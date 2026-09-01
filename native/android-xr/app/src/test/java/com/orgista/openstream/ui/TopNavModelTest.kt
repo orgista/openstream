@@ -1,5 +1,6 @@
 package com.orgista.openstream.ui
 
+import com.orgista.openstream.data.MediaKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,7 +23,14 @@ class TopNavModelTest {
     @Test
     fun `app chrome omits duplicate system connectivity telemetry`() {
         assertFalse(TopNavLayoutPolicy.showConnectivityTelemetry)
+        assertEquals("Offline", TopNavLayoutPolicy.offlineStatusLabel)
         assertEquals(TopDestination.DISCOVER, TopNavLayoutPolicy.brandDestination)
+    }
+
+    @Test
+    fun `content begins below controls but underneath the navigation fade`() {
+        assertEquals(72, TopNavBlendPolicy.contentTopInsetPx(navHeightPx = 100, fadeOverlapPx = 28))
+        assertEquals(0, TopNavBlendPolicy.contentTopInsetPx(navHeightPx = 20, fadeOverlapPx = 28))
     }
 
     @Test
@@ -62,6 +70,71 @@ class TopNavModelTest {
         assertEquals(
             "Add a source",
             libraryHeaderStatus(indexing = false, hasLibraries = false, titleCount = 0, metadataEnabled = false),
+        )
+    }
+
+    @Test
+    fun `library empty states stay terse and specific`() {
+        assertEquals("No titles", libraryEmptyTitle(hasCatalog = false, filter = null, missingSources = 0))
+        assertEquals("Source unavailable", libraryEmptyTitle(hasCatalog = false, filter = null, missingSources = 1))
+        assertEquals("Sources unavailable", libraryEmptyTitle(hasCatalog = false, filter = null, missingSources = 2))
+        assertEquals("No movies", libraryEmptyTitle(hasCatalog = true, filter = MediaKind.MOVIE, missingSources = 0))
+        assertEquals("No series", libraryEmptyTitle(hasCatalog = true, filter = MediaKind.SERIES, missingSources = 0))
+    }
+
+    @Test
+    fun `a configured library that indexes nothing names the missing share instead of reading empty`() {
+        assertEquals(
+            "Reconnect the NAS share in Settings → Sources",
+            libraryHeaderStatus(
+                indexing = false,
+                hasLibraries = true,
+                titleCount = 0,
+                metadataEnabled = true,
+                missingSources = 1,
+            ),
+        )
+        assertEquals(
+            "Reconnect 2 NAS shares in Settings → Sources",
+            libraryHeaderStatus(
+                indexing = false,
+                hasLibraries = true,
+                titleCount = 0,
+                metadataEnabled = true,
+                missingSources = 2,
+            ),
+        )
+        // A partially indexed library still reports its count first.
+        assertEquals(
+            "120 titles · 1 source needs reconnecting",
+            libraryHeaderStatus(
+                indexing = false,
+                hasLibraries = true,
+                titleCount = 120,
+                metadataEnabled = true,
+                missingSources = 1,
+            ),
+        )
+        // An active scan still wins, and a healthy library is unchanged.
+        assertEquals(
+            "Scanning library…",
+            libraryHeaderStatus(
+                indexing = true,
+                hasLibraries = true,
+                titleCount = 0,
+                metadataEnabled = true,
+                missingSources = 1,
+            ),
+        )
+        assertEquals(
+            "389 titles",
+            libraryHeaderStatus(
+                indexing = false,
+                hasLibraries = true,
+                titleCount = 389,
+                metadataEnabled = true,
+                missingSources = 0,
+            ),
         )
     }
 }

@@ -15,6 +15,7 @@ const STORAGE = {
 
 const readJSON = (key, fallback) => {
   try {
+    if (typeof localStorage === "undefined") return fallback;
     return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
   } catch {
     return fallback;
@@ -23,34 +24,55 @@ const readJSON = (key, fallback) => {
 
 const writeJSON = (key, value) => {
   try {
+    if (typeof localStorage === "undefined") return;
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // A full or disabled store must never prevent playback.
   }
 };
 
-const history = readJSON(STORAGE.history, {});
+export const MAX_HISTORY_ITEMS = 50;
+
+export function trimHistory(historyMap, maxItems = MAX_HISTORY_ITEMS) {
+  if (!historyMap || typeof historyMap !== "object") return {};
+  const keys = Object.keys(historyMap);
+  if (keys.length <= maxItems) return historyMap;
+  const entries = keys.map((key) => ({
+    key,
+    lastPlayed: Number(historyMap[key]?.lastPlayed) || 0,
+  }));
+  entries.sort((a, b) => a.lastPlayed - b.lastPlayed);
+  const excess = entries.length - maxItems;
+  for (let i = 0; i < excess; i++) {
+    delete historyMap[entries[i].key];
+  }
+  return historyMap;
+}
+
+const history = trimHistory(readJSON(STORAGE.history, {}));
 let catalog = normalizeCatalog(readJSON(STORAGE.catalog, []));
 let sources = normalizeSources(readJSON(STORAGE.sources, []));
 let section = catalog.length ? "discover" : "sources";
 let active = null;
 let lastSave = 0;
 
-const cards = document.querySelector("#continue-cards");
-const serverCards = document.querySelector("#server-cards");
-const continueRail = document.querySelector("#continue-rail");
-const serverRail = document.querySelector("#server-rail");
-const video = document.querySelector("#player");
-const playerShell = document.querySelector("#player-shell");
-const formatIndicator = document.querySelector("#format-indicator");
-const detailsSurface = document.querySelector("#details-surface");
-const heroArt = document.querySelector("#hero-art");
+const cards = typeof document !== "undefined" ? document.querySelector("#continue-cards") : null;
+const serverCards = typeof document !== "undefined" ? document.querySelector("#server-cards") : null;
+const continueRail = typeof document !== "undefined" ? document.querySelector("#continue-rail") : null;
+const serverRail = typeof document !== "undefined" ? document.querySelector("#server-rail") : null;
+const video = typeof document !== "undefined" ? document.querySelector("#player") : null;
+const playerShell = typeof document !== "undefined" ? document.querySelector("#player-shell") : null;
+const formatIndicator = typeof document !== "undefined" ? document.querySelector("#format-indicator") : null;
+const detailsSurface = typeof document !== "undefined" ? document.querySelector("#details-surface") : null;
+const heroArt = typeof document !== "undefined" ? document.querySelector("#hero-art") : null;
 
-document.documentElement.dataset.performance = performanceProfile({
-  deviceMemory: navigator.deviceMemory,
-  hardwareConcurrency: navigator.hardwareConcurrency,
-  saveData: navigator.connection?.saveData,
-});
+if (typeof document !== "undefined") {
+  document.documentElement.dataset.performance = performanceProfile({
+    deviceMemory: typeof navigator !== "undefined" ? navigator.deviceMemory : undefined,
+    hardwareConcurrency: typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined,
+    saveData: typeof navigator !== "undefined" ? navigator.connection?.saveData : undefined,
+  });
+}
 
 function normalizeCatalog(items) {
   if (!Array.isArray(items)) return [];
@@ -292,6 +314,7 @@ function saveProgress(force = false) {
     lastPlayed: Date.now(),
     completed: video.currentTime >= video.duration * 0.95,
   };
+  trimHistory(history);
   writeJSON(STORAGE.history, history);
 }
 
@@ -381,36 +404,6 @@ function handleBack() {
   return false;
 }
 
-document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
-  showSection(button.dataset.section);
-}));
-document.querySelector("#play").addEventListener("click", () => play(active));
-document.querySelector("#details").addEventListener("click", showDetails);
-document.querySelector("#close-details").addEventListener("click", closeDetails);
-document.querySelector("#close-player").addEventListener("click", closePlayer);
-video.addEventListener("timeupdate", () => saveProgress(false));
-video.addEventListener("ended", closePlayer);
-video.addEventListener("error", () => showToast("This TV could not play the selected stream."));
-addEventListener("online", updateNetwork);
-addEventListener("offline", updateNetwork);
-addEventListener("keydown", (event) => {
-  const code = event.keyCode;
-  if (handleDirectionalNavigation(event)) {
-    event.preventDefault();
-    return;
-  }
-  if (event.key === "Backspace" || event.key === "Escape" || code === 461) {
-    if (handleBack()) event.preventDefault();
-    return;
-  }
-  if (!playerShell.classList.contains("hidden")) {
-    if (event.key === "MediaPlayPause") video.paused ? video.play() : video.pause();
-    else if (event.key === "MediaPlay" || code === 415) video.play();
-    else if (event.key === "MediaPause" || code === 19) video.pause();
-    else if (event.key === "MediaStop" || code === 413) closePlayer();
-  }
-});
-
 globalThis.OpenStreamTV = {
   configure(next = {}) {
     if (Array.isArray(next.catalog)) {
@@ -428,23 +421,60 @@ globalThis.OpenStreamTV = {
   clear() {
     catalog = [];
     sources = [];
+    for (const key of Object.keys(history)) delete history[key];
     writeJSON(STORAGE.catalog, []);
     writeJSON(STORAGE.sources, []);
+    writeJSON(STORAGE.history, {});
     showSection("sources", true);
   },
   getState() {
-    return { catalogSize: catalog.length, performance: document.documentElement.dataset.performance, section };
+    return {
+      catalogSize: catalog.length,
+      historySize: Object.keys(history).length,
+      performance: typeof document !== "undefined" ? document.documentElement.dataset.performance : "standard",
+      section,
+    };
   },
 };
 
-function updateClock() {
-  document.querySelector("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
+if (typeof document !== "undefined") {
+  document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
+    showSection(button.dataset.section);
+  }));
+  document.querySelector("#play")?.addEventListener("click", () => play(active));
+  document.querySelector("#details")?.addEventListener("click", showDetails);
+  document.querySelector("#close-details")?.addEventListener("click", closeDetails);
+  document.querySelector("#close-player")?.addEventListener("click", closePlayer);
+  video?.addEventListener("timeupdate", () => saveProgress(false));
+  video?.addEventListener("ended", closePlayer);
+  video?.addEventListener("error", () => showToast("This TV could not play the selected stream."));
+  if (typeof addEventListener !== "undefined") {
+    addEventListener("online", updateNetwork);
+    addEventListener("offline", updateNetwork);
+    addEventListener("keydown", (event) => {
+      const code = event.keyCode;
+      if (handleDirectionalNavigation(event)) {
+        event.preventDefault();
+        return;
+      }
+      if (event.key === "Backspace" || event.key === "Escape" || code === 461) {
+        if (handleBack()) event.preventDefault();
+        return;
+      }
+      if (!playerShell?.classList.contains("hidden") && video) {
+        if (event.key === "MediaPlayPause") video.paused ? video.play() : video.pause();
+        else if (event.key === "MediaPlay" || code === 415) video.play();
+        else if (event.key === "MediaPause" || code === 19) video.pause();
+        else if (event.key === "MediaStop" || code === 413) closePlayer();
+      }
+    });
+  }
 
-updateClock();
-setInterval(updateClock, 1000);
-updateNetwork();
-showSection(section);
-setTimeout(() => {
-  (active ? document.querySelector("#play") : document.querySelector('.nav-item[data-section="sources"]'))?.focus();
-}, 0);
+  updateClock();
+  setInterval(updateClock, 1000);
+  updateNetwork();
+  showSection(section);
+  setTimeout(() => {
+    (active ? document.querySelector("#play") : document.querySelector('.nav-item[data-section="sources"]'))?.focus();
+  }, 0);
+}

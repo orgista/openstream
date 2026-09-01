@@ -161,6 +161,50 @@ object AppIcons {
         }.build()
     }
 
+    /** Broadcast antenna for the Live TV tab. */
+    val Live: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Live",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.White), pathFillType = PathFillType.NonZero) {
+                moveTo(12f, 5f)
+                curveTo(8.13f, 5f, 5f, 8.13f, 5f, 12f)
+                horizontalLineTo(7f)
+                curveTo(7f, 9.24f, 9.24f, 7f, 12f, 7f)
+                reflectiveCurveTo(17f, 9.24f, 17f, 12f)
+                horizontalLineTo(19f)
+                curveTo(19f, 8.13f, 15.87f, 5f, 12f, 5f)
+                close()
+                moveTo(13f, 15.29f)
+                curveTo(13.88f, 14.9f, 14.5f, 14.03f, 14.5f, 13f)
+                curveTo(14.5f, 11.62f, 13.38f, 10.5f, 12f, 10.5f)
+                reflectiveCurveTo(9.5f, 11.62f, 9.5f, 13f)
+                curveTo(9.5f, 14.02f, 10.12f, 14.9f, 11f, 15.29f)
+                verticalLineTo(18.59f)
+                lineTo(7.59f, 21.41f)
+                lineTo(9f, 22.82f)
+                lineTo(12f, 19.82f)
+                lineTo(15f, 22.82f)
+                lineTo(16.41f, 21.41f)
+                lineTo(13f, 18f)
+                verticalLineTo(15.29f)
+                close()
+                moveTo(12f, 1f)
+                curveTo(5.93f, 1f, 1f, 5.93f, 1f, 12f)
+                horizontalLineTo(3f)
+                curveTo(3f, 7.03f, 7.03f, 3f, 12f, 3f)
+                reflectiveCurveTo(21f, 7.03f, 21f, 12f)
+                horizontalLineTo(23f)
+                curveTo(23f, 5.93f, 18.07f, 1f, 12f, 1f)
+                close()
+            }
+        }.build()
+    }
+
     /** Folder glyph for the NAS browser. */
     val Folder: ImageVector by lazy {
         ImageVector.Builder(

@@ -3,7 +3,6 @@ package com.orgista.openstream.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +49,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,15 +81,25 @@ fun formatRuntime(minutes: Int): String {
 @Composable
 fun DiscoverScreen(
     catalog: List<MediaItem>,
+    emptyReason: DiscoverEmptyReason,
+    kidsAgeRange: String? = null,
     addonCatalogs: List<AddonCatalogSection> = emptyList(),
     feedPreferences: DiscoverFeedPreferences = DiscoverFeedPreferences.DEFAULT,
     upNextItems: List<MediaItem> = emptyList(),
     offlineMode: Boolean = false,
+    playEnabled: (MediaItem) -> Boolean = { true },
+    onOpenSources: () -> Unit,
+    onOpenWifiSettings: () -> Unit,
     onOpen: (MediaItem) -> Unit,
     onPlay: (MediaItem) -> Unit,
 ) {
     if (catalog.isEmpty()) {
-        EmptyCatalog(offlineMode)
+        EmptyCatalog(
+            reason = emptyReason,
+            kidsAgeRange = kidsAgeRange,
+            onOpenSources = onOpenSources,
+            onOpenWifiSettings = onOpenWifiSettings,
+        )
         return
     }
     val featuredCatalog = remember(catalog) { catalog.filter { it.kind != MediaKind.VIDEO }.ifEmpty { catalog } }
@@ -190,8 +208,10 @@ fun DiscoverScreen(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        PillButton("Play", icon = AppIcons.Play) { onPlay(featured) }
-                        PillButton("Details", prominent = false) { onOpen(featured) }
+                        ActionButton("Play", icon = AppIcons.Play, enabled = playEnabled(featured)) {
+                            onPlay(featured)
+                        }
+                        ActionButton("Details", prominent = false) { onOpen(featured) }
                     }
                 }
                 Box(
@@ -200,7 +220,7 @@ fun DiscoverScreen(
                         .padding(bottom = featuredProgressStyle.bottomPaddingDp.dp)
                         .width(featuredProgressStyle.widthDp.dp)
                         .height(featuredProgressStyle.heightDp.dp)
-                        .clip(RoundedCornerShape(50))
+                        .clip(OpenStreamShapes.Tag)
                         .background(Color.White.copy(alpha = featuredProgressStyle.trackAlpha)),
                 ) {
                     Box(
@@ -276,7 +296,12 @@ private fun MediaRail(
 }
 
 @Composable
-fun LibraryScreen(catalog: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
+fun LibraryScreen(
+    catalog: List<MediaItem>,
+    missingSources: Int = 0,
+    onOpenSources: () -> Unit,
+    onOpen: (MediaItem) -> Unit,
+) {
     var filter by remember { mutableStateOf<MediaKind?>(null) }
     val items = remember(catalog, filter) { catalog.filter { filter == null || it.kind == filter } }
     val configuration = LocalConfiguration.current
@@ -293,15 +318,15 @@ fun LibraryScreen(catalog: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
         columns = if (layout.gridColumns > 0) GridCells.Fixed(layout.gridColumns) else GridCells.Adaptive(minSize = 184.dp),
         horizontalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),
         verticalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),
-        contentPadding = PaddingValues(bottom = 34.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 34.dp),
     ) {
-        item(key = "library-header", span = { GridItemSpan(maxLineSpan) }) {
-            LibraryHeader(
-                count = items.size,
-                compact = layout.compact,
-                filter = filter,
-                onFilterChanged = { filter = it },
-            )
+        if (catalog.isNotEmpty()) {
+            item(key = "library-filters", span = { GridItemSpan(maxLineSpan) }) {
+                LibraryFilters(
+                    filter = filter,
+                    onFilterChanged = { filter = it },
+                )
+            }
         }
         items(items, key = { it.id }) { item ->
             MediaCard(
@@ -311,63 +336,88 @@ fun LibraryScreen(catalog: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                 onOpen = onOpen,
             )
         }
+        if (items.isEmpty()) {
+            item(key = "library-empty", span = { GridItemSpan(maxLineSpan) }) {
+                EmptyLibraryState(
+                    title = libraryEmptyTitle(
+                        hasCatalog = catalog.isNotEmpty(),
+                        filter = filter,
+                        missingSources = missingSources,
+                    ),
+                    onOpenSources = onOpenSources.takeIf { catalog.isEmpty() },
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun LibraryHeader(
-    count: Int,
-    compact: Boolean,
-    filter: MediaKind?,
-    onFilterChanged: (MediaKind?) -> Unit,
+private fun EmptyLibraryState(
+    title: String,
+    onOpenSources: (() -> Unit)?,
 ) {
-    if (compact) {
-        Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp)) {
-            Text(
-                "Library",
-                fontSize = 27.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = OpenStreamColors.Text,
-            )
-            Text("$count titles from connected sources", color = OpenStreamColors.Muted, fontSize = 13.sp)
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 440.dp)
+            .padding(horizontal = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            title,
+            modifier = Modifier.semantics { heading() },
+            color = OpenStreamColors.Text,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold,
+        )
+        if (onOpenSources != null) {
+            OpenStreamOutlinedButton(
+                onClick = onOpenSources,
+                modifier = Modifier.padding(top = 10.dp),
             ) {
-                FilterPill("All", filter == null) { onFilterChanged(null) }
-                FilterPill("Movies", filter == MediaKind.MOVIE) { onFilterChanged(MediaKind.MOVIE) }
-                FilterPill("Series", filter == MediaKind.SERIES) { onFilterChanged(MediaKind.SERIES) }
-            }
-        }
-    } else {
-        Row(
-            modifier = Modifier.padding(top = 24.dp, bottom = 18.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("Library", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text)
-                Text("$count titles from connected sources", color = OpenStreamColors.Muted, fontSize = 13.sp)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                FilterPill("All", filter == null) { onFilterChanged(null) }
-                FilterPill("Movies", filter == MediaKind.MOVIE) { onFilterChanged(MediaKind.MOVIE) }
-                FilterPill("Series", filter == MediaKind.SERIES) { onFilterChanged(MediaKind.SERIES) }
+                Text("Sources")
             }
         }
     }
 }
+
+@Composable
+private fun LibraryFilters(
+    filter: MediaKind?,
+    onFilterChanged: (MediaKind?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(top = 16.dp, bottom = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        FilterTab("All", filter == null) { onFilterChanged(null) }
+        FilterTab("Movies", filter == MediaKind.MOVIE) { onFilterChanged(MediaKind.MOVIE) }
+        FilterTab("Series", filter == MediaKind.SERIES) { onFilterChanged(MediaKind.SERIES) }
+    }
+}
+
+data class RemoteSearchResult(
+    val items: List<MediaItem>,
+    val attemptedSources: Int,
+    val failedSources: Int,
+)
 
 @Composable
 fun SearchScreen(
     catalog: List<MediaItem>,
     online: Boolean,
-    remoteSearch: suspend (String) -> List<MediaItem>,
+    remoteSearch: suspend (String) -> RemoteSearchResult,
     onOpen: (MediaItem) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var remoteResults by remember { mutableStateOf(emptyList<MediaItem>()) }
     var searching by remember { mutableStateOf(false) }
+    var remoteMessage by remember { mutableStateOf<String?>(null) }
+    var searchRevision by remember { mutableIntStateOf(0) }
     val normalizedQuery = query.trim()
     val localSearchIndex = remember(catalog) { TitleSearch.index(catalog) }
     val localResults = remember(localSearchIndex, normalizedQuery) {
@@ -378,18 +428,27 @@ fun SearchScreen(
         else TitleSearch.mergeAndRank(localResults, remoteResults, normalizedQuery)
     }
 
-    LaunchedEffect(normalizedQuery, online) {
+    LaunchedEffect(normalizedQuery, online, searchRevision) {
         remoteResults = emptyList()
+        remoteMessage = null
         searching = false
         if (!online || normalizedQuery.length < 2) return@LaunchedEffect
         delay(350)
         searching = true
-        remoteResults = try {
-            remoteSearch(normalizedQuery)
+        try {
+            val result = remoteSearch(normalizedQuery)
+            remoteResults = result.items
+            remoteMessage = when {
+                result.attemptedSources > 0 && result.failedSources == result.attemptedSources ->
+                    "Connected search is unavailable. Showing matches already on this device."
+                result.failedSources > 0 ->
+                    "Some connected sources could not be searched."
+                else -> null
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            emptyList()
+            remoteMessage = "Connected search is unavailable. Showing matches already on this device."
         }
         searching = false
     }
@@ -403,10 +462,11 @@ fun SearchScreen(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
-            placeholder = { Text("Search titles across every connected source", color = OpenStreamColors.Muted) },
+            label = { Text("Search titles") },
+            placeholder = { Text("Movies, shows, and videos", color = OpenStreamColors.Muted) },
             leadingIcon = { Icon(AppIcons.Search, contentDescription = null, tint = OpenStreamColors.Muted) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             colors = OutlinedTextFieldDefaults.colors(
@@ -429,6 +489,19 @@ fun SearchScreen(
                 color = OpenStreamColors.Muted,
                 fontSize = 13.sp,
             )
+            if (remoteMessage != null && online && normalizedQuery.length >= 2 && !searching) {
+                OpenStreamTextButton(onClick = { searchRevision++ }) { Text("Retry") }
+            }
+        }
+        remoteMessage?.let { message ->
+            Text(
+                message,
+                modifier = Modifier
+                    .padding(bottom = 8.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                color = OpenStreamColors.Amber,
+                fontSize = 13.sp,
+            )
         }
         LazyVerticalGrid(
             columns = if (layout.gridColumns > 0) GridCells.Fixed(layout.gridColumns) else GridCells.Adaptive(minSize = 184.dp),
@@ -449,45 +522,72 @@ fun SearchScreen(
 }
 
 @Composable
-private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FilterTab(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = if (selected) OpenStreamColors.SurfaceRaised else Color.Transparent,
-        border = BorderStroke(1.dp, if (selected) OpenStreamColors.Cyan.copy(alpha = 0.5f) else OpenStreamColors.Border),
+        modifier = Modifier.semantics {
+            this.selected = selected
+            role = Role.Tab
+        },
+        shape = OpenStreamShapes.Tag,
+        color = Color.Transparent,
     ) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 15.dp, vertical = 7.dp),
-            color = if (selected) OpenStreamColors.Cyan else OpenStreamColors.TextSoft,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Column(
+            modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+        ) {
+            Text(
+                label,
+                color = if (selected) OpenStreamColors.Text else OpenStreamColors.TextSoft,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Box(
+                Modifier
+                    .width(22.dp)
+                    .height(2.dp)
+                    .background(if (selected) OpenStreamColors.Accent else Color.Transparent),
+            )
+        }
     }
 }
 
 @Composable
-private fun EmptyCatalog(offlineMode: Boolean) {
+private fun EmptyCatalog(
+    reason: DiscoverEmptyReason,
+    kidsAgeRange: String?,
+    onOpenSources: () -> Unit,
+    onOpenWifiSettings: () -> Unit,
+) {
+    val copy = DiscoverEmptyStatePolicy.copy(reason, kidsAgeRange)
     Column(
         Modifier.fillMaxSize().padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            if (offlineMode) "No offline downloads yet" else "Nothing to show yet",
+            copy.title,
+            modifier = Modifier.semantics { heading() },
             fontSize = 26.sp,
             fontWeight = FontWeight.ExtraBold,
             color = OpenStreamColors.Text,
         )
         Text(
-            if (offlineMode) {
-                "Reconnect, open a title, and choose Make available offline. Completed downloads appear here automatically."
-            } else {
-                "Add a library, add-on, or YouTube channel in Sources to fill Discover."
-            },
+            copy.body,
             modifier = Modifier.padding(top = 10.dp),
             color = OpenStreamColors.TextSoft,
             fontSize = 15.sp,
         )
+        OpenStreamOutlinedButton(
+            onClick = if (reason == DiscoverEmptyReason.OFFLINE_NO_DOWNLOADS) {
+                onOpenWifiSettings
+            } else {
+                onOpenSources
+            },
+            modifier = Modifier.padding(top = 10.dp),
+        ) {
+            Text(copy.action)
+        }
     }
 }

@@ -26,41 +26,45 @@ object OfflineDeviceCapabilities {
         val maxWidth = maxOf(physicalWidth, physicalHeight)
         val maxHeight = minOf(physicalWidth, physicalHeight)
 
+        val codecInfos = runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .asSequence()
+                .filterNot { it.isEncoder }
+                .filter { Build.VERSION.SDK_INT < 29 || it.isHardwareAccelerated }
+                .toList()
+        }.getOrDefault(emptyList())
         val codecs = runCatching {
             buildSet {
                 add(OfflineVideoCodec.AVC)
-                MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                codecInfos
                     .asSequence()
-                    .filterNot { it.isEncoder }
-                    .filter { Build.VERSION.SDK_INT < 29 || it.isHardwareAccelerated }
                     .flatMap { it.supportedTypes.asSequence() }
                     .forEach { type ->
                         when (type.lowercase()) {
                             "video/hevc" -> add(OfflineVideoCodec.HEVC)
                             "video/av01" -> add(OfflineVideoCodec.AV1)
                         }
-                    }
+                }
             }
         }.getOrDefault(setOf(OfflineVideoCodec.AVC))
 
-        val decodeSize = runCatching {
-            val codecInfos = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
-                .asSequence()
-                .filterNot { it.isEncoder }
-                .filter { Build.VERSION.SDK_INT < 29 || it.isHardwareAccelerated }
-                .toList()
-            listOf(3840 to 2160, 2560 to 1440, 1920 to 1080).firstOrNull { (width, height) ->
+        fun maxDecodeFor(mimeType: String): OfflineDecodeSize? =
+            listOf(3840 to 2160, 2560 to 1440, 1920 to 1080, 1280 to 720).firstOrNull { (width, height) ->
                 codecInfos.any { codec ->
                     codec.supportedTypes.any { type ->
-                        type.startsWith("video/", ignoreCase = true) && runCatching {
+                        type.equals(mimeType, ignoreCase = true) && runCatching {
                             codec.getCapabilitiesForType(type).videoCapabilities?.isSizeSupported(width, height) == true
                         }.getOrDefault(false)
                     }
                 }
-            }
-        }.getOrNull()
-        val maxDecodeWidth = maxOf(maxWidth, decodeSize?.first ?: maxWidth)
-        val maxDecodeHeight = maxOf(maxHeight, decodeSize?.second ?: maxHeight)
+            }?.let { (width, height) -> OfflineDecodeSize(width, height) }
+        val codecDecodeSizes = buildMap {
+            maxDecodeFor("video/avc")?.let { put(OfflineVideoCodec.AVC, it) }
+            maxDecodeFor("video/hevc")?.let { put(OfflineVideoCodec.HEVC, it) }
+            maxDecodeFor("video/av01")?.let { put(OfflineVideoCodec.AV1, it) }
+        }
+        val maxDecodeWidth = maxOf(maxWidth, codecDecodeSizes.values.maxOfOrNull { it.width } ?: maxWidth)
+        val maxDecodeHeight = maxOf(maxHeight, codecDecodeSizes.values.maxOfOrNull { it.height } ?: maxHeight)
 
         val mediaReport = runCatching { HdrCapabilityProbe.inspect(context) }.getOrNull()
         val ranges = buildSet {
@@ -99,6 +103,7 @@ object OfflineDeviceCapabilities {
             dolbyVisionProfiles = mediaReport?.dolbyVisionBitstreamProfiles()?.toSet().orEmpty(),
             maxDecodeWidth = maxDecodeWidth,
             maxDecodeHeight = maxDecodeHeight,
+            codecDecodeSizes = codecDecodeSizes,
         )
     }
 }

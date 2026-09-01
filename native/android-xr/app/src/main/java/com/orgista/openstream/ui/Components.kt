@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +17,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +37,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -37,9 +46,66 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.orgista.openstream.data.MediaItem
 
-/** Filled pill action — the single primary action style across the app. */
+/** Material action with the app's compact control radius instead of a capsule. */
 @Composable
-fun PillButton(
+fun OpenStreamButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.buttonColors(),
+    content: @Composable RowScope.() -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = OpenStreamShapes.Control,
+        colors = colors,
+        content = content,
+    )
+}
+
+/** Outlined Material action with the same non-capsule control radius. */
+@Composable
+fun OpenStreamOutlinedButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = OpenStreamShapes.Control,
+        content = content,
+    )
+}
+
+/** Uncontained Material action whose keyboard/remote focus state is rectangular. */
+@Composable
+fun OpenStreamTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.textButtonColors(),
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+    content: @Composable RowScope.() -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        shape = OpenStreamShapes.Control,
+        colors = colors,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
+
+/** Compact rectangular action used for the app's primary and secondary controls. */
+@Composable
+fun ActionButton(
     label: String,
     icon: ImageVector? = null,
     enabled: Boolean = true,
@@ -49,7 +115,7 @@ fun PillButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(50),
+        shape = OpenStreamShapes.Control,
         color = when {
             !enabled -> OpenStreamColors.SurfaceRaised
             prominent -> Color(0xFFF5F8F9)
@@ -75,7 +141,7 @@ fun PillButton(
 
 /** Accessible icon-only action for compact preference controls. */
 @Composable
-fun IconPillButton(
+fun IconActionButton(
     icon: ImageVector,
     contentDescription: String,
     selected: Boolean = false,
@@ -83,7 +149,7 @@ fun IconPillButton(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(50),
+        shape = OpenStreamShapes.Control,
         color = if (selected) OpenStreamColors.Text else Color.Transparent,
         border = BorderStroke(1.dp, if (selected) OpenStreamColors.Text else OpenStreamColors.Border),
     ) {
@@ -101,7 +167,7 @@ fun IconPillButton(
 fun SectionHeader(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(),
-        modifier = modifier,
+        modifier = modifier.semantics { heading() },
         fontSize = 12.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = 1.4.sp,

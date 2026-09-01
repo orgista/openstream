@@ -63,6 +63,13 @@ object AppStorageManager {
     )
 
     @OptIn(ExperimentalCoilApi::class)
+    fun trimMemoryForPlayback(context: Context) {
+        // Keep the disk cache warm for fast back navigation, but release
+        // decoded posters before MediaCodec allocates its output buffers.
+        runCatching { context.imageLoader.memoryCache?.clear() }
+    }
+
+    @OptIn(ExperimentalCoilApi::class)
     fun clearCache(context: Context): AppStorageUsage {
         runCatching { context.imageLoader.memoryCache?.clear() }
         runCatching { context.imageLoader.diskCache?.clear() }

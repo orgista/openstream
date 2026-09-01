@@ -9,7 +9,24 @@ class IptvStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("openstream.iptv.v1", Context.MODE_PRIVATE)
     private val guideCache = IptvGuideCache(context.applicationContext)
 
-    fun sources(): List<IptvSource> = IptvSourceSelection.configured(custom())
+    fun sources(): List<IptvSource> = IptvSourceSelection.configured(
+        source = custom(),
+        pluto = IptvSource.pluto(plutoClientId()).takeIf { plutoEnabled },
+    )
+
+    var plutoEnabled: Boolean
+        get() = prefs.getBoolean(KEY_PLUTO_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_PLUTO_ENABLED, value).apply()
+            guideCache.remove(PLUTO_ID)
+        }
+
+    private fun plutoClientId(): String {
+        prefs.getString(KEY_PLUTO_CLIENT_ID, null)?.takeIf { it.isNotBlank() }?.let { return it }
+        val created = UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_PLUTO_CLIENT_ID, created).apply()
+        return created
+    }
 
     fun sessionSnapshot(): IptvSessionSnapshot = IptvSessionCatalog.snapshot
 
@@ -83,6 +100,24 @@ class IptvStore(context: Context) {
     fun removeCustom() {
         prefs.edit().remove(KEY_CUSTOM).apply()
         guideCache.remove(CUSTOM_ID)
+    }
+
+    fun manualGuideUrl(): String = prefs.getString(KEY_MANUAL_GUIDE_URL, "").orEmpty()
+
+    fun saveManualGuideUrl(value: String) {
+        val normalized = IptvEndpointPolicy.normalize(value)
+        require(normalized.isBlank() || IptvEndpointPolicy.isAllowed(normalized)) {
+            "Enter an HTTP or HTTPS XMLTV guide address."
+        }
+        prefs.edit().putString(KEY_MANUAL_GUIDE_URL, normalized).apply()
+        guideCache.remove(MANUAL_GUIDE_SOURCE_ID)
+    }
+
+    fun manualGuideCatalog(channels: List<IptvChannel> = manualChannels()): IptvSourceCatalog? {
+        val guideUrl = manualGuideUrl()
+        if (guideUrl.isBlank() || channels.isEmpty()) return null
+        val source = IptvSource.m3u(MANUAL_GUIDE_SOURCE_ID, "My Channels Guide", guideUrl)
+        return IptvSourceCatalog(source = source, channels = channels, guideUrls = listOf(guideUrl))
     }
 
     /**
@@ -237,8 +272,13 @@ class IptvStore(context: Context) {
         private const val KEY_ENABLED_PACKAGES = "enabledPackages"
         private const val KEY_FAVORITES = "favoriteChannels"
         private const val KEY_MANUAL_CHANNELS = "manualChannels"
+        private const val KEY_MANUAL_GUIDE_URL = "manualGuideUrl"
+        private const val KEY_PLUTO_ENABLED = "plutoEnabled"
+        private const val KEY_PLUTO_CLIENT_ID = "pluto.clientId.v1"
         private const val MAX_MANUAL_CHANNELS = 100
         private const val CUSTOM_ID = "custom"
+        private const val PLUTO_ID = "pluto"
+        const val MANUAL_GUIDE_SOURCE_ID = "manual-guide"
         fun custom(
             name: String,
             type: IptvSourceType,
@@ -251,7 +291,7 @@ class IptvStore(context: Context) {
 
 /** Live content sources exist only after a viewer configures one in Sources. */
 object IptvSourceSelection {
-    fun configured(source: IptvSource?): List<IptvSource> = listOfNotNull(source)
+    fun configured(source: IptvSource?, pluto: IptvSource? = null): List<IptvSource> = listOfNotNull(pluto, source)
 }
 
 internal object IptvSessionCatalog {

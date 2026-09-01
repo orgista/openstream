@@ -1,9 +1,12 @@
 package com.orgista.openstream.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 /**
  * Matches OpenPanel's design system so both launcher and media UI feel coherent:
@@ -32,9 +35,25 @@ object OpenStreamColors {
     // call sites keep compiling.
     val Green = Color(0xFF51C148)
     val Amber = Color(0xFFFFB900)
+    val Offline = Color(0xFFB8A46A)
     val Cyan = Accent
     val Coral = Muted
 }
+
+object OpenStreamShapes {
+    val Tag = RoundedCornerShape(4.dp)
+    val Control = RoundedCornerShape(8.dp)
+    val Selection = RoundedCornerShape(10.dp)
+    val Card = RoundedCornerShape(12.dp)
+}
+
+private val shapes = Shapes(
+    extraSmall = OpenStreamShapes.Tag,
+    small = OpenStreamShapes.Control,
+    medium = OpenStreamShapes.Selection,
+    large = OpenStreamShapes.Card,
+    extraLarge = OpenStreamShapes.Card,
+)
 
 private val scheme = darkColorScheme(
     primary = OpenStreamColors.Accent,
@@ -54,5 +73,5 @@ private val scheme = darkColorScheme(
 @Composable
 fun OpenStreamTheme(content: @Composable () -> Unit) {
     // Always dark: this is a media surface, not a system-themed app.
-    MaterialTheme(colorScheme = scheme, content = content)
+    MaterialTheme(colorScheme = scheme, shapes = shapes, content = content)
 }

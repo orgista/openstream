@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -24,7 +26,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -33,21 +34,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.orgista.openstream.domain.AdminPinPolicy
 import com.orgista.openstream.domain.ContentPolicy
 import com.orgista.openstream.domain.KidsCap
 import com.orgista.openstream.domain.createKidsPolicy
 import com.orgista.openstream.ui.icons.AppIcons
 
-private enum class Step { MODE, RATING, BLOCKLIST, CONFIRM }
+private enum class Step { MODE, RATING, BLOCKLIST, PIN, CONFIRM }
 
 /**
- * First-run setup. The kids path ends in an explicit irreversible
- * confirmation: once enabled there is no PIN, setting, or hidden exit —
- * uninstalling the app (clearing its data) is the only reset.
+ * First-run setup. The kids path creates a guardian admin PIN for Settings
+ * and source management, then ends in an explicit irreversible confirmation:
+ * the content filter itself has no exit — uninstalling the app (clearing its
+ * data) is the only reset.
  */
 @Composable
 fun OnboardingScreen(
@@ -58,12 +70,15 @@ fun OnboardingScreen(
     var cap by remember { mutableStateOf(KidsCap.TEENS) }
     val blockedTerms = remember { mutableStateListOf<String>() }
     var termDraft by remember { mutableStateOf("") }
+    var pinDraft by remember { mutableStateOf("") }
+    var pinConfirm by remember { mutableStateOf("") }
     var acknowledged by remember { mutableStateOf(false) }
 
     BackHandler(enabled = step != Step.MODE) {
         acknowledged = false
         step = when (step) {
-            Step.CONFIRM -> Step.BLOCKLIST
+            Step.CONFIRM -> Step.PIN
+            Step.PIN -> Step.BLOCKLIST
             Step.BLOCKLIST -> Step.RATING
             else -> Step.MODE
         }
@@ -83,30 +98,46 @@ fun OnboardingScreen(
         ) {
             when (step) {
                 Step.MODE -> {
-                    Title("Who watches on this device?")
-                    Subtitle("This choice sets up the whole library. Kids Mode is permanent for this installation.")
-                    ChoiceCard(
-                        title = "Everyone",
-                        body = "The full library with every connected source and add-on.",
-                        onClick = onStandard,
-                    )
-                    ChoiceCard(
-                        title = "Kids Mode",
-                        body = "Only age-appropriate titles. Restricted and unrated content never appears or plays.",
-                        warning = "Cannot be reverted once enabled",
-                        onClick = { step = Step.RATING },
-                    )
+                    Title(OnboardingCopy.MODE_TITLE)
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        if (maxWidth >= 700.dp) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                AudienceOption(
+                                    title = "Everyone",
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onStandard,
+                                )
+                                AudienceOption(
+                                    title = "Kids Mode",
+                                    warning = OnboardingCopy.KIDS_WARNING,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { step = Step.RATING },
+                                )
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                AudienceOption(
+                                    title = "Everyone",
+                                    onClick = onStandard,
+                                )
+                                AudienceOption(
+                                    title = "Kids Mode",
+                                    warning = OnboardingCopy.KIDS_WARNING,
+                                    onClick = { step = Step.RATING },
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Step.RATING -> {
-                    Title("What is the highest rating allowed?")
-                    Subtitle("Titles above this certification are hidden and refuse to play. Unrated content is always blocked in Kids Mode.")
+                    Title(OnboardingCopy.AGE_TITLE)
                     KidsCap.entries.forEach { entry ->
                         ChoiceCard(
-                            title = entry.label,
-                            body = entry.description,
-                            detail = entry.examples,
-                            selected = entry == cap,
+                            title = KidsAudiencePolicy.ageRange(entry),
                             onClick = {
                                 cap = entry
                                 step = Step.BLOCKLIST
@@ -116,8 +147,7 @@ fun OnboardingScreen(
                 }
 
                 Step.BLOCKLIST -> {
-                    Title("Anything else to block?")
-                    Subtitle("Add titles, franchises, or words. Any match in a title or description is hidden even when its rating passes.")
+                    Title(OnboardingCopy.BLOCK_TITLE)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -128,7 +158,7 @@ fun OnboardingScreen(
                             onValueChange = { termDraft = it.take(80) },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
-                            placeholder = { Text("Type a title or word") },
+                            label = { Text("Title or word") },
                         )
                         Button(
                             onClick = {
@@ -137,18 +167,21 @@ fun OnboardingScreen(
                                 termDraft = ""
                             },
                             enabled = termDraft.isNotBlank(),
+                            shape = OpenStreamShapes.Control,
                         ) { Text("Add") }
                     }
-                    if (blockedTerms.isEmpty()) {
-                        Subtitle("No extra blocks yet. The ${cap.label} rating cap still applies.")
-                    } else {
+                    if (blockedTerms.isNotEmpty()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                         ) {
                             blockedTerms.take(6).forEach { term ->
                                 Surface(
-                                    shape = RoundedCornerShape(50),
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "Remove $term"
+                                        role = Role.Button
+                                    },
+                                    shape = OpenStreamShapes.Tag,
                                     color = OpenStreamColors.Coral.copy(alpha = 0.12f),
                                     border = BorderStroke(1.dp, OpenStreamColors.Coral.copy(alpha = 0.4f)),
                                     onClick = { blockedTerms.remove(term) },
@@ -162,20 +195,57 @@ fun OnboardingScreen(
                                 }
                             }
                         }
-                        if (blockedTerms.size > 6) Subtitle("+ ${blockedTerms.size - 6} more")
+                        if (blockedTerms.size > 6) {
+                            Text("+${blockedTerms.size - 6} more", color = OpenStreamColors.Muted, fontSize = 13.sp)
+                        }
                     }
-                    Button(onClick = { step = Step.CONFIRM }) { Text("Continue") }
+                    Button(onClick = { step = Step.PIN }, shape = OpenStreamShapes.Control) {
+                        Text(OnboardingCopy.blockAction(blockedTerms.size))
+                    }
+                }
+
+                Step.PIN -> {
+                    Title(OnboardingCopy.PIN_TITLE)
+                    OutlinedTextField(
+                        value = pinDraft,
+                        onValueChange = { pinDraft = it.filter(Char::isDigit).take(AdminPinPolicy.MAX_LENGTH) },
+                        singleLine = true,
+                        label = { Text("PIN (${AdminPinPolicy.MIN_LENGTH}-${AdminPinPolicy.MAX_LENGTH} digits)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    OutlinedTextField(
+                        value = pinConfirm,
+                        onValueChange = { pinConfirm = it.filter(Char::isDigit).take(AdminPinPolicy.MAX_LENGTH) },
+                        singleLine = true,
+                        label = { Text("Confirm PIN") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    if (pinConfirm.isNotEmpty() && pinConfirm != pinDraft) {
+                        Text(
+                            "PINs do not match.",
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            color = OpenStreamColors.Amber,
+                            fontSize = 14.sp,
+                        )
+                    }
+                    Button(
+                        onClick = { step = Step.CONFIRM },
+                        enabled = AdminPinPolicy.isValidPin(pinDraft) && pinDraft == pinConfirm,
+                        shape = OpenStreamShapes.Control,
+                    ) { Text("Continue") }
                 }
 
                 Step.CONFIRM -> {
                     Icon(AppIcons.Warning, contentDescription = null, tint = OpenStreamColors.Amber, modifier = Modifier.size(48.dp))
-                    Title("Turn on Kids Mode?")
+                    Title(OnboardingCopy.CONFIRM_TITLE)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SummaryCell(cap.label, cap.examples)
+                        SummaryCell(KidsAudiencePolicy.ageRange(cap), cap.examples)
                         SummaryCell("${blockedTerms.size}", if (blockedTerms.size == 1) "blocked term" else "blocked terms")
                     }
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = OpenStreamShapes.Selection,
                         color = OpenStreamColors.Amber.copy(alpha = 0.1f),
                         border = BorderStroke(1.dp, OpenStreamColors.Amber.copy(alpha = 0.45f)),
                     ) {
@@ -185,38 +255,47 @@ fun OnboardingScreen(
                         ) {
                             Icon(AppIcons.Lock, contentDescription = null, tint = OpenStreamColors.Amber, modifier = Modifier.size(22.dp))
                             Text(
-                                "Kids Mode cannot be reverted. There is no PIN, setting, or hidden exit. " +
-                                    "To turn it off, OpenStream must be uninstalled — removing its app data — and set up again from the beginning.",
+                                OnboardingCopy.PERMANENCE,
                                 color = OpenStreamColors.Amber.copy(alpha = 0.95f),
                                 fontSize = 15.sp,
                                 lineHeight = 22.sp,
                             )
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.toggleable(
+                            value = acknowledged,
+                            role = Role.Checkbox,
+                            onValueChange = { acknowledged = it },
+                        ).padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         Checkbox(
                             checked = acknowledged,
-                            onCheckedChange = { acknowledged = it },
+                            onCheckedChange = null,
                             colors = CheckboxDefaults.colors(checkedColor = OpenStreamColors.Amber),
                         )
-                        Text("I understand Kids Mode is permanent for this installation.", color = OpenStreamColors.TextSoft)
+                        Text(OnboardingCopy.ACKNOWLEDGEMENT, color = OpenStreamColors.TextSoft)
                     }
                     Button(
-                        onClick = { onKids(createKidsPolicy(cap, blockedTerms.toList())) },
+                        onClick = { onKids(createKidsPolicy(cap, blockedTerms.toList(), pinDraft)) },
                         enabled = acknowledged,
+                        shape = OpenStreamShapes.Control,
                         colors = ButtonDefaults.buttonColors(containerColor = OpenStreamColors.Amber, contentColor = OpenStreamColors.CanvasDeep),
                     ) {
                         Icon(AppIcons.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Enable Kids Mode permanently", fontWeight = FontWeight.Bold)
+                        Text("  Turn on Kids Mode", fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
             if (step != Step.MODE) {
-                TextButton(onClick = {
+                OpenStreamTextButton(onClick = {
                     acknowledged = false
                     step = when (step) {
-                        Step.CONFIRM -> Step.BLOCKLIST
+                        Step.CONFIRM -> Step.PIN
+                        Step.PIN -> Step.BLOCKLIST
                         Step.BLOCKLIST -> Step.RATING
                         else -> Step.MODE
                     }
@@ -228,36 +307,57 @@ fun OnboardingScreen(
 
 @Composable
 private fun Title(text: String) {
-    Text(text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text, textAlign = TextAlign.Center)
-}
-
-@Composable
-private fun Subtitle(text: String) {
-    Text(text, fontSize = 16.sp, color = OpenStreamColors.TextSoft, textAlign = TextAlign.Center, lineHeight = 23.sp)
+    Text(
+        text,
+        modifier = Modifier.semantics { heading() },
+        fontSize = 34.sp,
+        fontWeight = FontWeight.ExtraBold,
+        color = OpenStreamColors.Text,
+        textAlign = TextAlign.Center,
+    )
 }
 
 @Composable
 private fun ChoiceCard(
     title: String,
-    body: String,
-    detail: String? = null,
-    warning: String? = null,
-    selected: Boolean = false,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = OpenStreamShapes.Selection,
         color = OpenStreamColors.Surface,
-        border = BorderStroke(1.dp, if (selected) OpenStreamColors.Cyan.copy(alpha = 0.6f) else OpenStreamColors.Border),
+        border = BorderStroke(1.dp, OpenStreamColors.BorderStrong),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(
+            title,
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
+            fontSize = 21.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = OpenStreamColors.Text,
+        )
+    }
+}
+
+@Composable
+private fun AudienceOption(
+    title: String,
+    modifier: Modifier = Modifier,
+    warning: String? = null,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = OpenStreamShapes.Selection,
+        color = OpenStreamColors.Surface,
+        border = BorderStroke(1.dp, OpenStreamColors.BorderStrong),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(title, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text)
-            Text(body, fontSize = 15.sp, color = OpenStreamColors.TextSoft, lineHeight = 21.sp)
-            if (detail != null) {
-                Text(detail.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.Muted)
-            }
             if (warning != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(AppIcons.Lock, contentDescription = null, tint = OpenStreamColors.Amber, modifier = Modifier.size(14.dp))
@@ -270,7 +370,7 @@ private fun ChoiceCard(
 
 @Composable
 private fun SummaryCell(value: String, label: String) {
-    Surface(shape = RoundedCornerShape(10.dp), color = OpenStreamColors.Surface, border = BorderStroke(1.dp, OpenStreamColors.Border)) {
+    Surface(shape = OpenStreamShapes.Selection, color = OpenStreamColors.Surface, border = BorderStroke(1.dp, OpenStreamColors.Border)) {
         Column(Modifier.padding(horizontal = 22.dp, vertical = 12.dp).width(160.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(value, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text)
             Text(label, fontSize = 13.sp, color = OpenStreamColors.Muted)

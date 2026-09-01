@@ -7,6 +7,11 @@ This file is a human checklist. It may be inspected by policy audits, but it mus
 
 Never paste credentials, private manifest URLs, tokens, or passwords into this file or any tracked project file. Retrieve private values from the device owner or an approved operating-system secret store at deployment time. Do not put them in shell history, logs, screenshots, APKs, or deployment notes.
 
+APPROVED SECRET STORE ON THE OWNER'S MAC
+----------------------------------------
+
+Reusable deployment values are stored in the macOS login Keychain under service "OpenStream Deployment". The account names are `torrentio-manifest`, `radarr`, `sonarr`, `tmdb-api`, `omdb-api`, `nas`, and `iptv-stale`. An authorized deployment agent may retrieve one value directly into its process with `security find-generic-password -w -s "OpenStream Deployment" -a <account>` and must never echo, log, screenshot, commit, or place that value in a command-line argument. `iptv-stale` is retention-only: the provider returned `auth=0` on 2026-08-21 and must not be provisioned again unless the owner supplies working credentials.
+
 INTERPRETING CONTENT REQUESTS
 -----------------------------
 
@@ -24,7 +29,8 @@ Provision only the items requested for that installation. Names below describe c
 [ ] Captions: add OpenSubtitles v3, or the owner's selected subtitle provider.
 [ ] Radarr: enter its private base address and API key under Server downloads, choose the requested default destination, and run Test.
 [ ] Sonarr: enter its private base address and API key under Server downloads, choose the requested default destination, and run Test.
-[ ] NAS/local library: add and test the NAS share before adding library folders. The currently requested display folder is "ServerPlus / movies"; its real host, mount path, username, and password stay in the secure deployment record.
+[ ] NAS/local library: add and test the NAS share before adding library folders. The currently requested display folders are "ServerPlus / movies" and "ServerPlus / TV"; the real host, mount path, username, and password stay in the secure deployment record.
+[ ] Server transcoding: if the owner wants Unraid/server-side transcoding, run the OpenStream gateway on the server with OPENSTREAM_GATEWAY_ALLOW_LAN=1, a high-entropy OPENSTREAM_GATEWAY_TOKEN, and OPENSTREAM_NAS_MAPPINGS that maps the owner's SMB host/share to the server's mounted path. Enter only the gateway URL and token in Settings -> Server transcoding on the device. Never commit the token, mapping, SMB path, or server IP as source defaults.
 [ ] Live TV: add the owner's Xtream or M3U profile through Live sources, then select the desired local, entertainment, premium, sports, league, and PPV channels in Channel Manager. Do not bundle a provider or a public fallback playlist.
 [ ] YouTube: add only channel handles or IDs explicitly requested by the device owner. No channels are part of the default profile.
 [ ] Trakt: when requested, enter the owner-controlled application credentials and complete device authorization.
@@ -38,6 +44,7 @@ POST-PROVISIONING VERIFICATION
 [ ] Metadata, artwork, title details, episodes, global search, streams, audio, and captions work for representative titles.
 [ ] Radarr and Sonarr tests succeed without exposing their addresses or keys in logs.
 [ ] NAS content identity matches the selected title before playback or download.
+[ ] Local/NAS playback probes complete and the device blocks any file whose cached MediaCodec result is unsupported; if server transcoding is configured, incompatible SMB files start through the gateway without exposing the token in the media URL.
 [ ] Live TV opens only the selected lineup and handles unavailable channels without replacing them with another channel.
 [ ] Device downloads complete, report storage/progress, play offline, and remain distinct from ARR server requests.
 [ ] Removing or disabling a source removes its cached rails after refresh.

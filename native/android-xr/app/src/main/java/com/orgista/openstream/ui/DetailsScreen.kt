@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -62,7 +63,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.orgista.openstream.data.MediaItem
 import com.orgista.openstream.data.MediaKind
+import com.orgista.openstream.data.SourceKind
 import com.orgista.openstream.data.StremioAddon
+import com.orgista.openstream.data.StremioAddonPresentation
 import com.orgista.openstream.data.StremioClient
 import com.orgista.openstream.data.StremioCatalogMerger
 import com.orgista.openstream.data.StremioStream
@@ -76,11 +79,14 @@ import com.orgista.openstream.arr.ArrPendingDownloadPolicy
 import com.orgista.openstream.arr.ArrPendingDownloadStore
 import com.orgista.openstream.arr.PendingArrDownload
 import com.orgista.openstream.arr.ArrStore
+import com.orgista.openstream.transcode.TranscodeServerClient
+import com.orgista.openstream.transcode.TranscodeServerStore
 import com.orgista.openstream.domain.TitlePreferenceStore
 import com.orgista.openstream.domain.TitleRating
 import com.orgista.openstream.streaming.BandwidthRuntime
 import com.orgista.openstream.offline.OfflineMediaRuntime
 import com.orgista.openstream.offline.OfflineDeviceCapabilities
+import com.orgista.openstream.offline.OfflineMediaProbeCache
 import com.orgista.openstream.offline.OfflineDownloadUiPolicy
 import com.orgista.openstream.offline.OfflineDownloadVisual
 import com.orgista.openstream.offline.OfflineProgressPolicy
@@ -110,6 +116,18 @@ private fun MediaItem.episodeNumber(): Int? = subtitle
 
 private fun MediaItem.streamIdentity(): String? =
     id.takeIf(stremioEpisodeIdPattern::matches) ?: imdbId
+
+private fun incompatibleLocalRouteMessage(target: MediaItem, localRequest: PlaybackRequest?): String? {
+    val hasLocalCandidate = target.candidates.any { candidate ->
+        (candidate.sourceKind == SourceKind.NAS || candidate.sourceKind == SourceKind.OFFLINE) &&
+            playableUris(PlaybackRequest(target.title, candidate.sourceName, candidate.uri)).isNotEmpty()
+    }
+    return if (hasLocalCandidate && localRequest == null) {
+        "A local copy exists, but this device should not play that version smoothly. Add a compatible 1080p/H.264 or supported HEVC copy, or connect another stream source for this title."
+    } else {
+        null
+    }
+}
 
 private tailrec fun Context.detailsActivity(): Activity? = when (this) {
     is Activity -> this
@@ -144,8 +162,13 @@ fun DetailsScreen(
     playbackStore: PlaybackStore,
     online: Boolean,
     metadataLoader: com.orgista.openstream.library.MetadataLoader,
+    mediaProbeCache: OfflineMediaProbeCache,
+    mediaProbeRevision: Int = 0,
+    onMediaProbeChanged: () -> Unit = {},
+    initialPlaybackSourceUnavailable: Boolean = false,
     onMetadataEnriched: (MediaItem) -> Unit = {},
     onBack: () -> Unit,
+    onOpenSources: () -> Unit,
     onPlay: (PlaybackRequest) -> Unit,
 ) {
     val context = LocalContext.current
@@ -154,13 +177,24 @@ fun DetailsScreen(
     var offlinePreparingIds by remember(item.id) { mutableStateOf(emptySet<String>()) }
     var serverSubmittingIds by remember(item.id) { mutableStateOf(emptySet<String>()) }
     var destinationChoice by remember(item.id) { mutableStateOf<DownloadDestinationChoice?>(null) }
+    var playbackSourceUnavailable by remember(item.id, initialPlaybackSourceUnavailable) {
+        mutableStateOf(initialPlaybackSourceUnavailable)
+    }
+    var playbackUnavailableMessage by remember(item.id) { mutableStateOf<String?>(null) }
     val offlineEntries by offlineRuntime.entries.collectAsState()
     val arrStore = remember { ArrStore(context.applicationContext) }
+    val transcodeServerStore = remember { TranscodeServerStore(context.applicationContext) }
     val pendingArrStore = remember { ArrPendingDownloadStore(context.applicationContext) }
     val radarr = remember(item.id) { arrStore.load(ArrKind.RADARR)?.takeIf(ArrConnection::enabled) }
     val sonarr = remember(item.id) { arrStore.load(ArrKind.SONARR)?.takeIf(ArrConnection::enabled) }
     val arrDownloadDestination = remember(item.id) { arrStore.downloadDestination }
     val deviceProfile = remember { OfflineDeviceCapabilities.inspect(context.applicationContext) }
+    val mediaProbeResolver: (com.orgista.openstream.data.MediaCandidate) -> com.orgista.openstream.offline.OfflineMediaProbe? = remember(
+        mediaProbeCache,
+        mediaProbeRevision,
+    ) {
+        { candidate -> mediaProbeCache.get(candidate.uri) }
+    }
     val preferenceStore = remember { TitlePreferenceStore(context.applicationContext) }
     var titleRating by remember(item.id) { mutableStateOf(preferenceStore.rating(item.id)) }
     var streamSearchLabel by remember { mutableStateOf("Finding best stream…") }
@@ -225,7 +259,7 @@ fun DetailsScreen(
             if (!trailerPlaying) trailerUnavailable = true
         }
     }
-    val streamAddons = addons.filter { "stream" in it.resources }
+    val streamAddons = addons.filter(StremioAddonPresentation::isPlaybackProvider)
     val seriesDecision = remember(item.id, item.episodes) {
         val ids = item.episodes.map(MediaItem::id)
         SeriesPlaybackPolicy.select(
@@ -263,24 +297,81 @@ fun DetailsScreen(
     }
 
     fun canResolveStream(target: MediaItem): Boolean =
-        !kidsMode && streamAddons.isNotEmpty() && target.streamIdentity() != null
+        streamAddons.isNotEmpty() && target.streamIdentity() != null
+
+    suspend fun serverTranscodeRequest(target: MediaItem): PlaybackRequest? {
+        val config = transcodeServerStore.load()?.takeIf { it.enabled } ?: return null
+        val candidate = bestServerTranscodeCandidate(target, deviceProfile, mediaProbeResolver) ?: return null
+        streamSearchLabel = "Starting server transcode…"
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                TranscodeServerClient.startSmbSession(config, candidate.uri, deviceProfile)
+            }
+        }.onFailure { error ->
+            Logs.warn("server transcode could not start for ${target.title}", error)
+        }.getOrNull()?.let { transcodeUrl ->
+            serverTranscodePlaybackRequest(target, transcodeUrl, config.sessionToken)
+        }
+    }
 
     fun playTarget(target: MediaItem) {
         if (searching) return
-        val localRequest = bestPlaybackRequest(target)
-        if (localRequest != null) {
-            onPlay(localRequest)
-            return
-        }
-        if (!canResolveStream(target)) return
         searching = true
         scope.launch {
+            playbackSourceUnavailable = false
+            playbackUnavailableMessage = null
+            val hasUnprobedLocal = target.candidates.any { candidate ->
+                (candidate.sourceKind == SourceKind.NAS || candidate.sourceKind == SourceKind.OFFLINE) &&
+                    mediaProbeCache.get(candidate.uri) == null
+            }
+            if (hasUnprobedLocal) {
+                streamSearchLabel = "Checking local format…"
+                runCatching {
+                    probeLocalCandidates(context.applicationContext, mediaProbeCache, target)
+                }.onSuccess { count ->
+                    if (count > 0) onMediaProbeChanged()
+                }.onFailure { error ->
+                    Logs.warn("local media probe failed for ${target.title}", error)
+                }
+            }
+            val localRequest = bestPlaybackRequest(
+                target,
+                deviceProfile = deviceProfile,
+                mediaProbe = mediaProbeResolver,
+            )
+            val localIncompatibleMessage = incompatibleLocalRouteMessage(target, localRequest)
+            if (localRequest != null) {
+                searching = false
+                onPlay(localRequest)
+                return@launch
+            }
+            serverTranscodeRequest(target)?.let { request ->
+                searching = false
+                onPlay(request)
+                return@launch
+            }
+            if (!canResolveStream(target)) {
+                searching = false
+                playbackUnavailableMessage = localIncompatibleMessage
+                playbackSourceUnavailable = true
+                return@launch
+            }
+            streamSearchLabel = "Finding best stream…"
+            val found = resolveStreams(target)
+            if (found.isEmpty()) {
+                searching = false
+                playbackUnavailableMessage = localIncompatibleMessage
+                Logs.warn(
+                    "no direct playback route for ${target.title}: " +
+                        "${streamAddons.size} stream add-on(s), 0 direct result(s)",
+                )
+                playbackSourceUnavailable = true
+                return@launch
+            }
             streamSearchLabel = "Optimizing for your network…"
             val bandwidth = runCatching {
                 BandwidthRuntime.forPlayback(context.applicationContext)
             }.getOrNull()
-            streamSearchLabel = "Finding best stream…"
-            val found = resolveStreams(target)
             searching = false
             Logs.event(
                 "stream selection capabilities: display=${deviceProfile.maxWidth}x${deviceProfile.maxHeight}," +
@@ -288,9 +379,14 @@ fun DetailsScreen(
                     "ranges=${deviceProfile.dynamicRanges.joinToString("|")}," +
                     "dvProfiles=${deviceProfile.dolbyVisionProfiles.sorted().joinToString("|")}",
             )
-            val request = bestPlaybackRequest(target, found, deviceProfile, bandwidth?.mbps)
+            val request = bestPlaybackRequest(target, found, deviceProfile, bandwidth?.mbps, mediaProbeResolver)
             if (request == null) {
-                Toast.makeText(context, "No directly playable add-on stream found", Toast.LENGTH_SHORT).show()
+                playbackUnavailableMessage = localIncompatibleMessage
+                Logs.warn(
+                    "no direct playback route for ${target.title}: " +
+                        "${streamAddons.size} stream add-on(s), ${found.size} direct result(s)",
+                )
+                playbackSourceUnavailable = true
             } else {
                 onPlay(request)
             }
@@ -539,8 +635,40 @@ fun DetailsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { destinationChoice = null }) {
+                OpenStreamTextButton(onClick = { destinationChoice = null }) {
                     Text("Cancel", color = OpenStreamColors.TextSoft)
+                }
+            },
+        )
+    }
+
+    if (playbackSourceUnavailable) {
+        val localIncompatible = playbackUnavailableMessage != null
+        AlertDialog(
+            onDismissRequest = { playbackSourceUnavailable = false },
+            containerColor = OpenStreamColors.SurfaceRaised,
+            titleContentColor = OpenStreamColors.Text,
+            textContentColor = OpenStreamColors.TextSoft,
+            title = { Text(if (localIncompatible) "Source not compatible" else "No playable source") },
+            text = {
+                Text(
+                    playbackUnavailableMessage
+                        ?: "This title is in your catalog, but none of your connected sources returned a video.",
+                )
+            },
+            confirmButton = {
+                OpenStreamTextButton(
+                    onClick = {
+                        playbackSourceUnavailable = false
+                        onOpenSources()
+                    },
+                ) {
+                    Text("Manage Sources", color = OpenStreamColors.Accent)
+                }
+            },
+            dismissButton = {
+                OpenStreamTextButton(onClick = { playbackSourceUnavailable = false }) {
+                    Text("Close", color = OpenStreamColors.TextSoft)
                 }
             },
         )
@@ -562,7 +690,11 @@ fun DetailsScreen(
         ?: decisionEpisode
         ?: item
     val playbackAction = seriesDecision?.action.takeIf { decisionEpisode?.id == playbackItem.id }
-    val localRequest = bestPlaybackRequest(playbackItem)
+    val localRequest = bestPlaybackRequest(
+        playbackItem,
+        deviceProfile = deviceProfile,
+        mediaProbe = mediaProbeResolver,
+    )
     val episodeLabel = playbackItem.subtitle?.substringBefore('·')?.trim()
     val playLabel = when (playbackAction) {
         SeriesPlaybackAction.RESUME -> "Resume ${episodeLabel.orEmpty()}".trim()
@@ -625,7 +757,7 @@ fun DetailsScreen(
                 ) {
                     item.genres.take(4).forEach { genre ->
                         Surface(
-                            shape = RoundedCornerShape(50),
+                            shape = OpenStreamShapes.Tag,
                             color = if (overArtwork) Color.Black.copy(alpha = 0.58f) else OpenStreamColors.SurfaceRaised,
                             border = if (overArtwork) BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)) else null,
                         ) {
@@ -687,7 +819,7 @@ fun DetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PillButton(
+                ActionButton(
                     if (searching) streamSearchLabel else playLabel,
                     icon = AppIcons.Play,
                     enabled = !searching && (localRequest != null || playbackCanResolve),
@@ -698,7 +830,7 @@ fun DetailsScreen(
                     Box {
                         Surface(
                             onClick = { seasonMenuOpen = true },
-                            shape = RoundedCornerShape(50),
+                            shape = OpenStreamShapes.Control,
                             color = if (overArtwork) Color.Black.copy(alpha = 0.68f) else OpenStreamColors.SurfaceRaised,
                             border = BorderStroke(
                                 1.dp,
@@ -748,14 +880,14 @@ fun DetailsScreen(
                         contentDescription = if (completed) "Downloaded" else "Download",
                     ) { requestTargetDownload(item) }
                 }
-                IconPillButton(
+                IconActionButton(
                     icon = AppIcons.ThumbUp,
                     contentDescription = "Like",
                     selected = titleRating == TitleRating.UP,
                 ) {
                     titleRating = preferenceStore.toggle(item.id, TitleRating.UP)
                 }
-                IconPillButton(
+                IconActionButton(
                     icon = AppIcons.ThumbDown,
                     contentDescription = "Dislike",
                     selected = titleRating == TitleRating.DOWN,
@@ -830,7 +962,7 @@ fun DetailsScreen(
                 Surface(
                     onClick = onBack,
                     modifier = Modifier.align(Alignment.TopStart).padding(14.dp),
-                    shape = RoundedCornerShape(50),
+                    shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.62f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
                 ) {
@@ -892,7 +1024,14 @@ fun DetailsScreen(
                     items(visibleEpisodes, key = MediaItem::id) { episode ->
                         EpisodeCard(
                             episode = episode,
-                            enabled = !searching && (bestPlaybackRequest(episode) != null || canResolveStream(episode)),
+                            enabled = !searching &&
+                                (
+                                    bestPlaybackRequest(
+                                        episode,
+                                        deviceProfile = deviceProfile,
+                                        mediaProbe = mediaProbeResolver,
+                                    ) != null || canResolveStream(episode)
+                                    ),
                             offlineCompleted = offlineCompleted(episode),
                             offlineActive = offlineActive(episode),
                             offlinePreparing = episode.id in offlinePreparingIds || episode.id in serverSubmittingIds,
@@ -972,7 +1111,7 @@ private fun EpisodeCard(
                 )
                 Surface(
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
-                    shape = RoundedCornerShape(50),
+                    shape = OpenStreamShapes.Tag,
                     color = Color.Black.copy(alpha = 0.72f),
                 ) {
                     Row(
@@ -1036,7 +1175,7 @@ private fun OfflineActionButton(
         onClick = onDownload,
         enabled = enabled,
         modifier = modifier.size(46.dp),
-        shape = RoundedCornerShape(50),
+        shape = CircleShape,
         color = Color.Black.copy(alpha = 0.76f),
         border = BorderStroke(
             1.dp,

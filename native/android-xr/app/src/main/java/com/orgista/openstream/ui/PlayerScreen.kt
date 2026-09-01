@@ -66,6 +66,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import com.orgista.openstream.Logs
 import com.orgista.openstream.data.StremioAddon
 import com.orgista.openstream.data.StremioClient
@@ -118,6 +119,17 @@ private fun Throwable.httpResponseCode(): Int? {
         }
     }
     return null
+}
+
+private fun safePlaybackHeaders(request: PlaybackRequest): Map<String, String> = buildMap {
+    request.httpRequestHeaders.forEach { (name, value) ->
+        val safeName = name.matches(Regex("[A-Za-z0-9-]{1,64}"))
+        val safeValue = value.length <= 1024 && '\r' !in value && '\n' !in value
+        if (safeName && safeValue) put(name, value)
+    }
+    request.httpReferer?.takeIf {
+        it.length <= 512 && '\r' !in it && '\n' !in it
+    }?.let { referer -> put("Referer", referer) }
 }
 
 /**
@@ -208,9 +220,7 @@ fun PlayerScreen(
                     )
                     .setAllowCrossProtocolRedirects(PlaybackHttpPolicy.followCrossProtocolRedirects)
                     .apply {
-                        request.httpReferer?.takeIf {
-                            it.length <= 512 && '\r' !in it && '\n' !in it
-                        }?.let { referer -> setDefaultRequestProperties(mapOf("Referer" to referer)) }
+                        safePlaybackHeaders(request).takeIf { it.isNotEmpty() }?.let(::setDefaultRequestProperties)
                     },
             )
         }
@@ -880,6 +890,10 @@ fun PlayerScreen(
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     findViewById<View>(androidx.media3.ui.R.id.exo_buffering)?.visibility = View.GONE
                     this.player = player
+                    // Always honor the encoded display aspect ratio. FIT keeps
+                    // 4:3 and 16:9 channels proportional without cropping or
+                    // stretching them to the tablet panel.
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                     setShowRewindButton(true)
@@ -976,7 +990,7 @@ fun PlayerScreen(
                 shape = RoundedCornerShape(8.dp),
                 color = Color.Black.copy(alpha = 0.78f),
             ) {
-                TextButton(
+                OpenStreamTextButton(
                     onClick = ::returnToLiveEdge,
                     modifier = Modifier.padding(horizontal = 2.dp),
                 ) {

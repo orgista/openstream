@@ -37,6 +37,14 @@ object StremioAddonPresentation {
     fun isRecommendationProvider(addon: StremioAddon): Boolean =
         addon.manifestId == "community.watch.next" || addon.name.equals("Watch Next", ignoreCase = true)
 
+    /**
+     * A `stream` resource is not automatically a video source. Recommendation
+     * add-ons such as Watch Next use that resource for external Stremio links,
+     * which OpenStream intentionally does not hand to Media3.
+     */
+    fun isPlaybackProvider(addon: StremioAddon): Boolean =
+        addon.enabled && "stream" in addon.resources && !isRecommendationProvider(addon)
+
     fun usage(addon: StremioAddon): String = if (isRecommendationProvider(addon)) {
         "Adds recommendations to Discover"
     } else {

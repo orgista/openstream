@@ -7,8 +7,9 @@ import { createNetflixTop10Service } from "./netflix-top10.mjs";
 import { listNasDirectory, resolveWithinRoot, streamNasFile, validateNasRoot } from "./nas.mjs";
 import {
   authorizeTarget,
-  assertLoopbackBindHost,
+  assertGatewayBindHost,
   assertAllowedOrigin,
+  isPrivateAddress,
   normalizeTarget,
   parseCanonicalRequestTarget,
   safeRequestJson,
@@ -16,7 +17,10 @@ import {
 } from "./security.mjs";
 import { probeTranscoder, startTranscode } from "./transcoder.mjs";
 
-const host = assertLoopbackBindHost(process.env.OPENSTREAM_GATEWAY_HOST ?? "127.0.0.1");
+const allowLanGateway = process.env.OPENSTREAM_GATEWAY_ALLOW_LAN === "1";
+const host = assertGatewayBindHost(process.env.OPENSTREAM_GATEWAY_HOST ?? "127.0.0.1", {
+  allowLan: allowLanGateway,
+});
 const port = Number(process.env.OPENSTREAM_GATEWAY_PORT ?? 8787);
 const urlHost = host.includes(":") ? `[${host}]` : host;
 const allowedOrigins = new Set(
@@ -120,6 +124,84 @@ function optionalString(value, max) {
 
 function pruneVault(vault, maximumEntries) {
   while (vault.size > maximumEntries) vault.delete(vault.keys().next().value);
+}
+
+export function parseNasMappings(value = process.env.OPENSTREAM_NAS_MAPPINGS ?? "[]") {
+  const raw = typeof value === "string" && value.trim() ? JSON.parse(value) : [];
+  if (!Array.isArray(raw)) throw new Error("OPENSTREAM_NAS_MAPPINGS must be a JSON array.");
+  return raw.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("Each NAS mapping must be an object.");
+    }
+    const host = requireString(entry.host, "NAS mapping host", 255).toLowerCase();
+    const share = requireString(entry.share, "NAS mapping share", 255);
+    const rootPath = requireString(entry.rootPath, "NAS mapping root path", 4096);
+    if (host.includes("@") || share.includes("/") || share.includes("\\") || share.includes("@")) {
+      throw new Error("NAS mapping host/share is invalid.");
+    }
+    return { host, share, rootPath };
+  });
+}
+
+function decodeSmbPath(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseSmbRoute(value) {
+  const text = requireString(value, "SMB media URI", 8192);
+  const match = /^smb:\/\/([^/?#]+)\/([^/?#]+)(?:\/([^?#]*))?(?:[?#].*)?$/i.exec(text);
+  if (!match) throw new Error("SMB media URI must look like smb://host/share/path.");
+  const authority = match[1];
+  if (authority.includes("@")) throw new Error("SMB media URI must not contain credentials.");
+  const host = authority.replace(/:\d+$/, "").trim().toLowerCase();
+  const share = decodeSmbPath(match[2]).trim();
+  const relativePath = decodeSmbPath(match[3] ?? "").replace(/^\/+/, "");
+  if (!host || !share || !relativePath || /[\u0000-\u001f]/.test(relativePath)) {
+    throw new Error("SMB media URI is incomplete.");
+  }
+  return { host, share, relativePath };
+}
+
+export async function resolveMappedSmbPath(smbUri, mappings = parseNasMappings()) {
+  const route = parseSmbRoute(smbUri);
+  const mapping = mappings.find((candidate) =>
+    candidate.host.toLowerCase() === route.host &&
+    candidate.share.toLowerCase() === route.share.toLowerCase());
+  if (!mapping) {
+    throw new Error("No OpenStream gateway NAS mapping matches this SMB share.");
+  }
+  const root = await validateNasRoot(mapping.rootPath);
+  return resolveWithinRoot(root, route.relativePath);
+}
+
+function hostHeaderAllowed(value, runtime) {
+  if (runtime.allowedHosts.has(value)) return true;
+  if (!runtime.allowLan) return false;
+  if (typeof value !== "string" || !value) return false;
+  const parsed = parseHostHeader(value);
+  if (!parsed || parsed.port !== runtime.port) return false;
+  return parsed.host === "localhost" || parsed.host === "localhost.localdomain" || isPrivateAddress(parsed.host);
+}
+
+function parseHostHeader(value) {
+  const header = String(value).trim().toLowerCase();
+  if (header.startsWith("[")) {
+    const end = header.indexOf("]");
+    if (end < 0) return undefined;
+    const host = header.slice(1, end);
+    const portText = header.slice(end + 1).replace(/^:/, "");
+    const port = Number(portText);
+    return Number.isInteger(port) ? { host, port } : undefined;
+  }
+  const separator = header.lastIndexOf(":");
+  if (separator < 0) return undefined;
+  const host = header.slice(0, separator);
+  const port = Number(header.slice(separator + 1));
+  return host && Number.isInteger(port) ? { host, port } : undefined;
 }
 
 async function issueStremioStream(record, value) {
@@ -599,7 +681,7 @@ async function routeRequest(request, response, session, logger, metadataService,
     prefix: "/api",
   });
   if (!requestUrl) throw new GatewayHttpError(404, "Gateway route not found.");
-  if (!runtime.allowedHosts.has(request.headers.host)) throw new Error("Invalid gateway host header.");
+  if (!hostHeaderAllowed(request.headers.host, runtime)) throw new Error("Invalid gateway host header.");
   if (request.method === "OPTIONS") {
     assertAllowedOrigin(origin, allowedOrigins);
     response.writeHead(204, securityHeaders(origin));
@@ -627,7 +709,9 @@ async function routeRequest(request, response, session, logger, metadataService,
   }
   const ownerId = authenticateSession(request, session);
   if (origin) assertAllowedOrigin(origin, allowedOrigins);
-  else if (request.headers["x-openstream-proxy"] !== "loopback") throw new Error("Gateway requests must come from the OpenStream app origin.");
+  else if (request.headers["x-openstream-proxy"] !== "loopback" && request.headers["x-openstream-client"] !== "android") {
+    throw new Error("Gateway requests must come from the OpenStream app origin.");
+  }
   if (origin && request.method === "POST" && request.headers["x-openstream-request"] !== "1") {
     throw new Error("Gateway mutation requests require the OpenStream request header.");
   }
@@ -765,6 +849,23 @@ async function routeRequest(request, response, session, logger, metadataService,
   if (requestUrl.pathname === "/api/transcode/capabilities" && request.method === "GET") {
     return sendJson(response, 200, await probeTranscoder(), origin);
   }
+  if (requestUrl.pathname === "/api/transcode/smb-sessions" && request.method === "POST") {
+    const payload = await readJson(request);
+    const probe = await probeTranscoder();
+    if (!probe.available) throw new Error("Local transcoding is unavailable: ffmpeg was not found on this machine.");
+    const input = await resolveMappedSmbPath(requireString(payload.smbUri, "SMB media URI", 8192), runtime.nasMappings);
+    const transcodeId = randomBytes(24).toString("base64url");
+    transcodeVault.set(transcodeId, {
+      ownerId,
+      input,
+      inputKind: "nas",
+      profile: payload.profile && typeof payload.profile === "object" ? payload.profile : {},
+      createdAt: Date.now(),
+    });
+    pruneVault(transcodeVault, 100);
+    void logger?.info("transcode", "SMB mapped session created");
+    return sendJson(response, 201, { transcodeUrl: `/gateway/transcode/media?transcodeId=${encodeURIComponent(transcodeId)}` }, origin);
+  }
   if (requestUrl.pathname === "/api/transcode/sessions" && request.method === "POST") {
     const payload = await readJson(request);
     const probe = await probeTranscoder();
@@ -845,9 +946,17 @@ export function createGatewayServer({
   logger = createLogger({ mirrorToConsole: false }),
   metadataService = createTmdbMetadataService(),
   netflixTop10Service = createNetflixTop10Service(),
+  nasMappings = process.env.OPENSTREAM_NAS_MAPPINGS ?? "[]",
+  allowLan = allowLanGateway,
 } = {}) {
   const session = createGatewaySession(sessionToken);
-  const runtime = { allowedHosts: new Set(), origin: `http://${urlHost}:${port}` };
+  const runtime = {
+    allowedHosts: new Set(),
+    origin: `http://${urlHost}:${port}`,
+    port,
+    allowLan,
+    nasMappings: parseNasMappings(nasMappings),
+  };
   const server = http.createServer((request, response) => {
     const startedAt = Date.now();
     const loggedPath = (request.url ?? "/").split("?")[0];
@@ -871,7 +980,9 @@ export function createGatewayServer({
     const address = server.address();
     if (!address || typeof address === "string") return;
     const boundHost = address.address.includes(":") ? `[${address.address}]` : address.address;
-    runtime.origin = `http://${boundHost}:${address.port}`;
+    const internalHost = boundHost === "0.0.0.0" || boundHost === "[::]" ? "127.0.0.1" : boundHost;
+    runtime.origin = `http://${internalHost}:${address.port}`;
+    runtime.port = address.port;
     runtime.allowedHosts = new Set([
       `${boundHost}:${address.port}`,
       `127.0.0.1:${address.port}`,

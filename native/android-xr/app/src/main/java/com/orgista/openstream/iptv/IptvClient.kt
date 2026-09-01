@@ -14,6 +14,7 @@ object IptvClient {
             channels = XtreamClient.load(source),
             guideUrls = listOf(XtreamClient.xmlTvUrl(source)),
         )
+        IptvSourceType.PLUTO -> PlutoIptvClient.load(source)
     }
 
     private fun loadM3u(source: IptvSource): IptvSourceCatalog {

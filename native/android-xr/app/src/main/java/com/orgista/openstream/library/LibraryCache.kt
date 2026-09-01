@@ -18,6 +18,15 @@ import java.io.File
  * is re-fetched lazily when a title opens.
  */
 object LibraryCache {
+    /**
+     * A valid cache is the startup library. Rewalking a large NAS on every
+     * process start duplicates the whole catalog in memory and can collide
+     * with video decoder allocation. Explicit source/key changes increment
+     * the revision and still request a fresh scan.
+     */
+    fun shouldScanAfterStartup(cacheAvailable: Boolean, libraryRevision: Int): Boolean =
+        !cacheAvailable || libraryRevision > 0
+
     private fun file(context: Context) = File(context.filesDir, "library-cache.json")
 
     fun save(context: Context, library: IndexedLibrary) {

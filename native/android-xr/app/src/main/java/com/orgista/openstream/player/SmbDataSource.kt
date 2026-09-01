@@ -23,6 +23,7 @@ class SmbDataSource(private val connection: NasConnection) : BaseDataSource(true
     private var uri: Uri? = null
     private var bytesRemaining: Long = 0
     private var loggedFirstRead = false
+    private var transferActive = false
 
     // Read-ahead buffer. ExoPlayer's extractors read a few bytes at a time
     // while parsing container structure; over SMB each read is a network round
@@ -57,6 +58,7 @@ class SmbDataSource(private val connection: NasConnection) : BaseDataSource(true
             loggedFirstRead = false
             com.orgista.openstream.Logs.event("smb open ok: pos=${dataSpec.position} len=$length remaining=$bytesRemaining")
             transferStarted(dataSpec)
+            transferActive = true
             return bytesRemaining
         } catch (error: Exception) {
             com.orgista.openstream.Logs.error("smb open failed (${error::class.simpleName})")
@@ -100,13 +102,19 @@ class SmbDataSource(private val connection: NasConnection) : BaseDataSource(true
 
     override fun close() {
         uri = null
+        val shouldEndTransfer = transferActive
+        transferActive = false
         try {
             file?.close()
         } catch (_: Exception) {
             // Closing a dropped connection must not mask the original error.
         } finally {
             file = null
-            transferEnded()
+            // Media3's BaseDataSource requires transferEnded() to pair with a
+            // successful transferStarted(). Calling it after host validation
+            // rejected an open passes a null DataSpec to listeners and masks
+            // the useful SMB error with a NullPointerException.
+            if (shouldEndTransfer) transferEnded()
         }
     }
 
@@ -118,10 +126,23 @@ class SmbDataSource(private val connection: NasConnection) : BaseDataSource(true
 
 object SmbHostPolicy {
     fun isHostAllowed(uriString: String, expectedHost: String): Boolean {
-        val uri = runCatching { java.net.URI(uriString) }.getOrNull() ?: return false
-        val scheme = uri.scheme?.lowercase() ?: return false
-        if (scheme != "smb") return false
-        val host = uri.host?.lowercase() ?: return false
-        return host.isNotBlank() && host.equals(expectedHost.lowercase(), ignoreCase = true)
+        val schemeEnd = uriString.indexOf("://")
+        if (schemeEnd <= 0 || !uriString.substring(0, schemeEnd).equals("smb", ignoreCase = true)) return false
+
+        // Validate only the authority. Library paths are human filenames and
+        // may legally contain raw spaces or Unicode; java.net.URI rejects the
+        // whole unescaped string before it can expose an otherwise valid host.
+        val authorityStart = schemeEnd + 3
+        val authorityEnd = listOf(
+            uriString.indexOf('/', authorityStart),
+            uriString.indexOf('?', authorityStart),
+            uriString.indexOf('#', authorityStart),
+        ).filter { it >= 0 }.minOrNull() ?: uriString.length
+        if (authorityEnd <= authorityStart) return false
+        val authority = uriString.substring(authorityStart, authorityEnd)
+        val uri = runCatching { java.net.URI("smb://$authority") }.getOrNull() ?: return false
+        val host = uri.host?.trim('[', ']') ?: return false
+        val expected = expectedHost.trim().trim('[', ']')
+        return host.isNotBlank() && expected.isNotBlank() && host.equals(expected, ignoreCase = true)
     }
 }

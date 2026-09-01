@@ -12,6 +12,11 @@ providers.environmentVariable("OPENSTREAM_ANDROID_BUILD_DIR").orNull?.let { requ
     layout.buildDirectory.set(localBuildDir)
 }
 
+val openStreamKeystoreFile = providers.environmentVariable("OPENSTREAM_KEYSTORE_FILE")
+val openStreamKeystorePass = providers.environmentVariable("OPENSTREAM_KEYSTORE_PASS")
+val openStreamKeyAlias = providers.environmentVariable("OPENSTREAM_KEY_ALIAS")
+val openStreamKeyPass = providers.environmentVariable("OPENSTREAM_KEY_PASS")
+
 android {
     namespace = "com.orgista.openstream"
     compileSdk {
@@ -24,7 +29,10 @@ android {
         applicationId = "com.orgista.openstream"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
+        // One Play listing serves TV and mobile with two artifacts: the
+        // google-tv AAB owns versionCode 1, this mobile/tablet AAB ships as 2.
+        // Keep the offset (TV = N, mobile = N+1) when bumping releases.
+        versionCode = 2
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -47,6 +55,18 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = openStreamKeystoreFile.orNull
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = openStreamKeystorePass.orNull
+                keyAlias = openStreamKeyAlias.orNull
+                keyPassword = openStreamKeyPass.orNull
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             // Local Vite dev server for the standards-based WebXR viewer.
@@ -57,6 +77,12 @@ android {
             )
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // TODO: set the production WebXR viewer URL before shipping a
             // release build. While this is empty, WebXrBackend reports the
             // immersive launch as unavailable and playback falls back to the

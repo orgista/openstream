@@ -2,6 +2,7 @@ package com.orgista.openstream.library
 
 import com.orgista.openstream.data.MediaItem
 import com.orgista.openstream.data.TitleRatings
+import com.orgista.openstream.domain.normalizedRatingAge
 
 object MetadataMergePolicy {
     fun merge(item: MediaItem, tmdbId: Int?, details: TmdbDetails?, omdb: OmdbResult?): MediaItem {
@@ -22,7 +23,9 @@ object MetadataMergePolicy {
                 synopsis.isBlank() || (synopsis.startsWith("From ") && synopsis.endsWith('.'))
             } ?: details?.overview.orEmpty().ifBlank { item.synopsis },
             year = item.year.takeIf { it > 0 } ?: details?.releaseYear ?: 0,
-            rating = item.rating.ifBlank { details?.certification ?: omdb?.rated.orEmpty() },
+            rating = item.rating.takeIf { normalizedRatingAge(it) != null }
+                ?: details?.certification
+                ?: omdb?.rated.orEmpty(),
             runtimeMinutes = item.runtimeMinutes.takeIf { it > 0 }
                 ?: details?.runtimeMinutes?.takeIf { it > 0 }
                 ?: omdb?.runtimeMinutes?.takeIf { it > 0 }

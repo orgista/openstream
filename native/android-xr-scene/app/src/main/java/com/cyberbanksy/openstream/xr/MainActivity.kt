@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(createContentView())
 
-        intent?.data?.let { pendingMedia = classify(it) }
+        intent?.data?.let { uri -> pendingMedia = processIncomingUri(uri) }
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -68,7 +68,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.data?.let { play(classify(it)) }
+        intent.data?.let { uri ->
+            processIncomingUri(uri)?.let(::play)
+        }
     }
 
     override fun onStop() {
@@ -88,6 +90,27 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    fun processIncomingUri(uri: Uri?): ImmersiveMedia? {
+        if (uri == null) return null
+        val scheme = uri.scheme?.lowercase()
+        if (!isAllowedScheme(scheme)) {
+            showStatus("Unsupported media URI scheme: ${uri.scheme}")
+            return null
+        }
+        if (scheme == "content") {
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+        return runCatching { classify(uri) }.getOrElse {
+            showStatus("Invalid media intent parameters.")
+            null
+        }
+    }
+
     private fun classify(uri: Uri): ImmersiveMedia = ImmersiveMediaClassifier.classify(
         uri = uri,
         title = uri.lastPathSegment,
@@ -102,7 +125,11 @@ class MainActivity : ComponentActivity() {
             pendingMedia = media
             showStatus("Starting Android XR…")
         } else {
-            adapter.play(media)
+            runCatching {
+                adapter.play(media)
+            }.onFailure { error ->
+                showStatus("Playback failed: ${error.message ?: "Unable to initialize video playback."}")
+            }
         }
     }
 
@@ -135,5 +162,10 @@ class MainActivity : ComponentActivity() {
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
             )
         }
+    }
+
+    companion object {
+        val ALLOWED_SCHEMES = setOf("content", "file", "http", "https")
+        fun isAllowedScheme(scheme: String?): Boolean = scheme?.lowercase() in ALLOWED_SCHEMES
     }
 }

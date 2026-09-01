@@ -1,0 +1,33 @@
+Start testing: Aug 15 09:54 CDT
+----------------------------------------------------------
+1/2 Testing: openstream_xr_geometry
+1/2 Test: openstream_xr_geometry
+Command: "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/openxr/build-test/openstream_xr_geometry_test"
+Directory: /Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/openxr/build-test
+"openstream_xr_geometry" start time: Aug 15 09:54 CDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   1.15 sec
+----------------------------------------------------------
+Test Passed.
+"openstream_xr_geometry" end time: Aug 15 09:54 CDT
+"openstream_xr_geometry" time elapsed: 00:00:01
+----------------------------------------------------------
+
+2/2 Testing: openstream_xr_session
+2/2 Test: openstream_xr_session
+Command: "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/openxr/build-test/openstream_xr_session_test"
+Directory: /Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/openxr/build-test
+"openstream_xr_session" start time: Aug 15 09:54 CDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.71 sec
+----------------------------------------------------------
+Test Passed.
+"openstream_xr_session" end time: Aug 15 09:54 CDT
+"openstream_xr_session" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 15 09:54 CDT

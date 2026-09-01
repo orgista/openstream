@@ -45,6 +45,7 @@ object XmlTvParser {
     ) : DefaultHandler() {
         val programs = ArrayList<IptvGuideProgram>()
         private val channelKeys = mutableMapOf<String, String>()
+        private val claimedChannelKeys = mutableSetOf<String>()
         private val guideMatcher = IptvGuideMatchPolicy.matcher(channels)
         private var channelId: String? = null
         private val displayNames = mutableListOf<String>()
@@ -54,8 +55,9 @@ object XmlTvParser {
 
         init {
             channels.filter { it.guideId.isNotBlank() }.forEach { channel ->
-                channelKeys[channel.guideId] = LiveChannelPackagePolicy.channelKey(channel)
-                channelKeys[channel.guideId.substringBefore('@')] = LiveChannelPackagePolicy.channelKey(channel)
+                val key = LiveChannelPackagePolicy.channelKey(channel)
+                channelKeys[channel.guideId] = key
+                channelKeys[channel.guideId.substringBefore('@')] = key
             }
         }
 
@@ -94,7 +96,17 @@ object XmlTvParser {
                 "display-name" -> if (channelId != null && value.isNotBlank()) displayNames += value.take(240)
                 "channel" -> {
                     channelId?.let { id ->
-                        guideMatcher.channelKey(id, displayNames)?.let { channelKeys[id] = it }
+                        val explicitKey = channelKeys[id] ?: channelKeys[id.substringBefore('@')]
+                        if (explicitKey != null) {
+                            claimedChannelKeys += explicitKey
+                        } else {
+                            guideMatcher.channelKey(id, displayNames)
+                                ?.takeIf { it !in claimedChannelKeys }
+                                ?.let { key ->
+                                    channelKeys[id] = key
+                                    claimedChannelKeys += key
+                                }
+                        }
                     }
                     channelId = null
                     displayNames.clear()

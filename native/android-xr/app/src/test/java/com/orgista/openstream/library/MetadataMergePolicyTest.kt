@@ -94,4 +94,24 @@ class MetadataMergePolicyTest {
         assertTrue(result.posterUrl!!.endsWith("/poster.jpg"))
         assertTrue(result.backdropUrl!!.endsWith("/backdrop.jpg"))
     }
+
+    @Test
+    fun `audience certification replaces a search popularity score`() {
+        val result = MetadataMergePolicy.merge(
+            existing.copy(rating = "★ 7.1"),
+            tmdbId = 42,
+            details = TmdbDetails(
+                imdbId = "tt1234567",
+                runtimeMinutes = 121,
+                genres = emptyList(),
+                cast = emptyList(),
+                director = null,
+                tagline = null,
+                certification = "PG",
+            ),
+            omdb = null,
+        )
+
+        assertEquals("PG", result.rating)
+    }
 }

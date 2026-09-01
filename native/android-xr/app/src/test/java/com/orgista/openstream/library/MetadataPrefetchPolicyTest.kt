@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MetadataPrefetchPolicyTest {
-    private fun item(id: String, complete: Boolean = false) = MediaItem(
+    private fun item(id: String, complete: Boolean = false, genres: List<String> = emptyList()) = MediaItem(
         id = id,
         kind = MediaKind.MOVIE,
         title = id,
@@ -17,7 +17,7 @@ class MetadataPrefetchPolicyTest {
         posterUrl = if (complete) "https://image.example/$id.jpg" else null,
         backdropUrl = if (complete) "https://image.example/$id-wide.jpg" else null,
         imdbId = "tt000000$id",
-        genres = if (complete) listOf("Drama") else emptyList(),
+        genres = if (complete) listOf("Drama") else genres,
     )
 
     @Test
@@ -28,5 +28,21 @@ class MetadataPrefetchPolicyTest {
         )
 
         assertEquals(listOf("2", "3"), selected.map { it.id })
+    }
+
+    @Test
+    fun `kids prefetch checks likely family titles before general catalog titles`() {
+        val selected = MetadataPrefetchPolicy.select(
+            listOf(
+                item("drama", genres = listOf("Drama")),
+                item("family", genres = listOf("Family")),
+                item("animation", genres = listOf("Animation", "Adventure")),
+                item("thriller", genres = listOf("Thriller")),
+            ),
+            limit = 3,
+            prioritizeKids = true,
+        )
+
+        assertEquals(listOf("family", "animation", "drama"), selected.map { it.id })
     }
 }

@@ -4,6 +4,7 @@ import com.orgista.openstream.data.UserAgents
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -13,6 +14,10 @@ import java.nio.charset.StandardCharsets
 import javax.net.ssl.HttpsURLConnection
 
 object ArrClient {
+    private const val STANDARD_RESPONSE_LIMIT = 512 * 1024
+    private const val CATALOG_RESPONSE_LIMIT = 8 * 1024 * 1024
+    private const val MAX_HEADER_BYTES = 64 * 1024
+
     fun test(connection: ArrConnection): ArrStatus {
         return parseStatus(request(connection, "GET", "/api/v3/system/status"))
     }
@@ -37,14 +42,26 @@ object ArrClient {
         require(method in setOf("GET", "POST", "PUT")) { "Unsupported ARR request." }
         require(path.startsWith("/api/v3/")) { "Unsupported ARR path." }
         val endpoint = "${ArrEndpointPolicy.normalize(connection.baseUrl)}$path"
+        val responseLimit = responseLimitBytes(path)
         return if (endpoint.startsWith("https://")) {
-            httpsRequest(endpoint, connection.apiKey, method, body)
+            httpsRequest(endpoint, connection.apiKey, method, body, responseLimit)
         } else {
-            privateHttpRequest(endpoint, connection.apiKey, method, body)
+            privateHttpRequest(endpoint, connection.apiKey, method, body, responseLimit)
         }
     }
 
-    private fun httpsRequest(endpoint: String, apiKey: String, method: String, body: String?): String {
+    fun responseLimitBytes(path: String): Int = when (path) {
+        "/api/v3/movie", "/api/v3/series" -> CATALOG_RESPONSE_LIMIT
+        else -> STANDARD_RESPONSE_LIMIT
+    }
+
+    private fun httpsRequest(
+        endpoint: String,
+        apiKey: String,
+        method: String,
+        body: String?,
+        responseLimit: Int,
+    ): String {
         val connection = URL(endpoint).openConnection() as HttpsURLConnection
         connection.connectTimeout = 6_000
         connection.readTimeout = 15_000
@@ -63,7 +80,9 @@ object ArrClient {
         return try {
             val status = connection.responseCode
             if (status !in 200..299) throw IOException("${method.lowercase().replaceFirstChar(Char::uppercase)} request returned HTTP $status.")
-            connection.inputStream.bufferedReader().use { it.readText().take(256_000) }
+            connection.inputStream.use { input ->
+                String(readLimited(input, responseLimit), StandardCharsets.UTF_8)
+            }
         } finally {
             connection.disconnect()
         }
@@ -74,7 +93,13 @@ object ArrClient {
      * supports the common private-IP ARR setup without enabling HTTP for the
      * rest of the app. Redirects and public hosts are never followed.
      */
-    private fun privateHttpRequest(endpoint: String, apiKey: String, method: String, body: String?): String {
+    private fun privateHttpRequest(
+        endpoint: String,
+        apiKey: String,
+        method: String,
+        body: String?,
+        responseLimit: Int,
+    ): String {
         val uri = URI(endpoint)
         if (!ArrEndpointPolicy.isPrivateLiteral(uri.host)) throw IOException("Local HTTP requires a private IP address.")
         val port = if (uri.port > 0) uri.port else 80
@@ -107,27 +132,35 @@ object ArrClient {
                 flush()
             }
 
-            val raw = ByteArrayOutputStream()
-            val buffer = ByteArray(8_192)
-            val input = socket.getInputStream()
-            while (raw.size() <= 300_000) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                raw.write(buffer, 0, count)
-            }
+            val responseBytes = readLimited(socket.getInputStream(), responseLimit + MAX_HEADER_BYTES)
             // Keep the response as raw bytes: the header line is ASCII, but the
             // body may contain multi-byte UTF-8, and chunk sizes count BYTES.
             // Decoding to String before de-framing would misalign every chunk
             // boundary that follows a non-ASCII byte and corrupt the JSON.
-            val responseBytes = raw.toByteArray()
             val headEnd = indexOfCrlfCrlf(responseBytes)
             if (headEnd < 0) throw IOException("ARR returned an invalid response.")
             val headerText = String(responseBytes, 0, headEnd, StandardCharsets.US_ASCII)
             val status = headerText.lineSequence().firstOrNull()?.split(' ')?.getOrNull(1)?.toIntOrNull()
                 ?: throw IOException("ARR returned an invalid status.")
             if (status !in 200..299) throw IOException("${method.lowercase().replaceFirstChar(Char::uppercase)} request returned HTTP $status.")
-            decodeHttpBody(headerText, responseBytes, headEnd + 4)
+            val decoded = decodeHttpBody(headerText, responseBytes, headEnd + 4)
+            if (decoded.toByteArray(StandardCharsets.UTF_8).size > responseLimit) {
+                throw IOException("ARR response is too large.")
+            }
+            decoded
         }
+    }
+
+    private fun readLimited(input: InputStream, limit: Int): ByteArray {
+        val output = ByteArrayOutputStream(minOf(limit, 64 * 1024))
+        val buffer = ByteArray(8_192)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (output.size() + count > limit) throw IOException("ARR response is too large.")
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
     }
 
     /**

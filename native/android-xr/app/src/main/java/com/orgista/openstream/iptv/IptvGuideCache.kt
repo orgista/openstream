@@ -16,10 +16,9 @@ object IptvGuideRefreshPolicy {
 }
 
 object IptvGuideCodec {
-    // v2 invalidates schedules built before Xtream epg_channel_id values were
-    // preserved. Those old caches were valid JSON but had avoidable coverage
-    // gaps because most provider rows could only be matched by display name.
-    private const val VERSION = 2
+    // v3 invalidates guide caches that could merge two XMLTV aliases onto one
+    // app channel and render overlapping schedules.
+    private const val VERSION = 3
     private const val MAX_CACHE_CHARS = 8_000_000
     private const val MAX_PROGRAMS = 24_000
 
@@ -109,11 +108,11 @@ class IptvGuideCache(context: Context) {
 
     private fun file(sourceId: String): File {
         val safeId = sourceId.lowercase().replace(Regex("[^a-z0-9-]"), "-").take(80)
-        return File(directory, "iptv-guide-$safeId-v2.json")
+        return File(directory, "iptv-guide-$safeId-v3.json")
     }
 
     private fun attemptFile(sourceId: String): File {
         val safeId = sourceId.lowercase().replace(Regex("[^a-z0-9-]"), "-").take(80)
-        return File(directory, "iptv-guide-$safeId-v2.attempt")
+        return File(directory, "iptv-guide-$safeId-v3.attempt")
     }
 }

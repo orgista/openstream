@@ -5,6 +5,11 @@
 
 namespace openstream::xr {
 
+constexpr std::uint32_t kMinLatitudeSegments = 2;
+constexpr std::uint32_t kMinLongitudeSegments = 3;
+constexpr std::uint32_t kMaxLatitudeSegments = 1024;
+constexpr std::uint32_t kMaxLongitudeSegments = 2048;
+
 enum class Projection {
     Flat,
     Equirectangular180,

@@ -26,7 +26,7 @@ class LiveChannelPackagePolicyTest {
         assertEquals(LiveChannelPackage.ENTERTAINMENT, LiveChannelPackagePolicy.packageFor(channel("6", "ABC (East)", "Network TV")))
         assertEquals(LiveChannelPackage.PREMIER, LiveChannelPackagePolicy.packageFor(channel("7", "HBO East", "Premium Movie Channels")))
         assertEquals(LiveChannelPackage.ULTIMATE, LiveChannelPackagePolicy.packageFor(channel("8", "FX Movie Channel", "Movies")))
-        assertEquals(LiveChannelPackage.CHOICE, LiveChannelPackagePolicy.packageFor(channel("9", "Discovery Family", "Kids")))
+        assertEquals(LiveChannelPackage.KIDS, LiveChannelPackagePolicy.packageFor(channel("9", "Discovery Family", "Kids")))
         assertEquals(LiveChannelPackage.LEAGUE_SPORTS, LiveChannelPackagePolicy.packageFor(channel("10", "MLB 01", "MLB Extra Innings")))
         assertEquals(LiveChannelPackage.LEAGUE_SPORTS, LiveChannelPackagePolicy.packageFor(channel("11", "ESPN+ 101", "ESPN+")))
     }
@@ -34,7 +34,7 @@ class LiveChannelPackagePolicyTest {
     @Test
     fun `manager exposes only signature style packages plus local sports and ppv`() {
         assertEquals(
-            listOf("Local", "Entertainment", "Choice", "Ultimate", "Premier", "Sports Pack", "League Sports", "Pay Per View"),
+            listOf("Local", "Entertainment", "Choice", "Kids & Family", "Ultimate", "Premier", "Sports Pack", "League Sports", "Pay Per View"),
             LiveChannelPackagePolicy.orderedPackages.map { it.label },
         )
         assertEquals(
@@ -42,6 +42,7 @@ class LiveChannelPackagePolicyTest {
                 LiveChannelPackage.LOCAL.id,
                 LiveChannelPackage.ENTERTAINMENT.id,
                 LiveChannelPackage.CHOICE.id,
+                LiveChannelPackage.KIDS.id,
                 LiveChannelPackage.ULTIMATE.id,
                 LiveChannelPackage.PREMIER.id,
                 LiveChannelPackage.SPORTS_PACK.id,
@@ -51,6 +52,18 @@ class LiveChannelPackagePolicyTest {
         )
         assertFalse(LiveChannelPackage.LEAGUE_SPORTS.id in LiveChannelPackagePolicy.defaultEnabledPackageIds)
         assertFalse(LiveChannelPackage.OTHER in LiveChannelPackagePolicy.orderedPackages)
+    }
+
+    @Test
+    fun `kids lineup includes only channels classified for children`() {
+        val pbsKids = channel("pbs-kids", "PBS Kids", "Kids")
+        val babyFirst = channel("baby-first", "BabyFirst", "Children")
+        val cnn = channel("cnn", "CNN", "Network TV")
+        val manualAdult = channel("manual-adult", "Horror Movies", "premier", sourceId = ManualLiveChannelPolicy.SOURCE_ID)
+
+        assertEquals(LiveChannelPackage.KIDS, LiveChannelPackagePolicy.packageFor(pbsKids))
+        assertEquals(LiveChannelPackage.KIDS, LiveChannelPackagePolicy.packageFor(babyFirst))
+        assertEquals(listOf(pbsKids, babyFirst), LiveChannelPackagePolicy.kidsChannels(listOf(pbsKids, cnn, babyFirst, manualAdult)))
     }
 
     @Test

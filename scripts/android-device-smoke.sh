@@ -96,8 +96,8 @@ if [ "$navigate" = "1" ]; then
   discover_ready=0
   if grep -Fq 'text="Play"' "$local_ui" && grep -Fq 'text="Details"' "$local_ui"; then
     discover_ready=1
-  elif grep -Fq 'text="No offline downloads yet"' "$local_ui" ||
-       grep -Fq 'text="Nothing to show yet"' "$local_ui"; then
+  elif grep -Fq 'text="No downloads"' "$local_ui" ||
+       grep -Fq 'text="Nothing here yet"' "$local_ui"; then
     discover_ready=1
   fi
   if [ "$discover_ready" -ne 1 ]; then

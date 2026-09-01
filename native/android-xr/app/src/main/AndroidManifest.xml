@@ -26,13 +26,17 @@
         android:name="android.hardware.xr.input.controller"
         android:required="false" />
 
+    <!-- The banner is a real 320x180dp lockup (dark card + mark + wordmark).
+         The bare transparent brand mark used to sit here, and every leanback
+         launcher rendered it as floating bars with nothing behind them. -->
     <application
         android:allowBackup="false"
-        android:banner="@drawable/openstream_brand_mark"
+        android:banner="@drawable/openstream_tv_banner"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/full_backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="OpenStream"
+        android:largeHeap="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"

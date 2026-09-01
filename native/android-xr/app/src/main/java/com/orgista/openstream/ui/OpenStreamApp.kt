@@ -1,13 +1,16 @@
 package com.orgista.openstream.ui
 
 import android.app.Activity
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,17 +46,34 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import com.orgista.openstream.Logs
 import com.orgista.openstream.R
+import com.orgista.openstream.arr.ArrCertifications
+import com.orgista.openstream.arr.ArrKind
+import com.orgista.openstream.arr.ArrStore
 import com.orgista.openstream.data.ConnectionStore
 import com.orgista.openstream.data.ConfiguredStremioCatalogPolicy
 import com.orgista.openstream.data.AddonCatalogSection
@@ -63,6 +83,7 @@ import com.orgista.openstream.data.NasConnection
 import com.orgista.openstream.data.Smb
 import com.orgista.openstream.data.SourceKind
 import com.orgista.openstream.data.StremioStream
+import com.orgista.openstream.data.StremioAddon
 import com.orgista.openstream.data.StremioCatalogCache
 import com.orgista.openstream.data.StremioCatalogMerger
 import com.orgista.openstream.data.StremioClient
@@ -70,6 +91,7 @@ import com.orgista.openstream.data.StremioAddonPresentation
 import com.orgista.openstream.data.StremioSearchPolicy
 import com.orgista.openstream.data.YoutubeChannelClient
 import com.orgista.openstream.data.YoutubeSourcePolicy
+import com.orgista.openstream.domain.AdminPinPolicy
 import com.orgista.openstream.domain.ContentPolicy
 import com.orgista.openstream.domain.ProfileStore
 import com.orgista.openstream.domain.RecommendationEngine
@@ -77,6 +99,7 @@ import com.orgista.openstream.domain.UpNextPolicy
 import com.orgista.openstream.domain.filterCatalog
 import com.orgista.openstream.domain.isItemAllowed
 import com.orgista.openstream.library.IndexedLibrary
+import com.orgista.openstream.library.LibraryFolderLinkPolicy
 import com.orgista.openstream.library.LibraryIndexer
 import com.orgista.openstream.library.LibraryKind
 import com.orgista.openstream.library.LibraryStore
@@ -86,15 +109,22 @@ import com.orgista.openstream.player.PlaybackStore
 import com.orgista.openstream.offline.OfflineCatalogPolicy
 import com.orgista.openstream.offline.OfflineDeviceCapabilities
 import com.orgista.openstream.offline.OfflineDeviceProfile
+import com.orgista.openstream.offline.OfflineMediaProbe
+import com.orgista.openstream.offline.OfflineMediaProbeCache
+import com.orgista.openstream.offline.OfflineMediaProbeRuntime
 import com.orgista.openstream.offline.OfflineMediaRuntime
 import com.orgista.openstream.offline.OfflineQualityPolicy
+import com.orgista.openstream.offline.OfflineStreamDescriptor
 import com.orgista.openstream.offline.OfflineIdentityResult
 import com.orgista.openstream.offline.OfflineStreamIdentityPolicy
 import com.orgista.openstream.ui.icons.AppIcons
 import com.orgista.openstream.trakt.TraktMediaIdentity
+import com.orgista.openstream.transcode.TranscodeServerClient
+import com.orgista.openstream.transcode.TranscodeServerStore
 import com.orgista.openstream.streaming.BandwidthRuntime
 import com.orgista.openstream.streaming.StreamingPlan
 import com.orgista.openstream.streaming.StreamingQualityPolicy
+import com.orgista.openstream.storage.AppStorageManager
 import com.orgista.openstream.iptv.IptvStore
 import com.orgista.openstream.iptv.LegacyEmbeddedSourceCacheCleaner
 import com.orgista.openstream.iptv.IptvPresentationPolicy
@@ -110,6 +140,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 
 /** A playback request routed to the player: what to play and how to reach it. */
 data class PlaybackRequest(
@@ -124,6 +156,7 @@ data class PlaybackRequest(
     val streamingPlan: StreamingPlan? = null,
     val httpUserAgent: String? = null,
     val httpReferer: String? = null,
+    val httpRequestHeaders: Map<String, String> = emptyMap(),
     val isLive: Boolean = false,
     val stremioType: String? = null,
     val stremioId: String? = null,
@@ -149,21 +182,81 @@ fun livePlaybackRequest(channel: com.orgista.openstream.iptv.IptvChannel): Playb
     isLive = true,
 )
 
+private val NavTextShadow = Shadow(color = Color.Black.copy(alpha = 0.5f), offset = Offset(0f, 1f), blurRadius = 4f)
+
 private fun MediaCandidate.playbackPriority(): Int = when (sourceKind) {
     SourceKind.OFFLINE -> 0
     SourceKind.NAS -> 1
     SourceKind.STREMIO -> 2
 }
 
+private fun MediaCandidate.routeStreamDescriptor(): StremioStream {
+    val filename = uri.substringBefore('?')
+        .substringBefore('#')
+        .substringAfterLast('/')
+        .takeIf { it.isNotBlank() }
+        ?.let { encoded ->
+            runCatching { URLDecoder.decode(encoded, StandardCharsets.UTF_8.name()) }.getOrDefault(encoded)
+        }
+    val descriptorTitle = listOf(formatLabel, filename, sourceName)
+        .filterNot { it.isNullOrBlank() }
+        .joinToString(" · ")
+    return StremioStream(
+        title = descriptorTitle.ifBlank { sourceName },
+        url = uri,
+        filename = filename,
+    )
+}
+
+private fun MediaCandidate.routeDescriptor(mediaProbe: OfflineMediaProbe?): OfflineStreamDescriptor {
+    val stream = routeStreamDescriptor()
+    return mediaProbe?.let { OfflineStreamDescriptor.fromProbe(stream, it) }
+        ?: OfflineStreamDescriptor.parse(stream)
+}
+
+fun bestServerTranscodeCandidate(
+    item: MediaItem,
+    deviceProfile: OfflineDeviceProfile,
+    mediaProbe: (MediaCandidate) -> OfflineMediaProbe? = { null },
+): MediaCandidate? = item.candidates
+    .filter { it.sourceKind == SourceKind.NAS && it.uri.startsWith("smb://") }
+    .filter { playableUris(PlaybackRequest(item.title, it.sourceName, it.uri)).isNotEmpty() }
+    .maxByOrNull { candidate ->
+        OfflineQualityPolicy.qualityScore(candidate.routeDescriptor(mediaProbe(candidate)), deviceProfile)
+    }
+
+fun serverTranscodePlaybackRequest(item: MediaItem, uri: String, sessionToken: String): PlaybackRequest = PlaybackRequest(
+    title = item.title,
+    subtitle = "HD Transcode",
+    uri = uri,
+    mediaId = item.id,
+    httpRequestHeaders = mapOf(
+        "X-OpenStream-Session" to sessionToken,
+        "X-OpenStream-Client" to "android",
+    ),
+    traktIdentity = TraktMediaIdentity.from(item),
+    stremioType = if (item.kind == com.orgista.openstream.data.MediaKind.SERIES) "series" else "movie",
+    stremioId = item.id.takeIf { it.startsWith("tt") } ?: item.imdbId,
+)
+
 fun bestPlaybackRequest(
     item: MediaItem,
     streams: List<StremioStream> = emptyList(),
     deviceProfile: OfflineDeviceProfile? = null,
     bandwidthMbps: Double? = null,
+    mediaProbe: (MediaCandidate) -> OfflineMediaProbe? = { null },
 ): PlaybackRequest? {
     val candidate = item.candidates
         .filter { it.sourceKind != SourceKind.OFFLINE || it.offlineIdentityVerified }
         .filter { playableUris(PlaybackRequest(item.title, it.sourceName, it.uri)).isNotEmpty() }
+        .filter { candidate ->
+            deviceProfile == null ||
+                OfflineQualityPolicy.compatibleDescriptors(
+                    descriptors = listOf(candidate.routeDescriptor(mediaProbe(candidate))),
+                    profile = deviceProfile,
+                    availableBytes = Long.MAX_VALUE,
+                ).isNotEmpty()
+        }
         .minByOrNull(MediaCandidate::playbackPriority)
     if (candidate != null) {
         return PlaybackRequest(
@@ -210,6 +303,32 @@ fun bestPlaybackRequest(
 
 fun preferredPlaybackRequest(item: MediaItem): PlaybackRequest? = bestPlaybackRequest(item)
 
+suspend fun probeLocalCandidates(
+    context: android.content.Context,
+    cache: OfflineMediaProbeCache,
+    item: MediaItem,
+): Int {
+    var probed = 0
+    val candidates = item.candidates
+        .filter { it.sourceKind == SourceKind.NAS || it.sourceKind == SourceKind.OFFLINE }
+        .filter { playableUris(PlaybackRequest(item.title, it.sourceName, it.uri)).isNotEmpty() }
+    for (candidate in candidates) {
+        if (cache.get(candidate.uri) != null) continue
+        val probe = OfflineMediaProbeRuntime.probe(context.applicationContext, candidate.uri)
+        cache.put(candidate.uri, probe)
+        probed++
+    }
+    return probed
+}
+
+fun hasPotentialPlaybackRoute(item: MediaItem, addons: List<StremioAddon>): Boolean {
+    if (preferredPlaybackRequest(item) != null || item.episodes.any { preferredPlaybackRequest(it) != null }) {
+        return true
+    }
+    val hasStremioIdentity = item.imdbId != null || item.id.matches(Regex("tt\\d{5,12}(?::\\d+:\\d+)?"))
+    return hasStremioIdentity && addons.any(StremioAddonPresentation::isPlaybackProvider)
+}
+
 sealed interface Screen {
     data object Discover : Screen
     data object Library : Screen
@@ -218,7 +337,10 @@ sealed interface Screen {
     data object Connections : Screen
     data object Settings : Screen
     data object ChannelManager : Screen
-    data class Details(val item: MediaItem) : Screen
+    data class Details(
+        val item: MediaItem,
+        val showPlaybackUnavailable: Boolean = false,
+    ) : Screen
     data class Player(val request: PlaybackRequest) : Screen
     data class YoutubeVideo(val videoId: String, val title: String) : Screen
 }
@@ -248,23 +370,33 @@ fun OpenStreamApp(onExit: () -> Unit) {
     val libraryStore = remember { LibraryStore(context.applicationContext) }
     val playbackStore = remember { PlaybackStore(context.applicationContext) }
     val iptvStore = remember { IptvStore(context.applicationContext) }
+    val transcodeServerStore = remember { TranscodeServerStore(context.applicationContext) }
     val xrRuntime = remember { XrRuntimeProbe.inspect(context.applicationContext) }
     var offlineStorageRevision by remember { mutableIntStateOf(0) }
     val offlineRuntime = remember(offlineStorageRevision) { OfflineMediaRuntime.get(context.applicationContext) }
+    val playbackDeviceProfile = remember { OfflineDeviceCapabilities.inspect(context.applicationContext) }
+    val mediaProbeCache = remember { OfflineMediaProbeCache(context.applicationContext) }
+    var mediaProbeRevision by remember { mutableIntStateOf(0) }
     val offlineEntries by offlineRuntime.entries.collectAsState()
     val deviceStatus = rememberHeaderDeviceStatus()
     val appScope = rememberCoroutineScope()
     var policy by remember { mutableStateOf(profileStore.loadActivePolicy()) }
+    val kidsProfileActive = policy is ContentPolicy.Kids
     // JSON catalog caches can be several megabytes. Decoding them in remember
     // blocked the first interactive frame, so a tap on Live during launch was
     // silently delayed behind unrelated Discover data. Paint navigation first
     // and adopt the cached snapshots from a worker thread when ready.
     var indexed by remember { mutableStateOf<IndexedLibrary?>(null) }
+    var startupCachesReady by remember { mutableStateOf(false) }
+    var startupLibraryCacheAvailable by remember { mutableStateOf(false) }
     var indexing by remember { mutableStateOf(false) }
+    /** Added library folders whose NAS share is not configured on this device. */
+    var missingLibrarySources by remember { mutableStateOf<List<String>>(emptyList()) }
     var libraryRevision by remember { mutableIntStateOf(0) }
     var playbackRevision by remember { mutableIntStateOf(0) }
     var addonRevision by remember { mutableIntStateOf(0) }
     var iptvRevision by remember { mutableIntStateOf(0) }
+    var arrRevision by remember { mutableIntStateOf(0) }
     var addonCatalog by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var addonCatalogs by remember { mutableStateOf<List<com.orgista.openstream.data.AddonCatalogSection>>(emptyList()) }
     var addonRecommendations by remember { mutableStateOf<List<AddonCatalogSection>>(emptyList()) }
@@ -295,6 +427,8 @@ fun OpenStreamApp(onExit: () -> Unit) {
             withContext(Dispatchers.IO) { StremioCatalogCache.remove(context.applicationContext) }
         }
         if (indexed == null) indexed = libraryCache
+        startupLibraryCacheAvailable = libraryCache != null
+        startupCachesReady = true
         if (addonCatalog.isEmpty()) addonCatalog = addonCache?.items.orEmpty()
         if (addonCatalogs.isEmpty()) addonCatalogs = addonCache?.sections.orEmpty()
         Logs.event(
@@ -330,7 +464,8 @@ fun OpenStreamApp(onExit: () -> Unit) {
     // Scan every added folder library, parse filenames, and (if a TMDB key is
     // set) enrich with posters — off the main thread. Re-runs when a folder is
     // added/removed or the key changes (libraryRevision bumps).
-    LaunchedEffect(libraryRevision, deviceStatus.online) {
+    LaunchedEffect(libraryRevision, deviceStatus.online, startupCachesReady) {
+        if (!startupCachesReady) return@LaunchedEffect
         val folders = libraryStore.folders()
         if (folders.isEmpty()) {
             indexed = null
@@ -340,12 +475,33 @@ fun OpenStreamApp(onExit: () -> Unit) {
         // an SMB scan with no physical network would otherwise turn a healthy
         // cached library into an empty result.
         if (!deviceStatus.online) return@LaunchedEffect
+        if (!com.orgista.openstream.library.LibraryCache.shouldScanAfterStartup(
+                cacheAvailable = startupLibraryCacheAvailable,
+                libraryRevision = libraryRevision,
+            )
+        ) {
+            Logs.event("library startup scan skipped: using cached ${indexed?.all?.size ?: 0} titles")
+            return@LaunchedEffect
+        }
         indexing = true
         val tmdb = Tmdb(libraryStore.reusableTmdbCredential())
-        val connections = connectionStore.nasConnections().associateBy { it.id }
+        val nasConnections = connectionStore.nasConnections()
+        // A folder whose share was removed and re-added points at a stale
+        // connection id. Repair those, then report anything still unmatched:
+        // skipping silently is what makes a configured library look empty.
+        val links = LibraryFolderLinkPolicy.resolve(folders, nasConnections)
+        if (links.changed) {
+            libraryStore.replaceFolders(links.folders)
+            Logs.event("library folders relinked to their NAS share: ${links.relinked.size}")
+        }
+        missingLibrarySources = links.orphaned.map { "${it.connectionName} / ${it.path.ifBlank { "(root)" }}" }
+        links.orphaned.forEach { folder ->
+            Logs.warn("library folder has no NAS share configured: ${folder.connectionName}/${folder.path}")
+        }
+        val connections = nasConnections.associateBy { it.id }
         val movies = ArrayList<MediaItem>()
         val shows = ArrayList<MediaItem>()
-        for (folder in folders) {
+        for (folder in links.folders) {
             val connection = connections[folder.connectionId] ?: continue
             val result = LibraryIndexer.index(connection, folder, tmdb)
             movies += result.movies
@@ -468,7 +624,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
     // Warm the small set of sparse titles most likely to be opened next. The
     // result is merged into every provider rail and persisted, so Back and a
     // later app launch render details immediately while refresh happens later.
-    LaunchedEffect(libraryRevision, deviceStatus.online, addonCatalog.map { it.id }) {
+    LaunchedEffect(libraryRevision, deviceStatus.online, addonCatalog.map { it.id }, kidsProfileActive) {
         if (!deviceStatus.online || addonCatalog.isEmpty()) return@LaunchedEffect
         kotlinx.coroutines.delay(600)
         val loader = com.orgista.openstream.library.MetadataLoader(
@@ -477,7 +633,11 @@ fun OpenStreamApp(onExit: () -> Unit) {
         )
         val metaAddons = connectionStore.stremioAddons().filter { it.enabled && "meta" in it.resources }
         if (!loader.active && metaAddons.isEmpty()) return@LaunchedEffect
-        val targets = MetadataPrefetchPolicy.select(addonCatalog, limit = 24)
+        val targets = MetadataPrefetchPolicy.select(
+            addonCatalog,
+            limit = if (kidsProfileActive) 64 else 24,
+            prioritizeKids = kidsProfileActive,
+        )
         if (targets.isEmpty()) return@LaunchedEffect
         val enrichedItems = withContext(Dispatchers.IO) {
             targets.chunked(4).flatMap { batch ->
@@ -516,7 +676,10 @@ fun OpenStreamApp(onExit: () -> Unit) {
         withContext(Dispatchers.IO) {
             StremioCatalogCache.saveSections(context.applicationContext, addonCatalogs, addonCatalog)
         }
-        Logs.event("metadata cache warmed for ${enrichedItems.size} titles")
+        Logs.event(
+            "metadata cache warmed for ${enrichedItems.size} titles " +
+                "(${enrichedItems.count { it.rating.isNotBlank() }} certified)",
+        )
     }
 
     val activePolicy = policy
@@ -644,8 +807,32 @@ fun OpenStreamApp(onExit: () -> Unit) {
     val discoverAddonCatalogs = remember(addonCatalogs, addonRecommendations, youtubeCatalogs) {
         addonCatalogs + addonRecommendations + youtubeCatalogs
     }
+    val hasConfiguredSources = remember(libraryRevision, addonRevision) {
+        hasLibraries ||
+            connectionStore.stremioAddons().any { it.enabled } ||
+            connectionStore.youtubeChannels().any { it.enabled }
+    }
     val offlineItems = remember(offlineEntries) {
         offlineEntries.filter { it.completed && it.identityVerified }.map { it.item }
+    }
+    // Radarr/Sonarr know a certification for every title they manage; that
+    // map rates locally-indexed files the metadata scan left unrated, which
+    // is what lets owned kid-appropriate titles pass the Kids Mode filter.
+    val arrStore = remember { ArrStore(context.applicationContext) }
+    var arrCertifications by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(arrRevision, deviceStatus.online) {
+        if (!deviceStatus.online) return@LaunchedEffect
+        val loaded = withContext(Dispatchers.IO) {
+            listOfNotNull(arrStore.load(ArrKind.RADARR), arrStore.load(ArrKind.SONARR))
+                .filter { it.enabled }
+                .flatMap { connection ->
+                    runCatching { ArrCertifications.fetch(connection).toList() }
+                        .getOrDefault(emptyList())
+                }
+                .toMap()
+        }
+        arrCertifications = loaded
+        Logs.event("arr certifications loaded: ${loaded.size} titles")
     }
     val catalog = remember(
         activePolicy,
@@ -653,6 +840,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
         offlineItems,
         deviceStatus.online,
         playbackRevision,
+        arrCertifications,
     ) {
         val visible = OfflineCatalogPolicy.select(deviceStatus.online, onlineCatalog, offlineItems)
         val withProgress = visible.map { item ->
@@ -661,7 +849,8 @@ fun OpenStreamApp(onExit: () -> Unit) {
                 ?: uri?.let(playbackStore::progressPercent)
             if (savedProgress == null) item else item.copy(progressPercent = savedProgress)
         }
-        val allowed = filterCatalog(withProgress, activePolicy)
+        val rated = ArrCertifications.applyTo(withProgress, arrCertifications)
+        val allowed = filterCatalog(rated, activePolicy)
         RecommendationEngine.rank(
             items = allowed,
             history = playbackStore.viewingSignals(allowed.map { it.id }),
@@ -684,14 +873,55 @@ fun OpenStreamApp(onExit: () -> Unit) {
     var screen by remember { mutableStateOf<Screen>(Screen.Discover) }
     var lastTab by remember { mutableStateOf<Screen>(Screen.Discover) }
 
+    // Kids Mode admin gate: Settings and source management open only after
+    // the guardian PIN. The unlock holds while the guardian stays on admin
+    // screens and drops the moment navigation returns to a kids surface.
+    var adminUnlocked by remember { mutableStateOf(false) }
+    var pinChallenge by remember { mutableStateOf<Screen?>(null) }
+    val isAdminScreen: (Screen) -> Boolean = { target ->
+        target is Screen.Settings || target is Screen.Connections || target is Screen.ChannelManager
+    }
+
     val navigate: (Screen) -> Unit = { next ->
-        Logs.event("navigate: ${next::class.simpleName}")
-        if (next is Screen.Discover || next is Screen.Library || next is Screen.Live || next is Screen.Search ||
-            next is Screen.Connections || next is Screen.Settings
-        ) {
-            lastTab = next
+        if (kidsMode && isAdminScreen(next) && !adminUnlocked) {
+            pinChallenge = next
+        } else {
+            Logs.event("navigate: ${next::class.simpleName}")
+            if (kidsMode && !isAdminScreen(next) && next !is Screen.Player) adminUnlocked = false
+            if (next is Screen.Discover || next is Screen.Library || next is Screen.Live || next is Screen.Search ||
+                next is Screen.Connections || next is Screen.Settings
+            ) {
+                lastTab = next
+            }
+            if (next is Screen.Player) {
+                AppStorageManager.trimMemoryForPlayback(context.applicationContext)
+            }
+            screen = next
         }
-        screen = next
+    }
+
+    pinChallenge?.let { target ->
+        AdminPinDialog(
+            configured = AdminPinPolicy.isConfigured(activePolicy),
+            onVerify = { pin ->
+                val accepted = AdminPinPolicy.verify(activePolicy, pin)
+                if (accepted) {
+                    Logs.event("admin gate unlocked")
+                    adminUnlocked = true
+                    pinChallenge = null
+                    navigate(target)
+                }
+                accepted
+            },
+            onCreate = { pin ->
+                policy = profileStore.setAdminPin(pin)
+                Logs.event("admin pin created on legacy kids install")
+                adminUnlocked = true
+                pinChallenge = null
+                navigate(target)
+            },
+            onDismiss = { pinChallenge = null },
+        )
     }
 
     val playGuarded: (MediaItem, PlaybackRequest) -> Unit = playGuarded@{ item, request ->
@@ -789,6 +1019,10 @@ fun OpenStreamApp(onExit: () -> Unit) {
                 playbackStore = playbackStore,
                 online = deviceStatus.online,
                 metadataLoader = metadataLoader,
+                mediaProbeCache = mediaProbeCache,
+                mediaProbeRevision = mediaProbeRevision,
+                onMediaProbeChanged = { mediaProbeRevision++ },
+                initialPlaybackSourceUnavailable = current.showPlaybackUnavailable,
                 onMetadataEnriched = { enriched ->
                     indexed?.let { currentLibrary ->
                         val updated = currentLibrary.copy(
@@ -831,6 +1065,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
                     }
                 },
                 onBack = { screen = lastTab },
+                onOpenSources = { navigate(Screen.Connections) },
                 onPlay = { request -> playGuarded(current.item, request) },
             )
             return
@@ -875,6 +1110,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
             LiveChannelManagerScreen(
                 store = iptvStore,
                 allChannels = iptvStore.sessionChannels(),
+                kidsMode = kidsMode,
                 onChanged = { iptvRevision++ },
                 onPackagesChanged = { iptvRevision++ },
                 onOpenSources = { navigate(Screen.Connections) },
@@ -885,7 +1121,18 @@ fun OpenStreamApp(onExit: () -> Unit) {
         else -> Unit
     }
 
-    Column(
+    var topNavHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val fadeOverlapPx = with(density) { TopNavBlendPolicy.FADE_OVERLAP_DP.dp.roundToPx() }
+    val contentTopInset = if (screen == Screen.Discover) {
+        0.dp
+    } else {
+        with(density) {
+            TopNavBlendPolicy.contentTopInsetPx(topNavHeightPx, fadeOverlapPx).toDp()
+        }
+    }
+
+    Box(
         Modifier
             .fillMaxSize()
             .background(OpenStreamColors.Canvas)
@@ -893,25 +1140,37 @@ fun OpenStreamApp(onExit: () -> Unit) {
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
             ),
     ) {
-        TopNav(
-            deviceStatus = deviceStatus,
-            kidsMode = kidsMode,
-            current = screen,
-            indexing = indexing,
-            hasLibraries = hasLibraries,
-            titleCount = catalog.size,
-            metadataEnabled = libraryStore.reusableTmdbCredential().isNotBlank(),
-            onNavigate = navigate,
-            onRescan = { libraryRevision++ },
-        )
-        Box(Modifier.fillMaxSize().clipToBounds()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(top = contentTopInset)
+                .clipToBounds(),
+        ) {
             when (screen) {
                 Screen.Discover -> DiscoverScreen(
                     catalog = catalog,
+                    emptyReason = when {
+                        !deviceStatus.online -> DiscoverEmptyReason.OFFLINE_NO_DOWNLOADS
+                        kidsMode && onlineCatalog.isNotEmpty() -> DiscoverEmptyReason.KIDS_FILTERED
+                        hasConfiguredSources -> DiscoverEmptyReason.SOURCES_EMPTY
+                        else -> DiscoverEmptyReason.NO_SOURCES
+                    },
+                    kidsAgeRange = (activePolicy as? ContentPolicy.Kids)?.cap?.let(KidsAudiencePolicy::ageRange),
                     addonCatalogs = if (deviceStatus.online) discoverAddonCatalogs else emptyList(),
                     feedPreferences = discoverFeedPreferences,
                     upNextItems = upNextItems,
                     offlineMode = !deviceStatus.online,
+                    onOpenSources = { navigate(Screen.Connections) },
+                    onOpenWifiSettings = {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                        }.onFailure {
+                            Toast.makeText(context, "Wi-Fi settings unavailable", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    playEnabled = { item ->
+                        YoutubeSourcePolicy.videoId(item) != null || hasPotentialPlaybackRoute(item, detailAddons)
+                    },
                     onOpen = openItem,
                     onPlay = { item ->
                         val youtubeVideoId = YoutubeSourcePolicy.videoId(item)
@@ -923,58 +1182,118 @@ fun OpenStreamApp(onExit: () -> Unit) {
                             navigate(Screen.Details(item))
                             return@DiscoverScreen
                         }
-                        val request = preferredPlaybackRequest(item)
-                        if (request != null) {
-                            playGuarded(item, request)
-                        } else {
-                            val streamAddons = connectionStore.stremioAddons().filter {
-                                it.enabled && "stream" in it.resources
+                        appScope.launch {
+                            val hasUnprobedLocal = item.candidates.any { candidate ->
+                                (candidate.sourceKind == SourceKind.NAS || candidate.sourceKind == SourceKind.OFFLINE) &&
+                                    mediaProbeCache.get(candidate.uri) == null
                             }
+                            if (hasUnprobedLocal) {
+                                Toast.makeText(context, "Checking local format…", Toast.LENGTH_SHORT).show()
+                                runCatching {
+                                    probeLocalCandidates(context.applicationContext, mediaProbeCache, item)
+                                }.onSuccess { count ->
+                                    if (count > 0) mediaProbeRevision++
+                                }.onFailure { error ->
+                                    Logs.warn("local media probe failed for ${item.title}", error)
+                                }
+                            }
+                            val request = bestPlaybackRequest(
+                                item,
+                                deviceProfile = playbackDeviceProfile,
+                                mediaProbe = { candidate -> mediaProbeCache.get(candidate.uri) },
+                            )
+                            if (request != null) {
+                                playGuarded(item, request)
+                                return@launch
+                            }
+                            val transcodeConfig = transcodeServerStore.load()?.takeIf { it.enabled }
+                            val transcodeCandidate = if (transcodeConfig != null) {
+                                bestServerTranscodeCandidate(
+                                    item,
+                                    playbackDeviceProfile,
+                                    mediaProbe = { candidate -> mediaProbeCache.get(candidate.uri) },
+                                )
+                            } else {
+                                null
+                            }
+                            if (transcodeConfig != null && transcodeCandidate != null) {
+                                Toast.makeText(context, "Starting server transcode…", Toast.LENGTH_SHORT).show()
+                                val transcodeUrl = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        TranscodeServerClient.startSmbSession(
+                                            transcodeConfig,
+                                            transcodeCandidate.uri,
+                                            playbackDeviceProfile,
+                                        )
+                                    }
+                                }.onFailure { error ->
+                                    Logs.warn("server transcode could not start for ${item.title}", error)
+                                }.getOrNull()
+                                if (transcodeUrl != null) {
+                                    playGuarded(
+                                        item,
+                                        serverTranscodePlaybackRequest(item, transcodeUrl, transcodeConfig.sessionToken),
+                                    )
+                                    return@launch
+                                }
+                            }
+                            val streamAddons = connectionStore.stremioAddons()
+                                .filter(StremioAddonPresentation::isPlaybackProvider)
                             val imdbId = item.imdbId
-                            if (!kidsMode && imdbId != null && streamAddons.isNotEmpty()) {
+                            if (imdbId != null && streamAddons.isNotEmpty()) {
                                 Toast.makeText(context, "Optimizing for your network…", Toast.LENGTH_SHORT).show()
-                                appScope.launch {
-                                    val type = if (item.kind == com.orgista.openstream.data.MediaKind.SERIES) "series" else "movie"
-                                    val streams = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        streamAddons.asSequence().flatMap { addon ->
-                                            runCatching { StremioClient.streamsFor(addon, type, imdbId) }
-                                                .getOrDefault(emptyList())
-                                                .asSequence()
-                                        }.distinctBy { it.url }.toList()
-                                    }
-                                    val deviceProfile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                        OfflineDeviceCapabilities.inspect(context.applicationContext)
-                                    }
-                                    val bandwidth = runCatching {
-                                        BandwidthRuntime.forPlayback(context.applicationContext)
-                                    }.getOrNull()
-                                    val request = bestPlaybackRequest(item, streams, deviceProfile, bandwidth?.mbps)
-                                    if (request == null) {
-                                        Toast.makeText(context, "No directly playable stream found", Toast.LENGTH_SHORT).show()
-                                        navigate(Screen.Details(item))
-                                    } else {
-                                        playGuarded(item, request)
-                                    }
+                                val type = if (item.kind == com.orgista.openstream.data.MediaKind.SERIES) "series" else "movie"
+                                val streams = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    streamAddons.asSequence().flatMap { addon ->
+                                        runCatching { StremioClient.streamsFor(addon, type, imdbId) }
+                                            .getOrDefault(emptyList())
+                                            .asSequence()
+                                    }.distinctBy { it.url }.toList()
+                                }
+                                val deviceProfile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                    OfflineDeviceCapabilities.inspect(context.applicationContext)
+                                }
+                                val bandwidth = runCatching {
+                                    BandwidthRuntime.forPlayback(context.applicationContext)
+                                }.getOrNull()
+                                val streamRequest = bestPlaybackRequest(
+                                    item,
+                                    streams,
+                                    deviceProfile,
+                                    bandwidth?.mbps,
+                                    mediaProbe = { candidate -> mediaProbeCache.get(candidate.uri) },
+                                )
+                                if (streamRequest == null) {
+                                    Logs.warn(
+                                        "no direct playback route for ${item.title}: " +
+                                            "${streamAddons.size} stream add-on(s), ${streams.size} direct result(s)",
+                                    )
+                                    navigate(Screen.Details(item, showPlaybackUnavailable = true))
+                                } else {
+                                    playGuarded(item, streamRequest)
                                 }
                             } else {
-                                navigate(Screen.Details(item))
+                                navigate(Screen.Details(item, showPlaybackUnavailable = true))
                             }
                         }
                     },
                 )
-                Screen.Library -> LibraryScreen(catalog, openItem)
+                Screen.Library -> LibraryScreen(
+                    catalog = catalog,
+                    missingSources = missingLibrarySources.size,
+                    onOpenSources = { navigate(Screen.Connections) },
+                    onOpen = openItem,
+                )
                 Screen.Live -> LiveTvScreen(
                     store = iptvStore,
                     revision = iptvRevision,
                     online = deviceStatus.online,
-                    onOpenSources = { navigate(Screen.Connections) },
-                    onPlay = { channel ->
-                        if (kidsMode) {
-                            Toast.makeText(context, "Live TV is not available in Kids Mode", Toast.LENGTH_SHORT).show()
-                        } else {
-                            navigate(Screen.Player(livePlaybackRequest(channel)))
-                        }
-                    },
+                    kidsMode = kidsMode,
+                    onManageChannels = { navigate(Screen.ChannelManager) },
+                    onBrowseDownloads = { navigate(Screen.Discover) },
+                    // Kids installs play live too: the lineup itself is curated
+                    // by a guardian behind the PIN-gated source management.
+                    onPlay = { channel -> navigate(Screen.Player(livePlaybackRequest(channel))) },
                 )
                 Screen.Search -> SearchScreen(
                     catalog = catalog,
@@ -988,11 +1307,18 @@ fun OpenStreamApp(onExit: () -> Unit) {
                                 StremioSearchPolicy.catalogsFor(addon).map { catalog -> addon to catalog }
                             }.take(12)
                             coroutineScope {
-                                searches.map { (addon, searchCatalog) ->
-                                    async { StremioClient.searchCatalog(addon, searchCatalog, query) }
-                                }.flatMap { it.await() }
-                                    .distinctBy { item -> item.imdbId ?: item.id }
-                                    .let { results -> filterCatalog(results, activePolicy) }
+                                val outcomes = searches.map { (addon, searchCatalog) ->
+                                    async {
+                                        runCatching { StremioClient.searchCatalog(addon, searchCatalog, query) }
+                                    }
+                                }.map { it.await() }
+                                RemoteSearchResult(
+                                    items = outcomes.flatMap { it.getOrDefault(emptyList()) }
+                                        .distinctBy { item -> item.imdbId ?: item.id }
+                                        .let { results -> filterCatalog(results, activePolicy) },
+                                    attemptedSources = outcomes.size,
+                                    failedSources = outcomes.count { it.isFailure },
+                                )
                             }
                         }
                     },
@@ -1039,7 +1365,10 @@ fun OpenStreamApp(onExit: () -> Unit) {
                     policy = activePolicy,
                     libraryStore = libraryStore,
                     offlineRuntime = offlineRuntime,
+                    onOpenSources = { navigate(Screen.Connections) },
+                    onOpenChannelManager = { navigate(Screen.ChannelManager) },
                     onTmdbKeyChanged = { libraryRevision++ },
+                    onArrChanged = { arrRevision++ },
                     onOfflineStorageChanged = { requested ->
                         val changed = OfflineMediaRuntime.configureStorage(context.applicationContext, requested)
                         if (changed) {
@@ -1057,6 +1386,22 @@ fun OpenStreamApp(onExit: () -> Unit) {
                 else -> Unit
             }
         }
+        TopNav(
+            deviceStatus = deviceStatus,
+            kidsMode = kidsMode,
+            current = screen,
+            indexing = indexing,
+            hasLibraries = hasLibraries,
+            titleCount = catalog.size,
+            metadataEnabled = libraryStore.reusableTmdbCredential().isNotBlank(),
+            missingLibrarySources = missingLibrarySources.size,
+            onNavigate = navigate,
+            onRescan = { libraryRevision++ },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onSizeChanged { topNavHeightPx = it.height }
+                .zIndex(1f),
+        )
     }
 }
 
@@ -1069,10 +1414,13 @@ private fun TopNav(
     hasLibraries: Boolean,
     titleCount: Int,
     metadataEnabled: Boolean,
+    missingLibrarySources: Int,
     onNavigate: (Screen) -> Unit,
     onRescan: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var brandFocused by remember { mutableStateOf(false) }
     val primaryTabs = primaryTopDestinations().map { destination ->
         when (destination) {
             TopDestination.DISCOVER -> Tab(Screen.Discover, "Discover")
@@ -1081,57 +1429,75 @@ private fun TopNav(
             else -> error("$destination is not a primary tab")
         }
     }
-    val headerStatus = libraryHeaderStatus(indexing, hasLibraries, titleCount, metadataEnabled)
+    val headerStatus = libraryHeaderStatus(
+        indexing = indexing,
+        hasLibraries = hasLibraries,
+        titleCount = titleCount,
+        metadataEnabled = metadataEnabled,
+        missingSources = missingLibrarySources,
+    )
     val configuration = LocalConfiguration.current
     val compact = TopNavLayoutPolicy.isCompact(configuration.screenWidthDp, configuration.screenHeightDp)
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(OpenStreamColors.Canvas),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                    start = if (compact) 16.dp else 26.dp,
+                    start = TopNavLayoutPolicy.brandStartPaddingDp(compact).dp,
                     end = if (compact) 8.dp else 26.dp,
-                    top = if (compact) 7.dp else 10.dp,
+                    top = (TopNavLayoutPolicy.brandTopOffsetDp(compact) - 7).dp,
                     bottom = if (compact) 2.dp else 10.dp,
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
                 modifier = Modifier
+                    .onFocusChanged { brandFocused = it.hasFocus }
+                    .border(
+                        width = 1.dp,
+                        color = if (brandFocused) OpenStreamColors.Accent else Color.Transparent,
+                        shape = OpenStreamShapes.Tag,
+                    )
                     .clickable { onNavigate(Screen.Discover) }
+                    .semantics {
+                        contentDescription = "OpenStream home"
+                        role = Role.Button
+                    }
                     .padding(
                         end = 8.dp,
                         top = 7.dp,
                         bottom = (TopNavLayoutPolicy.brandBottomPaddingDp(compact) + 7).dp,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(TopNavLayoutPolicy.brandGapDp(compact).dp),
             ) {
                 Image(
                     painter = painterResource(R.drawable.openstream_brand_mark),
                     contentDescription = null,
-                    modifier = Modifier.size(if (compact) 24.dp else 27.dp),
+                    modifier = Modifier.size(TopNavLayoutPolicy.brandMarkSizeDp(compact).dp),
                 )
                 Text(
                     "OpenStream",
-                    fontSize = if (compact) 17.sp else 18.sp,
+                    fontSize = TopNavLayoutPolicy.brandWordSp(compact).sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.14).sp,
                     color = OpenStreamColors.Text,
+                    style = TextStyle(shadow = NavTextShadow),
                 )
-            }
-            if (kidsMode) {
-                Spacer(Modifier.width(if (compact) 8.dp else 10.dp))
-                KidsBadge()
-            }
-            if (!deviceStatus.online) {
-                Spacer(Modifier.width(if (compact) 8.dp else 10.dp))
-                OfflineBadge()
+                if (kidsMode) {
+                    Spacer(Modifier.width(if (compact) 4.dp else 6.dp))
+                    Text(
+                        "KIDS",
+                        fontSize = TopNavLayoutPolicy.brandWordSp(compact).sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 2.sp,
+                        color = OpenStreamColors.Text,
+                        style = TextStyle(shadow = NavTextShadow),
+                    )
+                }
             }
             if (!compact) {
                 Spacer(Modifier.width(38.dp))
@@ -1146,11 +1512,15 @@ private fun TopNav(
                 OpenStreamLoadingIndicator(role = LoadingIndicatorRole.INLINE)
                 Spacer(Modifier.width(if (compact) 7.dp else 14.dp))
             }
+            if (!deviceStatus.online) {
+                OfflineStatus()
+                Spacer(Modifier.width(if (compact) 4.dp else 12.dp))
+            }
             if (!compact) {
-                Text(deviceStatus.time, color = OpenStreamColors.TextSoft, fontSize = 13.sp)
+                Text(deviceStatus.time, color = OpenStreamColors.TextSoft, fontSize = 13.sp, style = TextStyle(shadow = NavTextShadow))
                 Spacer(Modifier.width(12.dp))
             }
-            IconButton(onClick = { onNavigate(Screen.Search) }, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = { onNavigate(Screen.Search) }, modifier = Modifier.size(48.dp)) {
                 Icon(
                     AppIcons.Search,
                     contentDescription = "Search",
@@ -1159,7 +1529,7 @@ private fun TopNav(
                 )
             }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                     Icon(
                         AppIcons.More,
                         contentDescription = "More options",
@@ -1249,6 +1619,7 @@ private fun TopNav(
                 }
             }
         }
+        Spacer(Modifier.height(TopNavBlendPolicy.FADE_OVERLAP_DP.dp))
     }
 }
 
@@ -1260,11 +1631,18 @@ private fun TabButton(
     compact: Boolean = false,
     onClick: () -> Unit,
 ) {
+    var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier
+            .onFocusChanged { focused = it.hasFocus }
+            .semantics {
+                this.selected = selected
+                role = Role.Tab
+            },
         shape = RoundedCornerShape(8.dp),
         color = Color.Transparent,
+        border = if (focused) BorderStroke(1.dp, OpenStreamColors.Accent) else null,
     ) {
         Column(
             modifier = Modifier.padding(
@@ -1276,52 +1654,36 @@ private fun TabButton(
         ) {
             Text(
                 label,
-                color = if (selected) OpenStreamColors.Text else OpenStreamColors.Muted,
+                color = when {
+                    selected || focused -> OpenStreamColors.Text
+                    compact -> OpenStreamColors.TextSoft
+                    else -> OpenStreamColors.Muted
+                },
                 fontSize = 14.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Medium,
+                style = TextStyle(shadow = NavTextShadow),
             )
             Box(
                 Modifier
                     .width(22.dp)
                     .height(2.dp)
-                    .background(if (selected) OpenStreamColors.Accent else Color.Transparent),
+                    .background(if (selected || focused) OpenStreamColors.Accent else Color.Transparent),
             )
         }
     }
 }
 
 @Composable
-fun KidsBadge() {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = OpenStreamColors.AccentSoft,
-        border = BorderStroke(1.dp, OpenStreamColors.Accent.copy(alpha = 0.5f)),
-    ) {
-        Text(
-            "KIDS",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.sp,
-            color = OpenStreamColors.Accent,
-        )
-    }
-}
-
-@Composable
-private fun OfflineBadge() {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = OpenStreamColors.SurfaceRaised,
-        border = BorderStroke(1.dp, OpenStreamColors.Cyan.copy(alpha = 0.55f)),
-    ) {
-        Text(
-            "OFFLINE",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.sp,
-            color = OpenStreamColors.Cyan,
-        )
-    }
+private fun OfflineStatus() {
+    Text(
+        TopNavLayoutPolicy.offlineStatusLabel,
+        modifier = Modifier.semantics {
+            contentDescription = "Offline. Internet unavailable."
+            liveRegion = LiveRegionMode.Polite
+        },
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = OpenStreamColors.Offline,
+        style = TextStyle(shadow = NavTextShadow),
+    )
 }

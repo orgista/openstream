@@ -36,6 +36,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +64,7 @@ import kotlinx.coroutines.withContext
 fun LiveChannelManagerScreen(
     store: IptvStore,
     allChannels: List<IptvChannel>,
+    kidsMode: Boolean,
     onChanged: () -> Unit,
     onPackagesChanged: () -> Unit,
     onOpenSources: () -> Unit,
@@ -67,7 +72,7 @@ fun LiveChannelManagerScreen(
 ) {
     BackHandler(onBack = onBack)
     var catalogChannels by remember(allChannels) { mutableStateOf(allChannels) }
-    var loadingCatalog by remember { mutableStateOf(allChannels.isEmpty()) }
+    var loadingCatalog by remember { mutableStateOf(store.sources().isNotEmpty()) }
     var catalogError by remember { mutableStateOf<String?>(null) }
     var enabledPackageIds by remember { mutableStateOf(store.enabledPackageIds()) }
     var favoriteKeys by remember { mutableStateOf(store.favoriteChannelKeys()) }
@@ -79,10 +84,15 @@ fun LiveChannelManagerScreen(
         settledQuery = query
     }
     LaunchedEffect(Unit) {
-        if (catalogChannels.isNotEmpty()) return@LaunchedEffect
+        val sources = store.sources()
+        if (sources.isEmpty()) {
+            catalogChannels = IptvCatalogPolicy.mergeForPlayback(allChannels + store.manualChannels())
+            loadingCatalog = false
+            return@LaunchedEffect
+        }
         val loaded = withContext(Dispatchers.IO) {
             coroutineScope {
-                store.sources().map { source ->
+                sources.map { source ->
                     async { runCatching { IptvClient.loadCatalog(source).channels }.getOrDefault(emptyList()) }
                 }.awaitAll().flatten()
             }
@@ -93,31 +103,41 @@ fun LiveChannelManagerScreen(
         catalogChannels = merged
         store.updateSessionChannels(merged)
         loadingCatalog = false
-        if (merged.isEmpty()) catalogError = "No channels are available. Check the Live TV source above."
+        if (merged.isEmpty()) catalogError = if (kidsMode) {
+            "No Kids channels were returned. Add a public stream below."
+        } else {
+            "No channels are available. Check the Live TV source above."
+        }
     }
-    val packageCounts = remember(catalogChannels) {
-        catalogChannels.groupingBy(LiveChannelPackagePolicy::packageFor).eachCount()
+    val visibleCatalogChannels = remember(catalogChannels, kidsMode) {
+        if (kidsMode) LiveChannelPackagePolicy.kidsChannels(catalogChannels) else catalogChannels
     }
-    val favorites = remember(catalogChannels, favoriteKeys) {
-        catalogChannels.filter {
+    val managedPackages = remember(kidsMode) {
+        if (kidsMode) listOf(LiveChannelPackage.KIDS) else LiveChannelPackagePolicy.orderedPackages
+    }
+    val packageCounts = remember(visibleCatalogChannels) {
+        visibleCatalogChannels.groupingBy(LiveChannelPackagePolicy::packageFor).eachCount()
+    }
+    val favorites = remember(visibleCatalogChannels, favoriteKeys) {
+        visibleCatalogChannels.filter {
             LiveChannelPackagePolicy.channelKey(it) in favoriteKeys || it.sourceId == ManualLiveChannelPolicy.SOURCE_ID
         }.distinctBy(LiveChannelPackagePolicy::channelKey).sortedBy { it.name.lowercase() }
     }
-    val searchIndex = remember(catalogChannels) {
-        LiveChannelPackagePolicy.buildSearchIndex(catalogChannels)
+    val searchIndex = remember(visibleCatalogChannels) {
+        LiveChannelPackagePolicy.buildSearchIndex(visibleCatalogChannels)
     }
     val searchResults = remember(searchIndex, settledQuery) {
         LiveChannelPackagePolicy.searchIndexedChannels(searchIndex, settledQuery)
     }
-    val activeCount = remember(catalogChannels, enabledPackageIds, favoriteKeys) {
+    val activeCount = remember(visibleCatalogChannels, enabledPackageIds, favoriteKeys) {
         LiveChannelPackagePolicy.lineupChannels(
-            channels = catalogChannels,
+            channels = visibleCatalogChannels,
             enabledPackageIds = enabledPackageIds,
             favoriteChannelKeys = favoriteKeys,
         ).size
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 18.dp)) {
+    Column(Modifier.fillMaxSize().padding(top = 48.dp, start = 28.dp, end = 28.dp, bottom = 18.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -127,18 +147,24 @@ fun LiveChannelManagerScreen(
                 Icon(AppIcons.Back, contentDescription = "Back", tint = OpenStreamColors.Text)
             }
             Column(Modifier.weight(1f)) {
-                Text("Channel manager", color = OpenStreamColors.Text, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "Channel manager",
+                    modifier = Modifier.semantics { heading() },
+                    color = OpenStreamColors.Text,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                )
                 Text(
                     when {
                         loadingCatalog -> "Loading available channels…"
-                        else -> "$activeCount on · ${catalogChannels.size} available"
+                        else -> "$activeCount on · ${visibleCatalogChannels.size} available"
                     },
                     color = OpenStreamColors.Muted,
                     fontSize = 13.sp,
                 )
             }
-            OutlinedButton(onClick = onOpenSources) { Text("Sources") }
-            Button(onClick = { showAddDialog = true }) {
+            OpenStreamOutlinedButton(onClick = onOpenSources) { Text("Sources") }
+            OpenStreamButton(onClick = { showAddDialog = true }) {
                 Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Text(" Add channel")
             }
@@ -151,17 +177,29 @@ fun LiveChannelManagerScreen(
         ) {
             catalogError?.let { message ->
                 item("catalog-error") {
-                    Text(message, color = OpenStreamColors.Danger, fontSize = 13.sp)
+                    Text(
+                        message,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        color = OpenStreamColors.Danger,
+                        fontSize = 13.sp,
+                    )
                 }
             }
             item("packages-title") {
-                    Text("Channel packages", color = OpenStreamColors.Text, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "Channel packages",
+                    modifier = Modifier.semantics { heading() },
+                    color = OpenStreamColors.Text,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                )
             }
             item("packages") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    items(LiveChannelPackagePolicy.orderedPackages, key = LiveChannelPackage::id) { packageInfo ->
+                    items(managedPackages, key = LiveChannelPackage::id) { packageInfo ->
                         FilterChip(
                             selected = packageInfo.id in enabledPackageIds,
+                            shape = OpenStreamShapes.Control,
                             onClick = {
                                 val selected = packageInfo.id !in enabledPackageIds
                                 store.setPackageEnabled(packageInfo.id, selected)
@@ -175,7 +213,13 @@ fun LiveChannelManagerScreen(
             }
             item("my-title") {
                 Column(Modifier.padding(top = 10.dp)) {
-                    Text("My Channels", color = OpenStreamColors.Text, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "My Channels",
+                        modifier = Modifier.semantics { heading() },
+                        color = OpenStreamColors.Text,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                     Text(
                         if (favorites.isEmpty()) "Search below to add favorites, or add a stream that is missing."
                         else "${favorites.size} selected channels",
@@ -240,6 +284,7 @@ fun LiveChannelManagerScreen(
 
     if (showAddDialog) {
         AddLiveChannelDialog(
+            kidsMode = kidsMode,
             onDismiss = { showAddDialog = false },
             onAdd = { name, url, packageInfo ->
                 val added = store.addManualChannel(name, url, packageInfo)
@@ -284,7 +329,7 @@ private fun ChannelManagerRow(
                     fontSize = 12.sp,
                 )
             }
-            TextButton(onClick = onToggle) {
+            OpenStreamTextButton(onClick = onToggle) {
                 if (selected && !remove) {
                     Icon(AppIcons.Check, contentDescription = null, tint = OpenStreamColors.Green, modifier = Modifier.size(18.dp))
                     Text(" Added")
@@ -303,12 +348,15 @@ private fun ChannelManagerRow(
 
 @Composable
 private fun AddLiveChannelDialog(
+    kidsMode: Boolean,
     onDismiss: () -> Unit,
     onAdd: (String, String, LiveChannelPackage) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var streamUrl by remember { mutableStateOf("") }
-    var packageInfo by remember { mutableStateOf(LiveChannelPackage.LOCAL) }
+    var packageInfo by remember(kidsMode) {
+        mutableStateOf(if (kidsMode) LiveChannelPackage.KIDS else LiveChannelPackage.LOCAL)
+    }
     var packageMenuOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -332,9 +380,10 @@ private fun AddLiveChannelDialog(
                     singleLine = true,
                 )
                 Box {
-                    OutlinedButton(onClick = { packageMenuOpen = true }) { Text("Package: ${packageInfo.label}") }
+                    OpenStreamOutlinedButton(onClick = { packageMenuOpen = true }) { Text("Package: ${packageInfo.label}") }
                     DropdownMenu(expanded = packageMenuOpen, onDismissRequest = { packageMenuOpen = false }) {
-                        LiveChannelPackagePolicy.orderedPackages.forEach { option ->
+                        val options = if (kidsMode) listOf(LiveChannelPackage.KIDS) else LiveChannelPackagePolicy.orderedPackages
+                        options.forEach { option ->
                             DropdownMenuItem(
                                 text = { Text(option.label) },
                                 onClick = { packageInfo = option; packageMenuOpen = false },
@@ -346,7 +395,7 @@ private fun AddLiveChannelDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
+            OpenStreamButton(onClick = {
                 if (!ManualLiveChannelPolicy.isValid(name, streamUrl)) {
                     error = "Enter a channel name and a valid HTTP or HTTPS stream address."
                 } else {
@@ -354,6 +403,6 @@ private fun AddLiveChannelDialog(
                 }
             }) { Text("Add") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { OpenStreamTextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

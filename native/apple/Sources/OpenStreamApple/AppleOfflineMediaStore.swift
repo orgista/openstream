@@ -17,6 +17,8 @@ public struct AppleOfflineRecord: Codable, Equatable, Sendable {
 public enum AppleOfflineStoreError: Error, Equatable {
     case emptyMediaID
     case adaptiveStreamRequiresAssetDownload
+    case uncontainedSourceFileURL
+    case sourceFileNotFound
 }
 
 /// App-private device-storage persistence shared by iPhone, iPad, Apple TV,
@@ -27,8 +29,13 @@ public actor AppleOfflineMediaStore {
     private let rootDirectory: URL
     private let manifestURL: URL
     private let fileManager: FileManager
+    private let allowedDirectories: [URL]
 
-    public init(rootDirectory: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        rootDirectory: URL? = nil,
+        fileManager: FileManager = .default,
+        allowedDirectories: [URL]? = nil
+    ) {
         self.fileManager = fileManager
         let applicationSupport = rootDirectory ?? fileManager.urls(
             for: .applicationSupportDirectory,
@@ -36,6 +43,25 @@ public actor AppleOfflineMediaStore {
         ).first!.appending(path: "OpenStream/Offline", directoryHint: .isDirectory)
         self.rootDirectory = applicationSupport
         self.manifestURL = applicationSupport.appending(path: "manifest.json")
+
+        if let allowedDirectories {
+            self.allowedDirectories = allowedDirectories
+        } else {
+            var defaults: [URL] = [
+                applicationSupport,
+                applicationSupport.deletingLastPathComponent(),
+                fileManager.temporaryDirectory,
+                URL(fileURLWithPath: NSTemporaryDirectory()),
+            ]
+            for searchPath in [FileManager.SearchPathDirectory.documentDirectory, .cachesDirectory, .applicationSupportDirectory, .downloadsDirectory] {
+                defaults.append(contentsOf: fileManager.urls(for: searchPath, in: .userDomainMask))
+            }
+            if let customRoot = rootDirectory {
+                defaults.append(customRoot)
+                defaults.append(customRoot.deletingLastPathComponent())
+            }
+            self.allowedDirectories = defaults
+        }
     }
 
     public func record(for mediaID: String) -> AppleOfflineRecord? {
@@ -49,6 +75,25 @@ public actor AppleOfflineMediaStore {
         loadManifest().values
             .filter { fileManager.fileExists(atPath: $0.localURL.path) }
             .sorted { $0.storedAt > $1.storedAt }
+    }
+
+    public func isPathContained(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
+        let canonicalPath = url.standardizedFileURL.resolvingSymlinksInPath().path
+        guard !canonicalPath.isEmpty, canonicalPath != "/" else { return false }
+
+        for allowed in allowedDirectories {
+            let allowedPath = allowed.standardizedFileURL.resolvingSymlinksInPath().path
+            guard !allowedPath.isEmpty, allowedPath != "/" else { continue }
+            if canonicalPath == allowedPath {
+                return true
+            }
+            let prefix = allowedPath.hasSuffix("/") ? allowedPath : allowedPath + "/"
+            if canonicalPath.hasPrefix(prefix) {
+                return true
+            }
+        }
+        return false
     }
 
     @discardableResult
@@ -68,7 +113,14 @@ public actor AppleOfflineMediaStore {
         }
 
         if sourceURL.isFileURL {
-            try fileManager.copyItem(at: sourceURL, to: destination)
+            guard isPathContained(sourceURL) else {
+                throw AppleOfflineStoreError.uncontainedSourceFileURL
+            }
+            let canonicalSource = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+            guard fileManager.fileExists(atPath: canonicalSource.path) else {
+                throw AppleOfflineStoreError.sourceFileNotFound
+            }
+            try fileManager.copyItem(at: canonicalSource, to: destination)
         } else {
             let (temporaryURL, _) = try await URLSession.shared.download(from: sourceURL)
             try fileManager.moveItem(at: temporaryURL, to: destination)

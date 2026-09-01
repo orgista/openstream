@@ -100,11 +100,22 @@ export function isPrivateAddress(value) {
 }
 
 export function assertLoopbackBindHost(value) {
+  return assertGatewayBindHost(value, { allowLan: false });
+}
+
+export function assertGatewayBindHost(value, { allowLan = false } = {}) {
   const host = String(value).trim().toLowerCase().replace(/^\[|\]$/g, "");
-  if (!LOOPBACK_BIND_HOSTS.has(host)) {
-    throw new Error("The secure gateway may bind only to a loopback address.");
+  if (LOOPBACK_BIND_HOSTS.has(host)) {
+    return host;
   }
-  return host;
+  if (allowLan && isPrivateAddress(host)) {
+    return host;
+  }
+  throw new Error(
+    allowLan
+      ? "The secure gateway may bind only to a loopback or private LAN address."
+      : "The secure gateway may bind only to a loopback address.",
+  );
 }
 
 export function parseCanonicalRequestTarget(value, { origin, prefix }) {

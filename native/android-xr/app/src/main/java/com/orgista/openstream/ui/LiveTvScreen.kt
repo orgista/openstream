@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,16 +16,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,8 +42,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -59,11 +60,11 @@ import com.orgista.openstream.iptv.IptvChannel
 import com.orgista.openstream.iptv.IptvClient
 import com.orgista.openstream.iptv.IptvGuideClient
 import com.orgista.openstream.iptv.IptvGuideProgram
+import com.orgista.openstream.iptv.IptvSource
 import com.orgista.openstream.iptv.IptvPresentationPolicy
 import com.orgista.openstream.iptv.IptvStore
 import com.orgista.openstream.iptv.IptvSessionRefreshPolicy
 import com.orgista.openstream.iptv.LiveChannelPackagePolicy
-import com.orgista.openstream.iptv.LiveGuideSearchIndex
 import com.orgista.openstream.iptv.LivePreparedGuide
 import com.orgista.openstream.iptv.LivePreparedGuidePolicy
 import com.orgista.openstream.iptv.LiveGuidePolicy
@@ -79,28 +80,44 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
+object LiveTvEmptyStatePolicy {
+    fun message(online: Boolean, sourceLoadFailed: Boolean = false): String = when {
+        !online -> "No channels"
+        sourceLoadFailed -> "Channels unavailable"
+        else -> "No channels"
+    }
+}
+
 @Composable
 fun LiveTvScreen(
     store: IptvStore,
     revision: Int,
     online: Boolean,
-    onOpenSources: () -> Unit,
+    kidsMode: Boolean,
+    onManageChannels: () -> Unit,
+    onBrowseDownloads: () -> Unit,
     onPlay: (IptvChannel) -> Unit,
 ) {
     val initialSession = remember { store.sessionSnapshot() }
+    val initialPreparedGuide = remember(initialSession.preparedGuide, initialSession.revision, revision, kidsMode) {
+        initialSession.preparedGuide?.takeIf { initialSession.revision == revision }?.takeUnless { prepared ->
+            kidsMode && prepared.activeChannels.any {
+                LiveChannelPackagePolicy.packageFor(it) != com.orgista.openstream.iptv.LiveChannelPackage.KIDS
+            }
+        }
+    }
     var channels by remember { mutableStateOf(initialSession.channels) }
     var guidePrograms by remember { mutableStateOf(initialSession.programs) }
     var loading by remember { mutableStateOf(online && initialSession.channels.isEmpty()) }
     var guideLoading by remember { mutableStateOf(online && initialSession.programs.isEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var query by remember { mutableStateOf("") }
-    var settledQuery by remember { mutableStateOf("") }
     var manualChannels by remember { mutableStateOf(store.manualChannels()) }
     var managerRevision by remember { mutableIntStateOf(0) }
+    var retryRevision by remember { mutableIntStateOf(0) }
     var timeOffsetHalfHours by remember { mutableIntStateOf(0) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var preparedGuide by remember { mutableStateOf(initialSession.preparedGuide) }
-    var preparingGuide by remember { mutableStateOf(online && initialSession.preparedGuide == null) }
+    var preparedGuide by remember { mutableStateOf(initialPreparedGuide) }
+    var preparingGuide by remember { mutableStateOf(online && initialPreparedGuide == null) }
     var firstGuidePaintLogged by remember { mutableStateOf(false) }
 
     val configuration = LocalConfiguration.current
@@ -121,12 +138,7 @@ fun LiveTvScreen(
         }
     }
 
-    LaunchedEffect(query) {
-        delay(110)
-        settledQuery = query
-    }
-
-    LaunchedEffect(revision, online) {
+    LaunchedEffect(revision, online, retryRevision) {
         if (!online) {
             channels = emptyList()
             guidePrograms = emptyList()
@@ -136,8 +148,17 @@ fun LiveTvScreen(
             return@LaunchedEffect
         }
 
+        val sources = store.sources()
+        val currentManualChannels = store.manualChannels()
+        val manualGuideCatalog = store.manualGuideCatalog(currentManualChannels)
+        manualChannels = currentManualChannels
         val session = store.sessionSnapshot()
-        if (IptvSessionRefreshPolicy.canReuse(session, revision, System.currentTimeMillis())) {
+        val canReuseSession = IptvSessionRefreshPolicy.canReuse(session, revision, System.currentTimeMillis())
+        if (!canReuseSession) {
+            preparedGuide = null
+            preparingGuide = true
+        }
+        if (canReuseSession) {
             channels = session.channels
             guidePrograms = session.programs
             manualChannels = store.manualChannels()
@@ -146,10 +167,12 @@ fun LiveTvScreen(
             error = null
             if (session.programs.isEmpty()) {
                 val cachedPrograms = withContext(Dispatchers.IO) {
-                    store.sources().flatMap { source ->
-                        store.cachedGuidePrograms(source.id, nowMillis)
+                    (sources.map(IptvSource::id) + listOfNotNull(manualGuideCatalog?.source?.id))
+                        .distinct()
+                        .flatMap { sourceId ->
+                            store.cachedGuidePrograms(sourceId, nowMillis)
+                        }
                     }
-                }
                 if (cachedPrograms.isNotEmpty()) {
                     guidePrograms = cachedPrograms
                     store.updateSessionGuidePrograms(cachedPrograms)
@@ -160,11 +183,12 @@ fun LiveTvScreen(
 
         loading = true
         error = null
-        val sources = store.sources()
         val packagesForGuide = store.enabledPackageIds()
         val favoritesForGuide = store.favoriteChannelKeys()
         val cachedGuideBySource = withContext(Dispatchers.IO) {
-            sources.associate { source -> source.id to store.cachedGuidePrograms(source.id, nowMillis) }
+            (sources.map(IptvSource::id) + listOfNotNull(manualGuideCatalog?.source?.id))
+                .distinct()
+                .associateWith { sourceId -> store.cachedGuidePrograms(sourceId, nowMillis) }
         }
         val quickCachedGuide = cachedGuideBySource.values.flatten()
         if (quickCachedGuide.isNotEmpty()) {
@@ -178,6 +202,11 @@ fun LiveTvScreen(
             }
         }
         val configuredChannels = results.flatMap { it.second.getOrNull()?.channels.orEmpty() }
+        val embeddedGuidePrograms = results.flatMap { (source, result) ->
+            result.getOrNull()?.embeddedGuidePrograms.orEmpty().also { programs ->
+                if (programs.isNotEmpty()) store.cacheGuidePrograms(source.id, programs)
+            }
+        }
         val mergedChannels = withContext(Dispatchers.Default) {
             IptvCatalogPolicy.mergeForPlayback(configuredChannels.distinctBy(IptvChannel::streamUrl))
         }
@@ -189,24 +218,33 @@ fun LiveTvScreen(
         val failed = results.filter { it.second.isFailure }
             .map { IptvPresentationPolicy.sourceName(it.first.name) }
             .distinct()
+        results.filter { it.second.isFailure }.forEach { (source, result) ->
+            com.orgista.openstream.Logs.warn(
+                "live source refresh failed: ${IptvPresentationPolicy.sourceName(source.name)} " +
+                    "(${result.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"})",
+            )
+        }
         error = when {
-            mergedChannels.isEmpty() && manualChannels.isEmpty() && failed.isNotEmpty() ->
-                "Live TV could not load. Check ${failed.joinToString()} in Sources."
-            mergedChannels.isEmpty() && manualChannels.isEmpty() ->
-                "No live channels were returned by the configured sources."
-            failed.isNotEmpty() -> "Some sources could not refresh: ${failed.joinToString()}."
-            else -> null
+            failed.isEmpty() -> null
+            mergedChannels.isNotEmpty() || manualChannels.isNotEmpty() ->
+                "Some sources could not refresh: ${failed.joinToString()}."
+            else -> "No Live TV source could be refreshed."
         }
 
         val lineupForGuide = withContext(Dispatchers.Default) {
+            val guideCandidates = if (kidsMode) {
+                LiveChannelPackagePolicy.kidsChannels(mergedChannels + manualChannels)
+            } else {
+                mergedChannels + manualChannels
+            }
             LiveChannelPackagePolicy.lineupChannels(
-                channels = IptvCatalogPolicy.mergeForPlayback(mergedChannels + manualChannels),
+                channels = IptvCatalogPolicy.mergeForPlayback(guideCandidates),
                 enabledPackageIds = packagesForGuide,
                 favoriteChannelKeys = favoritesForGuide,
             )
         }
         val activeGuideKeys = lineupForGuide.mapTo(hashSetOf(), LiveChannelPackagePolicy::channelKey)
-        val catalogs = results.mapNotNull { it.second.getOrNull() }
+        val catalogs = (results.mapNotNull { it.second.getOrNull() } + listOfNotNull(manualGuideCatalog))
             .filter { it.guideUrls.isNotEmpty() }
             .map { catalog ->
                 catalog.copy(
@@ -220,7 +258,9 @@ fun LiveTvScreen(
             programs.filter { it.channelKey in activeGuideKeys }
         }
         val cachedProviderGuide = cachedGuideByActiveSource.values.flatten()
-        guidePrograms = cachedProviderGuide
+        val activeEmbeddedGuide = embeddedGuidePrograms.filter { it.channelKey in activeGuideKeys }
+        guidePrograms = (activeEmbeddedGuide + cachedProviderGuide)
+            .distinctBy { "${it.channelKey}:${it.startMillis}:${it.title}" }
         val catalogsToRefresh = withContext(Dispatchers.IO) {
             catalogs.filterNot { catalog ->
                 val cachedPrograms = cachedGuideByActiveSource[catalog.source.id].orEmpty()
@@ -245,7 +285,7 @@ fun LiveTvScreen(
                         } }.awaitAll().flatten()
                 }
             }
-            guidePrograms = (freshProviderPrograms + cachedProviderGuide)
+            guidePrograms = (activeEmbeddedGuide + freshProviderPrograms + cachedProviderGuide)
                 .distinctBy { "${it.channelKey}:${it.startMillis}:${it.title}" }
             guideLoading = false
         }
@@ -262,13 +302,17 @@ fun LiveTvScreen(
     // composition made the Discover → Live tap appear frozen. Retain the old
     // prepared model while its replacement is built so refreshes never blank
     // an already-visible guide.
-    LaunchedEffect(channels, manualChannels, guidePrograms, managerRevision, online, guideLoading) {
+    LaunchedEffect(channels, manualChannels, guidePrograms, managerRevision, online, guideLoading, kidsMode) {
         if (!online) {
             preparedGuide = null
             preparingGuide = false
             return@LaunchedEffect
         }
-        val sourceChannels = channels + manualChannels
+        val sourceChannels = if (kidsMode) {
+            LiveChannelPackagePolicy.kidsChannels(channels + manualChannels)
+        } else {
+            channels + manualChannels
+        }
         if (sourceChannels.isEmpty()) {
             preparedGuide = null
             preparingGuide = false
@@ -305,11 +349,6 @@ fun LiveTvScreen(
     val allChannels = preparedGuide?.allChannels.orEmpty()
     val activeChannels = preparedGuide?.activeChannels.orEmpty()
     val guideByChannel = preparedGuide?.guideByChannel.orEmpty()
-    val searchIndex = preparedGuide?.guideSearchIndex.orEmpty()
-    val fullCatalogSearchIndex = preparedGuide?.fullCatalogSearchIndex.orEmpty()
-    val guideChannelCount = remember(activeChannels, guideByChannel) {
-        activeChannels.count { LiveChannelPackagePolicy.channelKey(it) in guideByChannel }
-    }
 
     LaunchedEffect(activeChannels) {
         if (!firstGuidePaintLogged && activeChannels.isNotEmpty()) {
@@ -318,48 +357,20 @@ fun LiveTvScreen(
         }
     }
 
-    val visibleChannels = remember(
-        activeChannels,
-        searchIndex,
-        fullCatalogSearchIndex,
-        settledQuery,
-    ) {
-        if (settledQuery.isBlank()) {
-            searchIndex.map { it.channel }
-        } else {
-            val directCatalogMatches = LiveChannelPackagePolicy.searchIndexedChannels(
-                fullCatalogSearchIndex,
-                settledQuery,
-                limit = 100,
-            )
-            val programMatches = LiveGuideSearchIndex.search(searchIndex, settledQuery)
-            (directCatalogMatches + programMatches).distinctBy(LiveChannelPackagePolicy::channelKey)
-        }
-    }
+    val visibleChannels = activeChannels
     val channelWidth = if (layout.compact) 176.dp else 232.dp
+    val laneWidth = configuration.screenWidthDp.dp - channelWidth - 1.dp
     val rowHeight = if (layout.compact) 68.dp else 76.dp
     val windowStart = LiveGuidePolicy.windowStart(nowMillis, timeOffsetHalfHours)
     val windowEnd = windowStart + LiveGuidePolicy.WINDOW_MILLIS
 
-    Column(Modifier.fillMaxSize().background(OpenStreamColors.Canvas)) {
-        LiveGuideHeader(
-            channelCount = activeChannels.size,
-            loading = loading || preparingGuide,
-            guideLoading = guideLoading,
-            guideChannelCount = guideChannelCount,
-            compact = layout.compact,
-            edgePadding = edgePadding,
-            onOpenSources = onOpenSources,
-        )
-        LiveGuideControls(
-            query = query,
-            onQueryChanged = { query = it },
-            edgePadding = edgePadding,
-        )
-        error?.let {
+    Column(Modifier.fillMaxSize().background(OpenStreamColors.Canvas).padding(top = 16.dp)) {
+        error?.takeIf { allChannels.isNotEmpty() }?.let {
             Text(
                 it,
-                modifier = Modifier.padding(horizontal = edgePadding, vertical = 5.dp),
+                modifier = Modifier
+                    .padding(horizontal = edgePadding, vertical = 5.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
                 color = if (allChannels.isEmpty()) OpenStreamColors.TextSoft else OpenStreamColors.Amber,
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -376,11 +387,25 @@ fun LiveTvScreen(
             }
         } else if (visibleChannels.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (query.isNotBlank()) "No channels or programs match your search."
-                    else "No channels are enabled. Add channels in Channel manager.",
-                    color = OpenStreamColors.TextSoft,
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        LiveTvEmptyStatePolicy.message(
+                            online = online,
+                            sourceLoadFailed = error != null && allChannels.isEmpty(),
+                        ),
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        color = OpenStreamColors.TextSoft,
+                    )
+                    when {
+                        !online -> OpenStreamButton(onClick = onBrowseDownloads) { Text("Downloads") }
+                        error != null && allChannels.isEmpty() ->
+                            OpenStreamButton(onClick = { retryRevision++ }) { Text("Retry") }
+                        else -> OpenStreamButton(onClick = onManageChannels) { Text("Channel Manager") }
+                    }
+                }
             }
         } else {
             LiveGuideTimelineHeader(
@@ -426,6 +451,7 @@ fun LiveTvScreen(
                         programs = programs,
                         favorite = key in favoriteChannelKeys,
                         channelWidth = channelWidth,
+                        laneWidth = laneWidth,
                         rowHeight = rowHeight,
                         windowStartMillis = windowStart,
                         windowEndMillis = windowEnd,
@@ -440,66 +466,6 @@ fun LiveTvScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun LiveGuideHeader(
-    channelCount: Int,
-    loading: Boolean,
-    guideLoading: Boolean,
-    guideChannelCount: Int,
-    compact: Boolean,
-    edgePadding: Dp,
-    onOpenSources: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = edgePadding, vertical = if (compact) 8.dp else 11.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Live TV", fontSize = if (compact) 24.sp else 28.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text)
-            Text(
-                when {
-                    loading && channelCount > 0 -> "$channelCount channels · refreshing…"
-                    loading -> "Loading channels…"
-                    guideLoading -> "$channelCount channels · updating guide…"
-                    guideChannelCount == 0 -> "$channelCount channels · guide unavailable"
-                    else -> "$channelCount channels · guide ready"
-                },
-                color = OpenStreamColors.Muted,
-                fontSize = 12.sp,
-            )
-        }
-        Button(onClick = onOpenSources) { Text("Sources") }
-    }
-}
-
-@Composable
-private fun LiveGuideControls(
-    query: String,
-    onQueryChanged: (String) -> Unit,
-    edgePadding: Dp,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = edgePadding, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChanged,
-            modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
-            singleLine = true,
-            leadingIcon = { Icon(AppIcons.Search, contentDescription = null, tint = OpenStreamColors.Muted) },
-            placeholder = { Text("Search channels & shows") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OpenStreamColors.Accent,
-                unfocusedBorderColor = OpenStreamColors.Border,
-            ),
-        )
     }
 }
 
@@ -523,9 +489,9 @@ private fun LiveGuideTimelineHeader(
         ) {
             Text("Channels", color = OpenStreamColors.TextSoft, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("$channelCount", color = OpenStreamColors.Muted, fontSize = 11.sp)
-            TextButton(onClick = onNow, enabled = !atNow) { Text("Now") }
+            OpenStreamTextButton(onClick = onNow, enabled = !atNow) { Text("Now") }
         }
-        IconButton(onClick = onPrevious, modifier = Modifier.size(40.dp)) {
+        IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
             Icon(AppIcons.Back, contentDescription = "Earlier", tint = OpenStreamColors.TextSoft)
         }
         Row(Modifier.weight(1f).fillMaxHeight()) {
@@ -543,7 +509,7 @@ private fun LiveGuideTimelineHeader(
                 }
             }
         }
-        IconButton(onClick = onNext, modifier = Modifier.size(40.dp)) {
+        IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
             Icon(
                 AppIcons.Back,
                 contentDescription = "Later",
@@ -561,6 +527,7 @@ private fun LiveGuideRow(
     programs: List<IptvGuideProgram>,
     favorite: Boolean,
     channelWidth: Dp,
+    laneWidth: Dp,
     rowHeight: Dp,
     windowStartMillis: Long,
     windowEndMillis: Long,
@@ -583,6 +550,7 @@ private fun LiveGuideRow(
         GuideProgramLane(
             channel = channel,
             programs = programs,
+            laneWidth = laneWidth,
             windowStartMillis = windowStartMillis,
             windowEndMillis = windowEndMillis,
             nowMillis = nowMillis,
@@ -648,7 +616,19 @@ private fun GuideChannelCell(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            TextButton(onClick = onToggleFavorite, contentPadding = PaddingValues(2.dp)) {
+            OpenStreamTextButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.semantics {
+                    contentDescription = if (favorite) {
+                        "Remove ${channel.name} from favorites"
+                    } else {
+                        "Add ${channel.name} to favorites"
+                    }
+                    stateDescription = if (favorite) "Favorite" else "Not favorite"
+                    role = Role.Button
+                },
+                contentPadding = PaddingValues(2.dp),
+            ) {
                 Text(if (favorite) "★" else "☆", color = if (favorite) OpenStreamColors.Accent else OpenStreamColors.Muted, fontSize = 18.sp)
             }
         }
@@ -659,6 +639,7 @@ private fun GuideChannelCell(
 private fun GuideProgramLane(
     channel: IptvChannel,
     programs: List<IptvGuideProgram>,
+    laneWidth: Dp,
     windowStartMillis: Long,
     windowEndMillis: Long,
     nowMillis: Long,
@@ -668,11 +649,11 @@ private fun GuideProgramLane(
     val visible = remember(programs, windowStartMillis, windowEndMillis) {
         LiveGuidePolicy.programsFor(channel, programs, windowStartMillis, windowEndMillis)
     }
-    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(OpenStreamColors.CanvasDeep)) {
+    Box(Modifier.fillMaxSize().clipToBounds().background(OpenStreamColors.CanvasDeep)) {
         repeat(4) { index ->
             if (index > 0) {
                 Box(
-                    Modifier.offset(x = maxWidth * (index / 4f)).width(1.dp).fillMaxHeight().background(OpenStreamColors.Border),
+                    Modifier.offset(x = laneWidth * (index / 4f)).width(1.dp).fillMaxHeight().background(OpenStreamColors.Border),
                 )
             }
         }
@@ -687,10 +668,10 @@ private fun GuideProgramLane(
         } else {
             visible.forEach { program ->
                 val segment = LiveGuidePolicy.segment(program, windowStartMillis, windowEndMillis)
-                val desiredWidth = maxWidth * segment.widthFraction
+                val desiredWidth = laneWidth * segment.widthFraction
                 GuideProgramCell(
                     modifier = Modifier
-                        .offset(x = maxWidth * segment.startFraction)
+                        .offset(x = laneWidth * segment.startFraction)
                         .width(if (desiredWidth < 72.dp) 72.dp else desiredWidth)
                         .fillMaxHeight()
                         .padding(2.dp),
@@ -704,7 +685,7 @@ private fun GuideProgramLane(
         if (nowMillis in windowStartMillis until windowEndMillis) {
             val nowFraction = (nowMillis - windowStartMillis).toFloat() / (windowEndMillis - windowStartMillis).toFloat()
             Box(
-                Modifier.offset(x = maxWidth * nowFraction).width(2.dp).fillMaxHeight().background(OpenStreamColors.Accent),
+                Modifier.offset(x = laneWidth * nowFraction).width(2.dp).fillMaxHeight().background(OpenStreamColors.Accent),
             )
         }
     }

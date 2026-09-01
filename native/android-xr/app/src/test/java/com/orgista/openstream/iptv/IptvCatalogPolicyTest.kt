@@ -18,7 +18,9 @@ class IptvCatalogPolicyTest {
     fun `fresh installs have no compiled live tv sources`() {
         assertEquals(emptyList<IptvSource>(), IptvSourceSelection.configured(null))
         val configured = IptvSource.m3u("custom", "My TV", "https://provider.example/list.m3u")
+        val pluto = IptvSource.pluto("private-device-id")
         assertEquals(listOf(configured), IptvSourceSelection.configured(configured))
+        assertEquals(listOf(pluto, configured), IptvSourceSelection.configured(configured, pluto))
     }
 
     @Test

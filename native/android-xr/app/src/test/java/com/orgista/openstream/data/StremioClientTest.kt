@@ -88,7 +88,7 @@ class StremioClientTest {
         val addon = StremioClient.parseManifest("https://addon.example/manifest.json", manifest)
         val payload = """
             {"metas":[
-              {"id":"tt1234567","type":"movie","name":"A Film","description":"Plot","releaseInfo":"2025","poster":"https://img.example/p.jpg","background":"https://img.example/b.jpg","genres":["Drama"],"director":"[]"},
+              {"id":"tt1234567","type":"movie","name":"A Film","description":"Plot","releaseInfo":"2025","poster":"https://img.example/p.jpg","background":"https://img.example/b.jpg","genres":["Drama"],"director":"[]","imdbRating":"7.8"},
               {"id":"missing-name","type":"movie"}
             ]}
         """.trimIndent()
@@ -100,6 +100,7 @@ class StremioClientTest {
         assertEquals("tt1234567", items.single().imdbId)
         assertEquals(listOf("Drama"), items.single().genres)
         assertEquals(null, items.single().director)
+        assertEquals("7.8/10", items.single().ratings?.imdb)
     }
 
     @Test

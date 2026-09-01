@@ -44,12 +44,31 @@ class ProfileStore(context: Context) {
             .put("cap", policy.cap.name)
             .put("blockedTerms", JSONArray(policy.blockedTerms))
             .put("createdAt", policy.createdAt)
+            .apply {
+                policy.adminPinHash?.let { put("adminPinHash", it) }
+                policy.adminPinSalt?.let { put("adminPinSalt", it) }
+            }
             .toString()
         prefs.edit()
             .putString(KEY_PROFILE, raw)
             .putString(KEY_KIDS_LOCK, checksum(raw))
             .apply()
         return policy
+    }
+
+    /**
+     * First-use PIN claim for kids installs created before the admin PIN
+     * existed: stores the PIN inside the sealed profile and re-seals the lock.
+     * Never replaces a PIN that is already configured.
+     */
+    fun setAdminPin(pin: String): ContentPolicy? {
+        val current = loadActivePolicy()
+        if (current !is ContentPolicy.Kids || AdminPinPolicy.isConfigured(current)) return current
+        require(AdminPinPolicy.isValidPin(pin)) { "Enter a ${AdminPinPolicy.MIN_LENGTH}-${AdminPinPolicy.MAX_LENGTH} digit PIN." }
+        val salt = AdminPinPolicy.newSalt()
+        return enableKidsMode(
+            current.copy(adminPinHash = AdminPinPolicy.hash(pin, salt), adminPinSalt = salt),
+        )
     }
 
     private fun parseProfile(raw: String): ContentPolicy? = try {
@@ -64,6 +83,8 @@ class ProfileStore(context: Context) {
                     cap = cap,
                     blockedTerms = (0 until terms.length()).map { terms.getString(it) },
                     createdAt = json.optString("createdAt", "unknown"),
+                    adminPinHash = json.optString("adminPinHash").takeIf { it.isNotBlank() },
+                    adminPinSalt = json.optString("adminPinSalt").takeIf { it.isNotBlank() },
                 )
             }
             else -> null

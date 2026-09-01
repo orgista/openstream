@@ -5,3 +5,8 @@ logs/
 *.local
 test-media/
 native/android-xr/app/src/main/assets/
+
+# Session working artifacts and local tool config — never tracked
+artifacts/
+.claude/
+*.old.*

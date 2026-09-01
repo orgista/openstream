@@ -188,7 +188,9 @@ vec2 fisheyeSourceUv(vec2 equirectUv) {
 }
 
 float eacCoordinate(float faceCoordinate) {
-    return atan(faceCoordinate) / (PI * 0.5) + 0.5;
+    float clampedFace = clamp(faceCoordinate, -1.0, 1.0);
+    float uv = atan(clampedFace) / (PI * 0.5) + 0.5;
+    return clamp(uv, 0.0, 1.0);
 }
 
 vec2 cubemapSourceUv(vec2 equirectUv) {
@@ -204,27 +206,32 @@ vec2 cubemapSourceUv(vec2 equirectUv) {
     int face = 0;
     vec2 faceCoordinate = vec2(0.0);
     if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+        float denomX = max(magnitude.x, 1e-7);
         if (direction.x >= 0.0) {
             face = 0;
-            faceCoordinate = vec2(direction.z, -direction.y) / magnitude.x;
+            faceCoordinate = vec2(direction.z, -direction.y) / denomX;
         } else {
             face = 1;
-            faceCoordinate = vec2(-direction.z, -direction.y) / magnitude.x;
+            faceCoordinate = vec2(-direction.z, -direction.y) / denomX;
         }
     } else if (magnitude.y >= magnitude.z) {
+        float denomY = max(magnitude.y, 1e-7);
         if (direction.y >= 0.0) {
             face = 2;
-            faceCoordinate = vec2(direction.x, direction.z) / magnitude.y;
+            faceCoordinate = vec2(direction.x, direction.z) / denomY;
         } else {
             face = 3;
-            faceCoordinate = vec2(direction.x, -direction.z) / magnitude.y;
+            faceCoordinate = vec2(direction.x, -direction.z) / denomY;
         }
-    } else if (direction.z >= 0.0) {
-        face = 4;
-        faceCoordinate = vec2(-direction.x, -direction.y) / magnitude.z;
     } else {
-        face = 5;
-        faceCoordinate = vec2(direction.x, -direction.y) / magnitude.z;
+        float denomZ = max(magnitude.z, 1e-7);
+        if (direction.z >= 0.0) {
+            face = 4;
+            faceCoordinate = vec2(-direction.x, -direction.y) / denomZ;
+        } else {
+            face = 5;
+            faceCoordinate = vec2(direction.x, -direction.y) / denomZ;
+        }
     }
     vec2 faceUv = vec2(
         eacCoordinate(faceCoordinate.x),
@@ -367,6 +374,13 @@ bool QuestCompositorVideo::renderExternalTexture(
     waitInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
     waitInfo.timeout = XR_INFINITE_DURATION;
     if (XR_FAILED(xrWaitSwapchainImage(swapchain_, &waitInfo))) {
+        XrSwapchainImageReleaseInfo releaseInfo{};
+        releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+        (void) xrReleaseSwapchainImage(swapchain_, &releaseInfo);
+        return false;
+    }
+
+    if (imageIndex >= swapchainImages_.size()) {
         XrSwapchainImageReleaseInfo releaseInfo{};
         releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
         (void) xrReleaseSwapchainImage(swapchain_, &releaseInfo);

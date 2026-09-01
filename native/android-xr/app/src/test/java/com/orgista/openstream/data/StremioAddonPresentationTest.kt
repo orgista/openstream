@@ -1,6 +1,8 @@
 package com.orgista.openstream.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StremioAddonPresentationTest {
@@ -25,5 +27,27 @@ class StremioAddonPresentationTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun `only enabled direct stream providers advertise playback availability`() {
+        val direct = StremioAddon(
+            id = "torrentio",
+            manifestId = "com.stremio.torrentio.addon",
+            name = "Torrentio",
+            transportUrl = "https://stream.example",
+            version = "1.0.0",
+            resources = setOf("stream"),
+        )
+        val recommendation = direct.copy(
+            id = "watch-next",
+            manifestId = "community.watch.next",
+            name = "Watch Next",
+        )
+
+        assertTrue(StremioAddonPresentation.isPlaybackProvider(direct))
+        assertFalse(StremioAddonPresentation.isPlaybackProvider(direct.copy(enabled = false)))
+        assertFalse(StremioAddonPresentation.isPlaybackProvider(direct.copy(resources = setOf("subtitles"))))
+        assertFalse(StremioAddonPresentation.isPlaybackProvider(recommendation))
     }
 }

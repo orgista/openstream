@@ -78,6 +78,32 @@ class XmlTvParserTest {
         assertTrue(programs.single().endMillis > programs.single().startMillis)
     }
 
+    @Test
+    fun `one app channel claims only one matching xmltv schedule`() {
+        val xml = """
+            <tv>
+              <channel id="PBS.KIDS.HD.us2"><display-name>PBS Kids HD</display-name></channel>
+              <channel id="PBS.Kids.Stream.us2"><display-name>PBS Kids Stream</display-name></channel>
+              <programme start="20260812200000 -0500" stop="20260812203000 -0500" channel="PBS.KIDS.HD.us2">
+                <title>Correct Schedule</title>
+              </programme>
+              <programme start="20260812200500 -0500" stop="20260812210000 -0500" channel="PBS.Kids.Stream.us2">
+                <title>Duplicate Schedule</title>
+              </programme>
+            </tv>
+        """.trimIndent()
+        val kids = channel.copy(id = "kids", name = "PBS Kids", guideId = "")
+
+        val programs = XmlTvParser.parse(
+            ByteArrayInputStream(xml.toByteArray()),
+            listOf(kids),
+            Instant.parse("2026-08-13T00:00:00Z").toEpochMilli(),
+            Instant.parse("2026-08-13T03:00:00Z").toEpochMilli(),
+        )
+
+        assertEquals(listOf("Correct Schedule"), programs.map(IptvGuideProgram::title))
+    }
+
     @Test(expected = Exception::class)
     fun `rejects doctypes with internal entity subsets`() {
         val xml = """

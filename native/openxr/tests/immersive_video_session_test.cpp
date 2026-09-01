@@ -166,5 +166,61 @@ int main() {
         ImmersiveVideoSession session;
         assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
         assert(session.state() == SessionState::Idle);
+
+        invalid = immersiveSpec();
+        invalid.decodedHeight = 0;
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
+
+        invalid = immersiveSpec();
+        invalid.durationSeconds = -5.0;
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
+
+        invalid = immersiveSpec();
+        invalid.durationSeconds = std::numeric_limits<double>::quiet_NaN();
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
+
+        invalid = immersiveSpec();
+        invalid.durationSeconds = std::numeric_limits<double>::infinity();
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
+
+        invalid = immersiveSpec();
+        invalid.durationSeconds = 0.0;
+        invalid.live = false;
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::InvalidMedia);
+
+        invalid = immersiveSpec();
+        invalid.codec = VideoCodec::Unknown;
+        assert(session.prepare(invalid, fullCapabilities()).reason == RejectionReason::CodecUnsupported);
+
+        // Verify invalid segment counts cause prepare to safely reject
+        const auto validMedia = immersiveSpec();
+        assert(session.prepare(validMedia, fullCapabilities(), 0, 10).reason == RejectionReason::InvalidMedia);
+        assert(session.prepare(validMedia, fullCapabilities(), 10, 0).reason == RejectionReason::InvalidMedia);
+        assert(session.prepare(validMedia, fullCapabilities(), 2000, 100).reason == RejectionReason::InvalidMedia);
+        assert(session.prepare(validMedia, fullCapabilities(), 50, 5000).reason == RejectionReason::InvalidMedia);
     }
+
+    {
+        ImmersiveVideoSession session;
+        assert(session.prepare(immersiveSpec(), fullCapabilities()).accepted());
+        assert(session.play());
+
+        // NaN and negative seeking should fail gracefully without altering position
+        assert(!session.seek(std::numeric_limits<double>::quiet_NaN()));
+        assertNear(session.positionSeconds(), 0.0);
+
+        // Advance with non-finite or negative delta should be safely ignored
+        session.advance(std::numeric_limits<double>::quiet_NaN());
+        assertNear(session.positionSeconds(), 0.0);
+        session.advance(-10.0);
+        assertNear(session.positionSeconds(), 0.0);
+        session.advance(0.0);
+        assertNear(session.positionSeconds(), 0.0);
+
+        // Negative seek should clamp to 0.0
+        assert(session.seek(-10.0));
+        assertNear(session.positionSeconds(), 0.0);
+    }
+
+    return 0;
 }

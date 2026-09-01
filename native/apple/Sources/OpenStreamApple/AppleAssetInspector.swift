@@ -26,16 +26,30 @@ public enum AppleAssetInspector {
             let descriptions = try await track.load(.formatDescriptions)
             let dimensions = try await track.load(.naturalSize)
             let frameRate = Double(try await track.load(.nominalFrameRate))
+            let safeWidth = safeDimension(Double(dimensions.width))
+            let safeHeight = safeDimension(Double(dimensions.height))
+            let safeRate = safeFrameRate(frameRate)
             for description in descriptions {
                 formats.append(inspect(
                     description: description,
-                    width: Int(abs(dimensions.width)),
-                    height: Int(abs(dimensions.height)),
-                    frameRate: frameRate
+                    width: safeWidth,
+                    height: safeHeight,
+                    frameRate: safeRate
                 ))
             }
         }
         return try await AppleAssetInspection(formats: formats, playable: playable, protectedContent: protectedContent)
+    }
+
+    public static func safeDimension(_ value: Double) -> Int {
+        guard value.isFinite, value > 0, value <= Double(Int.max) else { return 0 }
+        guard value < Double(Int.max) else { return 0 }
+        return Int(value)
+    }
+
+    public static func safeFrameRate(_ value: Double) -> Double {
+        guard value.isFinite, value > 0 else { return 0.0 }
+        return value
     }
 
     public static func inspect(
@@ -66,14 +80,17 @@ public enum AppleAssetInspector {
             kind: projectionKind,
             stereo: hasLeftEye && hasRightEye
         )
+        let sanitizedWidth = max(0, width)
+        let sanitizedHeight = max(0, height)
+        let sanitizedFrameRate = (frameRate.isFinite && frameRate > 0) ? frameRate : 0.0
         return OpenStreamFormat(
             dynamicRange: dynamicRange,
             dolbyVisionProfile: dolbyVisionProfile,
             projection: projection,
             codec: codec,
-            width: width,
-            height: height,
-            frameRate: frameRate
+            width: sanitizedWidth,
+            height: sanitizedHeight,
+            frameRate: sanitizedFrameRate
         )
     }
 

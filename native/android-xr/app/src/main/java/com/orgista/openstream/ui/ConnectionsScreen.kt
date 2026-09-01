@@ -10,19 +10,24 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -57,7 +62,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import com.orgista.openstream.Logs
 import com.orgista.openstream.data.ConnectionStore
 import com.orgista.openstream.data.DiscoverFeedPreferences
@@ -70,6 +77,7 @@ import com.orgista.openstream.data.StremioClient
 import com.orgista.openstream.data.StremioAddonPresentation
 import com.orgista.openstream.data.StremioUrlPolicy
 import com.orgista.openstream.data.YoutubeChannelClient
+import com.orgista.openstream.library.LibraryFolderLinkPolicy
 import com.orgista.openstream.library.LibraryKind
 import com.orgista.openstream.library.LibraryStore
 import com.orgista.openstream.lan.LanSetupServer
@@ -177,11 +185,12 @@ fun ConnectionsScreen(
         return
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 24.dp),
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+      LazyColumn(
+        Modifier.fillMaxHeight().widthIn(max = 1080.dp).fillMaxWidth().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 36.dp),
-    ) {
+      ) {
         item {
             Row(
                 Modifier.fillMaxWidth(),
@@ -189,14 +198,20 @@ fun ConnectionsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column {
-                    Text("Sources", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = OpenStreamColors.Text)
+                    Text(
+                        "Sources",
+                        modifier = Modifier.semantics { heading() },
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = OpenStreamColors.Text,
+                    )
                     Text("Libraries, add-ons, YouTube, and Live TV", fontSize = 13.sp, color = OpenStreamColors.Muted)
                 }
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    OutlinedButton(
+                    OpenStreamOutlinedButton(
                         enabled = !lanStarting,
                         onClick = {
                             lanError = null
@@ -269,7 +284,7 @@ fun ConnectionsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                TextButton(
+                                OpenStreamTextButton(
                                     onClick = {
                                         val copiedUrl = if (lanFriendlyAddressActive) {
                                             LanSetupPresentation.computerUrl(session)
@@ -300,7 +315,7 @@ fun ConnectionsScreen(
                             }
                             Text("Or scan", color = OpenStreamColors.Muted, fontSize = 11.sp)
                         }
-                        TextButton(
+                        OpenStreamTextButton(
                             onClick = {
                                 lanMdnsResponder.close()
                                 lanServer.close()
@@ -342,8 +357,13 @@ fun ConnectionsScreen(
                 }
             }
             items(libraries, key = { it.id }) { folder ->
+                val missingShare = LibraryFolderLinkPolicy.isOrphaned(folder, nasConnections)
                 FlatSourceRow {
-                    Icon(AppIcons.Folder, contentDescription = null, tint = OpenStreamColors.Accent)
+                    Icon(
+                        AppIcons.Folder,
+                        contentDescription = null,
+                        tint = if (missingShare) OpenStreamColors.Amber else OpenStreamColors.Accent,
+                    )
                     Column(Modifier.weight(1f)) {
                         Text(
                             "${folder.connectionName} / ${folder.path.ifBlank { "(root)" }}",
@@ -353,13 +373,17 @@ fun ConnectionsScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            when (folder.kind) {
-                                LibraryKind.MOVIES -> "Movies library"
-                                LibraryKind.TV -> "TV library"
-                                LibraryKind.AUTO -> "Auto-organized library"
+                            if (missingShare) {
+                                "Share not connected — add \"${folder.connectionName}\" under NAS shares to index this folder"
+                            } else {
+                                when (folder.kind) {
+                                    LibraryKind.MOVIES -> "Movies library"
+                                    LibraryKind.TV -> "TV library"
+                                    LibraryKind.AUTO -> "Auto-organized library"
+                                }
                             },
                             fontSize = 13.sp,
-                            color = OpenStreamColors.Muted,
+                            color = if (missingShare) OpenStreamColors.Amber else OpenStreamColors.Muted,
                         )
                     }
                     AnimatedVisibility(
@@ -386,7 +410,7 @@ fun ConnectionsScreen(
                 title = "NAS shares",
                 info = "Network storage connected over SMB. Tap a share to browse it or add one of its folders to the library.",
             ) {
-                TextButton(onClick = {
+                OpenStreamTextButton(onClick = {
                     deletingCollection = null
                     showAddNas = true
                 }) { Text("Add NAS share") }
@@ -443,7 +467,8 @@ fun ConnectionsScreen(
                     Text(group.displayName, fontWeight = FontWeight.Bold, color = OpenStreamColors.Text)
                     Text(group.description, fontSize = 13.sp, color = OpenStreamColors.TextSoft)
                 }
-                TextButton(
+                OpenStreamTextButton(
+                    modifier = Modifier.semantics { contentDescription = "Move ${group.displayName} up" },
                     enabled = feedPreferences.order.firstOrNull() != group,
                     onClick = {
                         feedPreferences = feedPreferences.move(group, -1)
@@ -452,7 +477,8 @@ fun ConnectionsScreen(
                         onAddonsChanged()
                     },
                 ) { Text("Up") }
-                TextButton(
+                OpenStreamTextButton(
+                    modifier = Modifier.semantics { contentDescription = "Move ${group.displayName} down" },
                     enabled = feedPreferences.order.lastOrNull() != group,
                     onClick = {
                         feedPreferences = feedPreferences.move(group, 1)
@@ -463,6 +489,10 @@ fun ConnectionsScreen(
                 ) { Text("Down") }
                 Switch(
                     checked = group in feedPreferences.visibleGroups,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Show ${group.displayName} in Discover"
+                        stateDescription = if (group in feedPreferences.visibleGroups) "Shown" else "Hidden"
+                    },
                     onCheckedChange = { visible ->
                         feedPreferences = feedPreferences.withVisibility(group, visible)
                         store.saveDiscoverFeedPreferences(feedPreferences)
@@ -478,7 +508,7 @@ fun ConnectionsScreen(
                 title = "YouTube",
                 info = "Add an exact channel or @handle. Every enabled channel appears inside the YouTube group and contributes likely new uploads to Up Next. No YouTube API key is required.",
             ) {
-                TextButton(onClick = {
+                OpenStreamTextButton(onClick = {
                     deletingCollection = null
                     showAddYoutube = true
                 }) { Text("Add YouTube channel") }
@@ -514,6 +544,10 @@ fun ConnectionsScreen(
                 }
                 Switch(
                     checked = channel.enabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Show ${channel.name} in Discover"
+                        stateDescription = if (channel.enabled) "Enabled" else "Disabled"
+                    },
                     onCheckedChange = { enabled ->
                         store.setYoutubeChannelEnabled(channel.id, enabled)
                         revision++
@@ -544,7 +578,7 @@ fun ConnectionsScreen(
                 title = "Add-Ons",
                 info = "Add-ons provide catalogs, metadata, or HTTPS playback routes. Private manifest paths stay on this device.",
             ) {
-                TextButton(onClick = {
+                OpenStreamTextButton(onClick = {
                     deletingCollection = null
                     showAddAddon = true
                 }) { Text("Add add-on") }
@@ -626,6 +660,10 @@ fun ConnectionsScreen(
                 }
                 Switch(
                     checked = addon.enabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Enable ${addon.name}"
+                        stateDescription = if (addon.enabled) "Enabled" else "Disabled"
+                    },
                     onCheckedChange = { enabled ->
                         store.setStremioEnabled(addon.id, enabled)
                         revision++
@@ -658,6 +696,7 @@ fun ConnectionsScreen(
                 onOpenChannelManager = onOpenChannelManager,
             )
         }
+      }
     }
 
     if (showAddNas) {
@@ -705,36 +744,38 @@ private fun SourceSectionHeading(
     val layout = SourceSectionLayoutPolicy.current
     Row(
         Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             title,
+            modifier = Modifier.semantics { heading() },
             fontSize = layout.headingSizeSp.sp,
             fontWeight = FontWeight.ExtraBold,
             color = OpenStreamColors.Text,
         )
+        if (layout.showSectionInfo) {
+            IconButton(
+                onClick = { showInfo = true },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "$title information" },
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    border = BorderStroke(1.dp, OpenStreamColors.Muted),
+                ) {
+                    androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             actions()
-            if (layout.showSectionInfo) {
-                IconButton(
-                    onClick = { showInfo = true },
-                    modifier = Modifier.size(48.dp).semantics { contentDescription = "$title information" },
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = androidx.compose.ui.graphics.Color.Transparent,
-                        border = BorderStroke(1.dp, OpenStreamColors.Muted),
-                    ) {
-                        androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                            Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
-                        }
-                    }
-                }
-            }
         }
     }
     if (showInfo) {
@@ -742,7 +783,7 @@ private fun SourceSectionHeading(
             onDismissRequest = { showInfo = false },
             title = { Text(title) },
             text = { Text(info) },
-            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Done") } },
+            confirmButton = { OpenStreamTextButton(onClick = { showInfo = false }) { Text("Done") } },
         )
     }
 }
@@ -756,7 +797,7 @@ private fun DeleteModeButton(
 ) {
     if (!SourceManagementPolicy.showDeleteAction(itemCount)) return
     val active = SourceManagementPolicy.showRemoveControl(collection, activeCollection)
-    TextButton(onClick = onClick) {
+    OpenStreamTextButton(onClick = onClick) {
         Text(
             SourceManagementPolicy.deleteActionLabel(collection, active),
             color = if (active) OpenStreamColors.Danger else OpenStreamColors.TextSoft,
@@ -810,7 +851,7 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(
+                    OpenStreamOutlinedButton(
                         onClick = {
                             scanning = true
                             error = null
@@ -869,7 +910,7 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done, autoCorrectEnabled = false),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(
+                    OpenStreamOutlinedButton(
                         onClick = {
                             listingShares = true
                             error = null
@@ -916,7 +957,7 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
           }
         },
         confirmButton = {
-            Button(
+            OpenStreamButton(
                 onClick = {
                     checking = true
                     error = null
@@ -958,7 +999,7 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                 }
             }
         },
-        dismissButton = { TextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
+        dismissButton = { OpenStreamTextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
     )
 }
 
@@ -986,7 +1027,7 @@ private fun AddAddonDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
             }
         },
         confirmButton = {
-            Button(
+            OpenStreamButton(
                 onClick = {
                     checking = true
                     error = null
@@ -1015,7 +1056,7 @@ private fun AddAddonDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                 }
             }
         },
-        dismissButton = { TextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
+        dismissButton = { OpenStreamTextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
     )
 }
 
@@ -1055,7 +1096,7 @@ private fun AddYoutubeChannelDialog(store: ConnectionStore, onDone: (Boolean) ->
             }
         },
         confirmButton = {
-            Button(
+            OpenStreamButton(
                 onClick = {
                     checking = true
                     error = null
@@ -1081,7 +1122,7 @@ private fun AddYoutubeChannelDialog(store: ConnectionStore, onDone: (Boolean) ->
                 if (checking) OpenStreamLoadingLabel("Checking…") else Text("Verify & add")
             }
         },
-        dismissButton = { TextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
+        dismissButton = { OpenStreamTextButton(onClick = { if (!checking) onDone(false) }) { Text("Cancel") } },
     )
 }
 
@@ -1108,7 +1149,7 @@ private fun AddLibraryDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { OpenStreamTextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -1164,7 +1205,7 @@ private fun NasBrowser(
                 Text(connection.name, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp, color = OpenStreamColors.Text)
                 Text("/${path}", fontSize = 13.sp, color = OpenStreamColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Button(onClick = { showAddLibrary = true }) {
+            OpenStreamButton(onClick = { showAddLibrary = true }) {
                 Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Text("  Add as library")
             }

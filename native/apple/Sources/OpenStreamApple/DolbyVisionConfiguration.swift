@@ -9,11 +9,19 @@ public struct DolbyVisionConfiguration: Equatable, Sendable {
     public let baseLayerSignalCompatibilityID: UInt8
 
     public init?(record: Data) {
-        guard record.count >= 5 else { return nil }
+        guard record.count >= 5, record.count <= 256 else { return nil }
+        let versionMajor = record[record.startIndex]
+        guard versionMajor == 1 else { return nil }
+
         let profileAndLevel = record[record.index(record.startIndex, offsetBy: 2)]
         let levelAndFlags = record[record.index(record.startIndex, offsetBy: 3)]
-        profile = profileAndLevel >> 1
-        level = ((profileAndLevel & 0x01) << 5) | (levelAndFlags >> 3)
+        let parsedProfile = profileAndLevel >> 1
+        let parsedLevel = ((profileAndLevel & 0x01) << 5) | (levelAndFlags >> 3)
+
+        guard parsedProfile <= 31, parsedLevel <= 63 else { return nil }
+
+        profile = parsedProfile
+        level = parsedLevel
         hasRPU = (levelAndFlags & 0x04) != 0
         hasEnhancementLayer = (levelAndFlags & 0x02) != 0
         hasBaseLayer = (levelAndFlags & 0x01) != 0

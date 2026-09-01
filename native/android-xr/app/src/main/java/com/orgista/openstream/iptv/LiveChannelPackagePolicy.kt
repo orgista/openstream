@@ -8,6 +8,7 @@ enum class LiveChannelPackage(val id: String, val label: String) {
     LOCAL("local", "Local"),
     ENTERTAINMENT("entertainment", "Entertainment"),
     CHOICE("choice", "Choice"),
+    KIDS("kids", "Kids & Family"),
     ULTIMATE("ultimate", "Ultimate"),
     PREMIER("premier", "Premier"),
     SPORTS_PACK("sports-pack", "Sports Pack"),
@@ -33,6 +34,7 @@ object LiveChannelPackagePolicy {
     private val lineupLimits = mapOf(
         LiveChannelPackage.ENTERTAINMENT to 95,
         LiveChannelPackage.CHOICE to 35,
+        LiveChannelPackage.KIDS to 50,
         LiveChannelPackage.ULTIMATE to 35,
         LiveChannelPackage.PREMIER to 40,
         LiveChannelPackage.SPORTS_PACK to 45,
@@ -50,6 +52,7 @@ object LiveChannelPackagePolicy {
         LiveChannelPackage.LOCAL,
         LiveChannelPackage.ENTERTAINMENT,
         LiveChannelPackage.CHOICE,
+        LiveChannelPackage.KIDS,
         LiveChannelPackage.ULTIMATE,
         LiveChannelPackage.PREMIER,
         LiveChannelPackage.SPORTS_PACK,
@@ -60,6 +63,7 @@ object LiveChannelPackagePolicy {
         LiveChannelPackage.LOCAL.id,
         LiveChannelPackage.ENTERTAINMENT.id,
         LiveChannelPackage.CHOICE.id,
+        LiveChannelPackage.KIDS.id,
         LiveChannelPackage.ULTIMATE.id,
         LiveChannelPackage.PREMIER.id,
         LiveChannelPackage.SPORTS_PACK.id,
@@ -68,6 +72,11 @@ object LiveChannelPackagePolicy {
 
     private val ppv = Regex("(?i)\\b(?:ppv|pay[ -]?per[ -]?view|main event|live event|events?)\\b")
     private val local = Regex("(?i)\\b(?:locals?|affiliate|regional)\\b")
+    private val kidsGroup = Regex("(?i)^\\s*(?:kids?(?:[ &]+family)?|children|family|preschool|youth)\\s*$")
+    private val kidsChannels = Regex(
+        "(?i)^(?:pbs kids|babyfirst|kartoon channel|toon ?goggles|nick jr|nickelodeon|nicktoons|" +
+            "disney junior|disney channel|disney xd|universal kids|discovery family|cartoon network|boomerang)(?: |$)",
+    )
     private val sportsNetworkGroup = Regex("(?i)^\\s*(?:usa[ -]?)?sports networks?\\s*$")
     private val leagueSportsGroups = setOf(
         "nfl", "ncaaf", "mlb", "milb", "nba", "wnba", "nhl / echl", "hockey",
@@ -104,6 +113,7 @@ object LiveChannelPackagePolicy {
         val searchable = "${channel.group} ${channel.name}"
         val name = normalizedName(channel)
         return when {
+            kidsGroup.matches(channel.group) || kidsChannels.containsMatchIn(name) -> LiveChannelPackage.KIDS
             ppv.containsMatchIn(searchable) -> LiveChannelPackage.PPV
             local.containsMatchIn(searchable) -> LiveChannelPackage.LOCAL
             sportsNetworkGroup.matches(channel.group) -> LiveChannelPackage.SPORTS_PACK
@@ -119,6 +129,11 @@ object LiveChannelPackagePolicy {
     }
 
     fun channelKey(channel: IptvChannel): String = "${channel.sourceId}:${channel.id}"
+
+    /** Permanent Kids Mode receives only explicitly child-classified channels. */
+    fun kidsChannels(channels: List<IptvChannel>): List<IptvChannel> = channels
+        .filter { packageFor(it) == LiveChannelPackage.KIDS }
+        .distinctBy(::channelKey)
 
     /** The complete catalog remains searchable even when its package is disabled. */
     fun searchChannels(channels: List<IptvChannel>, query: String, limit: Int = 100): List<IptvChannel> {

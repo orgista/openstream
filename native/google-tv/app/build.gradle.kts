@@ -9,9 +9,12 @@ providers.environmentVariable("OPENSTREAM_GOOGLE_TV_BUILD_DIR").orNull?.let { re
     layout.buildDirectory.set(localBuildDir)
 }
 
+val openStreamKeystoreFile = providers.environmentVariable("OPENSTREAM_KEYSTORE_FILE")
+val openStreamKeystorePass = providers.environmentVariable("OPENSTREAM_KEYSTORE_PASS")
+val openStreamKeyAlias = providers.environmentVariable("OPENSTREAM_KEY_ALIAS")
+val openStreamKeyPass = providers.environmentVariable("OPENSTREAM_KEY_PASS")
+
 android {
-    // Keep the source namespace while the independently installable package
-    // uses the Cyberbanksy-owned ID below.
     namespace = "com.orgista.openstream"
     compileSdk {
         version = release(37) {
@@ -20,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.cyberbanksy.openstream.tv"
+        applicationId = "com.orgista.openstream"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
@@ -32,12 +35,30 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = openStreamKeystoreFile.orNull
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = openStreamKeystorePass.orNull
+                keyAlias = openStreamKeyAlias.orNull
+                keyPassword = openStreamKeyPass.orNull
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             // Local Vite dev server for the standards-based WebXR viewer.
             buildConfigField("String", "WEB_XR_URL", "\"http://127.0.0.1:5173/xr/viewer\"")
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // TODO: set the production WebXR viewer URL before shipping a release
             // build. Empty here means WebXrBackend disables the immersive launch
             // and playback falls back to the flat player (no localhost loopback).

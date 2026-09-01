@@ -25,8 +25,11 @@ Mesh sphereMesh(
     std::uint32_t latitudeSegments,
     std::uint32_t longitudeSegments
 ) {
-    if (latitudeSegments < 2 || longitudeSegments < 3) {
-        throw std::invalid_argument("immersive video mesh requires at least 2x3 segments");
+    if (latitudeSegments < kMinLatitudeSegments || longitudeSegments < kMinLongitudeSegments ||
+        latitudeSegments > kMaxLatitudeSegments || longitudeSegments > kMaxLongitudeSegments) {
+        throw std::invalid_argument(
+            "immersive video mesh segment counts out of allowable range [2..1024, 3..2048]"
+        );
     }
 
     Mesh mesh;
@@ -136,13 +139,34 @@ Mesh makeImmersiveVideoMesh(
     std::uint32_t latitudeSegments,
     std::uint32_t longitudeSegments
 ) {
+    if (latitudeSegments < kMinLatitudeSegments || longitudeSegments < kMinLongitudeSegments ||
+        latitudeSegments > kMaxLatitudeSegments || longitudeSegments > kMaxLongitudeSegments) {
+        throw std::invalid_argument(
+            "immersive video mesh segment counts out of allowable range [2..1024, 3..2048]"
+        );
+    }
+
     switch (projection) {
         case Projection::Equirectangular180:
-            return sphereMesh(kPi, false, stereo, eye, latitudeSegments, longitudeSegments / 2);
+            return sphereMesh(
+                kPi,
+                false,
+                stereo,
+                eye,
+                latitudeSegments,
+                std::max(longitudeSegments / 2, kMinLongitudeSegments)
+            );
         case Projection::Equirectangular360:
             return sphereMesh(kPi * 2.0F, false, stereo, eye, latitudeSegments, longitudeSegments);
         case Projection::Fisheye180:
-            return sphereMesh(kPi, true, stereo, eye, latitudeSegments, longitudeSegments / 2);
+            return sphereMesh(
+                kPi,
+                true,
+                stereo,
+                eye,
+                latitudeSegments,
+                std::max(longitudeSegments / 2, kMinLongitudeSegments)
+            );
         case Projection::Cubemap360:
             return cubemapMesh(stereo, eye);
         case Projection::WideFieldOfView:

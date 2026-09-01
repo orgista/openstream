@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertAllowedOrigin,
+  assertGatewayBindHost,
   assertLoopbackBindHost,
   isPrivateAddress,
   normalizeTarget,
@@ -62,6 +63,13 @@ test("permits only loopback gateway bind addresses", () => {
   for (const host of ["0.0.0.0", "192.168.1.10", "example.com"]) {
     assert.throws(() => assertLoopbackBindHost(host), /loopback/);
   }
+});
+
+test("LAN gateway bind requires an explicit private address mode", () => {
+  assert.equal(assertGatewayBindHost("0.0.0.0", { allowLan: true }), "0.0.0.0");
+  assert.equal(assertGatewayBindHost("192.168.1.20", { allowLan: true }), "192.168.1.20");
+  assert.throws(() => assertGatewayBindHost("0.0.0.0"), /loopback/);
+  assert.throws(() => assertGatewayBindHost("example.com", { allowLan: true }), /private LAN/);
 });
 
 test("requires every resolved address to be private before allowing cleartext HTTP", () => {

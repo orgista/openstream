@@ -79,6 +79,9 @@ class LibraryStore(context: Context) {
 
     fun removeFolder(id: String) = writeFolders(folders().filter { it.id != id })
 
+    /** Persists folders after [LibraryFolderLinkPolicy] repairs their connection ids. */
+    fun replaceFolders(list: List<LibraryFolder>) = writeFolders(list)
+
     private fun writeFolders(list: List<LibraryFolder>) {
         val array = JSONArray()
         list.forEach { folder ->

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.OpenStream" parent="android:style/Theme.Material.NoActionBar">
+    <style name="OpenStreamThemeBase" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
@@ -10,4 +10,6 @@
         <item name="android:statusBarColor">@color/openstream_black</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <style name="Theme.OpenStream" parent="@style/OpenStreamThemeBase" />
 </resources>

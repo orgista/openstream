@@ -18,8 +18,8 @@ public final class QuestMedia3Bridge {
     private final Activity activity;
     private final Surface surface;
     private ExoPlayer player;
-    private boolean released;
-    private boolean ready;
+    private volatile boolean released;
+    private volatile boolean ready;
 
     public QuestMedia3Bridge(Activity activity, Surface surface, String uri) {
         this.activity = activity;

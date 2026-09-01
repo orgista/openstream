@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createLogger } from "./logger.mjs";
 import { listNasDirectory, resolveWithinRoot, validateNasRoot } from "./nas.mjs";
-import { createGatewayServer } from "./openstream-gateway.mjs";
+import { createGatewayServer, parseNasMappings, resolveMappedSmbPath } from "./openstream-gateway.mjs";
 import { buildTranscodeArgs, clampTranscodeProfile, probeTranscoder } from "./transcoder.mjs";
 
 const GATEWAY_SESSION_TOKEN = "test-session-token-that-is-long-enough-for-auth";
@@ -94,6 +94,32 @@ test("NAS listing returns only directories and video files", async () => {
   assert.deepEqual(movies.files.map((entry) => entry.name), ["Family Trip (2026).mp4"]);
   assert.equal(typeof movies.files[0].size, "number");
   await rm(root, { recursive: true, force: true });
+});
+
+test("SMB transcode mappings resolve only inside an explicit NAS root", async () => {
+  const root = await makeNasFixture();
+  const mappingsJson = JSON.stringify([
+    { host: "192.168.1.87", share: "Media", rootPath: root },
+  ]);
+  const mappings = parseNasMappings(mappingsJson);
+  try {
+    const canonicalRoot = await validateNasRoot(root);
+    const resolved = await resolveMappedSmbPath(
+      "smb://192.168.1.87/Media/Movies/Family%20Trip%20(2026).mp4",
+      mappings,
+    );
+    assert.equal(resolved, path.join(canonicalRoot, "Movies", "Family Trip (2026).mp4"));
+    await assert.rejects(
+      resolveMappedSmbPath("smb://192.168.1.87/Other/Movies/Family%20Trip%20(2026).mp4", mappings),
+      /No OpenStream gateway NAS mapping/,
+    );
+    await assert.rejects(
+      resolveMappedSmbPath("smb://192.168.1.87/Media/Movies/../..", mappings),
+      /directory|file|escapes|ENOENT/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("gateway serves NAS media with range support and owner binding", async () => {

@@ -1,4 +1,4 @@
-@file:Suppress("RestrictedApi")
+@file:Suppress("RestrictedApi", "DEPRECATION")
 
 package com.cyberbanksy.openstream.xr
 
@@ -61,27 +61,34 @@ class SceneCoreVideoAdapter(
         )
         applyDynamicRange(entity, plan.dynamicRange)
 
-        val exoPlayer = ExoPlayer.Builder(context).build().also { created ->
-            created.addListener(
-                object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        when (playbackState) {
-                            Player.STATE_BUFFERING -> onStatus("Preparing immersive video…")
-                            Player.STATE_READY -> onStatus("Playing in full space")
-                            Player.STATE_ENDED -> onStatus("Playback complete")
-                            Player.STATE_IDLE -> Unit
+        val exoPlayer = try {
+            ExoPlayer.Builder(context).build().also { created ->
+                created.addListener(
+                    object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            when (playbackState) {
+                                Player.STATE_BUFFERING -> onStatus("Preparing immersive video…")
+                                Player.STATE_READY -> onStatus("Playing in full space")
+                                Player.STATE_ENDED -> onStatus("Playback complete")
+                                Player.STATE_IDLE -> Unit
+                            }
+                        }
+
+                        override fun onPlayerError(error: PlaybackException) {
+                            onStatus("This video could not be played on the current XR runtime.")
                         }
                     }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        onStatus("This video could not be played on the current XR runtime.")
-                    }
-                }
-            )
-            created.setVideoSurface(entity.getSurface())
-            created.setMediaItem(MediaItem.fromUri(sourceUri))
-            created.prepare()
-            created.playWhenReady = true
+                )
+                created.setVideoSurface(entity.getSurface())
+                created.setMediaItem(MediaItem.fromUri(sourceUri))
+                created.prepare()
+                created.playWhenReady = true
+            }
+        } catch (error: Throwable) {
+            entity.parent = null
+            entity.dispose()
+            onStatus("This video could not be initialized on the current XR runtime.")
+            return false
         }
         surfaceEntity = entity
         player = exoPlayer
@@ -118,6 +125,7 @@ class SceneCoreVideoAdapter(
         player?.release()
         player = null
         surfaceEntity?.parent = null
+        surfaceEntity?.dispose()
         surfaceEntity = null
     }
 

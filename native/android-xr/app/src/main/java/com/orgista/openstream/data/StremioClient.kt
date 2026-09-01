@@ -298,7 +298,9 @@ object StremioClient {
         }.orEmpty()
         val imdbId = listOf(meta.optString("imdbId"), meta.optString("imdb_id"), rawId)
             .firstOrNull { it.matches(Regex("tt\\d{5,12}")) }
-        val imdbRating = meta.opt("imdbRating")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        val imdbRating = meta.opt("imdbRating")?.toString()
+            ?.takeIf { it.isNotBlank() && it != "null" && it != "N/A" }
+            ?.let { if ('/' in it) it else "$it/10" }
         val kind = StremioMediaTypePolicy.kind(type) ?: return null
         val episodes = if (kind == MediaKind.SERIES) {
             parseEpisodes(

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,6 +22,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -50,17 +55,21 @@ fun IptvSettingsPanel(
     var message by remember { mutableStateOf<String?>(null) }
     var messageError by remember { mutableStateOf(false) }
     var deletingSource by remember { mutableStateOf(false) }
+    var manualGuideUrl by remember { mutableStateOf(store.manualGuideUrl()) }
+    var plutoEnabled by remember { mutableStateOf(store.plutoEnabled) }
     val scope = rememberCoroutineScope()
-    val valid = IptvEndpointPolicy.isAllowed(endpoint) && (
-        type == IptvSourceType.M3U || (username.isNotBlank() && password.isNotBlank())
-        )
+    val valid = when (type) {
+        IptvSourceType.M3U -> IptvEndpointPolicy.isAllowed(endpoint)
+        IptvSourceType.XTREAM -> IptvEndpointPolicy.isAllowed(endpoint) && username.isNotBlank() && password.isNotBlank()
+        IptvSourceType.PLUTO -> false
+    }
 
     Panel(
         "Live sources",
         "Add an Xtream account with its server address, username, and password, or paste an M3U playlist URL. Use HTTPS when your provider offers it; an HTTP provider does not encrypt account traffic.",
         actions = {
             if (saved != null) {
-                TextButton(
+                OpenStreamTextButton(
                     enabled = !working,
                     onClick = { deletingSource = !deletingSource },
                 ) {
@@ -95,16 +104,40 @@ fun IptvSettingsPanel(
             }
         },
     ) {
-        OutlinedButton(onClick = onOpenChannelManager) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Pluto TV", color = OpenStreamColors.Text, fontWeight = FontWeight.Bold)
+                Text("Free live channels and current guide", color = OpenStreamColors.TextSoft, fontSize = 13.sp)
+            }
+            Switch(
+                checked = plutoEnabled,
+                modifier = Modifier.semantics {
+                    contentDescription = "Include Pluto TV"
+                    stateDescription = if (plutoEnabled) "Enabled" else "Disabled"
+                },
+                onCheckedChange = { enabled ->
+                    plutoEnabled = enabled
+                    store.plutoEnabled = enabled
+                    messageError = false
+                    message = if (enabled) "Pluto TV added." else "Pluto TV removed."
+                    onChanged()
+                },
+            )
+        }
+        OpenStreamOutlinedButton(onClick = onOpenChannelManager) {
             Text("Channel manager")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (type == IptvSourceType.XTREAM) {
-                Button(onClick = {}) { Text("Xtream account") }
-                OutlinedButton(onClick = { type = IptvSourceType.M3U; message = null }) { Text("M3U playlist") }
+                OpenStreamButton(onClick = {}) { Text("Xtream account") }
+                OpenStreamOutlinedButton(onClick = { type = IptvSourceType.M3U; message = null }) { Text("M3U playlist") }
             } else {
-                OutlinedButton(onClick = { type = IptvSourceType.XTREAM; message = null }) { Text("Xtream account") }
-                Button(onClick = {}) { Text("M3U playlist") }
+                OpenStreamOutlinedButton(onClick = { type = IptvSourceType.XTREAM; message = null }) { Text("Xtream account") }
+                OpenStreamButton(onClick = {}) { Text("M3U playlist") }
             }
         }
         OutlinedTextField(
@@ -140,6 +173,31 @@ fun IptvSettingsPanel(
                 modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
             )
         }
+        Text("Program guide", color = OpenStreamColors.Text, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = manualGuideUrl,
+            onValueChange = { manualGuideUrl = it.trim(); message = null },
+            label = { Text("XMLTV guide URL (optional)") },
+            placeholder = { Text("https://example.com/guide.xml.gz") },
+            singleLine = true,
+            isError = manualGuideUrl.isNotBlank() && !IptvEndpointPolicy.isAllowed(manualGuideUrl),
+            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
+        )
+        OpenStreamOutlinedButton(
+            enabled = (manualGuideUrl.isBlank() || IptvEndpointPolicy.isAllowed(manualGuideUrl)) && !working,
+            onClick = {
+                runCatching { store.saveManualGuideUrl(manualGuideUrl) }
+                    .onSuccess {
+                        messageError = false
+                        message = if (manualGuideUrl.isBlank()) "Program guide removed." else "Program guide saved."
+                        onChanged()
+                    }
+                    .onFailure { failure ->
+                        messageError = true
+                        message = failure.message ?: "Could not save this program guide."
+                    }
+            },
+        ) { Text("Save guide") }
         message?.let {
             Text(
                 it,
@@ -149,7 +207,7 @@ fun IptvSettingsPanel(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
+            OpenStreamButton(
                 enabled = valid && !working,
                 onClick = {
                     val source = IptvStore.custom(name, type, endpoint, username, password)
@@ -165,7 +223,7 @@ fun IptvSettingsPanel(
                     }
                 },
             ) { Text("Save") }
-            OutlinedButton(
+            OpenStreamOutlinedButton(
                 enabled = valid && !working,
                 onClick = {
                     working = true
