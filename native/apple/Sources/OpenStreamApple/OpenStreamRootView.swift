@@ -3,6 +3,11 @@ import SwiftUI
 /// Empty production shell. Media appears only after the viewer configures a source.
 public struct OpenStreamRootView: View {
     @State private var selectedSection = "Discover"
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    private let sections = ["Discover", "Library", "Live", "Sources", "Settings"]
 
     public init() {}
 
@@ -15,27 +20,58 @@ public struct OpenStreamRootView: View {
                 emptyState
                 Spacer()
             }
-            .padding(.horizontal, 36)
+            .padding(.horizontal, compact ? 20 : 36)
             .padding(.vertical, 24)
         }
         .preferredColorScheme(.dark)
     }
 
+    // A single wide HStack collapses into one-character-per-line label towers
+    // on a phone, so compact widths get a two-row bar with a scrolling
+    // section picker instead.
+    private var compact: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder
     private var topBar: some View {
-        HStack(spacing: 18) {
-            OpenStreamThreeBarMark()
-                .frame(width: 38, height: 28)
-            Text("OpenStream")
-                .font(.system(size: 27, weight: .bold))
-            Spacer()
-            ForEach(["Discover", "Library", "Live", "Sources", "Settings"], id: \.self) { section in
-                Button(section) { selectedSection = section }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 16, weight: selectedSection == section ? .bold : .medium))
-                    .foregroundStyle(selectedSection == section ? Color.white : Color.white.opacity(0.62))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 12)
+        if compact {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) {
+                    OpenStreamThreeBarMark()
+                        .frame(width: 30, height: 22)
+                    Text("OpenStream")
+                        .font(.system(size: 23, weight: .bold))
+                    Spacer()
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) { sectionButtons }
+                }
             }
+        } else {
+            HStack(spacing: 18) {
+                OpenStreamThreeBarMark()
+                    .frame(width: 38, height: 28)
+                Text("OpenStream")
+                    .font(.system(size: 27, weight: .bold))
+                Spacer()
+                sectionButtons
+            }
+        }
+    }
+
+    private var sectionButtons: some View {
+        ForEach(sections, id: \.self) { section in
+            Button(section) { selectedSection = section }
+                .buttonStyle(.plain)
+                .font(.system(size: 16, weight: selectedSection == section ? .bold : .medium))
+                .foregroundStyle(selectedSection == section ? Color.white : Color.white.opacity(0.62))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 12)
         }
     }
 
