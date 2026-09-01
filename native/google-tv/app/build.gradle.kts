@@ -59,6 +59,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Embed native symbol tables (FFmpeg/Media3 .so files) in the AAB
+            // so Play symbolicates native crashes instead of raw addresses.
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             // TODO: set the production WebXR viewer URL before shipping a release
             // build. Empty here means WebXrBackend disables the immersive launch
             // and playback falls back to the flat player (no localhost loopback).
