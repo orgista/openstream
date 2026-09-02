@@ -1,95 +1,108 @@
 import SwiftUI
 
-/// Empty production shell. Media appears only after the viewer configures a source.
-public struct OpenStreamRootView: View {
-    @State private var selectedSection = "Discover"
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    #endif
+enum OpenStreamTab: String, CaseIterable, Identifiable {
+    case discover
+    case library
+    case live
+    case settings
 
-    private let sections = ["Discover", "Library", "Live", "Sources", "Settings"]
+    var id: String { rawValue }
 
-    public init() {}
-
-    public var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 0) {
-                topBar
-                Spacer()
-                emptyState
-                Spacer()
-            }
-            .padding(.horizontal, compact ? 20 : 36)
-            .padding(.vertical, 24)
+    var title: String {
+        switch self {
+        case .discover: "Discover"
+        case .library: "Library"
+        case .live: "Live"
+        case .settings: "Settings"
         }
-        .preferredColorScheme(.dark)
     }
 
-    // A single wide HStack collapses into one-character-per-line label towers
-    // on a phone, so compact widths get a two-row bar with a scrolling
-    // section picker instead.
-    private var compact: Bool {
-        #if os(iOS)
-        horizontalSizeClass == .compact
-        #else
-        false
-        #endif
+    var systemImage: String {
+        switch self {
+        case .discover: "sparkles"
+        case .library: "books.vertical"
+        case .live: "dot.radiowaves.left.and.right"
+        case .settings: "gearshape"
+        }
+    }
+}
+
+/// Native Apple app shell with one independent navigation stack per tab.
+@MainActor
+public struct OpenStreamRootView: View {
+    @State private var selectedTab = OpenStreamTab.discover
+    @State private var sourceStore = AppleSourceStore()
+    @State private var catalogStore = AppleCatalogStore()
+    @State private var settingsStore = AppleSettingsStore()
+
+    private let webManagement: any AppleWebManagementServing
+
+    public init(webManagement: (any AppleWebManagementServing)? = nil) {
+        self.webManagement = webManagement ?? AppleWebManagementController()
+    }
+
+    public var body: some View {
+        TabView(selection: $selectedTab) {
+            ForEach(OpenStreamTab.allCases) { tab in
+                NavigationStack {
+                    content(for: tab)
+                }
+                .tabItem {
+                    Label(tab.title, systemImage: tab.systemImage)
+                }
+                .tag(tab)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(.white)
     }
 
     @ViewBuilder
-    private var topBar: some View {
-        if compact {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 12) {
-                    OpenStreamThreeBarMark()
-                        .frame(width: 30, height: 22)
-                    Text("OpenStream")
-                        .font(.system(size: 23, weight: .bold))
-                    Spacer()
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) { sectionButtons }
-                }
-            }
-        } else {
-            HStack(spacing: 18) {
-                OpenStreamThreeBarMark()
-                    .frame(width: 38, height: 28)
-                Text("OpenStream")
-                    .font(.system(size: 27, weight: .bold))
-                Spacer()
-                sectionButtons
-            }
+    private func content(for tab: OpenStreamTab) -> some View {
+        switch tab {
+        case .discover:
+            AppleDiscoverView(
+                catalogStore: catalogStore,
+                sourceStore: sourceStore,
+                settings: settingsStore,
+                openSettings: { selectedTab = .settings }
+            )
+            .navigationTitle(tab.title)
+        case .library:
+            AppleLibraryView(
+                sourceStore: sourceStore,
+                openSettings: { selectedTab = .settings }
+            )
+            .navigationTitle(tab.title)
+        case .live:
+            AppleLiveTVView(
+                sourceStore: sourceStore,
+                settings: settingsStore,
+                openSettings: { selectedTab = .settings }
+            )
+            .navigationTitle(tab.title)
+        case .settings:
+            AppleSettingsView(
+                settings: settingsStore,
+                sourceStore: sourceStore,
+                webManagement: webManagement
+            )
         }
     }
+}
 
-    private var sectionButtons: some View {
-        ForEach(sections, id: \.self) { section in
-            Button(section) { selectedSection = section }
-                .buttonStyle(.plain)
-                .font(.system(size: 16, weight: selectedSection == section ? .bold : .medium))
-                .foregroundStyle(selectedSection == section ? Color.white : Color.white.opacity(0.62))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 12)
-        }
-    }
+private struct AppleCatalogEmptyView: View {
+    let title: String
+    let systemImage: String
+    let openSettings: () -> Void
 
-    private var emptyState: some View {
-        VStack(spacing: 18) {
-            OpenStreamThreeBarMark()
-                .frame(width: 84, height: 60)
-            Text(selectedSection == "Discover" ? "Nothing to show yet" : selectedSection)
-                .font(.system(size: 34, weight: .bold))
-            Text("Add libraries, add-ons, YouTube channels, and Live TV from Sources. OpenStream never ships requested content as a built-in catalog.")
-                .font(.system(size: 17))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 620)
-            Button("Open Sources") { selectedSection = "Sources" }
-                .buttonStyle(.borderedProminent)
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } actions: {
+            Button("Open Settings", action: openSettings)
+                .buttonStyle(.brandPrimary)
         }
-        .accessibilityElement(children: .contain)
     }
 }
 

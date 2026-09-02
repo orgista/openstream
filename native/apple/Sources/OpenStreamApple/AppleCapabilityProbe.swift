@@ -38,7 +38,10 @@ public enum AppleCapabilityProbe {
                 .dolbyVision: hdrState,
             ],
             projections: projections,
-            notes: ["AVPlayer.eligibleForHDRPlayback is a broad eligibility signal; each asset is inspected before route selection."]
+            notes: [
+                "AVPlayer.eligibleForHDRPlayback is a broad eligibility signal; each asset is inspected before route selection.",
+                "Container and FourCC labels are diagnostic only; async AVAsset and enabled-track playback properties decide support.",
+            ]
         )
     }
 }

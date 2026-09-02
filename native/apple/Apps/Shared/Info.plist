@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+#if OPENSTREAM_LONG_FORM_VIDEO
+	<key>AVInitialRouteSharingPolicy</key>
+	<string>LongFormVideo</string>
+#endif
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_openstream._tcp</string>
+	</array>
+	<!-- User-configured IPTV providers frequently expose HTTP-only playlist
+	     and media endpoints. Credentials remain separate from the stored URL. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsForMedia</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

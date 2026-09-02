@@ -119,7 +119,7 @@ import Testing
         height: 1080,
         frameRate: 24
     )
-    #expect(OpenStreamCapabilityNegotiator.evaluate(knownCodec, against: report).support == .supported)
+    #expect(OpenStreamCapabilityNegotiator.evaluate(knownCodec, against: report).support == .runtimeCheck)
 }
 
 @Test func appleOfflinePolicyChoosesTheBestDeviceCompatibleVariant() {
@@ -166,6 +166,8 @@ import Testing
 @Test func playbackProgressOnlyResumesMeaningfulUnfinishedPlayback() {
     #expect(ApplePlaybackProgress(position: 5, duration: 600).resumePosition == nil)
     #expect(ApplePlaybackProgress(position: 120, duration: 600).resumePosition == 120)
+    #expect(ApplePlaybackProgress(position: 569, duration: 600).resumePosition == 569)
+    #expect(ApplePlaybackProgress(position: 570, duration: 600).resumePosition == nil)
     #expect(ApplePlaybackProgress(position: 590, duration: 600).resumePosition == nil)
 }
 

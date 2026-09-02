@@ -95,15 +95,49 @@ public struct OpenStreamPlaybackDecision: Equatable, Sendable {
     }
 }
 
+/// Decoder evidence gathered from the concrete `AVAsset` and its enabled
+/// audio/video tracks. Container and codec labels are useful diagnostics, but
+/// they are never sufficient proof that the current device can play an asset.
+public struct OpenStreamRuntimePlaybackEvidence: Equatable, Sendable {
+    public var assetIsPlayable: Bool
+    public var assetIsReadable: Bool
+    public var assetIsExportable: Bool
+    public var hasProtectedContent: Bool
+    public var enabledVideoTracksArePlayableAndDecodable: Bool
+    public var enabledAudioTracksArePlayableAndDecodable: Bool
+
+    public init(
+        assetIsPlayable: Bool,
+        assetIsReadable: Bool,
+        assetIsExportable: Bool,
+        hasProtectedContent: Bool,
+        enabledVideoTracksArePlayableAndDecodable: Bool,
+        enabledAudioTracksArePlayableAndDecodable: Bool
+    ) {
+        self.assetIsPlayable = assetIsPlayable
+        self.assetIsReadable = assetIsReadable
+        self.assetIsExportable = assetIsExportable
+        self.hasProtectedContent = hasProtectedContent
+        self.enabledVideoTracksArePlayableAndDecodable = enabledVideoTracksArePlayableAndDecodable
+        self.enabledAudioTracksArePlayableAndDecodable = enabledAudioTracksArePlayableAndDecodable
+    }
+
+    public var supportsDirectPlayback: Bool {
+        assetIsPlayable
+            && enabledVideoTracksArePlayableAndDecodable
+            && enabledAudioTracksArePlayableAndDecodable
+    }
+}
+
 public enum OpenStreamCapabilityNegotiator {
-    private static let knownVideoCodecs: Set<String> = [
-        "av01", "avc1", "avc3", "dvh1", "dvhe", "hvc1", "hev1", "mp4v", "vp09",
-        "ap4h", "ap4x", "apch", "apcn", "apco", "apcs",
-    ]
     private static let maximumDimension = 32_768
     private static let maximumFrameRate = 480.0
 
-    public static func evaluate(_ format: OpenStreamFormat, against report: OpenStreamCapabilityReport) -> OpenStreamPlaybackDecision {
+    public static func evaluate(
+        _ format: OpenStreamFormat,
+        against report: OpenStreamCapabilityReport,
+        runtime evidence: OpenStreamRuntimePlaybackEvidence? = nil
+    ) -> OpenStreamPlaybackDecision {
         let normalizedCodec = format.codec.lowercased()
         guard normalizedCodec.utf8.count == 4,
               format.width > 0,
@@ -128,18 +162,33 @@ public enum OpenStreamCapabilityNegotiator {
             )
         }
 
-        var reasons: [String] = []
-        if !knownVideoCodecs.contains(normalizedCodec) {
-            reasons.append("The codec requires a runtime decoder check.")
+        if let evidence {
+            guard evidence.supportsDirectPlayback else {
+                let reason = if evidence.hasProtectedContent && !evidence.assetIsPlayable {
+                    "The protected asset is not playable by the system media stack."
+                } else if !evidence.assetIsPlayable {
+                    "The asset is not playable by the system media stack."
+                } else {
+                    "An enabled audio or video track is not both playable and decodable."
+                }
+                return OpenStreamPlaybackDecision(support: .unsupported, reasons: [reason])
+            }
+
+            if projectionSupport == .runtimeCheck && format.projection != .flat {
+                return OpenStreamPlaybackDecision(
+                    support: .runtimeCheck,
+                    reasons: ["Immersive presentation still requires an available AVKit experience."]
+                )
+            }
+            return OpenStreamPlaybackDecision(support: .supported, reasons: [])
         }
+
+        var reasons = ["Codec and container support require an asset and track decoder check."]
         if rangeSupport == .runtimeCheck { reasons.append("Dynamic range requires an asset and decoder check.") }
         if projectionSupport == .runtimeCheck { reasons.append("Immersive projection requires an AVKit experience check.") }
         if format.dynamicRange == .dolbyVision {
             reasons.append("Dolby Vision profile support is verified with the actual asset; HDR eligibility alone is insufficient.")
         }
-        return OpenStreamPlaybackDecision(
-            support: reasons.isEmpty ? .supported : .runtimeCheck,
-            reasons: reasons
-        )
+        return OpenStreamPlaybackDecision(support: .runtimeCheck, reasons: reasons)
     }
 }
