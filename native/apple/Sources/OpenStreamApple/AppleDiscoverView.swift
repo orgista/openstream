@@ -275,60 +275,73 @@ private struct AppleCatalogItemDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+                // Full-bleed hero. A Color.clear layer defines the size (screen
+                // width × heroHeight) and the artwork is a clipped overlay, so
+                // the image's scaledToFill can't report an oversized ideal width
+                // that widens the vertical ScrollView and shifts the whole
+                // content column left ("opens oddly / went sideways").
+                Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: heroHeight)
-                    .clipShape(.rect(cornerRadius: 18))
-
-                Text(item.name)
-                    .font(.largeTitle.bold())
-
-                Button {
-                    playRequest = UUID()
-                } label: {
-                    if playbackState == .loading {
-                        ProgressView()
-                            .accessibilityLabel("Loading stream")
-                    } else {
-                        Label("Play", systemImage: "play.fill")
+                    .overlay {
+                        AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
                     }
-                }
-                .buttonStyle(.brandPrimary)
-                .disabled(playbackState == .loading)
+                    .clipped()
 
-                if item.type == "series" {
-                    if isLoadingEpisodes {
-                        ProgressView()
-                    } else if !episodes.isEmpty {
-                        Picker("Episode", selection: $selectedEpisodeID) {
-                            ForEach(episodes) { episode in
-                                Text(episode.displayTitle).tag(Optional(episode.id))
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(item.name)
+                        .font(.largeTitle.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        playRequest = UUID()
+                    } label: {
+                        if playbackState == .loading {
+                            ProgressView()
+                                .accessibilityLabel("Loading stream")
+                        } else {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                    }
+                    .buttonStyle(.brandPrimary)
+                    .disabled(playbackState == .loading)
+
+                    if item.type == "series" {
+                        if isLoadingEpisodes {
+                            ProgressView()
+                        } else if !episodes.isEmpty {
+                            Picker("Episode", selection: $selectedEpisodeID) {
+                                ForEach(episodes) { episode in
+                                    Text(episode.displayTitle).tag(Optional(episode.id))
+                                }
                             }
                         }
                     }
-                }
 
-                if case .failed(let message) = playbackState {
-                    Label(message, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 12) {
-                    if let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
-                        Text(releaseInfo)
+                    if case .failed(let message) = playbackState {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
                     }
-                    if let rating = item.rating {
-                        Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+
+                    HStack(spacing: 12) {
+                        if let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
+                            Text(releaseInfo)
+                        }
+                        if let rating = item.rating {
+                            Label(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+
+                    if let summary = item.summary, !summary.isEmpty {
+                        Text(summary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .foregroundStyle(.secondary)
-
-                if let summary = item.summary, !summary.isEmpty {
-                    Text(summary)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
             }
-            .frame(maxWidth: 1_000, alignment: .leading)
-            .padding()
+            .padding(.bottom)
         }
         .navigationTitle(item.name)
         #if os(iOS)

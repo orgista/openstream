@@ -43,8 +43,8 @@ struct AppleSettingsView: View {
             }
 
             Section("Playback") {
-                Toggle("Captions Auto-On", isOn: $settings.captionsAutoOn)
-                Toggle("Delete After Watching", isOn: $settings.deleteAfterWatching)
+                Toggle("Captions Auto-On", isOn: $settings.captionsAutoOn).tint(.green)
+                Toggle("Delete After Watching", isOn: $settings.deleteAfterWatching).tint(.green)
                 NavigationLink(value: AppleSettingsRoute.playbackInfo) {
                     Label("Playback Info", systemImage: "play.square.stack")
                 }
@@ -92,7 +92,7 @@ private struct AppleMetadataSettingsView: View {
 
         Form {
             Section {
-                Toggle("Use Metadata APIs", isOn: $settings.metadataEnabled)
+                Toggle("Use Metadata APIs", isOn: $settings.metadataEnabled).tint(.green)
             }
 
             Section("TMDB") {
@@ -228,7 +228,7 @@ private struct AppleGatewaySettingsView: View {
 
         Form {
             Section {
-                Toggle("Enabled", isOn: $settings.gatewayEnabled)
+                Toggle("Enabled", isOn: $settings.gatewayEnabled).tint(.green)
             }
 
             Section("Connection") {

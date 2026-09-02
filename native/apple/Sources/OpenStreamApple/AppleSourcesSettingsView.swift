@@ -215,7 +215,7 @@ private struct AppleSourceDetailView: View {
                     Section {
                         LabeledContent("Type", value: source.kind.title)
                         LabeledContent(locationLabel(source), value: sourceLocation(source))
-                        Toggle("Enabled", isOn: enabled)
+                        Toggle("Enabled", isOn: enabled).tint(.green)
                     }
 
                     Section {
