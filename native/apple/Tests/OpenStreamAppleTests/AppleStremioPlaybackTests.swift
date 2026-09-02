@@ -521,3 +521,17 @@ private actor PlaybackResolutionRecorder {
         #expect(inspection == playableInspection())
     }
 }
+
+@Test func imdbIdentifierDetectionMatchesMoviesAndSeriesEpisodes() {
+    // Movies and series-episode ids are already stream-add-on friendly.
+    #expect(AppleStremioMetadataClient.isIMDBIdentifier("tt10986410"))
+    #expect(AppleStremioMetadataClient.isIMDBIdentifier("tt0126029:1:2"))
+    // Catalog add-ons (RT / Streaming Catalogs) key items by ids Torrentio
+    // cannot resolve — these must NOT be treated as IMDB ids so the meta
+    // lookup runs instead.
+    #expect(!AppleStremioMetadataClient.isIMDBIdentifier("tmdb:12345"))
+    #expect(!AppleStremioMetadataClient.isIMDBIdentifier("stremio:rt:ted-lasso"))
+    #expect(!AppleStremioMetadataClient.isIMDBIdentifier("kitsu:1"))
+    #expect(!AppleStremioMetadataClient.isIMDBIdentifier("tt"))
+    #expect(!AppleStremioMetadataClient.isIMDBIdentifier(""))
+}

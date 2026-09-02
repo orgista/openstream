@@ -105,9 +105,70 @@ public struct AppleStremioMetadataClient: Sendable {
         return []
     }
 
-    private static func endpoint(source: AppleSource, mediaID: String) throws -> URL {
+    /// Resolves a catalog item's canonical IMDB id (`tt…`) via a meta-capable
+    /// add-on. Catalog add-ons like Rotten Tomatoes and Streaming Catalogs
+    /// return items keyed by non-IMDB ids (tmdb/slug/prefixed), but stream
+    /// add-ons like Torrentio only resolve IMDB ids — so the raw catalog id
+    /// yields "no streams". This mirrors the Android client, which stores each
+    /// item's id AS its resolved IMDB id. Returns nil when nothing maps.
+    public func imdbIdentifier(
+        sources: [AppleSource],
+        preferredSourceID: AppleSource.ID? = nil,
+        type: String,
+        id: String
+    ) async -> String? {
+        // Already an IMDB id (movie `tt123`, or series episode `tt123:1:2`).
+        if Self.isIMDBIdentifier(id) { return id }
+        let eligible = sources.filter { source in
+            source.kind == .stremio
+                && source.isEnabled
+                && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
+        }
+        let candidates = eligible.filter { $0.id == preferredSourceID }
+            + eligible.filter { $0.id != preferredSourceID }
+        for source in candidates {
+            if Task.isCancelled { return nil }
+            if let resolved = try? await metaIMDBID(source: source, type: type, id: id) {
+                return resolved
+            }
+        }
+        return nil
+    }
+
+    /// True for `tt1234567` and series episode ids `tt1234567:1:2`.
+    public static func isIMDBIdentifier(_ id: String) -> Bool {
+        let head = id.split(separator: ":", maxSplits: 1).first.map(String.init) ?? id
+        guard head.hasPrefix("tt"), head.count >= 7 else { return false }
+        return head.dropFirst(2).allSatisfy(\.isNumber)
+    }
+
+    private func metaIMDBID(source: AppleSource, type: String, id: String) async throws -> String? {
+        let endpoint = try Self.endpoint(source: source, type: type, mediaID: id)
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await loader(request)
+        guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+              let http = response as? HTTPURLResponse,
+              http.url?.scheme?.lowercased() == "https",
+              (200 ... 299).contains(http.statusCode),
+              let envelope = try? JSONDecoder().decode(IMDBEnvelope.self, from: data) else {
+            return nil
+        }
+        if let imdb = envelope.meta.imdbID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           Self.isIMDBIdentifier(imdb) {
+            return imdb
+        }
+        let metaID = envelope.meta.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return Self.isIMDBIdentifier(metaID) ? metaID : nil
+    }
+
+    private static func endpoint(source: AppleSource, type: String = "series", mediaID: String) throws -> URL {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !cleanID.isEmpty, cleanID.utf8.count <= 512,
+              !cleanType.isEmpty, cleanType.utf8.count <= 64,
               var components = URLComponents(url: source.transportURL, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "https",
               components.host?.isEmpty == false,
@@ -118,7 +179,7 @@ public struct AppleStremioMetadataClient: Sendable {
             throw AppleStremioPlaybackError.invalidMediaIdentity
         }
         let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let suffix = "meta/series/\(encodedSegment(cleanID)).json"
+        let suffix = "meta/\(encodedSegment(cleanType))/\(encodedSegment(cleanID)).json"
         components.percentEncodedPath = basePath.isEmpty ? "/\(suffix)" : "/\(basePath)/\(suffix)"
         guard let url = components.url else { throw AppleStremioPlaybackError.invalidSource }
         return url
@@ -137,6 +198,16 @@ public struct AppleStremioMetadataClient: Sendable {
 
     private struct Envelope: Decodable {
         let meta: Metadata
+    }
+
+    private struct IMDBEnvelope: Decodable {
+        let meta: IMDBMeta
+    }
+
+    private struct IMDBMeta: Decodable {
+        let id: String?
+        let imdbID: String?
+        private enum CodingKeys: String, CodingKey { case id, imdbID = "imdb_id" }
     }
 
     private struct Metadata: Decodable {

@@ -265,6 +265,10 @@ private struct AppleCatalogItemDetailView: View {
     @State private var episodes: [AppleStremioEpisode] = []
     @State private var selectedEpisodeID: String?
     @State private var isLoadingEpisodes = false
+    // The item's canonical IMDB id, resolved via a meta add-on. Catalog add-ons
+    // (RT, Streaming Catalogs) key items by non-IMDB ids that stream add-ons
+    // can't resolve; this is the id actually used for episode + stream lookups.
+    @State private var resolvedMediaID: String?
 
     private let metadataClient = AppleStremioMetadataClient()
 
@@ -337,7 +341,7 @@ private struct AppleCatalogItemDetailView: View {
             guard playRequest != nil else { return }
             await resolvePlayback()
         }
-        .task(id: item.id) { await loadEpisodesIfNeeded() }
+        .task(id: item.id) { await prepare() }
         .modifier(AppleStremioPlayerPresentationModifier(presentation: $playerPresentation))
     }
 
@@ -352,7 +356,11 @@ private struct AppleCatalogItemDetailView: View {
     private func resolvePlayback() async {
         playbackState = .loading
         do {
-            let selectedItem = selectedEpisodeID.map(item.withMediaID) ?? item
+            // Series: play the selected episode id (already IMDB-shaped from the
+            // resolved series meta). Movie: play the resolved IMDB id, falling
+            // back to the raw catalog id only if meta resolution found nothing.
+            let streamID = selectedEpisodeID ?? resolvedMediaID ?? item.mediaID
+            let selectedItem = item.withMediaID(streamID)
             let resolved = try await playbackResolver.resolve(
                 sources: playbackSources,
                 preferredSourceID: source.id,
@@ -373,7 +381,17 @@ private struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private func loadEpisodesIfNeeded() async {
+    /// Resolve the item to its IMDB id, then (for series) load episodes keyed
+    /// by that id so both metadata and streams resolve against a stream-add-on
+    /// friendly identifier.
+    private func prepare() async {
+        let resolved = await metadataClient.imdbIdentifier(
+            sources: playbackSources,
+            preferredSourceID: source.id,
+            type: item.type,
+            id: item.mediaID
+        )
+        resolvedMediaID = resolved ?? item.mediaID
         guard item.type == "series" else { return }
         isLoadingEpisodes = true
         defer { isLoadingEpisodes = false }
@@ -381,7 +399,7 @@ private struct AppleCatalogItemDetailView: View {
             episodes = try await metadataClient.episodes(
                 sources: playbackSources,
                 preferredSourceID: source.id,
-                mediaID: item.mediaID
+                mediaID: resolvedMediaID ?? item.mediaID
             )
             selectedEpisodeID = episodes.first?.id
         } catch is CancellationError {
