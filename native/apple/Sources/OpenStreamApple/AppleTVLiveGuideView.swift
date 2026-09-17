@@ -558,9 +558,9 @@ private struct AppleTVGuideGrid: View, Equatable {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView(.vertical) {
-                HStack(alignment: .top, spacing: 0) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(rows) { row in
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        HStack(alignment: .top, spacing: 0) {
                             AppleTVGuideRailCell(
                                 row: row,
                                 model: AppleTVGuideRailCellModel(row: row, favoriteIDs: favoriteIDs),
@@ -572,13 +572,8 @@ private struct AppleTVGuideGrid: View, Equatable {
                             .frame(width: metrics.railWidth, height: metrics.rowHeight, alignment: .topLeading)
                             .onAppear { visibility.insert(row.id) }
                             .onDisappear { visibility.remove(row.id) }
-                        }
-                    }
-                    .frame(width: metrics.railWidth)
-                    .focusSection()
+                            .focusSection()
 
-                    LazyVStack(spacing: 0) {
-                        ForEach(rows) { row in
                             AppleTVGuideScheduleRow(
                                 channel: row.channel,
                                 cells: cellStore.cells(for: row.id),
@@ -591,13 +586,14 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) }
                             )
+                            .frame(width: metrics.timelineWidth)
+                            .focusSection()
                         }
                     }
-                    .frame(width: metrics.timelineWidth)
-                    .overlay(alignment: .topLeading) {
-                        AppleTVGuideNowLine(metrics: metrics, window: window, now: now, timeline: timeline)
-                    }
-                    .focusSection()
+                }
+                .overlay(alignment: .topLeading) {
+                    AppleTVGuideNowLine(metrics: metrics, window: window, now: now, timeline: timeline)
+                        .offset(x: metrics.railWidth)
                 }
             }
             .scrollIndicators(.hidden)
