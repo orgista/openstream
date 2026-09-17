@@ -1838,10 +1838,18 @@ order; this section grows as each lands.
       tab bar and glass top buttons, nothing painted by the app; iOS 18 keeps its classic bar by
       definition. Note for later: with Liquid Glass on, every bar and sheet is glass now — the
       "no glass" rule is superseded for iOS chrome by owner decision.
-- [ ] **Mormon Wives S1E1 still plays the wrong show** on the iPhone sim with the current tree
-      (owner, 2026-09-17; trace: `attempt 1/3 stremio host=torrentio.strem.fun route=surface`) — the
-      2026-09-16 ranking fix is in this build and did not settle it. Needs the candidate list from the
-      trace and a reproduction of which name won.
+- [x] **Mormon Wives S1E1 played the wrong show — diagnosed for real and fixed.** Torrentio's answer
+      for `tt31091039:1:1` holds twelve streams and seven are other shows: "Secret Lives of Gypsy
+      Wives S01E01" ×5 and "Secret Sex Lives of Tyrants S01E01" ×2. All state S01E01, so the 09-16
+      episode rule could not touch them, and the best-seeded Gypsy Wives 1080p won on quality.
+      `AppleStremioTitleMatch` now reads the title's own words (per colon part — "Star Wars: Andor"
+      matches "Andor" — stopwords dropped); a real release name lacking them sorts below every
+      match, ahead of the episode rule; silence (hashes, two-word names) is not a contradiction.
+      5 tests built from the real Torrentio names. The resolver traces the top four candidates per
+      play (`candidates for <title>: …`) so the next report can be read off the file. Verified on
+      the iPhone sim: `candidates for The Secret Lives of Mormon Wives: The.Secret.Lives.of.Mormon.
+      Wives.S01E01.1080p.WEB.h264-EDITH | … ×4` → play → first frame; the Gypsy/Tyrants releases no
+      longer appear in the top four. Gate **999 / 99**.
 - [ ] Improvements: ~~download percentage~~ (done above), faster posters, landscape control in the player, ~~EPG for M3U~~ (guide limits fixed above).
 - [!] **The crash report is not on this Mac.** Organizer's cache for `com.orgista.openstream` was
       last refreshed 2026-09-11, before build 10 shipped, and holds only its query state; the

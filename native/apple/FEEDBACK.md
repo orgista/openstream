@@ -7182,3 +7182,13 @@ visible; ⊕ adds, ✓ shows what's in, and the 300 cap still speaks up. Checked
 One thing I noticed on the iPhone sim: your Xtream source is switched off (Settings → Sources →
 Live TV → On), which is why the manager said "add a source first" — it now says the source is off.
 Nothing in the app disables a source by itself, and my tests only add/remove their own playlist.
+
+## 2026-09-17 13:05 — Mormon Wives, the real cause
+
+You were right that it was still wrong. It was never an episode problem: Torrentio answers that
+episode with twelve streams and seven of them are *other shows* — "Secret Lives of Gypsy Wives
+S01E01" and "Secret Sex Lives of Tyrants S01E01". They all say S01E01, so last night's episode rule
+couldn't tell them apart, and the best-seeded Gypsy Wives release won. Candidates are now ranked on
+the title's own words first; on the sim the top four are all Mormon Wives releases and episode 1
+plays. The trace now also names the top candidates on every play, so the next "wrong show" report
+is a file read, not a hunt. Tab bar is the system one (glass on iOS 26). All local — nothing pushed.

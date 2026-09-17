@@ -12,7 +12,7 @@ state is at the bottom of each, newest last).
 ```
 # The gate. NEVER plain `swift test` (the default .build lands on the SMB share and corrupts).
 swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
-# Expect: "Test run with 994 tests in 98 suites passed" (as of 2026-09-17 12:35). Run it BEFORE
+# Expect: "Test run with 999 tests in 99 suites passed" (as of 2026-09-17 13:05). Run it BEFORE
 # and AFTER every change. If it prints "input file … was modified during the build", that is
 # the SMB share, not you — sleep 30–45 s and run it again.
 
@@ -274,10 +274,9 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
 - This file — update the "state" below when you finish a unit of work.
 
 ## 7. State as of 2026-09-17 12:35 (newest first)
-- Tab bar is the system one (Liquid Glass on iOS 26; compat key removed). Channel Manager redesigned.
-  Mormon Wives diagnosed: Torrentio returns other shows' S01E01 releases ("Secret Lives of Gypsy
-  Wives", "Secret Sex Lives of Tyrants"); a title-match demotion is the fix in progress. Gate 994 / 98.
-  iOS 11/12 still wait on the Widgets App Group tick.
+- Mormon Wives fixed by title-match ranking (AppleStremioTitleMatch; trace `candidates for …`).
+  Tab bar is the system one. Channel Manager redesigned. Gate 999 / 99. Everything since 12 is
+  local (13 candidates); iOS 11/12 still wait on the Widgets App Group tick; macOS needs certs.
 - Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
   TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
   cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.

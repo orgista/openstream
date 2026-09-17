@@ -504,6 +504,22 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@", "ARTE")).firstMatch.exists, "search did not filter the list")
     }
 
+    /// Owner, 2026-09-17: "episode 1 still loads the wrong show". Plays the
+    /// Discover billboard item (Mormon Wives on this sim) and leaves the
+    /// candidate trace behind for inspection; asserts only that playback
+    /// starts without a failure alert.
+    func testBillboardPlayStartsWithoutFailure() {
+        launch(screen: "discover")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let play = app.buttons["Play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 40), "no billboard Play")
+        play.tap()
+        Thread.sleep(forTimeInterval: 30.0)
+        attach("billboard-play-after-30s")
+        let alert = app.alerts.firstMatch
+        XCTAssertFalse(alert.exists && alert.label.contains("Playback Failed"), "playback failed: \(alert.staticTexts.allElementsBoundByIndex.map(\.label))")
+    }
+
     /// Owner C8: landscape. The rule is that the phone hides the tab bar in
     /// landscape so content fills the screen, and brings it back in portrait.
     /// Both directions are asserted, because a bar that never comes back is the
