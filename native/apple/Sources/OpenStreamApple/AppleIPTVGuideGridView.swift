@@ -1,5 +1,11 @@
 import SwiftUI
 
+@MainActor
+@Observable
+private final class GuideScrollState {
+    var horizontalOffset: CGFloat = 0
+}
+
 /// A lazy schedule with one shared timeline and a pinned channel rail.
 public struct AppleIPTVGuideGridView: View {
     let channels: [AppleIPTVChannel]
@@ -9,10 +15,14 @@ public struct AppleIPTVGuideGridView: View {
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
     let onVisibleChannels: (Set<String>) async -> Void
+    
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var rows: [AppleGuideChannel] = []
-    @State private var horizontalOffset: CGFloat = 0
+    
+    @State private var rows: [AppleGuideRowModel] = []
+    @State private var headerSlots: [AppleGuideGridHeaderSlot] = []
+    @State private var scrollState = GuideScrollState()
     @State private var visibleIDs = Set<String>()
+    
     @ScaledMetric(relativeTo: .body) private var rowHeight = 76.0
 
     public init(channels: [AppleIPTVChannel], guide: AppleIPTVGuide, entries: [AppleChannelLineupEntry],
@@ -34,9 +44,9 @@ public struct AppleIPTVGuideGridView: View {
     public var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let window = AppleGuideChannelProjection.window(day: context.date, now: context.date)
-            let header = AppleGuideGridModel.build(channels: [], programmes: [:], window: window,
-                slotWidthMinutes: 30, now: context.date)
             let timelineWidth = CGFloat(window.duration / 1800) * cellWidth
+            let tick = floor(context.date.timeIntervalSince1970 / 60)
+            
             VStack(spacing: 0) {
                 if rows.isEmpty {
                     ContentUnavailableView("No Channels", systemImage: "tv")
@@ -51,62 +61,95 @@ public struct AppleIPTVGuideGridView: View {
                                         ForEach(rows) { row in
                                             HStack(spacing: 0) {
                                                 GuideChannelRail(row: row, isFavorite: favoriteIDs.contains(row.id),
+                                                    scrollState: scrollState, railWidth: railWidth,
                                                     onSelect: { onSelect(row.channel) }, onToggleFavorite: { onToggleFavorite(row.id) })
                                                     .frame(width: railWidth, height: rowHeight)
                                                     .background(Color.black)
-                                                    .offset(x: horizontalOffset)
                                                     .zIndex(1)
-                                                GuideScheduleRow(channel: row.channel, guide: guide, window: window,
-                                                    now: context.date, cellWidth: cellWidth, height: rowHeight,
+                                                GuideScheduleRow(row: row, cellWidth: cellWidth, height: rowHeight,
                                                     onSelect: { onSelect(row.channel) })
+                                                    .equatable()
                                             }
                                             .onAppear { visibleIDs.insert(row.id) }
                                             .onDisappear { visibleIDs.remove(row.id) }
                                         }
                                     } header: {
                                         HStack(spacing: 0) {
-                                            // 8 pt is `GuideChannelRail`'s own
-                                            // leading inset; without it this
-                                            // header sat hard against the screen
-                                            // edge while every channel name
-                                            // under it was indented.
                                             Text("Channels").font(.caption.bold())
                                                 .padding(.leading, 8)
                                                 .frame(width: railWidth, height: 36, alignment: .leading)
                                                 .background(Color.black)
-                                                .offset(x: horizontalOffset).zIndex(1)
+                                                .offset(x: scrollState.horizontalOffset).zIndex(1)
                                             HStack(spacing: 0) {
-                                                ForEach(header.headerSlots) { slot in
-                                                    Text(slot.time, format: .dateTime.hour().minute())
+                                                ForEach(headerSlots) { slot in
+                                                    Text(slot.label)
                                                         .font(.caption).foregroundStyle(.secondary)
                                                         .frame(width: cellWidth, height: 36, alignment: .leading)
                                                 }
                                             }
                                             .background(Color.black)
+                                        }
                                     }
                                 }
-                            }
+                                .overlay(alignment: .topLeading) {
+                                    if context.date >= window.start && context.date < window.end {
+                                        let offset = context.date.timeIntervalSince(window.start) / 1800
+                                        Rectangle().fill(AppleDesignTokens.brandAccent).frame(width: 2)
+                                            .offset(x: railWidth + CGFloat(offset) * cellWidth)
+                                            .padding(.top, 36)
+                                            .allowsHitTesting(false).accessibilityHidden(true)
+                                    }
+                                }
                             }
                             .scrollIndicators(.hidden)
                             .frame(width: railWidth + timelineWidth, height: geometry.size.height)
                         }
                         .scrollIndicators(.hidden)
                         .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.x) } action: { _, offset in
-                            horizontalOffset = offset
+                            scrollState.horizontalOffset = offset
                         }
                     }
                 }
             }
-        }
-        .background(Color.black)
-        .task(id: projectionInput) {
-            let input = projectionInput
-            let projected = await Task.detached(priority: .userInitiated) {
-                AppleGuideChannelProjection.rows(channels: input.channels, entries: input.entries,
-                    favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true)
-            }.value
-            guard !Task.isCancelled else { return }
-            rows = projected
+            .background(Color.black)
+            .task(id: GuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)) {
+                let input = GuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)
+                let now = context.date
+                
+                let result = await Task.detached(priority: .userInitiated) {
+                    let projected = AppleGuideChannelProjection.rows(channels: input.channels, entries: input.entries,
+                        favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true)
+                    let channelIDs = projected.map { $0.id }
+                    
+                    let gridIndex = AppleGuideGridModel.index(
+                        channels: channelIDs,
+                        guide: guide,
+                        window: input.window,
+                        slotWidthMinutes: 30,
+                        now: now
+                    )
+                    
+                    let newRows = projected.map { channel in
+                        let cells = gridIndex.cells(for: channel.id)
+                        let spans = cells.map { cell in
+                            AppleGuideProgrammeSpan(
+                                id: cell.id,
+                                startOffset: cell.columnOffset,
+                                width: cell.columnSpan,
+                                title: cell.title,
+                                subtitle: cell.subtitle,
+                                isNow: cell.isLive || (cell.start <= now && cell.end > now)
+                            )
+                        }
+                        return AppleGuideRowModel(id: channel.id, channel: channel.channel, number: channel.number, spans: spans)
+                    }
+                    return (newRows, gridIndex.headerSlots)
+                }.value
+                
+                guard !Task.isCancelled else { return }
+                self.rows = result.0
+                self.headerSlots = result.1
+            }
         }
         .task(id: visibleIDs) {
             try? await Task.sleep(for: .milliseconds(100))
@@ -157,21 +200,21 @@ public struct AppleIPTVGuideGridView: View {
         }
         .scrollIndicators(.hidden)
     }
-
-    private var projectionInput: GuideProjectionInput {
-        GuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs)
-    }
 }
 
 private struct GuideProjectionInput: Equatable, Sendable {
     let channels: [AppleIPTVChannel]
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
+    let window: DateInterval
+    let tick: Double
 }
 
 private struct GuideChannelRail: View {
-    let row: AppleGuideChannel
+    let row: AppleGuideRowModel
     let isFavorite: Bool
+    let scrollState: GuideScrollState
+    let railWidth: CGFloat
     let onSelect: () -> Void
     let onToggleFavorite: () -> Void
 
@@ -180,12 +223,10 @@ private struct GuideChannelRail: View {
             Button(action: onSelect) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        AppleRemoteImage(url: row.channel.logoURL, contentMode: .fit, placeholderSystemImage: "")
-                            .frame(width: 34, height: 24)
-                        // A channel number is an identifier, not a quantity:
-                        // `.number` applies the locale's thousands grouping, so
-                        // channel 1001 drew as "1,001" here while the rail's own
-                        // label (which interpolates) drew "1001". Owner B17.
+                        if let logoURL = row.channel.logoURL {
+                            AppleRemoteImage(url: logoURL, contentMode: .fit, placeholderSystemImage: "")
+                                .frame(width: 34, height: 24)
+                        }
                         if let number = row.number {
                             Text(number, format: AppleChannelNumberFormat.style)
                                 .font(.caption.monospacedDigit())
@@ -209,44 +250,37 @@ private struct GuideChannelRail: View {
             .accessibilityIdentifier("guide.favorite.\(row.id)")
         }
         .padding(.leading, 8)
+        .offset(x: scrollState.horizontalOffset)
     }
 }
 
-private struct GuideScheduleRow: View {
-    let channel: AppleIPTVChannel
-    let guide: AppleIPTVGuide
-    let window: DateInterval
-    let now: Date
+private struct GuideScheduleRow: View, Equatable {
+    let row: AppleGuideRowModel
     let cellWidth: CGFloat
     let height: CGFloat
     let onSelect: () -> Void
+    
+    nonisolated static func == (lhs: GuideScheduleRow, rhs: GuideScheduleRow) -> Bool {
+        lhs.row == rhs.row && lhs.cellWidth == rhs.cellWidth && lhs.height == rhs.height
+    }
 
     var body: some View {
-        let result = AppleGuideGridModel.build(channels: [channel.id],
-            programmes: [channel.id: guide.programmes(channelID: channel.id, in: window)],
-            window: window, slotWidthMinutes: 30, now: now)
         HStack(spacing: 0) {
-            ForEach(result.rows.first?.cells ?? []) { cell in
+            ForEach(row.spans) { cell in
                 Button(action: onSelect) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(cell.title).font(.caption.bold()).lineLimit(2)
                         if let subtitle = cell.subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     }
                     .padding(8)
-                    .frame(width: cellWidth * CGFloat(cell.columnSpan), height: height, alignment: .topLeading)
-                    .background(cell.start <= now && cell.end > now ? AppleDesignTokens.brandAccent.opacity(0.14) : AppleDesignTokens.surface)
+                    .frame(width: cellWidth * CGFloat(cell.width), height: height, alignment: .topLeading)
+                    .background(cell.isNow ? AppleDesignTokens.brandAccent.opacity(0.14) : AppleDesignTokens.surface)
                     .overlay(Rectangle().stroke(.white.opacity(0.08), lineWidth: 1))
                     .clipped()
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(channel.name), \(cell.title)")
-            }
-        }
-        .overlay(alignment: .leading) {
-            if let offset = result.nowOffset {
-                Rectangle().fill(AppleDesignTokens.brandAccent).frame(width: 2)
-                    .offset(x: CGFloat(offset) * cellWidth).allowsHitTesting(false).accessibilityHidden(true)
+                .accessibilityLabel("\(row.channel.name), \(cell.title)")
             }
         }
     }
