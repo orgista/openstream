@@ -68,8 +68,22 @@ public enum AppleInteractionTrace {
         #if DEBUG
         return true
         #else
-        return false
+        return defaultEnabled(
+            infoPlistFlag: Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? Bool,
+            isTestFlight: AppleBuildChannel.isTestFlight)
         #endif
+    }
+
+    /// `OpenStreamTraceDefault` in the app's Info.plist. A build stamped
+    /// `true` ships with tracing on (owner, 2026-09-17: Internal and
+    /// TraceEnabled), `false` with it off (the Reddit group). Absent, TestFlight
+    /// installs trace by default and App Store installs do not. The Settings
+    /// toggle overrides either way.
+    public static let infoPlistKey = "OpenStreamTraceDefault"
+
+    public static func defaultEnabled(infoPlistFlag: Bool?, isTestFlight: Bool) -> Bool {
+        if let infoPlistFlag { return infoPlistFlag }
+        return isTestFlight
     }
 
     /// Restarts the timeline. Called from the root view's `task`, which runs
