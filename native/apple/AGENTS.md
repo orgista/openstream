@@ -95,3 +95,24 @@ tabled; chapter markers are approved.
 ## Notes for the reviewer
 - <risky spots, assumptions, anything to spot-check, with path:line>
 ```
+
+## 8. Skills — read the matching SKILL.md BEFORE writing that kind of code
+They live in `~/.claude/skills/<name>/SKILL.md` (Claude Code loads them by name; agy needs
+`--add-dir ~/.claude/skills`; codex reads them as files). Each is a checklist + references; the
+references folder next to it has the details. Apply the one that matches, then do the task.
+
+| When the task touches… | Read | Then |
+|---|---|---|
+| any SwiftUI view/modifier change | `swiftui-pro` | check the diff against its review list |
+| a long `body`, inline side effects, view models, `@Observable` | `swiftui-view-refactor` | small dedicated subviews, MV over MVVM |
+| jank, slow scroll, too many view updates | `swiftui-performance-audit` (refs: 8) | audit first, then fix |
+| tvOS focus, `@FocusState`, `focusSection`, remote moves; iOS/visionOS focus | `swift-focusengine-pro` (refs: 31) | this repo's tvOS player/guide bugs were mostly focus |
+| `async`/`await`, actors, `@MainActor`, `Task`, Combine sinks | `swift-concurrency-pro` | the store/coordinator/engine files are actor-isolated |
+| tests (`@Suite`, `@Test`, `#expect`, traits, fixtures) | `swift-testing-pro` | no XCTest in the package; UI tests stay XCTest |
+| WidgetKit, Live Activity (download activity), Top Shelf, watch complications | `widgets` (refs: 20) | Widgets/TopShelf/Watch targets under `Apps/` |
+| background downloads, BGTaskScheduler, background URLSession | `background-execution` (refs: 12) | the offline download coordinator |
+| VoiceOver labels/values/identifiers, Dynamic Type, accessibility audit | `ios-accessibility` (refs: 18) | every control needs a label; UI tests depend on identifiers |
+| driving the simulators headlessly (tap, type, screenshot, app state) | `ios-simulator-skill` (refs: 41) | its erase/delete scripts were removed on purpose — never recreate them |
+| App Store Connect via `asc` (builds, groups, crashes, ids, signing, release) | `asc-cli-usage` first, then `asc-build-lifecycle` / `asc-testflight-orchestration` / `asc-crash-triage` / `asc-id-resolver` / `asc-signing-setup` / `asc-xcode-build` / `asc-release-flow` | read-only use is fine; anything that uploads or assigns groups needs the owner's "ship N" |
+Not for this repo: the cloudflare*, wrangler, durable-objects, agents-sdk, sandbox-sdk, docker,
+deployment, web-perf, turnstile skills — ignore them here.

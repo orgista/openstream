@@ -278,13 +278,30 @@ foreign diff; commit ONLY your own files; never `git add -A` here; never revert 
 write; if a file you need is already modified by the other agent, say so and stop.
 
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
-- 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
-  `asc-signing-setup`, `asc-xcode-build`, `asc-testflight-orchestration`, `asc-build-lifecycle`,
-  `asc-crash-triage`, `asc-id-resolver`, `asc-release-flow`, `swift-focusengine-pro`,
-  `swiftui-performance-audit`, `swiftui-view-refactor`, `swift-testing-pro`, `swift-concurrency-pro`,
-  `widgets`, `ios-accessibility`, `swiftui-pro`, `background-execution`, `ios-simulator-skill`
-  (its `simctl_erase.py` / `simctl_delete.py` were deleted on purpose — persistent sims). The `idb`
-  Python client is NOT installed (PEP 668); only `idb_companion` is. Use `xcrun simctl` + XCUITest.
+- 18 skills live in `~/.claude/skills/<name>/SKILL.md` and load automatically in Claude Code
+  (`Skill` tool by name). For agy pass `--add-dir ~/.claude/skills`; codex reads them as files.
+  The task→skill map is in `AGENTS.md §8`; the rule is *read the SKILL.md before writing that
+  kind of code*. What each one is for in THIS repo:
+  - `swiftui-pro` — review list for any view change (stock look, modifiers, Observation).
+  - `swiftui-view-refactor` — when a `body` is long or a view owns side effects (Discover detail
+    view is 4,000+ lines; extract, don't grow it).
+  - `swiftui-performance-audit` — Live guide grid, 300-channel lists, poster shelves.
+  - `swift-focusengine-pro` — tvOS focus (player overlay, Skip Intro, guide rail, settings rows);
+    most tvOS defects this month were focus.
+  - `swift-concurrency-pro` — `AppleSourceStore`/coordinators/engines are `@MainActor`; the
+    default-argument-inside-async crash (§4b) is the kind of thing it catches.
+  - `swift-testing-pro` — package tests are Swift Testing; pure policy types get pure tests.
+  - `widgets` — Widgets/TopShelf/Watch targets, the download Live Activity.
+  - `background-execution` — offline download coordinator, background URLSession.
+  - `ios-accessibility` — labels/identifiers the UI tests key on (`detail.episode.download`,
+    `sources.live.save`, `channels.add`, `player.skipIntro`).
+  - `ios-simulator-skill` — headless sim driving; `simctl_erase.py`/`simctl_delete.py` removed
+    (persistent sims). `idb` Python client is NOT installed; use `xcrun simctl` + XCUITest.
+  - `asc-*` (8) — `asc-cli-usage` first; `asc-crash-triage` for TestFlight crashes
+    (`asc testflight crashes list --app 6807530757`); `asc-signing-setup` for the Widgets App Group
+    step; `asc-xcode-build` / `asc-release-flow` for archives — but uploads only on "ship N".
+  - Ignore here: cloudflare*, wrangler, durable-objects, agents-sdk, sandbox-sdk, docker,
+    deployment-patterns, web-perf, turnstile-spin.
 - `asc` (brew) is installed and authenticated: profile **"OpenStream"**, team `2VQ74PD5YG`, app id
   `6807530757`. Proof: `asc apps list --bundle-id com.orgista.openstream`. The key lives in the
   keychain and in `~/Developer/openstream-build/asc_lib.py`; NEVER print key ids/issuer/p8 in chat.
@@ -346,6 +363,20 @@ write; if a file you need is already modified by the other agent, say so and sto
 - This file — update the "state" below when you finish a unit of work.
 
 ## 7. State as of 2026-09-17 Codex continuation (newest first)
+- iOS 11 and 12 are delivered and their en-US TestFlight notes are now populated and read-back
+  verified. See DELIVERIES.md; older signing/upload blockers below are historical.
+- Owner's build-note policy (September 17): write concise, platform-specific “Added…” / “Fixed…”
+  notes from the exact shipped snapshot, with one useful testing request. Apply the article-writing
+  and marketing copy-editing skills. Include only verified user-visible changes; no raw commit
+  messages, Android changes in Apple notes, unshipped features, test counts or generic hype.
+  Build 12 adds default diagnostic logging; its other features are inherited from 11. Use
+  `asc builds test-notes update` and read back the locale before calling notes delivered.
+- Xcode Cloud audit: Default runs 1–3 (September 1) all failed before compilation because commit
+  7a76d8d9 lacked `native/apple/Apps/OpenStreamApps.xcodeproj`. The workflow points to
+  `orgista/openstream`; its Android “Last Commit” text is not TestFlight release notes.
+  The separate TestFlight workflow has zero runs and only an iOS TEST action. Neither workflow
+  was changed or rerun. Cloud repair needs the intended repository, branch and project path aligned
+  with an approved published Apple snapshot; local iOS 11/12 delivery does not repair Cloud.
 - Chapter markers: finished the interrupted Aether → playback protocol → overlay wiring.
   Duration events re-evaluate intro eligibility; `.idle` clears the per-item skip. A chapter
   metadata update does NOT reset a skip. Aether public `stop()` already clears `mediaChapters`
