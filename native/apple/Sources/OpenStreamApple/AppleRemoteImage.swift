@@ -244,6 +244,50 @@ actor AppleRemoteImageCache {
         return decoded
     }
 
+    public func prefetch(_ urls: [URL]) async {
+        var uniqueURLs: [URL] = []
+        var seen: Set<URL> = []
+        for url in urls {
+            if !seen.contains(url) {
+                seen.insert(url)
+                uniqueURLs.append(url)
+            }
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            var inFlight = 0
+            for url in uniqueURLs {
+                if Task.isCancelled { break }
+                let exists = await AppleArtworkDiskCache.shared.contains(url: url, variant: "raw")
+                if !exists {
+                    if inFlight >= 4 {
+                        await group.next()
+                        inFlight -= 1
+                    }
+                    if Task.isCancelled { break }
+                    inFlight += 1
+                    group.addTask(priority: .utility) {
+                        do {
+                            var request = URLRequest(url: url)
+                            request.timeoutInterval = 15
+                            let (data, response) = try await AppleBoundedHTTPDataLoader.load(
+                                request,
+                                maximumBytes: 12 * 1_024 * 1_024
+                            )
+                            guard let http = response as? HTTPURLResponse,
+                                  (200 ... 299).contains(http.statusCode) else {
+                                return
+                            }
+                            await AppleArtworkDiskCache.shared.store(data, for: url, variant: "raw")
+                        } catch {
+                            // Never throws, never logs
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static func load(url: URL, maximumPixelDimension: Int) async throws -> CGImage {
         if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "raw") {
             return try await Task.detached(priority: .utility) {

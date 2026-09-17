@@ -57,6 +57,12 @@ actor AppleArtworkDiskCache {
         return data
     }
 
+    func contains(url: URL, variant: String) -> Bool {
+        let name = AppleArtworkDiskCachePolicy.fileName(for: url, variant: variant)
+        let fileURL = directory.appendingPathComponent(name, isDirectory: false)
+        return fileManager.fileExists(atPath: fileURL.path)
+    }
+
     func store(_ data: Data, for url: URL, variant: String) {
         let name = AppleArtworkDiskCachePolicy.fileName(for: url, variant: variant)
         let fileURL = directory.appendingPathComponent(name, isDirectory: false)
