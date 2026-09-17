@@ -118,20 +118,20 @@ struct AppleSettingsView: View {
 
             Section("Discover") {
                 Toggle("Show Discover tab", isOn: $settings.discoverEnabled)
-                    .disabled(!appleCanHideTab(.home, settings: settings))
+                    .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
                 Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
             }
 
             Section("Library") {
                 Toggle("Show Library tab", isOn: $settings.libraryEnabled)
-                    .disabled(!appleCanHideTab(.library, settings: settings))
+                    .disabled(!appleCanToggleTab(.library, settings: settings))
                     .accessibilityIdentifier("settings.library.enabled")
             }
 
             Section("Live TV") {
                 Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
-                    .disabled(!appleCanHideTab(.live, settings: settings))
+                    .disabled(!appleCanToggleTab(.live, settings: settings))
                     .accessibilityIdentifier("settings.live.enabled")
             }
 
@@ -181,10 +181,12 @@ struct AppleSettingsView: View {
 }
 
 /// The last content tab still on cannot be switched off, so its toggle goes
-/// inert rather than leaving the bar with Settings alone.
+/// inert rather than leaving the bar with Settings alone. Every other toggle
+/// stays live — including one that is already off, which is the half this used
+/// to get wrong.
 @MainActor
-private func appleCanHideTab(_ tab: OpenStreamTab, settings: AppleSettingsStore) -> Bool {
-    OpenStreamTabVisibility.canHide(
+private func appleCanToggleTab(_ tab: OpenStreamTab, settings: AppleSettingsStore) -> Bool {
+    OpenStreamTabVisibility.canToggle(
         tab,
         discover: settings.discoverEnabled,
         library: settings.libraryEnabled,
@@ -347,7 +349,7 @@ private struct AppleTVLiveTabPane: View {
 
         return Form {
             Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
-                .disabled(!appleCanHideTab(.live, settings: settings))
+                .disabled(!appleCanToggleTab(.live, settings: settings))
                 .accessibilityIdentifier("settings.live.enabled")
         }
         .appleSettingsPane("Live TV", embedded: true)
@@ -364,14 +366,14 @@ private struct AppleTVDiscoverPane: View {
         return Form {
             Section("Discover") {
                 Toggle("Show Discover tab", isOn: $settings.discoverEnabled)
-                    .disabled(!appleCanHideTab(.home, settings: settings))
+                    .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
                 Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
             }
 
             Section("Library") {
                 Toggle("Show Library tab", isOn: $settings.libraryEnabled)
-                    .disabled(!appleCanHideTab(.library, settings: settings))
+                    .disabled(!appleCanToggleTab(.library, settings: settings))
                     .accessibilityIdentifier("settings.library.enabled")
             }
         }
@@ -585,11 +587,28 @@ private struct AppleChannelManagerView: View {
 
     private func toggle(_ id: String) {
         if settings.liveChannelPackage == .custom {
-            settings.customChannelPackage.channels[id] = !customSelectedIDs.contains(id)
+            let adding = !customSelectedIDs.contains(id)
+            // Owner, 2026-09-17: past 300 the guide will not draw it, so do not
+            // let the list be built past what can be shown — say so instead.
+            if adding, !AppleLiveChannelSnapshot.canAddChannel(toSelectionOf: customSelectedIDs.count) {
+                errorMessage = AppleLiveChannelSnapshot.limitReachedMessage
+                return
+            }
+            errorMessage = nil
+            settings.customChannelPackage.channels[id] = adding
             return
         }
         var values = settings.favoriteChannelIDs
-        if values.contains(id) { values.remove(id) } else { values.insert(id) }
+        if values.contains(id) {
+            values.remove(id)
+        } else {
+            guard AppleLiveChannelSnapshot.canAddChannel(toSelectionOf: values.count) else {
+                errorMessage = AppleLiveChannelSnapshot.limitReachedMessage
+                return
+            }
+            values.insert(id)
+        }
+        errorMessage = nil
         settings.favoriteChannelIDs = values
     }
 
@@ -759,6 +778,13 @@ private struct AppleArrConnectionSection: View {
             }
             .buttonStyle(.brandSecondary)
             .disabled(!canTest || state.isTesting)
+            // The list row draws its own capsule and `.brandSecondary` draws a
+            // pill inside it — a box in a box, which is the "no boxes and
+            // weirdness" the owner called out for the settings panes
+            // (2026-09-16). One piece of chrome, not two. Confirmed on the
+            // phone as well as the television (2026-09-17), so it is not
+            // platform-gated.
+            .listRowBackground(Color.clear)
         }
         .onChange(of: baseURL) { _, _ in state = .idle }
         .onChange(of: apiKey) { _, _ in state = .idle }

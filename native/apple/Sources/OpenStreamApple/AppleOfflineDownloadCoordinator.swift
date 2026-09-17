@@ -105,6 +105,20 @@ final class AppleOfflineDownloadCoordinator {
             return false
         }
 
+        /// The case name alone, so progress updates within one phase compare equal.
+        var phaseName: String {
+            switch self {
+            case .idle: "idle"
+            case .resolving: "resolving"
+            case .downloading: "downloading"
+            case .paused: "paused"
+            case .resuming: "resuming"
+            case .completed: "completed"
+            case .failed: "failed"
+            case .cancelled: "cancelled"
+            }
+        }
+
         var container: String? {
             if case .completed(_, _, _, let container) = self { return container }
             return nil
@@ -470,7 +484,16 @@ final class AppleOfflineDownloadCoordinator {
     }
 
     private func transition(_ next: State) {
+        let previous = state
         state = next
+        // Trace phase changes only; progress ticks arrive many times a second.
+        if previous.phaseName != next.phaseName {
+            if case .failed = next {
+                AppleInteractionTrace.record(.failure, "download \(String(describing: next).prefix(160))")
+            } else {
+                AppleInteractionTrace.record(.network, "download \(String(describing: next).prefix(160))")
+            }
+        }
         publishLiveActivity(next)
         // `stateDidChange` belongs to whoever is driving a batch — the season
         // queue claims and releases it — so the Live Activity is driven from

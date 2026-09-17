@@ -102,6 +102,10 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let metrics: AppleTVGuideMetrics
     let channels: [AppleIPTVChannel]
     let categories: [String]
+    /// Channels the 300 cap kept off the guide; drawn as one line under the
+    /// category row when non-zero. `var` with a default so the memberwise
+    /// initialiser keeps every existing call site compiling.
+    var hiddenCount: Int = 0
     @Binding var selectedCategory: String
     let guide: AppleIPTVGuide
     /// `AppleIPTVGuideStore.revision`: the grid model is rebuilt when this
@@ -136,6 +140,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         metrics: AppleTVGuideMetrics = .standard,
         channels: [AppleIPTVChannel],
         categories: [String],
+        hiddenCount: Int = 0,
         selectedCategory: Binding<String>,
         guide: AppleIPTVGuide,
         guideRevision: Int = 0,
@@ -155,6 +160,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         self.metrics = metrics
         self.channels = channels
         self.categories = categories
+        self.hiddenCount = hiddenCount
         _selectedCategory = selectedCategory
         self.guide = guide
         self.guideRevision = guideRevision
@@ -407,6 +413,21 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     /// row; it pushes the existing channel search and stays filled while a
     /// search is active.
     private var categoryRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            categoryChipsAndSearch
+            // One line, only when the cap kept channels off the guide (owner,
+            // 2026-09-17: "note to the user… they reached the limit"). Same
+            // line the phone shows; the count is the whole message.
+            if hiddenCount > 0 {
+                Text("Showing \(channels.count) of \(channels.count + hiddenCount) channels")
+                    .font(.system(size: metrics.categoryFontSize * 0.8))
+                    .foregroundStyle(AppleDesignTokens.textSecondary)
+                    .accessibilityIdentifier("live.cap.notice")
+            }
+        }
+    }
+
+    private var categoryChipsAndSearch: some View {
         // 24 pt of spacing leaves 12 pt beside the glyph once the pill row's
         // negative padding has widened its clip.
         HStack(spacing: 24) {

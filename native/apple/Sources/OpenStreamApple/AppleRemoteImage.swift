@@ -107,6 +107,15 @@ struct AppleRemoteImage: View {
 /// cropping that padding keeps the visible mark optically centered.
 struct AppleTrimmedTitleLogo: View {
     let url: URL
+    /// Where the wordmark sits inside the slot it is given.
+    ///
+    /// `scaledToFit` leaves slack on one axis, and this view used to centre the
+    /// artwork in that slack unconditionally — which overrode the
+    /// `alignment: .leading` its callers asked for and left the Discover
+    /// billboard's wordmark indented ~190 pt while the metadata line, synopsis
+    /// and Play button under it were flush at the safe inset. It is declared
+    /// before `onLoadResult` so callers keep trailing-closure syntax.
+    var alignment: Alignment = .center
     /// Reports `true` once the wordmark is on screen, `false` when the fetch or
     /// decode failed, so callers can fall back to a text title instead of
     /// showing nothing.
@@ -123,8 +132,8 @@ struct AppleTrimmedTitleLogo: View {
                     Image(decorative: image, scale: displayScale)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: alignment)
+                        .frame(maxWidth: .infinity, alignment: alignment)
                 } else {
                     Color.clear
                 }

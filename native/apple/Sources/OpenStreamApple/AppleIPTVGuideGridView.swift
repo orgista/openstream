@@ -65,7 +65,13 @@ public struct AppleIPTVGuideGridView: View {
                                         }
                                     } header: {
                                         HStack(spacing: 0) {
+                                            // 8 pt is `GuideChannelRail`'s own
+                                            // leading inset; without it this
+                                            // header sat hard against the screen
+                                            // edge while every channel name
+                                            // under it was indented.
                                             Text("Channels").font(.caption.bold())
+                                                .padding(.leading, 8)
                                                 .frame(width: railWidth, height: 36, alignment: .leading)
                                                 .background(Color.black)
                                                 .offset(x: horizontalOffset).zIndex(1)

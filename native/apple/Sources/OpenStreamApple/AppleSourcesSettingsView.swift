@@ -611,7 +611,14 @@ private struct AppleSourceDetailView: View {
                 }
                 .appleSettingsPage(source.name)
             } else {
+                // Titled like every other settings page. `appleSettingsPageTitle`
+                // is what gives a page its navigation title *and* its trace
+                // entry, and this branch was the one page in the app that
+                // skipped both — the exact thing that modifier's own comment
+                // says must not happen. Without it the viewer lands on a bare
+                // centred message with an empty navigation bar behind it.
                 ContentUnavailableView("Source Not Found", systemImage: "questionmark.folder")
+                    .appleSettingsPageTitle("Source")
             }
         }
         .alert("Delete Source?", isPresented: $confirmDelete) {
@@ -967,6 +974,12 @@ private struct AppleAddLiveTVSourceView: View {
     @State private var isError = false
     @State private var connectionAction: AppleInstanceConnectionAction?
 
+    /// M3U text pasted or read from a chosen file. Saved into the one local
+    /// playlist (`AppleLocalPlaylistStore.pastedURL`), so every paste joins
+    /// the same source row.
+    @State private var pastedPlaylist = ""
+    @State private var isChoosingFile = false
+
     let sourceStore: AppleSourceStore
     private let client = AppleIPTVClient()
     private let streamProbe = AppleIPTVStreamProbe()
@@ -981,6 +994,10 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var endpointTitle: String {
         type == .xtream ? "Server URL" : "Playlist URL"
+    }
+
+    private var usesPastedPlaylist: Bool {
+        type == .m3u && !pastedPlaylist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: Fields shared by every platform
@@ -1138,6 +1155,19 @@ private struct AppleAddLiveTVSourceView: View {
                 }
             }
 
+            if type == .m3u {
+                Section("Playlist Text") {
+                    TextEditor(text: $pastedPlaylist)
+                        .font(.footnote.monospaced())
+                        .frame(minHeight: 120)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("Playlist text")
+                        .accessibilityIdentifier("sources.live.playlistText")
+                    Button("Choose File…") { isChoosingFile = true }
+                        .accessibilityIdentifier("sources.live.chooseFile")
+                }
+            }
+
             if let message {
                 Section {
                     Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
@@ -1154,6 +1184,16 @@ private struct AppleAddLiveTVSourceView: View {
             }
         }
         .appleSettingsPage("Add Live TV")
+        .fileImporter(isPresented: $isChoosingFile, allowedContentTypes: [.m3uPlaylist, .plainText, .text, .data]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url),
+               let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+                pastedPlaylist = text
+                if name.isEmpty { name = url.deletingPathExtension().lastPathComponent }
+            }
+        }
         .task(id: connectionAction) {
             guard let connectionAction else { return }
             await perform(connectionAction)
@@ -1185,6 +1225,7 @@ private struct AppleAddLiveTVSourceView: View {
     /// Why the form cannot be submitted yet, named for the viewer; nil when
     /// it can.
     private var submissionProblem: String? {
+        if usesPastedPlaylist { return nil }
         guard (try? AppleIPTVEndpointPolicy.normalize(endpoint)) != nil else {
             return type == .xtream
                 ? "Enter the Xtream server URL, including the port."
@@ -1203,8 +1244,21 @@ private struct AppleAddLiveTVSourceView: View {
             return
         }
         let submittedType = type
-        let submittedName = name
-        let submittedEndpoint = endpoint
+        var submittedName = name
+        var submittedEndpoint = endpoint
+        var mergeNote = ""
+        if usesPastedPlaylist {
+            do {
+                let merged = try AppleLocalPlaylistStore.shared.merge(text: pastedPlaylist)
+                submittedEndpoint = AppleLocalPlaylistStore.pastedURL.absoluteString
+                if submittedName.isEmpty { submittedName = "Playlists" }
+                mergeNote = " · \(merged.added) added, \(merged.total) total"
+            } catch {
+                isError = true
+                message = error.localizedDescription
+                return
+            }
+        }
         let submittedUsername = username
         let submittedPassword = password
         isWorking = true
@@ -1224,7 +1278,7 @@ private struct AppleAddLiveTVSourceView: View {
             let probe = try await streamProbe.validate(channels: channels)
             try Task.checkCancellation()
             if action.shouldSave {
-                let summary = "Connected · \(channels.count) channels · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
+                let summary = "Connected · \(channels.count) channels\(mergeNote) · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
                 try sourceStore.addIPTV(
                     name: submittedName,
                     type: submittedType,
@@ -1240,7 +1294,7 @@ private struct AppleAddLiveTVSourceView: View {
                 return
             }
             isError = false
-            message = "Connected · \(channels.count) channels · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
+            message = "Connected · \(channels.count) channels\(mergeNote) · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
         } catch is CancellationError {
             return
         } catch {
@@ -1835,6 +1889,7 @@ private struct AppleWebManagementView: View {
                         copy(activeSession.friendlyURL)
                     }
                     .buttonStyle(.brandSecondary)
+                    .listRowBackground(Color.clear)
                 }
 
                 Section {
@@ -1843,7 +1898,13 @@ private struct AppleWebManagementView: View {
                 }
             } else {
                 Section {
+                    // Its own section with no row fill: `startButton` draws a
+                    // filled capsule, and inside a grouped card that is two
+                    // pieces of chrome for one control.
                     startButton
+                        .listRowBackground(Color.clear)
+                }
+                Section {
                     forgetBrowsersButton
                 }
             }
@@ -1935,14 +1996,17 @@ private struct AppleWebManagementView: View {
                     forgetBrowsersButton
                         .buttonStyle(.brandSecondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let errorMessage {
                     Text(errorMessage)
                         .foregroundStyle(.red)
                 }
             }
-            .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
-            .padding(.horizontal, 48)
+            // Laid out like Add Catalog / Add Live TV / Add Network Share, whose
+            // content measures flush at x≈80 under its heading. This pane
+            // measured x=223 (see `startButton` for why).
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 20)
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
@@ -1998,7 +2062,14 @@ private struct AppleWebManagementView: View {
                 Text("Start Web Management")
             }
         }
+        // A full-width button is right on the phone, where every control in
+        // the form spans the sheet. On tvOS it stretches the capsule across the
+        // page and centres its own label, which is what put Start Web
+        // Management in the middle of the screen while the heading above it was
+        // flush left, and pushed Forget Paired Browsers off to the right.
+        #if !os(tvOS)
         .frame(maxWidth: .infinity)
+        #endif
         .buttonStyle(.brandPrimary)
         .disabled(isWorking)
     }
@@ -2020,8 +2091,12 @@ private struct AppleWebManagementView: View {
         #if !os(tvOS)
         .buttonStyle(.plain)
         .foregroundStyle(.red)
+        // No full-width frame. It is left over from when this was a filled
+        // capsule; on a plain action row it only centres the text, which left
+        // "Stop Web Management" centred and "Forget Paired Browsers"
+        // leading-aligned in the same card (measured 2026-09-17). Both are
+        // action rows and both read from the leading edge.
         #endif
-        .frame(maxWidth: .infinity)
         .disabled(isWorking)
     }
 

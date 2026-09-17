@@ -18,21 +18,36 @@ struct AppleWatchProviderSettingsView: View {
     private var region: String { AppleWatchProviderResponse.currentRegion() }
 
     var body: some View {
-        Group {
-            if isLoading && providers.isEmpty {
-                AppleSourceLoadingState()
-            } else if let failure {
-                AppleSourceEmptyState(title: failure, actionTitle: "Try Again", action: reload)
-            } else if providers.isEmpty {
-                // Reached when metadata is off or the key is missing, so the
-                // action points at the thing that fixes it.
-                AppleSourceEmptyState(title: "No Services", actionTitle: "Try Again", action: reload)
-            } else {
-                list
+        content
+            .task { if providers.isEmpty { await load() } }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if providers.isEmpty {
+            // Title only, no form column. A settings pane's column is for rows;
+            // centring an empty state inside it put "Metadata Is Off" at x=529
+            // of a 1920 pt page — dead centre of an invisible 900 pt column
+            // starting at the 80 pt inset — so it read as the page having
+            // drifted into the left half of the screen (measured 2026-09-17).
+            // D4b already settled that a tvOS empty state centres on the whole
+            // area rather than on a column.
+            Group {
+                if isLoading {
+                    AppleSourceLoadingState()
+                } else if let failure {
+                    AppleSourceEmptyState(title: failure, actionTitle: "Try Again", action: reload)
+                } else {
+                    // Reached when metadata is off or the key is missing, so the
+                    // action points at the thing that fixes it.
+                    AppleSourceEmptyState(title: "No Services", actionTitle: "Try Again", action: reload)
+                }
             }
+            .appleSettingsPageTitle("Streaming Services")
+        } else {
+            list
+                .appleSettingsPane("Streaming Services", embedded: embeddedInSplit)
         }
-        .appleSettingsPane("Streaming Services", embedded: embeddedInSplit)
-        .task { if providers.isEmpty { await load() } }
     }
 
     private var list: some View {

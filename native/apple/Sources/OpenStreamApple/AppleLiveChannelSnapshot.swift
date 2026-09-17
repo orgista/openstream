@@ -3,13 +3,52 @@ import Foundation
 /// One immutable projection per lineup/filter change. SwiftUI reads these
 /// arrays directly instead of normalizing every channel during each render.
 struct AppleLiveChannelSnapshot: Sendable {
+    /// How many lineup numbers the Premier Guide must match before All is
+    /// allowed to show only the lineup.
+    ///
+    /// Eight is far below the owner's real provider (a few hundred of 9,376) and
+    /// far above an accidental name collision (one or two), so it separates
+    /// "this lineup describes this source" from "this lineup happens to share a
+    /// channel name with it" with room on both sides.
+    static let minimumLineupMatches = 8
+
     /// The group `AppleChannelProjection.premierGuideGroups` gives the curated
     /// lineup; anything it could not match lands in its sibling "Other" group.
     static let premierGroupName = "Premier Guide"
 
+    /// The most channels the guide will ever draw. Owner, 2026-09-17: "no one
+    /// ever needs 3k channels… note to the user if they try to add more than
+    /// 300 they reached the limit." This is a *display* cap — the parser still
+    /// ingests the whole playlist (see `AppleIPTVClient.maximumChannels`), so
+    /// Search and the Custom package can still reach everything; the guide just
+    /// stops at 300 and says so through `hiddenCount`.
+    static let maximumDisplayedChannels = 300
+
+    /// Whether one more channel may be added to a hand-picked selection
+    /// (Custom package, or My Channels). Past the cap the guide would not draw
+    /// it anyway, so Channel Manager refuses and says so rather than letting
+    /// the viewer build a list the guide silently cuts.
+    static func canAddChannel(toSelectionOf count: Int) -> Bool {
+        count < maximumDisplayedChannels
+    }
+
+    /// The one line Channel Manager shows when a viewer tries to add past the cap.
+    static let limitReachedMessage = "Limit reached — the guide shows up to \(maximumDisplayedChannels) channels."
+
     let channels: [AppleIPTVChannel]
     let channelIDs: [String]
     let categories: [String]
+    /// How many selected channels the cap kept off the guide. Zero unless the
+    /// selection exceeded `maximumDisplayedChannels`; the Live tab shows one
+    /// line when it is not.
+    let hiddenCount: Int
+
+    init(channels: [AppleIPTVChannel], channelIDs: [String], categories: [String], hiddenCount: Int = 0) {
+        self.channels = channels
+        self.channelIDs = channelIDs
+        self.categories = categories
+        self.hiddenCount = hiddenCount
+    }
 
     static func build(groups: [AppleIPTVChannelGroup], package: AppleLiveChannelPackage,
                       custom: AppleCustomChannelPackage, entries: [AppleChannelLineupEntry],
@@ -66,9 +105,17 @@ struct AppleLiveChannelSnapshot: Sendable {
                         ? $0.1.name.localizedCaseInsensitiveCompare($1.1.name) == .orderedAscending
                         : $0.0.number < $1.0.number
                 }
-                // Nothing matched the lineup — an empty guide would be worse
-                // than an unfiltered one.
-                channels = numbered.isEmpty ? selected : numbered.map(\.1)
+                // The lineup only describes this source if it matched a
+                // meaningful number of channels. This used to fall back only
+                // when *nothing* matched, so a foreign M3U with one channel
+                // that happened to share a name with the US lineup — "CNN",
+                // say — showed exactly one channel under All. That is the
+                // tester's "only one TV channel is displayed in M3U" (build
+                // 10, 2026-09-17). Below the floor the curated list is not a
+                // guide, it is a coincidence, and the viewer gets everything.
+                channels = numbered.count < Self.minimumLineupMatches
+                    ? selected
+                    : numbered.map(\.1)
             } else {
                 channels = Dictionary(grouping: selected) { entryByChannelID[$0.id]?.category ?? "Other" }
                     .sorted { $0.key < $1.key }.flatMap(\.value)
@@ -78,6 +125,8 @@ struct AppleLiveChannelSnapshot: Sendable {
         } else {
             channels = selected.filter { categoryByID[$0.id] == category }
         }
-        return .init(channels: channels, channelIDs: channels.map(\.id), categories: categories)
+        let shown = Array(channels.prefix(Self.maximumDisplayedChannels))
+        return .init(channels: shown, channelIDs: shown.map(\.id), categories: categories,
+                     hiddenCount: max(0, channels.count - shown.count))
     }
 }

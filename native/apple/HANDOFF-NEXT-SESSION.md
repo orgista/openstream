@@ -1,28 +1,254 @@
-# Handoff for the next session (any model) — OpenStream Apple, 2026-09-14 09:30
+# Handoff — OpenStream Apple (`native/apple`) — read this FIRST, every session
 
-Read `AGENTS.md`, then the tail of `FEEDBACK.md` (tables R*, S*, U*, V*, W* and the "UX/UI audit and Apple TV rework plan" section). This file is the operational state; delete it when the items below are done and folded into FEEDBACK.
+Written 2026-09-17 by the overnight session, at the owner's request: *"leave explicit
+instructions for sonnet and opus."* Follow these literally. When something below is
+violated, the usual result is a false finding or a false "fixed" — both have happened here.
 
-## Machines and rules
-- Mac Studio (32 GB) rebooted 2026-09-14 ~01:00 from RAM exhaustion. Caps: at most 2 editing agents, 1 xcodebuild/swift build at a time, boot only the simulator being verified, no headless Chrome alongside builds.
-- Simulators (never erase): iPhone 16 Pro `6A037503-AF3A-4A22-B900-CF6573B15FB1` (owner left it in landscape), iPad `CC634933-18CE-4D3B-AECB-5021AC653A71`, Apple TV `B251C620-E3AD-4F9E-9911-EF8CBA6C7353`, Vision Pro `F598603A-4DDB-4A06-9CE0-4CF1AE042FE0`. Owner's real sources live on them.
-- Deploy: `~/Developer/openstream-build/deploy-all-v2.sh [ios tvos visionos]` (default ios tvos; boots a sim only while installing and shuts it down again unless it was already booted). The old deploy-all.sh boots all four sims at once and pushed the 32 GB Studio to 0.1 GB free (RealityKeyboard crash on the Vision Pro sim, 09:27) — do not use it. Full tests: `swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"` (539 tests / 30 suites green at 09:10). iOS xcodebuild must use the iPhone UDID as destination (other UDIDs no-op).
-- Headless tvOS navigation: `xcrun simctl spawn <ATV> defaults write com.orgista.openstream OpenStreamVisionScreen -string <settings|discover|library|live|add-live|add-catalog|…>` then relaunch; delete the key afterwards. The simulator tap tool addresses the PORTRAIT frame on a landscape iPad: landscape (X, Y) → tap (834 − Y, X).
-- Unraid workers (work Claude account, Fable): `~/Developer/openstream-build/unraid/run-worker.sh <name> <prompt-file>`; outputs/markers in `Infrastructure & Server/ServerPlus/Files/agent-state/openstream-workers/<name>.out|.done`. They cannot compile Swift — run the gates on the Mac after they finish.
-- Codex: `gpt-reserve` works headlessly (`CODEX_HOME=~/.codex-headless codex exec -m gpt-reserve …`); luna/astra are capped until Sep 19. agy print mode: `agy -p "<prompt>" --effort high --dangerously-skip-permissions`.
-- Usage: personal Claude account is for orchestration, gates and verification only; long jobs go to the work account (unraid), Codex reserve, agy or OpenRouter.
+Read `AGENTS.md` next, then the **tail** of `GUI-AUDIT.md` and `FEEDBACK.md` (the current
+state is at the bottom of each, newest last).
 
-## In flight right now
-- Unraid worker `manifests` (add-on manifest URL edge cases, U7–U10) and `webmgmt` (portal end to end, S6–S8): when `.done` appears, run `swift build`/`swift test` on the Mac, fix compile issues, deploy, verify.
-- Owner-verified items still pending on the Apple TV after the 09:15 deploy: Live tab (rebuilt, guide-first; the "Live" page title is still drawn — audit task 3 removes titles on tvOS), Top Shelf content, icon parallax, SMB Test Connection message, add-on logos.
+## 0. The three commands you will run most, exactly as written
 
-## Queue (audit plan, in order) — dispatch one at a time to the unraid work account, gates on the Mac
-1. Audit task 3 tvOS chrome pass (no page titles on tab roots; header inside content on pushed pages; drop the `.offset(y: -88)` glyph overlay; remove global `.tint(.white)` on tvOS).
-2. Task 5 tvOS title page layout (U2), then task 4 tvOS Discover metrics.
-3. Task 7/8 tvOS Settings split view and forms (U1 title overlap is the same bug family; an earlier settings/subtitle agent was cut off — check AppleSettingsViews.swift/AppleSourcesSettingsView.swift for partial edits first).
-4. V1 Discover/Library toggles (like Show Live tab); V3 wordmark shown together with the artwork (text title only during trailer playback).
-5. More Like This ranker (an agent was cut off; check for AppleRecommendationRanker.swift and finish), R2/R10/R11 verification on the phone.
-6. Audit task 1 (tvOS UI-test target with XCUIRemote) and task 12 (regression script) once fewer agents run.
-7. iPhone landscape rework: an agent finished builds but not screenshots — verify `design/iphone-landscape-rework-*.png` and the notch coverage during trailer playback (V2).
+```
+# The gate. NEVER plain `swift test` (the default .build lands on the SMB share and corrupts).
+swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
+# Expect: "Test run with 981 tests in 94 suites passed" (as of 2026-09-17 11:00). Run it BEFORE
+# and AFTER every change. If it prints "input file … was modified during the build", that is
+# the SMB share, not you — sleep 30–45 s and run it again.
 
-## Owner questions outstanding (from the audit)
-Brand assets for portal/Top Shelf; Live tab order on Apple TV; keep "Other sources" only on failure; tvOS Settings split view vs list; tab bar on iPhone portrait title pages.
+# tvOS build (sim UDID below). iOS uses the iPhone UDID; other UDIDs silently no-op.
+cd Apps && xcodebuild -project OpenStreamApps.xcodeproj -scheme "OpenStream tvOS" \
+  -destination "id=B251C620-E3AD-4F9E-9911-EF8CBA6C7353" \
+  -derivedDataPath ~/Developer/openstream-build/DerivedData-deploy-tvos build
+
+# Headless navigation to any screen after install:
+xcrun simctl launch <UDID> com.orgista.openstream -OpenStreamVisionScreen <screen>
+```
+
+## 1. The SMB share lies about builds — the protocol, no exceptions
+
+The repo is on an SMB mount. Xcode can print **BUILD SUCCEEDED without recompiling the file you
+just edited**, and a screenshot then "proves" old code. This produced false results more than
+once tonight. So, every time you edit a source:
+
+1. `touch` every file you edited.
+2. Sleep **≥ 12 s** before `xcodebuild`, **≥ 30–45 s** before `swift test` (more files → longer).
+3. Redirect the build log to a file and **grep it**: you must see
+   `SwiftCompile normal arm64 Compiling\ <YourFile>.swift` for *each* file you changed.
+   A bare "BUILD SUCCEEDED" is not proof. If the line is missing, touch again and rebuild.
+4. Only then `simctl install` and screenshot. If a build **failed**, do not install or
+   screenshot — you would be photographing the previous binary.
+
+The SPM gate builds **macOS**. Any file guarded `#if os(tvOS)` (e.g. `AppleTVLiveGuideView.swift`)
+is invisible to it. A green gate does not mean tvOS compiles — always run the tvOS build too.
+
+## 2. Simulators — persistent, never erased, no test data
+
+| Device | UDID |
+|---|---|
+| iPhone 16 Pro | `6A037503-AF3A-4A22-B900-CF6573B15FB1` |
+| iPad | `CC634933-18CE-4D3B-AECB-5021AC653A71` |
+| Apple TV (1080p) | `B251C620-E3AD-4F9E-9911-EF8CBA6C7353` |
+| Vision Pro | `F598603A-4DDB-4A06-9CE0-4CF1AE042FE0` |
+
+- **One simulator booted at a time, one build at a time, at most 2 agents.** 32 GB Studio.
+  Shut one down before booting the next (`xcrun simctl shutdown <UDID>`).
+- The owner's **real sources** live on them. Never erase, never add fixtures to them.
+- After a fresh install on tvOS wait **≥ 13 s** before screenshotting a routed screen; 9 s
+  landed on Discover instead of the pane.
+- The debug key `OpenStreamVisionScreen` **persists in defaults and survives reinstall**. If a
+  route stops landing, `xcrun simctl spawn <UDID> defaults read com.orgista.openstream
+  OpenStreamVisionScreen` and `defaults delete` it. Reading the app's `.plist` file is NOT
+  reading its defaults — only `simctl spawn … defaults read` is truthful.
+- `-OpenStreamVisionScreen` values: `discover library live detail episodes play first-run
+  settings channels playback-settings subtitle-languages metadata server-downloads trakt
+  watch-providers privacy storage about add-files add-live add-catalog network-share
+  web-management`. Works on iOS, tvOS and visionOS (the fence was removed 2026-09-17).
+- `simctl` has **no tap** and **no orientation** API. For taps/rotation/keyboard use the UI test
+  targets (`OpenStreamiOSUITests`, `OpenStreamTVUITests`) and export attachments with
+  `xcrun xcresulttool export attachments --path <x.xcresult> --output-path <dir>`.
+- Flipping a persisted setting with `defaults write` works for **some** keys and is silently
+  ignored for others: the live **package** key (`openstream.settings.live.package.v1`, values
+  `premierGuide|everything|custom`) works on tvOS; the **tab** toggles
+  (`openstream.settings.live.enabled.v1` etc.) were ignored on iPhone. If you write a default,
+  **prove it took** from the screenshot (e.g. the tab bar lost a tab) before trusting the
+  capture, and put the key back afterwards.
+- The Mac's Simulator has *Connect Hardware Keyboard* ON. That suppresses the on-screen
+  keyboard; the soft-keyboard UI test skips itself in that state. Don't file "no keyboard" as
+  an app bug.
+- `xcrun simctl ui <ATV> content_size|appearance|increase_contrast` → **unsupported** on tvOS.
+  A tvOS Dynamic Type pass cannot be run headlessly. iOS: `content_size
+  accessibility-extra-extra-extra-large` works; **set it back to `large`** when done.
+
+## 3. Verification discipline — the rules that stopped false findings
+
+- **Look at the capture.** Open the PNG and read it. Downscaled montages and pixel probes
+  alone produced ~8 false findings; several times "the eye" was wrong and the measurement
+  right, and twice the reverse.
+- **Confirm every capture-based finding a second, independent way** — usually by reading the
+  code path that draws it. Report neither until both agree.
+- **Measure, don't guess**: leftmost-lit-pixel per band, ink spans, luminance behind text
+  (PIL is installed; scratch under the session scratchpad, never in the repo).
+- A green test is not evidence the app does something. Sixteen `static func`s and a whole
+  feature (`AppleLibraryTVView`, 418 lines) are tested and never called (see GUI-AUDIT.md
+  "Tested but never called"). Before trusting a ✅, `grep` for a caller outside `Tests/`.
+- When a child ignores its parent's alignment, the bug is in the **child** (e.g.
+  `.frame(maxWidth: .infinity)` on a button). Three container-level "fixes" made it worse.
+- When a fix "does nothing", check for **stale binary** (§1) before theorising.
+- `#expect` messages must include the actual value so a failure reads on its own.
+- After a fix, re-screenshot **both** states (on/off, default/large type, phone/iPad). Two fixes
+  tonight needed a second pass that only the capture revealed.
+
+## 4. Architecture facts that bit us (don't rediscover them)
+
+- **The Live tab is two views.** `AppleMediaSourceViews.swift` draws iOS/visionOS (in an
+  `#else`), Apple TV draws `AppleTVLiveGuideScreen` in `AppleTVLiveGuideView.swift`. A change
+  to one is not a change to the other.
+- **`AppleTVLiveGuideScreen` has an explicit `init`** (it supplies `metrics` itself). Adding a
+  stored property is not enough — add the parameter to that init or the call site fails with
+  "extra argument".
+- Settings panes all title through `appleSettingsPageTitle` (tvOS draws `TVPageHeader`; iOS is
+  an **inline** navigation title, deliberately — large titles collided with section headers).
+  `appleSettingsPane` wraps content in the 900 pt tvOS form column; empty states must sit
+  **outside** it or they centre on the column, not the page.
+- Brand buttons use `RoundedRectangle(cornerRadius: 30)`, not `Capsule` (a capsule becomes an
+  ellipse when the label wraps at accessibility sizes and the text falls outside it).
+- Toggles: `AppleBrandToggleStyle` (accent switches) is applied **at the iOS root only**. On
+  tvOS a Toggle is an On/Off row — tinting it paints the label pink. Do not add it there.
+- The channel guide: `AppleLiveChannelSnapshot.minimumLineupMatches = 8` (Premier Guide falls
+  back to "everything" below it) and `maximumDisplayedChannels = 300` (display cap; the parser
+  still ingests up to `AppleIPTVClient.maximumChannels = 25_000`). Don't collapse the two.
+- tvOS: toolbar items always draw a box; `.navigationTitle` draws over the page; `Form`
+  uppercases section headers but `List` does not; a `.plain` button draws a focus platter.
+- iOS type-checker timeouts in `AppleDiscoverView` / `AppleMediaSourceViews`: **extract** a
+  sub-expression into a computed property or `func`; moving a block out (not nesting deeper)
+  is what compiles.
+
+### 4b. Traps found 2026-09-17 (UI tests, downloads, tracing)
+- **`simctl get_app_container` can return a STALE container.** After a UI-test install the app's data
+  container id changes; the old path still exists. To find the live one:
+  `find ~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Containers/Data/Application -name openstream-trace.log -mmin -10`.
+  Reading the old container's trace and concluding "nothing happened" cost an hour.
+- **The interaction trace is now ON in UI tests.** `-OpenStreamTrace YES` used to be ignored
+  (`object(forKey:) as? Bool` on the String "YES"); `isEnabled` now uses `bool(forKey:)`. The trace
+  file is `<container>/Library/Caches/openstream-trace.log`, timestamps are ms since launch (grep
+  `^0ms ` for launch markers). Download phase changes are traced as `network download <state>` and
+  failures as `failure download …`; progress ticks are NOT traced (throttled by `State.phaseName`).
+- **Downloads are automatic — never add a source picker back.** Owner decision, verbatim: "no I don't
+  want a download from I want it to be automatic". `startDownload(episode:)` → coordinator walks the
+  ranked plans. The row's feedback is `AppleEpisodeDownloadIndicator` (pure, tested) → ring + label.
+- **Match episode rows by identifier, not label.** `detail.episode.download` is the accessibility
+  identifier of every row's ↓; its label changes ("Download …" → "Preparing …" → "Downloading …, 4%"
+  → "Downloaded …") and also changes once metadata resolves. A label predicate "vanishes" mid-test.
+- **UI-test downloads are real and leave residue.** The detail route is a real series (9/11, 2.8 GB
+  episodes). Always cancel through "Download Options" and check
+  `<container>/Library/Application Support/OpenStream/Offline/manifest.json` is `{}` afterwards. If a
+  test left an mp4, remove the manifest entry and the file with the app terminated — the sims are
+  never erased.
+- **Series pages hid download failures** until today (`downloadFailureNotice` was `EmptyView()` for
+  series). It now shows for series too. Don't "clean it up" back to hidden.
+- **The SMB trap hits the gate too**: "input file … was modified during the build" from `swift test`
+  means sleep 45 s and rerun — the second run passed every time today.
+
+- **Default arguments that construct objects, evaluated inside a `@MainActor` async store
+  method, can crash the task allocator.** `addStremio(manifestValue:)` has
+  `client: AppleManifestClient = AppleManifestClient()`; calling it with the default from inside
+  `AppleSourceStore` crashed `swift test` with "freed pointer was not the last allocation"
+  (signal 6), deterministically, and the whole gate died with it. Pass `client: manifestClient`.
+  If the gate ever ends with that message and no "Test run with" line, bisect with `--filter`
+  per test — it took five variants to find; the log names only the tests in flight.
+- **`swift test` output filters**: never `grep -v trace` on the gate — file paths and test
+  names contain it. Grep for `Test run with|error:|Expectation failed|freed pointer` and always
+  check the exit code.
+- **UI tests: SwiftUI Form pickers** are tapped through their *value* button ("Xtream Account"),
+  not the "Type" label (StaticText, not hittable). `sources.live.playlistText` is the M3U editor's
+  identifier, `sources.live.chooseFile` the file button.
+- **Pasted playlists** live at `<Application Support>/OpenStream/Playlists/pasted.m3u`, addressed
+  by the stable URL `openstream-playlist://local/pasted.m3u` (`AppleLocalPlaylistStore`). The
+  IPTV client reads that scheme from disk; `AppleIPTVEndpointPolicy.normalize` passes it through.
+
+### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
+- 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
+  `asc-signing-setup`, `asc-xcode-build`, `asc-testflight-orchestration`, `asc-build-lifecycle`,
+  `asc-crash-triage`, `asc-id-resolver`, `asc-release-flow`, `swift-focusengine-pro`,
+  `swiftui-performance-audit`, `swiftui-view-refactor`, `swift-testing-pro`, `swift-concurrency-pro`,
+  `widgets`, `ios-accessibility`, `swiftui-pro`, `background-execution`, `ios-simulator-skill`
+  (its `simctl_erase.py` / `simctl_delete.py` were deleted on purpose — persistent sims). The `idb`
+  Python client is NOT installed (PEP 668); only `idb_companion` is. Use `xcrun simctl` + XCUITest.
+- `asc` (brew) is installed and authenticated: profile **"OpenStream"**, team `2VQ74PD5YG`, app id
+  `6807530757`. Proof: `asc apps list --bundle-id com.orgista.openstream`. The key lives in the
+  keychain and in `~/Developer/openstream-build/asc_lib.py`; NEVER print key ids/issuer/p8 in chat.
+- Crash reports from TestFlight: `asc testflight crashes list --app 6807530757` (asc-crash-triage
+  skill). Uploads: `asc builds upload` / `asc publish testflight` — ONLY after the owner says
+  "ship"/"push (n)". Build 11 is still blocked on signing (Xcode account session or manual profile
+  pinning) and the App Group tick for the widgets/watchkitapp bundle ids.
+
+## 5. Owner rules — do not relitigate, do not ask again
+
+- **NEVER upload to TestFlight/App Store unless the owner says "ship"/"push (n)"/"upload (n)".**
+  Build locally. **The App Store Connect API key is on this Mac** — key id, issuer and `.p8` in
+  `~/Developer/openstream-build/asc_lib.py` and `~/.appstoreconnect/private_keys/`; it works (never
+  print its values). Bundle ids `com.orgista.openstream.widgets` / `.watchkitapp` were registered
+  and App Store profiles created + installed on 2026-09-17 (UUIDs in
+  `~/Developer/openstream-build/ExportOptions-b11.plist`). Caveat: the API cannot assign the
+  specific App Group to a new bundle id — both new profiles carry
+  `com.apple.security.application-groups = []`. If an archive fails on that entitlement, the fix
+  is a 30-second portal step (Identifiers → the bundle id → App Groups → tick
+  `group.com.orgista.openstream`), then regenerate the two profiles.
+- **Credentials**: never type, echo, print or commit them. The SMB "Movies" password is never
+  used. IPTV stream URLs with path tokens are replaced with `https://fixture.example/…` in any
+  fixture (see `Tests/OpenStreamAppleTests/Fixtures/french-generalistes.m3u`).
+- No LaunchAgents, cron, routines, workers or "helper scripts" on this Mac. Chat follow-up only.
+- UI: stock Apple look; **no gradients/scrims** except the one approved billboard fade; nothing
+  blue but the brand mark (accent is `#FF3366`); no Liquid Glass; no explainer text (one line
+  max, and only when needed); no scroll indicators; one captions control; controls auto-hide;
+  no boxed icons on tvOS; no coloured label text.
+- Tabled until the owner says otherwise: trailers, intro fingerprinting. Chapter markers are
+  approved.
+- Small increments, one item at a time. If blocked, say so plainly and move on.
+- Netflix IPA is layout inspiration only — never assets, fonts or branding.
+- Commits are as **cyberbanksy** to the **orgista** org; the Apple work goes to its own repo
+  (`OpenStream>Apple`). Pushes currently fail (805 MB `design/` committed) — owner item.
+
+## 6. Where to write things down
+
+- `GUI-AUDIT.md` — tick `[x]` checked / `[F]` fixed / `[!]` defect found; append a dated
+  section per pass with **measurements**, not impressions. Correct a wrong tick in place and
+  say why.
+- `FEEDBACK.md` — a dated prose entry the owner reads: what changed, what was verified and how,
+  what is on him. Say what you did *not* do and why.
+- This file — update the "state" below when you finish a unit of work.
+
+## 7. State as of 2026-09-17 11:00 (newest first)
+- Toggles iOS-green; TestFlight installs trace by default (`AppleBuildChannel`); Add Live TV M3U
+  has Playlist Text + Choose File merging into one local playlist/one source row; AIOMetadata
+  seeded once on DEBUG/TestFlight. Gate 981 / 94. Ship 11 in progress (three platforms, automatic
+  signing via the ASC API key, `asc publish testflight` to Internal + TraceEnabled).
+- Downloads automatic (picker removed), per-episode ring + VoiceOver percentage, failure line on
+  series pages, trace flag fixed, download phases traced. UI test
+  `testDownloadStartsWithoutAskingForASource` passes (23 s). Gate 973 / 91. Sim manifest clean.
+- Skills (18) installed; `asc` logged in. Ship 11 still blocked on signing + App Group (see 4c).
+
+
+**Done tonight** (all gated, built on the platforms concerned, screenshot-verified): tester bugs 1
+(tab trap) and 4 (M3U "one channel"); toggle colour UX; 300 display cap with notice + Channel
+Manager guard; M3U cap 25k with truncation traced; owner's French playlist as a fixture; visionOS
+target un-broken (it did not build — nothing in the loop compiles it); status-bar shield on
+iPhone/iPad detail; Dynamic Type on the detail page; inline titles on pushed settings panes;
+iPad content column / hero buttons / rail bleed; billboard wordmark alignment; search ordering
+(exact title first); eight tvOS/iOS alignment fixes. Details in the two files above.
+
+**Open, on the owner**: ASC Issuer ID + two profiles (ship 11); crash report (TestFlight →
+Crashes, not on this Mac); the 805 MB `design/` push; which edge tvOS section headers align to;
+captions-control placement; search duplicate policy; Library TV (418 lines, unreachable) — wire
+or delete; nine tested-but-uncalled policies; `AppleIPTVGuideView` (public, superseded) —
+delete?; hero synopsis contrast (fails 4.5:1 on bright art — **most urgent parked item**).
+
+**Owner asks queued, in order**: tester bug 2 (download source picker); bug 3 + faster posters;
+download %; landscape button in the player; M3U EPG in the guide; settings backup/restore
+payload; iMessage "watch this" share extension (needs a third profile); visionOS every-screen
+dead-button tally (it builds now); Channel Manager redesign — recommendation in FEEDBACK.md
+(selected-only list, add via Search (+)); **iPhone DUO** — needs Xcode 27.1 beta, not released;
+this Mac has 26.3, no DUO device type, no iOS 27 runtime. Tooling-blocked, not us.
+
+**Test count**: 967 / 90. If yours is lower, you lost tests — find out why before continuing.

@@ -184,12 +184,16 @@ struct AppleFeaturedActions<Play: View, Detail: View>: View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
+        // `nil` on the phone, where filling half the column is the right pill;
+        // a fixed width on a tablet in portrait, where it was not.
+        let buttonWidth = AppleDetailMetrics
+            .featuredActionButtonWidth(portraitViewportWidth: viewportSize.width) ?? .infinity
         layout {
             NavigationLink {
                 playDestination
             } label: {
                 Label("Play", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: buttonWidth)
             }
             .buttonStyle(.brandPrimary)
             .accessibilityIdentifier("home.featured.play")
@@ -198,12 +202,13 @@ struct AppleFeaturedActions<Play: View, Detail: View>: View {
                 detailDestination
             } label: {
                 Label("Details", systemImage: "info.circle")
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: buttonWidth)
             }
             .buttonStyle(.brandSecondary)
             .accessibilityIdentifier("home.featured.details")
         }
         .controlSize(.large)
+        .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
     #endif

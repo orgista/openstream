@@ -70,12 +70,25 @@ enum OpenStreamTabVisibility {
         return content + [.settings]
     }
 
-    /// Whether a content tab may be turned off: false when it is the only
-    /// content tab still on, so its toggle goes inert instead of emptying the bar.
-    static func canHide(_ tab: OpenStreamTab, discover: Bool, library: Bool, live: Bool) -> Bool {
+    /// Whether a content tab's toggle may be **operated** — in either direction.
+    ///
+    /// This used to be `canHide`, and the name is what caused the bug: reading
+    /// it literally, "a tab that is already off has nothing to hide" looks like
+    /// it should return false, and a test said exactly that. But the call site
+    /// is `.disabled(!canHide(...))`, so a false answer greys the toggle out —
+    /// and a tab you had switched off could never be switched back on. A tester
+    /// hit that on build 10 and it is a dead end: the only way back was
+    /// reinstalling.
+    ///
+    /// The rule the app actually wants has two halves, and only the second one
+    /// is about hiding:
+    /// * a tab that is **off** can always be turned on;
+    /// * a tab that is **on** can be turned off unless it is the last one.
+    static func canToggle(_ tab: OpenStreamTab, discover: Bool, library: Bool, live: Bool) -> Bool {
         guard tab != .settings else { return false }
         let visible = visibleTabs(discover: discover, library: library, live: live)
-        return visible.contains(tab) && visible.count > 2
+        guard visible.contains(tab) else { return true }
+        return visible.count > 2
     }
 
     /// Keeps the current tab when it is still shown; otherwise moves to the
@@ -268,6 +281,7 @@ public struct OpenStreamRootView: View {
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()
+            Task { await sourceStore.seedTestCatalogsIfNeeded() }
             // Simulator-only navigation to real screens; no fixtures or saved sources.
             let screen = debugScreen
             guard let screen else { return }
@@ -280,28 +294,36 @@ public struct OpenStreamRootView: View {
             else if screen == "live" { selectedTab = .live }
             else if screen != "discover" && screen != "detail" && screen != "episodes" && screen != "play" {
                 selectedTab = .settings
-                #if os(visionOS) || os(tvOS)
+                // Every platform binds its Settings tab to the same
+                // `navigationPaths[.settings]` and declares the same
+                // `navigationDestination`s, so this was needlessly fenced off
+                // from iOS — which is why an iPhone sweep could only ever
+                // photograph the settings root and not the pages under it.
                 var path = NavigationPath()
                 if screen == "subtitle-languages" {
                     path.append(AppleSettingsRoute.playback)
                     path.append(AppleSettingsRoute.subtitleLanguages)
+                } else if let route = Self.debugTopLevelSettingsRoutes[screen] {
+                    // Panes that hang off Settings directly rather than under
+                    // Sources. Listing them here is what makes Privacy, Storage,
+                    // About and the three service panes reachable for a headless
+                    // screenshot at all — before this, the sweep could only see
+                    // the pages that happened to sit under Sources.
+                    path.append(route)
                 } else {
-                    if screen != "settings" && screen != "playback-settings" && screen != "channels" {
+                    if screen != "settings" {
                         path.append(AppleSettingsRoute.sources)
                     }
                     switch screen {
-                    case "channels": path.append(AppleSettingsRoute.channels)
                     case "add-files": path.append(AppleSourceRoute.addFiles)
                     case "add-live": path.append(AppleSourceRoute.addLiveTV)
                     case "add-catalog": path.append(AppleSourceRoute.addManifest)
                     case "network-share": path.append(AppleSourceRoute.addNetworkShare)
                     case "web-management": path.append(AppleSourceRoute.webManagement)
-                    case "playback-settings": path.append(AppleSettingsRoute.playback)
                     default: break
                     }
                 }
                 navigationPaths[.settings] = path
-                #endif
             }
         }
         #endif
@@ -327,6 +349,8 @@ public struct OpenStreamRootView: View {
         // (white label on a white fill, TV7); tvOS controls are styled where
         // they are declared instead (rework plan task 3).
         .tint(.white)
+        // Switches alone take the brand accent — see `AppleBrandToggleStyle`.
+        .toggleStyle(.brandSwitch)
         #endif
         .appleFirstRunPresentation(isPresented: Binding(
             get: {
@@ -510,6 +534,19 @@ public struct OpenStreamRootView: View {
     #endif
 
     #if DEBUG
+    /// Settings pages that are children of Settings itself, not of Sources.
+    private static let debugTopLevelSettingsRoutes: [String: AppleSettingsRoute] = [
+        "channels": .channels,
+        "playback-settings": .playback,
+        "metadata": .metadata,
+        "server-downloads": .serverDownloads,
+        "trakt": .trakt,
+        "watch-providers": .watchProviders,
+        "privacy": .privacy,
+        "storage": .storage,
+        "about": .about,
+    ]
+
     private var debugScreen: String? {
         if let stored = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") {
             return stored
@@ -621,16 +658,6 @@ private struct AppleFirstRunGuidanceView: View {
         .background(Color.black)
     }
     #endif
-}
-
-private struct AppleCatalogEmptyView: View {
-    let title: String
-    let systemImage: String
-    let openSettings: () -> Void
-
-    var body: some View {
-        AppleSourceEmptyState(title: title, actionTitle: "Open Settings", action: openSettings)
-    }
 }
 
 public struct OpenStreamThreeBarMark: View {

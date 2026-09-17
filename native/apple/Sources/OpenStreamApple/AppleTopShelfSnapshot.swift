@@ -255,11 +255,20 @@ public actor AppleTopShelfSnapshotWriter {
         #if os(tvOS)
         TVTopShelfContentProvider.topShelfContentDidChange()
         #endif
-        #if os(iOS) || os(visionOS)
+        #if os(iOS)
         // The same snapshot backs the iOS/iPadOS widgets, so a write has to
         // wake their timelines too. Without this a widget shows whatever it
         // rendered last until the system happens to refresh it.
         WidgetCenter.shared.reloadAllTimelines()
+        #elseif os(visionOS)
+        // `WidgetCenter` arrived on visionOS in 26.0 and this target deploys to
+        // 2.0, so the unguarded call did not compile — which is why the whole
+        // visionOS target had been failing to build (found 2026-09-17, the first
+        // time anything in this audit built it). Gated rather than dropped, so
+        // the reload still happens on a visionOS that has widgets.
+        if #available(visionOS 26.0, *) {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         #endif
     }
 }

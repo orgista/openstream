@@ -8,6 +8,25 @@ import SwiftUI
 /// the owner reported on the Live tab's Open Settings button). The brand is
 /// monochrome, so the accent is white and the primary button inverts to keep
 /// contrast; nothing in the app reads as the iOS default blue.
+/// The brand buttons' background shape.
+///
+/// Not a `Capsule`. A capsule's corner radius is always half its height, so a
+/// label that wraps turns the button into an **ellipse**, and an ellipse is
+/// narrower at its top and bottom than the text it is meant to contain: at the
+/// largest accessibility text size "Start Web Management" wrapped to three lines
+/// and the first and last lines sat *outside* the white fill (measured on the
+/// phone, 2026-09-17).
+///
+/// `RoundedRectangle` clamps its radius to half the smaller dimension, so at
+/// every ordinary single-line height (44–56 pt) this draws exactly the same pill
+/// a capsule did, and only once the label wraps does it become a rounded
+/// rectangle — which is full width at every height, so the text stays inside it.
+private let appleBrandButtonCornerRadius: CGFloat = 30
+
+private var appleBrandButtonShape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: appleBrandButtonCornerRadius, style: .continuous)
+}
+
 public struct AppleBrandPrimaryButtonStyle: ButtonStyle {
     public init() {}
 
@@ -27,16 +46,16 @@ public struct AppleBrandPrimaryButtonStyle: ButtonStyle {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 11)
                 .frame(minHeight: AppleDesignTokens.minimumActionSize)
-                .background(.white, in: .capsule)
+                .background(.white, in: appleBrandButtonShape)
                 .overlay {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: appleBrandButtonCornerRadius + 7, style: .continuous)
                         .stroke(.white.opacity(isFocused ? 0.95 : 0), lineWidth: 4)
                         .padding(-7)
                 }
                 .shadow(color: .white.opacity(isFocused ? 0.42 : 0), radius: 16)
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
                 .opacity(configuration.isPressed ? 0.7 : 1)
-                .contentShape(.capsule)
+                .contentShape(appleBrandButtonShape)
                 .appleVisionHover()
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
         }
@@ -71,17 +90,20 @@ public struct AppleBrandSecondaryButtonStyle: ButtonStyle {
                 .frame(minHeight: AppleDesignTokens.minimumActionSize)
                 .background(
                     isFocused ? Color(white: 0.28) : Color(white: 0.14),
-                    in: .capsule
+                    in: appleBrandButtonShape
                 )
                 .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(isFocused ? 0.96 : 0.34), lineWidth: isFocused ? 4 : 1)
-                        .padding(isFocused ? -7 : 0)
+                    RoundedRectangle(
+                        cornerRadius: appleBrandButtonCornerRadius + (isFocused ? 7 : 0),
+                        style: .continuous
+                    )
+                    .stroke(.white.opacity(isFocused ? 0.96 : 0.34), lineWidth: isFocused ? 4 : 1)
+                    .padding(isFocused ? -7 : 0)
                 }
                 .shadow(color: .white.opacity(isFocused ? 0.34 : 0), radius: 14)
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
                 .opacity(configuration.isPressed ? 0.72 : 1)
-                .contentShape(.capsule)
+                .contentShape(appleBrandButtonShape)
                 .appleVisionHover()
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
         }
@@ -193,4 +215,35 @@ public extension View {
     func appleTVReadableFocus() -> some View {
         modifier(AppleTVReadableFocusModifier())
     }
+}
+
+
+/// Switches take the brand accent; everything else keeps the app's white tint.
+///
+/// The app tints itself white so nothing reads as the iOS default blue. That
+/// also tinted every `Toggle`, and a white ON track under a white knob is a
+/// switch you can only read from the knob's drop shadow — "the toggles in
+/// settings are not great" (owner, 2026-09-17). This re-wraps each switch in the
+/// stock style with the brand accent — #FF3366, already the favourites and
+/// now-line colour, so it is inside "nothing blue but the brand mark" — and is
+/// applied once at each root, so buttons and links beside a switch stay white.
+public struct AppleBrandToggleStyle: ToggleStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        // Apple TV has no switch track to colour — its Toggle is a row with an
+        // "On"/"Off" label — and the tint landed on the label text instead.
+        // Left exactly as the platform draws it.
+        Toggle(configuration)
+        #else
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .tint(.green) // the classic iOS switch (owner, 2026-09-17)
+        #endif
+    }
+}
+
+public extension ToggleStyle where Self == AppleBrandToggleStyle {
+    static var brandSwitch: AppleBrandToggleStyle { AppleBrandToggleStyle() }
 }

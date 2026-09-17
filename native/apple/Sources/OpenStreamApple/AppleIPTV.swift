@@ -353,6 +353,8 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
 public enum AppleIPTVEndpointPolicy {
     public static func normalize(_ value: String) throws -> URL {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Pasted/uploaded playlists live in the app (`openstream-playlist://local/…`).
+        if let local = AppleLocalPlaylistStore.localURL(from: trimmed) { return local }
         let normalized = trimmed.contains("://")
             ? trimmed
             : "http://\(trimmed)"
@@ -395,7 +397,15 @@ public struct AppleIPTVClient: Sendable {
     public typealias ProtectedPlaybackURL = @Sendable (URL, [String: String]) async throws -> URL
 
     public static let maximumResponseBytes = 12_000_000
-    public static let maximumChannels = 10_000
+    /// 25,000, up from 10,000. The owner's own provider is 9,376 channels, and
+    /// the old cap sat 624 above it: one provider refresh, or two playlists
+    /// merged into one ("it should be able to accept a larger amount at once",
+    /// 2026-09-17), and the tail was dropped **silently** by the `break` below.
+    /// The byte ceiling stays the real backstop — at ~245 bytes per entry in
+    /// the owner's French playlist, 12 MB is ~49,000 entries — so this number
+    /// only needs to sit comfortably above any real provider while staying
+    /// under what the bytes could ever deliver.
+    public static let maximumChannels = 25_000
 
     private let loader: Loader
     private let protectedPlaybackURL: ProtectedPlaybackURL
@@ -426,6 +436,14 @@ public struct AppleIPTVClient: Sendable {
         switch type {
         case .m3u:
             endpoint = try AppleIPTVEndpointPolicy.normalize(source.url.absoluteString)
+            if AppleLocalPlaylistStore.isLocal(endpoint) {
+                let data = try AppleLocalPlaylistStore.shared.read(endpoint)
+                let values = try Self.parseM3U(data, sourceID: source.id, baseURL: endpoint)
+                guard !values.isEmpty else { throw AppleIPTVError.noChannels }
+                return source.epgURL.map { epgURL in
+                    values.map { channel in channel.withGuideURL(channel.guideURL ?? epgURL) }
+                } ?? values
+            }
         case .xtream:
             guard let credentials,
                   !credentials.username.isEmpty,
@@ -703,7 +721,14 @@ public struct AppleIPTVClient: Sendable {
                 guideID: providerID.isEmpty ? nil : providerID,
                 guideURL: guideURL
             ))
-            if channels.count == maximumChannels { break }
+            if channels.count == maximumChannels {
+                // Never silently. The viewer sees a guide missing its tail and
+                // has no way to know the playlist was cut, so say so where the
+                // diagnostics log will carry it.
+                let entries = lines.reduce(0) { $0 + ($1.uppercased().hasPrefix("#EXTINF:") ? 1 : 0) }
+                appleTrace("iptv playlist truncated: kept \(channels.count) of \(entries) entries (maximumChannels)")
+                break
+            }
         }
         return channels
     }

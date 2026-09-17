@@ -229,12 +229,36 @@ final class AppleCatalogSearchStore {
                 recordsByID[key] = value
             }
         }
+        let normalizedQuery = tokens.joined(separator: " ")
         return recordsByID.values.sorted { lhs, rhs in
+            let lhsRank = relevance(lhs, query: normalizedQuery)
+            let rhsRank = relevance(rhs, query: normalizedQuery)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
             let lhsTitle = normalized(lhs.title)
             let rhsTitle = normalized(rhs.title)
             if lhsTitle != rhsTitle { return lhsTitle < rhsTitle }
             return lhs.id < rhs.id
         }.prefix(limit).map { $0 }
+    }
+
+    /// How directly a matched title answers the query — 0 best.
+    ///
+    /// Alphabetical order alone is right only when nothing that matched sorts
+    /// ahead of the thing that was asked for. Typing "Dune" on the phone
+    /// returned *Be Dune Teen*, *Children of Dune* and *Destination Dune* above
+    /// *Dune* itself, because every one of them contains the word and B, C and
+    /// D-e sort before D-u (owner review, 2026-09-17). The corpus test missed
+    /// it: none of its 206 titles is a decoy that sorts ahead of an exact match.
+    ///
+    /// Ties still break alphabetically, so *Dune* stays ahead of *Dune: Part
+    /// Two* and the ordering that was already right does not move.
+    static func relevance(_ record: AppleMediaRecord, query: String) -> Int {
+        guard !query.isEmpty else { return 2 }
+        let title = normalized(record.title)
+        if title == query { return 0 }
+        if record.aliases.contains(where: { normalized($0) == query }) { return 0 }
+        if title.hasPrefix(query) { return 1 }
+        return 2
     }
 
     /// One row per title: the normalised name and the year.
@@ -247,11 +271,36 @@ final class AppleCatalogSearchStore {
         "\(normalized(record.title))|\(record.year.map(String.init) ?? "")"
     }
 
+    /// Whether a record answers the query.
+    ///
+    /// This used to be raw substring containment over the title, the aliases
+    /// **and the canonical id**, which produced the "odd results" the owner
+    /// reported. Measured against a 206-title corpus: "Her" returned
+    /// *Sherlock*, "Ran" returned *Stranger Things*, "It" returned 18 titles,
+    /// and a bare digit string matched whichever title happened to carry those
+    /// digits in its IMDb number.
+    ///
+    /// A token now has to begin a word — "her" does not begin "sherlock" — or
+    /// begin the title with its spaces removed, which is what lets "mash" find
+    /// *M\*A\*S\*H* and "walle" find *WALL·E*. The id is matched only in full.
     private static func matches(_ record: AppleMediaRecord, tokens: [Substring]) -> Bool {
-        let haystack = normalized(
-            ([record.title] + record.aliases + [record.canonicalID ?? ""]).joined(separator: " ")
-        )
-        return !tokens.isEmpty && tokens.allSatisfy(haystack.contains)
+        guard !tokens.isEmpty else { return false }
+        if let canonical = record.canonicalID?.lowercased(),
+           tokens.count == 1, tokens[0] == canonical {
+            return true
+        }
+        let words = normalized(([record.title] + record.aliases).joined(separator: " "))
+            .split(separator: " ")
+        let compact = words.joined()
+        return tokens.allSatisfy { token in
+            // A four-digit token may be the year rather than part of the title:
+            // people type "dune 2021" and "it 2017" to tell two versions apart,
+            // and that used to return **nothing**, because the year appears
+            // nowhere in the title. Still falls through to the title, so "1917"
+            // and "2001" keep finding the films named after them.
+            if token.count == 4, let year = Int(token), record.year == year { return true }
+            return words.contains { $0.hasPrefix(token) } || compact.hasPrefix(token)
+        }
     }
 
     private static func merge(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> AppleMediaRecord {
@@ -275,13 +324,16 @@ final class AppleCatalogSearchStore {
     }
 
     private static func normalized(_ value: String) -> String {
-        value.folding(
-            options: [.caseInsensitive, .diacriticInsensitive],
-            locale: Locale(identifier: "en_US_POSIX")
-        )
-        .components(separatedBy: CharacterSet.alphanumerics.inverted)
-        .filter { !$0.isEmpty }
-        .joined(separator: " ")
+        // "&" becomes "and" before punctuation is stripped, so "Law & Order"
+        // and someone typing "law and order" reach the same words.
+        value.replacingOccurrences(of: "&", with: " and ")
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
 

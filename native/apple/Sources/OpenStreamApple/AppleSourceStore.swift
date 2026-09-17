@@ -1016,6 +1016,69 @@ public final class AppleSourceStore {
 
     /// Fetches the add-on's manifest again and applies it. Fail-open: a
     /// transport or shape failure leaves the source exactly as it was.
+    /// Add-ons every tester should start with (owner, 2026-09-17: "add
+    /// AIOmetadata add-on for testing"). Seeded once per install in DEBUG and
+    /// TestFlight builds; a tester who deletes one never sees it come back.
+    public static let testCatalogManifests: [String] = [
+        "https://aiometadata.elfhosted.com/stremio/6907d7b7-37cb-4b48-adaf-f40b9cdec53c/manifest.json",
+    ]
+
+    public static var seedsTestCatalogs: Bool {
+        #if DEBUG
+        true
+        #else
+        AppleBuildChannel.isTestFlight
+        #endif
+    }
+
+    /// Adds each test catalog the first time it succeeds; a manifest that
+    /// fails to load (offline) is retried on the next launch.
+    ///
+    /// Passes the store's own `manifestClient` explicitly. Letting
+    /// `addStremio(manifestValue:)` build its default `AppleManifestClient()`
+    /// from inside this async method crashed the 2026-09-17 gate with "freed
+    /// pointer was not the last allocation" (signal 6, deterministic) — and
+    /// bypassed the stub client in tests. Bisected in `AppleTestCatalogSeedTests`.
+    public func seedTestCatalogsIfNeeded(force: Bool = false) async {
+        guard force || Self.seedsTestCatalogs else { return }
+        let pending = pendingTestCatalogs()
+        var index = 0
+        while index < pending.count {
+            let value = pending[index]
+            index += 1
+            if await seedTestCatalog(value) { markTestCatalogSeeded(value) }
+        }
+    }
+
+    private var testCatalogSeedKey: String { storageKey + ".seeded-test-catalogs.v1" }
+
+    private func seededTestCatalogs() -> [String] {
+        defaults.stringArray(forKey: testCatalogSeedKey) ?? []
+    }
+
+    private func pendingTestCatalogs() -> [String] {
+        let done = seededTestCatalogs()
+        return Self.testCatalogManifests.filter { !done.contains($0) }
+    }
+
+    private func markTestCatalogSeeded(_ value: String) {
+        var done = seededTestCatalogs()
+        guard !done.contains(value) else { return }
+        done.append(value)
+        defaults.set(done, forKey: testCatalogSeedKey)
+    }
+
+    private func seedTestCatalog(_ value: String) async -> Bool {
+        do {
+            // The store's own client — the default argument builds a fresh live
+            // client, which also bypassed the stub in tests.
+            _ = try await addStremio(manifestValue: value, client: manifestClient)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     @discardableResult
     public func refreshManifest(id: AppleSource.ID) async -> Bool {
         guard let source = sources.first(where: { $0.id == id }), source.kind == .stremio else { return false }

@@ -80,7 +80,7 @@ struct AppleTVBillboard<Actions: View>: View {
             wordmark: wordmark
         ) {
         case .wordmark(let url):
-            AppleTrimmedTitleLogo(url: url) { _ in }
+            AppleTrimmedTitleLogo(url: url, alignment: .leading) { _ in }
                 .frame(maxWidth: M.copyColumnWidth * 0.62, maxHeight: M.titleFontSize * 2.2, alignment: .leading)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)

@@ -208,20 +208,29 @@ func captionsAutoOnMigratesToAlways() {
     )
 
     // The toggle for the only content tab left goes inert.
-    #expect(OpenStreamTabVisibility.canHide(.library, discover: false, library: true, live: false) == false)
-    #expect(OpenStreamTabVisibility.canHide(.live, discover: false, library: false, live: true) == false)
-    #expect(OpenStreamTabVisibility.canHide(.home, discover: true, library: false, live: false) == false)
+    #expect(OpenStreamTabVisibility.canToggle(.library, discover: false, library: true, live: false) == false)
+    #expect(OpenStreamTabVisibility.canToggle(.live, discover: false, library: false, live: true) == false)
+    #expect(OpenStreamTabVisibility.canToggle(.home, discover: true, library: false, live: false) == false)
 
     // With two or more on, any of them may still be hidden.
-    #expect(OpenStreamTabVisibility.canHide(.home, discover: true, library: true, live: false))
-    #expect(OpenStreamTabVisibility.canHide(.library, discover: true, library: true, live: false))
-    #expect(OpenStreamTabVisibility.canHide(.live, discover: true, library: true, live: true))
+    #expect(OpenStreamTabVisibility.canToggle(.home, discover: true, library: true, live: false))
+    #expect(OpenStreamTabVisibility.canToggle(.library, discover: true, library: true, live: false))
+    #expect(OpenStreamTabVisibility.canToggle(.live, discover: true, library: true, live: true))
 
-    // A tab that is already off has nothing to hide.
-    #expect(OpenStreamTabVisibility.canHide(.live, discover: true, library: true, live: false) == false)
+    // A tab that is already OFF must always be switchable back ON. This row used
+    // to assert the opposite — "a tab that is already off has nothing to hide" —
+    // which read correctly against the old name and made the toggle inert, so a
+    // tab you switched off could never be switched back on (tester, build 10).
+    #expect(OpenStreamTabVisibility.canToggle(.live, discover: true, library: true, live: false))
+    #expect(OpenStreamTabVisibility.canToggle(.library, discover: true, library: false, live: true))
+    #expect(OpenStreamTabVisibility.canToggle(.home, discover: false, library: true, live: true))
+    // Even down to the last one: Library is the only tab on, so the other two
+    // must still be reachable.
+    #expect(OpenStreamTabVisibility.canToggle(.home, discover: false, library: true, live: false))
+    #expect(OpenStreamTabVisibility.canToggle(.live, discover: false, library: true, live: false))
 
     // Settings is never a candidate.
-    #expect(OpenStreamTabVisibility.canHide(.settings, discover: true, library: true, live: true) == false)
+    #expect(OpenStreamTabVisibility.canToggle(.settings, discover: true, library: true, live: true) == false)
 }
 
 @Test func selectionMovesToTheFirstVisibleTabWhenTheCurrentOneIsHidden() {

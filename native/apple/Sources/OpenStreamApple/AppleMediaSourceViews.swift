@@ -117,6 +117,18 @@ struct AppleLiveTVView: View {
                     }
                     .scrollIndicators(.hidden)
 
+                    // One line, only when the cap kept channels off the guide.
+                    // Not an explainer: the count is the whole message, and the
+                    // way to narrow it is the package picker the viewer already
+                    // has. Silent truncation was the thing to avoid.
+                    if channelSnapshot.hiddenCount > 0 {
+                        Text("Showing \(channelSnapshot.channels.count) of \(channelSnapshot.channels.count + channelSnapshot.hiddenCount) channels")
+                            .font(AppleDesignTokens.fontCaption)
+                            .foregroundStyle(AppleDesignTokens.textSecondary)
+                            .padding(.horizontal, AppleDesignTokens.spacingMedium)
+                            .accessibilityIdentifier("live.cap.notice")
+                    }
+
                     AppleIPTVGuideGridView(
                         channels: channelSnapshot.channels,
                         guide: guideStore.guide(for: channelSnapshot.channelIDs),
@@ -427,6 +439,7 @@ struct AppleLiveTVView: View {
         AppleTVLiveGuideScreen(
             channels: channelSnapshot.channels,
             categories: channelSnapshot.categories,
+            hiddenCount: channelSnapshot.hiddenCount,
             selectedCategory: $selectedCategory,
             guide: guideStore.guide(for: channelSnapshot.channelIDs),
             guideRevision: guideStore.revision,
@@ -1123,48 +1136,67 @@ struct AppleLibraryView: View {
         .appleTraceScreen("library", detail: "\(groups.count) titles, loading=\(library.isLoading)")
     }
 
+    /// Extracted from `libraryScroll` because the whole scroll body stopped
+    /// type-checking on visionOS — "unable to type-check this expression in
+    /// reasonable time", which is what had kept that target from building at all
+    /// (2026-09-17). The visionOS branches add enough overloads to tip an
+    /// expression the other platforms still managed. Same shape, one level of
+    /// nesting moved out.
+    @ViewBuilder
+    private func rotatingHero(_ heroes: [AppleLibrarySeries]) -> some View {
+        TimelineView(.periodic(from: .now, by: AppleHeroRotation.interval)) { context in
+            if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
+                let featured = heroes[index]
+                AppleFeaturedHero(
+                    item: library.catalogItem(for: featured),
+                    viewportSize: viewportSize,
+                    rotationCount: heroes.count,
+                    rotationIndex: index
+                ) {
+                    AppleFeaturedActions(viewportSize: viewportSize) {
+                        detail(featured, autoPlay: true)
+                    } detailDestination: { detail(featured) }
+                }
+                .padding(.horizontal, heroHorizontalPadding)
+            }
+        }
+    }
+
+    /// The per-source, per-kind shelves. Extracted for the same reason as
+    /// `rotatingHero`: two nested `ForEach`es carrying four `let` bindings and a
+    /// closure were more than the visionOS type-checker would finish.
+    private var sourceShelves: some View {
+        ForEach(library.sources) { source in
+            let local = groups.filter { $0.items.first?.sourceID == source.id }
+            ForEach([AppleLibraryTitle.Kind.movie, .show, .other], id: \.rawValue) { kind in
+                let titles = local.filter { $0.parsed.kind == kind }
+                if !titles.isEmpty {
+                    // One library source reads "Movies" / "Shows"; the
+                    // source name only disambiguates when there are several (Z9).
+                    let kindName = kind == .movie ? "Movies" : kind == .show ? "Shows" : "Other"
+                    let name = library.sources.count > 1 ? "\(kindName) · \(source.name)" : kindName
+                    let isFirstShelf = accessoryShelf.map {
+                        $0.sourceIndex == library.sources.firstIndex(where: { $0.id == source.id })
+                            && $0.kind == kind
+                    } ?? false
+                    shelf(name, titles, accessory: isFirstShelf ? sortAccessory : nil)
+                }
+            }
+        }
+    }
+
     private var libraryScroll: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 let heroes = library.featuredCandidates
                 if !heroes.isEmpty {
-                    TimelineView(.periodic(from: .now, by: AppleHeroRotation.interval)) { context in
-                        if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
-                            let featured = heroes[index]
-                            AppleFeaturedHero(
-                                item: library.catalogItem(for: featured),
-                                viewportSize: viewportSize,
-                                rotationCount: heroes.count,
-                                rotationIndex: index
-                            ) {
-                                AppleFeaturedActions(viewportSize: viewportSize) {
-                                    detail(featured, autoPlay: true)
-                                } detailDestination: { detail(featured) }
-                            }.padding(.horizontal, heroHorizontalPadding)
-                        }
-                    }
+                    rotatingHero(heroes)
                 }
                 if let error = library.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle").padding(.horizontal, 16)
                 }
                 if !library.continueWatching.isEmpty { shelf("Continue Watching", library.continueWatching, progress: true) }
-                ForEach(library.sources) { source in
-                    let local = groups.filter { $0.items.first?.sourceID == source.id }
-                    ForEach([AppleLibraryTitle.Kind.movie, .show, .other], id: \.rawValue) { kind in
-                        let titles = local.filter { $0.parsed.kind == kind }
-                        if !titles.isEmpty {
-                            // One library source reads "Movies" / "Shows"; the
-                            // source name only disambiguates when there are several (Z9).
-                            let kindName = kind == .movie ? "Movies" : kind == .show ? "Shows" : "Other"
-                            let name = library.sources.count > 1 ? "\(kindName) · \(source.name)" : kindName
-                            let isFirstShelf = accessoryShelf.map {
-                                $0.sourceIndex == library.sources.firstIndex(where: { $0.id == source.id })
-                                    && $0.kind == kind
-                            } ?? false
-                            shelf(name, titles, accessory: isFirstShelf ? sortAccessory : nil)
-                        }
-                    }
-                }
+                sourceShelves
                 if !groups.isEmpty { shelf("Recently Added", library.sorted(.added).prefix(24).map { $0 }) }
                 if library.isLoading && groups.isEmpty {
                     AppleSourceLoadingState()

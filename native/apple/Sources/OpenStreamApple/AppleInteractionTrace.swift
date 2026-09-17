@@ -59,8 +59,11 @@ public enum AppleInteractionTrace {
     /// reliable runtime signal that separates an internal TestFlight tester
     /// from an external one, and inventing one would be guesswork.
     public static var isEnabled: Bool {
-        if let stored = UserDefaults.standard.object(forKey: preferenceKey) {
-            return (stored as? Bool) ?? false
+        // A launch argument (`-OpenStreamTrace YES`, as the UI tests pass it)
+        // lands here as the String "YES"; `bool(forKey:)` reads both that and
+        // the Bool the Settings toggle stores.
+        if UserDefaults.standard.object(forKey: preferenceKey) != nil {
+            return UserDefaults.standard.bool(forKey: preferenceKey)
         }
         #if DEBUG
         return true

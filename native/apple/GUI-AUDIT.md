@@ -300,16 +300,32 @@ Design constraints from the owner, verbatim intent:
       way to verify a sign-in and never asks for service credentials.
 - [F] G3 **Stay in the app by default.** A local or add-on source keeps `Play`. The external
       option is "a very subtle also available to stream on (platform)", not a second button.
-- [F] G4 **Play becomes the external option only when there is nothing else** — no local file,
+- [~] G4 **Play becomes the external option only when there is nothing else** — no local file,
       no add-on stream.
+      **Corrected 2026-09-17: this is marked done and it is not wired.** The policy exists and is
+      tested (`AppleWatchProviderPolicy.replacesPlay`), but a search of `Sources/`, `Apps/` and
+      `Tests/` finds its only callers are its own three test cases. **No view calls it**, so Play is
+      never replaced by anything — the app always shows Play and the services stay a quiet sentence.
+      Found while checking G8; the same "a ✅ can outrun the code" pattern this file has been caught
+      by before.
+      **Not implemented here, and this one really is the owner's call:** wiring it means opening an
+      external service, and TMDB supplies no title-level deep link — only the provider's identity. So
+      the button would open Netflix, not the title, which is exactly the honesty problem G8 is about.
+      What should it do: open the service's app anyway, open a web search for the title, or stay as a
+      sentence? There is no existing rule that answers that.
 - [F] G5 **Subscription and free-with-ads only. Never rent or buy.** TMDB's
       `/watch/providers` splits results into `flatrate` / `free` / `ads` / `rent` / `buy`, so this
       is a filter, not a heuristic: keep the first three, drop the last two. This is the
       owner's "not purchase options cause prime does that a lot".
 - [F] G6 **Say which it is** — ads vs no ads — rather than implying a clean stream.
 - [F] G7 Region-correct — required, never defaulted
-- [ ] G8 Honest about deep-link depth: title-level links need partner agreements; without one the
+- [x] G8 Honest about deep-link depth: title-level links need partner agreements; without one the
       handoff opens the app, not the title. Do not imply otherwise in the UI.
+      **Satisfied, and in the strongest way available: the UI makes no handoff claim because it
+      offers no handoff.** `AppleWatchProviderRow` is a plain sentence — "Also available on Netflix
+      and Tubi" — with no tap target, no button and no link. Confirmed by search: there is no
+      `openURL`, no `UIApplication.shared.open` and no `NSWorkspace` anywhere in the app, so it never
+      leaves itself for a service at all. A passive line cannot imply title-level depth.
 
 ### H. iOS widgets + Apple Watch
 
@@ -917,3 +933,877 @@ deterministic. That is exactly "the same wrong show, and picking another source 
       **Verdict: cannot say the wrong show played here.** Not evidence the fix works either; the
       candidate that wins may simply differ from the owner's run. Needs the owner's own check on a
       build containing the fix.
+
+## Search tested against a 206-title corpus — 2026-09-16
+
+Owner: "search for at least 200 shows and movies all from different eras so that we have a good
+sample and improve the search". Built `AppleSearchCorpusTests` — **206 titles, 1927 to 2025**,
+movies and series, deliberately including the shapes that break naive matching: one-word titles
+(It, Up, Us, Her, M, 9), punctuation (WALL·E, M*A*S*H, S.H.I.E.L.D.), diacritics (Amélie, Shōgun,
+Léon), digits (Se7en, 1917, 12 Angry Men, 2001), ampersands (Law & Order), and the same title in
+two eras (It 1990 and It 2017).
+
+**Four real defects, found by the corpus and fixed:**
+
+- [F] **Substring matching returned unrelated titles.** `matches()` tested raw containment, so
+      "Her" returned *Sherlock*, "Ran" returned *Stranger Things*, "It" returned *Spirited Away*.
+      A token must now begin a word.
+- [F] **A short query returned a flood.** "It" came back with **18** results; it now returns the
+      four titles that actually begin with it (both *It*s, *It Happened One Night*, *It's a
+      Wonderful Life*).
+- [F] **A numeric query matched titles through their IMDb id.** The canonical id sat in the same
+      haystack as the title, so typing digits matched whichever title carried them in its id. The
+      id is now matched only in full.
+- [F] **Punctuated and ampersand titles were unfindable.** "MASH" did not find *M\*A\*S\*H* and
+      "Law and Order" did not find *Law & Order*. A token may now also begin the title with its
+      spaces removed, and "&" reads as "and" before punctuation is stripped.
+
+Recall was already correct and stays correct: all 206 titles find themselves, and the two *It*s
+remain two results rather than collapsing.
+
+Verified on device afterwards — a real "jury duty" search through the app still returns its rows,
+so the stricter matcher did not cost live recall.
+
+### Second pass on the corpus — ordering and years
+
+- [F] ~~**Result ordering is already right**~~ — **this was wrong**, see "Search ordering" below
+      (2026-09-17). The assertions in this row all passed and still pass; they simply could not
+      fail, because no corpus title sorts ahead of an exact match.
+- [F] **A year in the query returned nothing at all.** "Dune 2021" produced an **empty** result
+      list, and "It 2017" could not find the 2017 film — the year appears nowhere in a title, so
+      requiring every token to match the title killed the whole query. Typing a year is exactly how
+      someone separates *It* (1990) from *It* (2017).
+      A four-digit token may now match the record's year, and still falls through to the title, so
+      *1917* and *2001: A Space Odyssey* keep being findable by name. "It 2017" now returns the
+      2017 film and **not** the 1990 series.
+
+## Owner report: typing on iPhone — 2026-09-16
+
+**Resolved 2026-09-17 — see "Typing on iPhone, resolved" at the end of this file. The software
+keyboard does come up and does type; the simulator's *Connect Hardware Keyboard* setting was
+suppressing it during this pass.**
+
+- [~] **"Type by keyboard on iPhone doesn't work."** Partly tested, and the part I can reach works.
+      A UI test types into a Settings field, leaves the screen and comes back: **10 characters in,
+      10 characters still there**. So the field, its binding and persistence are sound — a value
+      that only existed while focused would have failed this.
+      **What that does not cover**, and I cannot cover here: the simulator never renders the
+      software keyboard (`ConnectHardwareKeyboard=false` plus a boot did not bring it up), so
+      `typeText` reaches the field through the hardware path. And the flow described — a text field
+      open on Apple TV, the iPhone offering to type for it — is Continuity between two real
+      devices, which no simulator pair provides.
+      Needs a real iPhone and Apple TV. Worth pinning down which half fails: typing *into the app
+      on the phone*, or *typing on the phone for the TV*.
+
+## Repo: why the push times out — 2026-09-16
+
+- [!] **`native/apple/design` is 805 MB of committed screenshots.** Codex ran the push and it
+      failed with `RPC failed; HTTP 408` — a timeout, not a permission or credential problem. The
+      first push of this branch has to send that 805 MB in one go.
+      Cleanup for tomorrow, since it is a history rewrite rather than a quick fix: move `design/`
+      and `verification-artifacts/` out of git (or into LFS), or push over SSH where the timeout is
+      far more forgiving. The 4 GB working tree is mostly untracked build output and is not the
+      issue; the committed screenshots are.
+
+
+## Alignment sweep — 2026-09-17
+
+Measured rather than eyeballed: leftmost lit pixel per 40 pt band, against each page's own heading.
+
+### tvOS
+- [F] **Web Management buttons sat mid-page.** Heading flush at x=81, *Start Web Management* at
+      x=223 and *Forget Paired Browsers* pushed off to its right. Cause was not the page layout but
+      `.frame(maxWidth: .infinity)` on the button itself — right on the phone, where every control
+      spans the sheet; on the television it stretches the capsule across the page and centres the
+      label inside it. Now phone-only. Measures x=80 / x=82.
+      Worth recording: three attempts at the *container* came first and two made it worse (buttons
+      dead-centre at x=605). None could have worked — when a child ignores its parent's alignment,
+      the child is the bug.
+- [F] **Discover billboard wordmark was indented while everything under it was flush.** On the
+      *9/11: One Day in America* slide the logo started at x=274 while the genre line, synopsis,
+      Play/Details and the dots were all at x=80. Wide wordmarks (*REACHER*, *THE GENTLEMEN*)
+      looked fine, which is why it hid: `scaledToFit` leaves slack on one axis and
+      `AppleTrimmedTitleLogo` centred the artwork in that slack unconditionally, overriding the
+      `alignment: .leading` that three of its four callers asked for. It takes an alignment now.
+      Six consecutive slides, including the 9/11 one, measure x=80–81.
+- [x] Add Catalog, Add Files, Add Live TV, Add Network Share — heading, section headers, field
+      labels, field capsules and buttons all on one left edge.
+- [x] Channel Manager, Playback, Subtitle Languages, Settings root — rows uniformly at x=101–102
+      under headings at x=82–85 (the standard row inset).
+- [x] First-run welcome — centred on purpose.
+- [x] Live guide channel rail **looked** out of step with the programme rows; measured aligned
+      within 4 pt at every row. Not a defect, left alone.
+- [ ] Live category rail clips its last chip mid-word ("Lo…" for Local) ~35 pt before the pinned
+      search glyph. That is how a horizontal rail signals more content and Apple's own TV app does
+      the same — **owner decision**, not changed.
+
+### iOS
+- [F] **"Channels" column header sat hard against the screen edge.** Ink at x≈0 while every channel
+      name under it was at the rail's 8 pt inset. Header now carries the same inset; both measure
+      x=26 at 3×.
+- [x] iPhone Discover, Library, Settings — billboard card, section headings and rails all on the
+      16 pt margin.
+- [x] Library artwork appearing blank was a **timing artifact**, not a defect: it fills in between
+      9 s and 30 s after a cold launch. Worth a separate look as a performance item.
+
+## Search ordering — 2026-09-17
+
+- [F] **An exact title did not come first in live results.** Typing "Dune" on the phone listed
+      *Be Dune Teen*, *Children of Dune*, *Destination Dune*, *Destination Dune* — and no *Dune*.
+      Every one of those genuinely matches ("Dune" begins a word in each) and B, C and D-e sort
+      before D-u, so plain alphabetical order buried the title that was typed.
+      Results are now ranked before they are alphabetised: exact title, then titles starting with
+      the query, then the rest — alphabetical inside each tier, so *Dune* still precedes *Dune:
+      Part Two* and nothing already correct moved. Phone now lists *Dune* 2021 / 2020 / 1984 first.
+      **Why the corpus missed it:** `anExactTitleComesFirst` contains only the answer. None of the
+      206 titles is a decoy that sorts ahead of an exact match, so the assertion could not fail.
+      There is now a test built from the five real titles off the owner's screen.
+- [!] *Destination Dune* still appears twice — 1984 from Cinemeta, 1983 from the TMDB add-on. Same
+      film, different years, so the collapse key keeps them apart. **Owner decision outstanding.**
+
+## Typing on iPhone, resolved — 2026-09-17
+
+- [x] **The on-screen keyboard works.** A test that taps the soft keys themselves (rather than
+      `typeText`, which injects through the hardware path and would pass either way) types
+      "Dune" into the search field and the results come back.
+      The first run showed a focused field with **no keyboard at all**, which looked exactly like
+      the owner's report — it was this Mac's Simulator having *Connect Hardware Keyboard* on, which
+      suppresses the software keyboard entirely. Setting restored afterwards; the test now skips
+      itself with an explanation when the hardware keyboard is connected rather than failing.
+      Standing note for this file: the earlier "the simulator never renders the software keyboard"
+      conclusion was wrong, and this is the cause.
+      Likeliest explanation for the original report: on build 10 search matched almost nothing, and
+      typing into a field that returns nothing reads as "typing doesn't work". Five matching bugs
+      have been fixed since. Needs one minute on the next build the owner installs.
+
+## iPad GUI pass — 2026-09-17
+
+Review iPad `CC634933-18CE-4D3B-AECB-5021AC653A71`, portrait, 834 pt.
+
+- [F] **The featured hero's Play and Details filled the whole page.** Measured: *Play* was a
+      **367 pt** capsule with a 40 pt label marooned in its middle, and the two together spanned the
+      content width. `AppleFeaturedActions` has only two branches — landscape (fixed pills) and
+      "everything else" (`.frame(maxWidth: .infinity)`, i.e. half the column each). iPad *portrait*
+      falls into the second, which is the phone layout: half of 402 pt is a normal pill, half of
+      834 pt is not. The detail page already resolves a `.portraitIPad` layout with a fixed
+      150 pt pill; the hero now uses the same rule
+      (`AppleDetailMetrics.featuredActionButtonWidth(portraitViewportWidth:)`, threshold 600 pt, so
+      every iPad width is above it and every phone width below). Measured after: 182 pt, pinned
+      leading under the title. Phone layout unchanged. 1 test.
+- [x] Discover alignment otherwise — title, hero card, section headings and poster rails all on the
+      14 pt margin.
+- [F] **Settings' large title was flush left while its list was centred.** "Settings" at x=14, the
+      list at x=105–451 of 556. I filed this as stock `.insetGrouped` behaviour and an owner
+      decision. **That was wrong** — it was ours: `appleSettingsContent()` wrapped the list in
+      `.frame(maxWidth: 560)`, a phone column, exactly the thing tvOS had already been moved off for
+      the same reason. Cap removed on iOS (2026-09-17). Measured: the card span went from
+      x=314–1353 to **x=40–1627**, so the title and the rows now share one left edge.
+- [x] **iPad Library — clean.** Hero card, both rail headings and every poster start at x=32 px
+      (16 pt); card pitch is 280 px with a 16 px gutter, *identical* between Continue Watching and
+      Movies. The Continue Watching cards looking larger than the Movies cards was an eyeball error,
+      not a measurement — they are the same. The hero-action fix above applies here too.
+- [x] **iPad Live — clean, and the now-line is right.** Nav title, preview player and the category
+      strip all on the 16 pt margin. The guide's time header labels sit at x=290/610/930/1250/1570 —
+      an exact 320 px (160 pt) pitch per half hour. The now-line measured x=386.5 against an expected
+      384 for a 12:39 capture in a window starting 12:30 (9/30 × 320 + the 288 px grid origin): **2.5
+      px out, which is the seconds that elapsed between the clock reading and the screenshot.**
+      Worth having actually checked — a now-line in the wrong place is a real defect, and this one
+      is not.
+- [ ] **The channel rail sits 8 pt left of everything else, and I left it there.** "Channels" and the
+      channel names measure x=17 px (8.5 pt) while the nav title, preview card and category strip are
+      all at 16 pt — a visible 8 pt step on iPad, where there is room. The rail's inset is 8 pt
+      because `railWidth` is fixed and the channel names already truncate ("HOME SHOPPING N…") on
+      *both* the phone and the iPad; spending 8 pt of that column to square up a column header would
+      make the truncation worse on the device where it is already tightest. Squaring it up properly
+      means widening `railWidth` on regular width, which moves the whole grid — **owner decision**,
+      not a number I should pick at 1 a.m.
+
+## iPad detail page — 2026-09-17
+
+- [F] **The whole detail page was squeezed into a phone-width column.** Measured on the review iPad
+      (834 pt): the synopsis, the "Episodes" header and every episode row all ended at x=626 px
+      (313 pt), with ~500 pt of the page empty beside them. Episode titles wrapped to two lines
+      ("First / Response"), dates to two ("S1 E1 · Aug / 30, 2021") and summaries to three.
+      Cause: `detailContentWidth` returned `actionColumnWidth` in portrait. On a **phone** that is
+      right by coincidence — two half-column pills plus the gap come to exactly the content column —
+      but on an iPad the action row is two fixed 150 pt pills, so the content column became
+      **310 pt** regardless of the page. The two concepts are now separate
+      (`AppleDetailMetrics.portraitContentWidth(viewportWidth:actionColumnWidth:)`), capped at the
+      same 680 pt readable width the landscape-iPad layout already used, so the page reads the same
+      whichever way the iPad is held. Measured after: content to x=1386 px (693 pt); titles, dates
+      and summaries all on one or two lines; three episodes visible where one and a half fitted
+      before. The phone number is unchanged and pinned by test. 1 test.
+- [F] **"Download Season" truncated to "Download Seas…"** in the fixed 150 pt portrait-iPad pill.
+      The download action's label is variable-length ("Download Season 1", "Download Specials") and
+      150 pt could not hold it. A phone's pill is `(width − 32 − 10) / 2` ≈ **180 pt** and the same
+      label fits there — so the *smaller* device had the *larger* button. `portraitIPadActionButtonWidth`
+      is now 180. Verified: the pill reads "Download Season 1" in full. The Discover hero shares this
+      metric, so its pills went 150 → 180 too — checked, still comfortably content-sized and nowhere
+      near the 367 pt they were before. Tests updated (370 pt action row) plus a new assertion that
+      the iPad pill is never narrower than the phone's, which is the invariant that was violated.
+
+## iPad episodes screen — 2026-09-17
+
+Measured after the content-column fix above.
+
+- [x] **The episode list is correct.** Synopsis, Episodes header and every episode row share the
+      16–17 pt left margin and end together at x≈1349–1386 px (the 680 pt column plus its inset).
+      Episode text starts at 52 px, which is past the thumbnail, and the download chevrons and the
+      "Season 1" picker are right-aligned on the column edge. Titles and dates are one line each and
+      summaries are two — the wrapping the 310 pt column caused is gone.
+- [F] **"More Like This" was clipped at the content column, not the page edge.** The rail's cards run
+      32→1391 px and the fifth is sliced vertically mid-artwork at 1391 (695 pt), leaving 139 pt of
+      black beside it. Every other rail in the app — Discover's, Library's — bleeds to the true page
+      edge, so this reads as a rendering fault rather than "there is more to the right".
+      It is *better* than it was (the 310 pt column clipped it at 326 pt), but it is not right.
+      **Fixed 2026-09-17, its own increment as planned.** The rail was inside the same
+      `.frame(maxWidth: detailContentWidth)` as the prose, so it has been hoisted out of that stack
+      into the full-width one and carries its own *leading* inset — the first card lines up with the
+      heading, the last runs off the screen, which is what says "keep scrolling". The heading keeps
+      the 16 pt margin (measured x=35 px after). Prose stays in the readable column; only the rail
+      moved. Measured after: cards run 32→1667 px, **six visible instead of four and a half**, and
+      the last one is cut by the screen rather than by an invisible line.
+      The feared iOS type-checker blow-up did not happen — the edit *relocates* one `if` block
+      rather than adding nesting, so the constrained stack got smaller. iOS compiled in 24 s.
+      Checked on the phone too: no regression, and the rail bleeds there now as well, matching
+      Discover and Library.
+
+## iPhone player / transport overlay — 2026-09-17
+
+Reached headlessly with `-OpenStreamVisionScreen play`, captured at 6 s (still resolving), 11 s
+(controls up) and 17 s (controls gone). Measured at full resolution on a 402 × 874 pt screen.
+
+- [x] **Controls auto-hide and come back** — the 11 s frame has the full overlay, the 17 s frame is
+      bare video. The rule holds.
+- [x] **The centre transport row is symmetric** — 99.7 → 302.3 pt, dead centre on a 402 pt page.
+- [x] **The scrubber row is symmetric** — "0:00" ink at 24.7 pt, "-1:14:07" ink ending 25.0 pt from
+      the right.
+- [x] **One captions control, and only one.** Present, as the rule requires.
+- [x] **The top bar's 10 pt ink asymmetry is chrome, not layout — checked twice.** The close glyph's
+      ink starts at 19.7 pt and the overflow menu's ends 30.0 pt from the right, which looked like a
+      defect in the downscaled frame. Reading `topBar` explains it exactly: both controls sit in
+      equal 44 pt tap frames off one `HStack`/`Spacer`, but the close button draws a 36 pt stroked
+      circle inside its frame (16 pt container padding + 4 pt = the 20 pt measured) while "…" is a
+      narrow glyph centred in the same 44 pt. Equal frames, different ink. **Not a defect.**
+- [ ] **The bottom bar sits 8 pt further in than the top bar**, because `bottomBar` adds
+      `.padding(.horizontal, 8)` on top of the container's 16. Visible as ~5 pt of ink difference
+      between "0:00" and the close circle. Small, and the 8 pt may be protecting a tvOS focus ring
+      on the shared overlay — **owner decision**, not worth risking tvOS focus clipping for 5 pt.
+- [ ] **The captions control is alone on its own row under the scrubber**, right-aligned, 61 pt
+      below the scrubber's centre with ~340 pt of empty width beside it, and it costs a whole row of
+      height at the bottom of the screen. Apple's own player carries this control in the top bar.
+      Moving it would change tvOS focus routing (`onMoveUp`/`onMoveDown` both target `.captions`),
+      so it is a design call plus focus work — **owner decision**.
+
+## iPad player / transport overlay — 2026-09-17
+
+Same route, measured at full resolution on an 834 × 1210 pt page.
+
+- [x] **No iPad-specific defect.** The overlay's margins come out identical to the phone's: close
+      glyph ink at 19.5 pt (phone 19.7), overflow menu ending 30.0 pt from the right (phone 30.0),
+      scrubber row symmetric at 24.5 / 25.0 (phone 24.7 / 25.0), captions glyph 34.5 pt from the
+      right (phone 34.3). Controls auto-hide on the same schedule.
+- [x] **The top-bar "asymmetry" is confirmed chrome, on a second device.** Getting 19.5/30.0 on a
+      834 pt page after 19.7/30.0 on a 402 pt one is what you would expect from equal tap frames
+      holding different-sized glyphs, and not from a layout that was actually lopsided. That closes
+      it — it was never a defect.
+- [ ] **Both parked items apply on iPad too, and one is worse here**: the captions control alone on
+      its own row now has **776 pt** of empty width beside it (340 on the phone), at the bottom of a
+      1210 pt page. The 8 pt bottom-bar offset is unchanged. Still **owner decisions** — placement
+      changes tvOS focus routing.
+- [x] The overlay does not scale up for iPad — same absolute glyph sizes, scrubber height and
+      margins as the phone. Checked against Apple's own player, which is also near-constant in
+      absolute size across the two. Left alone deliberately.
+
+**This completes the iPhone/iPad GUI pass**: Discover, Library, Live, Settings, detail, episodes and
+the player have now all been measured on both devices.
+
+## tvOS player / transport overlay — 2026-09-17
+
+Third platform for the same overlay, on the persistent Apple TV sim at 1920×1080.
+
+- [x] **Symmetric and correct.** The scrubber row measures x=107…1812 — **left margin 107, right
+      margin 107, exact**. That is the system safe area (80) plus the overlay's own padding (16) plus
+      the bottom bar's 8, which accounts for it to the pixel; the video runs full-bleed underneath
+      while the controls respect the safe area, which is what tvOS wants.
+- [x] **Controls auto-hide here too**, measured rather than eyeballed: the scrubber track is a
+      401 px continuous bright run at 12 s and **gone** at 18 s.
+- [x] **No close button and no centre play/skip glyphs** — correct, the remote's Select, Play/Pause
+      and clickpad edges carry those. No boxed icons anywhere on the overlay.
+- [x] **The recent iPhone/iPad work did not break tvOS** — this build recompiled both
+      `AppleDiscoverView.swift` and `AppleMediaShelf.swift` for appletvsimulator and succeeded.
+- [ ] **Captions-on-its-own-row is worst here**: the glyph sits bottom-right with the entire width of
+      a 1920 pt page empty beside it, and its right margin is 121 against the scrubber's 107 — the
+      same ~14 pt the phone and iPad show. Now confirmed on **all three** platforms, so whatever is
+      decided applies once, everywhere. Still an **owner decision**.
+
+## Second tvOS sweep — the settings panes pass 1 never reached, 2026-09-17
+
+- [F] **Seven panes were unreachable for a headless screenshot.** The DEBUG screen hook only knew
+      the pages that hang off *Sources*; Privacy, Storage, About, Metadata, Radarr & Sonarr, Trakt
+      and Streaming Services had no route, which is why every previous pass "checked" them at a
+      glance and none measured them. The hook now carries a table of the settings pages that are
+      children of Settings itself. DEBUG-only, no production behaviour.
+- [F] **"Test Connection" was a box inside a box on Apple TV.** In Radarr & Sonarr the list row
+      draws its own full-width capsule and `.brandSecondary` drew a pill inside it — exactly the
+      "no boxes and weirdness" the owner called out for the settings panes. `.listRowBackground(.clear)`
+      on tvOS; the button is now a single pill on the black ground. Verified in the capture.
+      **iOS not re-checked** — the change is `#if os(tvOS)`, so the phone is untouched, but whether
+      the phone has the same double chrome is still unmeasured.
+- [x] **Privacy, Storage, Metadata, Trakt** — titles at x=81–83, rows at x=101–102, the same rhythm
+      as Channel Manager and Playback. Nothing out of line.
+- [x] **About** — rows sit in the standard 900 pt column. The one icon-bearing row ("Third-Party
+      Notices") puts its glyph 18 px past where the plain rows' text starts, which is stock grouped-
+      list behaviour rather than a defect. Noted, not filed.
+- [F] **The Streaming Services empty state was centred on the form column, not the page.** "Metadata
+      Is Off" + "Try Again" centre at x=529 — dead centre of the 900 pt column that starts at the
+      80 pt inset — while the page centre is 960. The column is invisible, so it read as the empty
+      state floating into the left half of the screen. D4b already established that a tvOS empty
+      state centres in the whole tab area.
+      **Fixed 2026-09-17.** I had filed this as an owner decision; it was not — it contradicted a
+      rule already set. `appleSettingsPane` wraps *everything* it is applied to in the 900 pt form
+      column, so the empty state inherited a column meant for rows. The empty and loading states now
+      take the page title without the column, and the populated list keeps the pane modifier
+      unchanged. Measured: the empty state's ink centre moved from **530 to 960** — the page centre
+      exactly — with the title still at the 80 pt inset.
+- [!] **Section headers are inset from their own rows on List-based panes.** Re-measured properly
+      2026-09-17, because I nearly un-parked this on the grounds that "stock Apple look" already
+      answers it. It does not, and the measurement is why.
+      There are **three** different left edges on one pane, not two: the page title's ink at **x=82**
+      and the field capsules' edge at **x=80**; the section header at **x=101**; the field's own
+      placeholder text at **x=122**. The system's header inset matches neither the card edge nor the
+      row text, because our rows carry their own internal padding that the system header knows
+      nothing about. The hand-built panes add a fourth answer by putting the header flush at 80.
+      Apple's own grouped lists align a section header with the row *text*. Reproducing that here
+      means hard-coding a 21 pt nudge derived from our field chrome, which is a magic number that
+      breaks the moment the field padding changes. **So this stays an owner decision** — the choice
+      is which edge the app aligns headers to (80, 101 or 122), and no rule already set picks one.
+      Parked deliberately, now with numbers instead of an impression.
+
+## The settings panes on iOS — 2026-09-17
+
+- [F] **They were unreachable on iPhone and iPad too.** The screen hook's route-building was fenced
+      inside `#if os(visionOS) || os(tvOS)`, although every platform binds its Settings tab to the
+      same `navigationPaths[.settings]` and declares the same `navigationDestination`s. An iPhone
+      sweep could only ever photograph the settings root. Fence removed; all the panes open on iOS
+      now, which is how the next two rows were found at all.
+- [F] **The iPad settings list was centred in a 560 pt column while its title was flush left** — see
+      the corrected row above. One cause, and it was ours, not the system's.
+- [F] **On iPhone the first section header was drawn underneath the large title.** "RADARR" ghosts
+      through the white letters of "Radarr & Sonarr"; the section header renders at y≈355–385 while
+      its own card starts at y=417, so the list's content is not inset below the expanded large
+      title. The SONARR section below it is spaced correctly, so it is specifically the first
+      section against the navigation title.
+      **I guessed the cause and was wrong.** I expected the `.frame(maxWidth: 560)` above to be it —
+      a fixed frame stops the list being the scroll view the navigation bar tracks — and removing it
+      did fix the iPad column but left this collision exactly as it was (verified, same two pixels).
+      **Found and fixed 2026-09-17, second attempt.** The list is inset correctly — the card's top
+      lands exactly at the bottom of the expanded large-title bar. What was wrong is that the first
+      section header *floats* above the list's own top edge, and with a large title expanded there is
+      a title in that space. Pushed panes should not have had a large title at all: Apple's own
+      Settings gives every pushed pane ("General", "About", "Storage") an **inline** title and keeps
+      the large one for the root. `appleSettingsPageTitle` is used only by pushed panes, so
+      `.navigationBarTitleDisplayMode(.inline)` there is exactly the right scope. Verified on Privacy
+      and on Radarr & Sonarr: title inline and centred with the back chevron, section header fully
+      below it, card below that.
+      Recorded because it cost a tick: the first theory (the 560 pt frame) was wrong, and the way out
+      was to stop theorising and run the one experiment whose result could only mean one thing.
+
+## iOS settings panes re-measured after the inline-title change — 2026-09-17
+
+Every pane moved when the title mode changed, so all of them were re-swept: Storage, About, Trakt,
+Watch Providers, Metadata, Channel Manager, Playback, Subtitle Languages, Add Catalog, Add Network
+Share, Web Management.
+
+- [x] **No collisions anywhere.** Where a pane has a section header its ink sits at y=361 with the
+      card at 406–417, cleanly below the inline bar; where it has none the card starts at 406. Title
+      inline and centred, back chevron carrying the parent's name where there is one ("Sources",
+      "Playback").
+- [x] **Two scan outliers checked and cleared.** Channel Manager's `cardTop=304` is its search field,
+      not content riding up under the bar; Subtitle Languages' `cardTop=160` is the navigation bar's
+      own opaque background, which it has because its list is long enough to sit under the bar —
+      stock scroll-edge behaviour, and the only pane in the set where the bar is not transparent.
+- [F] **The iOS counterpart of the tvOS box-in-a-box was real.** Last pass I
+      fixed "Test Connection" on tvOS and said explicitly that whether the phone had the same double
+      chrome was unmeasured. It does: Web Management draws "Start Web Management" as a white capsule
+      **inside** a grouped-list card. A filled pill inside a card is two pieces of chrome for one
+      control. **Fixed 2026-09-17 in its own pass.** Three call sites, all verified on the phone:
+      *Test Connection* (Radarr & Sonarr) — the guard that cleared the row fill is no longer
+      tvOS-only, since the phone has the same double chrome; *Start Web Management* — its own section
+      with no row fill, so the capsule sits on the page and "Forget Paired Browsers" keeps a normal
+      iOS action row in its own card below; *Copy Address* — same, and it stays legible as a dark
+      capsule on the page rather than disappearing.
+      The active-session half was reachable by setting the existing
+      `OpenStreamVisionStartWebManagement` default, so *Copy Address* was measured in its real state
+      rather than assumed; the hook was deleted again afterwards.
+- [F] **Two alignments in one card.** In the active-session card "Stop Web Management" was centred
+      while "Forget Paired Browsers" directly below it was leading-aligned. The centring was not a
+      choice — it was a `.frame(maxWidth: .infinity)` left over from when that button was a filled
+      capsule; on a plain action row the frame does nothing except centre the text. Removed. Both
+      rows now read from the same leading edge, verified against the live active-session state.
+
+## Every settings empty state audited — 2026-09-17
+
+Follow-up to the Streaming Services fix: if one pane inherited the form column for its empty state,
+others could too. Checked every `AppleSourceEmptyState`, `AppleSourceLoadingState` and
+`ContentUnavailableView` in the app against the container it sits in.
+
+- [x] **Only Streaming Services had the column bug**, and it is fixed. Every other empty state that
+      sits inside a settings page is outside the form column already.
+- [x] **The tab-level empty and loading states are all on the D4b footing** — Discover, Library, Live
+      and the media-source views centre in the viewport (`appleCentredInViewport`), not in a column.
+- [F] **"Source Not Found" was the one settings page in the app with no title.** Its branch sits
+      outside `.appleSettingsPage`, so it drew a bare centred message with an empty navigation bar
+      behind it and — because `appleSettingsPageTitle` is also what records the screen — left no
+      trace entry either. That modifier's own comment says no page may be added later and silently
+      go unrecorded; this was the page that had. Titled now.
+      **Verified by reading, not by capture:** the state needs a navigation path holding a source id
+      whose source no longer exists, which the debug hook cannot produce. Said plainly rather than
+      implied.
+
+## tvOS accessibility pass — blocked at the tooling, 2026-09-17
+
+- [!] **Not doable headlessly, and not by a little.** `xcrun simctl ui <tv> content_size` returns
+      **unsupported**, and so does `increase_contrast` and `appearance`; `reduce_motion` and
+      `bold_text` are not simctl options at all. There is no way to put the Apple TV simulator into
+      an accessibility text or contrast state from here, so a tvOS Dynamic Type sweep cannot be run
+      the way the iPhone one was. Saying so rather than approximating it with a screenshot at the
+      default size and calling it a pass.
+      (iOS is unaffected — `content_size` works there, which is how C7 was done.)
+
+## D4b re-verified — 2026-09-17
+
+- [x] **The Library/Discover empty-state fix did land.** Checked because `[F]` rows in these files
+      have outrun the code before. Both tabs now have the same shape — `Group { if empty {
+      AppleSourceEmptyState } else { scroll } }`, the empty state a *sibling* of the scroll view
+      rather than a row inside it — and `AppleSourceEmptyState` fills and centres in whatever it is
+      given, so both centre on the whole tab area. The 94 pt jump between tabs cannot recur from this
+      shape.
+      Verified by reading rather than by capture, deliberately: the claim is structural, and
+      reproducing it would need a sources-free install, i.e. a throwaway sim. The method matches the
+      claim.
+
+## Largest text size on iOS, re-check of tonight's changes — 2026-09-17
+
+Set with `simctl ui … content_size accessibility-extra-extra-extra-large`; the sim was put back to
+`large` afterwards.
+
+- [F] **The brand buttons became ellipses and spilled their own text.** At the largest accessibility
+      size "Start Web Management" wraps to three lines, and because both brand button styles used a
+      `Capsule`, the fill became an **ellipse** — narrower at its top and bottom than the label —
+      so the first and last lines were drawn *outside* the white shape.
+      A capsule's radius is always half its height, which is the whole problem. The styles now use a
+      `RoundedRectangle` with a 30 pt radius: `RoundedRectangle` clamps its radius to half the
+      smaller dimension, so at 60 pt (the tvOS minimum action size) it is exactly half and at 44 pt
+      (iOS) it clamps to 22 — both still perfect pills — and only a wrapped label makes it a rounded
+      rectangle, which is full width at every height. Background, focus-ring overlay and hit shape
+      all moved together.
+      Verified three ways in one frame: the ellipse before, the rounded rectangle with all three
+      lines inside after, and the default text size still drawing the same pill it always did.
+- [x] **Discover at the largest size is correct** — the hero restacks, the summary holds to one line
+      (the `AppleHeroSummaryLineLimit` work), and Play and Details stack as full-width pills with
+      their labels inside them.
+- [x] **Radarr & Sonarr and Privacy are correct at this size.** Retaken against the fixed build:
+      "Test Connection" is now a rounded rectangle with both its lines inside it, labels wrap and the
+      toggles stay right-aligned and centred. Nothing overflows.
+- [F] **"Episodes" broke mid-word — "Episod" over "es".** The heading and the season control shared
+      one `HStack`, which at the largest size left the heading no room at all. They stack now when
+      the type is an accessibility size, which is the same answer the hero's action row already uses.
+      Verified: heading on one line, "Season 1" on one line beneath it.
+- [F] **The detail page's action buttons ignored Dynamic Type completely.** At the largest size Play,
+      "Download Season 1", "My List" and "Rate" stay at their default size while the synopsis beside
+      them is enormous — the two most important controls on the page are the only things that do not
+      grow. Cause is that `AppleDetailActionButtonLabel` sets a **fixed** `.font(.system(size: 15))`
+      and the metrics pin a 36 pt height and exact widths.
+      **Fixed 2026-09-17.** The label view now scales its font, glyph and height with `@ScaledMetric`
+      *from the same constants*, so at the default size every number is identical to before and the
+      metric functions the tests assert (`actionButtonWidth`, 174/180/140) are untouched — what
+      changed is how the view uses them, not the contract. Above the accessibility threshold the
+      buttons drop their fixed width and hug their content, and the row they sit in stacks
+      vertically.
+      **The stacking was not optional, and the first attempt proved it:** scaling alone left
+      "Download Season 1" squeezed between the screen edges and breaking **mid-word** into
+      "Downloa / d Seas…". Stacked, it wraps at the word — "Download / Season 1" — inside its own
+      button. Verified at both sizes in one frame: stacked and scaled at the largest, and pixel-for-
+      pixel the old layout at the default.
+
+## iPad at the largest text size — 2026-09-17
+
+- [F] **The secondary row was missed when the primary buttons were taught to scale.** On the iPad at
+      the largest size Play and Download had grown while "My List" and "Rate" kept their 20 pt glyphs
+      and 11 pt labels beside them — the giveaway that the previous fix only reached
+      `AppleDetailActionButtonLabel` and not `detailIconAction`/`rateControl`, which build their own
+      labels. Both scale from the same constants now, and above the threshold they hug their content
+      instead of sitting in a fixed 44 pt slot.
+      **And that immediately broke something else, caught by looking:** hugging turned
+      `HStack(spacing: 0)` into "My ListRate" with the two labels touching, because the zero spacing
+      was only ever safe while the fixed slots supplied the gap. The row now supplies 16 pt at
+      accessibility sizes. Verified: clear gap between them.
+- [F] **The stacking threshold was size-based, not width-aware.** On the iPad, Play and "Download
+      Season 1" stack vertically at the largest size even though the two of them come to roughly
+      460 pt on an 834 pt page and would fit side by side comfortably. The rule I added is
+      `dynamicTypeSize.isAccessibilitySize`, which is right for a phone and too eager for a tablet.
+      **Fixed 2026-09-17 with `ViewThatFits` rather than a better threshold.** The row offers the
+      horizontal layout first and the stacked one as the fallback, so SwiftUI measures instead of me
+      predicting. Predicting would have meant estimating how much a *hugging* button grows, which is
+      the same guess that was wrong the first time round.
+      Verified in three states: iPad at the largest size now side by side, iPhone at the largest size
+      still stacked with "Download / Season 1" wrapping at the word, and iPhone at the default size
+      unchanged.
+
+## iPad at the largest text size, remaining screens — 2026-09-17
+
+Retaken against the build carrying all three of tonight's Dynamic Type fixes.
+
+- [x] **Episodes is correct.** "Episodes" on one line with "Season 1" beneath it (the stacked header),
+      episode titles on one line, dates on one line, summaries wrapping to two and truncating at a
+      word. Download chevrons scale. Nothing breaks mid-word.
+- [x] **Web Management is correct.** "Start Web Management" fits one line inside a proper pill — the
+      rounded-rectangle change means it cannot become an ellipse even if it did wrap — and "Forget
+      Paired Browsers" sits in its card below.
+- [x] **The episode thumbnail stays 104×64 at every text size, and I am leaving it that way.**
+      It looks small beside three lines of very large text, which is what drew my eye. But growing it
+      takes width away from the text column, and on a phone a scaled thumbnail would eat roughly half
+      the row. The still is illustrative rather than essential, so holding it fixed preserves reading
+      width exactly where a viewer at this text size needs it most. Recorded as a decision, not an
+      oversight.
+- [F] **The status-bar collision, on both iPhone and iPad.** Scrolled content drew straight through
+      the clock and the battery — "…2001." over "6:09 AM" on the iPad, the synopsis over "12:42" on
+      the phone. At the **default** text size, so not an accessibility edge case.
+      Cause: the detail page hides the navigation bar on iOS so its hero can reach the top of the
+      screen, which is right — but with no bar there is also nothing behind the status bar once the
+      page scrolls. `AppleStatusBarShield` puts a flat black fill there, invisible while the page is
+      at rest and appearing as soon as it moves. Flat black, not a gradient: the app is allowed
+      exactly one gradient and this is not it.
+      Verified on both devices and in both states — scrolled, the clock is fully legible with the
+      text stopping below the band; at rest, the top of the page is unchanged from before. tvOS and
+      the SPM gate both still build the new file.
+      I had filed this as an owner decision. It was a defect: "stock Apple look" is a rule already
+      set, and no Apple app draws body text through the clock.
+
+## Tested but never called — a sweep prompted by G4, 2026-09-17
+
+G4 turned out to be a policy with three passing tests and no caller. That is not a one-off worth
+fixing in isolation; it is a question about how much the green gate actually covers. So I checked all
+**466** `static func` declarations in `Sources/OpenStreamApple` for callers in `Sources/` and `Apps/`.
+
+**Sixteen are called only from the test suite** (32 references there, none in the app):
+
+| Entry point | File | What its absence means |
+|---|---|---|
+| `replacesPlay` | AppleWatchProviders | G4 — Play is never replaced by the external option |
+| `evaluate` (+ the whole `MediaCapability` type) | MediaCapability | the type is referenced nowhere outside its own file |
+| `bestVariant` | AppleOfflineQualityPolicy | downloads do not choose a variant by this policy |
+| `shouldResume` | AppleAudioRoutePolicy | the app checks `.shouldResume` inline instead — a parallel implementation |
+| `popular`, `newReleases`, `recommendations`, `arrRecords` | AppleMediaIndex | four catalog queries nothing asks for |
+| `watchURL` | AppleMetadataClient | — |
+| `xtreamPlaylistURL` | AppleIPTV | — |
+| `firstSuccessful` | AppleServiceClients | — |
+| `toggledState` | AppleYouTubePreviewHTML | — |
+| `actionButtonFrames`, `iconCenters`, `usesTVDetailLayout` | detail metrics | layout helpers; harmless, but they read as live |
+| `style` | AppleAlignedTabTitle | — |
+
+Spot-checked by hand rather than trusting the script: `replacesPlay`, `shouldResume`, `bestVariant`,
+`usesTVDetailLayout`, `iconCenters`, `actionButtonFrames`, `MediaCapability`, `recommendations`,
+`newReleases` and `firstSuccessful` all confirmed to have no caller. `popular` matched only
+`popularityScore`, a different function.
+
+- [!] **Nothing deleted and nothing wired.** Some of these are probably written ahead of a feature,
+      and wiring the behavioural ones (the external option, download quality, the catalog queries) is
+      product work, not tidying. But the audit record should not imply the app runs code it does not.
+      **What this changes: the gate's 950 passing tests cover these sixteen policies and the app never
+      executes any of them.** Worth knowing before trusting a green tick in an area one of them
+      covers.
+
+### Triaging those sixteen — 2026-09-17
+
+A flat list of sixteen is not actionable, so I read each declaration and what the app does instead.
+They are not one problem; they are three.
+
+**Dead for a reason already on the record (2) — no action:**
+- `toggledState` (`AppleTrailerSoundBridge`) — trailers are **tabled** until the owner says otherwise,
+  so the bridge having no caller is exactly right.
+- `watchURL` (`AppleMetadataClient`) — builds a TMDB watch link, and G8 above records that the app
+  deliberately opens no external link at all. Its deadness *is* the G8 answer, not a gap.
+
+**Arithmetic and platform mirrors (5) — harmless, but their green tests say nothing about the app:**
+- `actionButtonFrames`, `iconCenters` — geometry helpers. `iconCenters` is a *correct* model of the
+  real layout (each cell genuinely is `iconCellWidth` wide in `AppleTVDetailViews`, laid edge to edge
+  in a zero-spacing `HStack`); the view simply does not need centres to draw it.
+- `usesTVDetailLayout`, `style(for:)` — each a runtime mirror of a `#if os(...)` the app already makes
+  at compile time. A test that asserts `tvOS → true` is testing the mirror, not the app.
+
+**Behaviour absent from the app (9) — the ones that matter:**
+`replacesPlay` (G4), `MediaCapability.evaluate` (the whole type), `bestVariant` (download quality),
+`shouldResume` (the player duplicates the check inline), `popular` / `newReleases` /
+`recommendations` / `arrRecords` (four catalog queries), and `firstSuccessful`
+(`AppleArrFallbackPolicy` — the ARR calls do not go through the fallback chain).
+
+- [!] Still nothing deleted and nothing wired: the nine are product decisions and the five are
+      harmless. But the triage is the useful part — it turns "sixteen things are wrong" into "nine
+      questions, five shrugs and two already-answered".
+
+## Library TV — a whole feature nobody can reach, 2026-09-17
+
+Revisited the note that "Library TV is built but unreachable", which had been recorded once and never
+followed up. It is bigger than the note suggested.
+
+- [!] **418 lines and 6 tests across three files, referenced by nothing.**
+      `AppleLibraryTV.swift` (135 lines — `AppleLibraryTVProgram`, `AppleLibraryTVChannel`, a queue
+      and a builder), `AppleLibraryTVView.swift` (187 lines), `AppleLibraryTVTests.swift` (96 lines,
+      6 tests). Outside those three files **nothing mentions any of it**: no view presents the view,
+      no route reaches it, no string "Library TV" appears anywhere in `Sources/` or `Apps/`, and
+      `AppleLibraryTVChannel` is used only by its own model and view.
+      What it is: local library files assembled into continuously-playing channels — programmes
+      carrying security-scoped URLs, a channel, a queue, a builder. In other words the app's own
+      "turn my files into a TV channel" feature, complete and tested.
+      Two things make it worth raising rather than filing as tidy-up:
+      1. **The view is `#if os(iOS)`**, so it does not even compile for Apple TV — the platform where
+         a continuous channel is the most obvious fit.
+      2. **The model has no platform guard**, so it compiles everywhere and its 6 tests pass on every
+         run, which is why the gate has never noticed.
+      **Owner decision, and a real one:** wire it (and if so, where — a tab, a Library action, which
+      platform), or delete it. It is not a defect in anything that ships; it is a built feature that
+      no viewer can get to.
+
+## Unreachable views — a sweep of all 99, 2026-09-17
+
+Library TV raised the obvious question: are there other whole screens nobody can get to? Checked
+every `struct … : View` in `Sources/OpenStreamApple` (99 of them) for construction anywhere in
+`Sources/` or `Apps/`.
+
+- [x] **The 52 that are only constructed inside their own file are fine** — they are private subviews
+      used by the parent that declares them, which is the normal shape.
+- [x] **The sweep found its own blind spot, and I checked rather than reported it.**
+      `AppleFirstRunGuidanceView` came up as "never constructed" because it is built with a trailing
+      closure — `AppleFirstRunGuidanceView { … }` — which my pattern missed. It is very much alive;
+      I have watched it render. Re-checked the others by plain name search to be sure none of them
+      were the same false positive.
+- [F] **`AppleCatalogEmptyView` deleted.** Ten lines, `private`, a thin wrapper around
+      `AppleSourceEmptyState` that nothing constructed. No tests referenced it, so the gate is
+      unchanged at 950; tvOS rebuilt and Discover verified on screen afterwards.
+- [!] **`AppleIPTVGuideView` is dead and I have not deleted it, because it is `public`.** 75 lines, a
+      per-channel now/next guide with its own 60-second timer, no tests, referenced nowhere. It has
+      been superseded twice over — `AppleIPTVGuideGridView` draws the iOS guide and
+      `AppleTVLiveGuideView` the tvOS one. Being `public` it is part of the package's API surface,
+      and the hazard is not the dead code but a future reader wiring the *old* guide by mistake.
+      Recommend deleting it; saying so rather than doing it, because removing a public type is worth
+      one line of confirmation.
+
+## visionOS — the target did not build, 2026-09-17
+
+Looking for what this audit had never touched: **110 `#if os(visionOS)` branches across 19 files, and
+not one visionOS pass recorded.** The first thing that happened on trying was that it would not build.
+Two separate failures, neither of which anything would have caught — the SPM gate builds macOS and the
+deploy builds are iOS and tvOS, so nothing in the loop compiles this platform.
+
+- [F] **`WidgetCenter` is only available in visionOS 26.0, and this target deploys to 2.0.** The
+      widget-publishing work added `#if os(iOS) || os(visionOS)` around
+      `WidgetCenter.shared.reloadAllTimelines()`. Gated with `if #available(visionOS 26.0, *)` rather
+      than dropped, so the reload still happens on a visionOS that has widgets.
+- [F] **The Library scroll body stopped type-checking on visionOS** — "unable to type-check this
+      expression in reasonable time". The visionOS branches add enough overloads to tip an expression
+      the other platforms still managed. Two extractions, same shape, one nesting level moved out
+      each time: `rotatingHero(_:)` for the TimelineView hero, `sourceShelves` for the two nested
+      `ForEach`es and their four `let` bindings. It took both — after the first, the error simply
+      moved to the new line number.
+- [x] **visionOS now builds**, and iOS and tvOS still do — checked both afterwards, since
+      `AppleMediaSourceViews` is shared code. Gate 950/87 throughout.
+- [ ] **The visionOS GUI itself is still unmeasured.** Building was the blocker; the screenshot pass
+      is the next thing.
+
+## visionOS GUI, first look — 2026-09-17
+
+Vision Pro sim, the app's window in a room. Discover, Settings and Web Management captured at
+3840×2160 and measured at full resolution.
+
+- [x] **It renders correctly.** Window with the tab ornament on the left and search/refresh at the
+      bottom, "Discover" title, hero billboard with Play and Details, the Top 10 shelf beneath.
+      Nothing is mislaid, and the two things that looked wrong at a glance are conventional visionOS:
+      the shelf continuing past the window's bottom edge is a scroll view, and the bottom ornament
+      hovering over the window edge is where the system puts an ornament.
+- [!] **The hero synopsis fails contrast over bright artwork — measured, not eyeballed.**
+      Sampling background luminance behind the synopsis on the *Mandalorian and Grogu* billboard
+      gives **~120–143** across the text's width, falling to ~30 only at the far right. White body
+      text on ~130 luminance is roughly **3.9:1**, under the 4.5:1 minimum for body text.
+      Cause is geometry, not a missing fade: the one approved fade starts at
+      `fadeStartFraction = 0.35` and reaches 0.85 black only at the bottom edge. The synopsis sits at
+      about 48% down this hero, where the gradient has applied roughly 0.17 opacity — far too little
+      against a bright orange explosion. The buttons below it are fine; they sit lower *and* carry
+      their own fills.
+      **This is not visionOS-specific.** The same `legacyHero` draws the iPhone and iPad billboards;
+      it has simply not been caught there because those captures happened to land on dark artwork.
+      **Owner decision, and I rank it the highest of the parked items** because it is an
+      accessibility failure rather than a taste question. Three ways to fix it, each changing the look
+      of a screen already reviewed: start the fade higher on non-tvOS, deepen it in the band where
+      the copy sits, or put a solid plate behind the copy. I am not picking one unilaterally at
+      07:30, but this one should not sit long.
+
+## Tester feedback, TestFlight build 10 — 2026-09-17
+
+Four bugs and four improvements from an external tester, plus a crash report. Worked in severity
+order; this section grows as each lands.
+
+- [F] **Bug 1: a tab switched off could never be switched back on.** Reproduced on the persistent
+      iPhone sim before the fix — the Live switch went inert the moment it was off — and the cause
+      was a name. `OpenStreamTabVisibility.canHide` was wired as `.disabled(!canHide(tab))`, and
+      read literally "a tab that is already off has nothing to hide", so it returned false for any
+      hidden tab and greyed the control out. **A test asserted exactly that** (`canHide(.live, on,
+      on, off) == false` with the comment "a tab that is already off has nothing to hide"), so the
+      gate was green on the trap. Renamed to `canToggle` with the two-part rule the app actually
+      wants: an off tab can always be turned on; an on tab can be turned off unless it is the last
+      one. The test now asserts the opposite of what it did, for all three tabs, including down to
+      the last one.
+      Proven at the control, not the policy: `testATabSwitchedOffCanBeSwitchedBackOn` switches Live
+      off, asserts the switch is still enabled, switches it back on. It failed against the stale
+      build for the tester's exact reason and passed against the fixed one — and the sim itself had
+      been left trapped by the old code; the fixed build released it.
+- [F] **Bug 2: a download picked its source by default, with no way to choose.** The resolver
+      already returns up to 12 ranked plans and `AppleOfflineDownloadCoordinator` already walks them
+      as fallback (`plans[planIndex]`), so "not necessarily available" was half-handled; what was
+      missing was any say in which goes first. Download now opens the existing playback source sheet
+      in a **download mode** — title "Download from", local files hidden — and the chosen row's plan
+      is moved to the front (`AppleOfflineDownloadPlanOrdering.preferring`), the rest kept behind it
+      in resolver order, so a bad pick still falls through instead of failing. One candidate skips
+      the sheet; a resolution error falls back to the old path. Season downloads are unchanged
+      (they resolve per episode). 3 unit tests on the ordering (chosen first, order kept, unknown /
+      nil / empty untouched) + `testDownloadOffersAChoiceOfSource`: tapping the episode's ↓ opened
+      the sheet with **7 sources in 22 s**, dismissed without downloading. Gate **970 / 91**; iOS
+      and tvOS rebuilt with both files confirmed recompiled.
+      Two false starts recorded: the first run tapped **Download Season** (the `detail` screen lands
+      on a series) which deliberately never asks; the second waited only 40 s for live add-on
+      resolution. Evidence attachments fixed both.
+- [!] **The sheet's rows are indistinguishable.** Seven rows read "[TB+] Add-on 1080p / via Add-on
+      TB" ×4 and "…720p" ×2 — the title is the stripped provider tag plus quality, and the
+      candidate's filename and size are not shown. For a *download* those are exactly what decides.
+      Same rows as the playback sheet, so fixing the detail line fixes both. Next.
+- [ ] The episode row's ↓ control measures **12.7 × 16 pt** (from the test's frame print) — well
+      under the 44 pt minimum. Tap target, not layout.
+- [ ] **Bug 3: Discover posters slow or missing.**
+- [F] **Bug 4: Live › All showed one channel for an M3U source.** One line:
+      `channels = numbered.isEmpty ? selected : numbered.map(\.1)`. Under **All** with the default
+      **Premier Guide** package, the list is only the channels that matched the owner's curated US
+      lineup, one per lineup number — and the fallback to "everything" fired only when the lineup
+      matched **nothing**. A foreign M3U with one channel that happened to share a name with the US
+      lineup ("CNN", "CBS") showed exactly that one channel. That is the report verbatim, and the
+      default package is `.premierGuide` (`AppleSettingsStore:478`), so every fresh M3U user gets it.
+      The cliff at zero is now a floor: `AppleLiveChannelSnapshot.minimumLineupMatches = 8`. Below
+      it the lineup is a coincidence, not a guide, and All shows everything; at or above it the
+      curated list stands. Eight is far under the owner's real case (a few hundred of 9,376) and far
+      over an accidental collision (one or two).
+      **The old test asserted the bug**: `allShowsOnlyTheCuratedLineup` used a two-entry lineup —
+      exactly the tester's case — and expected the two. Its fixture now sits at the floor. Three
+      tests added (one accidental match hides nothing; at the floor All is curated; one under it
+      shows everything), and the owner's own French *Généralistes* playlist is a fixture with three
+      more: all 28 parse with their accents, the `url-tvg` EPG header is kept, and **All shows all 28
+      under Premier Guide** — the tester's bug on a real list. Stream URLs in that fixture are
+      replaced with `fixture.example`; the originals carry a provider path token.
+      Verified on the persistent Apple TV with the owner's real provider: the same 12 rail rows in
+      view as before the fix, so All is still the curated lineup for him. Gate **956 / 88**.
+- [F] **Owner: "the toggles in settings are not great… fix the color ux of the toggles."** The app
+      tints itself white at the root (`OpenStreamRootView.swift:350`) so nothing reads as the iOS
+      default blue — and that tinted every `Toggle`: a white ON track under a white knob, readable
+      only from the knob's drop shadow (zoomed and confirmed). `AppleBrandToggleStyle` re-wraps each
+      switch in the stock style with the brand accent (#FF3366 — already the favourites and
+      now-line colour, inside "nothing blue but the brand mark") and is applied **once at the iOS
+      root**, so buttons, links and chevrons beside a switch stay white; no per-site churn across the
+      24 `Toggle(` call sites.
+      Verified on the iPhone in both states, using the real control (the tab-toggle UI test's OFF
+      attachment, not a defaults write — a `defaults write` of the tab key was silently ignored by
+      the app, so the first "off" capture was actually all-on and I did not trust it): ON = accent
+      track, white knob right; OFF = dark track, white knob left; the tab bar dropped to three, so
+      the setting genuinely took; nothing else on the page picked up the accent.
+      **Caught a regression by looking, and reverted it:** I had also applied the style in the tvOS
+      settings modifier. Apple TV draws a Toggle as a row with an "On"/"Off" label, not a switch,
+      and the accent landed on the **row text** — pink labels on the Privacy pane. Removed from tvOS,
+      and the style itself now passes the configuration through untouched on tvOS so it cannot do
+      that even if applied by accident. Privacy recaptured: labels white. Gate **956 / 88**; iOS and
+      tvOS both rebuilt with the final source confirmed compiled in.
+- [F] **Owner: "M3U… it should be able to accept a larger amount at once."** Two ceilings in
+      `parseM3U`: `maximumResponseBytes` (12 MB) and `maximumChannels`. The byte one is fine — at the
+      ~245 bytes per entry of the owner's French playlist, 12 MB is ~49,000 entries. The channel one
+      was **10,000**, and the owner's own provider is **9,376**: one provider refresh, or two
+      playlists merged, crossed it — and the `break` that enforces it dropped the tail **silently**,
+      so the guide simply ended early with no error anywhere. Raised to 25,000 (comfortably above any
+      real provider, well under what the bytes can carry), and the truncation is now traced —
+      "kept N of M entries" — so it can never again be invisible.
+      Four tests in `AppleM3UVolumeTests`, all against generated playlists in the owner's format:
+      2,000 parse whole; **12,000 parse whole** (this one fails on the old cap — it is the owner's
+      provider plus headroom); the cap is honoured exactly, not exceeded; and the two ceilings agree
+      (the byte budget can carry at least `maximumChannels` real entries, so the channel cap is
+      reachable and the byte error never fires first with a worse message).
+      Gate **960 / 89**. tvOS rebuilt with `AppleIPTV.swift` confirmed recompiled.
+      **A flake, recorded so nobody chases it:** the first gate run failed one unrelated test —
+      `webManagementFallsBackWhenThePreferredPortIsOccupied`, `Address already in use` — because the
+      tvOS app on the booted simulator was serving the Web Management port on this Mac's network
+      stack. Terminated it; the re-run was clean. Not this change: the four new tests passed both
+      times.
+- [F] **Owner: "cap how many channels can be displayed… no one ever needs 3k… note to the user if
+      they try to add more than 300."** Two separate ceilings now, on purpose: the parser still
+      *ingests* a whole playlist (`AppleIPTVClient.maximumChannels`, so Search and the Custom package
+      can reach everything), and the guide *draws* at most 300
+      (`AppleLiveChannelSnapshot.maximumDisplayedChannels`). The snapshot carries `hiddenCount`, and
+      the Live tab shows **one line, only when capped**: "Showing 300 of N channels" — the count is
+      the whole message, no explainer. Channel Manager refuses the 301st add to a hand-picked list
+      (Custom or My Channels) via `canAddChannel(toSelectionOf:)` and shows "Limit reached — the
+      guide shows up to 300 channels." in its existing message slot. Favorites is capped on its own
+      count, so 5 favourites out of 9,376 are all shown. 7 tests.
+      Verified on the Apple TV with the owner's provider switched to **Everything** (the persisted
+      package key, restored to Premier Guide afterwards): the guide draws the uncurated EAST/WEST
+      pairs and the line reads **"Showing 300 of 4,836 channels"** under the category chips, at the
+      safe inset, secondary grey.
+      **Two lessons recorded so nobody repeats them.** (1) The Live tab is two views: the notice I
+      added to `AppleMediaSourceViews` sits in the `#else` branch — iOS/visionOS only — and Apple TV
+      draws `AppleTVLiveGuideScreen`, which needed its own line. (2) That screen has an **explicit
+      `init`** (it supplies `metrics` itself), so adding a stored property is not enough — the
+      parameter has to be added to the init too, or the call site fails with "extra argument". The
+      SPM gate cannot catch either: that file is `#if os(tvOS)` and the gate builds macOS. Gate
+      **967 / 90**.
+- [x] **Downloads are automatic again — no "Download from" sheet** (owner, 2026-09-17: "no I don't
+      want a download from I want it to be automatic"). The picker mode, `preferredSourceURL` and the
+      `AppleOfflineDownloadPlanOrdering` seam are gone; ↓ calls `startDownload(episode:)` and the
+      coordinator walks the resolver's ranked plans itself when one fails — that is what answers the
+      tester's "a source is chosen by default but is not necessarily available" without asking.
+      Two things the tap had no visible answer for were fixed with it:
+      (1) **per-episode progress** — the row's ↓ becomes an App Store-style ring with a stop square
+      while *that* episode downloads (`AppleEpisodeDownloadIndicator`, 6 tests; VoiceOver reads
+      "Downloading S1 E1 · First Response, 4%"), a spinner while resolving, `checkmark.square` when
+      stored; other rows keep the filled arrow. Tester improvement "percentage bar during download".
+      (2) **failures/cancels are now shown on series pages** — `downloadFailureNotice` used to be
+      `EmptyView()` for a series, so a failed automatic episode download showed nothing at all.
+      Verified on the iPhone 16 Pro sim by `testDownloadStartsWithoutAskingForASource` (23 s): tap ↓
+      → no sheet → ring + square within 3 s (2.8 GB file, real download) → cancel through "Download
+      Options" → "Download cancelled…" line under the buttons, ↓ back to idle, no file left on the
+      sim (manifest empty). Gate **973 / 91**.
+      Follow-ups seen in the screenshots, not done: the *season* button shows the retry glyph after
+      an *episode* cancel (the two share one coordinator state); the hero trailer is a YouTube embed
+      that shows YouTube's "More videos" chrome when paused; `AppleWatchCompanion` traces "watch
+      link: not activated" four times a second forever (887 lines in one sitting) — throttle it.
+- [x] **Owner batch 2026-09-17 11:00 — toggles, TestFlight tracing, M3U paste/upload, AIOMetadata.**
+      *Toggles*: the switch is the classic iOS one again — green on, grey off, white knob
+      (`AppleBrandToggleStyle` → `.tint(.green)`; tvOS untouched). Verified on the iPhone sim
+      Settings page. *Tracing*: `AppleInteractionTrace.isEnabled` defaults ON for TestFlight
+      installs (`AppleBuildChannel.isTestFlight`, sandbox receipt; 2 tests) and OFF for App Store;
+      the Settings toggle still overrides. Also fixed: `-OpenStreamTrace YES` from a launch
+      argument was ignored (String vs Bool) — UI tests now trace. *M3U paste/upload*: Add Live TV →
+      M3U shows a "Playlist Text" editor and "Choose File…" (`.fileImporter`, m3u/plain text).
+      Everything pasted or picked merges into ONE local playlist (`AppleLocalPlaylistStore`,
+      `openstream-playlist://local/pasted.m3u`, merge keyed by stream URL, first copy wins, guide
+      header adopted) and `addIPTV` already updates a source with the same URL in place — so the
+      Sources list shows one "Playlists" row however many times you paste, the way an Xtream
+      account is one row. 6 tests. UI test `testAddLiveTVOffersPlaylistTextForM3U` passes
+      (18 s) and the screenshot shows the editor under the URL fields, stock grouped form.
+      *AIOMetadata*: `AppleSourceStore.testCatalogManifests` seeds the owner's AIOMetadata add-on
+      once per install in DEBUG/TestFlight builds (`seedTestCatalogsIfNeeded`, called from the
+      root task); deleting it is respected. 2 tests. Gate **981 / 94**.
+      **Trap recorded**: awaiting `addStremio(manifestValue:)` from inside the store with its
+      default `client: AppleManifestClient()` argument crashed the test process deterministically
+      ("freed pointer was not the last allocation", signal 6). Passing `client: manifestClient`
+      explicitly fixes it and also makes tests' stub client actually used. Bisected in
+      `AppleTestCatalogSeedTests`; do not "simplify" that call back.
+- [ ] Improvements: ~~download percentage~~ (done above), faster posters, landscape control in the player, EPG for M3U.
+- [!] **The crash report is not on this Mac.** Organizer's cache for `com.orgista.openstream` was
+      last refreshed 2026-09-11, before build 10 shipped, and holds only its query state; the
+      DiagnosticReports hits are local simulator/test-runner artefacts. It is in App Store Connect →
+      TestFlight → Crashes. Needs either Organizer opened once on this Mac (which pulls it into that
+      cache) or the device / OS / stack pasted here.

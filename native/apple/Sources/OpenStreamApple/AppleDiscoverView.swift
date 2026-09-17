@@ -1245,6 +1245,15 @@ struct AppleCatalogItemDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    // The secondary row (My List, Rate) was missed when the primary buttons were
+    // taught to scale: at the largest size its glyphs and 11 pt labels stayed
+    // tiny beside buttons that had grown (measured on the iPad, 2026-09-17).
+    @ScaledMetric(relativeTo: .body) private var scaledIconGlyphSize: CGFloat =
+        AppleDetailMetrics.iconGlyphSize
+    @ScaledMetric(relativeTo: .body) private var scaledIconLabelFontSize: CGFloat =
+        AppleDetailMetrics.iconLabelFontSize
+    @ScaledMetric(relativeTo: .body) private var scaledIconRowHeight: CGFloat =
+        AppleDetailMetrics.iconRowHeight
 
     let item: AppleCatalogItem
     let source: AppleSource
@@ -1466,17 +1475,31 @@ struct AppleCatalogItemDetailView: View {
                             .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
                     }
 
-                    if !suggestedItems.isEmpty {
-                        moreLikeThisSection
-                            .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
-                    }
                 }
                 .frame(maxWidth: detailContentWidth, alignment: .leading)
-                .padding(.horizontal, isLandscapeRegularLayout ? 40 : 16)
+                .padding(.horizontal, detailHorizontalInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Outside the column on purpose. Prose belongs in a readable
+                // width; a poster rail does not — every other rail in the app
+                // (Discover, Library) runs to the page edge. Inside the column
+                // the fifth card was sliced vertically at 695 pt of an 834 pt
+                // iPad page with 139 pt of black beside it, which reads as a
+                // rendering fault rather than "there is more to the right"
+                // (measured 2026-09-17). It carries its own leading inset.
+                if !suggestedItems.isEmpty {
+                    moreLikeThisSection
+                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+                }
             }
             .padding(.bottom)
             }
+            // The navigation bar is hidden here so the hero can bleed to the top
+            // of the screen. With no bar there is nothing behind the status bar
+            // once the page scrolls, and the synopsis was drawn through the
+            // clock. Applied to the scroll view itself, not the group, because
+            // it reads that scroll view's offset.
+            .appleStatusBarShield(topInset: detailSafeAreaInsets.top)
             #endif
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
@@ -1955,7 +1978,7 @@ struct AppleCatalogItemDetailView: View {
         VStack(alignment: .leading, spacing: AppleDetailMetrics.landscapeOverlaySpacing) {
             if case .valid = titleLogoState, let logoURL = titleLogoURL {
                 ZStack(alignment: .leading) {
-                    AppleTrimmedTitleLogo(url: logoURL) { loaded in
+                    AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
                     titleLogoLoadResult = loaded
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
@@ -2171,7 +2194,7 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSTitleBlock: some View {
         if case .valid = titleLogoState, let logoURL = titleLogoURL {
             ZStack(alignment: .leading) {
-                AppleTrimmedTitleLogo(url: logoURL) { loaded in
+                AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
                     titleLogoLoadResult = loaded
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
@@ -2830,9 +2853,9 @@ struct AppleCatalogItemDetailView: View {
 
     @ViewBuilder
     private var downloadFailureNotice: some View {
-        if item.type == "series", !visibleEpisodes.isEmpty {
-            EmptyView()
-        } else {
+        // Shown for series too (2026-09-17): downloads are automatic, so when
+        // no source works the only feedback is this line under the buttons.
+        Group {
             switch downloadCoordinator.state {
             case .failed(_, let message):
                 Text(message)
@@ -2906,11 +2929,16 @@ struct AppleCatalogItemDetailView: View {
         .controlSize(.large)
     }
 
+    /// The page margin the detail column and the More Like This rail share.
+    private var detailHorizontalInset: CGFloat {
+        isLandscapeRegularLayout ? 40 : 16
+    }
+
     private var detailContentWidth: CGFloat {
         #if os(visionOS)
         max(680, viewportSize.width - 80)
         #else
-        if isLandscapeRegularLayout { return 680 }
+        if isLandscapeRegularLayout { return AppleDetailMetrics.regularContentWidth }
         if isLandscapeLayout {
             return max(
                 320,
@@ -2920,7 +2948,10 @@ struct AppleCatalogItemDetailView: View {
                     - detailSafeAreaInsets.trailing
             )
         }
-        return actionColumnWidth
+        return AppleDetailMetrics.portraitContentWidth(
+            viewportWidth: viewportSize.width,
+            actionColumnWidth: actionColumnWidth
+        )
         #endif
     }
 
@@ -2951,13 +2982,35 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var primaryActionButtons: some View {
-        HStack(spacing: AppleDetailMetrics.actionButtonGap) {
+        // Side by side when they fit, stacked when they do not — and `ViewThatFits`
+        // decides, not a rule about text sizes.
+        //
+        // The first version of this stacked whenever the type was an accessibility
+        // size, which is right on a phone (two scaled buttons do not fit across
+        // one, and squeezing them broke "Download Season 1" mid-word into
+        // "Downloa / d Seas…") but wrong on a tablet, where the same two come to
+        // about 460 pt on an 834 pt page and stacked anyway (measured 2026-09-17).
+        // Predicting the width instead would mean guessing how much a hugging
+        // button grows, which is exactly the guess that was wrong the first time.
+        ViewThatFits(in: .horizontal) {
+            primaryActionRow(AnyLayout(HStackLayout(spacing: AppleDetailMetrics.actionButtonGap)))
+            primaryActionRow(
+                AnyLayout(VStackLayout(alignment: .leading, spacing: AppleDetailMetrics.actionButtonGap))
+            )
+        }
+        .frame(
+            width: dynamicTypeSize.isAccessibilitySize ? nil : primaryActionRowWidth,
+            alignment: .leading
+        )
+    }
+
+    private func primaryActionRow(_ layout: AnyLayout) -> some View {
+        layout {
             primaryPlayButton
             if showsDownloadAction {
                 downloadActionButton
             }
         }
-        .frame(width: primaryActionRowWidth, alignment: .leading)
     }
 
     @ViewBuilder
@@ -2982,13 +3035,21 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var secondaryActionRow: some View {
-        HStack(spacing: 0) {
+        // Zero spacing was safe only while each item sat in a fixed 44 pt slot
+        // that supplied its own gap. Now that they hug their labels above the
+        // accessibility threshold, "My List" and "Rate" ran together into
+        // "My ListRate" (measured on the iPad, 2026-09-17), so the row supplies
+        // the gap itself at those sizes.
+        HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 0) {
             detailIconAction("My List", systemImage: isFavorite ? "checkmark" : "plus", action: toggleFavorite)
                 .accessibilityLabel(isFavorite ? "Remove from My List" : "Add to My List")
                 .accessibilityValue(isFavorite ? "Saved" : "Not saved")
             rateControl
         }
-        .frame(width: primaryActionRowWidth, height: AppleDetailMetrics.iconRowHeight, alignment: .leading)
+        .frame(
+            width: dynamicTypeSize.isAccessibilitySize ? nil : primaryActionRowWidth,
+            alignment: .leading
+        )
         .overlay {
             Color.clear
                 .accessibilityElement(children: .ignore)
@@ -3072,12 +3133,14 @@ struct AppleCatalogItemDetailView: View {
         Button(action: action) {
             VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
                 Image(systemName: systemImage)
-                    .font(.system(size: AppleDetailMetrics.iconGlyphSize))
+                    .font(.system(size: scaledIconGlyphSize))
                 Text(title)
-                    .font(.system(size: AppleDetailMetrics.iconLabelFontSize, weight: .semibold))
+                    .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
             }
-            .frame(width: AppleDetailMetrics.iconActionWidth)
-            .frame(height: AppleDetailMetrics.iconRowHeight)
+            // A fixed 44 pt slot cannot hold "My List" at these sizes, so above
+            // the threshold the label decides its own width.
+            .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth)
+            .frame(minHeight: scaledIconRowHeight)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
@@ -3138,28 +3201,56 @@ struct AppleCatalogItemDetailView: View {
         AppleByteFormatting.string(count)
     }
 
-    private var episodeSection: some View {
-        VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
+    /// "Episodes" and the season control side by side, or stacked once the type
+    /// is large enough that they cannot share a line.
+    ///
+    /// At the largest accessibility size the two of them in one `HStack` left
+    /// the heading no room and it broke **mid-word** — "Episod" over "es"
+    /// (measured on the phone, 2026-09-17). The hero's action row already
+    /// restacks at these sizes; this is the same answer for the same problem.
+    @ViewBuilder
+    private var episodeSectionHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                episodesHeading
+                seasonControl
+            }
+        } else {
             HStack(alignment: .top) {
-                Text("Episodes")
-                    .font(.title2.bold())
-                    .accessibilityAddTraits(.isHeader)
+                episodesHeading
                 Spacer()
-                if seasonNumbers.count > 1 {
-                    Picker("Season", selection: $selectedSeason) {
-                        ForEach(seasonNumbers, id: \.self) { season in
-                            Text(seasonName(season)).tag(Optional(season))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .appleVisionActionTarget()
-                    .accessibilityIdentifier("detail.season")
-                } else if let season = selectedSeason {
-                    Text(seasonName(season))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                seasonControl
+            }
+        }
+    }
+
+    private var episodesHeading: some View {
+        Text("Episodes")
+            .font(.title2.bold())
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder
+    private var seasonControl: some View {
+        if seasonNumbers.count > 1 {
+            Picker("Season", selection: $selectedSeason) {
+                ForEach(seasonNumbers, id: \.self) { season in
+                    Text(seasonName(season)).tag(Optional(season))
                 }
             }
+            .pickerStyle(.menu)
+            .appleVisionActionTarget()
+            .accessibilityIdentifier("detail.season")
+        } else if let season = selectedSeason {
+            Text(seasonName(season))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var episodeSection: some View {
+        VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
+            episodeSectionHeader
 
             if isLoadingEpisodes {
                 VStack(spacing: 10) {
@@ -3196,6 +3287,56 @@ struct AppleCatalogItemDetailView: View {
             }
         }
         .accessibilityIdentifier("detail.episodes")
+    }
+
+    /// The title `startDownload(episode:)` hands the coordinator, so a row can
+    /// tell its own download from another episode's.
+    private func episodeDownloadTitle(_ episode: AppleStremioEpisode) -> String {
+        AppleStremioEpisodeSelection(seriesMediaID: resolvedMediaID ?? item.mediaID, episode: episode)?.displayTitle
+            ?? episode.displayTitle
+    }
+
+    private func episodeDownloadIndicator(for episode: AppleStremioEpisode) -> AppleEpisodeDownloadIndicator {
+        AppleEpisodeDownloadIndicator.resolve(
+            episodeTitle: episodeDownloadTitle(episode),
+            coordinatorState: downloadCoordinator.state,
+            isDownloaded: downloadedEpisodeIDs.contains(episode.id))
+    }
+
+    /// App Store-style ring while this episode downloads; the plain arrow
+    /// otherwise. Automatic downloads have no sheet, so the ring is the
+    /// viewer's only sign that the tap took (tester, build 10: "percentage
+    /// bar during download").
+    @ViewBuilder
+    private func episodeDownloadGlyph(_ indicator: AppleEpisodeDownloadIndicator) -> some View {
+        switch indicator {
+        case .idle:
+            Image(systemName: "arrow.down")
+        case .otherInProgress:
+            Image(systemName: "arrow.down.circle.fill")
+        case .downloaded:
+            Image(systemName: "checkmark.square")
+        case .preparing:
+            ProgressView().controlSize(.small)
+        case .downloading(let fraction), .paused(let fraction):
+            ZStack {
+                Circle().stroke(.white.opacity(0.25), lineWidth: 2.5)
+                if let fraction {
+                    Circle().trim(from: 0, to: fraction)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.25), value: fraction)
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
+                if case .paused = indicator {
+                    Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
+                } else if fraction != nil {
+                    RoundedRectangle(cornerRadius: 1.5).frame(width: 7, height: 7)
+                }
+            }
+            .frame(width: 24, height: 24)
+        }
     }
 
     private func episodeRow(_ episode: AppleStremioEpisode) -> some View {
@@ -3245,14 +3386,13 @@ struct AppleCatalogItemDetailView: View {
                     startDownload(episode: episode)
                 }
             } label: {
-                Image(systemName: downloadedEpisodeIDs.contains(episode.id)
-                    ? "checkmark.square"
-                    : downloadCoordinator.state.ownsDownload ? "arrow.down.circle.fill" : "arrow.down")
+                episodeDownloadGlyph(episodeDownloadIndicator(for: episode))
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
-            .accessibilityLabel("Download \(episode.displayTitle)")
+            .accessibilityLabel(episodeDownloadIndicator(for: episode).accessibilityLabel(episodeTitle: episodeDownloadTitle(episode)))
+            .accessibilityIdentifier("detail.episode.download")
             }
             #endif
         }
@@ -3277,6 +3417,7 @@ struct AppleCatalogItemDetailView: View {
         VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
             Text("More Like This")
                 .font(.title2.bold())
+                .padding(.leading, detailHorizontalInset)
                 .accessibilityAddTraits(.isHeader)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -3284,6 +3425,9 @@ struct AppleCatalogItemDetailView: View {
                     suggestedCards
                 }
                 .padding(.vertical, 8)
+                // Leading only: the first card lines up with the heading and the
+                // last one runs off the edge, which is what says "keep scrolling".
+                .padding(.leading, detailHorizontalInset)
             }
             .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         }
@@ -3442,12 +3586,15 @@ struct AppleCatalogItemDetailView: View {
             } label: {
                 VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
                     Image(systemName: ratingGlyph(for: rating, selected: rating != nil))
-                        .font(.system(size: AppleDetailMetrics.iconGlyphSize))
+                        .font(.system(size: scaledIconGlyphSize))
                     Text("Rate")
-                        .font(.system(size: AppleDetailMetrics.iconLabelFontSize, weight: .semibold))
+                        .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
                 }
-                .frame(width: AppleDetailMetrics.iconActionWidth, alignment: .leading)
-                .frame(height: AppleDetailMetrics.iconRowHeight)
+                .frame(
+                    width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth,
+                    alignment: .leading
+                )
+                .frame(minHeight: scaledIconRowHeight)
             }
             .buttonStyle(.plain)
             .opacity(rateChoicesExpanded ? 0 : 1)
@@ -3752,6 +3899,11 @@ struct AppleCatalogItemDetailView: View {
                 destinationLabel: "OpenStream Offline Storage"
             ),
             resolvePlans: {
+                // Automatic, by owner decision (2026-09-17): no source sheet.
+                // The resolver returns up to 12 ranked plans and the
+                // coordinator walks them in order when one fails, which is what
+                // makes "a source is chosen by default but is not necessarily
+                // available" (tester, build 10) safe without asking.
                 try await playbackResolver.resolveDownloadPlans(
                     sources: sources,
                     preferredSourceID: preferredSourceID,
@@ -4032,28 +4184,47 @@ struct AppleDetailActionButtonLabel: View {
     let kind: AppleDetailActionButtonKind
     let width: CGFloat?
 
+    // Play, Download, My List and Rate were the only things on the detail page
+    // that did not grow with the text size: a hard-coded 15 pt label and a
+    // pinned 36 pt height meant that at the largest accessibility size the two
+    // most important controls stayed exactly as small as they are now while the
+    // synopsis beside them was enormous (measured on the phone, 2026-09-17).
+    // These scale from the same numbers, so nothing moves at the default size.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var labelFontSize: CGFloat =
+        AppleDetailMetrics.actionButtonLabelFontSize
+    @ScaledMetric(relativeTo: .body) private var glyphSize: CGFloat =
+        AppleDetailMetrics.actionButtonGlyphSize
+    @ScaledMetric(relativeTo: .body) private var buttonHeight: CGFloat =
+        AppleDetailMetrics.actionButtonHeight
+
     var body: some View {
             HStack(spacing: 6) {
                 switch glyph {
                 case .systemImage(let name):
                     Image(systemName: name)
-                        .font(.system(size: AppleDetailMetrics.actionButtonGlyphSize))
+                        .font(.system(size: glyphSize))
                 case .progress:
                     ProgressView()
                         .tint(kind.foreground)
                 }
                 Text(title)
-                    .font(.system(size: AppleDetailMetrics.actionButtonLabelFontSize, weight: .semibold))
-                    .lineLimit(1)
+                    .font(.system(size: labelFontSize, weight: .semibold))
+                    // A fixed width cannot hold a label this size, so above the
+                    // accessibility threshold the button hugs its content and
+                    // the label may take a second line.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .minimumScaleFactor(0.8)
                     .allowsTightening(true)
             }
             .foregroundStyle(kind.foreground)
             .padding(.horizontal, AppleDetailMetrics.actionButtonHorizontalPadding)
             .frame(
-                width: width ?? AppleDetailMetrics.defaultActionButtonWidth,
-                height: AppleDetailMetrics.actionButtonHeight
+                width: dynamicTypeSize.isAccessibilitySize
+                    ? nil
+                    : (width ?? AppleDetailMetrics.defaultActionButtonWidth)
             )
+            .frame(minHeight: buttonHeight)
             .background(
                 kind.fill,
                 in: RoundedRectangle(cornerRadius: AppleDetailMetrics.actionButtonCornerRadius)
@@ -4661,7 +4832,30 @@ struct AppleDetailMetrics {
 
     // Layout-resolved widths
     static let portraitColumnInset: CGFloat = 16
-    static let portraitIPadActionButtonWidth: CGFloat = 150
+
+    /// The widest a column of prose is allowed to get on a regular-width
+    /// screen. Already the landscape-iPad figure; now the portrait one too, so
+    /// the detail page reads the same width whichever way the iPad is held.
+    static let regularContentWidth: CGFloat = 680
+
+    /// The detail page's content column in portrait.
+    ///
+    /// This used to be the *action row* width, which is right on a phone purely
+    /// by coincidence — there, two half-column pills plus the gap come to
+    /// exactly the content column. On an iPad the action row is two fixed
+    /// 150 pt pills, so the whole page (synopsis, Episodes header, every episode
+    /// row) was squeezed into **310 pt of an 834 pt page**, with the episode
+    /// titles wrapping to two lines and their dates to three while ~500 pt sat
+    /// empty beside them (measured on the review iPad, 2026-09-17).
+    static func portraitContentWidth(viewportWidth: CGFloat, actionColumnWidth: CGFloat) -> CGFloat {
+        min(regularContentWidth, max(actionColumnWidth, viewportWidth - 2 * portraitColumnInset))
+    }
+    /// 180, not 150, because the download action's label is variable-length —
+    /// "Download Season 1", "Download Specials" — and at 150 it truncated to
+    /// "Download Seas…" on the review iPad (2026-09-17). A phone's pill is
+    /// `(width − 32 − 10) / 2` ≈ 180 and the same label fits there, so the
+    /// smaller device had the larger button. This is that number, made explicit.
+    static let portraitIPadActionButtonWidth: CGFloat = 180
     #if os(visionOS)
     static let landscapeIPadActionButtonWidth: CGFloat = 180
     #else
@@ -4779,6 +4973,24 @@ struct AppleDetailMetrics {
         case .landscapeIPad:
             return landscapeIPadActionButtonWidth
         }
+    }
+
+    /// The narrowest viewport that is a tablet rather than a phone in portrait.
+    /// Every iPad portrait width (744 mini, 834, 1024) is above it; every phone
+    /// portrait width (320–440) is below.
+    static let portraitTabletWidthThreshold: CGFloat = 600
+
+    /// How wide a featured-hero action button should be in portrait, or `nil`
+    /// for "fill the column".
+    ///
+    /// Filling the column is right on the phone, where half of 402 pt is a
+    /// normal-looking pill. On an iPad in portrait the same rule gave *Play* a
+    /// **367 pt** capsule with a 40 pt label marooned in the middle of it
+    /// (measured on the review iPad, 2026-09-17) — the phone layout simply
+    /// stretched. The detail page already uses a fixed pill there; the hero now
+    /// uses the same one.
+    static func featuredActionButtonWidth(portraitViewportWidth width: CGFloat) -> CGFloat? {
+        width >= portraitTabletWidthThreshold ? portraitIPadActionButtonWidth : nil
     }
 
     static func iconRowWidth(for layout: AppleDetailLayout, screenWidth: CGFloat) -> CGFloat {

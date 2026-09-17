@@ -91,10 +91,16 @@ public struct AppleSettingsContentModifier: ViewModifier {
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity)
         #elseif os(iOS)
+        // No width cap. Wrapping the list in a fixed frame stops it being the
+        // scroll view the navigation bar tracks, and the bar then keeps the
+        // large title expanded while the list lays its own content out from the
+        // top of that frame — which is why "RADARR" was drawn *underneath*
+        // "Radarr & Sonarr" on the phone (measured 2026-09-17). The same cap was
+        // also what centred the list in a 560 pt column on iPad while the large
+        // title stayed flush left. tvOS moved off 560 for the same reason: it is
+        // a phone column, and a phone does not need it.
         content
             .listStyle(.insetGrouped)
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
         #elseif os(tvOS)
         // 560 pt is a phone column. Centred on a 1920 pt television it left the
         // page title stranded at the safe inset while the rows floated in the
@@ -109,6 +115,9 @@ public struct AppleSettingsContentModifier: ViewModifier {
             // toggles and text buttons inside settings forms keep an explicit
             // white here so nothing in a form reads as the default blue.
             .tint(.white)
+            // No `.brandSwitch` here: Apple TV draws a Toggle as a row with an
+            // "On"/"Off" label rather than a switch, and the accent tint painted
+            // the row *text* pink (seen on the Privacy pane, 2026-09-17).
         #else
         content
             .frame(maxWidth: 560)
@@ -141,6 +150,16 @@ public struct AppleSettingsPageTitleModifier: ViewModifier {
             TVPageHeader(title: title)
             content
         }
+        #elseif os(iOS)
+        // Inline, like Apple's own Settings: every pushed pane there ("General",
+        // "About", "Storage") carries an inline title, and only the root keeps a
+        // large one. Ours kept the large title on pushed panes, and the first
+        // section header was being drawn across it — "APPLE SERVICES" ghosting
+        // through the white letters of "Privacy" on every pane with a header
+        // (measured 2026-09-17).
+        content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
         #else
         content
             .navigationTitle(title)
