@@ -44,8 +44,6 @@
 	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>UIDesignRequiresCompatibility</key>
-	<true/>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

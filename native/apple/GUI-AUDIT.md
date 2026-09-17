@@ -1831,9 +1831,13 @@ order; this section grows as each lands.
       covered, so the search never filtered; and a lazy List hides off-screen rows from XCUITest —
       cleanup has to scroll. The sim's own Xtream source was found switched OFF (by hand; the app has
       no auto-disable path). Gate **994 / 98**.
-- [ ] **Tab bar: use the system one per OS** (owner 2026-09-17): iOS 26 gets the floating glass bar,
-      iOS 18 the current bar, no custom styling — "easier, esp. with the iPhone Duo". Check for any
-      compatibility opt-out (`UIDesignRequiresCompatibility`) or custom tab-bar appearance and remove it.
+- [x] **Tab bar: the system one per OS** (owner 2026-09-17). Removed `UIDesignRequiresCompatibility`
+      from the app Info.plist and the three tab-bar paint modifiers in `OpenStreamRootView`
+      (`toolbarBackground` ×2, `toolbarColorScheme`); only the player's `toolbar(.hidden)` stays.
+      Verified on the iPhone 16 Pro sim (iOS 26.3): Discover and Settings show the floating glass
+      tab bar and glass top buttons, nothing painted by the app; iOS 18 keeps its classic bar by
+      definition. Note for later: with Liquid Glass on, every bar and sheet is glass now — the
+      "no glass" rule is superseded for iOS chrome by owner decision.
 - [ ] **Mormon Wives S1E1 still plays the wrong show** on the iPhone sim with the current tree
       (owner, 2026-09-17; trace: `attempt 1/3 stremio host=torrentio.strem.fun route=surface`) — the
       2026-09-16 ranking fix is in this build and did not settle it. Needs the candidate list from the

@@ -197,10 +197,11 @@ public struct OpenStreamRootView: View {
                     set: { navigationPaths[tab] = $0 }
                 )) {
                     content(for: tab)
+                        // The system tab bar as each OS draws it (owner,
+                        // 2026-09-17): the floating glass bar on iOS 26, the
+                        // classic bar on iOS 18 — no background or colour
+                        // scheme of our own.
                         .toolbar(tabBarIsHidden ? .hidden : .automatic, for: .tabBar)
-                        .toolbarBackground(Color(white: 0.055), for: .tabBar)
-                        .toolbarBackground(.visible, for: .tabBar)
-                        .toolbarColorScheme(.dark, for: .tabBar)
                 }
                 .id(navigationIdentity(for: tab))
                 .tabItem {

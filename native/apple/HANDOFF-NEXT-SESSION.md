@@ -274,9 +274,10 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
 - This file — update the "state" below when you finish a unit of work.
 
 ## 7. State as of 2026-09-17 12:35 (newest first)
-- Channel Manager: Your Regional removed; selected-only list + "Add Channels…" picker (grouped,
-  searchable). Verified tvOS + iPhone. Gate 994 / 98. Next: Mormon Wives wrong-show diagnosis, then
-  the system tab bar per OS. iOS 11/12 still wait on the Widgets App Group tick.
+- Tab bar is the system one (Liquid Glass on iOS 26; compat key removed). Channel Manager redesigned.
+  Mormon Wives diagnosed: Torrentio returns other shows' S01E01 releases ("Secret Lives of Gypsy
+  Wives", "Secret Sex Lives of Tyrants"); a title-match demotion is the fix in progress. Gate 994 / 98.
+  iOS 11/12 still wait on the Widgets App Group tick.
 - Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
   TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
   cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.
