@@ -79,6 +79,9 @@ public final class AppleWatchCompanion: NSObject {
 
     /// The last context that actually reached the watch.
     private var lastSignature: String?
+    
+    // Throttles trace output while inactive
+    private var lastTracedActivationState: Int?
 
     public func detach() {
         engine = nil
@@ -103,9 +106,13 @@ public final class AppleWatchCompanion: NSObject {
         }
         let session = WCSession.default
         guard session.activationState == .activated else {
-            appleTrace("watch link: not activated (state=\(session.activationState.rawValue))")
+            if session.activationState.rawValue != lastTracedActivationState {
+                appleTrace("watch link: not activated (state=\(session.activationState.rawValue))")
+                lastTracedActivationState = session.activationState.rawValue
+            }
             return
         }
+        lastTracedActivationState = nil
         let isPlaying = engine?.phase == .playing
         let publishedTitle = engine == nil ? nil : title
         let signature = AppleWatchPayload.signature(title: publishedTitle, isPlaying: isPlaying)
