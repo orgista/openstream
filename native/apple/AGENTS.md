@@ -1,7 +1,97 @@
-# Rules for agents working in native/apple
+# Working in `native/apple` as an agent — read all of it before your first edit
 
-- **Headless only.** Never use Computer Use, screen control, cua/browser-use tools, or osascript UI automation on this Mac; the owner is using it. Drive simulators with XcodeBuildMCP or `xcrun simctl`, the web with `curl`, and take screenshots with `xcrun simctl io <udid> screenshot`.
-- **Docs.** Keep only `FEEDBACK.md` (append a short dated section with your result), `DELIVERIES.md`, and the `HANDOFF-*.md` you were given. Delete your handoff when done. Do not create `REPORT-*.md` or other markdown; put verification evidence as screenshots in `design/` and a dated section in `FEEDBACK.md`.
-- **Owner UI rules.** No gradients, scrims or dimming layers over artwork or video anywhere (heroes, detail pages, overlays) — text and controls sit directly on the image; nothing blue except the brand mark; no Liquid Glass; no explainer text; no scroll indicators; every failure names a reason; no third-party wordmarks or logos on shelves or titles (an add-on's own manifest icon in the Sources list is wanted and must stay); stock Apple player; no Stremio/torrent wording.
-- **Gates.** `swift build` and `swift test` with the scratch path named in your handoff, the `xcodebuild` in your handoff, then real simulator screenshots that you check before citing. Never weaken or delete a test. Do not commit.
-- **Do not edit** `AppleSMBRangeServer.swift`, `AppleSharePlay*.swift`, or playback engine files unless your handoff says so.
+You were handed a task by the main session (Fable) or by the owner. Do that task, nothing else,
+and report in the format at the bottom. Where this file and your task disagree, ask; do not guess.
+
+## 1. The three commands (verbatim — no substitutions)
+```
+# GATE — run BEFORE and AFTER every change. NEVER plain `swift test` (default .build lands on the
+# SMB share and corrupts). Expect "Test run with N tests in M suites passed"; note N/M in the report.
+swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
+
+# If it prints "input file … was modified during the build": that is the share, not you.
+# sleep 45 and run it again. If it ends with "freed pointer was not the last allocation" and no
+# "Test run with" line: a test crashed the process — bisect with --filter, do not ignore it.
+
+# Simulator builds (one at a time; only if your task asks for a build):
+cd Apps && xcodebuild -project OpenStreamApps.xcodeproj -scheme "OpenStream tvOS" \
+  -destination "id=B251C620-E3AD-4F9E-9911-EF8CBA6C7353" \
+  -derivedDataPath ~/Developer/openstream-build/DerivedData-deploy-tvos build > /tmp/build.log 2>&1
+#   iOS: scheme "OpenStream iOS", id=6A037503-AF3A-4A22-B900-CF6573B15FB1,
+#        -derivedDataPath ~/Developer/openstream-build/DerivedData-uitests
+```
+
+## 2. The SMB share lies — the protocol, no exceptions
+The repo is on an SMB share. Builds see stale files and stale directory listings.
+- After editing: `touch <every edited file>`, `sleep 16`, THEN build. Then prove it:
+  `grep -c "SwiftCompile normal arm64 Compiling.*<File>.swift" /tmp/build.log` must be ≥ 1 for
+  every file you edited. "BUILD SUCCEEDED" without that line is not proof.
+- Before reporting and before any commit: `find Sources Tests Apps -name "*.swift" -size 0` must
+  print nothing. A new file went to 0 bytes on this share once; check yours.
+- Write files with a normal write (heredoc / editor); never `>>` onto a file you have not read.
+
+## 3. Never (these end the task — stop and report instead)
+- Never upload to TestFlight/App Store, run `asc publish`, `asc builds upload`, `xcodebuild
+  -exportArchive`, or `git push`. Never add a build to a TestFlight group.
+- Never erase, delete, reset, or create simulators. The four persistent sims are: iPhone 16 Pro
+  `6A037503…`, iPad `CC634933…`, Apple TV `B251C620…`, Vision Pro `F598603A…`. Boot ONE at a time.
+  Never leave test data on them (a source, a download, a playlist you added — remove it).
+- Never use Computer Use / screen control / osascript UI automation — the owner is using this Mac.
+- Never create LaunchAgents, cron, routines, background workers.
+- Never edit signing: `project.pbxproj` CODE_SIGN_*/PROVISIONING_PROFILE_*, entitlements,
+  `Info.plist` keys, `ExportOptions*.plist`, anything under `~/.appstoreconnect`, `.p8` files.
+  Never print key ids, issuer ids, tokens, passwords, or stream URLs with provider tokens.
+- Never put a provider URL/token in the repo. Fixtures use `https://fixture.example/…`. Playlist
+  URLs for tests come from the environment (`OPENSTREAM_TEST_M3U`), not from source.
+- Never run more than one `xcodebuild` at a time; never run `swift test` concurrently with one.
+- Never edit `AppleSMBRangeServer.swift`, `AppleSharePlay*.swift`, or the AetherEngine package
+  checkout unless the task names them.
+- Never commit. The main session reviews the diff and commits (as the owner, cyberbanksy).
+
+## 4. Owner UI rules (do not relitigate)
+Stock Apple look. Nothing blue except the brand mark (accent #FF3366). No gradients, scrims or
+dimming over artwork/video (one approved billboard fade). No explainer text in the UI. No scroll
+indicators. Controls auto-hide. One captions control. No boxed icons on tvOS. No coloured label
+text. Toggles are the classic iOS green switch. The tab bar is the system one per OS (Liquid
+Glass on iOS 26) — no custom tab-bar paint. Downloads are automatic — no source picker.
+Live view options are Provider Lineup and My Channels only. Trailers and intro fingerprinting are
+tabled; chapter markers are approved.
+
+## 5. Architecture traps (each one cost an hour)
+- The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
+  are picked up automatically — but `#if os(tvOS)` files never compile in the SPM gate (macOS),
+  so a tvOS-only change needs a tvOS build to prove it.
+- `AppleTVLiveGuideScreen` and other tvOS screens have EXPLICIT inits: a new stored property must
+  be added to the init too or the call site fails with "extra argument".
+- A pushed SwiftUI page must carry its own `.task(id:)`; the parent's sleeps while covered.
+- A lazy `List` hides off-screen rows from XCUITest — scroll before asserting.
+- SwiftUI Form pickers are tapped through their VALUE button in UI tests, not the label.
+- Match episode-row controls by identifier (`detail.episode.download`), not label — labels change.
+- Awaiting `addStremio(manifestValue:)` with its default `client:` from inside `AppleSourceStore`
+  crashes the task allocator; pass `client: manifestClient`.
+- `simctl get_app_container` can return a stale container after a UI-test install; find the live
+  one by mtime. The interaction trace is `<container>/Library/Caches/openstream-trace.log`.
+- `#if DEBUG … #else …` — the `#else` branch only compiles in Release archives; reference-check it.
+- Tests are Swift Testing (`@Suite`, `@Test`, `#expect`); pure policy types get pure tests.
+
+## 6. Where to write things down
+- `GUI-AUDIT.md`: tick the item you worked on (`[x]`/`[F]`/`[!]`) with what changed and how it was
+  verified (gate count, screenshot, test name). No essays.
+- `FEEDBACK.md`: append a short dated section written for the owner (plain words, no jargon).
+- Do not create new markdown files, design folders, or handoffs unless the task asks.
+
+## 7. Report format (return exactly this, under 60 lines)
+```
+## Done
+- <item> — <files> — <one line on how>
+## Not done / unclear
+- <item> — <why>
+## Gates run
+- swift test … → pass N/M | fail (<one line>)
+- xcodebuild <scheme> → recompiled: <files confirmed by grep> | BUILD FAILED (<one line>)
+- zero-byte check → clean
+## Diff
+<git status --short -- . ; git diff --stat -- .>
+## Notes for the reviewer
+- <risky spots, assumptions, anything to spot-check, with path:line>
+```
