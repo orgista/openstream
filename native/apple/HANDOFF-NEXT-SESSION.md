@@ -234,7 +234,7 @@ Any LLM can run this loop; nothing here needs the driver's memory.
 **Rungs, in the order they are exhausted (one at a time, never idle):**
 | # | Worker | Command (spec = a file under `~/Developer/openstream-build/specs/`, never in the repo) | Use for |
 |---|---|---|---|
-| 1 | **agy** (Gemini 3.1 Pro) | `agy -p "$(cat spec.md)" --mode accept-edits --dangerously-skip-permissions --add-dir "<tree>" --add-dir ~/.claude/skills --effort medium --print-timeout 20m` | mechanical edits, tests, fixtures, docs |
+| 1 | **agy** (Gemini 3.1 Pro) | `agy -p "$(cat spec.md)" --mode accept-edits --dangerously-skip-permissions --add-dir "<tree>" --add-dir ~/.claude/skills --effort high --print-timeout 20m` (Gemini has only `low`/`high` — `medium` exits 1 with "invalid model selection") | mechanical edits, tests, fixtures, docs |
 | 2 | **Claude fast window** | `claude -p "$(cat spec.md)" --model opus --effort xhigh --permission-mode acceptEdits --add-dir "<tree>" --output-format text` (headless; burns the subscription — only when rung 1 is out) or the `implementer` Agent (Sonnet) from inside a session | multi-file Swift work that needs Xcode/sim knowledge |
 | 3 | **codex** (GPT‑6) | `codex exec -C "<tree>" -s workspace-write "$(cat spec.md)"` — ALWAYS pass `-s`; `-s read-only` for audits | same as 1 when agy is out or the Claude 5‑h bar is past ~90% |
 | 4 | **everything** | `or-review-remote implement` / `review` (GLM‑5.2, free tier), Sonnet/Opus subagents | last |
@@ -259,7 +259,7 @@ Build/screenshot: none — the driver does it.
 Forbidden: uploads, commits, git push, sims, signing, secrets, Computer Use, touching files not listed.
 Report: AGENTS.md §7, under 60 lines, then stop.
 ```
-**Model presets:** driver = Fable 5.1 / effort high (pinned for the session — /model, /fast, /effort mid-session cold-reads the whole context); implementation sessions = Opus 5 + /fast / xhigh; subs = Sonnet; agy medium; codex high.
+**Model presets:** driver = Fable 5.1 / effort high (pinned for the session — /model, /fast, /effort mid-session cold-reads the whole context); implementation sessions = Opus 5 + /fast / xhigh; subs = Sonnet; agy high (its only other level is low); codex high.
 **Progress check-in:** the 15-minute Desktop heartbeat (no cloud routine, no LaunchAgent). Each firing: 1–3 lines, which rung ran, N/M, what's next.
 
 ### 4f. Dispatching work to a model — audit of 2026-09-17 15:10 (tested, all three rungs answer)
@@ -322,6 +322,15 @@ write; if a file you need is already modified by the other agent, say so and sto
     The `ui-ux-pro-max` plugin (design-system, brand, banner-design, slides, ui-styling) is also
     installed. Task→skill rows are in `AGENTS.md §8`. Not installed: `brand-guidelines` (it is
     Anthropic's brand), the ASO screenshot skill (needs a Gemini MCP key — owner decision).
+  - Performance (installed 2026-09-17 16:00, vetted): `xctrace` (phillco — Python wrappers around
+    `xcrun xctrace`: record, analyze, export, compare; the only skill with scripts, all read-only
+    against the sim), `ios-performance-profiling`, `ios-launch-performance`,
+    `ios-perceived-performance`, `swiftui-performance`, `swift-concurrency-performance`,
+    `swift-runtime-performance` (Livsy90 — prose + references, no scripts). Audit verdict per skill:
+    profiling = which tool for which symptom + signposts/MetricKit (we have none); launch = the
+    startup scan/group/metadata pass; perceived = the poster complaint; swiftui = the 5k-line detail
+    view and the guide grid; concurrency = MainActor stores; runtime = the M3U/lineup hot loops.
+    Rule from AGENTS §8: nothing is "faster" without a before/after trace from `xctrace`.
   - Tidy: `/openstream-tidy` (project skill at `/Volumes/Files/Projects/.claude/skills/openstream-tidy`)
     is the constant clean-up — run it at the end of every heartbeat; it never deletes another agent's
     in-flight files and asks before anything over 1 GB or outside the build scratch.
@@ -393,11 +402,10 @@ write; if a file you need is already modified by the other agent, say so and sto
   `~/Developer/openstream-build/publish-apple-b12`; 986/96 tests and unsigned iOS Release build pass.
   Configuration-only publication differences (catalog sanitization, automatic signing, shared
   schemes/version stamps/test fixture) are in its DELIVERIES.md. Newer development work stays local.
-  Cloud Default is now **Apple Build Checks** (four BUILD actions, no archives), paused; the unused
-  TestFlight workflow is also paused. Owner must change Cloud's primary repository URL to
-  `https://github.com/orgista/openstream-apple.git` in Cloud Settings; the public API cannot switch
-  it and no web session is available. After owner connects it: verify repository + main/project
-  path, enable Apple Build Checks and run it. No Cloud success or new TestFlight delivery yet.
+  Cloud now uses `orgista/openstream-apple`. Apple Build Checks enabled; four platforms passed
+  run 5 (`3a431b39-00a5-47b7-8b72-891a435db678`) at `ba066e3`, which fixes iOS ActivityKit
+  isolation errors found in run 4. Build-12 tag unchanged; TestFlight workflow remains paused.
+  No new TestFlight binary. Current simulator UI fixes are newer local development changes.
 - iOS 11 and 12 are delivered and their en-US TestFlight notes are now populated and read-back
   verified. See DELIVERIES.md; older signing/upload blockers below are historical.
 - Owner's build-note policy (September 17): write concise, platform-specific “Added…” / “Fixed…”

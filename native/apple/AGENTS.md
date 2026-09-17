@@ -131,6 +131,12 @@ references folder next to it has the details. Apply the one that matches, then d
 | TestFlight "What to Test", Reddit/TraceEnabled group posts, release notes | `launch` + `copywriting` + `social` | short, plain, no hype |
 | pricing/tiers questions | `pricing` | owner decides; skill drafts |
 | marketing plan / channel choice / measuring it | `marketing-plan`, `analytics` | drafts for the owner |
+| **anything "slow"** — before touching code | `ios-performance-profiling` → pick the tool; `xctrace` → record/analyze/**compare** a trace headlessly (`scripts/trace_record.py`, `trace_compare.py`; templates on this Mac: App Launch, Time Profiler, Animation Hitches, SwiftUI, Allocations, Network) | measure first; a fix without a before/after trace is not done |
+| app launch, time to first frame, work at startup | `ios-launch-performance` | our launch runs the library scan/group/metadata pass up front (2.6 / 4.9 / 7.5 s in traces) |
+| "posters take time", spinners, blank shelves, perceived lag | `ios-perceived-performance` | progressive render + placeholders + the artwork disk cache |
+| view invalidation, identity, body cost, scroll jank | `swiftui-performance` (plus the installed `swiftui-performance-audit`) | Discover detail is 5,225 lines; the guide grid renders 300 rows |
+| task explosions, MainActor bottlenecks, actor hopping, cancellation | `swift-concurrency-performance` | stores/coordinators/engines are `@MainActor`; image cache is an actor |
+| ARC/COW/dispatch cost in hot loops | `swift-runtime-performance` | M3U parse (25k lines), lineup projection, search ranking |
 Not for this repo: the cloudflare*, wrangler, durable-objects, agents-sdk, sandbox-sdk, docker,
 deployment, web-perf, turnstile skills — ignore them here. (`brand-guidelines` is Anthropic's own
 brand and was not installed; write OpenStream's under `design/DESIGN-SYSTEM.md` instead.)
