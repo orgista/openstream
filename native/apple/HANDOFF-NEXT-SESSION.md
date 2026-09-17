@@ -227,25 +227,40 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   "OpenStream macOS" target, and the macOS platform on the App Store Connect app record. Do the
   prep, then ask before creating certificates.
 
-### 4e. Budget ladder for this project (owner, 2026-09-17 — PLANNED, not switched on yet)
-Order of exhaustion, one rung at a time, never idle:
-1. **`agy`** (`~/.local/bin/agy -p "<task>" --dangerously-skip-permissions --effort medium --add-dir <tree>`)
-   — mechanical work with a written spec: file edits, test additions, fixture generation, docs.
-   Print mode, 5-min default timeout (`--print-timeout 20m` for builds). Exhaust its quota first.
-2. **Claude subscription in fast mode** (`/fast`, Opus) — the 5-hour window: gates, screenshot
-   verification, owner questions, everything that needs judgment or the sims.
-3. **Codex** (`codex exec -C <tree> -m <model> "<task>"`) — exhausts slower; takes over rung-1 work
-   when agy is out and the Claude 5-hour bar is past ~90%.
-4. **Everything, all limits** — Fable/Opus/Sonnet subagents, or-review-remote (GLM-5.2 + free tier)
-   as in `ai-ops/or-review/TOKEN-PLAYBOOK.md`; the OpenRouter card is the last thing to drain.
-Rules that hold on every rung: gate + touch/sleep/grep + screenshot-LOOK stay on the Claude
-session (agy/codex do not drive the sims); one build at a time on the Mac; nothing uploads
-without "ship N"; specs go outside the repo (`~/Developer/openstream-build/specs/`); "sip usage"
-= smallest model that can do the step (Haiku lookups, Sonnet typing, Opus judgment).
-Progress check-in: the **15-minute heartbeat** is the Claude Desktop scheduled task that sends the
-"OpenStream Apple GUI heartbeat" prompt (visible in `launchctl list` as
-`com.anthropic.claudefordesktop…`; there are no cloud routines and no LaunchAgents by owner rule).
-Each firing reports 1–3 lines and which rung is active. Switch-on is the owner's call.
+### 4e. ORCHESTRATION — ACTIVE since 2026-09-17 15:30 (owner: "from here on out it's your job to make sure things get done without taking much of your own usage")
+The driver session (Fable, effort high) decides, specs, verifies and commits. **Workers do the typing.**
+Any LLM can run this loop; nothing here needs the driver's memory.
+
+**Rungs, in the order they are exhausted (one at a time, never idle):**
+| # | Worker | Command (spec = a file under `~/Developer/openstream-build/specs/`, never in the repo) | Use for |
+|---|---|---|---|
+| 1 | **agy** (Gemini 3.1 Pro) | `agy -p "$(cat spec.md)" --mode accept-edits --dangerously-skip-permissions --add-dir "<tree>" --add-dir ~/.claude/skills --effort medium --print-timeout 20m` | mechanical edits, tests, fixtures, docs |
+| 2 | **Claude fast window** | `claude -p "$(cat spec.md)" --model opus --effort xhigh --permission-mode acceptEdits --add-dir "<tree>" --output-format text` (headless; burns the subscription — only when rung 1 is out) or the `implementer` Agent (Sonnet) from inside a session | multi-file Swift work that needs Xcode/sim knowledge |
+| 3 | **codex** (GPT‑6) | `codex exec -C "<tree>" -s workspace-write "$(cat spec.md)"` — ALWAYS pass `-s`; `-s read-only` for audits | same as 1 when agy is out or the Claude 5‑h bar is past ~90% |
+| 4 | **everything** | `or-review-remote implement` / `review` (GLM‑5.2, free tier), Sonnet/Opus subagents | last |
+Read-only questions go to rung 1/3 first (`--effort low` / `-s read-only`), never to the driver's context.
+
+**The loop (per queue item; the driver runs it, a worker executes step 3):**
+1. `git status --short -- .` — anything modified by the other agent (Codex desktop) is off-limits; pick another item if it collides.
+2. Write the spec (template below) to `~/Developer/openstream-build/specs/<item>.md`. ≤3 files per spec; split bigger items.
+3. Run the rung. Capture stdout to `~/Developer/openstream-build/specs/<item>.out`.
+4. Verify yourself, always: `git diff --stat -- .` touches only the allowed files; `find Sources Tests Apps -name "*.swift" -size 0` empty; gate passes and N/M went up if tests were asked; UI/tvOS changes get the build + screenshot step from AGENTS.md §1–2 (driver does the LOOK).
+5. Commit only the worker's files (`git add <paths>`), record in GUI-AUDIT/FEEDBACK, run `/openstream-tidy`.
+6. If the worker went off-spec: `git checkout -- <files>` and re-run on the next rung with the failure quoted in the spec. Never patch its work by hand from the driver — that is the usage you are saving.
+
+**Spec template (every line filled):**
+```
+Repo: /Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple — read AGENTS.md first, all of it.
+Files you may change: <exact list>. Nothing else. Do not create files except the tests named below.
+Change: <behaviour, exact; policy table or acceptance criteria>
+Tests: <file + what they assert> (Swift Testing)
+Gate: swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm" — run before and after; report N/M.
+Build/screenshot: none — the driver does it.
+Forbidden: uploads, commits, git push, sims, signing, secrets, Computer Use, touching files not listed.
+Report: AGENTS.md §7, under 60 lines, then stop.
+```
+**Model presets:** driver = Fable 5.1 / effort high (pinned for the session — /model, /fast, /effort mid-session cold-reads the whole context); implementation sessions = Opus 5 + /fast / xhigh; subs = Sonnet; agy medium; codex high.
+**Progress check-in:** the 15-minute Desktop heartbeat (no cloud routine, no LaunchAgent). Each firing: 1–3 lines, which rung ran, N/M, what's next.
 
 ### 4f. Dispatching work to a model — audit of 2026-09-17 15:10 (tested, all three rungs answer)
 **Pick the model by the job, then give it the brief.** Every worker reads `AGENTS.md` first — it
