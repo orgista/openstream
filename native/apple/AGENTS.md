@@ -47,6 +47,7 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 - Never edit `AppleSMBRangeServer.swift`, `AppleSharePlay*.swift`, or the AetherEngine package
   checkout unless the task names them.
 - Never commit. The main session reviews the diff and commits (as the owner, cyberbanksy).
+- Uploads are the driver's job only, by the runbook in `HANDOFF-NEXT-SESSION.md §9`, after "ship N".
 
 ## 4. Owner UI rules (do not relitigate)
 Stock Apple look. Nothing blue except the brand mark (accent #FF3366). No gradients, scrims or

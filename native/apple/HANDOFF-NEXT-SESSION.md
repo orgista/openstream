@@ -491,3 +491,83 @@ dead-button tally (it builds now); Channel Manager redesign — recommendation i
 this Mac has 26.3, no DUO device type, no iOS 27 runtime. Tooling-blocked, not us.
 
 **Test count**: 1007 / 101. If yours is lower, you lost tests — find out why before continuing.
+
+## 9. SHIP RUNBOOK — copy, fill, run. Read it whole once; then never improvise a step
+Written after Opus went in circles on this (owner, 2026-09-17). Every command below ran today.
+Driver only: workers never upload. Authorization = the owner's literal "ship N" / "push N" for that
+build number, all platforms on the same N. Nothing else authorizes an upload or a group change.
+
+### 9.0 Facts you would otherwise rediscover
+- Team `2VQ74PD5YG` · app id `6807530757` · bundle `com.orgista.openstream` (+ `.topshelf`, `.widgets`, `.watchkitapp`).
+- Signing on this Mac is **manual**, pinned per target in `Apps/OpenStreamApps.xcodeproj/project.pbxproj`
+  (Release configs of `OpenStream tvOS`, `OpenStream Top Shelf`, `OpenStream visionOS`; iOS/Widgets/Watch
+  get the same pin when they ship). Identity: `iPhone Distribution: Raster Inc` (SHA‑1 `0A77397B…`).
+  Profiles are installed in `~/Library/MobileDevice/Provisioning Profiles/` and named:
+  `OpenStream tvOS App Store`, `OpenStream tvOS TopShelf`, `OpenStream App Store SharePlay 2026-09-10`
+  (iOS + visionOS app), `OpenStream App Store widgets 2026-09-17`, `OpenStream App Store watchkitapp`.
+- **Automatic signing does not work here**: no Xcode account, and `-allowProvisioningUpdates` with the
+  ASC API key fails "Authentication failed: bearer token". Do not retry it. Do not "try Xcode".
+- Build number comes from the command line: `CURRENT_PROJECT_VERSION=<N>`. Version is 1.0.
+- Tracing default is stamped in `Apps/Shared/Info.plist` key `OpenStreamTraceDefault` (true = traced
+  build for Internal + TraceEnabled; absent/false = non‑trace build for Reddit).
+- Groups: Internal `ca5595ab-…` (receives every build automatically), TraceEnabled `64f18c4b-…`,
+  Reddit `7360237c-…`. External groups need beta review: `--submit --confirm`.
+- `asc` is logged in (profile "OpenStream"). Never print key ids, issuer ids or the .p8.
+- One `xcodebuild` at a time. Archives take 5–12 min; run them detached with a done‑marker and poll.
+- The share lies: before archiving, `find Sources Tests Apps -name "*.swift" -size 0` must be empty and
+  every file you edited must be `touch`ed + 16 s old. Release compiles the `#else` of `#if DEBUG` —
+  a symbol only referenced there fails only here.
+
+### 9.1 Per platform (run tvOS, then visionOS, then iOS — sequentially)
+```
+B=~/Developer/openstream-build; N=<build number>; cd "<tree>/Apps"
+# tvOS
+xcodebuild -project OpenStreamApps.xcodeproj -scheme "OpenStream tvOS" -destination "generic/platform=tvOS" \
+  -configuration Release -derivedDataPath $B/DerivedData-deploy-tvos \
+  -archivePath $B/OpenStream-tvOS-b$N.xcarchive archive CURRENT_PROJECT_VERSION=$N > /tmp/archive-tvos.log 2>&1
+grep -E "\*\* ARCHIVE|error:" /tmp/archive-tvos.log | sort -u        # must say ARCHIVE SUCCEEDED, no error:
+xcodebuild -exportArchive -archivePath $B/OpenStream-tvOS-b$N.xcarchive \
+  -exportOptionsPlist $B/ExportOptions-tvos-b11-export.plist -exportPath $B/export-tvos-b$N > /tmp/export-tvos.log 2>&1
+ls $B/export-tvos-b$N/*.ipa                                          # "OpenStream tvOS.ipa"
+# visionOS: scheme "OpenStream visionOS", platform=visionOS, DerivedData-deploy-visionos, ExportOptions-visionos-b11-export.plist
+# iOS:      scheme "OpenStream iOS",      platform=iOS,      DerivedData-deploy-ios,      ExportOptions-ios-b11-export.plist
+```
+Check the archived number before uploading:
+`/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$B/OpenStream-tvOS-b$N.xcarchive/Products/Applications/OpenStream tvOS.app/Info.plist"`.
+
+### 9.2 Upload + groups (only after "ship N")
+```
+asc publish testflight --app 6807530757 --ipa "$B/export-tvos-b$N/OpenStream tvOS.ipa" --platform TV_OS \
+  --group "Internal,TraceEnabled" --submit --confirm --wait --output json      # traced build
+#   non-trace build → --group "Reddit"      visionOS → --platform VISION_OS     iOS → --platform IOS
+asc builds add-groups --build-id <id> --group Reddit                            # add an existing build to a group
+asc publish testflight --app 6807530757 --build-id <id> --group "TraceEnabled,Reddit" --submit --confirm   # submit an existing build
+```
+`--submit` without `--confirm` exits 2 ("--confirm is required"). "Skipped internal group … already receives all builds" is normal.
+
+### 9.3 Verify — never trust a doc, read App Store Connect
+```
+asc builds list --app 6807530757 --output json | python3 -c "import json,sys; d=json.load(sys.stdin); pre={i['id']:i['attributes'].get('platform') for i in d.get('included',[]) if i.get('type')=='preReleaseVersions'}; [print(a['version'], pre.get((r.get('relationships',{}).get('preReleaseVersion',{}).get('data') or {}).get('id'),'?'), a.get('processingState'), r['id']) for r in d['data'] for a in [r['attributes']] if a.get('version')=='$N']"
+asc testflight distribution view --build-id <id> --output json     # internalBuildState / externalBuildState = IN_BETA_TESTING
+```
+Then record in `DELIVERIES.md` (build → id → groups → commit) and FEEDBACK, and tell the owner the ids.
+
+### 9.4 When it fails — what it means, what to do (all seen 2026-09-17)
+| Symptom | Meaning | Do |
+|---|---|---|
+| `Authentication failed: … bearer token` on archive | automatic signing via API key; unsupported here | use the manual pins (9.0); do not retry |
+| `No profiles for 'com.orgista.openstream.widgets' … App Development` | the target is still Automatic | pin that target's Release config (script pattern in §4d) |
+| `requires a provisioning profile` at export | export plist names a profile that is not installed or misnamed | `ls ~/Library/MobileDevice/Provisioning\ Profiles/`, decode with `security cms -D -i` |
+| Widgets codesign: `application-groups` entitlement not in profile | the Widgets profile lacks the App Group | owner ticks the group in the portal → `asc profiles create … --bundle-id 9UBVK6SYGV --certificate SH522LYR9M` → install → retry |
+| `cannot find 'X' in scope` in Release only | a 0‑byte file on the share, or a `#else`-only reference | rewrite the file from the transcript/commit; `git show HEAD:./path \| wc -c` |
+| `input file … was modified during the build` | share mtime lag | sleep 45, rerun |
+| `asc … exit=2` with no output | flag error (usually missing `--confirm`) | rerun in the foreground and read stderr |
+| build not in `asc builds list` after upload | still processing | `--wait`, or poll every 2 min; do not upload again |
+| `Address already in use` in the gate | an app on a booted sim serves the web portal | `xcrun simctl terminate <udid> com.orgista.openstream`, rerun |
+
+### 9.5 macOS (build 13+) — prerequisites before any archive
+No Mac signing assets exist yet: needs a Mac App Distribution + Mac Installer Distribution cert (CSR
+from this Mac's keychain), a MAC_APP_STORE profile for `com.orgista.openstream`, the macOS platform on
+the ASC app record, sandbox entitlements on the `OpenStream macOS` target, and a manual pin like the
+others. Ask the owner before creating certificates; then follow 9.1–9.3 with `-destination
+"generic/platform=macOS"` and a `.pkg` export (`asc publish testflight --pkg … --platform MAC_OS`).
