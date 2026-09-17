@@ -7141,3 +7141,14 @@ streams are skipped and a guide header (`url-tvg`) is kept when one shows up. AI
 once per install on DEBUG/TestFlight builds as a normal catalog source; delete it and it stays gone.
 One caution: that manifest URL carries your personal elfhosted instance id and now ships in the
 binary — fine for testers, but say the word if you'd rather it came from a config the app fetches.
+
+## 2026-09-17 11:25 — build 11 status
+
+tvOS and visionOS build 11 are archived and exported (manual signing pinned per target in the
+project for Release only — no Xcode account on this Mac, and the API-key automatic path fails
+authentication). Upload + Internal/TraceEnabled distribution + beta-review submission runs through
+`asc publish testflight`. iOS 11 needs you for 30 seconds: Developer portal → Identifiers →
+com.orgista.openstream.widgets → App Groups → tick group.com.orgista.openstream. The API can turn
+the capability on but cannot pick the group; once ticked I regenerate the widgets profile and ship
+iOS the same way. One trap to know: a brand-new source file was silently truncated to 0 bytes on
+the share after the gate passed — it's restored and committed, and the handoff now has the check.

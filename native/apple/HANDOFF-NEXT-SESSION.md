@@ -167,6 +167,24 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   by the stable URL `openstream-playlist://local/pasted.m3u` (`AppleLocalPlaylistStore`). The
   IPTV client reads that scheme from disk; `AppleIPTVEndpointPolicy.normalize` passes it through.
 
+- **A source file went to 0 bytes on the share after the gate had passed** (`AppleBuildChannel.swift`,
+  2026-09-17 ~11:00, and the commit captured the empty file). Debug builds never noticed because the only
+  references sit in `#else` of `#if DEBUG`; the Release archive did. Before any archive or commit:
+  `find Sources Tests Apps -name "*.swift" -size 0` must print nothing, and `git show HEAD:./path | wc -c`
+  must not be 0 for a file you created. Rewrite from the transcript if it happens again.
+- **Release archives on this Mac use MANUAL signing pinned in the pbxproj** (tvOS app, Top Shelf,
+  visionOS app; identity "iPhone Distribution", profiles by name — see `ExportOptions-*-b11-export.plist`).
+  Debug stays Automatic. Automatic signing has no Xcode account here and the API-key path
+  (`-allowProvisioningUpdates -authenticationKey…`) fails "Authentication failed: bearer token".
+  Archive with `-derivedDataPath ~/Developer/openstream-build/DerivedData-deploy-<platform>` and
+  `CURRENT_PROJECT_VERSION=<n>`; export with `destination export`; upload with
+  `asc publish testflight --app 6807530757 --ipa <ipa> --platform TV_OS|VISION_OS|IOS --group "Internal,TraceEnabled" --submit`.
+- **iOS build 11 is blocked on one owner step**: the Widgets target needs `group.com.orgista.openstream`
+  in its App Store profile, and the portal is the only place that assigns a group to
+  `com.orgista.openstream.widgets` (capability is already enabled; `asc` cannot assign). After the owner
+  ticks it: `asc profiles create` a new widgets profile (App Store, cert SH522LYR9M), install it, pin
+  iOS app / Widgets / Watch in the pbxproj like tvOS, archive, export, publish.
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
   `asc-signing-setup`, `asc-xcode-build`, `asc-testflight-orchestration`, `asc-build-lifecycle`,
@@ -219,7 +237,10 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 11:00 (newest first)
+## 7. State as of 2026-09-17 11:25 (newest first)
+- Build 11: tvOS and visionOS archived + exported (CFBundleVersion 11) with pinned manual signing;
+  upload to TestFlight Internal + TraceEnabled in progress via `asc publish testflight`. iOS blocked
+  on the Widgets App Group (owner, portal). Commits 86a0b2a, 3055de2 (+ visionOS pin pending).
 - Toggles iOS-green; TestFlight installs trace by default (`AppleBuildChannel`); Add Live TV M3U
   has Playlist Text + Choose File merging into one local playlist/one source row; AIOMetadata
   seeded once on DEBUG/TestFlight. Gate 981 / 94. Ship 11 in progress (three platforms, automatic
