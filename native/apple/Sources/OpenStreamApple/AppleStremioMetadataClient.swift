@@ -181,6 +181,7 @@ public enum AppleStremioEpisodePolicy {
 public struct AppleStremioMetadataClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let loader: Loader
+    private let metadataCache: AppleMetadataDiskCache?
     static let defaultMetadataSource = AppleSource(
         id: UUID(uuidString: "86FE8F74-15D8-4A64-8EE7-B2BE55E22C48") ?? UUID(),
         kind: .stremio,
@@ -191,8 +192,20 @@ public struct AppleStremioMetadataClient: Sendable {
         resources: ["meta"]
     )
 
-    public init(loader: @escaping Loader = AppleStremioPlaybackClient.liveLoader) {
+    public init() {
+        self.loader = AppleStremioPlaybackClient.liveLoader
+        self.metadataCache = .shared
+    }
+
+    /// Injected transports remain independent of process-wide persisted data.
+    public init(loader: @escaping Loader) {
         self.loader = loader
+        self.metadataCache = nil
+    }
+
+    internal init(loader: @escaping Loader, metadataCache: AppleMetadataDiskCache?) {
+        self.loader = loader
+        self.metadataCache = metadataCache
     }
 
     public func details(
@@ -210,50 +223,83 @@ public struct AppleStremioMetadataClient: Sendable {
             throw AppleStremioPlaybackError.invalidSource
         }
         let endpoint = try Self.endpoint(source: source, type: cleanType, mediaID: cleanID)
-        var request = URLRequest(url: endpoint)
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await loader(request)
-        guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
-              let http = response as? HTTPURLResponse,
-              http.url == endpoint,
-              (200 ... 299).contains(http.statusCode),
-              let envelope = try? JSONDecoder().decode(DetailsEnvelope.self, from: data) else {
-            throw AppleStremioPlaybackError.invalidPayload
-        }
-        let value = envelope.meta
-        let responseID = value.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = value.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard responseID == cleanID, !title.isEmpty else {
-            throw AppleStremioPlaybackError.invalidPayload
-        }
-        let genres = (value.genres ?? value.genre ?? [])
-            .compactMap {
-                let clean = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                return clean.isEmpty ? nil : clean
+
+        func decode(data: Data) throws -> AppleTMDBDetails {
+            guard let envelope = try? JSONDecoder().decode(DetailsEnvelope.self, from: data) else {
+                throw AppleStremioPlaybackError.invalidPayload
             }
-            .prefix(12)
-            .map { String($0.prefix(60)) }
-        return AppleTMDBDetails(
-            mediaID: responseID,
-            mediaType: Self.nonEmpty(value.type) ?? cleanType,
-            title: String(title.prefix(200)),
-            releaseInfo: Self.nonEmpty(value.releaseInfo).map { String($0.prefix(100)) },
-            runtimeMinutes: value.runtime?.boundedRuntime,
-            contentRating: Self.nonEmpty(value.contentRating ?? value.certification),
-            formatBadges: value.formatBadges ?? [],
-            genres: genres,
-            cast: Self.names(value.cast, limit: 20),
-            director: Self.names(value.director, limit: 4).first,
-            writers: Self.names(value.writer, limit: 8),
-            imdbRating: value.imdbRating,
-            year: value.year ?? Self.leadingYear(value.releaseInfo),
-            overview: Self.nonEmpty(value.description).map { String($0.prefix(4_000)) },
-            posterURL: Self.safeArtworkURL(value.poster),
-            backdropURL: Self.safeArtworkURL(value.background),
-            logoURL: Self.safeArtworkURL(value.logo)
-        )
+            let value = envelope.meta
+            let responseID = value.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = value.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard responseID == cleanID, !title.isEmpty else {
+                throw AppleStremioPlaybackError.invalidPayload
+            }
+            let genres = (value.genres ?? value.genre ?? [])
+                .compactMap {
+                    let clean = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return clean.isEmpty ? nil : clean
+                }
+                .prefix(12)
+                .map { String($0.prefix(60)) }
+            return AppleTMDBDetails(
+                mediaID: responseID,
+                mediaType: Self.nonEmpty(value.type) ?? cleanType,
+                title: String(title.prefix(200)),
+                releaseInfo: Self.nonEmpty(value.releaseInfo).map { String($0.prefix(100)) },
+                runtimeMinutes: value.runtime?.boundedRuntime,
+                contentRating: Self.nonEmpty(value.contentRating ?? value.certification),
+                formatBadges: value.formatBadges ?? [],
+                genres: genres,
+                cast: Self.names(value.cast, limit: 20),
+                director: Self.names(value.director, limit: 4).first,
+                writers: Self.names(value.writer, limit: 8),
+                imdbRating: value.imdbRating,
+                year: value.year ?? Self.leadingYear(value.releaseInfo),
+                overview: Self.nonEmpty(value.description).map { String($0.prefix(4_000)) },
+                posterURL: Self.safeArtworkURL(value.poster),
+                backdropURL: Self.safeArtworkURL(value.background),
+                logoURL: Self.safeArtworkURL(value.logo)
+            )
+        }
+
+        @Sendable func fetch() async throws -> Data {
+            var request = URLRequest(url: endpoint)
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await loader(request)
+            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+                  let http = response as? HTTPURLResponse,
+                  http.url == endpoint,
+                  (200 ... 299).contains(http.statusCode) else {
+                throw AppleStremioPlaybackError.invalidPayload
+            }
+            return data
+        }
+
+        let cacheSource = endpoint.absoluteString
+        if let cache = metadataCache, let entry = await cache.entry(source: cacheSource, type: cleanType, mediaID: cleanID) {
+            if entry.freshness == .fresh {
+                if let result = try? decode(data: entry.payload) {
+                    return result
+                }
+            } else if entry.freshness == .stale {
+                if let result = try? decode(data: entry.payload) {
+                    Task.detached(priority: .background) { [metadataCache] in
+                        if let newData = try? await fetch(),
+                           (try? decode(data: newData)) != nil {
+                            await metadataCache?.store(newData, source: cacheSource, type: cleanType, mediaID: cleanID)
+                        }
+                    }
+                    return result
+                }
+            }
+        }
+
+        let data = try await fetch()
+        let result = try decode(data: data)
+        await metadataCache?.store(data, source: cacheSource, type: cleanType, mediaID: cleanID)
+        return result
     }
 
     public func episodes(source: AppleSource, mediaID: String) async throws -> [AppleStremioEpisode] {
