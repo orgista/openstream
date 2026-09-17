@@ -396,10 +396,10 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 19:25 (newest first)
+## 7. State as of 2026-09-17 19:50 (newest first)
 - Orchestration ACTIVE (§4e). Worker (agy) landed today: watch-trace throttle (39573de), artwork disk
   cache (75108d6), metadata disk cache for details/episodes/previewAssets (ebd6115, 62988cf), prefetch
-  API + policy (f26ba0e), launch snapshot + 10-min skip, tvOS guide laziness (−71 MB). Running: spec G iOS guide row models.
+  API + policy (f26ba0e), launch snapshot + 10-min skip, tvOS guide laziness (−71 MB), iOS guide row models. Gate 1035 / 107. Nothing running.
   Parked: prefetch view hooks (`specs/artwork-prefetch.md`) until
   Codex releases AppleDiscoverView.swift (open since 16:28; Codex also started
   `design/2026-09-17-iphone-native-ux/`). Gate 1030 / 105.
