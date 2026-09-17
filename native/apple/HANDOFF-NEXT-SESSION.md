@@ -257,7 +257,7 @@ Tests: <file + what they assert> (Swift Testing)
 Gate: swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm" — run before and after; report N/M.
 Build/screenshot: none — the driver does it.
 Forbidden: uploads, commits, git push, sims, signing, secrets, Computer Use, touching files not listed.
-Report: AGENTS.md §7, under 60 lines, then stop.
+Report: AGENTS.md §7, under 60 lines, as your final message — do not write a report file. Then stop.
 ```
 **Model presets:** driver = Fable 5.1 / effort high (pinned for the session — /model, /fast, /effort mid-session cold-reads the whole context); implementation sessions = Opus 5 + /fast / xhigh; subs = Sonnet; agy high (its only other level is low); codex high.
 **Progress check-in:** the 15-minute Desktop heartbeat (no cloud routine, no LaunchAgent). Each firing: 1–3 lines, which rung ran, N/M, what's next.

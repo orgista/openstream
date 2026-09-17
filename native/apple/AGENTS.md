@@ -90,7 +90,7 @@ The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDO
   the last two builds' `.xcarchive`s. Older archives, `export-*` folders and worktrees are deleted by
   the tidy pass (`/openstream-tidy`, run at the end of every heartbeat).
 
-## 7. Report format (return exactly this, under 60 lines)
+## 7. Report format (return exactly this, under 60 lines — as your final message, NEVER as a file in the tree)
 ```
 ## Done
 - <item> — <files> — <one line on how>

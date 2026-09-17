@@ -2,6 +2,12 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 enum AppleRemoteImageContentMode: Equatable {
     case fill
@@ -63,11 +69,13 @@ struct AppleRemoteImage: View {
                         url: url,
                         maximumPixelDimension: min(maximumDimension, 2_560)
                     )
+                    guard !Task.isCancelled else { return }
                     image = loaded
                     onLoad?(loaded)
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard !Task.isCancelled else { return }
                     failed = true
                     onFailure?()
                 }
@@ -141,16 +149,42 @@ struct AppleTrimmedTitleLogo: View {
             .task(id: "\(url.absoluteString)|\(Int(geometry.size.width))x\(Int(geometry.size.height))@\(displayScale)") {
                 guard !Task.isCancelled else { return }
                 do {
+                    if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "logo-trimmed"),
+                       let source = CGImageSourceCreateWithData(cachedData as CFData, nil),
+                       let cachedImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        guard !Task.isCancelled else { return }
+                        image = cachedImage
+                        report(true)
+                        return
+                    }
+
                     let decoded = try await AppleRemoteImageCache.shared.image(
                         url: url,
                         maximumPixelDimension: min(2_560, max(256, Int(max(geometry.size.width, geometry.size.height) * displayScale * 4)))
                     )
                     guard !Task.isCancelled else { return }
                     image = AppleRemoteImageDecoder.trimmedToAlphaBounds(decoded)
+
+                    if let finalImage = image {
+                        #if canImport(AppKit)
+                        let rep = NSBitmapImageRep(cgImage: finalImage)
+                        if let pngData = rep.representation(using: .png, properties: [:]) {
+                            await AppleArtworkDiskCache.shared.store(pngData, for: url, variant: "logo-trimmed")
+                        }
+                        #else
+                        let uiImage = UIImage(cgImage: finalImage)
+                        if let pngData = uiImage.pngData() {
+                            await AppleArtworkDiskCache.shared.store(pngData, for: url, variant: "logo-trimmed")
+                        }
+                        #endif
+                    }
+
+                    guard !Task.isCancelled else { return }
                     report(image != nil)
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard !Task.isCancelled else { return }
                     image = nil
                     report(false)
                 }
@@ -211,9 +245,17 @@ actor AppleRemoteImageCache {
     }
 
     private static func load(url: URL, maximumPixelDimension: Int) async throws -> CGImage {
+        if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "raw") {
+            return try await Task.detached(priority: .utility) {
+                try AppleRemoteImageDecoder.downsample(
+                    data: cachedData,
+                    maximumPixelDimension: maximumPixelDimension
+                )
+            }.value
+        }
+
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await AppleBoundedHTTPDataLoader.load(
             request,
             maximumBytes: 12 * 1_024 * 1_024
@@ -222,6 +264,7 @@ actor AppleRemoteImageCache {
               (200 ... 299).contains(http.statusCode) else {
             throw URLError(.cannotDecodeContentData)
         }
+        await AppleArtworkDiskCache.shared.store(data, for: url, variant: "raw")
         return try await Task.detached(priority: .utility) {
             try AppleRemoteImageDecoder.downsample(
                 data: data,
