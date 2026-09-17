@@ -145,4 +145,110 @@ struct AppleMetadataDiskCacheTests {
         var value = 0
         func increment() { value += 1 }
     }
+
+    private func waitUntil(_ condition: () async -> Bool, timeout: Duration) async throws {
+        let start = ContinuousClock().now
+        while ContinuousClock().now < start + timeout {
+            if await condition() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    @Test("Episodes are returned from cache without network call if fresh")
+    func episodesUsesFreshCache() async throws {
+        let temp = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let cache = AppleMetadataDiskCache(directory: temp)
+        let endpoint = try #require(URL(string: "https://fixture.example/meta/series/tt1234568.json"))
+        let payload = Data(#"{"meta":{"id":"tt1234568","type":"series","videos":[{"id":"tt1234568:1:1","title":"Fresh Episode","season":1,"episode":1}]}}"#.utf8)
+        await cache.store(payload, source: endpoint.absoluteString, type: "episodes", mediaID: "tt1234568")
+        let loadCount = Counter()
+        let client = AppleStremioMetadataClient(loader: { _ in
+            await loadCount.increment()
+            throw URLError(.notConnectedToInternet)
+        }, metadataCache: cache)
+        
+        let result = try await client.episodes(source: try source(), mediaID: "tt1234568")
+        #expect(result.count == 1)
+        #expect(result.first?.title == "Fresh Episode")
+        #expect(await loadCount.value == 0)
+    }
+
+    @Test("Episodes are returned from cache but network is called if stale")
+    func episodesRefreshesStaleCache() async throws {
+        let temp = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let cache = AppleMetadataDiskCache(directory: temp)
+        let endpoint = try #require(URL(string: "https://fixture.example/meta/series/tt1234569.json"))
+        
+        let stalePayload = Data(#"{"meta":{"id":"tt1234569","type":"series","videos":[{"id":"tt1234569:1:1","title":"Stale Episode","season":1,"episode":1}]}}"#.utf8)
+        let name = AppleMetadataDiskCachePolicy.fileName(source: endpoint.absoluteString, type: "episodes", mediaID: "tt1234569")
+        let url = temp.appendingPathComponent(name)
+        let entry = AppleMetadataDiskCache.Entry(storedAt: Date().addingTimeInterval(-48 * 3600), payload: stalePayload)
+        try JSONEncoder().encode(entry).write(to: url)
+        
+        let loadCount = Counter()
+        let client = AppleStremioMetadataClient(loader: { request in
+            await loadCount.increment()
+            let newPayload = Data(#"{"meta":{"id":"tt1234569","type":"series","videos":[{"id":"tt1234569:1:1","title":"New Episode","season":1,"episode":1}]}}"#.utf8)
+            return (newPayload, try #require(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        }, metadataCache: cache)
+        
+        let result = try await client.episodes(source: try source(), mediaID: "tt1234569")
+        #expect(result.count == 1)
+        #expect(result.first?.title == "Stale Episode")
+        
+        try await waitUntil({ await loadCount.value >= 1 }, timeout: .seconds(3))
+        #expect(await loadCount.value == 1)
+    }
+
+    @Test("Preview Assets are returned from cache without network call if fresh")
+    func previewAssetsUsesFreshCache() async throws {
+        let temp = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let cache = AppleMetadataDiskCache(directory: temp)
+        let endpoint = try #require(URL(string: "https://fixture.example/meta/movie/tt123_pa_fresh.json"))
+        let payload = Data(#"{"meta":{"id":"tt123_pa_fresh","type":"movie","logo":"https://fixture.example/logo.jpg","trailers":[{"source":"abcd1234567"}]}}"#.utf8)
+        await cache.store(payload, source: endpoint.absoluteString, type: "preview-assets", mediaID: "tt123_pa_fresh")
+        let loadCount = Counter()
+        let client = AppleStremioMetadataClient(loader: { _ in
+            await loadCount.increment()
+            throw URLError(.notConnectedToInternet)
+        }, metadataCache: cache)
+        
+        let result = await client.previewAssets(sources: [try source()], type: "movie", mediaID: "tt123_pa_fresh")
+        #expect(result?.trailerYouTubeKeys == ["abcd1234567"])
+        #expect(result?.logoURL?.absoluteString == "https://fixture.example/logo.jpg")
+        #expect(await loadCount.value == 0)
+    }
+
+    @Test("Preview Assets are returned from cache but network is called if stale")
+    func previewAssetsRefreshesStaleCache() async throws {
+        let temp = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let cache = AppleMetadataDiskCache(directory: temp)
+        let endpoint = try #require(URL(string: "https://fixture.example/meta/movie/tt123_pa_stale.json"))
+        
+        let stalePayload = Data(#"{"meta":{"id":"tt123_pa_stale","type":"movie","logo":"https://fixture.example/old.jpg","trailers":[]}}"#.utf8)
+        let name = AppleMetadataDiskCachePolicy.fileName(source: endpoint.absoluteString, type: "preview-assets", mediaID: "tt123_pa_stale")
+        let url = temp.appendingPathComponent(name)
+        let entry = AppleMetadataDiskCache.Entry(storedAt: Date().addingTimeInterval(-48 * 3600), payload: stalePayload)
+        try JSONEncoder().encode(entry).write(to: url)
+        
+        let loadCount = Counter()
+        let client = AppleStremioMetadataClient(loader: { request in
+            await loadCount.increment()
+            let newPayload = Data(#"{"meta":{"id":"tt123_pa_stale","type":"movie","logo":"https://fixture.example/new.jpg","trailers":[{"source":"new1234567"}]}}"#.utf8)
+            return (newPayload, try #require(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        }, metadataCache: cache)
+        
+        let result = await client.previewAssets(sources: [try source()], type: "movie", mediaID: "tt123_pa_stale")
+        #expect(result?.logoURL?.absoluteString == "https://fixture.example/old.jpg")
+        #expect(result?.trailerYouTubeKeys == [])
+        
+        try await waitUntil({ await loadCount.value >= 1 }, timeout: .seconds(3))
+        #expect(await loadCount.value == 1)
+    }
 }

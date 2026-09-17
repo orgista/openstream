@@ -224,7 +224,7 @@ public struct AppleStremioMetadataClient: Sendable {
         }
         let endpoint = try Self.endpoint(source: source, type: cleanType, mediaID: cleanID)
 
-        func decode(data: Data) throws -> AppleTMDBDetails {
+        @Sendable func decode(data: Data) throws -> AppleTMDBDetails {
             guard let envelope = try? JSONDecoder().decode(DetailsEnvelope.self, from: data) else {
                 throw AppleStremioPlaybackError.invalidPayload
             }
@@ -277,29 +277,13 @@ public struct AppleStremioMetadataClient: Sendable {
             return data
         }
 
-        let cacheSource = endpoint.absoluteString
-        if let cache = metadataCache, let entry = await cache.entry(source: cacheSource, type: cleanType, mediaID: cleanID) {
-            if entry.freshness == .fresh {
-                if let result = try? decode(data: entry.payload) {
-                    return result
-                }
-            } else if entry.freshness == .stale {
-                if let result = try? decode(data: entry.payload) {
-                    Task.detached(priority: .background) { [metadataCache] in
-                        if let newData = try? await fetch(),
-                           (try? decode(data: newData)) != nil {
-                            await metadataCache?.store(newData, source: cacheSource, type: cleanType, mediaID: cleanID)
-                        }
-                    }
-                    return result
-                }
-            }
-        }
-
-        let data = try await fetch()
-        let result = try decode(data: data)
-        await metadataCache?.store(data, source: cacheSource, type: cleanType, mediaID: cleanID)
-        return result
+        return try await fetchCachedOrNetwork(
+            cacheSource: endpoint.absoluteString,
+            type: cleanType,
+            mediaID: cleanID,
+            decode: decode(data:),
+            fetch: fetch
+        )
     }
 
     public func episodes(source: AppleSource, mediaID: String) async throws -> [AppleStremioEpisode] {
@@ -307,49 +291,60 @@ public struct AppleStremioMetadataClient: Sendable {
             throw AppleStremioPlaybackError.invalidSource
         }
         let endpoint = try Self.endpoint(source: source, mediaID: mediaID)
-        var request = URLRequest(url: endpoint)
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await loader(request)
-        guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes else {
-            throw AppleStremioPlaybackError.responseTooLarge
-        }
-        guard let http = response as? HTTPURLResponse else { throw AppleStremioPlaybackError.nonHTTPResponse }
-        guard http.url?.scheme?.lowercased() == "https" else {
-            throw AppleStremioPlaybackError.insecureRedirect
-        }
-        guard (200 ... 299).contains(http.statusCode) else {
-            throw AppleStremioPlaybackError.requestFailed(http.statusCode)
-        }
-        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
-            throw AppleStremioPlaybackError.invalidPayload
+        @Sendable func decode(data: Data) throws -> [AppleStremioEpisode] {
+            guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
+                throw AppleStremioPlaybackError.invalidPayload
+            }
+            guard let seriesID = Self.seriesRootID(mediaID) else {
+                throw AppleStremioPlaybackError.invalidMediaIdentity
+            }
+            var seen = Set<String>()
+            return envelope.meta.videos.compactMap { value in
+                guard let identity = Self.episodeIdentity(value.id, expectedSeriesID: seriesID),
+                      value.season?.boundedEpisodeNumber.map({ $0 == identity.season }) ?? true,
+                      value.episode?.boundedEpisodeNumber.map({ $0 == identity.episode }) ?? true,
+                      !value.seasonWasPresent || value.season != nil,
+                      !value.episodeWasPresent || value.episode != nil,
+                      seen.insert(identity.id).inserted else { return nil }
+                return AppleStremioEpisode(
+                    id: identity.id,
+                    title: value.title ?? value.name ?? "",
+                    season: identity.season,
+                    episode: identity.episode,
+                    releaseInfo: value.releaseInfo ?? value.released,
+                    runtimeMinutes: value.runtime?.boundedRuntime,
+                    overview: value.description,
+                    thumbnailURL: value.thumbnail.flatMap(URL.init(string:))
+                )
+            }.prefix(1_000).map { $0 }
         }
 
-        guard let seriesID = Self.seriesRootID(mediaID) else {
-            throw AppleStremioPlaybackError.invalidMediaIdentity
+        @Sendable func fetch() async throws -> Data {
+            var request = URLRequest(url: endpoint)
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await loader(request)
+            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes else {
+                throw AppleStremioPlaybackError.responseTooLarge
+            }
+            guard let http = response as? HTTPURLResponse else { throw AppleStremioPlaybackError.nonHTTPResponse }
+            guard http.url?.scheme?.lowercased() == "https" else {
+                throw AppleStremioPlaybackError.insecureRedirect
+            }
+            guard (200 ... 299).contains(http.statusCode) else {
+                throw AppleStremioPlaybackError.requestFailed(http.statusCode)
+            }
+            return data
         }
-        var seen = Set<String>()
-        return envelope.meta.videos.compactMap { value in
-            guard let identity = Self.episodeIdentity(value.id, expectedSeriesID: seriesID),
-                  value.season?.boundedEpisodeNumber.map({ $0 == identity.season }) ?? true,
-                  value.episode?.boundedEpisodeNumber.map({ $0 == identity.episode }) ?? true,
-                  !value.seasonWasPresent || value.season != nil,
-                  !value.episodeWasPresent || value.episode != nil,
-                  seen.insert(identity.id).inserted else { return nil }
-            return AppleStremioEpisode(
-                id: identity.id,
-                title: value.title ?? value.name ?? "",
-                season: identity.season,
-                episode: identity.episode,
-                releaseInfo: value.releaseInfo ?? value.released,
-                runtimeMinutes: value.runtime?.boundedRuntime,
-                overview: value.description,
-                thumbnailURL: value.thumbnail.flatMap(URL.init(string:))
-            )
-        }
-        .prefix(1_000)
-        .map { $0 }
+
+        return try await fetchCachedOrNetwork(
+            cacheSource: endpoint.absoluteString,
+            type: "episodes",
+            mediaID: mediaID,
+            decode: decode(data:),
+            fetch: fetch
+        )
     }
 
     /// Catalog results and metadata are often supplied by different add-ons.
@@ -473,6 +468,37 @@ public struct AppleStremioMetadataClient: Sendable {
         return nil
     }
 
+    private func fetchCachedOrNetwork<T>(
+        cacheSource: String,
+        type: String,
+        mediaID: String,
+        decode: @escaping @Sendable (Data) throws -> T,
+        fetch: @escaping @Sendable () async throws -> Data
+    ) async throws -> T {
+        if let cache = metadataCache, let entry = await cache.entry(source: cacheSource, type: type, mediaID: mediaID) {
+            if entry.freshness == .fresh {
+                if let result = try? decode(entry.payload) {
+                    return result
+                }
+            } else if entry.freshness == .stale {
+                if let result = try? decode(entry.payload) {
+                    Task.detached(priority: .background) { [metadataCache] in
+                        if let newData = try? await fetch(),
+                           (try? decode(newData)) != nil {
+                            await metadataCache?.store(newData, source: cacheSource, type: type, mediaID: mediaID)
+                        }
+                    }
+                    return result
+                }
+            }
+        }
+
+        let data = try await fetch()
+        let result = try decode(data)
+        await metadataCache?.store(data, source: cacheSource, type: type, mediaID: mediaID)
+        return result
+    }
+
     public static func canonicalMediaID(_ id: String) -> String? {
         let parts = id.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: ":", omittingEmptySubsequences: false)
@@ -554,25 +580,41 @@ public struct AppleStremioMetadataClient: Sendable {
         mediaID: String
     ) async throws -> AppleStremioPreviewAssets {
         let endpoint = try Self.endpoint(source: source, type: type, mediaID: mediaID)
-        var request = URLRequest(url: endpoint)
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await loader(request)
-        guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
-              let http = response as? HTTPURLResponse,
-              http.url?.scheme?.lowercased() == "https",
-              (200 ... 299).contains(http.statusCode),
-              let envelope = try? JSONDecoder().decode(PreviewEnvelope.self, from: data) else {
-            throw AppleStremioPlaybackError.invalidPayload
-        }
-        let keys = envelope.meta.trailers.compactMap(\.source)
-            .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
-            + envelope.meta.trailerStreams.compactMap(\.ytID)
+        @Sendable func decode(data: Data) throws -> AppleStremioPreviewAssets {
+            guard let envelope = try? JSONDecoder().decode(PreviewEnvelope.self, from: data) else {
+                throw AppleStremioPlaybackError.invalidPayload
+            }
+            let keys = envelope.meta.trailers.compactMap(\.source)
                 .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
-        return AppleStremioPreviewAssets(
-            trailerYouTubeKeys: keys,
-            logoURL: Self.safeArtworkURL(envelope.meta.logo)
+                + envelope.meta.trailerStreams.compactMap(\.ytID)
+                    .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
+            return AppleStremioPreviewAssets(
+                trailerYouTubeKeys: keys,
+                logoURL: Self.safeArtworkURL(envelope.meta.logo)
+            )
+        }
+
+        @Sendable func fetch() async throws -> Data {
+            var request = URLRequest(url: endpoint)
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await loader(request)
+            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+                  let http = response as? HTTPURLResponse,
+                  http.url?.scheme?.lowercased() == "https",
+                  (200 ... 299).contains(http.statusCode) else {
+                throw AppleStremioPlaybackError.invalidPayload
+            }
+            return data
+        }
+
+        return try await fetchCachedOrNetwork(
+            cacheSource: endpoint.absoluteString,
+            type: "preview-assets",
+            mediaID: mediaID,
+            decode: decode(data:),
+            fetch: fetch
         )
     }
 
