@@ -329,7 +329,22 @@ public struct OpenStreamRootView: View {
         }
         #endif
         .task(id: sourceAvailabilityIdentity) {
-            await AppleLocalLibraryStore.shared.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settingsStore)
+            await mediaIndex.load()
+            let activeSources = sourceStore.sources.filter { $0.isEnabled && ($0.kind == .library || $0.kind == .nas) }
+            
+            let published = await AppleLocalLibraryStore.shared.publishPersistedIndex(activeSources: activeSources)
+            
+            let delay = AppleLaunchWorkPolicy.scanDelay(hasPersistedIndex: published)
+            await Task.yield()
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            
+            let sourceDigest = ApplePlaybackIdentity.digest(for: activeSources.map(\.id.uuidString).sorted().joined(separator: ","))
+            if AppleLaunchWorkPolicy.shouldRescan(published: published, sourceDigest: sourceDigest, now: Date()) {
+                let task = Task.detached(priority: AppleLaunchWorkPolicy.backgroundPriority) {
+                    await AppleLocalLibraryStore.shared.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settingsStore)
+                }
+                await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+            }
         }
         .onChange(of: settingsStore.liveTVEnabled) { _, enabled in
             if !enabled { sharePlay.leave() }

@@ -14,6 +14,63 @@ final class AppleLocalLibraryStore {
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
     private var offlineIDs: [String: String] = [:]
+    private(set) var lastScan: Date?
+    
+    struct AppleLibraryGroupSnapshot: Codable {
+        let id: String
+        let title: String
+        let year: Int?
+        let kind: AppleLibraryTitle.Kind
+        struct Item: Codable {
+            let id: String
+            let sourceID: UUID
+            let name: String
+            let url: URL
+            let relativePath: String
+            let sizeBytes: Int64
+            let addedAt: Date
+        }
+        let items: [Item]
+    }
+
+    func publishPersistedIndex(activeSources: [AppleSource]) async -> Bool {
+        let activeSourceIDs = Set(activeSources.map(\.id))
+        
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("OpenStream")
+        let snapshotURL = caches.appendingPathComponent("LibraryGroups-v1.json")
+        
+        guard let data = try? Data(contentsOf: snapshotURL),
+              let snapshots = try? JSONDecoder().decode([AppleLibraryGroupSnapshot].self, from: data) else {
+            appleTrace("library persisted index unusable: no snapshot found")
+            return false
+        }
+        
+        var realGroups: [AppleLibrarySeries] = []
+        var publishedCount = 0
+        
+        for snapshot in snapshots {
+            let activeItems = snapshot.items.filter { activeSourceIDs.contains($0.sourceID) }
+            guard !activeItems.isEmpty else { continue }
+            
+            let parsed = AppleLibraryTitle(title: snapshot.title, year: snapshot.year, season: nil, episode: nil, kind: snapshot.kind)
+            let items = activeItems.map { AppleLibraryItem(sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
+            
+            let group = AppleLibrarySeries(id: snapshot.id, parsed: parsed, items: items)
+            realGroups.append(group)
+            publishedCount += 1
+        }
+        
+        guard publishedCount > 0 else {
+            appleTrace("library persisted index unusable: empty after filtering")
+            return false
+        }
+        
+        self.sources = activeSources
+        self.groups = realGroups
+        contentDidChange()
+        appleTrace("library published from persisted index: \(publishedCount) titles")
+        return true
+    }
     /// Bumped whenever `groups` or `metadata` changes, so `sortedCache` knows
     /// when its answer is stale. `@Observable` forbids property observers, so
     /// every mutation site calls `contentDidChange()` by hand.
@@ -145,7 +202,8 @@ final class AppleLocalLibraryStore {
         appleTrace("library scans done, \(files.count) files")
         let downloads = await AppleOfflineMediaStore().allRecords()
         appleTrace("library downloads read: \(downloads.count)")
-        offlineIDs = [:]
+        var newOfflineIDs: [String: String] = [:]
+        var newMetadata: [String: AppleCatalogItem] = [:]
         if !downloads.isEmpty {
             sources.append(AppleSource(id: Self.downloadsID, kind: .library, name: "Downloads", url: downloads[0].localURL.deletingLastPathComponent()))
             for record in downloads {
@@ -155,17 +213,18 @@ final class AppleLocalLibraryStore {
                 let file = AppleLibraryItem(sourceID: Self.downloadsID, name: filename,
                     url: record.localURL, relativePath: record.localURL.lastPathComponent, sizeBytes: 0, addedAt: record.storedAt)
                 files.append(file)
-                offlineIDs[file.id] = record.mediaID
+                newOfflineIDs[file.id] = record.mediaID
                 // Download record ids are index identities, not necessarily IMDb ids.
                 let group = AppleLibrarySeries.groups([file])[0]
-                metadata[group.id] = AppleCatalogItem(mediaID: indexed?.canonicalID ?? "local-" + ApplePlaybackIdentity.digest(for: record.mediaID),
+                newMetadata[group.id] = AppleCatalogItem(mediaID: indexed?.canonicalID ?? "local-" + ApplePlaybackIdentity.digest(for: record.mediaID),
                     type: group.parsed.kind == .show ? "series" : "movie", name: indexed?.title ?? record.title ?? group.parsed.title,
                     posterURL: record.artworkURL, summary: indexed?.summary, releaseInfo: (indexed?.year ?? group.parsed.year).map(String.init))
-                contentDidChange()
             }
         }
         let snapshot = files
         groups = await Task.detached { AppleLibrarySeries.groups(snapshot) }.value
+        offlineIDs = newOfflineIDs
+        metadata.merge(newMetadata) { current, _ in current }
         contentDidChange()
         appleTrace("library grouped: \(groups.count) titles")
         // Everything the shelves need is in `groups` now, so the tab can draw.
@@ -229,6 +288,28 @@ final class AppleLocalLibraryStore {
             await resolve(group, sourceStore: sourceStore, settings: settings)
         }
         appleTrace("library eager metadata resolved")
+        lastScan = Date()
+        let sourceDigest = ApplePlaybackIdentity.digest(for: sources.map(\.id.uuidString).sorted().joined(separator: ","))
+        
+        let snapshots = groups.map { group in
+            AppleLibraryGroupSnapshot(
+                id: group.id,
+                title: group.parsed.title,
+                year: group.parsed.year,
+                kind: group.parsed.kind,
+                items: group.items.map { AppleLibraryGroupSnapshot.Item(id: $0.id, sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
+            )
+        }
+        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let dir = caches.appendingPathComponent("OpenStream")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+            let url = dir.appendingPathComponent("LibraryGroups-v1.json")
+            if let data = try? JSONEncoder().encode(snapshots) {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+        
+        AppleLaunchWorkPolicy.recordScan(sourceDigest: sourceDigest, date: lastScan ?? Date())
     }
     func localFiles(for item: AppleCatalogItem, group: AppleLibrarySeries? = nil, episode: AppleStremioEpisode? = nil) -> [AppleLibraryItem] {
         let matches = matchingGroups(item)
