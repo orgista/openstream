@@ -402,29 +402,34 @@ struct AppleLiveTVView: View {
     }
 
     private func play(_ channel: AppleIPTVChannel) {
-        // Extension-less URLs get one 32 KB look before the first play so HLS
-        // goes to AVPlayer and raw TS to the engine; the verdict is kept for
-        // the session. Anything with a telling extension plays at once.
-        guard AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
-            startChannel(channel, shareSelection: true)
+        startChannel(channel, shareSelection: true)
+    }
+
+    @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
+    private let liveStreamProbe = AppleIPTVStreamProbe()
+
+    /// Every way a channel starts funnels through here. An extension-less URL
+    /// gets one 32 KB look first so HLS goes to AVPlayer and raw TS to the
+    /// engine (`AppleLiveStreamRoutePolicy`); the verdict is kept for the
+    /// session. Anything with a telling extension starts at once.
+    private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
+        guard channel.probedMediaKind == nil, AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
+            startChannelNow(channel, shareSelection: shareSelection, present: present)
             return
         }
         if let known = liveProbedKinds[channel.id] {
-            startChannel(channel.withProbedMediaKind(known), shareSelection: true)
+            startChannelNow(channel.withProbedMediaKind(known), shareSelection: shareSelection, present: present)
             return
         }
         Task { @MainActor in
             let kind = (try? await liveStreamProbe.validate(channel: channel).mediaKind) ?? .other
             liveProbedKinds[channel.id] = kind
             appleTrace("live probe \(channel.name): \(kind.rawValue)")
-            startChannel(channel.withProbedMediaKind(kind), shareSelection: true)
+            startChannelNow(channel.withProbedMediaKind(kind), shareSelection: shareSelection, present: present)
         }
     }
 
-    @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
-    private let liveStreamProbe = AppleIPTVStreamProbe()
-
-    private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
+    private func startChannelNow(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
         if shareSelection { sharePlay.selected(channel) }
         #if os(tvOS)
         if present { ensureTVEngine(for: channel.playbackRequest()) }

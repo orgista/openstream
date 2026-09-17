@@ -1207,6 +1207,7 @@ private struct AppleAddLiveTVSourceView: View {
         }
         .buttonStyle(PrimaryPillButtonStyle())
         .disabled(!canSubmit || isWorking)
+        .accessibilityIdentifier("sources.live.save")
 
         Button {
             connectionAction = .test(UUID())

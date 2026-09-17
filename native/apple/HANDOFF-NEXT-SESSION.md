@@ -185,6 +185,27 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   ticks it: `asc profiles create` a new widgets profile (App Store, cert SH522LYR9M), install it, pin
   iOS app / Widgets / Watch in the pbxproj like tvOS, archive, export, publish.
 
+### 4d. Build 11/12 (iOS) and 13 (all + macOS) — how
+- Worktrees on local disk (no SMB lies): `~/Developer/openstream-build/wt-b11` = commit 3055de2
+  (build 11 code, tracing off), `wt-b12` = bf6988e (build 12 code, tracing on by TestFlight receipt).
+  Both have iOS/Widgets/Watch Release configs pinned to manual signing (uncommitted, build-only).
+  Export options: `ExportOptions-ios-b11-export.plist` (profiles by name). Archive from
+  `<worktree>/native/apple/Apps` with `-scheme "OpenStream iOS" -destination generic/platform=iOS
+  -derivedDataPath ~/Developer/openstream-build/DerivedData-archive-ios CURRENT_PROJECT_VERSION=11|12`.
+- Blocker for iOS: the Widgets profile needs `group.com.orgista.openstream`. After the owner ticks it
+  in the portal (Identifiers → com.orgista.openstream.widgets → App Groups), regenerate:
+  `asc profiles create --name "OpenStream App Store widgets 2026-09-17" --type IOS_APP_STORE
+  --bundle-id 9UBVK6SYGV --certificate SH522LYR9M`, install to
+  `~/Library/MobileDevice/Provisioning Profiles/`, verify `application-groups` is in it, then archive.
+- iOS 11 → groups Reddit + Internal + TraceEnabled (matches tvOS/visionOS 11); iOS 12 → Internal +
+  TraceEnabled (matches 12). Both are owner-authorized on 2026-09-17 ("ship 11 & 12 for iOS").
+- **macOS for 13**: the account has NO Mac signing assets (certs: only Apple Development +
+  iOS Distribution; no Mac profiles; no local Mac identities). Needed: an "Apple Distribution"
+  (DISTRIBUTION) or MAC_APP_DISTRIBUTION cert + MAC_INSTALLER_DISTRIBUTION cert (CSR from this
+  Mac's keychain), a MAC_APP_STORE profile for com.orgista.openstream, sandbox entitlements on the
+  "OpenStream macOS" target, and the macOS platform on the App Store Connect app record. Do the
+  prep, then ask before creating certificates.
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
   `asc-signing-setup`, `asc-xcode-build`, `asc-testflight-orchestration`, `asc-build-lifecycle`,
@@ -202,6 +223,12 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   pinning) and the App Group tick for the widgets/watchkitapp bundle ids.
 
 ## 5. Owner rules — do not relitigate, do not ask again
+- **SHIPPING (owner, 2026-09-17, after I pushed 12 unasked): nothing goes to TestFlight without an
+  explicit "ship N" for that exact build number; all platforms go up on the same build; when there
+  are changes, ASK "I made some changes — should I push them?" and wait.** Adding an existing build
+  to another group is also a push. Current plan: iOS 11 and iOS 12 are authorized (to catch iOS up);
+  13 waits for go/no-go on ALL platforms, and 13 adds **macOS native**.
+
 - **Tab bar is the system one, per OS (owner 2026-09-17)**: iOS 26 floating glass bar, iOS 18 the
   classic bar. No custom tab-bar styling, no compatibility opt-out. (This supersedes "no Liquid
   Glass" for the tab bar only; everything else keeps the stock-but-not-glass rule.)

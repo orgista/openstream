@@ -396,16 +396,26 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("UITest Playlist")
         let url = app.textFields["Playlist URL"].firstMatch
         XCTAssertTrue(url.waitForExistence(timeout: 10)); url.tap(); url.typeText(playlist)
-        let save = app.buttons["sources.live.save"].firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        // Dismiss the keyboard so the buttons section is on screen, then find
+        // Save by identifier or, failing that, by its label.
+        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        var save = app.buttons["sources.live.save"].firstMatch
+        if !save.waitForExistence(timeout: 5) { save = app.buttons["Save"].firstMatch }
+        XCTAssertTrue(save.waitForExistence(timeout: 10), "no Save button on Add Live TV"); save.tap()
         // Save validates the playlist and probes a stream first (up to ~30 s).
         let live = app.tabBars.buttons["Live"].firstMatch
         XCTAssertTrue(live.waitForExistence(timeout: 60), "Live tab not reachable after saving")
         Thread.sleep(forTimeInterval: 2.0)
         attach("m3u-saved")
         live.tap()
+        // "All" is the curated provider lineup; a playlist's channels are
+        // reachable through Search (and the Everything package), so search.
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 30), "no Live search field")
+        search.tap(); search.typeText("TMC")
         let channel = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "TMC")).firstMatch
-        XCTAssertTrue(channel.waitForExistence(timeout: 60), "TMC not listed in Live")
+        if !channel.waitForExistence(timeout: 30) { attach("m3u-search-no-tmc") }
+        XCTAssertTrue(channel.exists, "TMC not found through Live search")
         channel.tap()
         Thread.sleep(forTimeInterval: 15.0)
         attach("m3u-tmc-after-15s")
@@ -414,26 +424,37 @@ final class AppleiOSUITests: XCTestCase {
         if failed { attach("m3u-playback-failed") }
         XCTAssertFalse(failed, "Playback Failed alert: \(alert.staticTexts.allElementsBoundByIndex.map(\.label))")
 
-        // Leave the persistent simulator as it was: remove the source.
-        app.tabBars.buttons["Settings"].firstMatch.tap()
+        removeUITestPlaylistSource()
+    }
+
+    /// Cleanup on its own so a failed run never leaves the playlist behind on
+    /// the persistent simulator: Settings → Sources → "UITest Playlist" →
+    /// Delete Source → Delete.
+    func testZRemoveUITestPlaylistSource() {
+        launch(screen: "settings")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        removeUITestPlaylistSource()
+    }
+
+    private func removeUITestPlaylistSource() {
         let sources = app.buttons["Sources"].firstMatch
-        if sources.waitForExistence(timeout: 10) { sources.tap() }
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch
-        if row.waitForExistence(timeout: 10) {
-            row.tap()
-            for label in ["Remove Source", "Remove", "Delete Source", "Delete"] {
-                let b = app.buttons[label].firstMatch
-                if b.waitForExistence(timeout: 3) { b.tap(); break }
-            }
-            for label in ["Remove", "Delete"] {
-                let confirm = app.alerts.buttons[label].firstMatch
-                if confirm.waitForExistence(timeout: 3) { confirm.tap(); break }
-                let sheet = app.sheets.buttons[label].firstMatch
-                if sheet.waitForExistence(timeout: 2) { sheet.tap(); break }
-            }
-            Thread.sleep(forTimeInterval: 1.0)
-            attach("m3u-source-removed")
+        if !sources.waitForExistence(timeout: 10) {
+            app.tabBars.buttons["Settings"].firstMatch.tap()
+            _ = sources.waitForExistence(timeout: 10)
         }
+        sources.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch
+        guard row.waitForExistence(timeout: 10) else { attach("no-uitest-playlist-source"); return }
+        row.tap()
+        let delete = app.buttons["Delete Source"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 10), "no Delete Source on the source page")
+        delete.tap()
+        let confirm = app.alerts.buttons["Delete"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "no Delete confirmation")
+        confirm.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch.exists, "source still listed")
+        attach("m3u-source-removed")
     }
 
     /// Owner C8: landscape. The rule is that the phone hides the tab bar in
