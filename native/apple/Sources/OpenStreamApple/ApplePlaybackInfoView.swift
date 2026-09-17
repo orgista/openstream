@@ -3,10 +3,36 @@ import SwiftUI
 
 @MainActor
 struct ApplePlaybackInfoView: View {
+    let settings: AppleSettingsStore
+    var title: String? = nil
+    var sourceName: String? = nil
     private let report = AppleCapabilityProbe.current()
+
+    private var engineKindDisplayName: String {
+        if settings.engineFellBackToNative {
+            return "Native (OpenStream Engine failed to start)"
+        }
+        return settings.playbackEngine.displayName
+    }
+    private var routeDisplayName: String { ApplePlaybackPresentationRoute.none.displayName }
 
     var body: some View {
         Form {
+            if let title, !title.isEmpty {
+                Section("Title") {
+                    Text(title)
+                    if let sourceName, !sourceName.isEmpty {
+                        Text("via \(sourceName)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section("Playback Engine") {
+                LabeledContent("Engine", value: engineKindDisplayName)
+                LabeledContent("Route", value: routeDisplayName)
+            }
+
             Section("Device") {
                 LabeledContent("Platform", value: report.platform)
                 LabeledContent("HDR Playback", value: report.hdrEligible ? "Eligible" : "Unavailable")
@@ -21,7 +47,7 @@ struct ApplePlaybackInfoView: View {
                 }
             }
 
-            #if os(iOS) || os(tvOS)
+            #if os(iOS) || os(tvOS) || os(visionOS)
             Section("Audio") {
                 LabeledContent("Output", value: audioOutput)
                 LabeledContent("AirPlay", value: isUsingAirPlay ? "Active" : "Available")
@@ -42,10 +68,10 @@ struct ApplePlaybackInfoView: View {
                 }
             }
         }
-        .navigationTitle("Playback Info")
+        .appleSettingsPage("Playback Info")
     }
 
-    #if os(iOS) || os(tvOS)
+    #if os(iOS) || os(tvOS) || os(visionOS)
     private var outputs: [AVAudioSessionPortDescription] {
         AVAudioSession.sharedInstance().currentRoute.outputs
     }
@@ -95,6 +121,26 @@ private extension OpenStreamSupport {
         case .supported: "Supported"
         case .runtimeCheck: "Checked Per Title"
         case .unsupported: "Unsupported"
+        }
+    }
+}
+
+private extension ApplePlaybackEngineKind {
+    var displayName: String {
+        switch self {
+        case .openStream: "OpenStream Engine"
+        case .native: "Native (AVPlayer)"
+        }
+    }
+}
+
+private extension ApplePlaybackPresentationRoute {
+    var displayName: String {
+        switch self {
+        case .none: "None"
+        case .avPlayer: "AVPlayer"
+        case .surface: "Surface"
+        case .audioOnly: "Audio Only"
         }
     }
 }

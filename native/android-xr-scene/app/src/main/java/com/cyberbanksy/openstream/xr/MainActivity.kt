@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
-            setBackgroundColor(Color.rgb(5, 6, 8))
+            setBackgroundColor(Color.rgb(6, 6, 6))
             addView(
                 status,
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),

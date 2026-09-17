@@ -1,0 +1,2 @@
+PASS  AetherEngine LICENSE contains App Store exception
+PASS  42 FFmpeg binary(ies) inspected, no forbidden flags

@@ -91,6 +91,37 @@ public actor ApplePlaybackPreparer {
         self.gatewayClient = gatewayClient
     }
 
+    public func prepareLibraryMedia(
+        sourceURL: URL,
+        preferredEngine: ApplePlaybackEngineKind,
+        gatewayRequest: AppleGatewayTranscodeRequest? = nil
+    ) async throws -> ApplePreparedPlayback {
+        try Task.checkCancellation()
+        // The OpenStream engine inspects and demuxes files itself. AVAsset
+        // inspection would reject formats such as Matroska before it can run.
+        if preferredEngine == .openStream {
+            return ApplePreparedPlayback(route: .direct(sourceURL), url: sourceURL)
+        }
+        let inspection: AppleAssetInspection
+        do {
+            inspection = try await AppleAssetInspector.inspect(url: sourceURL)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard gatewayRequest != nil else { throw error }
+            inspection = AppleAssetInspection(
+                formats: [], playable: false, readable: false, exportable: false, protectedContent: false,
+                container: .init(fileExtension: sourceURL.pathExtension, duration: nil, metadataFormats: [], metadata: [])
+            )
+        }
+        return try await prepare(
+            sourceURL: sourceURL,
+            decision: AppleStremioPlaybackResolver.decision(for: inspection),
+            inspectedAsset: inspection,
+            gatewayRequest: gatewayRequest
+        )
+    }
+
     public func prepare(
         sourceURL: URL,
         decision: OpenStreamPlaybackDecision,

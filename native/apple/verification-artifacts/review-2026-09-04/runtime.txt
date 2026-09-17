@@ -1,0 +1,12 @@
+Final source identity: 11b350efe319abccdf4904b4d16d5522bbe46c99e0d13ab6da88c918edfe071c
+Final signed Simulator iOS Debug installed; iPhone cold launch verified at 2026-09-04 23:11 UTC.
+PASS: original Imports source and media IDs restored after sandbox relocation and retained across cold launch.
+PASS: original Stress 5200 source restored; protected source reference persists and Live loads after cold launch.
+PASS: native Share sheet on iPhone and Share popover on iPad.
+PASS: largest Dynamic Type Guide wraps channel/programme titles; scrolling and programme selection into moving video work.
+PASS: system picker grants Imports folder; selected folder's MP4 plays in native AVKit.
+PASS: Continue Watching opens its matching title detail.
+PASS: iPad portrait first run, public-source addition and persistence, Discover, live playback, expanded Guide scrolling, and Share.
+Earlier review sequences: 5200-channel stress lineup, XMLTV selection, Direct URL HLS, Library MP4, download completion, authenticated byte-verified upload, source/settings forms, series episodes, cold title link, repeated media/search links, and episode deep-link playback.
+BLOCKED/UNVERIFIED: GUH physical/private-service acceptance, hardware audio/HDR/PiP/AirPlay/VoiceOver, iPad landscape/split view, and tvOS remote/focus acceptance.
+No AXe installation needed; existing executable became available again. Mac remains locked.

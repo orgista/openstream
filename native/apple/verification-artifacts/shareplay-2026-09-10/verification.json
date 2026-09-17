@@ -1,0 +1,97 @@
+{
+  "status": "Delivered to Anthony in TestFlight; physical/two-participant acceptance remains open",
+  "sourceFileCount": 221,
+  "sourceManifestSHA256": "b42055d7cf77f55329e4f6c2a7f13ff11b58f95e4489fc175470d3790671106e",
+  "regularTestsExecuted": 381,
+  "gatedMediaTestsExecuted": 18,
+  "totalTestsExecuted": 399,
+  "sharePlayFocusedTests": 15,
+  "earlierPlatformMatrix": {
+    "sourceManifestSHA256": "2c28f91800e980b717a293bbde044734b9aa9e6387a40bae9c55896a7ff5afcc",
+    "builds": [
+      {
+        "platform": "iOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "tvOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "visionOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "macOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "iOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "tvOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "visionOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "macOS",
+        "configuration": "Release",
+        "passed": true
+      }
+    ],
+    "laterChange": "Pause the old custom-rendered channel when its SharePlay binding is invalidated. Added regression and hardened asynchronous tests. Final regular and media tests passed afterward."
+  },
+  "licenseBinariesPassed": 44,
+  "simulator": {
+    "livePlayback": "PASS",
+    "sharePlayButton": "PASS",
+    "outsideFaceTimeExplanation": "PASS",
+    "noCallOrInvitationSent": true,
+    "finalSurfacePauseBuild": "PASS",
+    "finalSurfacePauseProcessID": 85800
+  },
+  "testHarnessCorrections": [
+    "Failure-event test now awaits the observable failed phase within two seconds.",
+    "Progress-throttle test measures intervals during a burst instead of assuming a short sleep finishes inside the throttle window."
+  ],
+  "acceptanceNotRun": [
+    "Actual two-participant GroupSession",
+    "Different-provider live timeline alignment",
+    "Physical iOS 18.7.8 crash confirmation",
+    "Owner private SMB authentication and playback",
+    "Real AirPlay receiver"
+  ],
+  "delivery": {
+    "version": "1.0",
+    "build": "8",
+    "buildID": "bb07be0f-bee2-43a9-9095-1210c88e3799",
+    "uploaded": true,
+    "processingState": "VALID",
+    "internalBuildState": "IN_BETA_TESTING",
+    "availableToAnthony": true,
+    "testNotesVerified": true,
+    "automaticExport": "Failed cloud-signing permission; manual export using existing local distribution certificate succeeded",
+    "distributionGroupActivities": true,
+    "distributionProfileUUID": "75afc0e9-11e3-4236-b7e4-95c4b8d7bc79"
+  },
+  "finalArchive": {
+    "version": "1.0",
+    "build": "8",
+    "strictDeepSignature": "PASS",
+    "appAndDSYMUUID": "CF0FE76B-C3FB-3ED2-AA41-996BC8B19B29",
+    "appGroupActivities": true,
+    "profileGroupActivities": true,
+    "archive": "/Users/macstudio/Library/Caches/openstream-feedback-20260910/shareplay-build-8-final/OpenStream-iOS-8.xcarchive"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "app": "OpenStream by Orgista",
+  "appId": "6807530757",
+  "bundleId": "com.orgista.openstream",
+  "platform": "IOS",
+  "marketingVersion": "1.0",
+  "buildNumber": "6",
+  "buildId": "8d5db918-00f8-4eaf-8ecc-bcc275f08902",
+  "uploadedDate": "2026-09-04T19:14:12-07:00",
+  "processingState": "VALID",
+  "internalBuildState": "IN_BETA_TESTING",
+  "testerGroup": "Internal",
+  "anthonyHasAccess": true,
+  "installationOfThisBuildVerified": false,
+  "sourceIdentity": "11b350efe319abccdf4904b4d16d5522bbe46c99e0d13ab6da88c918edfe071c",
+  "frameworkSymbolUploadWarnings": 9
+}

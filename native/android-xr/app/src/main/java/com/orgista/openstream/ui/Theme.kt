@@ -9,10 +9,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * Matches OpenPanel's design system so both launcher and media UI feel coherent:
- * a neutral near-black canvas (#040404), neutral near-white text (#fafafa),
- * and the OpenPanel brand blue as the single accent. System fonts, like
- * OpenPanel. Status colours (green/amber/red) are OpenPanel's exact values.
+ * A restrained, warm-neutral media theme: near-black surfaces, near-white text,
+ * and a sand accent that stays visible without washing the interface in color.
  */
 object OpenStreamColors {
     val CanvasDeep = Color(0xFF000000)
@@ -25,9 +23,8 @@ object OpenStreamColors {
     val Border = Color(0xFF262626)
     val BorderStrong = Color(0xFF3A3A3A)
 
-    /** The one accent: OpenPanel's brand blue (the sky→royal X gradient). */
-    val Accent = Color(0xFF3B82F6)
-    val AccentSoft = Color(0x243B82F6)
+    val Accent = Color(0xFFD6C4A3)
+    val AccentSoft = Color(0x24D6C4A3)
 
     val Danger = Color(0xFFFB2C36)
 
@@ -36,7 +33,6 @@ object OpenStreamColors {
     val Green = Color(0xFF51C148)
     val Amber = Color(0xFFFFB900)
     val Offline = Color(0xFFB8A46A)
-    val Cyan = Accent
     val Coral = Muted
 }
 
@@ -57,9 +53,9 @@ private val shapes = Shapes(
 
 private val scheme = darkColorScheme(
     primary = OpenStreamColors.Accent,
-    onPrimary = Color(0xFFFFFFFF),
+    onPrimary = Color(0xFF11100E),
     secondary = OpenStreamColors.Accent,
-    onSecondary = Color(0xFFFFFFFF),
+    onSecondary = Color(0xFF11100E),
     background = OpenStreamColors.Canvas,
     onBackground = OpenStreamColors.Text,
     surface = OpenStreamColors.Surface,

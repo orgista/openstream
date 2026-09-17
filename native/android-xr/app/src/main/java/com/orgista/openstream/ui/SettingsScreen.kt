@@ -479,7 +479,7 @@ fun SettingsScreen(
                     Text(
                         "At trakt.tv/activate enter code  ${authorization.userCode}",
                         fontWeight = FontWeight.ExtraBold,
-                        color = OpenStreamColors.Cyan,
+                        color = OpenStreamColors.Accent,
                         fontSize = 16.sp,
                     )
                 }
@@ -609,7 +609,7 @@ fun SettingsScreen(
                     "${OfflineProgressPolicy.formatBytes(storageStats.downloadedBytes)} currently available offline",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = OpenStreamColors.Cyan,
+                color = OpenStreamColors.Accent,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OfflineStorageOption(
@@ -827,7 +827,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth().padding(14.dp),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = OpenStreamColors.Cyan,
+                    color = OpenStreamColors.Accent,
                 )
             }
         }
@@ -997,7 +997,7 @@ private fun OfflineStorageOption(
         color = if (selected) OpenStreamColors.SurfaceRaised else OpenStreamColors.CanvasDeep,
         border = BorderStroke(
             1.dp,
-            if (selected) OpenStreamColors.Cyan.copy(alpha = 0.65f) else OpenStreamColors.Border,
+            if (selected) OpenStreamColors.Accent.copy(alpha = 0.65f) else OpenStreamColors.Border,
         ),
     ) {
         Row(
@@ -1009,7 +1009,7 @@ private fun OfflineStorageOption(
                 if (selected) AppIcons.Check else AppIcons.Storage,
                 contentDescription = null,
                 tint = when {
-                    selected -> OpenStreamColors.Cyan
+                    selected -> OpenStreamColors.Accent
                     enabled -> OpenStreamColors.TextSoft
                     else -> OpenStreamColors.Muted
                 },
@@ -1041,7 +1041,7 @@ private fun ArrDownloadDestinationOption(
         color = if (selected) OpenStreamColors.SurfaceRaised else OpenStreamColors.CanvasDeep,
         border = BorderStroke(
             1.dp,
-            if (selected) OpenStreamColors.Cyan.copy(alpha = 0.65f) else OpenStreamColors.Border,
+            if (selected) OpenStreamColors.Accent.copy(alpha = 0.65f) else OpenStreamColors.Border,
         ),
     ) {
         Row(
@@ -1052,7 +1052,7 @@ private fun ArrDownloadDestinationOption(
             Icon(
                 if (selected) AppIcons.Check else AppIcons.Download,
                 contentDescription = null,
-                tint = if (selected) OpenStreamColors.Cyan else OpenStreamColors.TextSoft,
+                tint = if (selected) OpenStreamColors.Accent else OpenStreamColors.TextSoft,
                 modifier = Modifier.size(15.dp),
             )
             Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.Text)

@@ -34,6 +34,7 @@ function gatewayRequest(port, path, {
   mutationHeader = true,
   origin = "http://127.0.0.1:5173",
   proxyMarker = false,
+  nativeClient = null,
   sessionToken = GATEWAY_SESSION_TOKEN,
 } = {}) {
   const encodedBody = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
@@ -41,6 +42,7 @@ function gatewayRequest(port, path, {
     Accept: "application/json",
     ...(origin ? { Origin: origin } : {}),
     ...(proxyMarker ? { "X-OpenStream-Proxy": "loopback" } : {}),
+    ...(nativeClient ? { "X-OpenStream-Client": nativeClient } : {}),
     ...(sessionToken ? { "X-OpenStream-Session": sessionToken } : {}),
     ...(encodedBody ? { "Content-Type": "application/json", "Content-Length": encodedBody.length } : {}),
     ...(method === "POST" && mutationHeader ? { "X-OpenStream-Request": "1" } : {}),
@@ -85,6 +87,24 @@ function gatewayMediaRequest(port, path, range, { sessionToken = GATEWAY_SESSION
 test("gateway refuses to start without a safe session token", () => {
   assert.throws(() => createGatewayServer({ sessionToken: null }), /OPENSTREAM_GATEWAY_TOKEN/);
   assert.throws(() => createGatewayServer({ sessionToken: `${"a".repeat(32)}\r\nInjected: true` }), /base64url/);
+});
+
+test("gateway admits authenticated Android and Apple native clients only", async () => {
+  const gateway = createGatewayServer({ sessionToken: GATEWAY_SESSION_TOKEN, logger: null });
+  const gatewayPort = await listen(gateway);
+  try {
+    for (const nativeClient of ["android", "apple"]) {
+      const result = await gatewayRequest(gatewayPort, "/api/health", { origin: null, nativeClient });
+      assert.equal(result.status, 200, nativeClient);
+    }
+    const unknown = await gatewayRequest(gatewayPort, "/api/health", {
+      origin: null,
+      nativeClient: "unknown",
+    });
+    assert.equal(unknown.status, 400);
+  } finally {
+    await close(gateway);
+  }
 });
 
 test("gateway exposes the cached Netflix Top 10 snapshot through the authenticated catalog route", async () => {

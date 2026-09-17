@@ -2,11 +2,58 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
+@MainActor
+@Test func importedLibraryRelocatesAfterSandboxChangeWithoutLosingIdentity() async throws {
+    let suite = "openstream-import-relocation-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
+    let documents = root.appendingPathComponent("Documents", isDirectory: true)
+    let imports = documents.appendingPathComponent("Imports", isDirectory: true)
+    try FileManager.default.createDirectory(at: imports, withIntermediateDirectories: true)
+    try Data([0, 1, 2]).write(to: imports.appendingPathComponent("Sample.mp4"))
+    let old = AppleSource(kind: .library, name: "Imports",
+        url: URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/\(UUID())/Documents/Imports", isDirectory: true))
+    defaults.set(try JSONEncoder().encode([old]), forKey: "openstream.sources.v1")
+    let store = AppleSourceStore(defaults: defaults, documentsDirectory: documents)
+    let migrated = try #require(store.sources.first)
+    #expect(migrated.id == old.id)
+    #expect(migrated.url == imports)
+    #expect(migrated.isManagedImports)
+    let items = try await AppleLibraryScanner().scan(source: migrated)
+    #expect(items.map(\.id) == ["\(old.id.uuidString):Sample.mp4"])
+    let granted = try store.addLibraryFolder(name: "Imports", url: imports, bookmarkData: Data([9]))
+    #expect(granted.id == old.id)
+    #expect(granted.bookmarkData == nil)
+    #expect(store.sources.count == 1)
+    let nextDocuments = root.appendingPathComponent("NextDocuments", isDirectory: true)
+    let reloaded = AppleSourceStore(defaults: defaults, documentsDirectory: nextDocuments)
+    #expect(reloaded.sources.first?.id == old.id)
+    #expect(reloaded.sources.first?.url == nextDocuments.appendingPathComponent("Imports", isDirectory: true))
+}
+
+@MainActor
+@Test func importedLibraryRelocationPreservesExternalAndBookmarkedFolders() throws {
+    let suite = "openstream-import-external-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let external = AppleSource(kind: .library, name: "Imports", url: URL(fileURLWithPath: "/Volumes/External/Imports"))
+    let bookmarked = AppleSource(kind: .library, name: "Imports",
+        url: URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/\(UUID())/Documents/Imports"),
+        bookmarkData: Data([1]))
+    defaults.set(try JSONEncoder().encode([external, bookmarked]), forKey: "openstream.sources.v1")
+    let store = AppleSourceStore(defaults: defaults, documentsDirectory: URL(fileURLWithPath: "/tmp/new-documents"))
+    #expect(store.sources.first(where: { $0.id == external.id }) == external)
+    #expect(store.sources.first(where: { $0.id == bookmarked.id }) == bookmarked)
+}
+
 @Test func manifestURLPolicyMatchesTheTrustedLANSetupRules() throws {
     #expect(try AppleManifestURLPolicy.normalize(" https://addon.example ").absoluteString ==
         "https://addon.example/manifest.json")
     #expect(try AppleManifestURLPolicy.normalize("https://addon.example/custom/manifest.json").absoluteString ==
         "https://addon.example/custom/manifest.json")
+    #expect(try AppleManifestURLPolicy.normalize("http://127.0.0.1:8765/addon/manifest.json").absoluteString ==
+        "http://127.0.0.1:8765/addon/manifest.json")
 
     #expect(throws: AppleManifestURLPolicy.Error.missingScheme) {
         try AppleManifestURLPolicy.normalize("addon.example/manifest.json")
@@ -47,6 +94,7 @@ import Testing
     #expect(first.id == duplicate.id)
     #expect(store.sources.count == 1)
     #expect(store.sources[0].name == "Renamed")
+    #expect(store.sources[0].configurationRevision == 2)
 
     let reloaded = AppleSourceStore(defaults: defaults)
     #expect(reloaded.sources == store.sources)
@@ -88,6 +136,9 @@ import Testing
     #expect(first.logoURL == URL(string: "https://img.example/addon.png"))
     #expect(first.resources == ["catalog", "stream"])
     #expect(first.catalogs.map(\.type) == ["movie", "series"])
+    #expect(first.lastValidatedAt != nil)
+    #expect(first.validationSummary == "Manifest validated")
+    #expect(first.capabilities == ["Catalog", "Stream"])
     #expect(first.transportURL == URL(string: "https://one.example/"))
 
     let replacementData = Data(#"""
@@ -244,14 +295,16 @@ import Testing
         decision: .init(support: .unsupported, reasons: ["audio codec"]),
         suitability: .init(isPlayable: false, isReadable: true, isExportable: true, isProtected: false)
     ) == .nativeOfflineExport(localMP4))
+    // The engine demuxes Matroska in-app; the gateway is no longer on the
+    // playback path for it, so the route is direct even when unreadable.
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: localMKV,
         decision: .init(support: .unsupported, reasons: ["container"]),
         suitability: .init(isPlayable: false, isReadable: false, isExportable: false, isProtected: false)
-    ) == .requiresExternalDemux(localMKV))
+    ) == .direct(localMKV))
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: remoteURL,
         decision: .init(support: .unsupported, reasons: ["codec"]),
         gatewayConfigured: true
-    ) == .gatewayTranscode(remoteURL))
+    ) == .direct(remoteURL))
 }

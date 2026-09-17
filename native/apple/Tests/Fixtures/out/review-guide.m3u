@@ -1,0 +1,3 @@
+#EXTM3U x-tvg-url="http://127.0.0.1:8765/media/review-guide.xml"
+#EXTINF:-1 tvg-id="review.nbc" group-title="News",NBC (EAST)
+http://127.0.0.1:8765/live/ts-h264-aac.ts

@@ -1,0 +1,7 @@
+# Rules for agents working in native/apple
+
+- **Headless only.** Never use Computer Use, screen control, cua/browser-use tools, or osascript UI automation on this Mac; the owner is using it. Drive simulators with XcodeBuildMCP or `xcrun simctl`, the web with `curl`, and take screenshots with `xcrun simctl io <udid> screenshot`.
+- **Docs.** Keep only `FEEDBACK.md` (append a short dated section with your result), `DELIVERIES.md`, and the `HANDOFF-*.md` you were given. Delete your handoff when done. Do not create `REPORT-*.md` or other markdown; put verification evidence as screenshots in `design/` and a dated section in `FEEDBACK.md`.
+- **Owner UI rules.** No gradients, scrims or dimming layers over artwork or video anywhere (heroes, detail pages, overlays) — text and controls sit directly on the image; nothing blue except the brand mark; no Liquid Glass; no explainer text; no scroll indicators; every failure names a reason; no third-party wordmarks or logos on shelves or titles (an add-on's own manifest icon in the Sources list is wanted and must stay); stock Apple player; no Stremio/torrent wording.
+- **Gates.** `swift build` and `swift test` with the scratch path named in your handoff, the `xcodebuild` in your handoff, then real simulator screenshots that you check before citing. Never weaken or delete a test. Do not commit.
+- **Do not edit** `AppleSMBRangeServer.swift`, `AppleSharePlay*.swift`, or playback engine files unless your handoff says so.

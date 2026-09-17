@@ -255,17 +255,11 @@ public struct AppleTranscodeGatewayClient: Sendable {
     }
 
     public static func liveLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        let session = URLSession(
-            configuration: .ephemeral,
-            delegate: AppleGatewayRedirectRejectingDelegate(),
-            delegateQueue: nil
-        )
-        defer { session.invalidateAndCancel() }
         do {
             return try await AppleBoundedHTTPDataLoader.load(
                 request,
                 maximumBytes: 1_000_000,
-                session: session
+                redirectPolicy: .reject
             )
         } catch AppleBoundedHTTPError.responseTooLarge {
             throw AppleTranscodeGatewayError.responseTooLarge
@@ -316,15 +310,9 @@ public struct AppleTranscodeGatewayClient: Sendable {
         }
     }
 }
-
-private final class AppleGatewayRedirectRejectingDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        completionHandler(nil)
-    }
+extension AppleTranscodeGatewayConfig {
+    /// One-line Settings description for the transcode gateway: an optional
+    /// remote accelerator, not a requirement for normal HTTP/HLS or compatible
+    /// local-file playback.
+    public static let settingsDescription = "Optional remote accelerator. Playback works without it."
 }

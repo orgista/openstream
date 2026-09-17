@@ -16,20 +16,22 @@ public enum AppleLibrarySourceError: Error, Equatable, LocalizedError, Sendable 
     }
 }
 
-public struct AppleLibraryItem: Identifiable, Equatable, Sendable {
+public struct AppleLibraryItem: Identifiable, Hashable, Sendable {
     public let id: String
     public let sourceID: AppleSource.ID
     public let name: String
     public let url: URL
     public let relativePath: String
     public let sizeBytes: Int64
+    public let addedAt: Date
 
     public init(
         sourceID: AppleSource.ID,
         name: String,
         url: URL,
         relativePath: String,
-        sizeBytes: Int64
+        sizeBytes: Int64,
+        addedAt: Date = .distantPast
     ) {
         id = "\(sourceID.uuidString):\(relativePath)"
         self.sourceID = sourceID
@@ -37,6 +39,7 @@ public struct AppleLibraryItem: Identifiable, Equatable, Sendable {
         self.url = url
         self.relativePath = relativePath
         self.sizeBytes = sizeBytes
+        self.addedAt = addedAt
     }
 }
 
@@ -103,22 +106,23 @@ public actor AppleLibraryScanner {
     public func scan(source: AppleSource) throws -> [AppleLibraryItem] {
         let root = try AppleLibraryBookmark.resolve(source)
         let access = AppleSecurityScopedAccess(url: root)
-        _ = access
+        defer { withExtendedLifetime(access) {} }
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw AppleLibrarySourceError.unavailable
         }
         guard let enumerator = fileManager.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .nameKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .nameKey, .creationDateKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else { throw AppleLibrarySourceError.permissionDenied }
 
         var items: [AppleLibraryItem] = []
         for case let url as URL in enumerator {
-            guard items.count < maximumItems,
-                  Self.supportedExtensions.contains(url.pathExtension.lowercased()),
-                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .nameKey]),
+            try Task.checkCancellation()
+            guard items.count < maximumItems else { break }
+            guard Self.supportedExtensions.contains(url.pathExtension.lowercased()),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .nameKey, .creationDateKey]),
                   values.isRegularFile == true else { continue }
             let rootPath = root.standardizedFileURL.path.hasSuffix("/")
                 ? root.standardizedFileURL.path
@@ -130,7 +134,8 @@ public actor AppleLibraryScanner {
                 name: values.name ?? url.deletingPathExtension().lastPathComponent,
                 url: url,
                 relativePath: relative,
-                sizeBytes: Int64(values.fileSize ?? 0)
+                sizeBytes: Int64(values.fileSize ?? 0),
+                addedAt: values.creationDate ?? .distantPast
             ))
         }
         return items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }

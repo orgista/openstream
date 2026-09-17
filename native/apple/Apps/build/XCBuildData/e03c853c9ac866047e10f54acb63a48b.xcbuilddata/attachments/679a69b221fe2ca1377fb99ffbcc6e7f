@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStream Watch-primary.dia",
+    "emit-module-dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStream Watch-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStream Watch-primary-emit-module.dia",
+    "pch" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStream Watch-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStream Watch-primary.swiftdeps"
+  },
+  "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/OpenStreamWatch/AppleWatchLink.swift" : {
+    "const-values" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.swiftconstvalues",
+    "dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.d",
+    "diagnostics" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.dia",
+    "index-unit-output-path" : "/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.o",
+    "llvm-bc" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.bc",
+    "object" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.o",
+    "swift-dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink.swiftdeps",
+    "swiftmodule" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/AppleWatchLink~partial.swiftmodule"
+  },
+  "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/OpenStreamWatch/OpenStreamWatchApp.swift" : {
+    "const-values" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.swiftconstvalues",
+    "dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.d",
+    "diagnostics" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.dia",
+    "index-unit-output-path" : "/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.o",
+    "llvm-bc" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.bc",
+    "object" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.o",
+    "swift-dependencies" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp.swiftdeps",
+    "swiftmodule" : "/Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple/Apps/build/OpenStreamApps.build/Debug-watchsimulator/OpenStream Watch.build/Objects-normal/arm64/OpenStreamWatchApp~partial.swiftmodule"
+  }
+}

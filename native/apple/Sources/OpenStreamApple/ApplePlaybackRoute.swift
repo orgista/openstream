@@ -60,10 +60,14 @@ public enum ApplePlaybackRoutePolicy {
                 ? .direct(sourceURL)
                 : .unavailable(unavailableReasons(decision, fallback: "Protected media is not playable on this device."))
         }
+        // The engine demuxes Matroska and MPEG-TS in-app; never route these to
+        // the gateway or the native exporter.
+        if isMatroska(sourceURL) || isMPEGTransportStream(sourceURL) {
+            return .direct(sourceURL)
+        }
         if suitability?.supportsDirectPlayback == true { return .direct(sourceURL) }
 
-        let requiresExternalDemux = isMatroska(sourceURL) || suitability?.isReadable == false
-        if requiresExternalDemux {
+        if suitability?.isReadable == false {
             return gatewayConfigured ? .gatewayTranscode(sourceURL) : .requiresExternalDemux(sourceURL)
         }
 
@@ -71,7 +75,7 @@ public enum ApplePlaybackRoutePolicy {
             if sourceURL.isFileURL && suitability.supportsNativeOfflineExport {
                 return .nativeOfflineExport(sourceURL)
             }
-            if gatewayConfigured { return .gatewayTranscode(sourceURL) }
+            if gatewayConfigured, decision.support == .unsupported { return .gatewayTranscode(sourceURL) }
             return .unavailable(unavailableReasons(decision, fallback: "The asset failed the system playback checks."))
         }
 
@@ -80,8 +84,6 @@ public enum ApplePlaybackRoutePolicy {
             .direct(sourceURL)
         case .unsupported where gatewayConfigured:
             .gatewayTranscode(sourceURL)
-        case .unsupported where isMatroska(sourceURL):
-            .requiresExternalDemux(sourceURL)
         case .unsupported:
             .unavailable(unavailableReasons(decision, fallback: "The asset requires runtime inspection."))
         }
@@ -104,6 +106,11 @@ public enum ApplePlaybackRoutePolicy {
     private static func isMatroska(_ url: URL) -> Bool {
         let fileExtension = url.pathExtension.lowercased()
         return fileExtension == "mkv" || fileExtension == "matroska"
+    }
+
+    private static func isMPEGTransportStream(_ url: URL) -> Bool {
+        let fileExtension = url.pathExtension.lowercased()
+        return fileExtension == "ts" || fileExtension == "m2ts" || fileExtension == "mts"
     }
 
     private static func unavailableReasons(
@@ -174,10 +181,30 @@ public actor AppleNativeMediaExporter {
 
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
+        // Read fresh filesystem metadata; URL resource values can retain the
+        // previous size/date when the same URL value survives replacement.
+        let sourceValues = try fileManager.attributesOfItem(atPath: sourceURL.path)
+        let sourceSize = (sourceValues[.size] as? NSNumber)?.int64Value ?? 0
+        let sourceModified = (sourceValues[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
+        let sourceFileID = (sourceValues[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        let sourceIdentity = "\(sourceURL.standardizedFileURL.absoluteString)|\(sourceSize)|\(sourceModified)|\(sourceFileID)"
         let destination = outputDirectory
-            .appending(path: ApplePlaybackIdentity.digest(for: sourceURL.standardizedFileURL.absoluteString))
+            .appending(path: ApplePlaybackIdentity.digest(for: sourceIdentity))
             .appendingPathExtension("mp4")
-        if fileManager.fileExists(atPath: destination.path) { return destination }
+        if fileManager.fileExists(atPath: destination.path) {
+            if let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
+               let size = attributes[.size] as? NSNumber,
+               size.int64Value > 0,
+               let cachedInspection = try? await AppleAssetInspector.inspect(url: destination),
+               cachedInspection.suitability.supportsDirectPlayback {
+                return destination
+            }
+            try? fileManager.removeItem(at: destination)
+        }
+
+        let temporary = outputDirectory
+            .appending(path: "\(destination.deletingPathExtension().lastPathComponent).partial-\(UUID().uuidString)")
+            .appendingPathExtension("mp4")
 
         let asset = AVURLAsset(url: sourceURL)
         guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
@@ -188,10 +215,23 @@ public actor AppleNativeMediaExporter {
         }
 
         do {
-            try await exporter.export(to: destination, as: .mp4)
+            try await exporter.export(to: temporary, as: .mp4)
+            try Task.checkCancellation()
+            do {
+                try fileManager.moveItem(at: temporary, to: destination)
+            } catch {
+                // Another exporter can publish the same source version while
+                // this actor is suspended in AVFoundation. Reuse only a valid
+                // complete file and discard our private temporary output.
+                guard fileManager.fileExists(atPath: destination.path),
+                      let completed = try? await AppleAssetInspector.inspect(url: destination),
+                      completed.suitability.supportsDirectPlayback else { throw error }
+                try? fileManager.removeItem(at: temporary)
+            }
             return destination
         } catch {
-            try? fileManager.removeItem(at: destination)
+            try? fileManager.removeItem(at: temporary)
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             throw AppleLocalTranscodeError.exportFailed(error.localizedDescription)
         }
     }

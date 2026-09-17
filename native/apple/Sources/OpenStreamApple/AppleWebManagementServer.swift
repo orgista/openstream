@@ -8,6 +8,7 @@ public enum AppleWebManagementServerError: Error, Equatable, LocalizedError, Sen
     case listenerFailed(String)
     case invalidListenerPort
     case invalidSessionURL
+    case sourceValidationTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -21,6 +22,8 @@ public enum AppleWebManagementServerError: Error, Equatable, LocalizedError, Sen
             "Web Management could not reserve a local port."
         case .invalidSessionURL:
             "Web Management could not create its local URL."
+        case .sourceValidationTimedOut:
+            "The add-on took too long to respond."
         }
     }
 }
@@ -32,9 +35,19 @@ public enum AppleWebManagementServerStopReason: Equatable, Sendable {
     case failed(String)
 }
 
+/// Every decision the portal makes about a request, on one line.
+///
+/// Web Management has three ways to look identical while failing — the
+/// listener never binds, the browser never reaches it, or it reaches it and
+/// is turned away by the `Host`/origin/pairing checks — and none of them
+/// leave a mark on the TV. This names which one happened.
+private func traceWeb(_ detail: @autoclosure () -> String) {
+    AppleInteractionTrace.record(.network, "web " + detail())
+}
+
 @MainActor
 public final class AppleWebManagementServer {
-    public nonisolated static let defaultPort: UInt16 = 11_470
+    public nonisolated static let defaultPort: UInt16 = 8_090
     public nonisolated static let defaultSessionDuration: TimeInterval = 10 * 60
     public nonisolated static let bonjourServiceType = "_openstream._tcp"
 
@@ -73,53 +86,56 @@ public final class AppleWebManagementServer {
 
     private let configuration: Configuration
     private let manifestClient: AppleManifestClient
+    private let iptvClient: AppleIPTVClient
     private let networkQueue = DispatchQueue(label: "com.orgista.openstream.web-management", qos: .userInitiated)
 
     private var listener: NWListener?
     private var bonjourService: NetService?
+    private var bonjourMonitor: AppleBonjourPublishMonitor?
     private var sourceStore: AppleSourceStore?
     private var expiryTask: Task<Void, Never>?
     private var connectionTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var generation = UUID()
     private var isCompleting = false
+    /// Browsers that have already entered a code once and need not again.
+    private let trust = AppleWebManagementTrust()
 
     public init(
         configuration: Configuration = Configuration(),
-        manifestClient: AppleManifestClient = AppleManifestClient()
+        manifestClient: AppleManifestClient = AppleManifestClient(),
+        iptvClient: AppleIPTVClient = AppleIPTVClient()
     ) {
         self.configuration = configuration
         self.manifestClient = manifestClient
+        self.iptvClient = iptvClient
     }
 
     @discardableResult
     public func start(sourceStore: AppleSourceStore) async throws -> AppleWebManagementSession {
         tearDown(reason: nil)
 
-        guard configuration.sessionDuration > 0, configuration.sessionDuration.isFinite else {
+        guard configuration.sessionDuration > 0,
+              configuration.sessionDuration <= 24 * 60 * 60,
+              configuration.sessionDuration.isFinite else {
             throw AppleWebManagementServerError.invalidConfiguration
         }
         guard let host = configuration.hostProvider(), AppleWebManagementProtocol.isAllowedClient(host: host) else {
+            traceWeb("start rejected: no usable LAN address (\(configuration.hostProvider() ?? "none"))")
             throw AppleWebManagementServerError.localNetworkUnavailable
         }
+        traceWeb("start on \(host), preferred port \(configuration.preferredPort)")
 
         self.sourceStore = sourceStore
         generation = UUID()
 
         let activeListener: NWListener
         do {
-            activeListener = try await startReadyListener(port: configuration.preferredPort)
+            activeListener = try await startListenerWithFallback(from: configuration.preferredPort)
         } catch {
-            guard configuration.preferredPort != 0 else {
-                self.sourceStore = nil
-                throw AppleWebManagementServerError.listenerFailed(error.localizedDescription)
-            }
-            do {
-                activeListener = try await startReadyListener(port: 0)
-            } catch {
-                self.sourceStore = nil
-                throw AppleWebManagementServerError.listenerFailed(error.localizedDescription)
-            }
+            self.sourceStore = nil
+            traceWeb("listener failed: \(error.localizedDescription)")
+            throw AppleWebManagementServerError.listenerFailed(error.localizedDescription)
         }
 
         guard let port = activeListener.port?.rawValue else {
@@ -130,21 +146,22 @@ public final class AppleWebManagementServer {
 
         let token = AppleWebManagementProtocol.makeToken()
         let expiresAt = Date().addingTimeInterval(configuration.sessionDuration)
-        guard let tokenURL = Self.makeURL(host: host, port: port, path: "/openstream", token: token),
-              let friendlyURL = Self.makeURL(host: host, port: port, path: "/", token: nil) else {
+        guard let friendlyURL = Self.makeURL(host: host, port: port, path: "/") else {
             activeListener.cancel()
             self.sourceStore = nil
             throw AppleWebManagementServerError.invalidSessionURL
         }
 
         let activeSession = AppleWebManagementSession(
-            url: tokenURL,
+            url: friendlyURL,
             friendlyURL: friendlyURL,
             expiresAt: expiresAt,
-            token: token
+            token: token,
+            pairingCode: AppleWebManagementProtocol.makePairingCode()
         )
         listener = activeListener
         session = activeSession
+        traceWeb("listening on \(friendlyURL.absoluteString) pairing=\(activeSession.pairingCode) for \(Int(configuration.sessionDuration))s")
         publishBonjourIfRequested(port: port)
         installRuntimeStateHandler(for: activeListener)
         scheduleExpiry(after: configuration.sessionDuration)
@@ -164,7 +181,7 @@ public final class AppleWebManagementServer {
         tcp.noDelay = true
         tcp.connectionTimeout = 8
         let parameters = NWParameters(tls: nil, tcp: tcp)
-        parameters.includePeerToPeer = true
+        parameters.includePeerToPeer = false
 
         let endpointPort = port == 0 ? NWEndpoint.Port.any : NWEndpoint.Port(rawValue: port)!
         let candidate = try NWListener(using: parameters, on: endpointPort)
@@ -184,6 +201,24 @@ public final class AppleWebManagementServer {
             candidate.cancel()
             throw error
         }
+    }
+
+    private func startListenerWithFallback(from preferredPort: UInt16) async throws -> NWListener {
+        if preferredPort == 0 {
+            return try await startReadyListener(port: 0)
+        }
+        var lastError: (any Error)?
+        for offset in 0 ..< 64 {
+            let candidate = UInt32(preferredPort) + UInt32(offset)
+            guard candidate <= UInt32(UInt16.max) else { break }
+            do {
+                return try await startReadyListener(port: UInt16(candidate))
+            } catch {
+                traceWeb("port \(candidate) unavailable: \(error.localizedDescription)")
+                lastError = error
+            }
+        }
+        throw lastError ?? AppleWebManagementServerError.invalidListenerPort
     }
 
     private func waitUntilReady(_ candidate: NWListener) async throws {
@@ -212,10 +247,9 @@ public final class AppleWebManagementServer {
 
     private func scheduleExpiry(after duration: TimeInterval) {
         expiryTask?.cancel()
-        let nanoseconds = UInt64(min(duration * 1_000_000_000, Double(UInt64.max)))
         expiryTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: nanoseconds)
+                try await Task.sleep(for: .seconds(duration))
             } catch {
                 return
             }
@@ -230,6 +264,7 @@ public final class AppleWebManagementServer {
     private func publishBonjourIfRequested(port: UInt16) {
         bonjourService?.stop()
         bonjourService = nil
+        bonjourMonitor = nil
         guard configuration.advertisesBonjour else { return }
 
         let service = NetService(
@@ -238,7 +273,13 @@ public final class AppleWebManagementServer {
             name: "OpenStream",
             port: Int32(port)
         )
-        service.includesPeerToPeer = true
+        service.includesPeerToPeer = false
+        // Without a delegate a refused registration is completely silent, so
+        // "the TV shows an address and the browser finds nothing" looked the
+        // same as a working session.
+        let monitor = AppleBonjourPublishMonitor()
+        bonjourMonitor = monitor
+        service.delegate = monitor
         bonjourService = service
         service.publish()
     }
@@ -263,7 +304,7 @@ public final class AppleWebManagementServer {
     }
 
     private func serve(_ connection: NWConnection, id: ObjectIdentifier, generation acceptedGeneration: UUID) async {
-        let timeout = Task { @MainActor in
+        var timeout = Task { @MainActor in
             do {
                 try await Task.sleep(nanoseconds: 8_000_000_000)
             } catch {
@@ -283,6 +324,7 @@ public final class AppleWebManagementServer {
         guard let remoteHost = Self.host(from: connection.endpoint),
               AppleWebManagementProtocol.isAllowedClient(host: remoteHost) else {
             timeout.cancel()
+            traceWeb("403 client off-LAN: \(Self.host(from: connection.endpoint) ?? "unknown")")
             await send(.plain(403, "Forbidden", "This page is available only on the local network."), to: connection)
             return
         }
@@ -290,20 +332,32 @@ public final class AppleWebManagementServer {
         do {
             let request = try await AppleWebManagementHTTPReader.read(from: connection)
             timeout.cancel()
-            guard generation == acceptedGeneration, let activeSession = session else { return }
+            traceWeb("\(request.method) \(request.target) from \(remoteHost) host=\(request.headers["host"] ?? "none") origin=\(request.headers["origin"] ?? "none")")
+            guard generation == acceptedGeneration, let activeSession = session else {
+                traceWeb("dropped: session ended before the reply")
+                return
+            }
             let result = await response(for: request, session: activeSession)
+            traceWeb("-> \(result.response.code) \(result.response.status)")
             await send(result.response, to: connection)
             if result.stopAfterSending, generation == acceptedGeneration {
+                // Do not let teardown cancel the task and socket that are still
+                // flushing the success response to the browser.
+                connections.removeValue(forKey: id)
+                connectionTasks.removeValue(forKey: id)
                 tearDown(reason: .completed)
             }
         } catch AppleWebManagementHTTPReadError.tooLarge {
             timeout.cancel()
+            traceWeb("413 request too large")
             await send(.plain(413, "Payload Too Large", "The request is too large."), to: connection)
         } catch AppleWebManagementHTTPReadError.malformed {
             timeout.cancel()
+            traceWeb("400 malformed request")
             await send(.plain(400, "Bad Request", "Malformed request."), to: connection)
         } catch {
             // A closed or timed-out local connection needs no response.
+            traceWeb("connection closed without a request: \(error.localizedDescription)")
         }
     }
 
@@ -311,64 +365,200 @@ public final class AppleWebManagementServer {
         for request: AppleWebManagementHTTPRequest,
         session activeSession: AppleWebManagementSession
     ) async -> (response: AppleWebManagementHTTPResponse, stopAfterSending: Bool) {
-        guard request.path == "/" || request.path == "/openstream" else {
+        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics" else {
             return (.plain(404, "Not Found", "Not found."), false)
         }
-
-        if !AppleWebManagementProtocol.isValidRequestSource(
+        guard !activeSession.isExpired else {
+            return (.plain(410, "Gone", "This setup session has expired."), true)
+        }
+        guard AppleWebManagementProtocol.isValidHost(request.headers["host"], session: activeSession) else {
+            // The browser typed a different address than the one the app is
+            // advertising — a second interface, a hostname, a stale bookmark.
+            traceWeb("host check failed: sent \(request.headers["host"] ?? "none"), expected \(activeSession.friendlyURL.host ?? "?"):\(activeSession.friendlyURL.port.map(String.init) ?? "?")")
+            return (.plain(403, "Forbidden", "Host rejected."), false)
+        }
+        guard AppleWebManagementProtocol.isTrustedRequestSource(
             origin: request.headers["origin"],
             referer: request.headers["referer"],
             session: activeSession
-        ) {
-            return (.plain(403, "Forbidden", "Cross-origin request rejected."), false)
+        ) else {
+            traceWeb("origin check failed: origin=\(request.headers["origin"] ?? "none") referer=\(request.headers["referer"] ?? "none")")
+            return (.plain(403, "Forbidden", "The browser source is not the Web Management page."), false)
         }
+
+        // The trace log, readable from a machine on the same network.
+        //
+        // A shipped build records a timeline, but on a real Apple TV or phone
+        // that file is inside the app container and unreachable — which would
+        // make the logs the owner asked for unreadable in practice. Serving it
+        // here reuses the portal's own LAN listener and its authentication
+        // rather than adding a service or a phone-home. It sits behind the
+        // session token like any state-changing request, so nothing on the
+        // network can read it without the portal already being paired.
+        if request.path == "/diagnostics" {
+            guard AppleWebManagementProtocol.hasValidToken(
+                form: [:], headers: request.headers, query: request.query, session: activeSession
+            ) else {
+                traceWeb("diagnostics refused: not paired")
+                return (.plain(403, "Forbidden", "Pair with the portal first."), false)
+            }
+            let log = (try? String(contentsOf: AppleInteractionTrace.fileURL ?? URL(fileURLWithPath: "/dev/null"), encoding: .utf8)) ?? ""
+            traceWeb("diagnostics served (\(log.utf8.count) bytes)")
+            return (.plain(200, "OK", log.isEmpty ? "No trace recorded yet." : log), false)
+        }
+
 
         switch request.method {
         case "GET":
-            let maxAge = max(1, Int(activeSession.expiresAt.timeIntervalSinceNow.rounded(.down)))
-            let cookie = "openstream_token=\(activeSession.token); Max-Age=\(maxAge); SameSite=Strict; HttpOnly; Path=/"
-            return (
-                .html(200, "OK", AppleWebManagementPage.setup(token: activeSession.token), headers: [
-                    "Set-Cookie": cookie,
-                ]),
-                false
+            let hasBootstrapToken = request.query["token"].map {
+                AppleWebManagementProtocol.hasValidToken(
+                    form: ["token": $0], headers: [:], query: [:], session: activeSession
+                )
+            } ?? false
+            let hasSessionToken = AppleWebManagementProtocol.hasValidToken(
+                form: [:], headers: request.headers, query: [:], session: activeSession
             )
+            let isTrusted = trust.trusts(cookieHeader: request.headers["cookie"])
+            if hasBootstrapToken {
+                return (
+                    .redirect(
+                        activeSession.friendlyURL.absoluteString,
+                        cookies: pairingCookies(for: activeSession)
+                    ),
+                    false
+                )
+            }
+            // A browser that paired before is handed the session token straight
+            // away, so the code is asked for once per browser rather than once
+            // per session (owner 2026-09-15).
+            if isTrusted, !hasSessionToken {
+                traceWeb("trusted browser recognised; skipping the pairing code")
+                return (
+                    .html(200, "OK", page(session: activeSession, paired: true),
+                          cookies: pairingCookies(for: activeSession)),
+                    false
+                )
+            }
+            return (.html(200, "OK", page(session: activeSession, paired: hasSessionToken || isTrusted)), false)
 
         case "POST":
             guard !isCompleting else {
                 return (.plain(403, "Forbidden", "This session is already adding a source."), false)
             }
-            let form = AppleWebManagementProtocol.parseForm(request.body)
-            guard AppleWebManagementProtocol.hasValidToken(
+            // Browsers post the form urlencoded by default; some in-app
+            // browsers and forms that declare it post multipart. Both carry
+            // the same field names.
+            let form = AppleWebManagementProtocol.parseForm(
+                body: request.rawBody,
+                contentType: request.headers["content-type"]
+            )
+            let hasToken = AppleWebManagementProtocol.hasValidToken(
                 form: form,
                 headers: request.headers,
                 query: request.query,
                 session: activeSession
-            ) else {
-                return (.plain(403, "Forbidden", "Invalid or missing session token."), false)
+            )
+            // The pairing code stays usable for the whole session. Consuming it
+            // on first use locked the browser out after a failed add, because a
+            // dropped cookie left no second way in.
+            let paired = AppleWebManagementProtocol.hasValidPairingCode(form: form, session: activeSession)
+                || trust.trusts(cookieHeader: request.headers["cookie"])
+            guard hasToken || paired else {
+                traceWeb("pairing failed: action=\(form["action"] ?? "add") code=\(form["pairingCode"] == nil ? "absent" : "wrong") cookie=\(request.headers["cookie"] == nil ? "absent" : "present")")
+                return (.html(
+                    403,
+                    "Pairing Required",
+                    page(
+                        session: activeSession,
+                        paired: false,
+                        manifest: form["manifest"] ?? "",
+                        error: "The pairing code is missing or incorrect."
+                    )
+                ), false)
+            }
+            // Every authenticated answer refreshes the cookie, so the browser
+            // never has to be asked for the pairing code twice.
+            let cookie = pairingCookies(for: activeSession)
+
+            switch form["action"] {
+            case "pair":
+                return (.html(200, "OK", page(session: activeSession, paired: true), cookies: cookie), false)
+            case "remove":
+                guard let sourceStore,
+                      let id = form["sourceID"].flatMap({ UUID(uuidString: $0) }),
+                      let existing = sourceStore.sources.first(where: { $0.id == id }),
+                      sourceStore.remove(id: id) else {
+                    return (.html(
+                        400,
+                        "Source Not Removed",
+                        page(
+                            session: activeSession,
+                            paired: true,
+                            error: "That source is no longer in the list."
+                        ),
+                        cookies: cookie
+                    ), false)
+                }
+                return (.html(
+                    200,
+                    "OK",
+                    page(session: activeSession, paired: true, notice: "Removed \(existing.name)"),
+                    cookies: cookie
+                ), false)
+            default:
+                break
             }
 
             let manifest = form["manifest"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sourceType = Self.sourceType(from: form)
+            let draft = Self.draft(from: form)
             isCompleting = true
+            defer { isCompleting = false }
             do {
                 guard let sourceStore else {
-                    isCompleting = false
                     return (.plain(400, "Bad Request", "The session is no longer active."), false)
                 }
-                let source = try await sourceStore.addStremio(manifestValue: manifest, client: manifestClient)
+                let source: AppleSource
+                switch sourceType {
+                case "m3u":
+                    source = try await addM3U(form: form, sourceStore: sourceStore)
+                case "xtream":
+                    source = try await addXtream(form: form, sourceStore: sourceStore)
+                default:
+                    source = try await addSource(manifestValue: manifest, sourceStore: sourceStore)
+                }
+                traceWeb("added \(sourceType) source \"\(source.name)\"")
                 guard !Task.isCancelled, self.session?.token == activeSession.token else {
-                    isCompleting = false
                     return (.plain(400, "Bad Request", "The session is no longer active."), false)
                 }
-                return (.html(200, "OK", AppleWebManagementPage.success(sourceName: source.name)), true)
+                return (
+                    .html(
+                        200,
+                        "OK",
+                        page(session: activeSession, paired: true, notice: "Added \(source.name)"),
+                        cookies: cookie
+                    ),
+                    false
+                )
             } catch {
-                isCompleting = false
+                // A failed add names its reason and leaves the pairing intact:
+                // the page stays paired, the cookie is refreshed, and the
+                // typed values (never the password) come back for a retry.
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                traceWeb("add \(sourceType) failed: \(message)")
                 return (
                     .html(
                         400,
-                        "Bad Request",
-                        AppleWebManagementPage.setup(token: activeSession.token, manifest: manifest, error: message)
+                        "Source Not Added",
+                        page(
+                            session: activeSession,
+                            paired: true,
+                            manifest: manifest,
+                            error: message,
+                            sourceType: sourceType,
+                            draft: draft
+                        ),
+                        cookies: cookie
                     ),
                     false
                 )
@@ -382,12 +572,163 @@ public final class AppleWebManagementServer {
         }
     }
 
+    /// Renders the portal with the values every response needs: the address the
+    /// browser is on, the saved sources, and whether the pairing step is done.
+    private func page(
+        session activeSession: AppleWebManagementSession,
+        paired: Bool,
+        manifest: String = "",
+        notice: String? = nil,
+        error: String? = nil,
+        sourceType: String = "addon",
+        draft: [String: String] = [:]
+    ) -> String {
+        AppleWebManagementPage.setup(
+            manifest: manifest,
+            error: error,
+            pairingCode: paired ? nil : activeSession.pairingCode,
+            notice: notice,
+            sources: sourceStore?.sources ?? [],
+            address: Self.displayAddress(for: activeSession),
+            sourceType: sourceType,
+            draft: draft
+        )
+    }
+
+    /// The address the page shows is the bare `IP:PORT` the browser typed or
+    /// scanned; no scheme, path, or token.
+    private static func displayAddress(for session: AppleWebManagementSession) -> String? {
+        guard let host = session.friendlyURL.host else { return nil }
+        guard let port = session.friendlyURL.port else { return host }
+        return "\(host):\(port)"
+    }
+
+    /// `addon` is the default so older posts that carry only `manifest` still
+    /// add an add-on.
+    private static func sourceType(from form: [String: String]) -> String {
+        switch form["sourceType"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "m3u": "m3u"
+        case "xtream": "xtream"
+        default: "addon"
+        }
+    }
+
+    private static let draftFields = ["m3uName", "playlistURL", "epgURL", "xtreamName", "serverURL", "username"]
+
+    private static func draft(from form: [String: String]) -> [String: String] {
+        draftFields.reduce(into: [:]) { result, field in
+            if let value = form[field] { result[field] = value }
+        }
+    }
+
+    private func addSource(
+        manifestValue: String,
+        sourceStore: AppleSourceStore
+    ) async throws -> AppleSource {
+        let client = manifestClient
+        return try await withThrowingTaskGroup(of: AppleSource.self) { group in
+            group.addTask {
+                try await sourceStore.addStremio(manifestValue: manifestValue, client: client)
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(20))
+                throw AppleWebManagementServerError.sourceValidationTimedOut
+            }
+            guard let result = try await group.next() else {
+                throw AppleWebManagementServerError.sourceValidationTimedOut
+            }
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private func pairingCookies(for session: AppleWebManagementSession) -> [String] {
+        let maxAge = max(1, Int(session.expiresAt.timeIntervalSinceNow.rounded(.down)))
+        return [
+            "openstream_token=\(session.token); Max-Age=\(maxAge); SameSite=Strict; HttpOnly; Path=/",
+            trust.cookieHeaderValue,
+        ]
+    }
+
+    private func addM3U(
+        form: [String: String],
+        sourceStore: AppleSourceStore
+    ) async throws -> AppleSource {
+        let endpoint = form["playlistURL"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized = try AppleIPTVEndpointPolicy.normalize(endpoint)
+        let draft = AppleSource(
+            kind: .liveTV,
+            name: form["m3uName"] ?? "",
+            url: normalized,
+            iptvType: .m3u
+        )
+        let channels = try await iptvClient.channels(source: draft)
+        return try sourceStore.addIPTV(
+            name: form["m3uName"] ?? "",
+            type: .m3u,
+            endpoint: endpoint,
+            epgURL: form["epgURL"],
+            lastValidatedAt: .now,
+            validationSummary: "Connected · \(channels.count) channels",
+            discoveredItemCount: channels.count,
+            capabilities: ["Live channels", "Playback"]
+        )
+    }
+
+    private func addXtream(
+        form: [String: String],
+        sourceStore: AppleSourceStore
+    ) async throws -> AppleSource {
+        let endpoint = form["serverURL"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let username = form["username"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = form["password"] ?? ""
+        // Name the missing field before any network call; the panel would
+        // otherwise answer with a generic login failure.
+        // Describes the credentials without ever recording them. The owner
+        // reports the portal rejecting an account that is known good
+        // (2026-09-15, `auth=0`), and the question that answers it is whether
+        // what *arrived* matches what was typed — a password mangled by form
+        // decoding, truncated, or quietly autofilled by the browser looks
+        // identical to a wrong one from the outside. Lengths and character
+        // classes distinguish those; the values themselves are never written.
+        traceWeb(
+            "xtream submit: server=\(endpoint) user=\(username.count) chars"
+            + " password=\(password.count) chars"
+            + " userASCII=\(username.allSatisfy(\.isASCII)) passwordASCII=\(password.allSatisfy(\.isASCII))"
+            + " passwordHasSpace=\(password.contains(" "))"
+            + " passwordTrimmedDiffers=\(password != password.trimmingCharacters(in: .whitespacesAndNewlines))"
+        )
+        guard !username.isEmpty, !password.isEmpty else { throw AppleIPTVError.missingCredentials }
+        let draft = AppleSource(
+            kind: .liveTV,
+            name: form["xtreamName"] ?? "",
+            url: try AppleIPTVEndpointPolicy.normalize(endpoint),
+            iptvType: .xtream
+        )
+        let credentials = AppleIPTVCredentials(username: username, password: password)
+        let channels = try await iptvClient.channels(source: draft, credentials: credentials)
+        return try sourceStore.addIPTV(
+            name: form["xtreamName"] ?? "",
+            type: .xtream,
+            endpoint: endpoint,
+            username: username,
+            password: password,
+            lastValidatedAt: .now,
+            validationSummary: "Connected · \(channels.count) channels",
+            discoveredItemCount: channels.count,
+            capabilities: ["Live channels", "Playback"]
+        )
+    }
+
     private func send(_ response: AppleWebManagementHTTPResponse, to connection: NWConnection) async {
         let data = response.serialized()
         await withCheckedContinuation { continuation in
-            connection.send(content: data, completion: .contentProcessed { _ in
-                continuation.resume()
-            })
+            connection.send(
+                content: data,
+                contentContext: .defaultMessage,
+                isComplete: true,
+                completion: .contentProcessed { _ in continuation.resume() }
+            )
         }
     }
 
@@ -406,6 +747,7 @@ public final class AppleWebManagementServer {
 
         bonjourService?.stop()
         bonjourService = nil
+        bonjourMonitor = nil
 
         let tasks = Array(connectionTasks.values)
         connectionTasks.removeAll()
@@ -417,18 +759,18 @@ public final class AppleWebManagementServer {
 
         sourceStore = nil
         session = nil
-        if wasActive, let reason { onStop?(reason) }
+        if wasActive, let reason {
+            traceWeb("stopped: \(reason)")
+            onStop?(reason)
+        }
     }
 
-    private static func makeURL(host: String, port: UInt16, path: String, token: String?) -> URL? {
+    private static func makeURL(host: String, port: UInt16, path: String) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
         components.port = Int(port)
         components.path = path
-        if let token {
-            components.queryItems = [URLQueryItem(name: "token", value: token)]
-        }
         return components.url
     }
 
@@ -444,6 +786,23 @@ public final class AppleWebManagementServer {
         @unknown default:
             return nil
         }
+    }
+}
+
+/// Reports whether the `_openstream._tcp` advertisement was accepted.
+///
+/// Bonjour is optional — the numeric address and the QR code work without it —
+/// but a refusal is the clearest sign that local network access was denied,
+/// which is otherwise invisible from the TV.
+private final class AppleBonjourPublishMonitor: NSObject, NetServiceDelegate {
+    func netServiceDidPublish(_ sender: NetService) {
+        traceWeb("bonjour published \(sender.type) on port \(sender.port)")
+    }
+
+    func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
+        let code = errorDict[NetService.errorCode]?.intValue ?? 0
+        let domain = errorDict[NetService.errorDomain]?.intValue ?? 0
+        traceWeb("bonjour NOT published (code \(code), domain \(domain)) — discovery is off; the numeric address still works")
     }
 }
 
@@ -555,6 +914,7 @@ struct AppleWebManagementHTTPRequest: Sendable {
     let query: [String: String]
     let headers: [String: String]
     let body: String
+    let rawBody: Data
 }
 
 private enum AppleWebManagementHTTPReader {
@@ -577,7 +937,7 @@ private enum AppleWebManagementHTTPReader {
                 let bodyOffset = terminator.upperBound
 
                 guard partial.method == "POST", partial.path == "/" || partial.path == "/openstream" else {
-                    return partial.withBody("")
+                    return partial.withBody(Data())
                 }
                 guard partial.headers["transfer-encoding"] == nil else {
                     throw AppleWebManagementHTTPReadError.malformed
@@ -591,10 +951,7 @@ private enum AppleWebManagementHTTPReader {
                 let availableBodyBytes = buffer.count - bodyOffset
                 if availableBodyBytes >= contentLength {
                     let bodyData = buffer[bodyOffset ..< bodyOffset + contentLength]
-                    guard let body = String(data: bodyData, encoding: .utf8) else {
-                        throw AppleWebManagementHTTPReadError.malformed
-                    }
-                    return partial.withBody(body)
+                    return partial.withBody(Data(bodyData))
                 }
                 guard buffer.count <= bodyOffset + maxBodyBytes else {
                     throw AppleWebManagementHTTPReadError.tooLarge
@@ -667,7 +1024,7 @@ private enum AppleWebManagementHTTPReader {
 
     private static func receive(from connection: NWConnection) async throws -> (Data?, Bool) {
         try await withCheckedThrowingContinuation { continuation in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { data, _, isComplete, error in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -697,14 +1054,15 @@ private enum AppleWebManagementHTTPReader {
         let query: [String: String]
         let headers: [String: String]
 
-        func withBody(_ body: String) -> AppleWebManagementHTTPRequest {
+        func withBody(_ body: Data) -> AppleWebManagementHTTPRequest {
             AppleWebManagementHTTPRequest(
                 method: method,
                 target: target,
                 path: path,
                 query: query,
                 headers: headers,
-                body: body
+                body: String(data: body, encoding: .utf8) ?? "",
+                rawBody: body
             )
         }
     }
@@ -716,27 +1074,46 @@ private struct AppleWebManagementHTTPResponse: Sendable {
     let body: String
     let contentType: String
     let headers: [String: String]
+    /// Whole `Set-Cookie` values. Kept out of `headers` because that is a
+    /// dictionary and a response legitimately sets more than one cookie.
+    var cookies: [String] = []
 
     static func plain(
         _ code: Int,
         _ status: String,
         _ body: String,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        cookies: [String] = []
     ) -> Self {
-        Self(code: code, status: status, body: body, contentType: "text/plain; charset=utf-8", headers: headers)
+        Self(code: code, status: status, body: body, contentType: "text/plain; charset=utf-8", headers: headers, cookies: cookies)
     }
 
     static func html(
         _ code: Int,
         _ status: String,
         _ body: String,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        cookies: [String] = []
     ) -> Self {
-        Self(code: code, status: status, body: body, contentType: "text/html; charset=utf-8", headers: headers)
+        Self(code: code, status: status, body: body, contentType: "text/html; charset=utf-8", headers: headers, cookies: cookies)
+    }
+
+    static func redirect(_ location: String, headers: [String: String] = [:], cookies: [String] = []) -> Self {
+        var values = headers
+        values["Location"] = location
+        return Self(
+            code: 303,
+            status: "See Other",
+            body: "Continue.",
+            contentType: "text/plain; charset=utf-8",
+            headers: values,
+            cookies: cookies
+        )
     }
 
     func serialized() -> Data {
         let bodyData = Data(body.utf8)
+        let policy = headers["Content-Security-Policy"] ?? "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         var lines = [
             "HTTP/1.1 \(code) \(status)",
             "Content-Type: \(contentType)",
@@ -745,11 +1122,12 @@ private struct AppleWebManagementHTTPResponse: Sendable {
             "Connection: close",
             "X-Content-Type-Options: nosniff",
             "X-Frame-Options: DENY",
-            "Referrer-Policy: no-referrer",
+            "Referrer-Policy: same-origin",
             "Permissions-Policy: camera=(), microphone=(), geolocation=()",
-            "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy: \(policy)",
         ]
-        lines.append(contentsOf: headers.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value)" })
+        lines.append(contentsOf: headers.filter { $0.key != "Content-Security-Policy" }.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value)" })
+        lines.append(contentsOf: cookies.map { "Set-Cookie: \($0)" })
         var response = Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
         response.append(bodyData)
         return response

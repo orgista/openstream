@@ -34,7 +34,7 @@ class PlaybackRoutingTest {
                 listOf(
                     MediaCandidate(
                         id = "nas-1",
-                        sourceName = "ServerPlus",
+                        sourceName = "ExampleNAS",
                         sourceKind = SourceKind.NAS,
                         uri = "smb://server/media/Northstar.mkv",
                         formatLabel = "MKV",
@@ -44,7 +44,7 @@ class PlaybackRoutingTest {
         )
 
         assertEquals("Northstar", request?.title)
-        assertEquals("ServerPlus", request?.subtitle)
+        assertEquals("ExampleNAS", request?.subtitle)
         assertEquals("smb://server/media/Northstar.mkv", request?.uri)
     }
 

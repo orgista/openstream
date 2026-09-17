@@ -432,7 +432,7 @@ fun ConnectionsScreen(
         }
         items(nasConnections, key = { it.id }) { connection ->
             FlatSourceRow(modifier = Modifier.clickable { browsing = connection }) {
-                Icon(AppIcons.Storage, contentDescription = null, tint = OpenStreamColors.Cyan)
+                Icon(AppIcons.Storage, contentDescription = null, tint = OpenStreamColors.Accent)
                 Column(Modifier.weight(1f)) {
                     Text(connection.name, fontWeight = FontWeight.Bold, color = OpenStreamColors.Text)
                     Text("smb://${connection.host}/${connection.share}", fontSize = 13.sp, color = OpenStreamColors.Muted)
@@ -883,10 +883,10 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                             },
                             shape = RoundedCornerShape(8.dp),
                             color = if (host == server.host) OpenStreamColors.SurfaceRaised else OpenStreamColors.Surface,
-                            border = BorderStroke(1.dp, if (host == server.host) OpenStreamColors.Cyan.copy(alpha = 0.5f) else OpenStreamColors.Border),
+                            border = BorderStroke(1.dp, if (host == server.host) OpenStreamColors.Accent.copy(alpha = 0.5f) else OpenStreamColors.Border),
                         ) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(AppIcons.Storage, contentDescription = null, tint = OpenStreamColors.Cyan, modifier = Modifier.size(17.dp))
+                                Icon(AppIcons.Storage, contentDescription = null, tint = OpenStreamColors.Accent, modifier = Modifier.size(17.dp))
                                 Text(server.name, fontWeight = FontWeight.Bold, color = OpenStreamColors.Text, fontSize = 14.sp)
                                 Text(server.host, color = OpenStreamColors.Muted, fontSize = 13.sp)
                             }
@@ -939,7 +939,7 @@ private fun AddNasDialog(store: ConnectionStore, onDone: (Boolean) -> Unit) {
                             onClick = { share = option },
                             shape = RoundedCornerShape(8.dp),
                             color = if (share == option) OpenStreamColors.SurfaceRaised else OpenStreamColors.Surface,
-                            border = BorderStroke(1.dp, if (share == option) OpenStreamColors.Cyan.copy(alpha = 0.5f) else OpenStreamColors.Border),
+                            border = BorderStroke(1.dp, if (share == option) OpenStreamColors.Accent.copy(alpha = 0.5f) else OpenStreamColors.Border),
                         ) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(AppIcons.Folder, contentDescription = null, tint = OpenStreamColors.Muted, modifier = Modifier.size(16.dp))
@@ -1256,7 +1256,7 @@ private fun NasBrowser(
                             Icon(
                                 if (entry.isDirectory) AppIcons.Folder else AppIcons.Play,
                                 contentDescription = null,
-                                tint = if (entry.isDirectory) OpenStreamColors.Muted else OpenStreamColors.Cyan,
+                                tint = if (entry.isDirectory) OpenStreamColors.Muted else OpenStreamColors.Accent,
                                 modifier = Modifier.size(20.dp),
                             )
                             Text(

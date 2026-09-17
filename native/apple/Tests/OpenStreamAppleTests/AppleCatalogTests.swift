@@ -1,6 +1,89 @@
 import Foundation
 import Testing
+
+@Test
+func catalogClientAcceptsCinemetaImdbIDPayloads() async throws {
+    let source = AppleSource(
+        kind: .stremio,
+        name: "Cinemeta",
+        url: URL(string: "https://v3-cinemeta.strem.io/manifest.json")!,
+        resources: ["catalog"],
+        catalogs: [AppleStremioCatalog(type: "movie", id: "top")]
+    )
+    let client = AppleStremioCatalogClient { request in
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        let data = Data(#"{"metas":[{"imdb_id":"tt1234567","type":"movie","name":"Cinemeta Film"}]}"#.utf8)
+        return (data, response)
+    }
+
+    let items = try await client.load(source: source, catalog: source.catalogs[0])
+
+    #expect(items.map(\.mediaID) == ["tt1234567"])
+    #expect(items.first?.name == "Cinemeta Film")
+}
 @testable import OpenStreamApple
+
+@Test func catalogTitleLookupPreservesCatalogOrderForAmbiguousTitles() throws {
+    let source = AppleSource(kind: .stremio, name: "Ordered Catalog",
+                             url: URL(string: "https://catalog.example/manifest.json")!)
+    let catalog = AppleStremioCatalog(type: "movie", id: "ordered")
+    let items = (0..<128).map {
+        AppleCatalogItem(mediaID: "tt\(1_000_000 + $0)", type: "movie", name: "Shared Title")
+    }
+    for order in [items, Array(items.reversed())] {
+        #expect(Set(order.map { AppleMediaIngestion.catalogRecord(instanceID: source.id, item: $0).id }).count == 128)
+        let lookup = AppleCatalogSearchLookup(
+            sections: [.init(source: source, catalog: catalog, items: order)], sources: [source])
+        #expect(lookup.match(title: "shared title", type: "MOVIE")?.item == order.first)
+    }
+}
+
+@Test func catalogCanonicalAvailabilityChoosesFirstEnabledSection() throws {
+    let first = AppleSource(kind: .stremio, name: "First", url: URL(string: "https://first.example/manifest.json")!)
+    let second = AppleSource(kind: .stremio, name: "Second", url: URL(string: "https://second.example/manifest.json")!)
+    var disabled = AppleSource(kind: .stremio, name: "Disabled", url: URL(string: "https://disabled.example/manifest.json")!)
+    disabled.isEnabled = false
+    let catalog = AppleStremioCatalog(type: "movie", id: "popular")
+    let item = AppleCatalogItem(mediaID: "tt100", type: "movie", name: "Shared Title")
+    let sections = [disabled, first, second].map { AppleCatalogSection(source: $0, catalog: catalog, items: [item]) }
+    let lookup = AppleCatalogSearchLookup(sections: sections, sources: [second, disabled, first])
+    let id = AppleMediaIngestion.catalogRecord(instanceID: second.id, item: item).id
+    #expect(lookup.match(for: id)?.source.id == first.id)
+    #expect(lookup.match(title: item.name, type: item.type)?.source.id == first.id)
+}
+
+@Test func catalogSearchLookupBuildsNavigationAndRelatedItemsOncePerSnapshot() throws {
+    let source = AppleSource(
+        kind: .stremio,
+        name: "Fast Catalog",
+        url: URL(string: "https://catalog.example/manifest.json")!,
+        resources: ["catalog"],
+        catalogs: [
+            .init(type: "movie", id: "popular", name: "Popular"),
+            .init(type: "movie", id: "recent", name: "Recent"),
+        ]
+    )
+    let first = AppleCatalogItem(mediaID: "tt100", type: "movie", name: "First")
+    let second = AppleCatalogItem(mediaID: "tt200", type: "movie", name: "Second")
+    let sections = [
+        AppleCatalogSection(source: source, catalog: source.catalogs[0], items: [first, second]),
+        AppleCatalogSection(source: source, catalog: source.catalogs[1], items: [first]),
+    ]
+
+    let lookup = AppleCatalogSearchLookup(sections: sections, sources: [source])
+    let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: second)
+    let match = try #require(lookup.match(for: record.id))
+
+    #expect(match.item == second)
+    #expect(match.source == source)
+    #expect(lookup.relatedItems(for: source.id) == [first, second])
+    #expect(lookup.sourceName(for: record) == "Fast Catalog")
+}
 
 @Test func stremioCatalogClientBuildsTheEndpointAndParsesMediaCards() async throws {
     let source = AppleSource(
@@ -149,6 +232,17 @@ import Testing
     #expect(store.sections[0].sourceName == "Good")
     #expect(store.sections[0].items.map(\.name) == ["Show"])
     #expect(store.partialErrors.count == 1)
+    #expect(store.sourceRefreshReports.count == 2)
+    let goodReport = try #require(store.sourceRefreshReports.first(where: { $0.sourceID == good.id }))
+    #expect(goodReport.itemCount == 1)
+    #expect(goodReport.successfulCatalogCount == 1)
+    #expect(goodReport.failedCatalogCount == 0)
+    #expect(goodReport.failureSummary == nil)
+    let badReport = try #require(store.sourceRefreshReports.first(where: { $0.sourceID == bad.id }))
+    #expect(badReport.itemCount == 0)
+    #expect(badReport.successfulCatalogCount == 0)
+    #expect(badReport.failedCatalogCount == 1)
+    #expect(badReport.failureSummary?.isEmpty == false)
 
     let reloaded = AppleCatalogStore(client: client, cache: AppleCatalogCache(fileURL: cacheURL))
     await reloaded.loadCachedSections(sources: [good, bad])

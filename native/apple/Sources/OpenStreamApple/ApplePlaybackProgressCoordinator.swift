@@ -6,6 +6,9 @@ import Foundation
 @MainActor
 public final class ApplePlaybackProgressCoordinator {
     public let mediaIdentity: String
+    /// The episode (or resolved film id) the saved position belongs to, so a
+    /// series resumes the part it was actually watching.
+    public let partID: String?
 
     private let store: ApplePlaybackStore
     private let saveInterval: Double
@@ -15,10 +18,12 @@ public final class ApplePlaybackProgressCoordinator {
     public init(
         store: ApplePlaybackStore,
         mediaIdentity: String,
+        partID: String? = nil,
         saveInterval: Double = 15
     ) {
         self.store = store
         self.mediaIdentity = mediaIdentity
+        self.partID = partID
         self.saveInterval = max(1, saveInterval)
     }
 
@@ -46,7 +51,7 @@ public final class ApplePlaybackProgressCoordinator {
     }
 
     public func record(position: Double, duration: Double) {
-        store.save(mediaID: mediaIdentity, position: position, duration: duration)
+        store.save(mediaID: mediaIdentity, position: position, duration: duration, partID: partID)
     }
 
     public func markComplete() {

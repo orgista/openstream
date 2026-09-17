@@ -19,5 +19,5 @@ test("Android 12 system splash hands off without showing the OpenStream mark twi
   assert.match(styles, /android:windowSplashScreenAnimationDuration[^<]*>0</);
   assert.doesNotMatch(styles, /@mipmap\/ic_launcher|openstream_launcher_foreground/);
   assert.match(blankIcon, /@android:color\/transparent/);
-  assert.match(colors, /name="openstream_launch_background">#020406</);
+  assert.match(colors, /name="openstream_launch_background">#030303</);
 });

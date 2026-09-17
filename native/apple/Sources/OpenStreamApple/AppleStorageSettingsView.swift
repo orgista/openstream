@@ -113,9 +113,11 @@ struct AppleStorageSettingsView: View {
     @State private var statusMessage: String?
 
     private let maintenance: AppleStorageMaintenance
+    private let embeddedInSplit: Bool
 
-    init(maintenance: AppleStorageMaintenance = AppleStorageMaintenance()) {
+    init(maintenance: AppleStorageMaintenance = AppleStorageMaintenance(), embeddedInSplit: Bool = false) {
         self.maintenance = maintenance
+        self.embeddedInSplit = embeddedInSplit
     }
 
     var body: some View {
@@ -145,12 +147,12 @@ struct AppleStorageSettingsView: View {
 
             if let statusMessage {
                 Section {
-                    Text(statusMessage)
-                        .foregroundStyle(statusMessage == "Done" ? Color.secondary : Color.red)
+                    Label(statusMessage, systemImage: statusMessage == "Done" ? "checkmark.circle" : "exclamationmark.circle")
+                        .foregroundStyle(statusMessage == "Done" ? Color.primary : Color.red)
                 }
             }
         }
-        .navigationTitle("Storage")
+        .appleSettingsPane("Storage", embedded: embeddedInSplit)
         .task {
             snapshot = await maintenance.snapshot()
         }
@@ -202,7 +204,7 @@ struct AppleStorageSettingsView: View {
     }
 
     private func format(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        AppleByteFormatting.string(bytes)
     }
 }
 

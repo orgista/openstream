@@ -1,0 +1,376 @@
+Regular tests executed: 352
+Gated media tests deferred to sequential fixture run: 18
+
+✔ Test negotiatorNeedsConcreteAssetAndTrackEvidence() passed after 0.011 seconds.
+✔ Test stremioEpisodePolicyGroupsAndOrdersSeasonsWithoutLosingSpecials() passed after 0.012 seconds.
+✔ Test playbackProgressOnlyResumesMeaningfulUnfinishedPlayback() passed after 0.021 seconds.
+✔ Test arrClientRejectsInvalidEndpointAndHeaderValueBeforeLoading() passed after 0.021 seconds.
+✔ Test imdbIdentifierDetectionMatchesMoviesAndSeriesEpisodes() passed after 0.021 seconds.
+✔ Test playbackPreparerExecutesGatewayRouteAndReturnsItsPlaybackRequest() passed after 0.021 seconds.
+✔ Test healthOnlySourceChangesDoNotTriggerCatalogRefreshIdentity() passed after 0.021 seconds.
+✔ Test stremioPlaybackClientRetriesTransportErrorsButNotOrdinaryHTTPFailures() passed after 0.022 seconds.
+✔ Test systemArtworkPolicyRejectsCredentialBearingAndUntrustedURLs() passed after 0.021 seconds.
+✔ Test detailSynopsisFallsBackWhenCatalogTextIsEmpty() passed after 0.024 seconds.
+✔ Test iptvStreamProbeRecognizesHLSPlaylistBytes() passed after 0.024 seconds.
+✔ Test appleThirdPartyNoticesAreSortedByName() passed after 0.029 seconds.
+✔ Test appleOfflineStorePersistsSystemDownloadedHLSAssets() passed after 0.029 seconds.
+✔ Test appleThirdPartyNoticesNamesIncludeAetherEngineAndFFmpeg() passed after 0.029 seconds.
+✔ Test externalPlaybackRequiresAPublicHeaderFreeRoute() passed after 0.029 seconds.
+✔ Test iptvStreamProbeRejectsEmptyOrUnauthorizedStreams() passed after 0.034 seconds.
+✔ Test stremioPlaybackResolverReportsUnsupportedOnlyResultsWithoutInspecting() passed after 0.034 seconds.
+✔ Test iptvParserAcceptsBOMCommasAndMakesVariantIDsUnique() passed after 0.035 seconds.
+✔ Test xtreamAPIURLTrimsPaddedUsernameAndPassword() passed after 0.035 seconds.
+✔ Test catalogCacheTracksSixHourFreshnessAndFiltersCurrentConfiguration() passed after 0.035 seconds.
+✔ Test trailerAutoplayHonorsSystemAccessibilityPreferences() passed after 0.035 seconds.
+✔ Test mediaIndexPersistsLikesAndRecommendationsUseThoseSignals() passed after 0.036 seconds.
+✔ Test gatewayCapabilitiesDefaultMissingOptionalSignalsToFalse() passed after 0.036 seconds.
+✔ Test routePolicyRequiresRuntimeSuitabilityAndNeverExportsMatroska() passed after 0.036 seconds.
+✔ Test xtreamChannelUsesRawTSEvenWhenAccountAllowsM3U8() passed after 0.036 seconds.
+✔ Test m3UChannelPlaybackRequestIsLiveAndBypassesTheLoopbackBridge() passed after 0.036 seconds.
+✔ Test dolbyVisionConfigurationParsesNonZeroIndexDataSlices() passed after 0.036 seconds.
+✔ Test appleThirdPartyNoticesEveryTextIsLongerThan200Characters() passed after 0.036 seconds.
+✔ Test stremioStreamingServerEndpointPolicyRequiresProtectedOrLocalTransport() passed after 0.036 seconds.
+✔ Test regionalFilteringRequiresAValidZIPAndUsesLocalLineupMatches() passed after 0.037 seconds.
+✔ Test premierGuideGroupsSortsNumbersAndTrailsOther() passed after 0.037 seconds.
+✔ Test titleRatingsPersistAllThreeStates() passed after 0.038 seconds.
+✔ Test appleOfflineStoreDownloadsWithOnlyApprovedPlaybackHeaders() passed after 0.038 seconds.
+✔ Test stremioPlaybackClientEncodesEachPathSegmentAndParsesHTTPStreams() passed after 0.037 seconds.
+✔ Test appleAssetInspectorSafelyHandlesNonFiniteAndNegativeDimensions() passed after 0.038 seconds.
+✔ Test stremioCandidatePlaybackRequestCopiesProxyHeadersIntoHints() passed after 0.038 seconds.
+✔ Test catalogSearchLookupBuildsNavigationAndRelatedItemsOncePerSnapshot() passed after 0.039 seconds.
+✔ Test catalogRefreshKeepsOpenedSearchTitlesAndFavoritesUntilSourceRemoval() passed after 0.040 seconds.
+✔ Test xtreamClientUsesNativeAPIWhenPlaylistExportsAreUnavailable() passed after 0.039 seconds.
+✔ Test manifestURLPolicyMatchesTheTrustedLANSetupRules() passed after 0.040 seconds.
+✔ Test reloadGateRejectsOverlapAndAllowsTheNextCompletedReload() passed after 0.042 seconds.
+✔ Test unsupportedProjectionBlocksTheRoute() passed after 0.040 seconds.
+✔ Test manifestParsingIsLossyBoundedAndPreservesCatalogExtras() passed after 0.040 seconds.
+✔ Test negotiatorRejectsMalformedGeometryAndRequiresUnknownCodecChecks() passed after 0.040 seconds.
+✔ Test arrClientPreventsRepeatedMovieAndSeriesEnqueues() passed after 0.041 seconds.
+✔ Test stremioStreamingServerCreatesTorrentAndBuildsAppleHLSRoute() passed after 0.040 seconds.
+✔ Test appleThirdPartyNoticesHasAtLeastFiveEntries() passed after 0.040 seconds.
+✔ Test stremioPlaybackClientRetriesTransientStatusesWithBoundedBackoff() passed after 0.041 seconds.
+✔ Test stremioPlaybackDecisionUsesRuntimeEvidenceRatherThanCodecLabels() passed after 0.043 seconds.
+✔ Test remoteImageDecoderBoundsDecodedPixelMemory() passed after 0.050 seconds.
+✔ Test mediaIndexSearchIsDeterministicAndPersistenceContainsNoLocalPath() passed after 0.048 seconds.
+✔ Test libraryScannerFindsOnlySupportedVideoFiles() passed after 0.048 seconds.
+✔ Test stremioMetadataClientLoadsEpisodeIdentitiesForSeriesPlayback() passed after 0.049 seconds.
+✔ Test playbackFailureClassifiesCoreMediaEmptyPlaylistError() passed after 0.049 seconds.
+✔ Test smbEndpointInputAcceptsURLsAndHonorsSeparateShareAndPathFields() passed after 0.048 seconds.
+✔ Test xtreamClientClassifiesRejectedAccounts() passed after 0.049 seconds.
+✔ Test gatewayClientPreservesAnExplicitBasePath() passed after 0.048 seconds.
+✔ Test arrClientRejectsIncompleteQueueConfigurationBeforeLoading() passed after 0.047 seconds.
+✔ Test appleOfflineStoreAtomicallyReplacesAnExistingDownloadAfterValidation() passed after 0.051 seconds.
+✔ Test unknownProjectionMetadataIsNotClassifiedAsFlat() passed after 0.047 seconds.
+✔ Test xtreamClientReportsRejectionStatusInMessage() passed after 0.047 seconds.
+✔ Test webManagementPageIsLeanAndEscapesSubmittedValues() passed after 0.048 seconds.
+✔ Test catalogCacheRejectsContentFromAReconfiguredSourceIdentity() passed after 0.049 seconds.
+✔ Test playbackEngineDefaultsToOpenStreamWhenUnset() passed after 0.051 seconds.
+✔ Test effectiveDVRWindowSecondsIsNilForNonLiveEvenWhenSet() passed after 0.046 seconds.
+✔ Test smbEndpointInputRejectsInvalidValuesAndPreservesBonjourServiceInstances() passed after 0.048 seconds.
+✔ Test stremioCatalogClientBuildsTheEndpointAndParsesMediaCards() passed after 0.048 seconds.
+✔ Test arrClientUsesSonarrStatusEndpointAndBoundsDisplayedFields() passed after 0.048 seconds.
+✔ Test arrClientUsesNativeStatusEndpointAndAPIKeyHeader() passed after 0.046 seconds.
+✔ Test effectiveDVRWindowSecondsDefaultsTo1800ForLiveWhenAbsent() passed after 0.046 seconds.
+✔ Test offlineResolutionKeepsOrderedFallbackCandidates() passed after 0.046 seconds.
+✔ Test liveVisibilityRemovesWestDuplicatesAndNoEventSlots() passed after 0.046 seconds.
+✔ Test stremioPlaybackClientSkipsNetworkForUnavailableResources() passed after 0.046 seconds.
+✔ Test negotiatorNeverTreatsDolbyVisionEligibilityAsAProfileGuarantee() passed after 0.046 seconds.
+✔ Test iptvPolicyAndXtreamEndpointKeepCredentialsOutOfTheBaseURL() passed after 0.047 seconds.
+✔ Test playbackRouteUsesOnlyProvenNativeExportAndRoutesUnreadableContainersExternally() passed after 0.046 seconds.
+✔ Test manifestClientRetriesTransientFailuresButNotPermanentClientErrors() passed after 0.046 seconds.
+✔ Test offlineDownloadPolicyUsesTheProtectedCapabilityWithoutForwardingHeaders() passed after 0.049 seconds.
+✔ Test protectedNonplayableAndUnreadableAssetsNeverUseNativeExport() passed after 0.046 seconds.
+✔ Test playbackIdentityIsStableAndNeverContainsTheSourceValue() passed after 0.046 seconds.
+✔ Test tmdbClientFindsAnIMDBTitleAndSelectsTheBestOfficialTrailer() passed after 0.047 seconds.
+✔ Test iptvParserMapsExtvlcOptOriginOntoRequestHeaders() passed after 0.046 seconds.
+✔ Test diagnosticsSelectTheFirstEnabledStreamCapableAddon() passed after 0.046 seconds.
+✔ Test mediaIndexDoesNotOverwriteANewerVersion() passed after 0.046 seconds.
+✔ Test diagnosticsClassifyAllSupportedAndUnsupportedStreamShapes() passed after 0.046 seconds.
+✔ Test stremioPlaybackClientRejectsOversizedAndInsecureResponses() passed after 0.046 seconds.
+✔ Test streamLabelsBoundAdversarialCombiningScalars() passed after 0.046 seconds.
+✔ Test mediaIndexRefreshPreservesSingleSourceUserState() passed after 0.046 seconds.
+✔ Test directPlaybackInputAcceptsHTTPAndRejectsInvalidOrCredentialBearingLocators() passed after 0.046 seconds.
+✔ Test "Cap exceeded -> 413" passed after 0.046 seconds.
+✔ Test appleOfflineMediaStoreEnforcesSandboxContainment() passed after 0.047 seconds.
+✔ Test dolbyVisionConfigurationRejectsInvalidVersionAndExcessiveSize() passed after 0.046 seconds.
+✔ Test xtreamClientClassifiesNonSuccessStatusAsHTTPStatus() passed after 0.046 seconds.
+✔ Test gatewayEndpointPolicyAllowsHTTPSAndPrivateLiteralHTTPOnly() passed after 0.046 seconds.
+✔ Test appleOfflinePolicyChoosesTheBestDeviceCompatibleVariant() passed after 0.046 seconds.
+✔ Test catalogClientPercentEncodesSegmentsCapsItemsAndTrimsFields() passed after 0.047 seconds.
+✔ Test appleOfflineStoreDetectsAnExtensionlessHLSManifestBeforePersistingIt() passed after 0.046 seconds.
+✔ Test userFacingCopyContainsNoRemovedServiceOrProtocolBranding() passed after 0.055 seconds.
+✔ Test mediaIndexQuarantinesCorruptDataBeforeWritingAgain() passed after 0.047 seconds.
+✔ Test catalogTitleLookupPreservesCatalogOrderForAmbiguousTitles() passed after 0.054 seconds.
+✔ Test diagnosticsAreDisabledWithoutTheLaunchArgument() passed after 0.047 seconds.
+✔ Test "Filename sanitization (../ rejected)" passed after 0.048 seconds.
+✔ Test stremioMetadataClientLoadsTrailerAndOfficialWordmarkAssets() passed after 0.047 seconds.
+✔ Test "Multipart parsing of a two-part body" passed after 0.048 seconds.
+✔ Test stremioPlaybackClientRejectsInvalidSourceIdentityAndPayload() passed after 0.047 seconds.
+✔ Test malformedStreamMembersDoNotDiscardLaterQualityAlternatives() passed after 0.049 seconds.
+✔ Test gatewayClientSendsSessionHeadersAndParsesCapabilities() passed after 0.047 seconds.
+✔ Test playbackRequestEqualityComparesAllFields() passed after 0.047 seconds.
+✔ Test arrClientEnqueuesMovieWithSearchOptionsAndSafeHeaders() passed after 0.047 seconds.
+✔ Test effectiveHeadersProxyHeadersOverrideRequestHeadersOnCollision() passed after 0.047 seconds.
+✔ Test stremioStreamingServerConnectionTestUsesSettingsEndpoint() passed after 0.047 seconds.
+✔ Test liveChannelWithVlcOptUserAgentCarriesHeadersInPlaybackRequestWithUpstreamHost() passed after 0.047 seconds.
+✔ Test arrEndpointPolicyAllowsHTTPSAndPrivateLiteralHTTPOnly() passed after 0.047 seconds.
+✔ Test appleThirdPartyNoticesSourceOfferIsNonEmpty() passed after 0.047 seconds.
+✔ Test playbackPreparerUsesTheInspectedRemoteURLForGatewayFallback() passed after 0.047 seconds.
+✔ Test factoryFallsBackToNativeWhenAetherConstructionThrows() passed after 0.057 seconds.
+✔ Test stremioStreamParsingSeparatesDirectHTTPFromUnsupportedLocators() passed after 0.047 seconds.
+✔ Test hintsDefaultsAreEmpty() passed after 0.045 seconds.
+✔ Test arrClientRejectsRedirectsAndChangedResponseOrigins() passed after 0.045 seconds.
+✔ Test discoveryPolicyRequiresCatalogCapabilitySkipsInputAndAppliesBothLimits() passed after 0.046 seconds.
+✔ Test appleOfflineStoreRejectsEmptyAndUnsupportedRemoteDownloads() passed after 0.048 seconds.
+✔ Test settingsStoreDoesNotDeleteASecretThatFailedToLoad() passed after 0.057 seconds.
+✔ Test smbEndpointPolicyBuildsCredentialFreeServerShareURLs() passed after 0.046 seconds.
+✔ Test arrFallbackAttemptsCandidatesInOrderAndStopsAfterSuccess() passed after 0.045 seconds.
+✔ Test "Tests JSON Loading and preset logic" passed after 0.045 seconds.
+✔ Test offlineResolutionShieldsProviderHeadersBehindTemporaryCapability() passed after 0.045 seconds.
+✔ Test factoryReturnsAetherWithoutFallbackWhenPreferredAndConstructionSucceeds() passed after 0.057 seconds.
+✔ Test dolbyVisionProfile8UsesExplicitBaseLayerCompatibilityBeforeTransferFallback() passed after 0.045 seconds.
+✔ Test "Tests Exact name match" passed after 0.044 seconds.
+✔ Test catalogShelvesSplitProviderNamesByMediaType() passed after 0.044 seconds.
+✔ Test completedOfflineMediaReplaysWithoutConsultingTheNetwork() passed after 0.046 seconds.
+✔ Test "Tests local matching" passed after 0.043 seconds.
+✔ Test "Tests normalization US prefix" passed after 0.044 seconds.
+✔ Test "Tests alias match" passed after 0.044 seconds.
+✔ Test dolbyVisionConfigurationParsesProfileAndFlags() passed after 0.043 seconds.
+✔ Test catalogCanonicalAvailabilityChoosesFirstEnabledSection() passed after 0.043 seconds.
+✔ Test appRouterAcceptsOnlyOpaqueOpenStreamRoutes() passed after 0.043 seconds.
+✔ Test "Tests normalization suffix" passed after 0.045 seconds.
+✔ Test mediaIndexMergesCanonicalAvailabilityAndRemovesOneInstanceTransactionally() passed after 0.048 seconds.
+✔ Test trailerSoundBridgeTransitionsAndIssuesExplicitPlayerCommands() passed after 0.042 seconds.
+✔ Test iptvParserKeepsMetadataHeadersAndSafeRelativeStreams() passed after 0.041 seconds.
+✔ Test "Tests normalization of punctuation" passed after 0.044 seconds.
+✔ Test arrClientLoadsRootFoldersAndQualityProfilesForBothKinds() passed after 0.042 seconds.
+✔ Test cancelledLoadIsNotReportedAsAPlaybackFailure() passed after 0.045 seconds.
+✔ Test arrLibraryLoadsDownloadedMoviesAndSeriesIntoOpaqueMediaRecords() passed after 0.041 seconds.
+✔ Test localMediaIdentityIncludesItsSourceRelativeIdentity() passed after 0.041 seconds.
+✔ Test arrCancellationDoesNotPoisonACompleteRetry() passed after 0.041 seconds.
+✔ Test "Unknown name returns nil" passed after 0.044 seconds.
+✔ Test channelVisibilityHides24x7ByDefaultIncludingSearchInput() passed after 0.040 seconds.
+✔ Test stremioCandidateRankingPrefersBroadlyCompatibleContainersAndKeepsNotWebReady() passed after 0.041 seconds.
+✔ Test stremioStreamParsingHonorsWebReadinessAndSafeProxyHeaders() passed after 0.040 seconds.
+✔ Test mediaIndexPurgesDisabledAndRemovedInstanceAvailability() passed after 0.043 seconds.
+✔ Test webManagementTokenAndTrustRulesMatchTheLANContract() passed after 0.040 seconds.
+✔ Test gatewayClientKeepsPlaybackCredentialsOnTheConfiguredOrigin() passed after 0.040 seconds.
+✔ Test effectiveDVRWindowSecondsUsesExplicitValueWhenProvidedForLive() passed after 0.040 seconds.
+✔ Test tmdbClientKeepsV3CredentialsInTheQueryAndRejectsInvalidIdentifiers() passed after 0.040 seconds.
+✔ Test arrClientFindsExactTitleAndYearForMoviesAndSeries() passed after 0.040 seconds.
+✔ Test iptvStreamProbeRequiresMediaBytesAndPreservesPlaybackHeaders() passed after 0.040 seconds.
+✔ Test cacheReloadUsesTheCallersEffectiveCatalogLimit() passed after 0.042 seconds.
+✔ Test appleOfflineStoreCopiesListsAndRemovesLocalMedia() passed after 0.041 seconds.
+✔ Test webManagementProtocolRequiresItsSessionTokenAndSameOrigin() passed after 0.040 seconds.
+✔ Test offlineResolutionDownloadsOriginalMediaWithoutPlaybackInspection() passed after 0.041 seconds.
+✔ Test appleOfflineStoreRejectsHTTPErrorBodiesWithoutReplacingAnExistingDownload() passed after 0.041 seconds.
+✔ Test playbackPreparerRejectsARemoteGatewaySourceThatWasNotInspected() passed after 0.040 seconds.
+✔ Test gatewayClientCreatesASeparateRemoteURLSessionPayload() passed after 0.040 seconds.
+✔ Test routePolicyRoutesMatroskaAndMPEGTransportStreamDirectly() passed after 0.040 seconds.
+✔ Test failedTransportMigrationNeverOverwritesTheOnlyFullLocator() passed after 0.059 seconds.
+✔ Test stremioMetadataClientFallsBackToDedicatedMetadataAddon() passed after 0.040 seconds.
+✔ Test mediaIndexSearchAppliesItsLimitInStableTitleOrderAcrossReloads() passed after 0.058 seconds.
+✔ Test channelVisibilityKeepsProviderLineupAndHonorsMyChannelsAndPPV() passed after 0.041 seconds.
+✔ Test smbRangeServerParsesBoundedSingleRanges() passed after 0.040 seconds.
+✔ Test xtreamClientClassifiesHTMLBlockPageAsUnexpectedResponse() passed after 0.040 seconds.
+✔ Test xtreamOutputFormatPrefersM3U8WhenAllowedOtherwiseTS() passed after 0.039 seconds.
+✔ Test offlineActionPolicyExcludesEveryLiveTVRoute() passed after 0.039 seconds.
+✔ Test arrClientRejectsOversizedFailedAndMalformedResponses() passed after 0.040 seconds.
+✔ Test stremioSubtitleClientEncodesEpisodeIdentityAndKeepsSafeTracks() passed after 0.040 seconds.
+✔ Test "Xtream parsing and base64 decode" passed after 0.039 seconds.
+✔ Test "Malformed input" passed after 0.039 seconds.
+✔ Test youtubePreviewWaitsForPlayerReadinessAndHandlesBlockedAutoplay() passed after 0.042 seconds.
+✔ Test premierLineupDoesNotRepeatNumbersForHDAndEastVariants() passed after 0.038 seconds.
+✔ Test todaysGuideStartsNearNowAndIncludesTheEvening() passed after 0.038 seconds.
+✔ Test topShelfSnapshotIsBoundedAndUsesOnlyOpaqueDeepLinks() passed after 0.042 seconds.
+✔ Test overlappingAndDuplicateProgrammesDoNotShiftTheTimeline() passed after 0.038 seconds.
+✔ Test captionsPreferenceRoundTripsThroughUserDefaults() passed after 0.059 seconds.
+✔ Test uploadPreservesBytesDoesNotOverwriteAndRejectsUnsafeFiles() passed after 0.042 seconds.
+✔ Test "DoubleUp beats up" passed after 0.027 seconds.
+✔ Test "Resumable wins" passed after 0.026 seconds.
+✔ Test "Down-rated excluded" passed after 0.026 seconds.
+✔ Test "Completed sinks" passed after 0.027 seconds.
+✔ Test "Deterministic across two calls" passed after 0.026 seconds.
+✔ Test "Extracts logo when icon is absent" passed after 0.025 seconds.
+✔ Test "Extracts icon when both icon and logo are present" passed after 0.025 seconds.
+✔ Test "Rejects excessively long URLs" passed after 0.025 seconds.
+✔ Test canonicalIDsRejectMalformedZeroAndCrossSeriesEpisodes() passed after 0.025 seconds.
+✔ Test fakeEngineFailOnLoadThrowsAndSetsFailure() passed after 0.059 seconds.
+✔ Test "Rejects non-HTTPS URLs" passed after 0.025 seconds.
+✔ Test "Genre overlap and recency" passed after 0.027 seconds.
+✔ Test "Extracts from Data" passed after 0.026 seconds.
+✔ Test testClamping() passed after 0.023 seconds.
+✔ Test testGaps() passed after 0.023 seconds.
+✔ Test testNowOffsetAndLabels() passed after 0.023 seconds.
+✔ Test "XMLTV parsing and nowAndNext" passed after 0.039 seconds.
+✔ Test playlistRetainsGuideURLAndProviderChannelID() passed after 0.014 seconds.
+✔ Test factoryReceivesStoredPlaybackEnginePreference() passed after 0.059 seconds.
+✔ Test "Matches Netflix Top 10 dynamic catalogs" passed after 0.010 seconds.
+✔ Test boundedHTTPClientReturnsOnlyTheRequestedMediaProbePrefix() passed after 0.053 seconds.
+✔ Test "Returns nil when neither are present" passed after 0.026 seconds.
+✔ Test "Returns nil for unknown or generic catalogs" passed after 0.010 seconds.
+✔ Test cleanupTombstoneNeverDeletesAnActiveSourcesSecrets() passed after 0.060 seconds.
+✔ Test systemSearchFiltersBeforeApplyingItsResultLimit() passed after 0.043 seconds.
+✔ Suite "AppleWebUploadHandler Tests" passed after 0.062 seconds.
+✔ Test playbackEngineRoundTripsThroughUserDefaults() passed after 0.059 seconds.
+✔ Test channelProjectionFiltersAndGroupsLargeLineupsOutsideTheViewBody() passed after 0.054 seconds.
+✔ Test credentialBearingTransportURLsPersistOnlyInKeychain() passed after 0.059 seconds.
+✔ Suite AppleChannelLineupPresetsTests passed after 0.062 seconds.
+✔ Suite "AppleIPTVGuide Tests" passed after 0.062 seconds.
+✔ Suite "AppleRecommendationRanker Tests" passed after 0.062 seconds.
+✔ Suite "AppleAddonManifestIcon" passed after 0.062 seconds.
+✔ Suite "AppleGuideGridModel Tests" passed after 0.062 seconds.
+✔ Test stremioPlaybackResolverUsesConfiguredServiceForTorrentOnlyResult() passed after 0.062 seconds.
+✔ Test boundedHTTPClientRejectsChunkedOverflowBeforeAccumulatingIt() passed after 0.050 seconds.
+✔ Test networkShareSourceSerializationContainsCredentialReferenceOnly() passed after 0.059 seconds.
+✔ Test stremioPlaybackResolverProtectsHeaderBearingStreamURLs() passed after 0.061 seconds.
+✔ Test spotlightFiltersPrivateRecordsAndOptOutWinsOverAnInFlightExport() passed after 0.061 seconds.
+✔ Test stremioPlaybackResolverRevokesRejectedProtectedCapabilities() passed after 0.051 seconds.
+✔ Test "Matches known catalog IDs to service names" passed after 0.012 seconds.
+✔ Test stremioPlaybackResolverInspectsCandidatesUntilOnePrepares() passed after 0.046 seconds.
+✔ Test stremioPlaybackResolverUsesPlaybackAddonForCatalogOnlyTitles() passed after 0.043 seconds.
+✔ Test stremioPlaybackResolverPassesRejectedRemoteStreamToConfiguredGateway() passed after 0.044 seconds.
+✔ Suite "AppleCatalogServiceName" passed after 0.061 seconds.
+✔ Test stremioPlaybackResolverBoundsConcurrentCandidateInspection() passed after 0.062 seconds.
+✔ Test "Parse inline TSV fixture" passed after 0.018 seconds.
+✔ Suite "AppleNetflixTop10 Tests" passed after 0.061 seconds.
+✔ Test rankedStreamsPreserveAuthenticationFailureAfterEmptyFallback() passed after 0.045 seconds.
+✔ Test metadataSourcesMergeValidEpisodesAndSelectionKeepsEpisodeTarget() passed after 0.002 seconds.
+✔ Suite AppleCanonicalEpisodeTests passed after 0.065 seconds.
+✔ Test diagnosticsClassifyBlockedAndFailedStagesWithFixedCategories() passed after 0.063 seconds.
+✔ Test diagnosticsReturnOnlyStructuredRedactedFields() passed after 0.050 seconds.
+✔ Test diagnosticsFixtureExercisesEveryProductionStage() passed after 0.065 seconds.
+✔ Test addingAnotherLiveSourceNeverReplacesAnExistingPlaylistOrAccount() passed after 0.064 seconds.
+✔ Test rankedStreamsPropagateCallerCancellation() passed after 0.070 seconds.
+✔ Test diagnosticsExposeActionableRedactedStreamCategories() passed after 0.050 seconds.
+✔ Test sourceDiagnosticsRedactURLsCredentialsAndBodyFields() passed after 0.067 seconds.
+✔ Test playbackStoreUsesOpaqueKeysAndThirtySecondCompletionThreshold() passed after 0.069 seconds.
+✔ Test revokingOneSMBPlaybackCancelsItsReadWithoutClosingOtherSessions() passed after 0.081 seconds.
+✔ Test netflixStreamingParserKeepsOnlyNewestWeekWithUnsortedRows() passed after 0.076 seconds.
+✔ Test catalogClientFetchesParsesAndAuditsLoopbackFixtures() passed after 0.061 seconds.
+✔ Test catalogClientRejectsInvalidSourceAndUnsafeEndpointInputs() passed after 0.001 seconds.
+✔ Suite AppleCatalogFixtureTests passed after 0.094 seconds.
+✔ Test diagnosticsClassifyTimeoutsWithoutLeakingTheError() passed after 0.086 seconds.
+✔ Test channelManagerPreferencesPersistLocally() passed after 0.091 seconds.
+✔ Test guideFavoritesAreRealAndChannelsBeyondThreeHundredRemainReachable() passed after 0.075 seconds.
+✔ Suite AppleGuideRegressionTests passed after 0.098 seconds.
+✔ Test fallbackOrderingMergesRicherFieldsAndPreservesIdentity() passed after 0.078 seconds.
+✔ Test manifestClientFetchAndValidationMatrix() passed after 0.049 seconds.
+✔ Test manifestURLPolicyRejectsUnsafeAndUnsupportedForms() passed after 0.001 seconds.
+✔ Suite AppleManifestFixtureTests passed after 0.098 seconds.
+✔ Test iptvAndLibrarySourcesPersistWithoutLeakingCredentialsIntoURLs() passed after 0.093 seconds.
+✔ Test factoryReturnsNativeWithoutFallbackWhenNativeIsPreferred() passed after 0.093 seconds.
+✔ Test networkShareDefaultsAreEmptyAndNoProductionPresetExists() passed after 0.096 seconds.
+✔ Test remoteImageCacheDeduplicatesConcurrentLoads() passed after 0.108 seconds.
+✔ Test customPackageStartsWithEastFeedAndPersistsChannelAndGroupOverrides() passed after 0.107 seconds.
+✔ Test protectedPlaybackServerReturnsBadGatewayForEmptyUpstreamPlaylist() passed after 0.113 seconds.
+✔ Test networkShareSourcePersistsCredentialsOnlyInTheCredentialStore() passed after 0.110 seconds.
+✔ Test preparedPlaybackIsDirectlyConsumableByThePlayerSession() passed after 0.110 seconds.
+✔ Test protectedPlaybackServerFollowsSameOriginRedirectKeepingReferer() passed after 0.115 seconds.
+✔ Test protectedPlaybackServerKeepsChildURLsStableAcrossIdenticalRefreshes() passed after 0.138 seconds.
+✔ Test protectedPlaybackServerFollowsCrossOriginRedirectDroppingSensitiveHeaders() passed after 0.123 seconds.
+✔ Test protectedPlaybackServerScopesChildURLsToTheirOwnSession() passed after 0.141 seconds.
+✔ Test protectedPlaybackServerServesConcurrentRequestsForTheSameChildURL() passed after 0.139 seconds.
+✔ Test protectedPlaybackServerKeepsChildURLsStableWhenLivePlaylistSlidesByOne() passed after 0.135 seconds.
+✔ Test protectedPlaybackServerStickyPlaylistOriginSurvivesLoadBalancedRedirects() passed after 0.149 seconds.
+✔ Test protectedPlaybackServerResolvesRelativeChildURIsAgainstTheFinalRedirectedURL() passed after 0.132 seconds.
+✔ Test failedLegacyCredentialMigrationPreservesTheOriginalBlob() passed after 0.138 seconds.
+✔ Test captionsAutoOnMigratesToAlways() passed after 0.139 seconds.
+✔ Test protectedPlaybackServerFallsBackToOriginalPanelURLWhenStickyURLFails() passed after 0.135 seconds.
+✔ Test playbackCoordinatorReportsStagesAndClassifiesActionableFailures() passed after 0.138 seconds.
+✔ Test engineFellBackToNativeStartsFalseAndIsNotPersisted() passed after 0.139 seconds.
+✔ Test overlayTimeFormattingRejectsNonFiniteAndOverflowingValues() passed after 0.139 seconds.
+✔ Test failedSourceSecretCleanupKeepsARetryTombstone() passed after 0.140 seconds.
+✔ Test sourceStoreLossilyRetainsKnownSourcesWhenAFutureKindExists() passed after 0.143 seconds.
+✔ Test rankedStreamsCancelSlowProviderAndTryNextWithinOverallBudget() passed after 0.144 seconds.
+✔ Test protectedPlaybackServerStreamsLargeBodyWithBackpressureAndTearsDownWhenRevoked() passed after 0.175 seconds.
+✔ Test stalledSMBReadTimesOutReleasesConnectionAndAllowsRetry() passed after 0.172 seconds.
+✔ Test protectedPlaybackServerRetainsResourcesAcrossMasterPlaylistVariants() passed after 0.185 seconds.
+✔ Test protectedPlaybackServerBoundsRollingHistoryWithoutEvictingCurrentSegments() passed after 0.184 seconds.
+✔ Test missingInstalledMetadataUsesDefaultAndCancelsSlowPreferredSource() passed after 0.105 seconds.
+✔ Suite AppleMetadataResolverTests passed after 0.206 seconds.
+✔ Test sourceStorePersistsAndDeduplicatesManifests() passed after 0.204 seconds.
+✔ Test captionsPreferenceDefaultsToOffWhenUnset() passed after 0.204 seconds.
+✔ Test offlineDownloadBuildsAFilesRequestAndPlaysThroughTheEngine() passed after 0.203 seconds.
+✔ Test importedLibraryRelocationPreservesExternalAndBookmarkedFolders() passed after 0.205 seconds.
+✔ Test playbackEngineFallsBackToOpenStreamForInvalidStoredValue() passed after 0.205 seconds.
+✔ Test catalogStoreHasNoBuiltInContentWhenNoSourcesExist() passed after 0.225 seconds.
+✔ Test skipLiveWithoutDvrIsNoOp() passed after 0.181 seconds.
+✔ Test scrubForwardsSeekToEngine() passed after 0.181 seconds.
+✔ Test skipForwardsSeeksClamped() passed after 0.181 seconds.
+✔ Test skipClampsToEnd() passed after 0.181 seconds.
+✔ Test importedLibraryRelocatesAfterSandboxChangeWithoutLosingIdentity() passed after 0.220 seconds.
+✔ Test playbackCoordinatorResetDetachesFailureReporting() passed after 0.227 seconds.
+✔ Test webManagementFallsBackWhenThePreferredPortIsOccupied() passed after 0.229 seconds.
+✔ Test slowObserverHasBoundedBufferAndRetainsTheLatestPosition() passed after 0.216 seconds.
+✔ Test validatedManifestReplacesTheSameProviderIdentityAndKeepsCapabilities() passed after 0.257 seconds.
+✔ Test postStartPlayerFailureReachesTheUserVisibleCoordinator() passed after 0.241 seconds.
+✔ Test fakeEngineEmitsScriptedPhasesInOrderAndEndsOnLastPhase() passed after 0.257 seconds.
+✔ Test freshCompleteCachePreventsAnAutomaticNetworkRefresh() passed after 0.279 seconds.
+✔ Test routeSurfaceIsMirrored() passed after 0.257 seconds.
+✔ Test pausedPhaseMapsToPaused() passed after 0.257 seconds.
+✔ Test loadingPhaseMapsToLoading() passed after 0.257 seconds.
+✔ Test playingPhaseMapsToPlaying() passed after 0.257 seconds.
+✔ Test routeAvPlayerIsMirrored() passed after 0.257 seconds.
+✔ Test loadFailureSetsFailedPhase() passed after 0.257 seconds.
+✔ Test rebufferingMapsToWaitingBuffering() passed after 0.257 seconds.
+✔ Test stalledReconnectingMapsToWaitingReconnecting() passed after 0.258 seconds.
+✔ Test authenticationFailureKeepsItsActionableReasonWithAlternatives() passed after 0.257 seconds.
+✔ Test endedNonLiveMapsToEnded() passed after 0.257 seconds.
+✔ Test interruptionsResumeOnlyPlaybackThatWasPlaying() passed after 0.248 seconds.
+✔ Test timeTextClampsNegativeToZero() passed after 0.246 seconds.
+✔ Test selectSubtitleForwardsIdToEngine() passed after 0.246 seconds.
+✔ Test avPlayerRouteShowsAirPlayAndPiP() passed after 0.246 seconds.
+✔ Test selectAudioForwardsToEngine() passed after 0.246 seconds.
+✔ Test surfaceRouteHidesAirPlayAndPiP() passed after 0.246 seconds.
+✔ Test vodWithDurationIsScrubbable() passed after 0.246 seconds.
+✔ Test nextEpisodeNilHidesAction() passed after 0.243 seconds.
+✔ Test timeTextFormatsHoursMinutesSeconds() passed after 0.245 seconds.
+✔ Test liveWithDvrIsScrubbable() passed after 0.246 seconds.
+✔ Suite ApplePlayerHostTests passed after 0.289 seconds.
+✔ Test ccStateFlagReflectsSubtitleSelection() passed after 0.246 seconds.
+✔ Test liveWithoutDvrHasEmptyPositionText() passed after 0.246 seconds.
+✔ Test selectSubtitleNilForwardsToEngine() passed after 0.246 seconds.
+✔ Test timeTextFormatsMinutesSeconds() passed after 0.246 seconds.
+✔ Test liveWithoutDvrIsNotScrubbable() passed after 0.246 seconds.
+✔ Test surfaceRouteShowsOverlay() passed after 0.246 seconds.
+✔ Test rankedStreamsEnforceOverallDeadlineAndCancelOutstandingRequests() passed after 0.290 seconds.
+✔ Test stremioCandidateFallbackTriesNextAfterUnsupportedMediaThenPlays() passed after 0.290 seconds.
+✔ Test stopInvalidatesAnInFlightLoadAndRetry() passed after 0.260 seconds.
+✔ Test stremioCandidateFallbackReportsUnsupportedMediaWhenAllCandidatesFail() passed after 0.275 seconds.
+✔ Test supersededLoadFailureCannotReplaceNewPlayback() passed after 0.260 seconds.
+✔ Test aSlowerOldRefreshCannotOverwriteANewerConfiguration() passed after 0.273 seconds.
+✔ Test catalogStoreKeepsSuccessfulSectionsWhenAnotherSourceFails() passed after 0.329 seconds.
+✔ Test surfaceWaitingShowsIndicatorWithAccessibilityLabel() passed after 0.292 seconds.
+✔ Test coordinatorDoesNotRetainItselfWhileObserving() passed after 0.306 seconds.
+✔ Test newerQueryCancelsNetworkWorkAndCannotBeOverwritten() passed after 0.331 seconds.
+✔ Test webManagementRejectsInvalidHTTPRequests() passed after 0.342 seconds.
+✔ Test cancelledObserversAreRemovedAndDoNotAccumulateOnChannelSwitches() passed after 0.331 seconds.
+✔ Suite ApplePlaybackEventStreamTests passed after 0.346 seconds.
+✔ Test webUploadStreamsAuthenticatedBytesAndRegistersTheLibraryFolder() passed after 0.344 seconds.
+✔ Test webManagementExpiresAndReleasesItsListener() passed after 0.363 seconds.
+✔ Test timeoutFiresWhenPlayingNotReached() passed after 0.341 seconds.
+✔ Test failureEventSetsFailedPhase() passed after 0.341 seconds.
+✔ Test webManagementLoopbackServesAndPersistsOneManifest() passed after 0.367 seconds.
+✔ Test asynchronousCandidateFailureTriesTheNextStream() passed after 0.358 seconds.
+✔ Test protectedPlaybackServerPreservesEveryResourceInLongOnDemandPlaylist() passed after 0.392 seconds.
+✔ Test avPlayerRouteHidesOverlayAndWaitingIndicator() passed after 0.397 seconds.
+✔ Suite AppleTransportOverlayModelTests passed after 0.440 seconds.
+✔ Test progressWritesAreThrottledOnSurfaceRoute() passed after 0.416 seconds.
+✔ Test searchIsConcurrentBoundedDeduplicatedAndPartiallySuccessful() passed after 0.132 seconds.
+✔ Suite AppleCatalogSearchPipelineTests passed after 0.475 seconds.
+✔ Test sourceQualifiedChannelIDsResolveGuideAndConfigurationsStaySeparate() passed after 0.429 seconds.
+✔ Test testVisibleRefreshAndCacheExpiry() passed after 0.430 seconds.
+✔ Suite "AppleIPTVGuideStore Tests" passed after 0.475 seconds.
+✔ Test progressIsMonotonicAndCompletionIsAtomic() passed after 0.468 seconds.
+✔ Test liveEndedRetriesOnceThenFailsOnSecondEnded() passed after 0.483 seconds.
+✔ Suite ApplePlaybackCoordinatorTests passed after 0.514 seconds.
+✔ Test catalogRefreshBoundsConcurrentFanOutAndTotalQueuedRequests() passed after 0.556 seconds.
+✔ Test smbRangeBridgeMeasuresSeekStartupAndReleasesItsListener() passed after 1.010 seconds.
+✔ Test pauseRetainsBytesAndResumeUsesHTTPRange() passed after 1.848 seconds.
+✔ Test invalidResumeResponseSafelyRestartsFromZero() passed after 1.942 seconds.
+✔ Test cancellationRemovesPartialAndNeverPublishesARecord() passed after 0.016 seconds.
+✔ Test timeoutMapsToActionableFailureAndRetryCompletes() passed after 1.007 seconds.
+✔ Test localDownloadPlatformPolicyRejectsTVAndVision() passed after 0.001 seconds.
+✔ Suite AppleOfflineDownloadCoordinatorTests passed after 5.300 seconds.
+✔ Test run with 370 tests in 20 suites passed after 5.301 seconds.

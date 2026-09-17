@@ -4,7 +4,11 @@ import Observation
 @MainActor
 @Observable
 public final class AppleWebManagementController: AppleWebManagementServing {
-    public private(set) var session: AppleWebManagementSession?
+    public private(set) var session: AppleWebManagementSession? {
+        didSet {
+            for observer in sessionObservers.values { observer.yield(session) }
+        }
+    }
     public private(set) var error: String?
     public private(set) var isRunning = false
 
@@ -13,10 +17,26 @@ public final class AppleWebManagementController: AppleWebManagementServing {
     @ObservationIgnored private let configuration: AppleWebManagementServer.Configuration
     @ObservationIgnored private let manifestClient: AppleManifestClient
     @ObservationIgnored private var server: AppleWebManagementServer?
+    @ObservationIgnored private var sessionObservers: [
+        UUID: AsyncStream<AppleWebManagementSession?>.Continuation
+    ] = [:]
 
     public init() {
         configuration = .init()
         manifestClient = AppleManifestClient()
+    }
+
+    public func sessionUpdates() -> AsyncStream<AppleWebManagementSession?> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            sessionObservers[id] = continuation
+            continuation.yield(session)
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    self?.sessionObservers.removeValue(forKey: id)
+                }
+            }
+        }
     }
 
     init(

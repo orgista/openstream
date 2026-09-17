@@ -258,7 +258,7 @@ fun MediaCard(
                         .align(Alignment.BottomStart)
                         .fillMaxWidth(item.progressPercent / 100f)
                         .height(3.dp)
-                        .background(OpenStreamColors.Cyan),
+                        .background(OpenStreamColors.Accent),
                 )
             }
         }

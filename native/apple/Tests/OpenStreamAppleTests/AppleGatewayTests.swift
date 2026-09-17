@@ -208,8 +208,11 @@ import Testing
         )
     )
 
-    #expect(prepared.route == .gatewayTranscode(sourceURL))
-    #expect(prepared.url.absoluteString == "https://gateway.example/api/transcode/media?transcodeId=ffffffffffffffffffffffffffffffff")
+    // The engine demuxes Matroska in-app; the gateway is no longer on the
+    // playback path for it, so the prepared route is direct and the gateway
+    // session is never created.
+    #expect(prepared.route == .direct(sourceURL))
+    #expect(prepared.url == sourceURL)
     #expect(prepared.requestHeaders.isEmpty)
 }
 
@@ -231,17 +234,20 @@ import Testing
         protectedContent: false
     )
 
-    await #expect(throws: ApplePlaybackPreparationError.gatewaySourceMismatch) {
-        try await ApplePlaybackPreparer(gatewayClient: client).prepare(
-            sourceURL: inspectedURL,
-            decision: .init(support: .unsupported, reasons: ["runtime decoder rejected the asset"]),
-            inspectedAsset: inspection,
-            gatewayRequest: .init(
-                config: config,
-                source: .remoteURL(differentURL),
-                maximumWidth: 1920,
-                maximumHeight: 1080
-            )
+    // The engine demuxes Matroska in-app, so the gateway source is no longer
+    // consulted and a mismatched remote source is not rejected: the inspected
+    // Matroska URL is returned for direct playback.
+    let prepared = try await ApplePlaybackPreparer(gatewayClient: client).prepare(
+        sourceURL: inspectedURL,
+        decision: .init(support: .unsupported, reasons: ["runtime decoder rejected the asset"]),
+        inspectedAsset: inspection,
+        gatewayRequest: .init(
+            config: config,
+            source: .remoteURL(differentURL),
+            maximumWidth: 1920,
+            maximumHeight: 1080
         )
-    }
+    )
+    #expect(prepared.route == .direct(inspectedURL))
+    #expect(prepared.url == inspectedURL)
 }

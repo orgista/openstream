@@ -20,8 +20,8 @@ class LibraryFolderLinkPolicyTest {
 
     @Test
     fun `a folder whose connection exists is left untouched`() {
-        val connections = listOf(connection("abc", "ServerPlus"))
-        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("abc", "ServerPlus")), connections)
+        val connections = listOf(connection("abc", "ExampleNAS"))
+        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("abc", "ExampleNAS")), connections)
         assertFalse(result.changed)
         assertTrue(result.orphaned.isEmpty())
         assertEquals("abc", result.folders.single().connectionId)
@@ -29,18 +29,18 @@ class LibraryFolderLinkPolicyTest {
 
     @Test
     fun `a stale connection id relinks to the uniquely matching share name`() {
-        val connections = listOf(connection("new-id", "ServerPlus"))
-        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "serverplus ")), connections)
+        val connections = listOf(connection("new-id", "ExampleNAS"))
+        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ExampleNAS ")), connections)
         assertTrue(result.changed)
         assertTrue(result.orphaned.isEmpty())
         assertEquals("new-id", result.folders.single().connectionId)
         // The canonical share name from the connection replaces the stored one.
-        assertEquals("ServerPlus", result.folders.single().connectionName)
+        assertEquals("ExampleNAS", result.folders.single().connectionName)
     }
 
     @Test
     fun `with no connections at all the folder is reported orphaned`() {
-        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ServerPlus")), emptyList())
+        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ExampleNAS")), emptyList())
         assertFalse(result.changed)
         assertEquals(1, result.orphaned.size)
         // Left in place so the viewer can reconnect the share instead of losing the folder.
@@ -49,8 +49,8 @@ class LibraryFolderLinkPolicyTest {
 
     @Test
     fun `an ambiguous share name is never guessed`() {
-        val connections = listOf(connection("id-1", "ServerPlus"), connection("id-2", "ServerPlus"))
-        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ServerPlus")), connections)
+        val connections = listOf(connection("id-1", "ExampleNAS"), connection("id-2", "ExampleNAS"))
+        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ExampleNAS")), connections)
         assertFalse(result.changed)
         assertEquals(1, result.orphaned.size)
     }
@@ -58,17 +58,17 @@ class LibraryFolderLinkPolicyTest {
     @Test
     fun `a different share name stays orphaned`() {
         val connections = listOf(connection("id-1", "Backup"))
-        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ServerPlus")), connections)
+        val result = LibraryFolderLinkPolicy.resolve(listOf(folder("stale-id", "ExampleNAS")), connections)
         assertEquals(1, result.orphaned.size)
-        assertTrue(LibraryFolderLinkPolicy.isOrphaned(folder("stale-id", "ServerPlus"), connections))
+        assertTrue(LibraryFolderLinkPolicy.isOrphaned(folder("stale-id", "ExampleNAS"), connections))
     }
 
     @Test
     fun `mixed folders resolve independently`() {
-        val connections = listOf(connection("live", "ServerPlus"))
+        val connections = listOf(connection("live", "ExampleNAS"))
         val folders = listOf(
-            folder("live", "ServerPlus"),
-            folder("stale", "ServerPlus").copy(id = "folder-2"),
+            folder("live", "ExampleNAS"),
+            folder("stale", "ExampleNAS").copy(id = "folder-2"),
             folder("gone", "OldNas").copy(id = "folder-3"),
         )
         val result = LibraryFolderLinkPolicy.resolve(folders, connections)

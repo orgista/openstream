@@ -54,7 +54,7 @@ import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val LaunchBackground = Color(0xFF020406)
+private val LaunchBackground = Color(0xFF030303)
 private val LaunchMark = Color(0xFFF5F8F9)
 private val LaunchSweep = Color(0xFFEAFEFF)
 private val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
@@ -148,7 +148,7 @@ private fun OpenStreamLaunchStage(elapsedMillis: Int, animatorsEnabled: Boolean)
                 val glowRadius = size.minDimension * LaunchBarEffectPolicy.ambientRadiusFraction
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF384046).copy(alpha = glowAlpha), Color.Transparent),
+                        colors = listOf(Color(0xFF3E3A34).copy(alpha = glowAlpha), Color.Transparent),
                         center = Offset(size.width * 0.5f, size.height * 0.44f),
                         radius = glowRadius,
                     ),

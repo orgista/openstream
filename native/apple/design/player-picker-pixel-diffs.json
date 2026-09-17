@@ -1,0 +1,422 @@
+[
+  {
+    "device": "ipad",
+    "title": "whisper",
+    "series": "visible-ipad",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 50.274,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "whisper",
+    "series": "visible-ipad",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 7.848,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "whisper",
+    "series": "visible-ipad",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 47.293,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "whisper",
+    "series": "visible-ipad",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 23.339,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "whisper",
+    "series": "visible-ipad",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 57.161,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "psycho",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 55.381,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "psycho",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 0.837,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "psycho",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 45.497,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "psycho",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 30.579,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "psycho",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 114.736,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "2073",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 90.405,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "2073",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 0.0,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "2073",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 63.033,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "2073",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 75.787,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "ipad",
+    "title": "2073",
+    "series": "visible-ipad-rest",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 78.65,
+    "crop": [
+      166,
+      242,
+      1501,
+      2178
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "psycho",
+    "series": "visible-iphone",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 59.263,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "psycho",
+    "series": "visible-iphone",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 2.434,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "psycho",
+    "series": "visible-iphone",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 52.831,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "psycho",
+    "series": "visible-iphone",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 45.518,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "psycho",
+    "series": "visible-iphone",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 101.059,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "whisper",
+    "series": "visible-iphone",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 0.0,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "whisper",
+    "series": "visible-iphone",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 51.795,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "whisper",
+    "series": "visible-iphone",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 48.489,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "whisper",
+    "series": "visible-iphone",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 16.599,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "whisper",
+    "series": "visible-iphone",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 65.909,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "2073",
+    "series": "visible-iphone",
+    "fromSeconds": 3,
+    "toSeconds": 6,
+    "meanAbsoluteRGBDelta": 85.142,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "2073",
+    "series": "visible-iphone",
+    "fromSeconds": 6,
+    "toSeconds": 10,
+    "meanAbsoluteRGBDelta": 62.932,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "2073",
+    "series": "visible-iphone",
+    "fromSeconds": 10,
+    "toSeconds": 20,
+    "meanAbsoluteRGBDelta": 44.728,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "2073",
+    "series": "visible-iphone",
+    "fromSeconds": 20,
+    "toSeconds": 30,
+    "meanAbsoluteRGBDelta": 77.537,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  },
+  {
+    "device": "iphone",
+    "title": "2073",
+    "series": "visible-iphone",
+    "fromSeconds": 30,
+    "toSeconds": 40,
+    "meanAbsoluteRGBDelta": 78.961,
+    "crop": [
+      48,
+      235,
+      1085,
+      943
+    ]
+  }
+]

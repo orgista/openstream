@@ -1,0 +1,34 @@
+{
+  "manifestScope": "Sources and Apps files, Swift tests, Package.swift and Package.resolved; excludes SMB temporary files and Xcode user data",
+  "sourceFileCount": 227,
+  "sourceManifestSHA256": "7d42f67e43964b4bc2c7d0f3f5875a1a5cde1265a5e023808edd40973da84eaf",
+  "changedSinceBuild8": [
+    "Sources/OpenStreamApple/AetherPlaybackEngine.swift",
+    "Sources/OpenStreamApple/AppleDiscoverView.swift",
+    "Sources/OpenStreamApple/AppleIPTV.swift",
+    "Sources/OpenStreamApple/AppleLibrary.swift",
+    "Sources/OpenStreamApple/AppleLibraryTV.swift",
+    "Sources/OpenStreamApple/AppleLibraryTVView.swift",
+    "Sources/OpenStreamApple/AppleMediaSourceViews.swift",
+    "Sources/OpenStreamApple/AppleNetworkShare.swift",
+    "Sources/OpenStreamApple/ApplePlaybackPreparer.swift",
+    "Sources/OpenStreamApple/ApplePlaybackRequest.swift",
+    "Sources/OpenStreamApple/AppleSMBLibraryScanner.swift",
+    "Sources/OpenStreamApple/AppleSourcesSettingsView.swift",
+    "Sources/OpenStreamApple/AppleTransportOverlay.swift",
+    "Sources/OpenStreamApple/AppleYouTubePreviewHTML.swift",
+    "Sources/OpenStreamApple/NativePlaybackEngine.swift",
+    "Sources/OpenStreamApple/OpenStreamRootView.swift",
+    "Tests/OpenStreamAppleTests/AppleCatalogSearchPipelineTests.swift",
+    "Tests/OpenStreamAppleTests/AppleIPTVAndLibraryTests.swift",
+    "Tests/OpenStreamAppleTests/AppleLibraryTVTests.swift",
+    "Tests/OpenStreamAppleTests/AppleMetadataClientTests.swift",
+    "Tests/OpenStreamAppleTests/ApplePausedPlaybackFixtureTests.swift",
+    "Tests/OpenStreamAppleTests/ApplePlaybackEngineFixtureTests.swift",
+    "Tests/OpenStreamAppleTests/AppleSMBLibraryScannerTests.swift"
+  ],
+  "platformMatrixDifferences": [
+    "Sources/OpenStreamApple/AetherPlaybackEngine.swift",
+    "Sources/OpenStreamApple/AppleMediaSourceViews.swift"
+  ]
+}

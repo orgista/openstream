@@ -60,13 +60,13 @@ import Testing
             isExportable: true,
             isProtected: false
         )
-    ) == .requiresExternalDemux(localMKV))
+    ) == .direct(localMKV))
 
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: remoteMKV,
         decision: unsupported,
         gatewayConfigured: true
-    ) == .gatewayTranscode(remoteMKV))
+    ) == .direct(remoteMKV))
 }
 
 @Test func protectedNonplayableAndUnreadableAssetsNeverUseNativeExport() {
@@ -181,9 +181,36 @@ import Testing
         )
     )
 
-    #expect(prepared.route == .gatewayTranscode(sourceURL))
-    #expect(prepared.url.absoluteString == "https://gateway.example/api/transcode/media?transcodeId=cccccccccccccccccccccccccccccccc")
+    // The engine demuxes Matroska in-app; the gateway is no longer on the
+    // playback path for it, so the prepared route is direct.
+    #expect(prepared.route == .direct(sourceURL))
+    #expect(prepared.url == sourceURL)
     #expect(prepared.requestHeaders.isEmpty)
+}
+
+@Test func routePolicyRoutesMatroskaAndMPEGTransportStreamDirectly() {
+    let localMKV = URL(fileURLWithPath: "/tmp/movie.mkv")
+    let localTS = URL(fileURLWithPath: "/tmp/movie.ts")
+    let remoteTS = URL(string: "https://media.example/live.ts")!
+    let unsupported = OpenStreamPlaybackDecision(support: .unsupported, reasons: ["container"])
+
+    #expect(ApplePlaybackRoutePolicy.route(
+        sourceURL: localMKV,
+        decision: unsupported,
+        gatewayConfigured: true
+    ) == .direct(localMKV))
+
+    #expect(ApplePlaybackRoutePolicy.route(
+        sourceURL: localTS,
+        decision: unsupported,
+        gatewayConfigured: true
+    ) == .direct(localTS))
+
+    #expect(ApplePlaybackRoutePolicy.route(
+        sourceURL: remoteTS,
+        decision: unsupported,
+        gatewayConfigured: true
+    ) == .direct(remoteTS))
 }
 
 @MainActor
@@ -192,14 +219,43 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let url = URL(fileURLWithPath: "/tmp/prepared-movie.mp4")
-    let prepared = ApplePreparedPlayback(route: .direct(url), url: url)
+    let prepared = ApplePreparedPlayback(
+        route: .direct(url),
+        url: url,
+        requestHeaders: ["User-Agent": "OpenStream-IPTV", "Referer": "https://provider.example/"]
+    )
     let session = ApplePlayerSession(
         preparedPlayback: prepared,
         progressStore: ApplePlaybackStore(defaults: defaults)
     )
     defer { session.stop(saveProgress: false) }
 
-    #expect(prepared.requestHeaders.isEmpty)
+    #expect(session.requestHeaders == prepared.requestHeaders)
     #expect(session.player.currentItem === session.playerItem)
     #expect(ApplePlaybackIdentity.isStorageKey(session.mediaIdentity))
+}
+
+@MainActor
+@Test func playbackCoordinatorReportsStagesAndClassifiesActionableFailures() {
+    let coordinator = ApplePlaybackCoordinator()
+
+    coordinator.beginResolving()
+    #expect(coordinator.phase == .resolving)
+    coordinator.update(.loading)
+    #expect(coordinator.phase == .loading)
+    coordinator.update(.loading)
+    #expect(coordinator.phase == .loading)
+
+    let authentication = coordinator.fail(AppleIPTVError.requestFailed(403))
+    #expect(authentication.kind == .authentication)
+    #expect(authentication.message.contains("HTTP 403"))
+    #expect(coordinator.phase == .failed(authentication))
+
+    let unsupported = ApplePlaybackFailure.classify(URLError(.cannotDecodeContentData))
+    #expect(unsupported.kind == .unsupportedMedia)
+    #expect(unsupported.message.contains("cannot be played directly") || unsupported.message.contains("Transcode Gateway"))
+
+    let network = ApplePlaybackFailure.classify(URLError(.cannotConnectToHost))
+    #expect(network.kind == .network)
+    #expect(network.message.contains("network"))
 }

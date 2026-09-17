@@ -1,0 +1,7 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="ts1" group-title="Test",TS Channel
+http://127.0.0.1:8765/media/test.ts
+#EXTINF:-1 tvg-id="hls1" group-title="Test",HLS Channel
+http://127.0.0.1:8765/media/hls/index.m3u8
+#EXTINF:-1 tvg-id="mp41" group-title="Test",MP4 Channel
+http://127.0.0.1:8765/media/test.mp4

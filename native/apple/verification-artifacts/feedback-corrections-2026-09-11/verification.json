@@ -1,0 +1,195 @@
+{
+  "status": "Local fixes verified within recorded scope; release held for remaining hardware acceptance",
+  "releaseHold": true,
+  "archived": false,
+  "uploaded": false,
+  "lastDeliveredBuild": "1.0 (8)",
+  "sourceFileCount": 227,
+  "sourceManifestSHA256": "7d42f67e43964b4bc2c7d0f3f5875a1a5cde1265a5e023808edd40973da84eaf",
+  "regularTestsExecuted": 397,
+  "regularReportEntries": 417,
+  "regularGatedTestsSkipped": 20,
+  "realMediaTests": [
+    {
+      "name": "aetherPlaysH264AacMP4OverRemoteBypassRoute",
+      "passed": true,
+      "logSHA256": "9361fe329e5841c6e2854dc4cf6dd2373bc81c62167c7111903ac564fd0ecb23"
+    },
+    {
+      "name": "aetherPlaysH264AacMKVOverLoopbackRoute",
+      "passed": true,
+      "logSHA256": "2cae3dfb6486f1c94857b61187602dfc651deaea34aa504f09ac1b011f59cf10"
+    },
+    {
+      "name": "aetherListsSubtitleTrackForMKVWithEmbeddedSRT",
+      "passed": true,
+      "logSHA256": "91a2bcc65759dff25042c6f51e57894003ba2a7c6ac3671d7adc4c92fd562a54"
+    },
+    {
+      "name": "aetherPlaysLiveTSWithNilDuration",
+      "passed": true,
+      "logSHA256": "9740987061eec1c4ac433442a6a88d0a337d664817e76609110d14a563a77c97"
+    },
+    {
+      "name": "aetherExposesEAC3AudioTrackForHEVCMKV",
+      "passed": true,
+      "logSHA256": "71cd893a369d1232475e0474aa89075ab8961529e69f92aad95622fd520e401a"
+    },
+    {
+      "name": "aetherRoutesInterlacedMPEG2MP2TSToSoftwareSurface",
+      "passed": true,
+      "logSHA256": "6656ef453b8eee260039ea6393dc7ae15dcf4a847feed35832ae6c8fd3422958"
+    },
+    {
+      "name": "aetherPlaysDolbyVisionProfile81MP4OverRemoteBypass",
+      "passed": true,
+      "logSHA256": "e1452cb89fa2d791e0ca168a8982825ae2ba4b7b7aecb4b89847e7df38a9660a"
+    },
+    {
+      "name": "aetherPlaysProtectedMP4WhenRefererHeaderIsPresent",
+      "passed": true,
+      "logSHA256": "79384b5961ee9ccbbf6d0b9bf35e01179116eaf0516facd29e16dcfaa657a86d"
+    },
+    {
+      "name": "aetherReportsAuthenticationWhenProtectedMP4LacksReferer",
+      "passed": true,
+      "logSHA256": "4e5a3efb477fa15ad4234bfe34e5aa30d6dfaf23fb37a437d2c3658921727504"
+    },
+    {
+      "name": "aetherSeeksToRequestedPosition",
+      "passed": true,
+      "logSHA256": "247582b8bdeb9ca67246b2aa7febc66b10bab5279dd901af60baf9fa7042fe90"
+    },
+    {
+      "name": "aetherPlaysHLSAndTimeAdvances",
+      "passed": true,
+      "logSHA256": "740e1b467ee08707f8ddbde9d88202577c138fb79a25f3cdabc8f26f1289f722"
+    },
+    {
+      "name": "nativeEngineHonorsResumeAndAwaitedSeek",
+      "passed": true,
+      "logSHA256": "fbcc8e1a211c6137b5e103c840d5cb4b2f81c903a3416b3d8abd9e3078175052"
+    },
+    {
+      "name": "nativeEnginePreservesProtectedHeadersAndTimeAdvances",
+      "passed": true,
+      "logSHA256": "721c1de97e98cdbc8e822a3712b0268e138e0f8d9cf81186b759e1ade257c99a"
+    },
+    {
+      "name": "nativeExportConcurrentRequestsPublishOneValidFileWithoutPartials",
+      "passed": true,
+      "logSHA256": "d13be526d72b35d7fddbc7e3d59010082293045e195e4e9f286eb46fefb4c036"
+    },
+    {
+      "name": "nativeExportDoesNotReuseOldMediaAfterSourceReplacement",
+      "passed": true,
+      "logSHA256": "01adf707e187df6450c59deef67f6c6bb75ef57b7a0d49bf1757a313d37157d7"
+    },
+    {
+      "name": "nativeExportReplacesCorruptCacheWithoutLeavingPartialFiles",
+      "passed": true,
+      "logSHA256": "271d14b56b074d8a571fb12541c40725634b55120883096fade71be1b1d9f05a"
+    },
+    {
+      "name": "smbPlayerBridgeReachesPlaybackSeeksAndReleasesItsListener",
+      "passed": true,
+      "logSHA256": "0b17d823f17d80e1af1207717acb8163e1ccd080034458c1ba6c09d730825ca0"
+    },
+    {
+      "name": "protectedBridgeTokenCapacityExpiresBeforeRenewal",
+      "passed": true,
+      "logSHA256": "9879587a9fb6c7ffbf8e9e984c408fb676ce535a97af3d7904750311c67b19d2"
+    }
+  ],
+  "pausedPlaybackTestsExecuted": 2,
+  "pausedPlaybackTestsPassed": true,
+  "privateServiceChecks": {
+    "nas": "PASS",
+    "stremio": "PASS",
+    "iptv": "PASS",
+    "iptvChannels": 4927,
+    "iptvCategories": 47
+  },
+  "simulatorChecks": {
+    "smbDiscoverySignInListSaveReopen": "PASS",
+    "smbLibraryPartialAccessScan": "PASS",
+    "smbMKVPlaybackPauseSeek": "PASS",
+    "iptvSetupSaveReopenGuidePlaybackChannelSwitch": "PASS",
+    "stremioDetailPlayback": "PASS",
+    "singleTrailerSoundControlAndNoStopStrip": "PASS",
+    "opaqueLiveTabBar": "PASS",
+    "libraryTVChannelSelectionNextAutomaticRepeat": "PASS",
+    "libraryTVPlayingBackgroundRecovery": "PASS",
+    "pausedRecoveryEngineRegression": "PASS",
+    "libraryTVPausedBackgroundRecovery": "PASS: 0:26 before background, 0:26 after return and a later observation; Play then advanced to 0:31. Same process 60461."
+  },
+  "platformMatrix": {
+    "localEvidenceRoot": "/tmp/openstream-apple-review.i4PUUz",
+    "state": "PASS",
+    "laterSourceDifference": "Preserve explicitly disabled autoplay in AppleLiveInlinePlayer and check cancellation before the new paused-resume seek. Final-source package, paused-engine regressions, and iPhone checks are recorded separately.",
+    "builds": [
+      {
+        "platform": "iOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "tvOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "visionOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "macOS",
+        "configuration": "Debug",
+        "passed": true
+      },
+      {
+        "platform": "iOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "tvOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "visionOS",
+        "configuration": "Release",
+        "passed": true
+      },
+      {
+        "platform": "macOS",
+        "configuration": "Release",
+        "passed": true
+      }
+    ]
+  },
+  "finalSourceRegularTests": "PASS",
+  "finalSourceIPhoneBuild": "PASS",
+  "validationNotes": [
+    "An overlapping local build briefly locked the shared build database; the serial final-source iPhone build then passed and launched successfully.",
+    "An earlier catalog cancellation test expired before its loader started under compiler load; startup/deadline handling in the test was corrected and the full suite passed."
+  ],
+  "privateCredentialSourceCheck": {
+    "filesChecked": 199,
+    "matches": 0
+  },
+  "remainingAcceptance": [
+    "Physical iOS 18.7.8 crash/regression check; GUH requires a passcode",
+    "Mac window access for landscape/split view",
+    "Actual volume/audio routes and AirPlay receiver",
+    "Two-person SharePlay and cross-provider alignment",
+    "Exact linkage for unavailable historical TestFlight crash-log relationships"
+  ],
+  "licenseBinariesPassed": 42,
+  "finalSourceIPhoneProcessID": 60461,
+  "finalSourceIPhoneBuildLog": "/Users/macstudio/Library/Developer/XcodeBuildMCP/workspaces/Projects-b220a4e69e56/logs/build_run_sim_2026-09-11T05-30-14-838Z_pid42500_0f20f594.log",
+  "finalPausedEngineRegressionLog": "artifacts/feedback/2026-09-10/paused-engines-current.log",
+  "totalAutomatedTestsExecuted": 417
+}

@@ -1,0 +1,101 @@
+{
+  "regularTestsExecuted": 366,
+  "gatedMediaTestsExecuted": 18,
+  "totalTestsExecuted": 384,
+  "platformBuilds": [
+    {
+      "platform": "iOS",
+      "configuration": "Debug",
+      "result": "PASS"
+    },
+    {
+      "platform": "tvOS",
+      "configuration": "Debug",
+      "result": "PASS"
+    },
+    {
+      "platform": "visionOS",
+      "configuration": "Debug",
+      "result": "PASS"
+    },
+    {
+      "platform": "macOS",
+      "configuration": "Debug",
+      "result": "PASS"
+    },
+    {
+      "platform": "iOS",
+      "configuration": "Release",
+      "result": "PASS"
+    },
+    {
+      "platform": "tvOS",
+      "configuration": "Release",
+      "result": "PASS"
+    },
+    {
+      "platform": "visionOS",
+      "configuration": "Release",
+      "result": "PASS"
+    },
+    {
+      "platform": "macOS",
+      "configuration": "Release",
+      "result": "PASS"
+    }
+  ],
+  "platformBuildSourceManifestSHA256": "ae0bc09794f9cb8b9f280a7849169054e3377aecdfd8eec9ea33c0af3229543d",
+  "finalSourceManifestSHA256": "9e8c5a2b17c52ff00f15e036ff6001b6d85a853ef23797e3b7ad85af4657a85e",
+  "finalSourceFiles": 215,
+  "licenseBinariesPassed": 42,
+  "finalNarrowCorrection": "Normalize discovered IPv4 interface suffix; final regular package suite, signed iOS Simulator build/run, and signed iOS Release archive passed afterward. Simulator discovery displayed a normalized address and opened the authentication form.",
+  "simulatorOS": "iOS 26.3",
+  "deviceAcceptance": "GUH passcode required; Anthony remains on TestFlight build 6.",
+  "recoveredCrashes": [
+    {
+      "build": 4,
+      "reason": "scene-update watchdog; main thread waiting in AVAudioSession.setActive"
+    },
+    {
+      "build": 5,
+      "reason": "scene-update watchdog; main thread doing string processing during SwiftUI update"
+    }
+  ],
+  "outstanding": [
+    "Physical iOS 18.7.8 confirmation",
+    "Owner private SMB credentials and share access",
+    "Real-device AirPlay/caption routes",
+    "SharePlay",
+    "Synthetic channels"
+  ],
+  "finalArchive": {
+    "result": "PASS",
+    "version": "1.0",
+    "build": "7",
+    "codesignStrictDeep": "PASS",
+    "appAndDSYMUUID": "4652C51C-2172-3769-96BD-75D752E7C1EB",
+    "signing": "Automatic development archive; manual distribution export"
+  },
+  "finalSimulatorBuild": {
+    "result": "PASS",
+    "processID": 62050,
+    "discoveredSMBAddressNormalization": "PASS",
+    "privateSMBAuthentication": "NOT RUN"
+  },
+  "testflight": {
+    "version": "1.0",
+    "build": "7",
+    "processingState": "VALID",
+    "internalBuildState": "IN_BETA_TESTING",
+    "availableToAnthony": true,
+    "testNotesVerified": true
+  },
+  "finalIPadSimulator": {
+    "buildAndLaunch": "PASS",
+    "portraitSeriesLayout": "PASS",
+    "trailerVideo": "PASS",
+    "episodeThumbnailsAndSummary": "PASS",
+    "landscapeAndSplitView": "BLOCKED: Mac locked during attempted Simulator UI control",
+    "sharePopover": "PASS: native share popover displayed the opaque media link; no share sent"
+  }
+}

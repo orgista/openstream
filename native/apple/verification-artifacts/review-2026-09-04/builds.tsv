@@ -1,0 +1,8 @@
+iOS	Debug	PASS
+tvOS	Debug	PASS
+visionOS	Debug	PASS
+macOS	Debug	PASS
+iOS	Release	PASS
+tvOS	Release	PASS
+visionOS	Release	PASS
+macOS	Release	PASS

@@ -69,6 +69,19 @@ function authenticateSession(request, session) {
   return session.ownerId;
 }
 
+function activeTranscodeCapability(request, requestUrl) {
+  if (request.method !== "GET" || requestUrl.pathname !== "/api/transcode/media") return undefined;
+  const transcodeId = requestUrl.searchParams.get("transcodeId");
+  if (typeof transcodeId !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(transcodeId)) return undefined;
+  const record = transcodeVault.get(transcodeId);
+  if (!record) return undefined;
+  if (Date.now() - record.createdAt > 12 * 60 * 60_000) {
+    transcodeVault.delete(transcodeId);
+    return undefined;
+  }
+  return record;
+}
+
 const connectionNames = {
   "google-drive": "Google Drive",
   stremio: "Stremio",
@@ -627,6 +640,30 @@ function resolveTranscodeInput(mediaUrl, ownerId) {
   throw new Error("Only NAS and Stremio gateway media can be transcoded locally.");
 }
 
+async function resolveRequestedTranscodeInput(payload, ownerId) {
+  const hasGatewayMedia = payload.mediaUrl !== undefined;
+  const hasRemoteTarget = payload.remoteUrl !== undefined;
+  if (hasGatewayMedia === hasRemoteTarget) {
+    throw new Error("Provide exactly one gateway media URL or remote media URL.");
+  }
+  if (hasGatewayMedia) {
+    return resolveTranscodeInput(requireString(payload.mediaUrl, "Media URL", 4096), ownerId);
+  }
+
+  // A directly resolved Apple candidate has no pre-existing connection
+  // policy. Authorize it as public HTTPS only, then retain the authorization
+  // policy so every relay fetch revalidates the same origin and network class.
+  const authorization = await authorizeTarget(
+    requireString(payload.remoteUrl, "Remote media URL", 8192),
+    { allowPrivateNetwork: false },
+  );
+  return {
+    kind: "remote",
+    input: authorization.url.toString(),
+    targetPolicy: authorization.policy,
+  };
+}
+
 function normalizeXrMediaSource(value, origin) {
   const source = requireString(value, "XR media source", 8192);
   const url = new URL(source, origin);
@@ -707,9 +744,16 @@ async function routeRequest(request, response, session, logger, metadataService,
     pipeStream(request, response, upstream, origin);
     return;
   }
-  const ownerId = authenticateSession(request, session);
+  // The random transcode ID is a scoped, expiring bearer capability. This
+  // lets native AVPlayer open only the prepared media route without exposing
+  // the gateway-wide session token or relying on undocumented HTTP headers.
+  const transcodeCapability = activeTranscodeCapability(request, requestUrl);
+  const ownerId = transcodeCapability?.ownerId ?? authenticateSession(request, session);
   if (origin) assertAllowedOrigin(origin, allowedOrigins);
-  else if (request.headers["x-openstream-proxy"] !== "loopback" && request.headers["x-openstream-client"] !== "android") {
+  else if (!transcodeCapability &&
+    request.headers["x-openstream-proxy"] !== "loopback"
+    && !new Set(["android", "apple"]).has(request.headers["x-openstream-client"])
+  ) {
     throw new Error("Gateway requests must come from the OpenStream app origin.");
   }
   if (origin && request.method === "POST" && request.headers["x-openstream-request"] !== "1") {
@@ -868,9 +912,9 @@ async function routeRequest(request, response, session, logger, metadataService,
   }
   if (requestUrl.pathname === "/api/transcode/sessions" && request.method === "POST") {
     const payload = await readJson(request);
+    const resolved = await resolveRequestedTranscodeInput(payload, ownerId);
     const probe = await probeTranscoder();
     if (!probe.available) throw new Error("Local transcoding is unavailable: ffmpeg was not found on this machine.");
-    const resolved = resolveTranscodeInput(requireString(payload.mediaUrl, "Media URL", 4096), ownerId);
     const transcodeId = randomBytes(24).toString("base64url");
     transcodeVault.set(transcodeId, {
       ownerId,
@@ -896,7 +940,7 @@ async function routeRequest(request, response, session, logger, metadataService,
     if (!probe.available) throw new Error("Local transcoding is unavailable: ffmpeg was not found on this machine.");
     let input = sessionRecord.input;
     let inputToken;
-    if (sessionRecord.inputKind === "stremio") {
+    if (sessionRecord.inputKind === "stremio" || sessionRecord.inputKind === "remote") {
       // ffmpeg must never dial the remote itself (it follows redirects and does
       // its own DNS); hand it a single-purpose loopback URL that relays through
       // the gateway's SSRF-safe fetch and keeps Range support for seeking.
@@ -917,7 +961,12 @@ async function routeRequest(request, response, session, logger, metadataService,
     request.on("close", () => child.kill("SIGKILL"));
     child.on("close", (code, signal) => {
       if (inputToken) transcodeInputVault.delete(inputToken);
-      const context = code && !signal ? { stderr: stderrTail } : undefined;
+      // Remote ffmpeg diagnostics can echo its loopback relay URL, including
+      // the scoped input capability query. Keep remote playback logs entirely
+      // query-free; local NAS diagnostics cannot contain a relay URL.
+      const context = code && !signal && sessionRecord.inputKind === "nas"
+        ? { stderr: stderrTail }
+        : undefined;
       void logger?.info("transcode", `ffmpeg exited code=${code ?? "none"} signal=${signal ?? "none"} encoder=${plan.videoEncoder} cap=${plan.clamped.maxWidth}x${plan.clamped.maxHeight}`, context);
       response.end();
     });
