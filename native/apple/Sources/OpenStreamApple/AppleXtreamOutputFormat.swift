@@ -37,7 +37,9 @@ extension AppleIPTVChannel {
             isLive: true,
             mediaID: id,
             title: name,
-            sourceKind: .liveTV
+            sourceKind: .liveTV,
+            hints: .init(nativeRemoteHLS: AppleLiveStreamRoutePolicy.nativeRemoteHLS(
+                url: streamURL, probedKind: probedMediaKind))
         )
     }
 }

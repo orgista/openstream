@@ -12,6 +12,15 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     public let origin: String?
     public let guideID: String?
     public let guideURL: URL?
+    /// What a play-time probe found the stream to be; nil until probed.
+    /// Optional so cached channels written before it decode unchanged.
+    public var probedMediaKind: AppleIPTVStreamProbeResult.MediaKind? = nil
+
+    public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {
+        var copy = self
+        copy.probedMediaKind = kind
+        return copy
+    }
 
     public init(
         id: String,
@@ -874,7 +883,7 @@ public struct AppleIPTVClient: Sendable {
 }
 
 public struct AppleIPTVStreamProbeResult: Equatable, Sendable {
-    public enum MediaKind: Equatable, Sendable {
+    public enum MediaKind: String, Equatable, Sendable, Codable {
         case hlsPlaylist
         case rawMPEGTransportStream
         case other

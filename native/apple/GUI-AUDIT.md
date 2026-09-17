@@ -1801,7 +1801,30 @@ order; this section grows as each lands.
       ("freed pointer was not the last allocation", signal 6). Passing `client: manifestClient`
       explicitly fixes it and also makes tests' stub client actually used. Bisected in
       `AppleTestCatalogSeedTests`; do not "simplify" that call back.
-- [ ] Improvements: ~~download percentage~~ (done above), faster posters, landscape control in the player, EPG for M3U.
+- [x] **Live: extension-less HLS channels played through FFmpeg and failed** (owner 2026-09-17,
+      French M3U: "Demuxer: open failed (Operation not permitted (-1))"). `https://host/895` → 302 →
+      `….m3u8`: no extension, so the engine's raw live path opened it with FFmpeg. Now
+      `AppleLiveStreamRoutePolicy` decides: a telling extension decides at once; an extension-less
+      http(s) URL gets one 32 KB probe (`AppleIPTVStreamProbe`, follows redirects) on first play and
+      an HLS verdict sets `hints.nativeRemoteHLS` → `LoadOptions.nativeRemoteHLS` → AVPlayer plays
+      the origin URL. Verdicts are kept per channel for the session. 6 tests. Verified on the iPhone
+      sim with the owner's playlist (URL via TEST_RUNNER_OPENSTREAM_TEST_M3U, never in the repo):
+      `testExtensionLessHLSChannelPlaysFromAnM3U` — TMC plays, no alert, source removed after.
+- [x] **Live guide "No information" for a national XMLTV** (same playlist, open-epg France):
+      `files/france.xml` redirects to `download.php` and is 10.6 MB; the loader rejected every redirect
+      and capped at 8 MB. Now https→https redirects are followed, 48 MB, 30 s. Constants tested.
+- [ ] **Channel Manager redesign (owner 2026-09-17, screenshots)**: drop "Your Regional" (owner: "I
+      don't think it works"); keep Provider Lineup and My Channels; the MY CHANNELS list of 3,000
+      toggles is not a UX — show only the selected channels with remove, plus "Add Channels…" opening
+      a searchable picker (search + groups + ⊕ per row, 300 cap with the existing limit message).
+- [ ] **Tab bar: use the system one per OS** (owner 2026-09-17): iOS 26 gets the floating glass bar,
+      iOS 18 the current bar, no custom styling — "easier, esp. with the iPhone Duo". Check for any
+      compatibility opt-out (`UIDesignRequiresCompatibility`) or custom tab-bar appearance and remove it.
+- [ ] **Mormon Wives S1E1 still plays the wrong show** on the iPhone sim with the current tree
+      (owner, 2026-09-17; trace: `attempt 1/3 stremio host=torrentio.strem.fun route=surface`) — the
+      2026-09-16 ranking fix is in this build and did not settle it. Needs the candidate list from the
+      trace and a reproduction of which name won.
+- [ ] Improvements: ~~download percentage~~ (done above), faster posters, landscape control in the player, ~~EPG for M3U~~ (guide limits fixed above).
 - [!] **The crash report is not on this Mac.** Organizer's cache for `com.orgista.openstream` was
       last refreshed 2026-09-11, before build 10 shipped, and holds only its query state; the
       DiagnosticReports hits are local simulator/test-runner artefacts. It is in App Store Connect →

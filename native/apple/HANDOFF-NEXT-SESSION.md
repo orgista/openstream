@@ -12,7 +12,7 @@ state is at the bottom of each, newest last).
 ```
 # The gate. NEVER plain `swift test` (the default .build lands on the SMB share and corrupts).
 swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
-# Expect: "Test run with 981 tests in 94 suites passed" (as of 2026-09-17 11:00). Run it BEFORE
+# Expect: "Test run with 991 tests in 97 suites passed" (as of 2026-09-17 11:50). Run it BEFORE
 # and AFTER every change. If it prints "input file … was modified during the build", that is
 # the SMB share, not you — sleep 30–45 s and run it again.
 
@@ -202,6 +202,15 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   pinning) and the App Group tick for the widgets/watchkitapp bundle ids.
 
 ## 5. Owner rules — do not relitigate, do not ask again
+- **Tab bar is the system one, per OS (owner 2026-09-17)**: iOS 26 floating glass bar, iOS 18 the
+  classic bar. No custom tab-bar styling, no compatibility opt-out. (This supersedes "no Liquid
+  Glass" for the tab bar only; everything else keeps the stock-but-not-glass rule.)
+- **Live view options are Provider Lineup and My Channels only** — "Your Regional" is removed by
+  owner decision; do not bring it back.
+- **The owner drives the iPhone simulator through Codex computer-use while you build.** Installing
+  or launching on `6A037503…` can interrupt them; prefer the UI-test runner (it reinstalls anyway)
+  and keep sessions short. Trace files from their sessions land in the app container too.
+
 
 - **NEVER upload to TestFlight/App Store unless the owner says "ship"/"push (n)"/"upload (n)".**
   Build locally. **The App Store Connect API key is on this Mac** — key id, issuer and `.p8` in
@@ -237,7 +246,10 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 11:25 (newest first)
+## 7. State as of 2026-09-17 11:50 (newest first)
+- Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
+  TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
+  cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.
 - Build 11: tvOS and visionOS archived + exported (CFBundleVersion 11) with pinned manual signing;
   upload to TestFlight Internal + TraceEnabled in progress via `asc publish testflight`. iOS blocked
   on the Widgets App Group (owner, portal). Commits 86a0b2a, 3055de2 (+ visionOS pin pending).

@@ -375,6 +375,67 @@ final class AppleiOSUITests: XCTestCase {
         attach("add-live-m3u-playlist-text")
     }
 
+    /// Owner, 2026-09-17: a French M3U whose HLS streams sit behind
+    /// extension-less URLs failed with "Demuxer: open failed (Operation not
+    /// permitted (-1))". The playlist URL comes from the environment
+    /// (TEST_RUNNER_OPENSTREAM_TEST_M3U) so provider tokens never land in the
+    /// repo; without it the test skips. Adds the source, plays the first
+    /// channel, expects no failure alert, then removes the source again.
+    func testExtensionLessHLSChannelPlaysFromAnM3U() throws {
+        guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_M3U not set")
+        }
+        launch(screen: "add-live")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
+        picker.tap()
+        let m3u = app.buttons["M3U Playlist"].firstMatch
+        XCTAssertTrue(m3u.waitForExistence(timeout: 10)); m3u.tap()
+        let name = app.textFields["Name"].firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("UITest Playlist")
+        let url = app.textFields["Playlist URL"].firstMatch
+        XCTAssertTrue(url.waitForExistence(timeout: 10)); url.tap(); url.typeText(playlist)
+        let save = app.buttons["sources.live.save"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        // Save validates the playlist and probes a stream first (up to ~30 s).
+        let live = app.tabBars.buttons["Live"].firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 60), "Live tab not reachable after saving")
+        Thread.sleep(forTimeInterval: 2.0)
+        attach("m3u-saved")
+        live.tap()
+        let channel = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "TMC")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 60), "TMC not listed in Live")
+        channel.tap()
+        Thread.sleep(forTimeInterval: 15.0)
+        attach("m3u-tmc-after-15s")
+        let alert = app.alerts.firstMatch
+        let failed = alert.exists && alert.label.contains("Playback Failed")
+        if failed { attach("m3u-playback-failed") }
+        XCTAssertFalse(failed, "Playback Failed alert: \(alert.staticTexts.allElementsBoundByIndex.map(\.label))")
+
+        // Leave the persistent simulator as it was: remove the source.
+        app.tabBars.buttons["Settings"].firstMatch.tap()
+        let sources = app.buttons["Sources"].firstMatch
+        if sources.waitForExistence(timeout: 10) { sources.tap() }
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch
+        if row.waitForExistence(timeout: 10) {
+            row.tap()
+            for label in ["Remove Source", "Remove", "Delete Source", "Delete"] {
+                let b = app.buttons[label].firstMatch
+                if b.waitForExistence(timeout: 3) { b.tap(); break }
+            }
+            for label in ["Remove", "Delete"] {
+                let confirm = app.alerts.buttons[label].firstMatch
+                if confirm.waitForExistence(timeout: 3) { confirm.tap(); break }
+                let sheet = app.sheets.buttons[label].firstMatch
+                if sheet.waitForExistence(timeout: 2) { sheet.tap(); break }
+            }
+            Thread.sleep(forTimeInterval: 1.0)
+            attach("m3u-source-removed")
+        }
+    }
+
     /// Owner C8: landscape. The rule is that the phone hides the tab bar in
     /// landscape so content fills the screen, and brings it back in portrait.
     /// Both directions are asserted, because a bar that never comes back is the

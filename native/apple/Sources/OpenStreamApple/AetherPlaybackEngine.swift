@@ -148,6 +148,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // renditions also keeps cues flowing there.
         options.preferredDecodePath = .automatic
         options.prepareNativeSubtitles = true
+        // Live HLS from an extension-less URL: AVPlayer plays the origin
+        // directly; the raw live path would hand it to FFmpeg and fail.
+        if request.hints.nativeRemoteHLS { options.nativeRemoteHLS = true }
         options.autoplay = request.autoplay
         // A language the viewer picked wins over one derived from the captions
         // preference: under `.always` the preference contributes no languages

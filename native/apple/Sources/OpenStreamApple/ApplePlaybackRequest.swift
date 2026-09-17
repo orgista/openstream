@@ -18,19 +18,24 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// an add-on, and used to ask add-ons for subtitle files.
         public var addonMediaID: String?
         public var addonMediaType: String?
+        /// Hand the origin URL to AVPlayer as HLS instead of demuxing it
+        /// (`AppleLiveStreamRoutePolicy`). Live channels only.
+        public var nativeRemoteHLS: Bool
 
         public init(
             notWebReady: Bool = false,
             proxyHeaders: [String: String] = [:],
             filename: String? = nil,
             addonMediaID: String? = nil,
-            addonMediaType: String? = nil
+            addonMediaType: String? = nil,
+            nativeRemoteHLS: Bool = false
         ) {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
             self.filename = filename
             self.addonMediaID = addonMediaID
             self.addonMediaType = addonMediaType
+            self.nativeRemoteHLS = nativeRemoteHLS
         }
     }
 

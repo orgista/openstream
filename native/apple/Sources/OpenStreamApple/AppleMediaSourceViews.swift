@@ -402,8 +402,27 @@ struct AppleLiveTVView: View {
     }
 
     private func play(_ channel: AppleIPTVChannel) {
-        startChannel(channel, shareSelection: true)
+        // Extension-less URLs get one 32 KB look before the first play so HLS
+        // goes to AVPlayer and raw TS to the engine; the verdict is kept for
+        // the session. Anything with a telling extension plays at once.
+        guard AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
+            startChannel(channel, shareSelection: true)
+            return
+        }
+        if let known = liveProbedKinds[channel.id] {
+            startChannel(channel.withProbedMediaKind(known), shareSelection: true)
+            return
+        }
+        Task { @MainActor in
+            let kind = (try? await liveStreamProbe.validate(channel: channel).mediaKind) ?? .other
+            liveProbedKinds[channel.id] = kind
+            appleTrace("live probe \(channel.name): \(kind.rawValue)")
+            startChannel(channel.withProbedMediaKind(kind), shareSelection: true)
+        }
     }
+
+    @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
+    private let liveStreamProbe = AppleIPTVStreamProbe()
 
     private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
         if shareSelection { sharePlay.selected(channel) }

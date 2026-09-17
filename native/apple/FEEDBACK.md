@@ -7152,3 +7152,23 @@ com.orgista.openstream.widgets → App Groups → tick group.com.orgista.openstr
 the capability on but cannot pick the group; once ticked I regenerate the widgets profile and ship
 iOS the same way. One trap to know: a brand-new source file was silently truncated to 0 bytes on
 the share after the gate passed — it's restored and committed, and the handoff now has the check.
+
+## 2026-09-17 11:50 — your M3U, the guide, and where the builds stand
+
+The French playlist: those channels are HLS behind extension-less URLs (`…/895` redirects to an
+`.m3u8`). The engine treated them as raw TS and FFmpeg refused them. Live channels now get a one-time
+32 KB look when the URL says nothing, and HLS goes straight to AVPlayer — TMC plays on the iPhone sim
+with your exact playlist, no alert. The guide was a second bug: open-epg's France file redirects and
+is 10.6 MB; the loader rejected redirects and stopped at 8 MB, hence "No information". Both fixed,
+tested, will be in the next build (13).
+
+Builds: **11** (tvOS + visionOS) is the non-trace build and is now in Reddit as well as Internal and
+TraceEnabled; **12** (tvOS + visionOS) traces by default and is in Internal + TraceEnabled, submitted
+for beta review. Honest note: 11 shipped without the trace default because that edit had been lost
+in an aborted script — so 11 is exactly the "non trace" build you asked for Reddit, and 12 is the
+traced one. iOS is still waiting on the Widgets App Group tick in the portal.
+
+Mormon Wives: the ranking fix from 09-16 is in this tree and you still got the wrong show on the
+sim, so it did not settle it — logged as open, next on my list after the Channel Manager cleanup you
+asked for (Your Regional removed; selected-only list + searchable "Add Channels…" for 3,000-channel
+lineups). Tab bar: understood — system bar per OS, no custom styling. Watch simulators removed.
