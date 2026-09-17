@@ -1809,7 +1809,11 @@ order; this section grows as each lands.
       an HLS verdict sets `hints.nativeRemoteHLS` → `LoadOptions.nativeRemoteHLS` → AVPlayer plays
       the origin URL. Verdicts are kept per channel for the session. 6 tests. Verified on the iPhone
       sim with the owner's playlist (URL via TEST_RUNNER_OPENSTREAM_TEST_M3U, never in the repo):
-      `testExtensionLessHLSChannelPlaysFromAnM3U` — TMC plays, no alert, source removed after.
+      `testExtensionLessHLSChannelPlaysFromAnM3U` — trace `live probe TMC: hlsPlaylist` → `play "TMC"` →
+      `first frame, route=avPlayer` 2.8 s later; screenshot shows video and a populated French guide;
+      the source is deleted at the end (and `testZRemoveUITestPlaylistSource` cleans up a failed run).
+      Lesson: the probe first sat on `play(_:)`, which rows never call — every start goes through
+      `startChannel`, so that is where the gate lives now.
 - [x] **Live guide "No information" for a national XMLTV** (same playlist, open-epg France):
       `files/france.xml` redirects to `download.php` and is 10.6 MB; the loader rejected every redirect
       and capped at 8 MB. Now https→https redirects are followed, 48 MB, 30 s. Constants tested.
