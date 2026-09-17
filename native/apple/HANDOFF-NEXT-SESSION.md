@@ -579,3 +579,20 @@ from this Mac's keychain), a MAC_APP_STORE profile for `com.orgista.openstream`,
 the ASC app record, sandbox entitlements on the `OpenStream macOS` target, and a manual pin like the
 others. Ask the owner before creating certificates; then follow 9.1–9.3 with `-destination
 "generic/platform=macOS"` and a `.pkg` export (`asc publish testflight --pkg … --platform MAC_OS`).
+
+
+### Codex iPhone UX completion — 2026-09-17
+
+Current local iPhone 16 Pro app is freshly built Debug 1.0 (1), not the numbered TestFlight binary.
+See GUI-AUDIT.md, final September 17 native UX section, and design/2026-09-17-iphone-native-ux.
+Final gate 1024/104; iOS and tvOS build success with changed-file compile evidence. Trailer
+safe-area/Back/44pt controls and stable hero destination fixed; native Live title, search keyboard
+dismissal, Playlist Text removal, independent Save/Test feedback, historical source-failure display,
+and channel failure recovery verified. All 28 supplied channels tested twice (5 decoded,23 HTTP403).
+
+Concurrent metadata disk-cache addition initially broke five resolver expectations by conflating
+provider endpoints; corrected to Meta-v2 complete-endpoint hash and isolated injected transports.
+Keep those corrections and seven cache regression tests when reviewing the pending diff. No current
+UX changes committed/pushed by Codex; prior clean build-12 publication and CI-only ActivityKit fix
+are separate. Cloud run5 green on all4platforms; no new TestFlight binary. Private install receipt:
+~/Developer/openstream-build/codex-ios-ux-install-receipt.json. Temporary test source/cache removed.
