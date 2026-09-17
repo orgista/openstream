@@ -12,7 +12,7 @@ state is at the bottom of each, newest last).
 ```
 # The gate. NEVER plain `swift test` (the default .build lands on the SMB share and corrupts).
 swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
-# Expect: "Test run with 991 tests in 97 suites passed" (as of 2026-09-17 11:50). Run it BEFORE
+# Expect: "Test run with 994 tests in 98 suites passed" (as of 2026-09-17 12:35). Run it BEFORE
 # and AFTER every change. If it prints "input file … was modified during the build", that is
 # the SMB share, not you — sleep 30–45 s and run it again.
 
@@ -273,7 +273,10 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 11:50 (newest first)
+## 7. State as of 2026-09-17 12:35 (newest first)
+- Channel Manager: Your Regional removed; selected-only list + "Add Channels…" picker (grouped,
+  searchable). Verified tvOS + iPhone. Gate 994 / 98. Next: Mormon Wives wrong-show diagnosis, then
+  the system tab bar per OS. iOS 11/12 still wait on the Widgets App Group tick.
 - Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
   TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
   cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.

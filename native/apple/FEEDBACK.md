@@ -7172,3 +7172,13 @@ Mormon Wives: the ranking fix from 09-16 is in this tree and you still got the w
 sim, so it did not settle it — logged as open, next on my list after the Channel Manager cleanup you
 asked for (Your Regional removed; selected-only list + searchable "Add Channels…" for 3,000-channel
 lineups). Tab bar: understood — system bar per OS, no custom styling. Watch simulators removed.
+
+## 2026-09-17 12:35 — Channel Manager, cleaned up
+
+"Your Regional" is gone. Live view offers Provider Lineup and My Channels. The MY CHANNELS section
+no longer shows 3,000 toggles: it lists only what you've picked (swipe or ⊖ to drop one) and one
+row, "Add Channels…", opens a picker grouped by your provider's groups with a search box that stays
+visible; ⊕ adds, ✓ shows what's in, and the 300 cap still speaks up. Checked on Apple TV and iPhone.
+One thing I noticed on the iPhone sim: your Xtream source is switched off (Settings → Sources →
+Live TV → On), which is why the manager said "add a source first" — it now says the source is off.
+Nothing in the app disables a source by itself, and my tests only add/remove their own playlist.

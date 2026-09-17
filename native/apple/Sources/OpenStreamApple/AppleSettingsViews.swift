@@ -434,30 +434,7 @@ private struct AppleChannelManagerView: View {
 
                 Picker("Live view", selection: $settings.liveChannelScope) {
                     ForEach(AppleLiveChannelScope.allCases) { scope in
-                        Text(scope == .regional && AppleZIPCodePolicy.isValid(settings.regionalZIPCode)
-                            ? "Local Channels · \(settings.regionalZIPCode)" : scope.title).tag(scope)
-                    }
-                }
-
-                // The ZIP only means anything for the regional lineup. It used
-                // to sit here permanently, empty and disabled, which on a
-                // television reads as a broken field rather than an
-                // inapplicable one. Disclose it the way the Custom Package
-                // section below already does.
-                if settings.liveChannelScope == .regional {
-                    TextField("ZIP code", text: $settings.regionalZIPCode)
-                        #if os(iOS)
-                        .keyboardType(.numberPad)
-                        #endif
-                        .onChange(of: settings.regionalZIPCode) { _, value in
-                            let digits = String(value.filter(\.isNumber).prefix(5))
-                            if digits != value { settings.regionalZIPCode = digits }
-                        }
-                    if !settings.regionalZIPCode.isEmpty,
-                       !AppleZIPCodePolicy.isValid(settings.regionalZIPCode) {
-                        Text("Enter a valid 5-digit US ZIP code.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        Text(scope.title).tag(scope)
                     }
                 }
 
@@ -483,11 +460,6 @@ private struct AppleChannelManagerView: View {
             // list moved focus to the tab bar and left the Settings pill drawn
             // without its icon and overflowing the bar (measured 2026-09-16).
             Section {
-                NavigationLink {
-                    AppleTVChannelSearchEditor(query: $query)
-                } label: {
-                    AppleTVNavigationLabel("Search Channels", systemImage: "magnifyingglass")
-                }
                 Button {
                     Task { await reload() }
                 } label: {
@@ -496,41 +468,54 @@ private struct AppleChannelManagerView: View {
                 .disabled(isLoading)
             }
             #endif
+            // Owner, 2026-09-17: a 3,000-row wall of toggles is not a way to
+            // pick channels. The list holds only what is selected; adding goes
+            // through a searchable picker.
             Section(settings.liveChannelPackage == .custom ? "Custom Channels" : "My Channels") {
                 if isLoading, channels.isEmpty {
                     ProgressView()
                 } else if channels.isEmpty {
-                    Text(errorMessage ?? "Add a Live TV source first.")
+                    Text(errorMessage ?? emptyLineupMessage)
                         .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
                 } else {
-                    ForEach(numberedChannels) { channel in
-                        Toggle(isOn: Binding(
-                            get: { isSelected(channel.id) },
-                            set: { _ in toggle(channel.id) }
-                        )) {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(displayName(for: channel))
-                                        .foregroundStyle(.primary)
-                                    if !channel.group.isEmpty {
-                                        Text(channel.group)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                    NavigationLink {
+                        channelPicker
+                    } label: {
+                        Label("Add Channels…", systemImage: "plus.circle")
+                    }
+                    .accessibilityIdentifier("channels.add")
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    }
+                    ForEach(selectedChannels) { channel in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayName(for: channel)).foregroundStyle(.primary)
+                                if !channel.group.isEmpty {
+                                    Text(channel.group).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
+                            Spacer(minLength: 8)
+                            #if os(tvOS)
+                            Button("Remove") { toggle(channel.id) }
+                            #else
+                            Button { toggle(channel.id) } label: {
+                                Image(systemName: "minus.circle").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Remove \(channel.name)")
+                            #endif
                         }
-                        .accessibilityLabel(channel.name)
-                        .accessibilityValue(isSelected(channel.id)
-                            ? "Included" : "Not included")
                     }
+                    #if !os(tvOS)
+                    .onDelete { offsets in
+                        for channel in offsets.map({ selectedChannels[$0] }) { toggle(channel.id) }
+                    }
+                    #endif
                 }
             }
         }
         .appleSettingsPane("Channel Manager", embedded: embeddedInSplit)
-        #if !os(tvOS)
-        .searchable(text: $query, prompt: "Channels")
-        #endif
         // tvOS toolbar items always draw a box around the glyph, which is the
         // same defect the owner called on Discover (T4) and Search (R1).
         // On a television these two actions are rows in the form instead.
@@ -571,7 +556,6 @@ private struct AppleChannelManagerView: View {
                 scope: settings.liveChannelScope,
                 showPayPerView: settings.showPayPerViewChannels,
                 favoriteIDs: settings.favoriteChannelIDs,
-                regionalZIPCode: settings.regionalZIPCode,
                 show24x7: settings.show24x7Channels
             ),
             query: clean
@@ -610,6 +594,70 @@ private struct AppleChannelManagerView: View {
         }
         errorMessage = nil
         settings.favoriteChannelIDs = values
+    }
+
+    /// "Add a source" is wrong when one exists but is switched off.
+    private var emptyLineupMessage: String {
+        let live = sourceStore.sources.filter { $0.kind == .liveTV }
+        if live.isEmpty { return "Add a Live TV source first." }
+        return live.contains(where: \.isEnabled) ? "No channels yet." : "Your Live TV source is turned off."
+    }
+
+    private var selectedChannels: [AppleIPTVChannel] {
+        numberedChannels.filter { isSelected($0.id) }
+    }
+
+    /// The whole (filtered) lineup, grouped by the provider's groups, or a
+    /// flat result list while searching. Rows add with ⊕ and show ✓ once in.
+    private var channelPicker: some View {
+        Form {
+            #if os(tvOS)
+            Section {
+                NavigationLink {
+                    AppleTVChannelSearchEditor(query: $query)
+                } label: {
+                    AppleTVNavigationLabel(query.isEmpty ? "Search Channels" : "Search · \(query)", systemImage: "magnifyingglass")
+                }
+            }
+            #endif
+            if let errorMessage {
+                Section { Text(errorMessage).font(.caption).foregroundStyle(.red) }
+            }
+            ForEach(AppleChannelPickerSections.build(channels: numberedChannels, query: query)) { section in
+                Section(section.name) {
+                    ForEach(section.channels) { channel in
+                        Button {
+                            toggle(channel.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(displayName(for: channel)).foregroundStyle(.primary)
+                                    if !query.isEmpty, !channel.group.isEmpty {
+                                        Text(channel.group).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                                Image(systemName: isSelected(channel.id) ? "checkmark.circle.fill" : "plus.circle")
+                                    .foregroundStyle(isSelected(channel.id) ? Color.primary : Color.secondary)
+                            }
+                        }
+                        .accessibilityLabel(channel.name)
+                        .accessibilityValue(isSelected(channel.id) ? "Included" : "Not included")
+                    }
+                }
+            }
+        }
+        .appleSettingsPage("Add Channels")
+        // The manager's own `task(id:)` sleeps while it is covered by this
+        // page, so the query has to drive the projection from here too.
+        .task(id: projectionIdentity) { await rebuildFilteredChannels() }
+        // Always-visible field: an inline-title page otherwise hides the
+        // search bar until the list is pulled down, which nobody discovers.
+        #if os(iOS)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Channels")
+        #elseif !os(tvOS)
+        .searchable(text: $query, prompt: "Channels")
+        #endif
     }
 
     private var numberedChannels: [AppleIPTVChannel] {

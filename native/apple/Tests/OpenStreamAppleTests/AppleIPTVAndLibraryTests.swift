@@ -436,42 +436,6 @@ private actor IPTVRequestRecorder {
         showPayPerView: true,
         favoriteIDs: ["event"]
     ).map(\.id) == ["event"])
-    #expect(AppleChannelVisibilityPolicy.visibleChannels(
-        from: [
-            news,
-            AppleIPTVChannel(
-                id: "regional-a",
-                sourceID: sourceID,
-                name: "Regional News",
-                group: "Regional",
-                streamURL: URL(string: "https://tv.example/regional-news.m3u8")!
-            ),
-            AppleIPTVChannel(
-                id: "affiliate-a",
-                sourceID: sourceID,
-                name: "World Feed",
-                group: "Affiliate Movies",
-                streamURL: URL(string: "https://tv.example/affiliate.m3u8")!
-            ),
-            AppleIPTVChannel(
-                id: "region-x",
-                sourceID: sourceID,
-                name: "North Region",
-                group: "Regions",
-                streamURL: URL(string: "https://tv.example/regionals.m3u8")!
-            ),
-            AppleIPTVChannel(
-                id: "sports",
-                sourceID: sourceID,
-                name: "Sports One",
-                group: "Sports",
-                streamURL: URL(string: "https://tv.example/sports.m3u8")!
-            ),
-        ],
-        scope: .regional,
-        showPayPerView: true,
-        favoriteIDs: []
-    ).map(\.id).sorted() == ["affiliate-a", "region-x", "regional-a"])
     #expect(AppleIPTVEndpointPolicy.isProtectedPlaybackBridge(
         URL(string: "http://127.0.0.1:12345/live/opaque/stream.ts")!
     ))

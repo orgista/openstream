@@ -385,28 +385,10 @@ final class AppleiOSUITests: XCTestCase {
         guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
             throw XCTSkip("OPENSTREAM_TEST_M3U not set")
         }
-        launch(screen: "add-live")
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
-        XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
-        picker.tap()
-        let m3u = app.buttons["M3U Playlist"].firstMatch
-        XCTAssertTrue(m3u.waitForExistence(timeout: 10)); m3u.tap()
-        let name = app.textFields["Name"].firstMatch
-        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("UITest Playlist")
-        let url = app.textFields["Playlist URL"].firstMatch
-        XCTAssertTrue(url.waitForExistence(timeout: 10)); url.tap(); url.typeText(playlist)
-        // Dismiss the keyboard so the buttons section is on screen, then find
-        // Save by identifier or, failing that, by its label.
-        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
-        var save = app.buttons["sources.live.save"].firstMatch
-        if !save.waitForExistence(timeout: 5) { save = app.buttons["Save"].firstMatch }
-        XCTAssertTrue(save.waitForExistence(timeout: 10), "no Save button on Add Live TV"); save.tap()
-        // Save validates the playlist and probes a stream first (up to ~30 s).
-        let live = app.tabBars.buttons["Live"].firstMatch
-        XCTAssertTrue(live.waitForExistence(timeout: 60), "Live tab not reachable after saving")
-        Thread.sleep(forTimeInterval: 2.0)
+        addUITestPlaylist(playlist)
         attach("m3u-saved")
+        let live = app.tabBars.buttons["Live"].firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 10))
         live.tap()
         // "All" is the curated provider lineup; a playlist's channels are
         // reachable through Search (and the Everything package), so search.
@@ -436,15 +418,42 @@ final class AppleiOSUITests: XCTestCase {
         removeUITestPlaylistSource()
     }
 
+    /// Add Live TV → M3U → name + URL → Save (validation + stream probe, up
+    /// to ~30 s). Leaves the app on the Sources page.
+    private func addUITestPlaylist(_ playlist: String) {
+        launch(screen: "add-live")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
+        picker.tap()
+        let m3u = app.buttons["M3U Playlist"].firstMatch
+        XCTAssertTrue(m3u.waitForExistence(timeout: 10)); m3u.tap()
+        let name = app.textFields["Name"].firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("UITest Playlist")
+        let url = app.textFields["Playlist URL"].firstMatch
+        XCTAssertTrue(url.waitForExistence(timeout: 10)); url.tap(); url.typeText(playlist)
+        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        var save = app.buttons["sources.live.save"].firstMatch
+        if !save.waitForExistence(timeout: 5) { save = app.buttons["Save"].firstMatch }
+        XCTAssertTrue(save.waitForExistence(timeout: 10), "no Save button on Add Live TV"); save.tap()
+        let live = app.tabBars.buttons["Live"].firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 60), "Live tab not reachable after saving")
+        Thread.sleep(forTimeInterval: 2.0)
+    }
+
     private func removeUITestPlaylistSource() {
+        // Start from a known place: relaunch on the Settings root.
+        app.terminate()
+        launch(screen: "settings")
+        _ = app.wait(for: .runningForeground, timeout: 30)
         let sources = app.buttons["Sources"].firstMatch
-        if !sources.waitForExistence(timeout: 10) {
-            app.tabBars.buttons["Settings"].firstMatch.tap()
-            _ = sources.waitForExistence(timeout: 10)
-        }
+        guard sources.waitForExistence(timeout: 20) else { attach("cleanup-no-sources-row"); XCTFail("Sources row not found"); return }
         sources.tap()
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch
-        guard row.waitForExistence(timeout: 10) else { attach("no-uitest-playlist-source"); return }
+        // The list is lazy: the row (added last) may be below the fold.
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch
+        var swipes = 0
+        while !row.waitForExistence(timeout: 3), swipes < 6 { app.swipeUp(); swipes += 1 }
+        guard row.exists else { attach("no-uitest-playlist-source"); return }
         row.tap()
         let delete = app.buttons["Delete Source"].firstMatch
         XCTAssertTrue(delete.waitForExistence(timeout: 10), "no Delete Source on the source page")
@@ -455,6 +464,44 @@ final class AppleiOSUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UITest Playlist")).firstMatch.exists, "source still listed")
         attach("m3u-source-removed")
+    }
+
+    /// Owner, 2026-09-17: "we need a better ux when dealing with something
+    /// like 3000 channels". The manager lists only selected channels and
+    /// adds through a searchable, grouped picker. Screenshots of all three
+    /// states; nothing is changed in the selection.
+    func testChannelManagerListsSelectedAndAddsThroughAPicker() throws {
+        // The persistent sim's own live source may be off; bring a playlist
+        // of our own (URL from the environment), and remove it at the end.
+        guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_M3U not set")
+        }
+        addUITestPlaylist(playlist)
+        defer { removeUITestPlaylistSource() }
+        app.terminate()
+        launch(screen: "channels")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        var add = app.buttons["channels.add"].firstMatch
+        if !add.waitForExistence(timeout: 60) {
+            add = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Add Channels")).firstMatch
+        }
+        if !add.exists { attach("channel-manager-no-add-row") }
+        XCTAssertTrue(add.exists, "no Add Channels… row (is a Live TV source configured?)")
+        XCTAssertFalse(app.staticTexts["Your Regional"].exists)
+        attach("channel-manager-root")
+        add.tap()
+        let picker = app.navigationBars["Add Channels"].firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 20), "picker did not open")
+        Thread.sleep(forTimeInterval: 2.0)
+        attach("channel-picker-groups")
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10), "picker has no search field")
+        search.tap(); search.typeText("tmc")
+        Thread.sleep(forTimeInterval: 2.5)
+        attach("channel-picker-search")
+        // The filter must actually apply: TMC stays, a non-match goes.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "TMC")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@", "ARTE")).firstMatch.exists, "search did not filter the list")
     }
 
     /// Owner C8: landscape. The rule is that the phone hides the tab bar in

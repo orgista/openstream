@@ -1817,10 +1817,20 @@ order; this section grows as each lands.
 - [x] **Live guide "No information" for a national XMLTV** (same playlist, open-epg France):
       `files/france.xml` redirects to `download.php` and is 10.6 MB; the loader rejected every redirect
       and capped at 8 MB. Now https→https redirects are followed, 48 MB, 30 s. Constants tested.
-- [ ] **Channel Manager redesign (owner 2026-09-17, screenshots)**: drop "Your Regional" (owner: "I
-      don't think it works"); keep Provider Lineup and My Channels; the MY CHANNELS list of 3,000
-      toggles is not a UX — show only the selected channels with remove, plus "Add Channels…" opening
-      a searchable picker (search + groups + ⊕ per row, 300 cap with the existing limit message).
+- [x] **Channel Manager redesign (owner 2026-09-17, screenshots).** "Your Regional" is gone
+      (`AppleLiveChannelScope` = Provider Lineup, My Channels; a stored "regional" falls back to the
+      lineup; the ZIP field went with it). MY CHANNELS now lists only what is selected — swipe or ⊖
+      to remove — plus one "Add Channels…" row opening a picker: grouped by the provider's groups
+      while browsing, a flat "Results" list while searching, ⊕ / ✓ per row, the 300 cap's message in
+      place. Empty state says "Your Live TV source is turned off." when that is the case instead of
+      "Add a source first". `AppleChannelPickerSections` (pure, 3 tests) + scope tests. Verified:
+      Apple TV screenshot (root: Package / Live view / two toggles / Refresh / Add Channels…) and
+      iPhone `testChannelManagerListsSelectedAndAddsThroughAPicker` (root, grouped picker, search
+      "tmc" keeps TMC and drops ARTE), using the owner's playlist from the environment and removing
+      it after. Two lessons: a pushed page must carry its own `task(id:)` — the parent's sleeps while
+      covered, so the search never filtered; and a lazy List hides off-screen rows from XCUITest —
+      cleanup has to scroll. The sim's own Xtream source was found switched OFF (by hand; the app has
+      no auto-disable path). Gate **994 / 98**.
 - [ ] **Tab bar: use the system one per OS** (owner 2026-09-17): iOS 26 gets the floating glass bar,
       iOS 18 the current bar, no custom styling — "easier, esp. with the iPhone Duo". Check for any
       compatibility opt-out (`UIDesignRequiresCompatibility`) or custom tab-bar appearance and remove it.

@@ -199,8 +199,6 @@ public enum AppleChannelVisibilityPolicy {
             let scopeMatches: Bool = switch scope {
             case .providerLineup:
                 true
-            case .regional:
-                isRegional(channel, zipCode: regionalZIPCode)
             case .favorites:
                 favoriteIDs.contains(channel.id)
             }

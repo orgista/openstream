@@ -23,9 +23,6 @@ import Testing
     #expect(AppleZIPCodePolicy.normalize(" 60614 ") == "60614")
     #expect(AppleChannelVisibilityPolicy.isRegional(local, zipCode: "60614"))
     #expect(!AppleChannelVisibilityPolicy.isRegional(merelyRegional, zipCode: "60614"))
-    #expect(AppleChannelProjection.groupedChannels(from: [local, merelyRegional], scope: .regional,
-        showPayPerView: true, favoriteIDs: [], query: "", regionalZIPCode: "60614")
-        .flatMap(\.channels).map(\.id) == ["local"])
 }
 
 @Test func catalogShelvesSplitProviderNamesByMediaType() {

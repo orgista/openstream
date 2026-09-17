@@ -95,8 +95,10 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
 }
 
 public enum AppleLiveChannelScope: String, Codable, CaseIterable, Identifiable, Sendable {
+    // "Your Regional" was removed by owner decision (2026-09-17: "I don't
+    // think it works"); a stored "regional" decodes as nil and falls back to
+    // the provider lineup.
     case providerLineup
-    case regional
     case favorites
 
     public var id: String { rawValue }
@@ -104,7 +106,6 @@ public enum AppleLiveChannelScope: String, Codable, CaseIterable, Identifiable, 
     public var title: String {
         switch self {
         case .providerLineup: "Provider Lineup"
-        case .regional: "Your Regional"
         case .favorites: "My Channels"
         }
     }
