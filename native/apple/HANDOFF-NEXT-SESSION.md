@@ -567,6 +567,19 @@ asc testflight distribution view --build-id <id> --output json     # internalBui
 ```
 Then record in `DELIVERIES.md` (build → id → groups → commit) and FEEDBACK, and tell the owner the ids.
 
+### 9.3a TestFlight "What to Test" notes — owner policy (2026-09-17, applies to every build)
+Concise, platform-specific "Added…" / "Fixed…" lines written from the exact shipped snapshot, with
+one useful testing request. Only verified user-visible changes: no raw commit messages, no Android
+items in Apple notes, no unshipped features, no test counts, no hype. Use the `copywriting` /
+`copy-editing` skills for the wording. Set them with `asc publish testflight … --test-notes "<text>"
+--locale en-US` (or the testflight notes command from `asc-testflight-orchestration`) and read them back.
+
+### 9.3b Source publication (Codex, 2026-09-17)
+Shipped snapshots also go to the private GitHub repo `orgista/openstream-apple` (tag `build-N`,
+isolated checkout `~/Developer/openstream-build/publish-apple-b<N>`), where Apple Build Checks run
+on four platforms. That publication is configuration-sanitized (see its DELIVERIES.md); newer
+development stays local on `codex/openstream-multiplatform-offline` until the owner says otherwise.
+
 ### 9.4 When it fails — what it means, what to do (all seen 2026-09-17)
 | Symptom | Meaning | Do |
 |---|---|---|
