@@ -12,7 +12,7 @@ state is at the bottom of each, newest last).
 ```
 # The gate. NEVER plain `swift test` (the default .build lands on the SMB share and corrupts).
 swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm"
-# Expect: "Test run with 999 tests in 99 suites passed" (as of 2026-09-17 13:05). Run it BEFORE
+# Expect: "Test run with 1007 tests in 101 suites passed" (as of 2026-09-17 Codex continuation). Run it BEFORE
 # and AFTER every change. If it prints "input file … was modified during the build", that is
 # the SMB share, not you — sleep 30–45 s and run it again.
 
@@ -179,32 +179,71 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   Archive with `-derivedDataPath ~/Developer/openstream-build/DerivedData-deploy-<platform>` and
   `CURRENT_PROJECT_VERSION=<n>`; export with `destination export`; upload with
   `asc publish testflight --app 6807530757 --ipa <ipa> --platform TV_OS|VISION_OS|IOS --group "Internal,TraceEnabled" --submit`.
-- **iOS build 11 is blocked on one owner step**: the Widgets target needs `group.com.orgista.openstream`
-  in its App Store profile, and the portal is the only place that assigns a group to
-  `com.orgista.openstream.widgets` (capability is already enabled; `asc` cannot assign). After the owner
-  ticks it: `asc profiles create` a new widgets profile (App Store, cert SH522LYR9M), install it, pin
-  iOS app / Widgets / Watch in the pbxproj like tvOS, archive, export, publish.
+- **Widgets signing fixed 2026-09-17**: owner assigned `group.com.orgista.openstream` to
+  `com.orgista.openstream.widgets`. New App Store profile `5ZP6L8ACKH`, named
+  `OpenStream App Store widgets 2026-09-17`, UUID `9b677921-be29-4e96-b798-92cb82791049`,
+  contains the group and is installed in both current Xcode and legacy profile directories.
+  The Watch target has no App Group entitlement and works with its existing profile.
 
-### 4d. Build 11/12 (iOS) and 13 (all + macOS) — how
+### 4d. Build 11/12 (iOS), 13 (existing platforms), and macOS 1 — how
+- Owner update 2026-09-17: start native macOS at **1.0 (1)** and bring its features up to the
+  current other-platform baseline. This supersedes the older requirement to start Mac at 13 or
+  keep its build number identical to the other platforms. Both Mac target configurations and the
+  existing local Debug app already report 1.0 (1), minimum macOS 15. No number change is needed.
+  Parity audit found a release blocker: `OpenStreamRootView.tabs` has no macOS conditional branch,
+  so the main TabView has no tab contents on Mac despite compiling. This remains unfixed; see
+  FEEDBACK.md's macOS baseline audit. Starting a baseline does not itself publish an upload.
+- Live release catch-up 2026-09-17: iOS 11 (`ec6ec0bc-db74-4005-bbe1-b3c3d163f7c1`) is VALID
+  and IN_BETA_TESTING internally and externally, assigned to Reddit + Internal + TraceEnabled.
+  iOS 12 has been uploaded and is processing; see DELIVERIES.md for the final state.
+  visionOS 12 is VALID / IN_BETA_TESTING for Internal + TraceEnabled; visionOS 11 also has Reddit.
+  Native macOS has no uploaded builds. CLI `asc web app-groups assign` supports future assignments
+  with an Apple Account web session; the API-key profile is a separate authentication mechanism.
 - Worktrees on local disk (no SMB lies): `~/Developer/openstream-build/wt-b11` = commit 3055de2
   (build 11 code, tracing off), `wt-b12` = bf6988e (build 12 code, tracing on by TestFlight receipt).
   Both have iOS/Widgets/Watch Release configs pinned to manual signing (uncommitted, build-only).
   Export options: `ExportOptions-ios-b11-export.plist` (profiles by name). Archive from
   `<worktree>/native/apple/Apps` with `-scheme "OpenStream iOS" -destination generic/platform=iOS
   -derivedDataPath ~/Developer/openstream-build/DerivedData-archive-ios CURRENT_PROJECT_VERSION=11|12`.
-- Blocker for iOS: the Widgets profile needs `group.com.orgista.openstream`. After the owner ticks it
-  in the portal (Identifiers → com.orgista.openstream.widgets → App Groups), regenerate:
-  `asc profiles create --name "OpenStream App Store widgets 2026-09-17" --type IOS_APP_STORE
-  --bundle-id 9UBVK6SYGV --certificate SH522LYR9M`, install to
-  `~/Library/MobileDevice/Provisioning Profiles/`, verify `application-groups` is in it, then archive.
+- The first iOS 11 upload was rejected because the embedded Watch app had no icons. Fixed only
+  that packaging in both worktrees and main: Watch asset catalog reuses the existing opaque 1024px
+  app icon, is included in Watch resources, and is selected in Debug/Release build settings.
+  Rebuilt/re-exported with the SAME authorized number; Apple accepted the corrected build 11.
+  Archive checks validate all three bundle signatures/build numbers, the embedded widget profile,
+  Watch Assets.car + CFBundleIcons metadata, and iPhone/iPad support (iOS 18+).
+  Final local artifacts: `OpenStream-iOS-b11-icons.xcarchive/.ipa` and
+  `OpenStream-iOS-b12-icons.xcarchive/.ipa` under `~/Developer/openstream-build/`.
+  Fresh gates for historical snapshots: build 11 = 981 tests / 94 suites; build 12 = 985 / 96.
+  `main-merge-spm` was last used for the build-12 worktree, so its lower test count is not lost
+  main-branch tests; main still has the newer 1007/101 suite. Logs: `codex-ios11-*`, `codex-ios12-*`.
 - iOS 11 → groups Reddit + Internal + TraceEnabled (matches tvOS/visionOS 11); iOS 12 → Internal +
   TraceEnabled (matches 12). Both are owner-authorized on 2026-09-17 ("ship 11 & 12 for iOS").
-- **macOS for 13**: the account has NO Mac signing assets (certs: only Apple Development +
+- **macOS for 1**: the account has NO Mac signing assets (certs: only Apple Development +
   iOS Distribution; no Mac profiles; no local Mac identities). Needed: an "Apple Distribution"
   (DISTRIBUTION) or MAC_APP_DISTRIBUTION cert + MAC_INSTALLER_DISTRIBUTION cert (CSR from this
   Mac's keychain), a MAC_APP_STORE profile for com.orgista.openstream, sandbox entitlements on the
   "OpenStream macOS" target, and the macOS platform on the App Store Connect app record. Do the
   prep, then ask before creating certificates.
+
+### 4e. Budget ladder for this project (owner, 2026-09-17 — PLANNED, not switched on yet)
+Order of exhaustion, one rung at a time, never idle:
+1. **`agy`** (`~/.local/bin/agy -p "<task>" --dangerously-skip-permissions --effort medium --add-dir <tree>`)
+   — mechanical work with a written spec: file edits, test additions, fixture generation, docs.
+   Print mode, 5-min default timeout (`--print-timeout 20m` for builds). Exhaust its quota first.
+2. **Claude subscription in fast mode** (`/fast`, Opus) — the 5-hour window: gates, screenshot
+   verification, owner questions, everything that needs judgment or the sims.
+3. **Codex** (`codex exec -C <tree> -m <model> "<task>"`) — exhausts slower; takes over rung-1 work
+   when agy is out and the Claude 5-hour bar is past ~90%.
+4. **Everything, all limits** — Fable/Opus/Sonnet subagents, or-review-remote (GLM-5.2 + free tier)
+   as in `ai-ops/or-review/TOKEN-PLAYBOOK.md`; the OpenRouter card is the last thing to drain.
+Rules that hold on every rung: gate + touch/sleep/grep + screenshot-LOOK stay on the Claude
+session (agy/codex do not drive the sims); one build at a time on the Mac; nothing uploads
+without "ship N"; specs go outside the repo (`~/Developer/openstream-build/specs/`); "sip usage"
+= smallest model that can do the step (Haiku lookups, Sonnet typing, Opus judgment).
+Progress check-in: the **15-minute heartbeat** is the Claude Desktop scheduled task that sends the
+"OpenStream Apple GUI heartbeat" prompt (visible in `launchctl list` as
+`com.anthropic.claudefordesktop…`; there are no cloud routines and no LaunchAgents by owner rule).
+Each firing reports 1–3 lines and which rung is active. Switch-on is the owner's call.
 
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
@@ -227,7 +266,8 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   explicit "ship N" for that exact build number; all platforms go up on the same build; when there
   are changes, ASK "I made some changes — should I push them?" and wait.** Adding an existing build
   to another group is also a push. Current plan: iOS 11 and iOS 12 are authorized (to catch iOS up);
-  13 waits for go/no-go on ALL platforms, and 13 adds **macOS native**.
+  13 waits for go/no-go on existing platforms. Owner subsequently chose **macOS native build 1**
+  as its separate starting baseline (see 4d); it has not been uploaded.
 
 - **Tab bar is the system one, per OS (owner 2026-09-17)**: iOS 26 floating glass bar, iOS 18 the
   classic bar. No custom tab-bar styling, no compatibility opt-out. (This supersedes "no Liquid
@@ -273,7 +313,45 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 12:35 (newest first)
+## 7. State as of 2026-09-17 Codex continuation (newest first)
+- Chapter markers: finished the interrupted Aether → playback protocol → overlay wiring.
+  Duration events re-evaluate intro eligibility; `.idle` clears the per-item skip. A chapter
+  metadata update does NOT reset a skip. Aether public `stop()` already clears `mediaChapters`
+  (pinned engine line 4954); don't infer item identity from changed chapter arrays.
+- Skip Intro no longer covers captions/scrubber: the action stack reserves the measured bottom-bar
+  height. tvOS Down from the surface / Up from the scrubber reaches Skip Intro; auto-hide does not
+  steal its focus. iPhone and Apple TV tests played a generated MPEG-2 MKV and proved a 50-second
+  seek (captured at 0:52) and button removal. Screenshots: `design/2026-09-17-chapters/`.
+  All changes remain uncommitted and unshipped; 13 still needs the owner's go/no-go.
+- Final verification: `swift build` and 1007/101 gate pass; iOS/tvOS Debug builds and chapter UI tests
+  pass; visionOS Simulator and native macOS Debug builds pass with `CODE_SIGNING_ALLOWED=NO`.
+  macOS is buildable locally; distribution signing and runtime review are still separate work.
+- Verification traps: UI-test schemes build ONLY their runner, not the app. Build the app, inspect
+  SwiftCompile lines, boot the intended simulator, install explicitly, THEN run its UI-test scheme.
+  `TEST_RUNNER_OPENSTREAM_CHAPTER_FIXTURE_URL` enables the new opt-in tests; test media is outside
+  the repo under `~/Developer/openstream-build/chapter-fixture/`. FFV1 is unavailable in the bundled
+  decoder; the MPEG-2 fixture works. The existing DEBUG `OpenStreamVisionPlaybackURL` launch route
+  now works on all Apple platforms through Add Files. No source is saved. Tests write resume entries;
+  fixture-only entries were removed after shutdown, and the temporary localhost server was stopped.
+- Orchestration used `CLAUDE_CONFIG_DIR=~/.claude-work claude -p` with file tools only. Claude added
+  six lifecycle tests; Codex corrected its mistaken stop/chapters assumption before accepting the
+  patch. Initial AGY runs hit a headless read denial, then a 180-second timeout on a 97,774-byte
+  prompt in Pro High / plan mode. Follow-up diagnosis: silent authentication succeeds; model
+  generation continues without a final answer. Pro High and Pro Low both repeated analysis on a
+  23,672-byte one-file review and were explicitly stopped. Flash Medium completed that review in
+  94.3 seconds (33,705 thinking tokens); its two duration findings are not accepted patches.
+  A focused 3,475-byte lifecycle invariant check on Flash Low completed successfully in 2.7 seconds.
+  For bounded AGY checks use `--model gemini-3.8-flash-low --effort low --sandbox
+  --disable-slash-commands --output-format stream-json --print-timeout 90s --print <prompt>`.
+  Supply only relevant excerpts and explicit checks; omit `--mode plan`. Inspect the final JSON
+  `result.status == SUCCESS` and nonempty response, plus stderr for permission denials. Broader
+  audits may use Flash Medium and a longer ceiling, but must still be audited independently.
+  Global AGY model, trust and permission settings were not changed. Evidence is under
+  `~/Developer/openstream-build/codex-agy-diagnostic-*`. AI Council completed with
+  `--providers ollama --ollama --ollama-model Qwen2.5:7b
+  --synth-provider ollama --mode fast --timeout-seconds 90 --no-context --no-oss-fallback`.
+  Its claimed concurrent chapter-read race was rejected: the read/recompute is synchronous on MainActor.
+  No OpenRouter call, commits, TestFlight operations, signing changes, or certificates.
 - Mormon Wives fixed by title-match ranking (AppleStremioTitleMatch; trace `candidates for …`).
   Tab bar is the system one. Channel Manager redesigned. Gate 999 / 99. Everything since 12 is
   local (13 candidates); iOS 11/12 still wait on the Widgets App Group tick; macOS needs certs.
@@ -314,4 +392,4 @@ dead-button tally (it builds now); Channel Manager redesign — recommendation i
 (selected-only list, add via Search (+)); **iPhone DUO** — needs Xcode 27.1 beta, not released;
 this Mac has 26.3, no DUO device type, no iOS 27 runtime. Tooling-blocked, not us.
 
-**Test count**: 967 / 90. If yours is lower, you lost tests — find out why before continuing.
+**Test count**: 1007 / 101. If yours is lower, you lost tests — find out why before continuing.
