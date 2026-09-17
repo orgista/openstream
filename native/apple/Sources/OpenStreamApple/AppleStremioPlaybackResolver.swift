@@ -348,7 +348,12 @@ public struct AppleStremioPlaybackResolver: Sendable {
             // cannot win on resolution alone.
             let wanted = AppleStremioSeriesInfo(mediaID: item.mediaID)
                 .map { (season: $0.season, episode: $0.episode) }
-            return AppleStremioCandidateRanking.rankForAutomaticPlayback(collected, episode: wanted)
+            let ranked = AppleStremioCandidateRanking.rankForAutomaticPlayback(collected, episode: wanted, title: item.name)
+            // The trace names the top picks so a "wrong show" report can be
+            // read off the file instead of reproduced.
+            appleTrace("candidates for \(item.name): " + ranked.prefix(4).map {
+                String(($0.filename ?? $0.title).prefix(60)) }.joined(separator: " | "))
+            return ranked
         }
         if let providerFailure { throw AppleStremioPlaybackResolutionError.providerFailure(providerFailure) }
         throw bestError

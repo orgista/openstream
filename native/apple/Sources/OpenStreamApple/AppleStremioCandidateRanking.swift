@@ -11,9 +11,17 @@ public enum AppleStremioCandidateRanking {
     /// candidate that does not contradict it, however good its resolution.
     public static func rankForAutomaticPlayback(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
-        episode: (season: Int, episode: Int)? = nil
+        episode: (season: Int, episode: Int)? = nil,
+        title: String? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
-        ordered(candidates, preferCompatibleWhenUnknown: false, episode: episode)
+        ordered(candidates, preferCompatibleWhenUnknown: false, episode: episode, title: title)
+    }
+
+    /// Whether this candidate is named for a different title altogether.
+    static func contradictsTitle(_ candidate: AppleStremioHTTPPlaybackCandidate, title: String) -> Bool {
+        let text = [candidate.filename ?? "", candidate.title,
+                    candidate.sourceURL.lastPathComponent].joined(separator: " ")
+        return AppleStremioTitleMatch.contradicts(text, title: title)
     }
 
     /// Whether this candidate names an episode other than the one being played.
@@ -31,11 +39,18 @@ public enum AppleStremioCandidateRanking {
     private static func ordered(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         preferCompatibleWhenUnknown: Bool,
-        episode: (season: Int, episode: Int)? = nil
+        episode: (season: Int, episode: Int)? = nil,
+        title: String? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
         candidates.enumerated().sorted { lhs, rhs in
             // Demoted rather than dropped: if every candidate contradicts, the
             // viewer still gets something to play rather than nothing.
+            // A different show is worse than a different episode, so it sorts first.
+            if let title, !title.isEmpty {
+                let lw = contradictsTitle(lhs.element, title: title)
+                let rw = contradictsTitle(rhs.element, title: title)
+                if lw != rw { return !lw }
+            }
             if let episode {
                 let lw = contradictsEpisode(lhs.element, season: episode.season, episode: episode.episode)
                 let rw = contradictsEpisode(rhs.element, season: episode.season, episode: episode.episode)
