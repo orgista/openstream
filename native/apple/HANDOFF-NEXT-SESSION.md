@@ -195,7 +195,9 @@ is invisible to it. A green gate does not mean tvOS compiles — always run the 
   FEEDBACK.md's macOS baseline audit. Starting a baseline does not itself publish an upload.
 - Live release catch-up 2026-09-17: iOS 11 (`ec6ec0bc-db74-4005-bbe1-b3c3d163f7c1`) is VALID
   and IN_BETA_TESTING internally and externally, assigned to Reddit + Internal + TraceEnabled.
-  iOS 12 has been uploaded and is processing; see DELIVERIES.md for the final state.
+  iOS 12 (`a173faf4-49ce-42f3-9de2-c07ff664e0d6`) is also VALID / IN_BETA_TESTING internally
+  and externally, assigned to Internal + TraceEnabled. Both deliveries are complete; actual
+  installation on the owner's iPhone has not been observed. See DELIVERIES.md.
   visionOS 12 is VALID / IN_BETA_TESTING for Internal + TraceEnabled; visionOS 11 also has Reddit.
   Native macOS has no uploaded builds. CLI `asc web app-groups assign` supports future assignments
   with an Apple Account web session; the API-key profile is a separate authentication mechanism.
@@ -244,6 +246,36 @@ Progress check-in: the **15-minute heartbeat** is the Claude Desktop scheduled t
 "OpenStream Apple GUI heartbeat" prompt (visible in `launchctl list` as
 `com.anthropic.claudefordesktop…`; there are no cloud routines and no LaunchAgents by owner rule).
 Each firing reports 1–3 lines and which rung is active. Switch-on is the owner's call.
+
+### 4f. Dispatching work to a model — audit of 2026-09-17 15:10 (tested, all three rungs answer)
+**Pick the model by the job, then give it the brief.** Every worker reads `AGENTS.md` first — it
+now holds the commands, the SMB protocol, the never-list, the UI rules, the traps and the report
+format. Your task message adds only what is specific to the task.
+
+| Job | Use | Why |
+|---|---|---|
+| Judgment, design, owner questions, anything with a screenshot to LOOK at | this session (Fable; `/fast` when told) | only it sees images and owns ship/commit |
+| Read-only lookup / audit / "where is X decided" | `agy -p … --effort low` (Gemini 3.1 Pro, ~14 s) or `codex exec -s read-only` (GPT‑6, ~16 s); `investigator` (Sonnet) only when the answer needs the Claude tool set — it cost ~19k tokens for a grep | free-ish rungs first; sip the subscription |
+| Mechanical implementation with a written spec (≤3 files) | `agy -p "<spec>" --mode accept-edits --dangerously-skip-permissions --effort medium --print-timeout 20m` | rung 1 of the ladder (§4e) |
+| Same, when agy is out or it needs Xcode/sim knowledge | `implementer` (Sonnet; `model:"opus"` for hard multi-file) | reads AGENTS.md, runs the gate, reports the diff |
+| Same, when the Claude 5‑hour bar is past ~90% | `codex exec -C <tree> -s workspace-write "<spec>"` | rung 3; ALWAYS pass `-s` — the desktop config is `danger-full-access` |
+| tvOS focus / SwiftUI review of a diff | Sonnet + the `swift-focusengine-pro` / `swiftui-pro` skills | cheap, specialised |
+
+**Task-message template (paste, fill every line — a blank line is a bug):**
+```
+Repo: /Volumes/Files/Projects/Code, Apps & Websites/Apps/OpenStream/native/apple — read AGENTS.md first.
+Files you may change: <exact list>. Do not touch anything else.
+Change: <exact behaviour, or the policy table / acceptance criteria>.
+Tests: <which suite/file; Swift Testing style>.
+Gate: swift test --scratch-path "$HOME/Developer/openstream-build/main-merge-spm" (before and after; report N/M).
+Build/screenshot: <none | scheme + sim UDID + what to grep in the log>.
+Forbidden: uploads, commits, git push, sims erase/create, signing, secrets, Computer Use (see AGENTS.md §3).
+Report: AGENTS.md §7 format, under 60 lines.
+```
+**Shared tree:** the owner's Codex desktop session ("Astra") edits `native/apple` live and can ship
+(it uploaded iOS 11/12 on 2026-09-17). Before every edit: `git status --short -- .` and read any
+foreign diff; commit ONLY your own files; never `git add -A` here; never revert what you did not
+write; if a file you need is already modified by the other agent, say so and stop.
 
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/` and load automatically each session: `asc-cli-usage`,
@@ -354,7 +386,7 @@ Each firing reports 1–3 lines and which rung is active. Switch-on is the owner
   No OpenRouter call, commits, TestFlight operations, signing changes, or certificates.
 - Mormon Wives fixed by title-match ranking (AppleStremioTitleMatch; trace `candidates for …`).
   Tab bar is the system one. Channel Manager redesigned. Gate 999 / 99. Everything since 12 is
-  local (13 candidates); iOS 11/12 still wait on the Widgets App Group tick; macOS needs certs.
+  local (13 candidates); iOS 11/12 catch-up is now delivered; macOS build 1 still needs signing.
 - Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
   TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
   cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.
