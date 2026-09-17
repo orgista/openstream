@@ -404,6 +404,85 @@ write; if a file you need is already modified by the other agent, say so and sto
   Codex releases AppleDiscoverView.swift (open since 16:28; Codex also started
   `design/2026-09-17-iphone-native-ux/`). Gate 1030 / 105.
 - Skills: UX/marketing (11) + performance (7) installed and mapped in AGENTS.md §8. Tidy skill live.
+- (Codex continuation, kept verbatim:)
+- Build 12 source publication completed at owner's explicit request: private
+  `orgista/openstream-apple`, main + tag `build-12`, commit `4a7c402`. Isolated checkout
+  `~/Developer/openstream-build/publish-apple-b12`; 986/96 tests and unsigned iOS Release build pass.
+  Configuration-only publication differences (catalog sanitization, automatic signing, shared
+  schemes/version stamps/test fixture) are in its DELIVERIES.md. Newer development work stays local.
+  Cloud now uses `orgista/openstream-apple`. Apple Build Checks enabled; four platforms passed
+  run 5 (`3a431b39-00a5-47b7-8b72-891a435db678`) at `ba066e3`, which fixes iOS ActivityKit
+  isolation errors found in run 4. Build-12 tag unchanged; TestFlight workflow remains paused.
+  No new TestFlight binary. Current simulator UI fixes are newer local development changes.
+- iOS 11 and 12 are delivered and their en-US TestFlight notes are now populated and read-back
+  verified. See DELIVERIES.md; older signing/upload blockers below are historical.
+- Owner's build-note policy (September 17): write concise, platform-specific “Added…” / “Fixed…”
+  notes from the exact shipped snapshot, with one useful testing request. Apply the article-writing
+  and marketing copy-editing skills. Include only verified user-visible changes; no raw commit
+  messages, Android changes in Apple notes, unshipped features, test counts or generic hype.
+  Build 12 adds default diagnostic logging; its other features are inherited from 11. Use
+  `asc builds test-notes update` and read back the locale before calling notes delivered.
+- Xcode Cloud audit: Default runs 1–3 (September 1) all failed before compilation because commit
+  7a76d8d9 lacked `native/apple/Apps/OpenStreamApps.xcodeproj`. The workflow points to
+  `orgista/openstream`; its Android “Last Commit” text is not TestFlight release notes.
+  The separate TestFlight workflow has zero runs and only an iOS TEST action. Neither workflow
+  was changed or rerun. Cloud repair needs the intended repository, branch and project path aligned
+  with an approved published Apple snapshot; local iOS 11/12 delivery does not repair Cloud.
+- Chapter markers: finished the interrupted Aether → playback protocol → overlay wiring.
+  Duration events re-evaluate intro eligibility; `.idle` clears the per-item skip. A chapter
+  metadata update does NOT reset a skip. Aether public `stop()` already clears `mediaChapters`
+  (pinned engine line 4954); don't infer item identity from changed chapter arrays.
+- Skip Intro no longer covers captions/scrubber: the action stack reserves the measured bottom-bar
+  height. tvOS Down from the surface / Up from the scrubber reaches Skip Intro; auto-hide does not
+  steal its focus. iPhone and Apple TV tests played a generated MPEG-2 MKV and proved a 50-second
+  seek (captured at 0:52) and button removal. Screenshots: `design/2026-09-17-chapters/`.
+  All changes remain uncommitted and unshipped; 13 still needs the owner's go/no-go.
+- Final verification: `swift build` and 1007/101 gate pass; iOS/tvOS Debug builds and chapter UI tests
+  pass; visionOS Simulator and native macOS Debug builds pass with `CODE_SIGNING_ALLOWED=NO`.
+  macOS is buildable locally; distribution signing and runtime review are still separate work.
+- Verification traps: UI-test schemes build ONLY their runner, not the app. Build the app, inspect
+  SwiftCompile lines, boot the intended simulator, install explicitly, THEN run its UI-test scheme.
+  `TEST_RUNNER_OPENSTREAM_CHAPTER_FIXTURE_URL` enables the new opt-in tests; test media is outside
+  the repo under `~/Developer/openstream-build/chapter-fixture/`. FFV1 is unavailable in the bundled
+  decoder; the MPEG-2 fixture works. The existing DEBUG `OpenStreamVisionPlaybackURL` launch route
+  now works on all Apple platforms through Add Files. No source is saved. Tests write resume entries;
+  fixture-only entries were removed after shutdown, and the temporary localhost server was stopped.
+- Orchestration used `CLAUDE_CONFIG_DIR=~/.claude-work claude -p` with file tools only. Claude added
+  six lifecycle tests; Codex corrected its mistaken stop/chapters assumption before accepting the
+  patch. Initial AGY runs hit a headless read denial, then a 180-second timeout on a 97,774-byte
+  prompt in Pro High / plan mode. Follow-up diagnosis: silent authentication succeeds; model
+  generation continues without a final answer. Pro High and Pro Low both repeated analysis on a
+  23,672-byte one-file review and were explicitly stopped. Flash Medium completed that review in
+  94.3 seconds (33,705 thinking tokens); its two duration findings are not accepted patches.
+  A focused 3,475-byte lifecycle invariant check on Flash Low completed successfully in 2.7 seconds.
+  For bounded AGY checks use `--model gemini-3.8-flash-low --effort low --sandbox
+  --disable-slash-commands --output-format stream-json --print-timeout 90s --print <prompt>`.
+  Supply only relevant excerpts and explicit checks; omit `--mode plan`. Inspect the final JSON
+  `result.status == SUCCESS` and nonempty response, plus stderr for permission denials. Broader
+  audits may use Flash Medium and a longer ceiling, but must still be audited independently.
+  Global AGY model, trust and permission settings were not changed. Evidence is under
+  `~/Developer/openstream-build/codex-agy-diagnostic-*`. AI Council completed with
+  `--providers ollama --ollama --ollama-model Qwen2.5:7b
+  --synth-provider ollama --mode fast --timeout-seconds 90 --no-context --no-oss-fallback`.
+  Its claimed concurrent chapter-read race was rejected: the read/recompute is synchronous on MainActor.
+  No OpenRouter call, commits, TestFlight operations, signing changes, or certificates.
+- Mormon Wives fixed by title-match ranking (AppleStremioTitleMatch; trace `candidates for …`).
+  Tab bar is the system one. Channel Manager redesigned. Gate 999 / 99. Everything since 12 is
+  local (13 candidates); iOS 11/12 catch-up is now delivered; macOS build 1 still needs signing.
+- Live HLS-behind-bare-URL fix + guide limits (991 / 97). Build 12 (trace) tvOS in Internal +
+  TraceEnabled, visionOS uploading; build 11 (non-trace) also in Reddit. Next: Channel Manager
+  cleanup (remove Your Regional, selected-only list + Add Channels picker), then Mormon Wives.
+- Build 11: tvOS and visionOS archived + exported (CFBundleVersion 11) with pinned manual signing;
+  upload to TestFlight Internal + TraceEnabled in progress via `asc publish testflight`. iOS blocked
+  on the Widgets App Group (owner, portal). Commits 86a0b2a, 3055de2 (+ visionOS pin pending).
+- Toggles iOS-green; TestFlight installs trace by default (`AppleBuildChannel`); Add Live TV M3U
+  has Playlist Text + Choose File merging into one local playlist/one source row; AIOMetadata
+  seeded once on DEBUG/TestFlight. Gate 981 / 94. Ship 11 in progress (three platforms, automatic
+  signing via the ASC API key, `asc publish testflight` to Internal + TraceEnabled).
+- Downloads automatic (picker removed), per-episode ring + VoiceOver percentage, failure line on
+  series pages, trace flag fixed, download phases traced. UI test
+  `testDownloadStartsWithoutAskingForASource` passes (23 s). Gate 973 / 91. Sim manifest clean.
+- Skills (18) installed; `asc` logged in. Ship 11 still blocked on signing + App Group (see 4c).
 
 **Done tonight** (all gated, built on the platforms concerned, screenshot-verified): tester bugs 1
 (tab trap) and 4 (M3U "one channel"); toggle colour UX; 300 display cap with notice + Channel
