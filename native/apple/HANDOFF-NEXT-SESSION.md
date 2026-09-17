@@ -300,6 +300,16 @@ write; if a file you need is already modified by the other agent, say so and sto
   - `asc-*` (8) — `asc-cli-usage` first; `asc-crash-triage` for TestFlight crashes
     (`asc testflight crashes list --app 6807530757`); `asc-signing-setup` for the Widgets App Group
     step; `asc-xcode-build` / `asc-release-flow` for archives — but uploads only on "ship N".
+  - UX/UI + marketing (installed 2026-09-17, vetted, scripts stripped): `frontend-design`,
+    `canvas-design` (anthropics/skills); `aso`, `launch`, `product-marketing`, `copywriting`,
+    `pricing`, `social`, `marketing-plan`, `analytics` (coreyhaines31/marketingskills); `vibe-aso`
+    (Kronop — keyword research + localized metadata; its ASC-key wizard must reuse the `asc` login).
+    The `ui-ux-pro-max` plugin (design-system, brand, banner-design, slides, ui-styling) is also
+    installed. Task→skill rows are in `AGENTS.md §8`. Not installed: `brand-guidelines` (it is
+    Anthropic's brand), the ASO screenshot skill (needs a Gemini MCP key — owner decision).
+  - Tidy: `/openstream-tidy` (project skill at `/Volumes/Files/Projects/.claude/skills/openstream-tidy`)
+    is the constant clean-up — run it at the end of every heartbeat; it never deletes another agent's
+    in-flight files and asks before anything over 1 GB or outside the build scratch.
   - Ignore here: cloudflare*, wrangler, durable-objects, agents-sdk, sandbox-sdk, docker,
     deployment-patterns, web-perf, turnstile-spin.
 - `asc` (brew) is installed and authenticated: profile **"OpenStream"**, team `2VQ74PD5YG`, app id
@@ -363,6 +373,16 @@ write; if a file you need is already modified by the other agent, say so and sto
 - This file — update the "state" below when you finish a unit of work.
 
 ## 7. State as of 2026-09-17 Codex continuation (newest first)
+- Build 12 source publication completed at owner's explicit request: private
+  `orgista/openstream-apple`, main + tag `build-12`, commit `4a7c402`. Isolated checkout
+  `~/Developer/openstream-build/publish-apple-b12`; 986/96 tests and unsigned iOS Release build pass.
+  Configuration-only publication differences (catalog sanitization, automatic signing, shared
+  schemes/version stamps/test fixture) are in its DELIVERIES.md. Newer development work stays local.
+  Cloud Default is now **Apple Build Checks** (four BUILD actions, no archives), paused; the unused
+  TestFlight workflow is also paused. Owner must change Cloud's primary repository URL to
+  `https://github.com/orgista/openstream-apple.git` in Cloud Settings; the public API cannot switch
+  it and no web session is available. After owner connects it: verify repository + main/project
+  path, enable Apple Build Checks and run it. No Cloud success or new TestFlight delivery yet.
 - iOS 11 and 12 are delivered and their en-US TestFlight notes are now populated and read-back
   verified. See DELIVERIES.md; older signing/upload blockers below are historical.
 - Owner's build-note policy (September 17): write concise, platform-specific “Added…” / “Fixed…”

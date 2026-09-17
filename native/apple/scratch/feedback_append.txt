@@ -1,5 +1,0 @@
-
-### Antigravity handoff results G
-- Created `Sources/OpenStreamApple/Resources/ChannelLineup/premier-us-extended.json` covering missing ranges for premium movies (500s), sports (600s), Spanish-language and international (400s), and music channels (800s). Replaced placeholders with real channel facts and removed overlapping names based on `lineup-reference-directv-2026-09-03.md`. Total entries: ~361.
-- Created `Tests/OpenStreamAppleTests/AppleChannelLineupPresetsExtendedTests.swift` to validate the extended lineup file against the target schema and missing ranges.
-- **Hook for Codex**: Change `"premier-us"` to `"premier-us-extended"` in `AppleChannelLineupPresets.swift`'s `loadFile()` function.

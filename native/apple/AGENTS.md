@@ -74,11 +74,20 @@ tabled; chapter markers are approved.
 - `#if DEBUG … #else …` — the `#else` branch only compiles in Release archives; reference-check it.
 - Tests are Swift Testing (`@Suite`, `@Test`, `#expect`); pure policy types get pure tests.
 
-## 6. Where to write things down
+## 6. Where to write things down — and nowhere else
+The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDOFF-NEXT-SESSION.md`,
+`DELIVERIES.md`, and the references under `design/*.md`. Everything else is trash.
 - `GUI-AUDIT.md`: tick the item you worked on (`[x]`/`[F]`/`[!]`) with what changed and how it was
   verified (gate count, screenshot, test name). No essays.
 - `FEEDBACK.md`: append a short dated section written for the owner (plain words, no jargon).
-- Do not create new markdown files, design folders, or handoffs unless the task asks.
+  Sections older than two weeks get rotated into `FEEDBACK-ARCHIVE-*.md` by the tidy pass.
+- Screenshots you must keep go under `design/<date>-<item>/` and are deleted once the GUI-AUDIT
+  entry describes them; never into the tree root, never `scratch/`, never `*.log`.
+- Do not create new markdown files, plans, proposals, or handoffs. If you think one is needed, put
+  the content in the matching section of the documents above.
+- Build scratch lives in `~/Developer/openstream-build/`: `main-merge-spm` + the DerivedData dirs +
+  the last two builds' `.xcarchive`s. Older archives, `export-*` folders and worktrees are deleted by
+  the tidy pass (`/openstream-tidy`, run at the end of every heartbeat).
 
 ## 7. Report format (return exactly this, under 60 lines)
 ```
@@ -114,5 +123,13 @@ references folder next to it has the details. Apply the one that matches, then d
 | VoiceOver labels/values/identifiers, Dynamic Type, accessibility audit | `ios-accessibility` (refs: 18) | every control needs a label; UI tests depend on identifiers |
 | driving the simulators headlessly (tap, type, screenshot, app state) | `ios-simulator-skill` (refs: 41) | its erase/delete scripts were removed on purpose — never recreate them |
 | App Store Connect via `asc` (builds, groups, crashes, ids, signing, release) | `asc-cli-usage` first, then `asc-build-lifecycle` / `asc-testflight-orchestration` / `asc-crash-triage` / `asc-id-resolver` / `asc-signing-setup` / `asc-xcode-build` / `asc-release-flow` | read-only use is fine; anything that uploads or assigns groups needs the owner's "ship N" |
+| the web portal / landing page look, any new visual direction | `frontend-design` | one bold element, quiet everything else; stock Apple stays stock |
+| posters, press images, social art | `canvas-design` (refs: 83) | brand: black, white, accent #FF3366, no gradients |
+| App Store name/subtitle/keywords/description, listing audit | `aso` first; `vibe-aso` for keyword research + 50-locale metadata (its setup wants an ASC API key — use the existing `asc` login, NEVER paste a key) | French testers → fr-FR first |
+| positioning, "why OpenStream vs Stremio/Infuse", messaging | `product-marketing` → then `copywriting` | write the context doc once, reuse it |
+| TestFlight "What to Test", Reddit/TraceEnabled group posts, release notes | `launch` + `copywriting` + `social` | short, plain, no hype |
+| pricing/tiers questions | `pricing` | owner decides; skill drafts |
+| marketing plan / channel choice / measuring it | `marketing-plan`, `analytics` | drafts for the owner |
 Not for this repo: the cloudflare*, wrangler, durable-objects, agents-sdk, sandbox-sdk, docker,
-deployment, web-perf, turnstile skills — ignore them here.
+deployment, web-perf, turnstile skills — ignore them here. (`brand-guidelines` is Anthropic's own
+brand and was not installed; write OpenStream's under `design/DESIGN-SYSTEM.md` instead.)
