@@ -46,7 +46,11 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 - Never run more than one `xcodebuild` at a time; never run `swift test` concurrently with one.
 - Never edit `AppleSMBRangeServer.swift`, `AppleSharePlay*.swift`, or the AetherEngine package
   checkout unless the task names them.
-- Never commit. The main session reviews the diff and commits (as the owner, cyberbanksy).
+- Never commit, `git add`, `git stash`, `git checkout --`, `git reset`, or `git clean`. Other agents'
+  uncommitted work lives in this tree; a stash/pop or checkout would take it with yours. To test "without
+  your change", reason from the diff or run only your own test suite — never move files around.
+- Never create files or folders outside the paths your task names (no `scratch_store`, no `REPORT.md`);
+  use `/tmp` for scratch.
 - Uploads are the driver's job only, by the runbook in `HANDOFF-NEXT-SESSION.md §9`, after "ship N".
 
 ## 4. Owner UI rules (do not relitigate)
