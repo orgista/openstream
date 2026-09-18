@@ -535,6 +535,7 @@ private extension AppleSourceKind {
         case .youtube: "play.rectangle"
         case .liveTV: "dot.radiowaves.left.and.right"
         case .nas: "externaldrive.connected.to.line.below"
+        case .mediaServer: "server.rack"
         }
     }
 }

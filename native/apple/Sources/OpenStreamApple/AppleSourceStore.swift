@@ -7,6 +7,7 @@ public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
     case youtube
     case liveTV
     case nas
+    case mediaServer
 
     public var title: String {
         switch self {
@@ -15,6 +16,7 @@ public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
         case .youtube: "YouTube"
         case .liveTV: "Live TV"
         case .nas: "Network share"
+        case .mediaServer: "Media Server"
         }
     }
 }
@@ -107,6 +109,8 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     /// resolved numeric endpoint used by the SMB client.
     public var networkDisplayHost: String?
 
+    public var serverKind: AppleMediaServerKind?
+
     // Decode-only bridge for v1 installs. AppleSourceStore immediately moves
     // these values to Keychain and they are never encoded again.
     var legacyUsername: String?
@@ -137,7 +141,8 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         validationFailureSummary: String? = nil,
         discoveredItemCount: Int? = nil,
         capabilities: [String] = [],
-        networkDisplayHost: String? = nil
+        networkDisplayHost: String? = nil,
+        serverKind: AppleMediaServerKind? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -164,6 +169,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         self.discoveredItemCount = Self.cleanItemCount(discoveredItemCount)
         self.capabilities = Self.cleanCapabilities(capabilities)
         self.networkDisplayHost = Self.cleanNetworkDisplayHost(networkDisplayHost)
+        self.serverKind = serverKind
         legacyUsername = nil
         legacyPassword = nil
     }
@@ -178,6 +184,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         case logoURL, iptvType, epgURL, credentialReference, transportReference, username, password, bookmarkData
         case configurationRevision, lastValidatedAt, validationSummary
         case lastValidationFailureAt, validationFailureSummary, discoveredItemCount, capabilities, networkDisplayHost
+        case serverKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -220,6 +227,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         networkDisplayHost = Self.cleanNetworkDisplayHost(
             try container.decodeIfPresent(String.self, forKey: .networkDisplayHost)
         )
+        serverKind = try container.decodeIfPresent(AppleMediaServerKind.self, forKey: .serverKind)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -249,6 +257,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         try container.encodeIfPresent(discoveredItemCount, forKey: .discoveredItemCount)
         try container.encode(capabilities, forKey: .capabilities)
         try container.encodeIfPresent(networkDisplayHost, forKey: .networkDisplayHost)
+        try container.encodeIfPresent(serverKind, forKey: .serverKind)
     }
 
     private static func cleanStatus(_ value: String?) -> String? {
@@ -1433,6 +1442,76 @@ public final class AppleSourceStore {
 
     private func updateNetworkCredentials(_ credentials: AppleSMBCredentials, reference: String) throws {
         let data = try JSONEncoder().encode(credentials)
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw AppleKeychainStoreError.invalidData
+        }
+        try keychain.set(value, for: reference)
+        credentialError = nil
+    }
+
+    public func addMediaServer(
+        kind: AppleMediaServerKind,
+        name: String,
+        session: AppleMediaServerSession
+    ) throws -> AppleSource {
+        let cleanName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        let displayName = cleanName.isEmpty ? kind.title : cleanName
+
+        if let index = sources.firstIndex(where: { candidate in
+            guard candidate.kind == .mediaServer, candidate.serverKind == kind else { return false }
+            guard candidate.url.host?.lowercased() == session.baseURL.host?.lowercased() else { return false }
+            guard candidate.url.port == session.baseURL.port else { return false }
+            return (try? mediaServerSession(for: candidate))?.userID == session.userID
+        }) {
+            let existing = sources[index]
+            let reference = existing.id.uuidString.lowercased()
+            try updateMediaServerCredentials(reference: reference, session: session)
+            let updated = try securedTransportSource(AppleSource(
+                id: existing.id,
+                kind: .mediaServer,
+                name: displayName,
+                url: session.baseURL,
+                isEnabled: existing.isEnabled,
+                addedAt: existing.addedAt,
+                credentialReference: reference,
+                transportReference: existing.transportReference,
+                isManagedImports: existing.isManagedImports,
+                configurationRevision: existing.configurationRevision,
+                serverKind: kind
+            ))
+            sources[index] = updated
+            persist()
+            return updated
+        }
+
+        let newID = UUID()
+        let reference = newID.uuidString.lowercased()
+        try updateMediaServerCredentials(reference: reference, session: session)
+        
+        let newSource = try securedTransportSource(AppleSource(
+            id: newID,
+            kind: .mediaServer,
+            name: displayName,
+            url: session.baseURL,
+            credentialReference: reference,
+            serverKind: kind
+        ))
+        sources.insert(newSource, at: 0)
+        persist()
+        return newSource
+    }
+
+    public func mediaServerSession(for source: AppleSource) throws -> AppleMediaServerSession? {
+        guard source.kind == .mediaServer else { return nil }
+        guard let reference = source.credentialReference else { return nil }
+        guard let value = try keychain.string(for: reference), let data = value.data(using: .utf8) else {
+            return nil
+        }
+        return try JSONDecoder().decode(AppleMediaServerSession.self, from: data)
+    }
+
+    private func updateMediaServerCredentials(reference: String, session: AppleMediaServerSession) throws {
+        let data = try JSONEncoder().encode(session)
         guard let value = String(data: data, encoding: .utf8) else {
             throw AppleKeychainStoreError.invalidData
         }
