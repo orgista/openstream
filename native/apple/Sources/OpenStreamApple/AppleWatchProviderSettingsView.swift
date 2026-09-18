@@ -51,7 +51,7 @@ struct AppleWatchProviderSettingsView: View {
     }
 
     private var list: some View {
-        List {
+        Form {
             Section {
                 ForEach(providers) { provider in
                     Toggle(isOn: binding(for: provider)) {

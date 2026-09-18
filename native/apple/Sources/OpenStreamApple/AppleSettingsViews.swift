@@ -140,6 +140,10 @@ struct AppleSettingsView: View {
                     AppleTVNavigationLabel("Metadata", systemImage: "photo.on.rectangle.angled")
                 }
                 .appleTVReadableFocus()
+                NavigationLink(value: AppleSettingsRoute.watchProviders) {
+                    AppleTVNavigationLabel("Streaming Services", systemImage: "rectangle.stack.badge.play")
+                }
+                .appleTVReadableFocus()
                 NavigationLink(value: AppleSettingsRoute.serverDownloads) {
                     AppleTVNavigationLabel("Radarr & Sonarr", systemImage: "arrow.down.circle")
                 }
@@ -804,9 +808,14 @@ private struct AppleArrConnectionSection: View {
         Section(kind.displayName) {
             TextField("Server URL", text: $baseURL)
                 .autocorrectionDisabled()
+                #if os(iOS) || os(visionOS)
+                .keyboardType(.URL)
+                .textContentType(.URL)
+                #endif
                 .tint(.primary)
                 .appleFormSubmit(.baseURL, chain: Self.chain, focus: $focusedField)
             SecureField("API key", text: $apiKey)
+                .textContentType(.password)
                 .appleFormSubmit(.apiKey, chain: Self.chain, focus: $focusedField)
             TextField("Root folder path", text: $rootFolderPath)
                 .autocorrectionDisabled()
@@ -989,6 +998,8 @@ struct AppleSubtitleLanguagesView: View {
                 .disabled(!isSelected && settings.subtitleLanguages.count >= AppleSubtitleLanguages.maximumSelection)
                 .appleTVReadableFocus()
                 .accessibilityIdentifier("settings.subtitleLanguages.\(language.code)")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityRemoveTraits(isSelected ? [] : .isSelected)
                 .id(language.code)
             }
 
@@ -1060,6 +1071,7 @@ private struct AppleConnectionTestLabel: View {
             HStack {
                 ProgressView()
                     .controlSize(.small)
+                    .accessibilityLabel("Testing connection")
                 Text("Testing")
             }
         } else {
