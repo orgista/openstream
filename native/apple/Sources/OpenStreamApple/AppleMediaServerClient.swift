@@ -113,6 +113,20 @@ public struct AppleEmbyConnectServer: Codable, Equatable, Sendable {
 }
 
 public struct AppleMediaServerClient: Sendable {
+    /// The MediaBrowser header wants a device name; the platform name is enough
+    /// and needs no UIKit or `Host` (macOS-only), so this compiles everywhere.
+    public static var platformDeviceName: String {
+        #if os(tvOS)
+        return "Apple TV"
+        #elseif os(visionOS)
+        return "Apple Vision Pro"
+        #elseif os(macOS)
+        return "Mac"
+        #else
+        return "iPhone or iPad"
+        #endif
+    }
+
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     private let loader: Loader
@@ -125,7 +139,7 @@ public struct AppleMediaServerClient: Sendable {
         loader: @escaping Loader = URLSession.shared.data(for:),
         deviceID: String? = nil,
         clientName: String = "OpenStream",
-        deviceName: String = Host.current().localizedName ?? "Unknown Device",
+        deviceName: String = AppleMediaServerClient.platformDeviceName,
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     ) {
         self.loader = loader

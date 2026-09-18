@@ -31,10 +31,12 @@ struct AppleNativeSubtitleSelectionTests {
     }
 
     /// An empty menu is worse than a long one: a stream carrying only
-    /// languages the viewer did not ask for still lists them.
-    @Test func aStreamWithNoMatchingLanguageStillListsItsTracks() {
+    /// languages the viewer did not ask for still offers one of them — one,
+    /// not the whole list (owner, 2026-09-17: "one option, no English 1 or 2").
+    @Test func aStreamWithNoMatchingLanguageStillOffersOneTrack() {
         let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["ja"])
-        #expect(visible.map(\.id) == [0, 1, 2])
+        #expect(visible.count == 1)
+        #expect(tracks.map(\.id).contains(visible[0].id))
     }
 
     /// ...but "list them anyway" must not become "turn one on". Only `.always`

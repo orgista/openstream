@@ -624,7 +624,7 @@ struct AppleTransportTrackMenu: View {
             Section("Subtitles") {
                 Button("Off") { onSelectSubtitle(nil) }
                 ForEach(subtitleTracks) { track in
-                    Button(trackLabel(track)) {
+                    Button(AppleSubtitleTrackFilter.menuLabel(for: track)) {
                         onSelectSubtitle(track.id)
                     }
                 }
