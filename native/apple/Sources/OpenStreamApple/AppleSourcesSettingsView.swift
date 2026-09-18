@@ -98,6 +98,10 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Add Live TV", systemImage: "dot.radiowaves.left.and.right")
                 }
                 .appleTVReadableFocus()
+                NavigationLink(value: AppleSourceRoute.addMediaServer) {
+                    AppleTVNavigationLabel("Add Media Server", systemImage: "server.rack")
+                }
+                .appleTVReadableFocus()
 
                 NavigationLink(value: AppleSourceRoute.webManagement) {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
@@ -148,6 +152,8 @@ struct AppleSourcesSettingsView: View {
                 AppleAddManifestSourceView(sourceStore: sourceStore)
             case .addLiveTV:
                 AppleAddLiveTVSourceView(sourceStore: sourceStore)
+            case .addMediaServer:
+                AppleAddMediaServerView(sourceStore: sourceStore)
             case .addNetworkShare:
                 AppleAddNetworkShareView(sourceStore: sourceStore)
             case .addARR:
@@ -219,6 +225,7 @@ enum AppleSourceRoute: Hashable {
     case addInstance
     case addManifest
     case addLiveTV
+    case addMediaServer
     case addNetworkShare
     case addARR
     case webManagement
@@ -886,7 +893,7 @@ private struct AppleTVChoicePill: View {
 
 /// Stock field chrome on Apple TV (the focused field lifts the way the system
 /// Settings app's do); the plain in-row style inside forms elsewhere.
-private extension View {
+extension View {
     @ViewBuilder
     func appleSourceFieldStyle() -> some View {
         #if os(tvOS)
@@ -902,7 +909,7 @@ private extension View {
 /// the eye is an inline focusable glyph beside the field, not a separate
 /// "Show password" toggle row (owner item S10).
 @MainActor
-private struct AppleRevealableSecureField: View {
+struct AppleRevealableSecureField: View {
     private let title: String
     @Binding private var text: String
     @Binding private var isRevealed: Bool

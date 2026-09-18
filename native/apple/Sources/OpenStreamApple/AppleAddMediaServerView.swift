@@ -1,0 +1,621 @@
+import Foundation
+import SwiftUI
+
+#if os(iOS) || os(visionOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
+private func appleSecondaryFieldPrompt(_ title: String) -> Text {
+    #if os(visionOS)
+    Text(title).foregroundColor(.white)
+    #elseif os(tvOS)
+    Text(title).italic().foregroundStyle(.tertiary)
+    #elseif os(iOS)
+    Text(title).foregroundColor(Color(uiColor: .secondaryLabel))
+    #else
+    Text(title).foregroundStyle(.secondary)
+    #endif
+}
+
+public struct AppleMediaServerFormPolicy {
+    public static func normalizedBaseURL(_ text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.contains(" ") { return nil }
+        let urlString = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
+        guard let url = URL(string: urlString), url.host != nil else { return nil }
+        return url
+    }
+
+    public static func canTest(urlText: String) -> Bool {
+        return normalizedBaseURL(urlText) != nil
+    }
+
+    public static func canSave(urlText: String, username: String) -> Bool {
+        return canTest(urlText: urlText) && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public static func canSignIn(email: String, password: String) -> Bool {
+        return email.contains("@") && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+    }
+
+    public static func defaultName(kind: AppleMediaServerKind, typedName: String, publicInfo: AppleMediaServerPublicInfo?, host: String?) -> String {
+        let trimmed = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        if let serverName = publicInfo?.serverName, !serverName.isEmpty { return serverName }
+        return host ?? kind.title
+    }
+
+    public static func message(for error: AppleMediaServerError) -> String {
+        switch error {
+        case .invalidCredentials: return "Wrong username or password."
+        case .server(let status): return "The server answered with an error (\(status))."
+        case .malformedResponse: return "The server's reply made no sense."
+        case .unreachable: return "Can't reach the server."
+        case .unsupported: return "Not supported by this server."
+        }
+    }
+
+    public static let quickConnectPollInterval: Duration = .seconds(3)
+}
+
+private enum AppleInstanceConnectionAction: Equatable {
+    case test(UUID)
+    case save(UUID)
+    case signIn(UUID)
+    case connect(UUID)
+    
+    var shouldSave: Bool {
+        if case .save = self { return true }
+        if case .signIn = self { return true }
+        if case .connect = self { return true }
+        return false
+    }
+}
+
+private enum EmbyMode: String, Hashable, CaseIterable {
+    case connect = "Emby Connect"
+    case server = "Server URL"
+}
+
+@MainActor
+struct AppleAddMediaServerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let sourceStore: AppleSourceStore
+    
+    @State private var kind: AppleMediaServerKind = .jellyfin
+    @State private var embyMode: EmbyMode = .connect
+    
+    @State private var name: String = ""
+    @State private var url: String = ""
+    @State private var username: String = ""
+    @State private var password: String = ""
+    @State private var isPasswordRevealed = false
+    
+    @State private var embyEmail: String = ""
+    @State private var embyPassword: String = ""
+    @State private var isEmbyPasswordRevealed = false
+    @State private var embyServers: [AppleEmbyConnectServer] = []
+    @State private var selectedEmbyServerID: String = ""
+    @State private var embyAccount: AppleEmbyConnectAccount?
+    
+    @State private var isWorking: Bool = false
+    @State private var message: String?
+    @State private var isError: Bool = false
+    @State private var connectionAction: AppleInstanceConnectionAction?
+    
+    @State private var ticket: AppleQuickConnectTicket?
+    @State private var quickConnectTask: Task<Void, Never>?
+    
+    private let client = AppleMediaServerClient()
+    
+    private enum Field: Hashable {
+        case name, url, username, embyEmail
+    }
+    @FocusState private var focusedField: Field?
+    
+    private var fieldChain: [Field] {
+        if kind == .emby && embyMode == .connect {
+            return [.embyEmail]
+        } else {
+            return [.name, .url, .username]
+        }
+    }
+    
+    var body: some View {
+        #if os(tvOS)
+        tvOSBody
+        #else
+        standardBody
+        #endif
+    }
+    
+    private var nameField: some View {
+        TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+            .textContentType(.name)
+            .appleSourceFieldStyle()
+    }
+    
+    private var urlField: some View {
+        TextField("Server URL", text: $url, prompt: appleSecondaryFieldPrompt("Server URL"))
+            .textContentType(.URL)
+            .appleSourceFieldStyle()
+            .tint(.primary)
+            #if os(iOS) || os(tvOS) || os(visionOS)
+            .textInputAutocapitalization(.never)
+            #endif
+            #if os(iOS) || os(visionOS)
+            .keyboardType(.URL)
+            #endif
+            .autocorrectionDisabled()
+    }
+    
+    private var usernameField: some View {
+        TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
+            .textContentType(.username)
+            .appleSourceFieldStyle()
+            #if os(iOS) || os(tvOS) || os(visionOS)
+            .textInputAutocapitalization(.never)
+            #endif
+            .autocorrectionDisabled()
+    }
+    
+    private var passwordField: some View {
+        AppleRevealableSecureField("Password", text: $password, isRevealed: $isPasswordRevealed)
+    }
+    
+    private var embyEmailField: some View {
+        TextField("Email", text: $embyEmail, prompt: appleSecondaryFieldPrompt("Email"))
+            .textContentType(.emailAddress)
+            .appleSourceFieldStyle()
+            #if os(iOS) || os(tvOS) || os(visionOS)
+            .textInputAutocapitalization(.never)
+            #endif
+            #if os(iOS) || os(visionOS)
+            .keyboardType(.emailAddress)
+            #endif
+            .autocorrectionDisabled()
+    }
+    
+    private var embyPasswordField: some View {
+        AppleRevealableSecureField("Password", text: $embyPassword, isRevealed: $isEmbyPasswordRevealed)
+    }
+    
+    #if os(tvOS)
+    private var tvOSBody: some View {
+        let metrics = AppleTVSettingsMetrics.standard
+        return ScrollView {
+            VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                    AppleTVFormField("Server") {
+                        HStack(spacing: metrics.iconSpacing) {
+                            AppleTVChoicePill(title: AppleMediaServerKind.jellyfin.title, isSelected: kind == .jellyfin) { kind = .jellyfin }
+                                .accessibilityIdentifier("sources.mediaServer.kind.jellyfin")
+                            AppleTVChoicePill(title: AppleMediaServerKind.emby.title, isSelected: kind == .emby) { kind = .emby }
+                                .accessibilityIdentifier("sources.mediaServer.kind.emby")
+                        }
+                    }
+                    
+                    if kind == .emby {
+                        AppleTVFormField("Sign in with") {
+                            HStack(spacing: metrics.iconSpacing) {
+                                AppleTVChoicePill(title: EmbyMode.connect.rawValue, isSelected: embyMode == .connect) { embyMode = .connect }
+                                    .accessibilityIdentifier("sources.mediaServer.embyMode.connect")
+                                AppleTVChoicePill(title: EmbyMode.server.rawValue, isSelected: embyMode == .server) { embyMode = .server }
+                                    .accessibilityIdentifier("sources.mediaServer.embyMode.server")
+                            }
+                        }
+                    }
+                    
+                    if kind == .emby && embyMode == .connect {
+                        AppleTVFormGroup("Emby Connect") {
+                            AppleTVFormField("Email") {
+                                embyEmailField
+                                    .focused($focusedField, equals: .embyEmail)
+                                    .accessibilityIdentifier("sources.mediaServer.embyEmail")
+                            }
+                            AppleTVFormField("Password") {
+                                embyPasswordField
+                                    .accessibilityIdentifier("sources.mediaServer.embyPassword")
+                            }
+                        }
+                    } else {
+                        AppleTVFormGroup("Connection") {
+                            AppleTVFormField("Name") {
+                                nameField
+                                    .focused($focusedField, equals: .name)
+                                    .accessibilityIdentifier("sources.mediaServer.name")
+                            }
+                            AppleTVFormField("Server URL") {
+                                urlField
+                                    .focused($focusedField, equals: .url)
+                                    .accessibilityIdentifier("sources.mediaServer.url")
+                            }
+                            AppleTVFormField("Username") {
+                                usernameField
+                                    .focused($focusedField, equals: .username)
+                                    .accessibilityIdentifier("sources.mediaServer.username")
+                            }
+                            AppleTVFormField("Password") {
+                                passwordField
+                                    .accessibilityIdentifier("sources.mediaServer.password")
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                .focusSection()
+                .disabled(isWorking)
+                
+                if kind == .emby && embyMode == .connect {
+                    HStack(spacing: metrics.pillSpacing) {
+                        Button { connectionAction = .signIn(UUID()) } label: { connectionLabel(saving: true, text: "Sign In") }
+                            .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                            .disabled(!AppleMediaServerFormPolicy.canSignIn(email: embyEmail, password: embyPassword) || isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.embySignIn")
+                    }
+                    .focusSection()
+                } else {
+                    HStack(spacing: metrics.pillSpacing) {
+                        Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
+                            .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                            .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.save")
+                        Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
+                            .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                            .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.test")
+                    }
+                    .focusSection()
+                }
+                
+                if kind == .jellyfin {
+                    VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                        AppleTVFormGroup("Quick Connect") {
+                            HStack(spacing: metrics.pillSpacing) {
+                                Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
+                                    .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                                    .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+                                    .accessibilityIdentifier("sources.mediaServer.quickConnect")
+                            }
+                            if let ticket {
+                                AppleTVFormField("Code") {
+                                    Text(ticket.code)
+                                        .font(.system(.title2, design: .monospaced))
+                                        .accessibilityIdentifier("sources.mediaServer.quickConnect.code")
+                                }
+                                HStack(spacing: metrics.pillSpacing) {
+                                    Button("Cancel") { cancelQuickConnect() }
+                                        .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                                        .accessibilityIdentifier("sources.mediaServer.quickConnect.cancel")
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                    .focusSection()
+                }
+                
+                if !embyServers.isEmpty {
+                    VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                        AppleTVFormField("Server") {
+                            HStack(spacing: metrics.iconSpacing) {
+                                ForEach(embyServers, id: \.id) { server in
+                                    AppleTVChoicePill(title: server.name, isSelected: selectedEmbyServerID == server.id) { selectedEmbyServerID = server.id }
+                                        .accessibilityIdentifier("sources.mediaServer.embyServer.\(server.id)")
+                                }
+                            }
+                        }
+                        HStack(spacing: metrics.pillSpacing) {
+                            Button {
+                                guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
+                                saveEmbyServer(server: server)
+                            } label: { connectionLabel(saving: true, text: "Save") }
+                                .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                                .disabled(isWorking)
+                                .accessibilityIdentifier("sources.mediaServer.saveEmby")
+                        }
+                        .focusSection()
+                    }
+                    .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                    .focusSection()
+                }
+
+                if let message {
+                    AppleTVFormMessage(text: message, isError: isError)
+                        .accessibilityIdentifier("sources.mediaServer.status")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, AppleTVChromeMetrics.verticalSafeInset)
+        }
+        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+        .defaultFocus($focusedField, .name)
+        .appleSettingsPageTitle("Add Media Server")
+        .task(id: connectionAction) {
+            guard let connectionAction else { return }
+            await perform(connectionAction)
+        }
+        .onChange(of: kind) { _, _ in resetState() }
+        .onChange(of: embyMode) { _, _ in resetState() }
+        .onDisappear { cancelQuickConnect() }
+    }
+    #else
+    private var standardBody: some View {
+        Form {
+            Section {
+                Picker("Server", selection: $kind) {
+                    Text(AppleMediaServerKind.jellyfin.title).tag(AppleMediaServerKind.jellyfin)
+                    Text(AppleMediaServerKind.emby.title).tag(AppleMediaServerKind.emby)
+                }
+                .accessibilityIdentifier("sources.mediaServer.kind")
+            }
+            .disabled(isWorking)
+            
+            if kind == .emby {
+                Section {
+                    Picker("Sign in with", selection: $embyMode) {
+                        Text(EmbyMode.connect.rawValue).tag(EmbyMode.connect)
+                        Text(EmbyMode.server.rawValue).tag(EmbyMode.server)
+                    }
+                    .accessibilityIdentifier("sources.mediaServer.embyMode")
+                }
+                .disabled(isWorking)
+            }
+            
+            if kind == .emby && embyMode == .connect {
+                Section {
+                    embyEmailField.appleFormSubmit(.embyEmail, chain: fieldChain, focus: $focusedField)
+                        .accessibilityIdentifier("sources.mediaServer.embyEmail")
+                    embyPasswordField
+                        .accessibilityIdentifier("sources.mediaServer.embyPassword")
+                }
+                .disabled(isWorking)
+                
+                Section {
+                    Button { connectionAction = .signIn(UUID()) } label: { connectionLabel(saving: true, text: "Sign In") }
+                        .disabled(!AppleMediaServerFormPolicy.canSignIn(email: embyEmail, password: embyPassword) || isWorking)
+                        .accessibilityIdentifier("sources.mediaServer.embySignIn")
+                }
+                
+                if !embyServers.isEmpty {
+                    Section {
+                        Picker("Server", selection: $selectedEmbyServerID) {
+                            ForEach(embyServers, id: \.id) { server in
+                                Text(server.name).tag(server.id)
+                            }
+                        }
+                        .accessibilityIdentifier("sources.mediaServer.embyServer")
+                        Button {
+                            guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
+                            saveEmbyServer(server: server)
+                        } label: { connectionLabel(saving: true, text: "Save") }
+                            .disabled(isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.saveEmby")
+                    }
+                }
+            } else {
+                Section("Connection") {
+                    nameField.appleFormSubmit(.name, chain: fieldChain, focus: $focusedField)
+                        .accessibilityIdentifier("sources.mediaServer.name")
+                    urlField.appleFormSubmit(.url, chain: fieldChain, focus: $focusedField)
+                        .accessibilityIdentifier("sources.mediaServer.url")
+                    usernameField.appleFormSubmit(.username, chain: fieldChain, focus: $focusedField)
+                        .accessibilityIdentifier("sources.mediaServer.username")
+                    passwordField
+                        .accessibilityIdentifier("sources.mediaServer.password")
+                }
+                .disabled(isWorking)
+                
+                Section {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { connectionButtons }
+                        VStack(alignment: .leading, spacing: 12) { connectionButtons }
+                    }
+                    .controlSize(.large)
+                }
+                .listRowBackground(Color.clear)
+                
+                if kind == .jellyfin {
+                    Section("Quick Connect") {
+                        Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
+                            .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.quickConnect")
+                        if let ticket {
+                            LabeledContent("Code") {
+                                Text(ticket.code).font(.system(.title2, design: .monospaced))
+                            }
+                            .accessibilityIdentifier("sources.mediaServer.quickConnect.code")
+                            Button("Cancel", role: .cancel) { cancelQuickConnect() }
+                                .accessibilityIdentifier("sources.mediaServer.quickConnect.cancel")
+                        }
+                    }
+                }
+            }
+            
+            if let message {
+                Section {
+                    Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
+                        .foregroundStyle(isError ? .red : .secondary)
+                        .accessibilityIdentifier("sources.mediaServer.status")
+                }
+            }
+        }
+        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+        .appleSettingsPage("Add Media Server")
+        .task(id: connectionAction) {
+            guard let connectionAction else { return }
+            await perform(connectionAction)
+        }
+        .onChange(of: kind) { _, _ in resetState() }
+        .onChange(of: embyMode) { _, _ in resetState() }
+        .onDisappear { cancelQuickConnect() }
+    }
+    
+    private var connectionButtons: some View {
+        Group {
+            Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
+                .buttonStyle(.borderedProminent)
+                .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
+                .accessibilityIdentifier("sources.mediaServer.save")
+            
+            Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
+                .buttonStyle(.bordered)
+                .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+                .accessibilityIdentifier("sources.mediaServer.test")
+        }
+    }
+    #endif
+    
+    private func connectionLabel(saving: Bool, text: String) -> some View {
+        let active = isWorking && (connectionAction?.shouldSave == saving)
+        return HStack(spacing: 8) {
+            if active { ProgressView().accessibilityHidden(true) }
+            Text(text)
+        }
+    }
+    
+    private func resetState() {
+        message = nil
+        isError = false
+        ticket = nil
+        quickConnectTask?.cancel()
+        quickConnectTask = nil
+    }
+    
+    private func cancelQuickConnect() {
+        ticket = nil
+        quickConnectTask?.cancel()
+        quickConnectTask = nil
+    }
+    
+    private func perform(_ action: AppleInstanceConnectionAction) async {
+        isWorking = true
+        message = nil
+        isError = false
+        defer { isWorking = false }
+        
+        switch action {
+        case .test(_):
+            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
+            do {
+                let info = try await client.publicInfo(baseURL: baseURL)
+                isError = false
+                if let serverName = info.serverName, let version = info.version {
+                    message = "Connected to \(serverName) (\(version))"
+                } else {
+                    message = "Connected"
+                }
+            } catch let err as AppleMediaServerError {
+                isError = true
+                message = AppleMediaServerFormPolicy.message(for: err)
+            } catch {
+                isError = true
+                message = error.localizedDescription
+            }
+            
+        case .save(_):
+            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
+            do {
+                let session = try await client.authenticate(baseURL: baseURL, kind: kind, username: username, password: password)
+                let info = try? await client.publicInfo(baseURL: baseURL)
+                let finalName = AppleMediaServerFormPolicy.defaultName(kind: kind, typedName: name, publicInfo: info, host: baseURL.host)
+                _ = try sourceStore.addMediaServer(kind: kind, name: finalName, session: session)
+                dismiss()
+            } catch let err as AppleMediaServerError {
+                isError = true
+                message = AppleMediaServerFormPolicy.message(for: err)
+            } catch {
+                isError = true
+                message = error.localizedDescription
+            }
+            
+        case .signIn(_):
+            do {
+                let account = try await client.embyConnectSignIn(email: embyEmail, password: embyPassword)
+                self.embyAccount = account
+                let servers = try await client.embyConnectServers(account: account)
+                if servers.isEmpty {
+                    isError = true
+                    message = "No servers on this account."
+                } else if servers.count == 1 {
+                    try await exchangeAndSaveEmbyServer(server: servers[0], account: account)
+                } else {
+                    self.embyServers = servers
+                    self.selectedEmbyServerID = servers[0].id
+                }
+            } catch let err as AppleMediaServerError {
+                isError = true
+                message = AppleMediaServerFormPolicy.message(for: err)
+            } catch {
+                isError = true
+                message = error.localizedDescription
+            }
+            
+        case .connect(_):
+            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
+            do {
+                let enabled = try await client.quickConnectEnabled(baseURL: baseURL)
+                if !enabled {
+                    isError = true
+                    message = "Quick Connect is off on this server."
+                    return
+                }
+                let newTicket = try await client.quickConnectInitiate(baseURL: baseURL)
+                self.ticket = newTicket
+                
+                quickConnectTask = Task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: AppleMediaServerFormPolicy.quickConnectPollInterval)
+                        if Task.isCancelled { break }
+                        do {
+                            let authenticated = try await client.quickConnectState(baseURL: baseURL, secret: newTicket.secret)
+                            if authenticated {
+                                let session = try await client.authenticateWithQuickConnect(baseURL: baseURL, secret: newTicket.secret)
+                                let info = try? await client.publicInfo(baseURL: baseURL)
+                                let finalName = AppleMediaServerFormPolicy.defaultName(kind: .jellyfin, typedName: name, publicInfo: info, host: baseURL.host)
+                                _ = try sourceStore.addMediaServer(kind: .jellyfin, name: finalName, session: session)
+                                dismiss()
+                                break
+                            }
+                        } catch {
+                            // ignore errors during poll
+                        }
+                    }
+                }
+            } catch let err as AppleMediaServerError {
+                isError = true
+                message = AppleMediaServerFormPolicy.message(for: err)
+            } catch {
+                isError = true
+                message = error.localizedDescription
+            }
+        }
+    }
+    
+    private func saveEmbyServer(server: AppleEmbyConnectServer) {
+        guard let account = embyAccount else { return }
+        Task {
+            isWorking = true
+            message = nil
+            isError = false
+            defer { isWorking = false }
+            do {
+                try await exchangeAndSaveEmbyServer(server: server, account: account)
+            } catch let err as AppleMediaServerError {
+                isError = true
+                message = AppleMediaServerFormPolicy.message(for: err)
+            } catch {
+                isError = true
+                message = error.localizedDescription
+            }
+        }
+    }
+    
+    private func exchangeAndSaveEmbyServer(server: AppleEmbyConnectServer, account: AppleEmbyConnectAccount) async throws {
+        let session = try await client.embyConnectExchange(server: server, account: account)
+        _ = try sourceStore.addMediaServer(kind: .emby, name: server.name, session: session)
+        dismiss()
+    }
+}
