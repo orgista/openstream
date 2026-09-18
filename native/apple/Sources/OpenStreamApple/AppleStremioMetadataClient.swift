@@ -115,6 +115,44 @@ public struct AppleStremioPreviewAssets: Equatable, Sendable {
     }
 }
 
+public struct AppleRuntimeMinutesParser {
+    public static func parse(_ value: String?) -> Int? {
+        guard let value else { return nil }
+        let clean = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if let exact = Int(clean) { return exact }
+        
+        var total = 0
+        var hasValue = false
+        
+        if let hRange = clean.range(of: "h") {
+            let hStr = clean[..<hRange.lowerBound].trimmingCharacters(in: .whitespaces)
+            if let h = Int(hStr) {
+                total += h * 60
+                hasValue = true
+            }
+            
+            let remainder = clean[hRange.upperBound...].trimmingCharacters(in: .whitespaces)
+            let mStr = remainder.replacingOccurrences(of: "min", with: "")
+                                .replacingOccurrences(of: "m", with: "")
+                                .trimmingCharacters(in: .whitespaces)
+            if let m = Int(mStr) {
+                total += m
+                hasValue = true
+            }
+        } else {
+            let mStr = clean.replacingOccurrences(of: "min", with: "")
+                            .replacingOccurrences(of: "m", with: "")
+                            .trimmingCharacters(in: .whitespaces)
+            if let m = Int(mStr) {
+                total += m
+                hasValue = true
+            }
+        }
+        
+        return hasValue ? total : nil
+    }
+}
+
 public enum AppleStremioEpisodePolicy {
     public static func initialSeason(in episodes: [AppleStremioEpisode]) -> Int? {
         let available = seasons(in: episodes)
@@ -254,11 +292,19 @@ public struct AppleStremioMetadataClient: Sendable {
                 director: Self.names(value.director, limit: 4).first,
                 writers: Self.names(value.writer, limit: 8),
                 imdbRating: value.imdbRating,
-                year: value.year ?? Self.leadingYear(value.releaseInfo),
+                year: value.year,
                 overview: Self.nonEmpty(value.description).map { String($0.prefix(4_000)) },
                 posterURL: Self.safeArtworkURL(value.poster),
-                backdropURL: Self.safeArtworkURL(value.background),
-                logoURL: Self.safeArtworkURL(value.logo)
+                backdropURL: Self.safeArtworkURL(value.background ?? value.landscapePoster),
+                logoURL: Self.safeArtworkURL(value.logo),
+                trailerYouTubeKeys: {
+                    let ts1 = value.trailers?.compactMap(\.source) ?? []
+                    let ts2 = value.trailerStreams?.compactMap(\.ytID) ?? []
+                    return (ts1 + ts2).compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
+                        .reduce(into: []) { keys, key in
+                            if !keys.contains(key) { keys.append(key) }
+                        }
+                }()
             )
         }
 
@@ -313,7 +359,7 @@ public struct AppleStremioMetadataClient: Sendable {
                     episode: identity.episode,
                     releaseInfo: value.releaseInfo ?? value.released,
                     runtimeMinutes: value.runtime?.boundedRuntime,
-                    overview: value.description,
+                    overview: value.description ?? value.overview,
                     thumbnailURL: value.thumbnail.flatMap(URL.init(string:))
                 )
             }.prefix(1_000).map { $0 }
@@ -697,6 +743,7 @@ public struct AppleStremioMetadataClient: Sendable {
         let name: String?
         let description: String?
         let releaseInfo: String?
+        let released: String?
         let runtime: FlexibleMetadataInt?
         let contentRating: String?
         let certification: String?
@@ -710,11 +757,14 @@ public struct AppleStremioMetadataClient: Sendable {
         let year: Int?
         let poster: String?
         let background: String?
+        let landscapePoster: String?
         let logo: String?
+        let trailers: [Trailer]?
+        let trailerStreams: [TrailerStream]?
 
         private enum CodingKeys: String, CodingKey {
-            case id, type, name, description, releaseInfo, runtime, genre, genres, poster, background, logo, contentRating, certification, badges, formats
-            case cast, director, writer, imdbRating, year
+            case id, type, name, description, releaseInfo, released, runtime, genre, genres, poster, background, landscapePoster, logo, contentRating, certification, badges, formats
+            case cast, director, writer, imdbRating, year, trailers, trailerStreams
         }
 
         init(from decoder: Decoder) throws {
@@ -724,7 +774,14 @@ public struct AppleStremioMetadataClient: Sendable {
             name = try? container.decode(String.self, forKey: .name)
             description = try? container.decode(String.self, forKey: .description)
             releaseInfo = try? container.decode(String.self, forKey: .releaseInfo)
-            runtime = try? container.decode(FlexibleMetadataInt.self, forKey: .runtime)
+            released = try? container.decode(String.self, forKey: .released)
+            if let rVal = try? container.decode(FlexibleMetadataInt.self, forKey: .runtime) {
+                runtime = rVal
+            } else if let rStr = try? container.decode(String.self, forKey: .runtime), let mins = AppleRuntimeMinutesParser.parse(rStr) {
+                runtime = .value(mins)
+            } else {
+                runtime = nil
+            }
             contentRating = try? container.decode(String.self, forKey: .contentRating)
             certification = try? container.decode(String.self, forKey: .certification)
             formatBadges = (try? container.decode([String].self, forKey: .badges))
@@ -743,14 +800,19 @@ public struct AppleStremioMetadataClient: Sendable {
             }
             if let value = try? container.decode(Int.self, forKey: .year) {
                 year = value
-            } else if let value = try? container.decode(String.self, forKey: .year) {
-                year = AppleStremioMetadataClient.leadingYear(value)
+            } else if let value = try? container.decode(String.self, forKey: .year), let num = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                year = num
+            } else if let release = (try? container.decode(String.self, forKey: .releaseInfo)) ?? (try? container.decode(String.self, forKey: .released)) {
+                year = AppleStremioMetadataClient.leadingYear(release)
             } else {
                 year = nil
             }
             poster = try? container.decode(String.self, forKey: .poster)
             background = try? container.decode(String.self, forKey: .background)
+            landscapePoster = try? container.decode(String.self, forKey: .landscapePoster)
             logo = try? container.decode(String.self, forKey: .logo)
+            trailers = try? container.decode([Trailer].self, forKey: .trailers)
+            trailerStreams = try? container.decode([TrailerStream].self, forKey: .trailerStreams)
         }
 
         /// Cinemeta returns `cast`/`director`/`writer` as an array of names, but
@@ -853,11 +915,12 @@ public struct AppleStremioMetadataClient: Sendable {
         let released: String?
         let runtime: FlexibleMetadataInt?
         let description: String?
+        let overview: String?
         let thumbnail: String?
         let seasonWasPresent: Bool
         let episodeWasPresent: Bool
 
-        private enum CodingKeys: String, CodingKey { case id, title, name, season, episode, releaseInfo, released, runtime, description, thumbnail }
+        private enum CodingKeys: String, CodingKey { case id, title, name, season, episode, releaseInfo, released, runtime, description, overview, thumbnail }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -870,8 +933,15 @@ public struct AppleStremioMetadataClient: Sendable {
             episodeWasPresent = container.contains(.episode)
             releaseInfo = try? container.decode(String.self, forKey: .releaseInfo)
             released = try? container.decode(String.self, forKey: .released)
-            runtime = try? container.decode(FlexibleMetadataInt.self, forKey: .runtime)
+            if let rVal = try? container.decode(FlexibleMetadataInt.self, forKey: .runtime) {
+                runtime = rVal
+            } else if let rStr = try? container.decode(String.self, forKey: .runtime), let mins = AppleRuntimeMinutesParser.parse(rStr) {
+                runtime = .value(mins)
+            } else {
+                runtime = nil
+            }
             description = try? container.decode(String.self, forKey: .description)
+            overview = try? container.decode(String.self, forKey: .overview)
             thumbnail = try? container.decode(String.self, forKey: .thumbnail)
         }
     }

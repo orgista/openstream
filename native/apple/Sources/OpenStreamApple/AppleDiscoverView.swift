@@ -73,6 +73,7 @@ struct AppleDiscoverView: View {
     /// the billboard simply never asked, which is why heroes only ever showed
     /// text (owner 2026-09-15).
     @State private var heroWordmarks: [String: URL] = [:]
+    @State private var heroOverviews: [String: String] = [:]
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -537,13 +538,43 @@ struct AppleDiscoverView: View {
 
     @ViewBuilder
     private func featuredHero(_ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0) -> some View {
+        let itemToDisplay: AppleCatalogItem = {
+            if let resolvedOverview = heroOverviews[value.item.mediaID] {
+                return AppleCatalogItem(
+                    mediaID: value.item.mediaID,
+                    type: value.item.type,
+                    name: value.item.name,
+                    posterURL: value.item.posterURL,
+                    backgroundURL: value.item.backgroundURL,
+                    summary: resolvedOverview,
+                    releaseInfo: value.item.releaseInfo,
+                    rating: value.item.rating,
+                    contentRating: value.item.contentRating,
+                    formatBadges: value.item.formatBadges,
+                    genres: value.item.genres,
+                    cast: value.item.cast,
+                    director: value.item.director,
+                    writers: value.item.writers,
+                    year: value.item.year
+                )
+            }
+            return value.item
+        }()
+
         AppleFeaturedHero(
-            item: value.item,
+            item: itemToDisplay,
             viewportSize: viewportSize,
             wordmark: heroWordmarks[value.item.mediaID],
             rotationCount: rotationCount,
             rotationIndex: rotationIndex
         ) { featuredActions(value) }
+        .task(id: value.item.mediaID) {
+            guard heroOverviews[value.item.mediaID] == nil else { return }
+            let resolver = AppleMetadataResolver()
+            if let details = try? await resolver.resolve(sources: sourceStore.sources, type: value.item.type, mediaID: value.item.mediaID), let overview = details.overview {
+                heroOverviews[value.item.mediaID] = overview
+            }
+        }
     }
 
     /// Reads whatever the prefetcher has already cached for the heroes. Cache
@@ -1918,16 +1949,11 @@ struct AppleCatalogItemDetailView: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        isLandscapeLayout ? .clear : .black.opacity(0.48),
-                        in: Circle()
-                    )
-                    .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.6), radius: 4)
                     .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
-                    .contentShape(Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back")

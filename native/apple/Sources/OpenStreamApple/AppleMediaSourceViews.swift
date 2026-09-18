@@ -169,14 +169,14 @@ struct AppleLiveTVView: View {
 
                 Group {
                     if isLandscape {
-                        HStack(alignment: .top, spacing: 0) {
-                            #if os(iOS)
-                            videoColumn.frame(width: viewportSize.width * 0.5)
-                            #else
-                            videoColumn
-                            #endif
-                            guideColumn
+                        ScrollView(.vertical) {
+                            VStack(spacing: 0) {
+                                videoColumn
+                                guideColumn
+                                    .containerRelativeFrame(.vertical, count: 1, span: 1, spacing: 0)
+                            }
                         }
+                        .scrollIndicators(.hidden)
                     } else {
                         VStack(spacing: 0) {
                             videoColumn
@@ -720,7 +720,7 @@ private struct LivePinnedPlayerLayout: ViewModifier {
             .ignoresSafeArea(.container, edges: .horizontal)
             
         if isPlaceholder && isPad {
-            base.containerRelativeFrame(.vertical, count: 100, span: 40, alignment: .center)
+            base.containerRelativeFrame(.vertical, count: 100, span: 40, spacing: 0, alignment: .center)
         } else {
             base
         }
@@ -807,6 +807,12 @@ struct AppleLiveInlinePlayer: View {
             }
         }
         .background(.black)
+        .onChange(of: lifetime.isFullScreen) { _, isFullScreen in
+            #if !os(macOS)
+            host.viewController.requiresLinearPlayback = !isFullScreen
+            host.viewController.allowsPictureInPicturePlayback = isFullScreen
+            #endif
+        }
         #if !os(macOS)
         .fullScreenCover(isPresented: $showsSurfaceFullScreen, onDismiss: { lifetime.isFullScreen = false }) {
             AppleLiveSurfaceFullScreenPlayer(coordinator: coordinator, request: request, sharePlayMenu: sharePlayMenu)
@@ -832,6 +838,10 @@ struct AppleLiveInlinePlayer: View {
             coordinator.stop()
             host.activate()
             host.configureLivePlaybackControls()
+            #if !os(macOS)
+            host.viewController.requiresLinearPlayback = !lifetime.isFullScreen
+            host.viewController.allowsPictureInPicturePlayback = lifetime.isFullScreen
+            #endif
             try? await audioSession.prepareForPlayback()
             guard !Task.isCancelled else { return }
             var playbackRequest = request

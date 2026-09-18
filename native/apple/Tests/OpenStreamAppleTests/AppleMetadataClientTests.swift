@@ -280,3 +280,134 @@ private func makeLogoPNG(edgeAlpha: UInt8) throws -> Data {
     }
     #expect(AppleTrailerPreviewPolicy.validYouTubeKey("contains a space") == nil)
 }
+
+@Test func runtimeMinutesParser() {
+    #expect(AppleRuntimeMinutesParser.parse("142") == 142)
+    #expect(AppleRuntimeMinutesParser.parse("142 min") == 142)
+    #expect(AppleRuntimeMinutesParser.parse("2h22min") == 142)
+    #expect(AppleRuntimeMinutesParser.parse("2h 22m") == 142)
+    #expect(AppleRuntimeMinutesParser.parse("1h") == 60)
+    #expect(AppleRuntimeMinutesParser.parse("45m") == 45)
+    #expect(AppleRuntimeMinutesParser.parse("142min") == 142)
+}
+
+@Test func metadataClientDetailsDecodesShapesProperly() async throws {
+    let client = AppleStremioMetadataClient { request in
+        return (
+            Data("""
+            {
+                "meta": {
+                    "id": "tt0111161",
+                    "type": "movie",
+                    "name": "The Shawshank Redemption",
+                    "year": "1994",
+                    "runtime": "2h22min",
+                    "released": "1994-09-24T00:00:00.000Z",
+                    "imdbRating": "9.3",
+                    "genres": ["Drama", "Crime"],
+                    "director": ["Frank Darabont"],
+                    "writer": ["Frank Darabont", "Stephen King"],
+                    "cast": null,
+                    "poster": "https://image.tmdb.org/t/p/w600_and_h900_bestv2/9cqNxx0GxF0bflZmeSMuL5tnGzr.jpg",
+                    "background": "https://image.tmdb.org/t/p/original/v8xVDqt8uCul3c3mgx4VpGCwxJC.jpg",
+                    "logo": "https://image.tmdb.org/t/p/original/1K53E8WXQW76Scg8upBObXSrbgN.png",
+                    "landscapePoster": "https://image.tmdb.org/t/p/original/xXXFdqV965crlxCO3dj3PhtcCAf.jpg",
+                    "trailers": [{"source": "PLl99DlL6b4", "type": "Trailer"}],
+                    "trailerStreams": [{"ytId": "xyXX8LXiNJ4"}],
+                    "description": "Two imprisoned men bond over a number of years..."
+                }
+            }
+            """.utf8),
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
+    }
+    let source = AppleSource(
+        id: UUID(),
+        kind: .stremio,
+        name: "test",
+        url: URL(string: "https://fixture.example/manifest.json")!,
+        manifestID: "test",
+        resources: ["meta"]
+    )
+    let details = try await client.details(source: source, type: "movie", mediaID: "tt0111161")
+    #expect(details.year == 1994)
+    #expect(details.runtimeMinutes == 142)
+    #expect(details.imdbRating == 9.3)
+    #expect(details.logoURL?.absoluteString == "https://image.tmdb.org/t/p/original/1K53E8WXQW76Scg8upBObXSrbgN.png")
+    #expect(details.backdropURL?.absoluteString == "https://image.tmdb.org/t/p/original/v8xVDqt8uCul3c3mgx4VpGCwxJC.jpg")
+    #expect(details.trailerYouTubeKeys == ["PLl99DlL6b4", "xyXX8LXiNJ4"])
+    #expect(details.cast.isEmpty)
+    #expect(details.director == "Frank Darabont")
+}
+
+@Test func metadataClientDetailsDecodesLandscapePosterAsFallback() async throws {
+    let client = AppleStremioMetadataClient { request in
+        return (
+            Data("""
+            {
+                "meta": {
+                    "id": "tt0111161",
+                    "type": "movie",
+                    "name": "Fallback",
+                    "landscapePoster": "https://image.tmdb.org/t/p/original/xXXFdqV965crlxCO3dj3PhtcCAf.jpg"
+                }
+            }
+            """.utf8),
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
+    }
+    let source = AppleSource(
+        id: UUID(),
+        kind: .stremio,
+        name: "test",
+        url: URL(string: "https://fixture.example/manifest.json")!,
+        manifestID: "test",
+        resources: ["meta"]
+    )
+    let details = try await client.details(source: source, type: "movie", mediaID: "tt0111161")
+    #expect(details.backdropURL?.absoluteString == "https://image.tmdb.org/t/p/original/xXXFdqV965crlxCO3dj3PhtcCAf.jpg")
+}
+
+@Test func metadataClientEpisodesDecodesSeriesShapeProperly() async throws {
+    let client = AppleStremioMetadataClient { request in
+        return (
+            Data("""
+            {
+                "meta": {
+                    "id": "tt0903747",
+                    "type": "series",
+                    "videos": [
+                        {
+                            "id": "tt0903747:0:1",
+                            "title": "Good Cop / Bad Cop",
+                            "season": 0,
+                            "episode": 1,
+                            "thumbnail": "https://artworks.thetvdb.com/banners/episodes/81189/3859781.jpg",
+                            "overview": "Hank and Marie try to spice up their relationship on Valentine's Day.",
+                            "released": "2009-02-18T02:00:00.000Z"
+                        }
+                    ]
+                }
+            }
+            """.utf8),
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
+    }
+    let source = AppleSource(
+        id: UUID(),
+        kind: .stremio,
+        name: "test",
+        url: URL(string: "https://fixture.example/manifest.json")!,
+        manifestID: "test",
+        resources: ["meta"]
+    )
+    let episodes = try await client.episodes(source: source, mediaID: "tt0903747")
+    #expect(episodes.count == 1)
+    let ep = episodes[0]
+    #expect(ep.season == 0)
+    #expect(ep.episode == 1)
+    #expect(ep.title == "Good Cop / Bad Cop")
+    #expect(ep.overview == "Hank and Marie try to spice up their relationship on Valentine's Day.")
+    #expect(ep.thumbnailURL?.absoluteString == "https://artworks.thetvdb.com/banners/episodes/81189/3859781.jpg")
+    #expect(ep.releaseInfo == "2009-02-18T02:00:00.000Z")
+}

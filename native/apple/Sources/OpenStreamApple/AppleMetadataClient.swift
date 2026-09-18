@@ -610,7 +610,9 @@ public struct AppleMetadataResolver: Sendable {
             posterURL: lhs.posterURL ?? rhs.posterURL,
             backdropURL: lhs.backdropURL ?? rhs.backdropURL,
             logoURL: lhs.logoURL ?? rhs.logoURL,
-            trailerYouTubeKeys: lhs.trailerYouTubeKeys + rhs.trailerYouTubeKeys
+            trailerYouTubeKeys: (lhs.trailerYouTubeKeys + rhs.trailerYouTubeKeys).reduce(into: []) { keys, key in
+                if !keys.contains(key) { keys.append(key) }
+            }
         )
     }
 
