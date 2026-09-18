@@ -415,7 +415,18 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-18 02:01 (newest first)
+## 7. State as of 2026-09-18 14:05 (newest first)
+- Owner's morning list (GUI-AUDIT "owner's list") is done and on both sims (build 14:00, HEAD df2ada9).
+  Live: video pinned top, search icon, landscape fits/fills, inline controls = full screen/mute/play,
+  full-screen picker + single close + live captions. Discover: inline-large title, two-line CW card,
+  billboard uses the resolved synopsis; AIOMetadata shapes decoded. One player overlay.
+- Rungs: agy quota exhausted ~13:55 (resets ~16:30) → Codex (`codex exec -s workspace-write`) is the
+  active worker. Workers touching iOS-only code must run the iOS xcodebuild themselves (the SPM gate
+  cannot see it) — the specs now say so. Delete any patch*.py they leave.
+- Sims (owner): OpenStream Content, 15 Pro Max iOS18 (+ paired Watch), Review iPad, Apple TV,
+  Vision Pro only. Never create more.
+- Next: tvOS/visionOS/macOS compile check of today's Live/overlay work
+  (`scratchpad/build-other-platforms.sh`), then the per-screen sweep table in GUI-AUDIT.
 - Media servers steps 1–6 committed (latest 63d8035, gate 1079/117): Jellyfin/Emby sign-in,
   library API, Add Media Server screen, shelves + Continue Watching, detail + play (direct stream),
   progress back to the server, Plex client + Plex sign-in/shelves/play. Live-verified on the iOS

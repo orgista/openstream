@@ -2076,23 +2076,23 @@ order; this section grows as each lands.
 Owner: "add to the list … codex is running a build too so keep that in mind" (→ one build at a
 time, check for Codex's xcodebuild before every build; re-baseline `git status` before touching a
 file Codex may hold).
-- [ ] 1. Guide data for the M3U the owner sent does not populate ("No information") — find why
+- [x] 1. Guide data for the M3U the owner sent does not populate ("No information") — find why
   (no `url-tvg` in the playlist? `tvg-id` present? fallback EPG?) and fix.
-- [ ] 1b. Discover billboard still shows Cinemeta's one-line blurb for a title (seen 11:19 on the
+- [x] 1b. Discover billboard still shows Cinemeta's one-line blurb for a title (seen 11:19 on the
   iPhone 16 Pro: "Reality show about swingers…") — the featured card's summary comes from the
   catalog entry, not the resolver; make the billboard use the resolved (add-on-first) synopsis.
-- [ ] 2. Live video player GUI needs work — test it (inline preview + full screen), iPhone first.
-- [ ] 3. Draft a list of every screen (GUI inventory) and check each one — the overnight sweep,
+- [x] 2. Live video player GUI needs work — test it (inline preview + full screen), iPhone first.
+- [x] 3. Draft a list of every screen (GUI inventory) and check each one — the overnight sweep,
   written down as a checklist in this file.
-- [ ] 4. Back button on the content (detail) page is a little too big.
-- [ ] 5. Continue Watching: a long title ("Masters of the Universe") gets the title and the progress
+- [x] 4. Back button on the content (detail) page is a little too big.
+- [x] 5. Continue Watching: a long title ("Masters of the Universe") gets the title and the progress
   bar cut off on the card.
-- [ ] 6. Live tab: the player preview can be bigger; search becomes an icon (like Discover) so the
+- [x] 6. Live tab: the player preview can be bigger; search becomes an icon (like Discover) so the
   preview gets the room.
-- [ ] 7. Subtitles picker "needs to be fixed" — verify the one-entry menu on every route/platform
+- [x] 7. Subtitles picker "needs to be fixed" — verify the one-entry menu on every route/platform
   (surface + AVPlayer, iPhone/iPad/TV/Vision) and the label; ask what still looks wrong if it passes.
-- [ ] 8. "Other sources" on the detail page needs to be fixed.
-- [ ] 9. Player overlay: two overlays (one permanent, one on tap) → one overlay; everything shows
+- [x] 8. "Other sources" on the detail page needs to be fixed.
+- [x] 9. Player overlay: two overlays (one permanent, one on tap) → one overlay; everything shows
   on tap and hides together when idle.
 
 ## 2026-09-18 11:27 — GUI inventory (owner's item 3) — every screen, checked per platform
@@ -2128,3 +2128,10 @@ photograph from that platform's simulator (or Mac) taken from the current build,
 Debug routes for headless captures: `-OpenStreamVisionScreen discover|library|live|settings|
 source-detail|add-files|add-live|add-catalog|add-media-server|network-share|web-management|
 subtitle-languages` + the top-level settings routes listed in OpenStreamRootView.swift.
+
+## 2026-09-18 14:05 — owner's list: status
+All nine (+1b) landed between 11:30 and 14:00 (commits 2a9ff9a, faf4cad, f9c2f2a, df2ada9) and are on
+OpenStream Content + the Review iPad (build 14:00). Verified by photo: Live portrait/landscape on
+iPhone + iPad, inline tapped state (3 controls), full screen (one close, captions), Discover with
+the two-line Continue Watching card. Guide data loads a few seconds after the Live tab opens (trace
+`guide loaded`). Workers: agy until its quota ran out (~13:55, resets ~16:30), then Codex.
