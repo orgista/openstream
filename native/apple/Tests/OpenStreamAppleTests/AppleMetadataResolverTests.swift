@@ -78,14 +78,111 @@ struct AppleMetadataResolverTests {
         #expect(fixture.requestsAreRedacted())
     }
 
-    private func metadataSource(host: String, name: String) -> AppleSource {
+    private func metadataSource(host: String, name: String, manifestID: String? = nil) -> AppleSource {
         AppleSource(
             kind: .stremio,
             name: name,
             url: URL(string: "https://\(host)/manifest.json")!,
+            manifestID: manifestID,
             resources: ["meta"]
         )
     }
+
+    @Test
+    func fallbackOrderingPrefersAddonsOverBuiltInCinemeta() async throws {
+        let fixture = MetadataFixture()
+        let cinemeta = metadataSource(host: "default.fixture", name: "Cinemeta", manifestID: "com.stremio.cinemeta")
+        let addon = metadataSource(host: "secondary.fixture", name: "AIO", manifestID: "com.aio.meta")
+        let defaultSource = metadataSource(host: "default.fixture", name: "Default", manifestID: "com.stremio.cinemeta")
+        
+        let resolver = AppleMetadataResolver(
+            sourceClient: AppleStremioMetadataClient(loader: fixture.load),
+            overallDeadline: .seconds(2),
+            defaultSource: defaultSource
+        )
+        
+        let details = try await resolver.resolve(
+            sources: [cinemeta, addon],
+            preferredSourceID: cinemeta.id,
+            type: "movie",
+            mediaID: "tt1234567"
+        )
+        
+        #expect(details?.overview == "Preferred description")
+        #expect(details?.title == "Preferred Title")
+        #expect(fixture.hosts == ["secondary.fixture", "default.fixture"])
+    }
+
+    @Test
+    func fallbackOrderingTwoAddOnsPreferredFirst() async throws {
+        let fixture = MetadataFixture()
+        let addon1 = metadataSource(host: "empty.fixture", name: "Addon1", manifestID: "com.addon1")
+        let addon2 = metadataSource(host: "secondary.fixture", name: "Addon2", manifestID: "com.addon2")
+        let defaultSource = metadataSource(host: "default.fixture", name: "Default", manifestID: "com.stremio.cinemeta")
+        
+        let resolver = AppleMetadataResolver(
+            sourceClient: AppleStremioMetadataClient(loader: fixture.load),
+            overallDeadline: .seconds(2),
+            defaultSource: defaultSource
+        )
+        
+        let details = try await resolver.resolve(
+            sources: [addon2, addon1],
+            preferredSourceID: addon1.id,
+            type: "movie",
+            mediaID: "tt1234567"
+        )
+        
+        #expect(fixture.hosts.starts(with: ["empty.fixture", "secondary.fixture"]))
+    }
+
+    @Test
+    func fallbackOrderingNoAddOnsCinemetaResolves() async throws {
+        let fixture = MetadataFixture()
+        let cinemeta = metadataSource(host: "default.fixture", name: "Cinemeta", manifestID: "com.stremio.cinemeta")
+        let defaultSource = metadataSource(host: "default.fixture", name: "Default", manifestID: "com.stremio.cinemeta")
+        
+        let resolver = AppleMetadataResolver(
+            sourceClient: AppleStremioMetadataClient(loader: fixture.load),
+            overallDeadline: .seconds(2),
+            defaultSource: defaultSource
+        )
+        
+        let details = try await resolver.resolve(
+            sources: [cinemeta],
+            preferredSourceID: cinemeta.id,
+            type: "movie",
+            mediaID: "tt1234567"
+        )
+        
+        #expect(details?.title == "Default Title")
+        #expect(details?.runtimeMinutes == 121)
+    }
+
+    @Test
+    func fallbackOrderingAddOnFailsCinemetaFillsIn() async throws {
+        let fixture = MetadataFixture()
+        let failingAddon = metadataSource(host: "unauthorized.fixture", name: "FailingAddon", manifestID: "com.failing")
+        let cinemeta = metadataSource(host: "default.fixture", name: "Cinemeta", manifestID: "com.stremio.cinemeta")
+        let defaultSource = metadataSource(host: "default.fixture", name: "Default", manifestID: "com.stremio.cinemeta")
+        
+        let resolver = AppleMetadataResolver(
+            sourceClient: AppleStremioMetadataClient(loader: fixture.load),
+            overallDeadline: .seconds(2),
+            defaultSource: defaultSource
+        )
+        
+        let details = try await resolver.resolve(
+            sources: [failingAddon, cinemeta],
+            preferredSourceID: failingAddon.id,
+            type: "movie",
+            mediaID: "tt1234567"
+        )
+        
+        #expect(details?.title == "Default Title")
+        #expect(details?.runtimeMinutes == 121)
+    }
+
 }
 
 private final class MetadataFixture: @unchecked Sendable {
@@ -174,3 +271,4 @@ private final class MetadataFixture: @unchecked Sendable {
         let hasCredentials: Bool
     }
 }
+

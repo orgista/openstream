@@ -563,11 +563,26 @@ public struct AppleMetadataResolver: Sendable {
                 && source.isEnabled
                 && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         }
-        var result = eligible.filter { $0.id == preferredSourceID }
-            + eligible.filter { $0.id != preferredSourceID }
+        
+        let builtIn: [AppleSource]
+        let addOns: [AppleSource]
+        
+        if let defaultManifestID = defaultSource.manifestID {
+            builtIn = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) == .orderedSame }
+            addOns = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) != .orderedSame }
+        } else {
+            builtIn = []
+            addOns = eligible
+        }
+
+        var result = addOns.filter { $0.id == preferredSourceID }
+            + addOns.filter { $0.id != preferredSourceID }
+            + builtIn
+            
         let hasDefaultSource = defaultSource.manifestID.map { manifestID in
             result.contains { $0.manifestID == manifestID }
         } ?? false
+        
         if AppleStremioMetadataClient.isIMDBIdentifier(mediaID), !hasDefaultSource {
             result.append(defaultSource)
         }
