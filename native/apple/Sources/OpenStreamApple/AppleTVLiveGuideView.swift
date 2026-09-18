@@ -130,7 +130,9 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     @State private var rows: [AppleGuideChannel] = []
     @State private var visibility = AppleTVGuideVisibility()
     @State private var timeline = AppleTVGuideTimeline()
-    @State private var cellStore = AppleGuideCellStore()
+    @State private var gridIndex = AppleGuideGridIndex.empty
+    @State private var gridNextBoundary = Date.distantPast
+    @State private var gridBuildRevision = 0
     @State private var preview = AppleTVChannelPreview()
     /// A cheap stand-in for `rows` so `AppleTVGuideGrid` can decide whether
     /// to redraw without comparing the array.
@@ -182,15 +184,45 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let now = context.date
             let window = metrics.window(now: now)
-            // Points the cell store at this window before anything reads it.
-            // Idempotent and unobserved, so calling it from `body` costs one
-            // string compare on every pass but the first of each minute.
-            let gridToken = configuredToken(window: window, now: now)
             VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                 nowPlayingStrip(now: now)
                 categoryRow
-                guideHeader(window: window, now: now)
-                grid(window: window, now: now, token: gridToken)
+                guideHeader(window: window, now: now, slots: gridIndex.headerSlots)
+                grid(window: window, now: now)
+            }
+            .task(id: gridIdentity(window: window, now: now)) {
+                let inputChannels = rows.map(\.id)
+                let currentWindow = window
+                let currentNow = now
+                let currentGuide = guide
+                let slotMin = metrics.slotMinutes
+                let index = await Task.detached(priority: .utility) {
+                    AppleGuideGridModel.index(channels: inputChannels, guide: currentGuide, window: currentWindow, slotWidthMinutes: slotMin, now: currentNow)
+                }.value
+                
+                guard !Task.isCancelled else { return }
+                
+                var next = Date.distantFuture
+                for cells in index.cellsByChannel.values {
+                    for cell in cells {
+                        if cell.start > currentNow, cell.start < next { next = cell.start }
+                        if cell.end > currentNow, cell.end < next { next = cell.end }
+                    }
+                }
+                
+                gridIndex = index
+                gridNextBoundary = next == .distantFuture ? currentNow.addingTimeInterval(3600) : next
+                gridBuildRevision &+= 1
+                #if DEBUG
+                appleTrace("guide tick: rebuilt \(index.cellsByChannel.values.lazy.flatMap({ $0 }).count) cells")
+                #endif
+            }
+            .onChange(of: Int(now.timeIntervalSince1970 / 60)) { oldMinute, newMinute in
+                if now < gridNextBoundary {
+                    #if DEBUG
+                    appleTrace("guide tick: no boundary, skipped")
+                    #endif
+                }
             }
             .padding(.horizontal, metrics.horizontalSafeInset)
             .padding(.top, 12)
@@ -277,19 +309,23 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         return .category(selectedCategory)
     }
 
-    /// What the grid model actually depends on. `rowsRevision` stands in for
-    /// the row array so this comparison stays O(1) on a thousand-channel
-    /// lineup, and the minute bucket re-keys it on the timeline's tick.
-    private func gridIdentity(window: DateInterval, now: Date) -> AppleTVGuideGridIdentity {
-        AppleTVGuideGridIdentity(
+    private struct GridUpdateIdentity: Equatable {
+        let rowsRevision: Int
+        let guideRevision: Int
+        let windowStart: Date
+        let windowEnd: Date
+        let forceMinute: Int
+    }
+
+    private func gridIdentity(window: DateInterval, now: Date) -> GridUpdateIdentity {
+        GridUpdateIdentity(
             rowsRevision: rowsRevision,
             guideRevision: guideRevision,
             windowStart: window.start,
             windowEnd: window.end,
-            minute: Int(now.timeIntervalSince1970 / 60)
+            forceMinute: now >= gridNextBoundary ? Int(now.timeIntervalSince1970 / 60) : 0
         )
     }
-
 
     private var projectionInput: AppleTVGuideProjectionInput {
         AppleTVGuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs)
@@ -472,33 +508,24 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
 
     /// Hour labels only. The rail column is an empty spacer so the labels stay
     /// aligned with the programme cells underneath them.
-    private func guideHeader(window: DateInterval, now: Date) -> some View {
+    private func guideHeader(window: DateInterval, now: Date, slots: [AppleGuideGridHeaderSlot]) -> some View {
         HStack(spacing: 0) {
             Color.clear
                 .frame(width: metrics.railWidth, height: metrics.headerHeight)
                 .accessibilityHidden(true)
 
-            AppleTVGuideHeaderLabels(slots: cellStore.headerSlots, metrics: metrics, timeline: timeline)
+            AppleTVGuideHeaderLabels(slots: slots, metrics: metrics, timeline: timeline)
         }
     }
 
     // MARK: Grid
 
-    /// Re-points the cell store when the window or the minute moves and
-    /// returns the token the grid compares itself on.
-    private func configuredToken(window: DateInterval, now: Date) -> String {
-        let token = "\(gridIdentity(window: window, now: now))"
-        cellStore.configure(token: token, guide: guide, window: window, now: now,
-            slotMinutes: metrics.slotMinutes)
-        return token
-    }
-
-    private func grid(window: DateInterval, now: Date, token: String) -> some View {
+    private func grid(window: DateInterval, now: Date) -> some View {
         AppleTVGuideGrid(
             rows: rows,
             rowsRevision: rowsRevision,
-            cellStore: cellStore,
-            gridToken: token,
+            gridIndex: gridIndex,
+            gridBuildRevision: gridBuildRevision,
             favoriteIDs: favoriteIDs,
             metrics: metrics,
             window: window,
@@ -527,8 +554,8 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
 private struct AppleTVGuideGrid: View, Equatable {
     let rows: [AppleGuideChannel]
     let rowsRevision: Int
-    let cellStore: AppleGuideCellStore
-    let gridToken: String
+    let gridIndex: AppleGuideGridIndex
+    let gridBuildRevision: Int
     let favoriteIDs: Set<String>
     let metrics: AppleTVGuideMetrics
     let window: DateInterval
@@ -543,7 +570,7 @@ private struct AppleTVGuideGrid: View, Equatable {
     // Sendable value properties, so it stays outside that isolation.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.rowsRevision == rhs.rowsRevision
-            && lhs.gridToken == rhs.gridToken
+            && lhs.gridBuildRevision == rhs.gridBuildRevision
             && lhs.window == rhs.window
             && lhs.now == rhs.now
             && lhs.favoriteIDs == rhs.favoriteIDs
@@ -576,7 +603,7 @@ private struct AppleTVGuideGrid: View, Equatable {
 
                             AppleTVGuideScheduleRow(
                                 channel: row.channel,
-                                cells: cellStore.cells(for: row.id),
+                                cells: gridIndex.cells(for: row.id),
                                 window: window,
                                 now: now,
                                 metrics: metrics,

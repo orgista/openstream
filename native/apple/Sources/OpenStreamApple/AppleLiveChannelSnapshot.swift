@@ -1,8 +1,78 @@
 import Foundation
+#if DEBUG
+import os
+#endif
 
 /// One immutable projection per lineup/filter change. SwiftUI reads these
 /// arrays directly instead of normalizing every channel during each render.
+
+private final class AppleLiveChannelMatchCache: @unchecked Sendable {
+    static let shared = AppleLiveChannelMatchCache()
+    private let lock = NSLock()
+    private var matches = [String: AppleChannelLineupEntry?]()
+    private var lastEntries: [AppleChannelLineupEntry] = []
+    
+    func match(channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [String: AppleChannelLineupEntry] {
+        lock.lock()
+        #if DEBUG
+        let shouldClearCache = !AppleLiveChannelSnapshot.debugDisableCacheClear.withLock { $0 }
+        if shouldClearCache && entries != lastEntries {
+            matches.removeAll()
+            lastEntries = entries
+        }
+        #else
+        if entries != lastEntries {
+            matches.removeAll()
+            lastEntries = entries
+        }
+        #endif
+        var result = [String: AppleChannelLineupEntry](minimumCapacity: channels.count)
+        var toCompute = [(String, String)]()
+        for channel in channels {
+            let key = "\(channel.id)|\(channel.name)"
+            if let cached = matches[key] {
+                if let entry = cached { result[channel.id] = entry }
+            } else {
+                toCompute.append((channel.id, channel.name))
+            }
+        }
+        lock.unlock()
+        
+        if toCompute.isEmpty { return result }
+        
+        let count = toCompute.count
+        #if DEBUG
+        AppleLiveChannelSnapshot.debugMatchCallsCounter?.calls.withLock { $0 += count }
+        #endif
+        
+        var computed = [(String, AppleChannelLineupEntry?)]()
+        computed.reserveCapacity(toCompute.count)
+        let lineupIndex = AppleChannelLineupIndex(entries)
+        for (id, name) in toCompute {
+            let entry = lineupIndex.match(name)
+            computed.append(("\(id)|\(name)", entry))
+            if let e = entry { result[id] = e }
+        }
+        
+        lock.lock()
+        for (k, v) in computed {
+            matches[k] = v
+        }
+        lock.unlock()
+        
+        return result
+    }
+}
+
 struct AppleLiveChannelSnapshot: Sendable {
+#if DEBUG
+    final class DebugCounter: Sendable {
+        let calls = OSAllocatedUnfairLock<Int>(initialState: 0)
+    }
+    @TaskLocal static var debugMatchCallsCounter: DebugCounter?
+    static let debugDisableCacheClear = OSAllocatedUnfairLock<Bool>(initialState: false)
+#endif
+
     /// How many lineup numbers the Premier Guide must match before All is
     /// allowed to show only the lineup.
     ///
@@ -60,7 +130,6 @@ struct AppleLiveChannelSnapshot: Sendable {
         case .everything: selected = all.filter { !AppleChannelVisibilityPolicy.isPlaceholder($0) }
         case .premierGuide: selected = AppleChannelVisibilityPolicy.deduplicatedEastChannels(all)
         }
-        let index = AppleChannelLineupIndex(entries)
 
         // One fuzzy match per channel, reused by the category list, the
         // category filter and the Premier Guide ordering. These were three
@@ -69,10 +138,7 @@ struct AppleLiveChannelSnapshot: Sendable {
         // deduplicated list), then the grouping below — and on the owner's
         // 9376 channels they cost **761 ms** of the Live tab's start-up
         // (measured 2026-09-15).
-        var entryByChannelID = [String: AppleChannelLineupEntry](minimumCapacity: selected.count)
-        for channel in selected where entryByChannelID[channel.id] == nil {
-            if let entry = index.match(channel.name) { entryByChannelID[channel.id] = entry }
-        }
+        let entryByChannelID = AppleLiveChannelMatchCache.shared.match(channels: selected, entries: entries)
 
         var categoryByID = [String: String](minimumCapacity: entryByChannelID.count)
         for (id, entry) in entryByChannelID {
