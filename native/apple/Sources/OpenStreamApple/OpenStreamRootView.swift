@@ -128,6 +128,7 @@ public struct OpenStreamRootView: View {
     @State private var catalogStore = AppleCatalogStore()
     @State private var settingsStore = AppleSettingsStore()
     @State private var mediaIndex = AppleMediaIndexStore()
+    @State private var mediaServerLibrary = AppleMediaServerLibraryStore()
     private let router: AppleAppRouter
     @State private var intentHandoff = AppleAppIntentHandoff.shared
     @State private var sharePlay = AppleSharePlaySessionStore.shared
@@ -346,6 +347,13 @@ public struct OpenStreamRootView: View {
                 }
                 await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
             }
+            
+            let enabledServerIDs = Set(sourceStore.sources.filter { $0.isEnabled && $0.kind == .mediaServer }.map(\.id))
+            let existingServerIDs = Set(mediaServerLibrary.shelves.map(\.sourceID)).union(mediaServerLibrary.failures.keys)
+            for id in existingServerIDs where !enabledServerIDs.contains(id) {
+                mediaServerLibrary.clear(sourceID: id)
+            }
+            await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
         }
         .onChange(of: settingsStore.liveTVEnabled) { _, enabled in
             if !enabled { sharePlay.leave() }
@@ -355,7 +363,7 @@ public struct OpenStreamRootView: View {
         .onChange(of: visibleTabs, initial: true) { _, visible in
             selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visible)
         }
-        .task { sharePlay.startListening() }
+        .task { sharePlay.startListening(); mediaServerLibrary.loadPersisted() }
         .onChange(of: sharePlay.revision) {
             if sharePlay.channel != nil { selectedTab = .live }
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }
@@ -479,6 +487,7 @@ public struct OpenStreamRootView: View {
                 catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
+                mediaServerLibrary: mediaServerLibrary,
                 router: router,
                 settings: settingsStore,
                 openSettings: { selectedTab = .settings }

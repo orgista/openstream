@@ -118,4 +118,26 @@ struct AppleMediaServerLibraryStoreTests {
         await store.reload(sources: [source1]) { _ in return session1 }
         #expect(store.shelves.count == 2)
     }
+
+    @Test("Merged continue watching handles deduplication")
+    func testMergedContinueWatching() {
+        let local = [
+            AppleCatalogItem(mediaID: "ms:123:item1", type: "movie", name: "L1"),
+            AppleCatalogItem(mediaID: "ms:123:item2", type: "movie", name: "L2")
+        ]
+        
+        let server = [
+            AppleCatalogItem(mediaID: "ms:123:item2", type: "movie", name: "S2"),
+            AppleCatalogItem(mediaID: "ms:123:item3", type: "movie", name: "S3")
+        ]
+        
+        let merged = AppleMediaServerLibraryStore.mergedContinueWatching(local: local, server: server)
+        
+        #expect(merged.count == 3)
+        #expect(merged[0].mediaID == "ms:123:item1")
+        #expect(merged[1].mediaID == "ms:123:item2")
+        #expect(merged[1].name == "L2") // Keeps local
+        #expect(merged[2].mediaID == "ms:123:item3")
+        #expect(merged[2].name == "S3")
+    }
 }

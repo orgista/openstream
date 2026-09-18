@@ -77,6 +77,7 @@ struct AppleDiscoverView: View {
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
+    let mediaServerLibrary: AppleMediaServerLibraryStore
     let router: AppleAppRouter
     let settings: AppleSettingsStore
     let openSettings: () -> Void
@@ -93,6 +94,7 @@ struct AppleDiscoverView: View {
         catalogStore: AppleCatalogStore,
         sourceStore: AppleSourceStore,
         mediaIndex: AppleMediaIndexStore,
+        mediaServerLibrary: AppleMediaServerLibraryStore,
         router: AppleAppRouter,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
@@ -101,6 +103,7 @@ struct AppleDiscoverView: View {
         self.catalogStore = catalogStore
         self.sourceStore = sourceStore
         self.mediaIndex = mediaIndex
+        self.mediaServerLibrary = mediaServerLibrary
         self.router = router
         self.settings = settings
         self.openSettings = openSettings
@@ -181,11 +184,12 @@ struct AppleDiscoverView: View {
                             }
                         }
 
-                        if !continueWatching.isEmpty {
+                        let mergedCW = self.mergedContinueWatching
+                        if !mergedCW.isEmpty {
                             indexedShelf(
                                 title: "Continue Watching",
                                 identifier: "continue",
-                                values: continueWatching,
+                                values: mergedCW,
                                 showsProgress: true
                             )
                         }
@@ -194,6 +198,22 @@ struct AppleDiscoverView: View {
                             AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
                                 sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
                                 .accessibilityIdentifier("home.your-library")
+                        }
+
+                        ForEach(mediaServerLibrary.shelves) { shelf in
+                            AppleMediaShelf(title: shelf.title) {
+                                ForEach(shelf.items, id: \.mediaID) { item in
+                                    if let ref = AppleMediaServerItemReference.parse(item.mediaID),
+                                       let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) {
+                                        let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+                                        let value = IndexedCatalogItem(record: record, item: item, source: source)
+                                        NavigationLink { detail(value) } label: {
+                                            AppleCatalogCard(item: item)
+                                        }
+                                        .accessibilityIdentifier("home.ms.\(shelf.id).\(item.mediaID)")
+                                    }
+                                }
+                            }
                         }
 
                         if !topPicks.isEmpty {
@@ -352,6 +372,7 @@ struct AppleDiscoverView: View {
                 loadedCache = true
             }
             await catalogStore.refresh(sources: sourceStore.sources)
+            await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
             await indexCatalogs()
             try? await mediaIndex.synchronizePlaybackProgress()
@@ -417,6 +438,22 @@ struct AppleDiscoverView: View {
             }
             .prefix(12)
             .map { $0 }
+    }
+
+    private var mergedContinueWatching: [IndexedCatalogItem] {
+        let serverItems = mediaServerLibrary.continueWatching
+        let localItems = self.continueWatching.map { $0.item }
+        let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
+        
+        return mergedItems.compactMap { item -> IndexedCatalogItem? in
+            if let existing = self.continueWatching.first(where: { $0.item.mediaID == item.mediaID }) {
+                return existing
+            }
+            guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
+                  let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
+            let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+            return IndexedCatalogItem(record: record, item: item, source: source)
+        }
     }
 
     private var topPicks: [IndexedCatalogItem] {
@@ -673,6 +710,7 @@ struct AppleDiscoverView: View {
     private func refresh() {
         Task { @MainActor in
             await catalogStore.refresh(sources: sourceStore.sources, force: true)
+            await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
             await indexCatalogs()
         }
@@ -5254,4 +5292,18 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
 
 func appleStreamDisplayText(_ value: String) -> String {
     value.replacingOccurrences(of: #"(?i)\b(?:stremio|torrent\w*)\b"#, with: "Add-on", options: .regularExpression)
+}
+
+extension AppleMediaServerLibraryStore {
+    public static func mergedContinueWatching(local: [AppleCatalogItem], server: [AppleCatalogItem]) -> [AppleCatalogItem] {
+        var merged = local
+        var seen = Set(local.map { $0.mediaID })
+        for item in server {
+            if !seen.contains(item.mediaID) {
+                seen.insert(item.mediaID)
+                merged.append(item)
+            }
+        }
+        return merged
+    }
 }
