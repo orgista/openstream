@@ -229,7 +229,7 @@ struct AppleAddMediaServerView: View {
                                     .accessibilityIdentifier("sources.mediaServer.embyPassword")
                             }
                         }
-                    } else {
+                    } else if kind != .plex {
                         AppleTVFormGroup("Connection") {
                             AppleTVFormField("Name") {
                                 nameField
@@ -473,7 +473,7 @@ struct AppleAddMediaServerView: View {
                             .accessibilityIdentifier("sources.mediaServer.saveEmby")
                     }
                 }
-            } else {
+            } else if kind != .plex {
                 Section("Connection") {
                     nameField.appleFormSubmit(.name, chain: fieldChain, focus: $focusedField)
                         .accessibilityIdentifier("sources.mediaServer.name")

@@ -806,7 +806,7 @@ private enum AppleInstanceConnectionAction: Equatable {
 #if os(tvOS)
 /// One Apple TV form field: a Caption 1 (25 pt) label above the stock field,
 /// whose focused chrome the system draws (rework plan task 8).
-private struct AppleTVFormField<Field: View>: View {
+struct AppleTVFormField<Field: View>: View {
     let label: String
     @ViewBuilder let field: () -> Field
 
@@ -826,7 +826,7 @@ private struct AppleTVFormField<Field: View>: View {
 }
 
 /// A titled group of fields (Server, Share, Account), title in Caption 1.
-private struct AppleTVFormGroup<Content: View>: View {
+struct AppleTVFormGroup<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
 
@@ -847,7 +847,7 @@ private struct AppleTVFormGroup<Content: View>: View {
 
 /// The result line under a form's pills: the exact failure reason in red or
 /// the success summary in primary, both Body 29.
-private struct AppleTVFormMessage: View {
+struct AppleTVFormMessage: View {
     let text: String
     let isError: Bool
 
@@ -862,7 +862,7 @@ private struct AppleTVFormMessage: View {
 
 /// Two or more choices shown as pills (Xtream Account / M3U Playlist, the
 /// server's shares); the chosen one is white.
-private struct AppleTVChoicePill: View {
+struct AppleTVChoicePill: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void
