@@ -49,6 +49,38 @@ final class AppleTVFocusUITests: XCTestCase {
 
     // MARK: - The guide
 
+    func testChapterIntroCanBeReachedAndSkippedWithTheRemote() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_CHAPTER_FIXTURE_URL"],
+              !fixture.isEmpty else {
+            throw XCTSkip("OPENSTREAM_CHAPTER_FIXTURE_URL not set")
+        }
+        app.launchArguments += ["-OpenStreamVisionPlaybackURL", fixture]
+        launch(screen: "add-files")
+        let skip = element("player.skipIntro")
+        XCTAssertTrue(wait(for: skip), "Chapter-backed Skip Intro never appeared")
+        let surface = element("player.controls.show")
+        let surfaceFocused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasFocus == true"), object: surface)
+        XCTAssertEqual(XCTWaiter.wait(for: [surfaceFocused], timeout: 10), .completed,
+                       "The playback surface must receive initial focus before pressing Down")
+        remote.press(.down)
+        let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasFocus == true"), object: skip)
+        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed,
+                       "The remote must reach Skip Intro from the playback surface")
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "tv-chapter-before-skip"
+        before.lifetime = .keepAlways
+        add(before)
+        remote.press(.select)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: skip)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 10), .completed)
+        let sought = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "0:5[0-9]")).firstMatch
+        XCTAssertTrue(sought.waitForExistence(timeout: 10), "Playback did not reach the 50-second chapter boundary")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "tv-chapter-after-skip"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     /// Owner Z17: the guide must open on the first channel, not the category
     /// chips, so the info panel describes what it is showing.
     func testGuideOpensFocusedOnAChannel() {
@@ -408,4 +440,3 @@ final class AppleTVFocusUITests: XCTestCase {
         XCTAssertTrue(focusedElement.exists, "pressing down from Play left focus nowhere")
     }
 }
-

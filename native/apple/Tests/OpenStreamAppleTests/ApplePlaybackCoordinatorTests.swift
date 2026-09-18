@@ -326,3 +326,23 @@ private func coordinatorWaitUntil(
     }
     return await condition()
 }
+
+@Suite("Live channel failure wording")
+struct AppleLiveFailureWordingTests {
+    @Test func playerDiagnosticsBecomeAnActionableChannelMessage() {
+        let failure = ApplePlaybackFailure(kind: .player, message: "Failed to load: custom source probe failed")
+        #expect(failure.liveChannelMessage == "This channel could not start playing. Try again or choose another channel.")
+    }
+
+    @Test func channelDenialDoesNotBlameSavedCredentials() {
+        let failure = ApplePlaybackFailure(kind: .authentication, message: "Provider rejected account (HTTP 403)")
+        #expect(failure.liveChannelMessage.contains("403"))
+        #expect(!failure.liveChannelMessage.contains("account"))
+        #expect(failure.liveChannelMessage.contains("another channel"))
+    }
+
+    @Test func unsupportedFormatDetailsRemainAvailable() {
+        let failure = ApplePlaybackFailure(kind: .unsupportedMedia, message: "This video format is not supported.")
+        #expect(failure.liveChannelMessage == failure.message)
+    }
+}

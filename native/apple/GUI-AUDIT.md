@@ -161,6 +161,14 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
 - [F] B32 Skip-intro affordance (chapter markers) — policy + engine + button done 2026-09-16
 
 ### Settings
+- [F] Remaining panes (worker audit 2026-09-17, cited): iOS/visionOS Settings root now lists
+      **Streaming Services** under Services (tvOS already did); Radarr/Sonarr URL fields get URL
+      keyboard + content type, API keys the password content type; connection-test spinner labelled
+      for VoiceOver; selected subtitle language carries `.isSelected`; Watch Providers is a `Form` like
+      the other panes. Verified on the iPhone sim. Declined from the audit: red error text (stock iOS
+      uses red for errors), save-on-commit for text fields (behaviour change), tvOS sidebar Dynamic
+      Type (tvOS has none). Storage: spinner labelled ("Clearing cache" / "Clearing metadata" / "Deleting downloads"); no
+      persistence-error row because that pane has no settings store in scope.
 - [F] B33 Root list: one column, consistent glyph slot
 - [x] B34 Playback pane
 - [F] B35 Sources — add rows (Add Files / Add Instance / Add Catalog / Add Live TV / Web
@@ -221,6 +229,13 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
       defaults (tab toggles on, Top 10 on).
 
 ## E. Web management portal
+- [F] E7 Portal polish (worker audit 2026-09-17, cited): placeholder contrast 2.5:1 → 6.07:1
+      (#9a9a9e on #1c1c1e); `:focus-visible` ring in #FF3366 instead of a bare border change; radio
+      tabs 38→44 px and secondary buttons 34→44 px; hover/error colours (#ff453a/#ff9a9f) → the accent;
+      h2 sentence case; a visually-hidden h1 so headings run h1→h2; 720 px column at ≥1024 px. Verified
+      on the served page from the iPhone sim (curl checks every value) and Safari-in-sim screenshot.
+      Style test renders paired + unpaired. Still open from the audit: forms POST with a full reload,
+      no inline validation or submit-busy state, pairing code has no auto-advance. Gate 1037 / 109.
 - [x] E1 Wordmark and brand mark
 - [x] E2 Form alignment and labels
 - [x] E3 Button hierarchy — primary Add, plain Remove (hover state not testable headlessly)
@@ -1777,8 +1792,9 @@ order; this section grows as each lands.
       sim (manifest empty). Gate **973 / 91**.
       Follow-ups seen in the screenshots, not done: the *season* button shows the retry glyph after
       an *episode* cancel (the two share one coordinator state); the hero trailer is a YouTube embed
-      that shows YouTube's "More videos" chrome when paused; `AppleWatchCompanion` traces "watch
-      link: not activated" four times a second forever (887 lines in one sitting) — throttle it.
+      that shows YouTube's "More videos" chrome when paused; ~~`AppleWatchCompanion` traces "watch
+      link: not activated" four times a second forever~~ — throttled to state changes (first rung‑1
+      worker run: agy from `specs/watch-trace-throttle.md`, 137 s, one file, driver-verified, gate 1007/101).
 - [x] **Owner batch 2026-09-17 11:00 — toggles, TestFlight tracing, M3U paste/upload, AIOMetadata.**
       *Toggles*: the switch is the classic iOS one again — green on, grey off, white knob
       (`AppleBrandToggleStyle` → `.tint(.green)`; tvOS untouched). Verified on the iPhone sim
@@ -1850,9 +1866,142 @@ order; this section grows as each lands.
       the iPhone sim: `candidates for The Secret Lives of Mormon Wives: The.Secret.Lives.of.Mormon.
       Wives.S01E01.1080p.WEB.h264-EDITH | … ×4` → play → first frame; the Gypsy/Tyrants releases no
       longer appear in the top four. Gate **999 / 99**.
-- [ ] Improvements: ~~download percentage~~ (done above), faster posters, landscape control in the player, ~~EPG for M3U~~ (guide limits fixed above).
+- [F] **Bug 3 / "faster posters" — artwork now persists on disk (Infuse-level, owner 2026-09-17).**
+      `AppleRemoteImageCache` was memory-only and forced `reloadIgnoringLocalCacheData`, so every launch
+      re-downloaded every poster, backdrop and wordmark. New `AppleArtworkDiskCache`
+      (`Caches/OpenStream/Artwork-v1`, SHA-256(url)-variant, 512 MB LRU trim once per process): raw
+      bytes stored after download and read before the network; the trimmed title wordmark is stored as
+      PNG under its own variant so it is never re-cropped. Measured on the iPhone sim: cold launch wrote
+      8 files, the warm launch read 7 of them from disk; opening a title wrote no trimmed wordmark because neither sim title carries a
+      logo URL (their heroes are text / baked-in art); the wordmark branch is covered by the round-trip
+      test and used live by the tvOS billboard and three iOS detail call sites. 3 policy/round-trip tests; gate 1014 / 102.
+      Built by the rung-1 worker (agy, `specs/artwork-disk-cache.md`, 242 s), driver-verified.
+      Next (queued): prefetch poster+backdrop+logo for visible shelves and on detail appear
+      (`AppleDiscoverView` is Codex's right now — waits), and a metadata disk cache so a title page
+      renders from cache first (spec C, in progress).
+- [x] **Metadata disk cache — a title page renders from cache (owner 2026-09-17, Infuse-level).**
+      `AppleStremioMetadataClient.details()` consults `AppleMetadataDiskCache` (`Caches/OpenStream/Meta-v2`)
+      before the network: fresh (< 24 h) → no request; stale (< 14 d) → cached result returned, refresh
+      in the background; expired → network then store. Key = full add-on endpoint + type + id, because
+      `AppleLibraryMetadataResolver` asks several add-ons for one id and merges the richer fields — the
+      worker's first pass keyed by id alone and broke five resolver tests; second pass fixed it and made
+      the cache injected (`.shared` in the app, `nil` for injected loaders) so tests never touch the real
+      Caches dir. 7 tests. Measured on the iPhone sim opening a catalog title through the billboard:
+      2 meta entries written per title (two add-ons), persisted across relaunch; the billboard rotated
+      to another title on the second run, so the disk-hit path is proven by the client test
+      (`clientUsesCache`), not by that run. Gate **1024 / 104**. Worker: agy, two passes
+      (`specs/metadata-disk-cache*.md`, 319 s + 765 s). Episodes + preview assets: done the same way (shared `fetchCachedOrNetwork`, 4 more tests; the
+      stale-refresh tests poll with a 3 s deadline after a fixed sleep proved flaky under load).
+      Prefetch API + policy landed (`AppleRemoteImageCache.prefetch`, `AppleArtworkPrefetchPolicy`);
+      the two view hooks wait for `AppleDiscoverView.swift` (Codex has it open since 16:28). Gate
+      **1030 / 105** twice.
+- [F] **Launch: Library titles at 142 ms instead of ~5 s (perf, owner 2026-09-17).** The library walk
+      (1,397 files over SMB), grouping and metadata pass all ran at launch. `AppleLocalLibraryStore` now
+      writes a grouped snapshot with real URLs after each scan and publishes it first
+      (`library published from persisted index: 421 titles` at 142 ms); the walk runs afterwards at
+      `.utility` after a 1 s yield and is skipped for 10 minutes after a good scan (`AppleLaunchWorkPolicy`,
+      per source-set digest, persisted). Skip is only allowed after a successful publish — the worker's
+      first two passes (a) never persisted the timestamp and published 1,397 fake one-per-file rows with
+      `file:///` URLs, then (b) guessed the index format (`itemReference` is a digest) and left
+      "No Videos" when the walk was skipped; the third pass is what shipped. Verified on the iPhone sim,
+      Library screenshot on the skip path shows billboard, posters and Continue Watching at 13 s.
+      Gate **1032 / 106**. Worker: agy ×3; two worker-rule breaches recorded in AGENTS.md §3 (it
+      `git stash`ed a shared tree and staged files; both now forbidden).
+- [F] **tvOS Live guide built all 300 rows at once (perf audit 2026-09-17).** A worker audit with the
+      `swiftui-performance` skill found the guide was `HStack { LazyVStack(rail); LazyVStack(rows) }`
+      inside the vertical ScrollView — unbounded height, laziness defeated. Now one `LazyVStack` of
+      `HStack(rail cell, schedule row)`; focus sections, widths and the now-line kept. Measured on the
+      Apple TV sim (Live, provider lineup, 25 s): RSS 538 MB → 467 MB steady (−71 MB), peak at 5 s
+      504 → 459 MB; before/after screenshots identical. Gate 1032 / 106. Same audit's other two
+      findings (iOS grid) are fixed too: `horizontalOffset` lives in an `@Observable` read only by the
+      header/now-line, rows render from precomputed `AppleGuideRowModel`s with `.equatable()`, header
+      times precomputed, minute tick scoped (3 tests). Layout verified with the playlist UI test.
+      Gate **1035 / 107**. Observation from that run: the French provider now answers TMC with
+      HTTP 403 ("Channel Unavailable") — provider-side; the UI test should treat that alert as a
+      failure too (it only checks "Playback Failed"). Note: the SwiftUI Instruments template does not run on the
+      Simulator — use Time Profiler/Allocations + RSS sampling + the app trace.
+- [F] **tvOS guide minute tick no longer rebuilds 300 rows on the main actor** (audit finding 5).
+      Grid cells build in a `.task(id:)` off the main actor; the tick only re-keys it when a programme
+      boundary has passed (`guide tick: no boundary, skipped` in the trace at the minute mark; rebuilds
+      seen only as channels/guide loaded: 0 → 140 → 160 cells). `AppleLiveChannelSnapshot` memoises
+      `index.match` per channel (DEBUG `@TaskLocal` counter proves the second build does no matching).
+      Honest measurement: idle CPU on the sim unchanged (358 vs 356 Time Profiler samples / 90 s) — the
+      idle guide was already cheap; what went away is the per-minute main-actor burst. Screen identical.
+      Nit: a boundary rebuilds twice (identity minute→0). Gate **1036 / 108** twice. Worker: agy ×2
+      (a wall-clock test was replaced by the structural one).
+- [ ] Improvements: ~~download percentage~~ (done above), ~~faster posters~~ (disk cache above), landscape control in the player, ~~EPG for M3U~~ (guide limits fixed above).
 - [!] **The crash report is not on this Mac.** Organizer's cache for `com.orgista.openstream` was
       last refreshed 2026-09-11, before build 10 shipped, and holds only its query state; the
       DiagnosticReports hits are local simulator/test-runner artefacts. It is in App Store Connect →
       TestFlight → Crashes. Needs either Organizer opened once on this Mac (which pulls it into that
       cache) or the device / OS / stack pasted here.
+
+## 2026-09-17 — Chapter-marker continuation
+
+- [x] Aether chapter publisher reaches the engine protocol and custom transport overlay; 1007 tests /
+  101 suites include late-runtime eligibility, skip persistence through track/metadata updates and
+  backward seeks, and a new item with identical chapter markers.
+- [F] Skip Intro overlapped the iPhone captions control. Action stack now reserves measured bottom-bar
+  height. The iOS UI test asserts `skip.frame.maxY <= scrubber.frame.minY`; default-size iPhone 16 Pro
+  screenshots (1206 × 2622) checked before and after. Intro picture red at 0:00; post-skip green at 0:52.
+- [F] Apple TV focus paths bypassed the chapter action, and transport auto-hide could reclaim focus.
+  Down from the surface and Up from the scrubber now reach Skip Intro; it keeps focus through hiding
+  and releases focus when removed. Remote-driven test passed. Checked 1920 × 1080 captures show the
+  focused button above the scrubber at 0:05 and green playback at 0:52 after Select.
+- [x] Evidence: `design/2026-09-17-chapters/{iphone,tv}-{before,after}.png`. Generated media stayed
+  outside the repo and was played through Direct URL, without saving sources. Fixture resume entries
+  cleaned after simulator shutdown. Native AVKit skip UI and physical devices were not verified here.
+
+
+## 2026-09-17 — iPhone 16 Pro native UX audit (Codex)
+
+- [x] Installed-app check: persistent iPhone 16 Pro, iOS 26.3 (23D8133), initially local Debug
+  1.0 (1), not the TestFlight build 12 binary. Rebuilt current source and installed without resetting
+  the simulator. The supplied temporary screenshot files had expired; fresh simulator evidence used.
+- [F] Live's clipped floating title replaced with the native large navigation title. System tab bar
+  retained. Discover, Library, Live and Settings roots reviewed; Library capture was a loading state.
+- [F] Add Live TV no longer exposes deprecated Playlist Text. File import retained. Save validates
+  source/lineup separately from sample-stream testing; only the active action shows its busy state.
+  Native Save/Test controls pass 44-point hit-target checks and largest accessibility text layout.
+- [F] Source health compares latest failure with latest success, retaining diagnostic history while
+  hiding a resolved username error. Channel HTTP 401/403 no longer implies bad account credentials.
+- [F] Trailer hero reaches the screen edge; Back stays visible and mute/replay use 44-point targets.
+  Featured navigation snapshots the selected title outside the rotating carousel. Async metadata and
+  image completion check cancellation before applying results.
+- [x] All 28 supplied playlist entries tested twice from this Mac, including app request headers.
+  M6, W9, 6TER, PARIS PREMIÈRE and RTL9 decoded. Other 23 returned HTTP 403 in both passes.
+  These are time/network-specific provider results, not a claim that those channels never work.
+  Playlist URLs and private reports remain outside the repo. Foundation checks on Mac and simulator
+  independently confirmed TF1 403 and M6 transport-stream response.
+- [F] Probe failures have Retry/Close; later engine failures receive actionable channel wording.
+  tvOS full-screen probe task and alert belong to the visible player during footer channel switching.
+  Probes preserve playlist Origin as well as User-Agent/Referer. File-open failures now provide feedback.
+- [x] Xcode Cloud uses orgista/openstream-apple. Run 5 passed iOS, macOS, tvOS and visionOS after
+  the ActivityKit isolation fix. Original build-12 tag retained. No new TestFlight upload.
+- [!] Scope: native source review plus selected XCUITest flows and fresh rendered captures. The
+  web-oriented pixelslop scanner's raw heuristic counts are not confirmed defects or a native score.
+  VoiceOver speech, physical-device playback, every settings subpage and tvOS footer runtime remain
+  outside this iPhone pass. Final validation and evidence are recorded below.
+
+- [F] Concurrent metadata-cache regression caught by the full test gate: raw metadata from one
+  provider was reused for every provider of the same title. Cache now hashes complete endpoint
+  identity, invalidates the old namespace, and isolates injected test transports. Regression coverage
+  checks richer fallback-provider fields and reuse across fresh client/cache instances.
+
+- [x] Final source gate reached 1,024 tests / 104 suites after the cache corrections. iPhone UI
+  checks passed native form controls, source health, stable featured title over 26 seconds, trailer
+  rotation and failed-channel-to-M6 recovery with visible video. Temporary playlist removed.
+- [F] The recovery capture exposed a keyboard covering the guide after selection. iOS search focus
+  now dismisses when playback selection changes while retaining the search query. Final XCUITest
+  passed; screenshot confirms M6 video and the keyboard dismissed.
+
+- [x] Completion: final gate **1,024 tests / 104 suites passed**; iOS and tvOS builds passed.
+  Changed app files have explicit SwiftCompile evidence. Installed Debug 1.0 (1) binary hash equals
+  the final iOS build, and source hashes remained unchanged afterward. No empty Swift files.
+  Native form, largest text, tab roots, source health, trailer rotation/stable identity, channel
+  error/recovery and cleanup checks passed across the targeted runs. Final recovery rerun passed
+  with the keyboard-dismissal assertion. Early failed runs are retained with their resolved causes.
+- [x] Evidence: `design/2026-09-17-iphone-native-ux/` — native form, largest text, trailer portrait
+  and landscape, channel denial/recovery, and final Live root with the owner's existing source.
+  No temporary sources or cached test channels remain; last channel belongs to an existing source.
+  Private local test server stopped. Simulator left on Live with the current rebuilt app.

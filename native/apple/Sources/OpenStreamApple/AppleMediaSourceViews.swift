@@ -82,6 +82,16 @@ struct AppleLiveTVView: View {
                 tvGuide
                 #else
                 VStack(spacing: 0) {
+                    if let pendingProbe {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Connecting to \(pendingProbe.channel.name)…")
+                                .lineLimit(2)
+                        }
+                        .font(.subheadline)
+                        .padding(12)
+                        .accessibilityIdentifier("live.connecting")
+                    }
                     if let selectedChannel {
                         AppleLiveInlinePlayer(
                             request: selectedChannel.playbackRequest(),
@@ -143,7 +153,7 @@ struct AppleLiveTVView: View {
                 #endif
             }
         }
-        .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query))
+        .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision))
         .task(id: settings.playbackEngine) {
             guard configuredEngine != settings.playbackEngine else { return }
             configuredEngine = settings.playbackEngine
@@ -184,6 +194,15 @@ struct AppleLiveTVView: View {
                 Button("Leave SharePlay", role: .destructive) { sharePlay.message = nil; sharePlay.leave() }
             }
         } message: { Text(sharePlay.message ?? "") }
+        .task(id: pendingProbe?.id) {
+            guard probeSurfaceIsActive(isPlayer: false) else { return }
+            await probePendingChannel()
+        }
+        .alert("Channel Unavailable", isPresented: probeFailureBinding(isPlayer: false)) {
+            probeFailureActions
+        } message: {
+            Text(probeFailureMessage ?? "")
+        }
         // The full-screen player owns the failure alert (Retry/Close). A second
         // alert here, bound to the same coordinator phase, collided with the
         // fullScreenCover and dismissed the player silently (2026-09-03).
@@ -407,12 +426,73 @@ struct AppleLiveTVView: View {
 
     @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
     private let liveStreamProbe = AppleIPTVStreamProbe()
+    private struct ChannelProbeRequest {
+        let id = UUID()
+        let channel: AppleIPTVChannel
+        let shareSelection: Bool
+        let present: Bool
+    }
+    @State private var pendingProbe: ChannelProbeRequest?
+    @State private var failedProbe: ChannelProbeRequest?
+    @State private var probeFailureMessage: String?
+
+    private func probePendingChannel() async {
+        guard let request = pendingProbe else { return }
+        do {
+            let result = try await liveStreamProbe.validate(channel: request.channel)
+            let kind = result.mediaKind
+            appleTrace("live preflight: HTTP \(result.statusCode), \(kind.rawValue)")
+            try Task.checkCancellation()
+            guard pendingProbe?.id == request.id else { return }
+            liveProbedKinds[request.channel.id] = kind
+            pendingProbe = nil
+            startChannelNow(request.channel.withProbedMediaKind(kind),
+                shareSelection: request.shareSelection, present: request.present)
+        } catch {
+            guard !Task.isCancelled, pendingProbe?.id == request.id else { return }
+            pendingProbe = nil
+            failedProbe = request
+            appleTrace("live preflight failed: \(String(describing: type(of: error)))")
+            probeFailureMessage = error.localizedDescription
+        }
+    }
+
+    private func probeSurfaceIsActive(isPlayer: Bool) -> Bool {
+        #if os(tvOS)
+        (tvPlayer != nil) == isPlayer
+        #else
+        !isPlayer
+        #endif
+    }
+
+    private func probeFailureBinding(isPlayer: Bool) -> Binding<Bool> {
+        Binding(
+            get: { probeSurfaceIsActive(isPlayer: isPlayer) && probeFailureMessage != nil },
+            set: { presented in
+                guard !presented, probeSurfaceIsActive(isPlayer: isPlayer) else { return }
+                probeFailureMessage = nil
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var probeFailureActions: some View {
+        Button("Retry") {
+            guard let request = failedProbe else { return }
+            startChannel(request.channel, shareSelection: request.shareSelection, present: request.present)
+        }
+        Button("Close", role: .cancel) { failedProbe = nil }
+    }
+
 
     /// Every way a channel starts funnels through here. An extension-less URL
     /// gets one 32 KB look first so HLS goes to AVPlayer and raw TS to the
     /// engine (`AppleLiveStreamRoutePolicy`); the verdict is kept for the
     /// session. Anything with a telling extension starts at once.
     private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
+        pendingProbe = nil
+        probeFailureMessage = nil
+        failedProbe = nil
         guard channel.probedMediaKind == nil, AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
             startChannelNow(channel, shareSelection: shareSelection, present: present)
             return
@@ -421,12 +501,10 @@ struct AppleLiveTVView: View {
             startChannelNow(channel.withProbedMediaKind(known), shareSelection: shareSelection, present: present)
             return
         }
-        Task { @MainActor in
-            let kind = (try? await liveStreamProbe.validate(channel: channel).mediaKind) ?? .other
-            liveProbedKinds[channel.id] = kind
-            appleTrace("live probe \(channel.name): \(kind.rawValue)")
-            startChannelNow(channel.withProbedMediaKind(kind), shareSelection: shareSelection, present: present)
-        }
+        // Retire the previous attempt before showing a new channel's failure.
+        // Otherwise its player alert can cover the preflight's Retry/Close alert.
+        playbackCoordinator.stop()
+        pendingProbe = ChannelProbeRequest(channel: channel, shareSelection: shareSelection, present: present)
     }
 
     private func startChannelNow(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
@@ -494,6 +572,18 @@ struct AppleLiveTVView: View {
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .id(ObjectIdentifier(playbackCoordinator))
+                // A full-screen cover can suspend the underlying view's task.
+                // Footer channel switches and their errors belong to this
+                // visible surface; the root is gated off while it is presented.
+                .task(id: pendingProbe?.id) {
+                    guard probeSurfaceIsActive(isPlayer: true) else { return }
+                    await probePendingChannel()
+                }
+                .alert("Channel Unavailable", isPresented: probeFailureBinding(isPlayer: true)) {
+                    probeFailureActions
+                } message: {
+                    Text(probeFailureMessage ?? "")
+                }
                 // The guide only fetches EPG for rows visible in the grid, so
                 // a viewer who opened a channel without scrolling the guide had
                 // no programme data for the strip's channels and the "what is
@@ -718,7 +808,7 @@ struct AppleLiveInlinePlayer: View {
             Button("Close", role: .cancel) { coordinator.stop() }
         } message: {
             if case .failed(let failure) = coordinator.phase {
-                Text(failure.message)
+                Text(request.isLive ? failure.liveChannelMessage : failure.message)
             }
         }
     }
@@ -1048,6 +1138,10 @@ private class AppleLiveChromeViewController: UIViewController, UIGestureRecogniz
 private struct AppleLiveSearchModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var query: String
+    let selectionRevision: Int
+    #if os(iOS)
+    @FocusState private var searchFocused: Bool
+    #endif
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -1056,6 +1150,10 @@ private struct AppleLiveSearchModifier: ViewModifier {
         #else
         if isEnabled {
             content.searchable(text: $query, prompt: "Channels and groups")
+                #if os(iOS)
+                .searchFocused($searchFocused)
+                .onChange(of: selectionRevision) { _, _ in searchFocused = false }
+                #endif
         } else {
             content
         }
@@ -1119,6 +1217,9 @@ enum AppleSMBPlaybackRequestFactory {
 struct AppleLibraryView: View {
     @State private var library = AppleLocalLibraryStore.shared
     @State private var viewportSize: CGSize = .zero
+    @State private var selectedHero: AppleLibrarySeries?
+    @State private var selectedHeroAutoPlay = false
+    @State private var showsSelectedHero = false
     @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
@@ -1157,6 +1258,11 @@ struct AppleLibraryView: View {
                 libraryScroll
             }
         }
+        .navigationDestination(isPresented: $showsSelectedHero) {
+            if let selectedHero {
+                detail(selectedHero, autoPlay: selectedHeroAutoPlay)
+            }
+        }
         .appleTraceScreen("library", detail: "\(groups.count) titles, loading=\(library.isLoading)")
     }
 
@@ -1177,13 +1283,21 @@ struct AppleLibraryView: View {
                     rotationCount: heroes.count,
                     rotationIndex: index
                 ) {
-                    AppleFeaturedActions(viewportSize: viewportSize) {
-                        detail(featured, autoPlay: true)
-                    } detailDestination: { detail(featured) }
+                    AppleFeaturedActions(
+                        viewportSize: viewportSize,
+                        onPlay: { selectHero(featured, autoPlay: true) },
+                        onDetails: { selectHero(featured, autoPlay: false) }
+                    )
                 }
                 .padding(.horizontal, heroHorizontalPadding)
             }
         }
+    }
+
+    private func selectHero(_ group: AppleLibrarySeries, autoPlay: Bool) {
+        selectedHero = group
+        selectedHeroAutoPlay = autoPlay
+        showsSelectedHero = true
     }
 
     /// The per-source, per-kind shelves. Extracted for the same reason as

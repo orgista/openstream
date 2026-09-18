@@ -17,6 +17,10 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     Text(title).foregroundColor(.white)
     #elseif os(tvOS)
     Text(title).italic().foregroundStyle(.tertiary)
+    #elseif os(iOS)
+    // Use the system label color directly; hierarchical secondary styling
+    // compounds the text field's placeholder dimming on a dark form.
+    Text(title).foregroundColor(Color(uiColor: .secondaryLabel))
     #else
     Text(title).foregroundStyle(.secondary)
     #endif
@@ -335,7 +339,7 @@ private struct AppleAddFilesView: View {
         }
         .appleSettingsPage("Add Files")
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        #if DEBUG && os(visionOS)
+        #if DEBUG
         .task {
             if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
                let url = AppleDirectPlaybackInput.url(raw) {
@@ -580,7 +584,7 @@ private struct AppleSourceDetailView: View {
                         if !source.capabilities.isEmpty {
                             AppleTruncatingValue("Capabilities", value: source.capabilities.joined(separator: ", "))
                         }
-                        if let lastFailureAt = source.lastValidationFailureAt {
+                        if source.hasCurrentValidationFailure, let lastFailureAt = source.lastValidationFailureAt {
                             LabeledContent(
                                 "Last Failure",
                                 value: lastFailureAt.formatted(date: .abbreviated, time: .shortened)
@@ -639,8 +643,7 @@ private struct AppleSourceDetailView: View {
     }
 
     private func healthLabel(_ source: AppleSource) -> String {
-        if let failure = source.lastValidationFailureAt,
-           failure > (source.lastValidatedAt ?? .distantPast) {
+        if source.hasCurrentValidationFailure {
             return "Needs attention"
         }
         if source.lastValidatedAt != nil { return "Connected" }
@@ -974,22 +977,27 @@ private struct AppleAddLiveTVSourceView: View {
     @State private var isError = false
     @State private var connectionAction: AppleInstanceConnectionAction?
 
-    /// M3U text pasted or read from a chosen file. Saved into the one local
-    /// playlist (`AppleLocalPlaylistStore.pastedURL`), so every paste joins
-    /// the same source row.
+    /// File imports join the existing local playlist only when Save is pressed.
     @State private var pastedPlaylist = ""
     @State private var isChoosingFile = false
+    @State private var playlistFileName: String?
 
     let sourceStore: AppleSourceStore
     private let client = AppleIPTVClient()
     private let streamProbe = AppleIPTVStreamProbe()
 
     var body: some View {
-        #if os(tvOS)
-        tvOSBody
-        #else
-        standardBody
-        #endif
+        Group {
+            #if os(tvOS)
+            tvOSBody
+            #else
+            standardBody
+            #endif
+        }
+        .onChange(of: [type.rawValue, name, endpoint, username, password, pastedPlaylist]) { _, _ in
+            message = nil
+            isError = false
+        }
     }
 
     private var endpointTitle: String {
@@ -1103,16 +1111,17 @@ private struct AppleAddLiveTVSourceView: View {
                 }
                 .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
                 .focusSection()
+                .disabled(isWorking)
 
                 HStack(spacing: metrics.pillSpacing) {
-                    Button("Save") { connectionAction = .save(UUID()) }
+                    Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true) }
                         .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                         .disabled(isWorking)
                         .accessibilityIdentifier("sources.live.save")
                     Button {
                         connectionAction = .test(UUID())
                     } label: {
-                        if isWorking { ProgressView() } else { Text("Test Connection") }
+                        connectionLabel(saving: false)
                     }
                     .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                     .disabled(isWorking)
@@ -1145,6 +1154,7 @@ private struct AppleAddLiveTVSourceView: View {
                     }
                 }
             }
+            .disabled(isWorking)
 
             Section("Connection") {
                 nameField.appleFormSubmit(.name, chain: fieldChain, focus: $focusedField)
@@ -1154,24 +1164,28 @@ private struct AppleAddLiveTVSourceView: View {
                     passwordField
                 }
             }
+            .disabled(isWorking)
 
             if type == .m3u {
-                Section("Playlist Text") {
-                    TextEditor(text: $pastedPlaylist)
-                        .font(.footnote.monospaced())
-                        .frame(minHeight: 120)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Playlist text")
-                        .accessibilityIdentifier("sources.live.playlistText")
+                Section {
                     Button("Choose File…") { isChoosingFile = true }
                         .accessibilityIdentifier("sources.live.chooseFile")
+                    if let playlistFileName {
+                        LabeledContent("File", value: playlistFileName)
+                        Button("Remove File", role: .destructive) {
+                            pastedPlaylist = ""
+                            self.playlistFileName = nil
+                        }
+                    }
                 }
+                .disabled(isWorking)
             }
 
             if let message {
                 Section {
                     Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
-                        .foregroundStyle(isError ? .red : .primary)
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("sources.live.result")
                 }
             }
 
@@ -1182,16 +1196,27 @@ private struct AppleAddLiveTVSourceView: View {
                 }
                 .controlSize(.large)
             }
+            .listRowBackground(Color.clear)
         }
+        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .appleSettingsPage("Add Live TV")
         .fileImporter(isPresented: $isChoosingFile, allowedContentTypes: [.m3uPlaylist, .plainText, .text, .data]) { result in
-            guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url),
-               let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+            do {
+                let url = try result.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let data = try Data(contentsOf: url)
+                guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw AppleIPTVError.invalidPlaylist
+                }
                 pastedPlaylist = text
+                playlistFileName = url.lastPathComponent
                 if name.isEmpty { name = url.deletingPathExtension().lastPathComponent }
+            } catch {
+                let failure = error as NSError
+                guard failure.domain != NSCocoaErrorDomain || failure.code != NSUserCancelledError else { return }
+                isError = true
+                message = "The playlist file could not be opened. Choose it again or enter a playlist URL."
             }
         }
         .task(id: connectionAction) {
@@ -1200,24 +1225,32 @@ private struct AppleAddLiveTVSourceView: View {
         }
     }
 
-    @ViewBuilder
     private var connectionButtons: some View {
-        Button("Save") {
-            connectionAction = .save(UUID())
-        }
-        .buttonStyle(PrimaryPillButtonStyle())
-        .disabled(!canSubmit || isWorking)
-        .accessibilityIdentifier("sources.live.save")
+        Group {
+            Button { connectionAction = .save(UUID()) } label: {
+                connectionLabel(saving: true)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSubmit || isWorking)
+            .accessibilityIdentifier("sources.live.save")
 
-        Button {
-            connectionAction = .test(UUID())
-        } label: {
-            if isWorking { ProgressView() } else { Text("Test Connection") }
+            Button { connectionAction = .test(UUID()) } label: {
+                connectionLabel(saving: false)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canSubmit || isWorking)
+            .accessibilityIdentifier("sources.live.test")
         }
-        .buttonStyle(.brandSecondary)
-        .disabled(!canSubmit || isWorking)
     }
     #endif
+
+    private func connectionLabel(saving: Bool) -> some View {
+        let active = isWorking && (connectionAction?.shouldSave == saving)
+        return HStack(spacing: 8) {
+            if active { ProgressView().accessibilityHidden(true) }
+            Text(active ? (saving ? "Saving…" : "Testing…") : (saving ? "Save" : "Test Connection"))
+        }
+    }
 
     private var canSubmit: Bool {
         submissionProblem == nil
@@ -1246,20 +1279,9 @@ private struct AppleAddLiveTVSourceView: View {
         }
         let submittedType = type
         var submittedName = name
-        var submittedEndpoint = endpoint
-        var mergeNote = ""
-        if usesPastedPlaylist {
-            do {
-                let merged = try AppleLocalPlaylistStore.shared.merge(text: pastedPlaylist)
-                submittedEndpoint = AppleLocalPlaylistStore.pastedURL.absoluteString
-                if submittedName.isEmpty { submittedName = "Playlists" }
-                mergeNote = " · \(merged.added) added, \(merged.total) total"
-            } catch {
-                isError = true
-                message = error.localizedDescription
-                return
-            }
-        }
+        let importingFile = usesPastedPlaylist
+        let submittedEndpoint = importingFile ? AppleLocalPlaylistStore.pastedURL.absoluteString : endpoint
+        if importingFile && submittedName.isEmpty { submittedName = "Playlists" }
         let submittedUsername = username
         let submittedPassword = password
         isWorking = true
@@ -1275,11 +1297,18 @@ private struct AppleAddLiveTVSourceView: View {
             let credentials = submittedType == .xtream
                 ? AppleIPTVCredentials(username: submittedUsername, password: submittedPassword)
                 : nil
-            let channels = try await client.validate(source: source, credentials: credentials)
-            let probe = try await streamProbe.validate(channels: channels)
+            let channels: [AppleIPTVChannel]
+            if importingFile {
+                channels = try AppleIPTVClient.parseM3U(Data(pastedPlaylist.utf8), sourceID: source.id, baseURL: source.url)
+                guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
+            } else {
+                channels = try await client.validate(source: source, credentials: credentials)
+            }
             try Task.checkCancellation()
             if action.shouldSave {
-                let summary = "Connected · \(channels.count) channels\(mergeNote) · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
+                let channelCount = importingFile
+                    ? try AppleLocalPlaylistStore.shared.merge(text: pastedPlaylist).total
+                    : channels.count
                 try sourceStore.addIPTV(
                     name: submittedName,
                     type: submittedType,
@@ -1287,18 +1316,29 @@ private struct AppleAddLiveTVSourceView: View {
                     username: submittedUsername,
                     password: submittedPassword,
                     lastValidatedAt: .now,
-                    validationSummary: summary,
-                    discoveredItemCount: channels.count,
-                    capabilities: ["Live channels", "Playback"]
+                    validationSummary: "Connected · \(channelCount) channels",
+                    discoveredItemCount: channelCount,
+                    capabilities: ["Live channels"]
                 )
                 dismiss()
                 return
             }
-            isError = false
-            message = "Connected · \(channels.count) channels\(mergeNote) · Playback verified (\(probe.bytesReceived.formatted()) bytes)"
+            do {
+                _ = try await streamProbe.validate(channels: channels)
+                try Task.checkCancellation()
+                isError = false
+                message = "Connected · \(channels.count) channels · Sample stream responded"
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                isError = true
+                message = "Loaded \(channels.count) channels. Sample streams unavailable. \(error.localizedDescription)"
+            }
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled else { return }
             isError = true
             message = error.localizedDescription
         }

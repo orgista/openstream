@@ -57,6 +57,9 @@ struct AppleDiscoverView: View {
     @State private var viewportSize: CGSize = .zero
     @State private var loadedCache = false
     @State private var showsSearch = false
+    @State private var selectedHero: IndexedCatalogItem?
+    @State private var selectedHeroAutoPlay = false
+    @State private var showsSelectedHero = false
     #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
     @State private var visionReviewDetail = false
     @State private var visionReviewAutoPlay = false
@@ -241,6 +244,11 @@ struct AppleDiscoverView: View {
                 .scrollClipDisabled()
                 .background(Color.black.ignoresSafeArea())
                 #endif
+            }
+        }
+        .navigationDestination(isPresented: $showsSelectedHero) {
+            if let selectedHero {
+                detail(selectedHero, initialAutoPlay: selectedHeroAutoPlay)
             }
         }
         .overlay(alignment: .top) {
@@ -546,9 +554,19 @@ struct AppleDiscoverView: View {
     }
 
     private func featuredActions(_ value: IndexedCatalogItem) -> some View {
-        AppleFeaturedActions(viewportSize: viewportSize) {
-            detail(value, initialAutoPlay: true)
-        } detailDestination: { detail(value) }
+        AppleFeaturedActions(
+            viewportSize: viewportSize,
+            onPlay: { selectHero(value, autoPlay: true) },
+            onDetails: { selectHero(value, autoPlay: false) }
+        )
+    }
+
+    private func selectHero(_ value: IndexedCatalogItem, autoPlay: Bool) {
+        // Capture the tapped title outside the rotating hero. Timeline ticks
+        // must never replace the item in an already presented detail page.
+        selectedHero = value
+        selectedHeroAutoPlay = autoPlay
+        showsSelectedHero = true
     }
 
     @ViewBuilder
@@ -1396,6 +1414,7 @@ struct AppleCatalogItemDetailView: View {
             #endif
         }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
+        .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
     }
 
     private func applyDetailViewport(_ viewport: AppleDetailViewport) {
@@ -1423,7 +1442,13 @@ struct AppleCatalogItemDetailView: View {
             ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 detailHero
+                    #if os(iOS)
+                    // With the navigation bar hidden, extend the hero through
+                    // the status-bar safe area in portrait as well as landscape.
+                    .padding(.top, -detailSafeAreaInsets.top)
+                    #else
                     .padding(.top, isLandscapeLayout ? -detailSafeAreaInsets.top : 0)
+                    #endif
                     .padding(.leading, isLandscapeLayout ? -detailSafeAreaInsets.leading : 0)
                     .padding(.trailing, isLandscapeLayout ? -detailSafeAreaInsets.trailing : 0)
 
@@ -1510,7 +1535,13 @@ struct AppleCatalogItemDetailView: View {
             }
         )
         .coordinateSpace(name: "detail-scroll")
+        #if os(iOS)
+        // The hero extends into the top safe area in both orientations; the
+        // status-bar shield above protects text once the page scrolls.
+        .scrollClipDisabled()
+        #else
         .scrollClipDisabled(isLandscapeLayout)
+        #endif
         .onGeometryChange(for: AppleDetailViewport.self) { proxy in
             AppleDetailViewport(size: proxy.size, insets: proxy.safeAreaInsets)
         } action: { viewport in
@@ -1856,13 +1887,14 @@ struct AppleCatalogItemDetailView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back")
+            .accessibilityIdentifier("detail.back")
             .padding(.leading, isLandscapeLayout ? 12 + detailSafeAreaInsets.leading : 12)
+            #if os(iOS)
+            .padding(.top, 10 + detailSafeAreaInsets.top)
+            #else
             .padding(.top, 10)
+            #endif
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .opacity(trailerIsPlaying ? 0 : 1)
-            .allowsHitTesting(!trailerIsPlaying)
-            .accessibilityHidden(trailerIsPlaying)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: trailerIsPlaying)
             #endif
         }
         }
@@ -3967,6 +3999,14 @@ struct AppleCatalogItemDetailView: View {
     private func prepare() async {
         let generation = UUID()
         preparationGeneration = generation
+        metadataDetails = nil
+        previewAssets = nil
+        fallbackArtwork = nil
+        episodes = []
+        selectedSeason = nil
+        selectedEpisodeID = nil
+        resolvedMediaID = nil
+        watchProviders = []
         let isSeries = item.type == "series"
         // An item that already carries a canonical `tt…` id needs no meta
         // add-on round trip, so Play is usable before anything is awaited.
@@ -4051,29 +4091,34 @@ struct AppleCatalogItemDetailView: View {
         guard !Task.isCancelled, preparationGeneration == generation else { return }
         previewAssets = preview
         do {
-            metadataDetails = try await metadataResolver.resolve(
+            let details = try await metadataResolver.resolve(
                 sources: playbackSources,
                 preferredSourceID: source.id,
                 type: item.type,
                 mediaID: resolvedMediaID ?? item.mediaID,
                 configuration: metadataConfiguration
             )
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
+            metadataDetails = details
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
             metadataDetails = nil
         }
         guard !Task.isCancelled, preparationGeneration == generation else { return }
         await loadWatchProviders()
         guard !Task.isCancelled, preparationGeneration == generation else { return }
         if item.posterURL == nil, metadataDetails?.backdropURL == nil, metadataDetails?.posterURL == nil {
-            fallbackArtwork = await AppleArtworkResolver.shared.resolve(
+            let artwork = await AppleArtworkResolver.shared.resolve(
                 mediaID: resolvedMediaID ?? item.mediaID,
                 type: item.type,
                 existingPosterURL: item.posterURL,
                 existingBackgroundURL: item.backgroundURL,
                 configuration: metadataConfiguration
             )
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
+            fallbackArtwork = artwork
         }
     }
 
@@ -4479,7 +4524,6 @@ private struct AppleYouTubeAutoPreview: UIViewRepresentable {
             #else
             muteButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
             #endif
-            muteButton.layer.cornerRadius = 17
             muteButton.clipsToBounds = true
             muteButton.accessibilityIdentifier = "detail.trailer.mute"
             muteButton.addTarget(self, action: #selector(mutePreview), for: .primaryActionTriggered)
@@ -4509,8 +4553,9 @@ private struct AppleYouTubeAutoPreview: UIViewRepresentable {
             #if os(visionOS)
             let controlSide: CGFloat = 60
             #else
-            let controlSide: CGFloat = 34
+            let controlSide: CGFloat = 44
             #endif
+            muteButton.layer.cornerRadius = controlSide / 2
             muteButton.frame = CGRect(
                 x: bounds.maxX - 12 - controlSide,
                 y: bounds.maxY - 12 - controlSide,

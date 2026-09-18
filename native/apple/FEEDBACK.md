@@ -4237,11 +4237,86 @@ four archive actions with four simulator/Mac BUILD actions. Paused it and the un
 workflow; read-back tables show Enabled=false. Prior configs saved privately as
 codex-cloud-*-before-publication.json. Old failed runs are retained.
 
-Remaining dependency: Apple's API still lists only orgista/openstream. Its public workflow PATCH
-cannot change the repository relationship, SCM APIs are read-only, and no Apple web session is
-available. Owner must use Cloud Settings, primary repository More Options / Change URL, to select
-https://github.com/orgista/openstream-apple.git and grant access if prompted. Keep branch main and
-project native/apple/Apps/OpenStreamApps.xcodeproj. Once connected, verify the repository, enable
-Apple Build Checks and run it under this repair request. Keep the separate TestFlight workflow
-paused; archive/distribution is not part of this source publication. No successful Cloud run is
-claimed yet.
+Cloud repair completed September 17: `orgista/openstream-apple` is connected and Apple Build Checks is enabled. Run 5 (`3a431b39-00a5-47b7-8b72-891a435db678`) passed all four platforms at commit `ba066e3`. Run 4 exposed two iOS ActivityKit isolation errors; the follow-up fixes them without unsafe Sendable suppression. Build-12 tag unchanged, old failures retained, separate TestFlight workflow paused. No new TestFlight binary.
+
+## 2026-09-17 16:40 — artwork stays on disk now
+
+Posters, backdrops and the title wordmark are written to disk the first time they're seen and come
+back from disk on the next launch — the app used to force a fresh download of every image, every
+launch, which is why testers saw slow or missing posters. On the sim the second launch read its
+posters back from disk and the second open of a title reused the trimmed wordmark. Cap is 512 MB,
+oldest first. Done by the cheap worker from a spec; I verified and committed. Next: prefetch what's on
+screen so the *first* open is instant too, and cache title metadata the same way.
+
+
+
+### 2026-09-17 — iPhone trailer, Live TV and native controls
+
+Fixed the trailer's top framing and kept Back available while it plays. Opening a featured title
+now keeps that title selected even when the home carousel advances. Live uses the normal iOS page
+heading. Removed Playlist Text; retained file import and gave Save and Test Connection separate
+working states. The source page hides old login errors after a successful connection. Channel
+failures say what happened and offer Retry/Close without blaming a working saved account.
+
+Checked every entry in the supplied 28-channel playlist twice: five decoded; 23 were denied by
+the provider with HTTP 403 on this network. Working entries were M6, W9, 6TER, PARIS PREMIÈRE and
+RTL9. A denied channel no longer prevents saving a valid playlist. Test Connection describes a
+sample response rather than promising every channel will play. The audit also caught and corrected
+a new metadata-cache collision between providers. Screenshots and test coverage are in GUI-AUDIT.md.
+
+These changes are local simulator work, not a new TestFlight upload. Cloud is separately repaired:
+Apple Build Checks run 5 passed all four Apple platforms in the dedicated Apple repository.
+
+Verified completion: 1,024 automated tests pass, iOS and Apple TV builds pass, and the installed
+iPhone binary matches the final build. Trailer rotation, source health, large text and channel
+recovery checks pass. Selecting a channel also dismisses the search keyboard. Temporary sources
+and channel caches were removed; the simulator is back on Live with the existing account.
+
+## 2026-09-17 17:30 — title pages cache their metadata
+
+Opening a title now keeps the add-on's answer on disk: the next open renders from that copy (fresh
+for a day, then still shown while a quiet refresh runs, gone after two weeks). Artwork was done an
+hour ago; episodes and the wordmark/backdrop lookups are with the worker now. Both were built by the
+cheap worker from specs — the first metadata pass broke five tests (it forgot that several add-ons
+answer the same title and get merged); the second pass fixed it. I only verified and committed.
+
+## 2026-09-17 18:50 — launch is off the library's back
+
+The Library shows its titles 142 ms after launch from a saved snapshot (it was ~5 s while the app
+walked the share), the share walk runs quietly afterwards, and a relaunch within 10 minutes skips the
+walk entirely. It took the worker three passes — the first two would have shown fake rows or an empty
+Library — which is exactly why every pass gets measured on the sim before it's committed.
+
+## 2026-09-17 19:25 — Apple TV guide is lazy again
+
+Opening Live on Apple TV built every one of the 300 channel rows up front. The worker's own audit
+found it, the fix is 24 lines, and the sim shows 71 MB less memory with an identical screen.
+The same audit's iPhone/iPad findings are with the worker now.
+
+## 2026-09-17 19:50 — iPhone/iPad guide stops re-drawing itself while you scroll
+
+Every horizontal scroll frame used to re-render the entire guide, and each row re-filtered the
+programme list every time. Rows now render from a precomputed model and only the header and the
+now-line follow the scroll. Same look, verified with the French playlist. One thing to know: that
+provider is now refusing TMC with a 403 — the app says "Channel Unavailable", which is the right
+message; it's on their side.
+
+## 2026-09-17 20:40 — Apple TV guide: the minute tick is quiet now
+
+Every minute the guide used to rebuild all its cells on the main thread. It now rebuilds only when a
+programme actually starts or ends, and off the main thread; the trace shows the minute mark being
+skipped. Idle CPU on the sim was already low, so the number barely moves — the point is no more
+once-a-minute stall on a 300-channel lineup.
+
+## 2026-09-17 21:20 — web portal, first pass
+
+The browser portal now reads properly: placeholders you can actually see, a brand-pink focus ring,
+44-pt tap targets, no off-palette colours, sentence-case headings. Same layout. Left for a second
+pass: the forms still reload the page on submit and don't validate inline.
+
+## 2026-09-17 21:45 — settings panes
+
+Streaming Services was missing from the iPhone/iPad Settings list (Apple TV had it) — it's there
+now. Small hygiene on the Radarr/Sonarr fields (URL keyboard, password autofill), VoiceOver labels,
+and the Streaming Services pane now looks like the other panes.
+

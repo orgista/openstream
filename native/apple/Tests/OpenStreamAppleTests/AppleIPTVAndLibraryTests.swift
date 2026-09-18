@@ -346,12 +346,14 @@ private actor IPTVRequestRecorder {
         name: "News",
         streamURL: URL(string: "http://127.0.0.1:12345/live/opaque/stream.ts")!,
         userAgent: "Provider Player",
-        referer: "https://tv.example/"
+        referer: "https://tv.example/",
+        origin: "https://tv.example"
     )
     let probe = AppleIPTVStreamProbe { request in
         #expect(request.value(forHTTPHeaderField: "Range") == "bytes=0-32767")
         #expect(request.value(forHTTPHeaderField: "User-Agent") == "Provider Player")
         #expect(request.value(forHTTPHeaderField: "Referer") == "https://tv.example/")
+        #expect(request.value(forHTTPHeaderField: "Origin") == "https://tv.example")
         return (
             Data(repeating: 0x47, count: 188),
             HTTPURLResponse(url: request.url!, statusCode: 206, httpVersion: nil, headerFields: nil)!
@@ -402,7 +404,7 @@ private actor IPTVRequestRecorder {
     let unauthorized = AppleIPTVStreamProbe { request in
         (Data("denied".utf8), HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!)
     }
-    await #expect(throws: AppleIPTVError.authenticationFailed(status: nil)) {
+    await #expect(throws: AppleIPTVError.streamRequestFailed(403)) {
         try await unauthorized.validate(channels: [channel])
     }
 }
@@ -692,6 +694,7 @@ private actor IPTVRequestRecorder {
     )
     let failed = try #require(store.sources.first { $0.id == live.id })
     #expect(failed.lastValidationFailureAt == failureAt)
+    #expect(failed.hasCurrentValidationFailure)
     #expect(failed.validationFailureSummary == "Provider rejected the request. Retry later.")
 
     let recoveredAt = failureAt.addingTimeInterval(60)
@@ -707,6 +710,7 @@ private actor IPTVRequestRecorder {
     #expect(recovered.discoveredItemCount == 43)
     #expect(recovered.capabilities == ["Live channels", "Playback"])
     #expect(recovered.lastValidationFailureAt == failureAt)
+    #expect(!recovered.hasCurrentValidationFailure)
     let persisted = try #require(defaults.data(forKey: "openstream.sources.v1"))
     let persistedText = try #require(String(data: persisted, encoding: .utf8))
     #expect(!persistedText.contains("viewer"))
@@ -1229,4 +1233,59 @@ private actor IPTVRequestRecorder {
     let secondAccount = try store.addIPTV(name: "Account Two", type: .xtream, endpoint: "https://tv.example", username: "second", password: "fixture")
     #expect(account.id != secondAccount.id)
     #expect(store.sources.count == 4)
+}
+
+@Test(arguments: [401, 403, 404, 429, 503])
+func channelHTTPFailuresDoNotMasqueradeAsAccountRejection(status: Int) async throws {
+    let channel = AppleIPTVChannel(id: "blocked", sourceID: UUID(), name: "News",
+        streamURL: URL(string: "https://fixture.example/live")!)
+    let probe = AppleIPTVStreamProbe { request in
+        (Data("denied".utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+    await #expect(throws: AppleIPTVError.streamRequestFailed(status)) {
+        try await probe.validate(channel: channel)
+    }
+    let message = AppleIPTVError.streamRequestFailed(status).localizedDescription
+    #expect(message.contains(String(status)))
+    #expect(!message.contains("username"))
+    #expect(!message.contains("auth=0"))
+}
+
+@Test func channelProbeRejectsAnHTMLPageWithSuccessfulHTTPStatus() async throws {
+    let channel = AppleIPTVChannel(id: "portal", sourceID: UUID(), name: "News",
+        streamURL: URL(string: "https://fixture.example/live.m3u8")!)
+    let probe = AppleIPTVStreamProbe { request in
+        (Data("<!doctype html><html>Sign in</html>".utf8),
+         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html"])!)
+    }
+    await #expect(throws: AppleIPTVError.invalidStreamResponse) {
+        try await probe.validate(channel: channel)
+    }
+}
+
+@Test func channelSampleCanReachAWorkingChannelAtTheEndOfTheLineup() async throws {
+    let channels = (0..<28).map { index in
+        AppleIPTVChannel(id: String(index), sourceID: UUID(), name: "Channel \(index)",
+            streamURL: URL(string: "https://fixture.example/\(index)")!)
+    }
+    let probe = AppleIPTVStreamProbe { request in
+        let status = request.url!.lastPathComponent == "27" ? 200 : 403
+        return (Data("#EXTM3U\n#EXT-X-VERSION:3\n".utf8),
+            HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+    let result = try await probe.validate(channels: channels)
+    #expect(result.mediaKind == .hlsPlaylist)
+}
+
+@Test func channelProbeRetriesRangeRejectionWithABoundedNormalRequest() async throws {
+    let channel = AppleIPTVChannel(id: "range", sourceID: UUID(), name: "News",
+        streamURL: URL(string: "https://fixture.example/live")!)
+    let probe = AppleIPTVStreamProbe { request in
+        let status = request.value(forHTTPHeaderField: "Range") == nil ? 200 : 416
+        return (Data("#EXTM3U\n#EXT-X-VERSION:3\n".utf8),
+            HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+    let result = try await probe.validate(channel: channel)
+    #expect(result.statusCode == 200)
+    #expect(result.mediaKind == .hlsPlaylist)
 }

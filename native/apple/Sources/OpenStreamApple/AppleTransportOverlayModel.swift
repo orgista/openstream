@@ -58,7 +58,9 @@ public final class AppleTransportOverlayModel {
     /// `AppleChapterMarkers`.
     public var introChapter: AppleChapter? = nil
     /// Sticky for the rest of the item: seeking back into the opening after
-    /// skipping must not put the button up again.
+    /// skipping must not put the button up again. It ends with the item —
+    /// see `clearIntroForNewItem()`, because this model outlives a load
+    /// whenever the viewer switches source or channel inside the player.
     public private(set) var hasSkippedIntro = false
 
     /// Whether the Skip Intro button belongs on screen right now.
@@ -79,6 +81,20 @@ public final class AppleTransportOverlayModel {
         let destination = AppleChapterMarkers.skipDestination(intro: introChapter)
         appleTrace("skip intro → \(Int(destination))s")
         await coordinator.userSeek(to: destination)
+    }
+
+    /// Re-derives the opening from the engine's markers and whatever runtime is
+    /// known now. Idempotent and write-guarded, so calling it from both
+    /// `.tracks` and `.duration` costs no extra Observation invalidation.
+    private func refreshIntroChapter() {
+        let found = AppleChapterMarkers.intro(in: coordinator.engine.chapters, duration: duration)
+        if introChapter != found { introChapter = found }
+    }
+
+    /// Drops the opening and the sticky skip when the engine leaves the item.
+    private func clearIntroForNewItem() {
+        if introChapter != nil { introChapter = nil }
+        if hasSkippedIntro { hasSkippedIntro = false }
     }
 
     /// The end-of-episode card, or nil when there is nothing to offer yet.
@@ -162,7 +178,7 @@ public final class AppleTransportOverlayModel {
         self.audioTracks = coordinator.engine.audioTracks
         self.subtitleTracks = coordinator.engine.subtitleTracks
         self.introChapter = AppleChapterMarkers.intro(
-            in: (coordinator.engine as? NativePlaybackEngine)?.chapters ?? [],
+            in: coordinator.engine.chapters,
             duration: coordinator.engine.duration
         )
         // The same persisted list the coordinator reads when no host hands it
@@ -406,8 +422,14 @@ public final class AppleTransportOverlayModel {
 
     private func apply(_ event: ApplePlaybackEngineEvent) {
         switch event {
-        case .phase:
-            // Phase is read directly from the coordinator; re-evaluate auto-hide.
+        case .phase(let phase):
+            // A new load runs through the engine's `stop()`, which reports
+            // `.idle`; from here that is the only load boundary in sight (the
+            // coordinator's attempt counter is private). The opening belongs to
+            // the item, so both the marker and the skip end with it.
+            if phase == .idle { clearIntroForNewItem() }
+            // Phase is otherwise read directly from the coordinator;
+            // re-evaluate auto-hide.
             scheduleAutoHide()
         case .route(let route):
             self.route = route
@@ -423,15 +445,19 @@ public final class AppleTransportOverlayModel {
             let cues = coordinator.engine.subtitleCues
             if subtitleCues != cues { subtitleCues = cues }
         case .duration(let seconds):
-            if duration != seconds { duration = seconds }
+            guard duration != seconds else { break }
+            duration = seconds
+            // The runtime and the chapter list come from independent engine
+            // publishers, so a runtime that lands *after* the chapters has to
+            // re-run the marker test: `AppleChapterMarkers.intro` can only skip
+            // a mislabelled single-chapter file once it knows the runtime to
+            // measure the chapter against.
+            refreshIntroChapter()
         case .tracks:
             // Chapters land in the same pass as the tracks, after `load`
             // returns, so this is where a stream's opening sequence becomes
             // known.
-            if let native = coordinator.engine as? NativePlaybackEngine {
-                let found = AppleChapterMarkers.intro(in: native.chapters, duration: duration)
-                if introChapter != found { introChapter = found }
-            }
+            refreshIntroChapter()
             let audio = coordinator.engine.audioTracks
             if audioTracks != audio { audioTracks = audio }
             let subtitles = coordinator.engine.subtitleTracks

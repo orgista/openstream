@@ -83,6 +83,21 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// re-reads it on position ticks. Empty on `.avPlayer` routes where the
     /// system player's own captions menu renders the track.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
+    /// Container chapters from the engine's probe demuxer (`mediaChapters`),
+    /// mapped for `AppleChapterMarkers`. B32: the Skip Intro button used to
+    /// read chapters from the native engine only, so it never appeared on the
+    /// engine route that plays most content.
+    public private(set) var chapters: [AppleChapter] = [] {
+        didSet {
+            guard chapters != oldValue else { return }
+            appleTrace("engine chapters: \(chapters.count) — \(chapters.map(\.title).prefix(6).joined(separator: ", "))")
+            emit(.tracks)
+        }
+    }
+
+    nonisolated static func mapChapter(_ info: ChapterInfo) -> AppleChapter {
+        AppleChapter(title: info.name, start: info.startSeconds, end: info.startSeconds + max(info.durationSeconds, 0))
+    }
 
     /// Preferred caption behaviour applied at load and when tracks arrive. The
     /// host sets this from `AppleSettingsStore.captionsPreference` before load;
@@ -290,6 +305,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .store(in: &cancellables)
         aether.$audioTracks
             .sink { [weak self] tracks in self?.audioTracks = tracks.map(Self.mapTrack) }
+            .store(in: &cancellables)
+        aether.$mediaChapters
+            .sink { [weak self] infos in self?.chapters = infos.map(Self.mapChapter) }
             .store(in: &cancellables)
         aether.$subtitleTracks
             .sink { [weak self] tracks in self?.applyEmbeddedSubtitleTracks(tracks.map(Self.mapTrack)) }

@@ -329,6 +329,8 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
     case invalidPlaylist
     case noChannels
     case streamUnavailable
+    case streamRequestFailed(Int)
+    case invalidStreamResponse
 
     public var errorDescription: String? {
         switch self {
@@ -352,7 +354,15 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
         case .responseTooLarge: "The IPTV playlist is too large."
         case .invalidPlaylist: "The server did not return an M3U playlist."
         case .noChannels: "No playable channels were found."
-        case .streamUnavailable: "The provider returned channels, but no tested channel delivered media data."
+        case .streamUnavailable: "This channel did not deliver media. Try another channel or retry later."
+        case .invalidStreamResponse: "This channel returned a web page instead of video. Check the playlist address or try another channel."
+        case .streamRequestFailed(let status):
+            switch status {
+            case 401, 403: "The provider denied access to this channel (HTTP \(status)). Try another channel or check access with your provider."
+            case 404: "This channel is no longer available at this address (HTTP 404). Refresh the playlist or try another channel."
+            case 429: "The provider is limiting requests (HTTP 429). Wait a moment before retrying."
+            default: "This channel is unavailable (HTTP \(status)). Try another channel or retry later."
+            }
         }
     }
 }
@@ -910,11 +920,15 @@ public struct AppleIPTVStreamProbe: Sendable {
 
     public func validate(
         channels: [AppleIPTVChannel],
-        maximumAttempts: Int = 3
+        maximumAttempts: Int = 5
     ) async throws -> AppleIPTVStreamProbeResult {
         guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
         var lastError: (any Error)?
-        for channel in channels.prefix(min(max(maximumAttempts, 1), 5)) {
+        let attempts = min(channels.count, min(max(maximumAttempts, 1), 5))
+        for attempt in 0..<attempts {
+            try Task.checkCancellation()
+            let index = attempts == 1 ? 0 : attempt * (channels.count - 1) / (attempts - 1)
+            let channel = channels[index]
             do {
                 return try await validate(channel: channel)
             } catch is CancellationError {
@@ -937,16 +951,26 @@ public struct AppleIPTVStreamProbe: Sendable {
         request.setValue("video/mp2t, application/vnd.apple.mpegurl, application/octet-stream, */*", forHTTPHeaderField: "Accept")
         request.setValue(channel.userAgent ?? "OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
         if let referer = channel.referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+        if let origin = channel.origin { request.setValue(origin, forHTTPHeaderField: "Origin") }
 
-        let (data, response) = try await loader(request)
-        guard let http = response as? HTTPURLResponse else { throw AppleIPTVError.nonHTTPResponse }
-        if http.statusCode == 401 || http.statusCode == 403 {
-            throw AppleIPTVError.authenticationFailed(status: nil)
+        var (data, response) = try await loader(request)
+        // Some live endpoints reject byte ranges but accept ordinary GETs.
+        // The loader still caps the response, so retrying cannot read forever.
+        if (response as? HTTPURLResponse)?.statusCode == 416 {
+            try Task.checkCancellation()
+            request.setValue(nil, forHTTPHeaderField: "Range")
+            (data, response) = try await loader(request)
         }
+        guard let http = response as? HTTPURLResponse else { throw AppleIPTVError.nonHTTPResponse }
         guard http.statusCode == 200 || http.statusCode == 206 else {
-            throw AppleIPTVError.requestFailed(http.statusCode)
+            throw AppleIPTVError.streamRequestFailed(http.statusCode)
         }
         guard !data.isEmpty else { throw AppleIPTVError.streamUnavailable }
+        let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        let prefix = String(decoding: data.prefix(256), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !contentType.contains("text/html"), !prefix.hasPrefix("<!doctype html"), !prefix.hasPrefix("<html") else {
+            throw AppleIPTVError.invalidStreamResponse
+        }
         return AppleIPTVStreamProbeResult(
             statusCode: http.statusCode,
             bytesReceived: min(data.count, Self.maximumProbeBytes),

@@ -32,6 +32,48 @@ final class AppleiOSUITests: XCTestCase {
         add(shot)
     }
 
+    /// Uses an ephemeral local video through Direct URL; it adds no saved source.
+    func testChapterMarkerSkipIntroSeeksAndDisappears() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_CHAPTER_FIXTURE_URL"],
+              !fixture.isEmpty else {
+            throw XCTSkip("OPENSTREAM_CHAPTER_FIXTURE_URL not set")
+        }
+        launch(screen: "add-files")
+        let directURL = app.buttons["Direct URL"].firstMatch
+        XCTAssertTrue(directURL.waitForExistence(timeout: 30), "Direct URL row missing")
+        directURL.tap()
+        let dialog = app.alerts["Direct URL"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "Direct URL dialog missing")
+        let field = dialog.textFields.firstMatch
+        field.tap()
+        field.typeText(fixture)
+        dialog.buttons["Play"].tap()
+
+        let skip = app.buttons["player.skipIntro"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 30), "Chapter-backed Skip Intro never appeared")
+        let scrubber = app.sliders["Playback position"]
+        XCTAssertTrue(scrubber.exists, "Playback scrubber missing during intro")
+        XCTAssertLessThanOrEqual(skip.frame.maxY, scrubber.frame.minY,
+                                 "Skip Intro must sit above the playback controls: \(skip.frame), \(scrubber.frame)")
+        attach("chapter-intro-before-skip")
+        skip.tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: skip)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 10), .completed, "Skip Intro remained after skipping")
+        let position = app.sliders["Playback position"]
+        let sought = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                guard let text = position.value as? String else { return false }
+                let parts = text.split(separator: ":").compactMap { Int($0) }
+                guard parts.count == 2 else { return false }
+                let seconds = parts[0] * 60 + parts[1]
+                return seconds >= 50 && seconds < 65
+            }, object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [sought], timeout: 10), .completed,
+                       "Expected seek to the 50-second chapter boundary; position: \(String(describing: position.value))")
+        attach("chapter-intro-after-skip")
+        XCTAssertFalse(app.alerts["Playback Failed"].exists, "The chapter seek failed")
+    }
+
     /// Proves the target itself works before anything is asserted through it.
     func testAppLaunchesAndShowsTheTabBar() {
         launch()
@@ -354,25 +396,24 @@ final class AppleiOSUITests: XCTestCase {
         }
     }
 
-    /// Owner, 2026-09-17: "paste/upload text for M3U streams". Switching the
-    /// Type picker to M3U must reveal the Playlist Text editor and Choose
-    /// File; nothing is saved here.
-    func testAddLiveTVOffersPlaylistTextForM3U() {
+    /// M3U sources use a URL or a file; the deprecated text editor stays removed.
+    func testAddLiveTVUsesNativeActionsWithoutPlaylistText() {
         launch(screen: "add-live")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        // The Form picker's tappable element is its value, not its "Type" label.
         let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
-        XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
+        XCTAssertTrue(picker.waitForExistence(timeout: 20))
         picker.tap()
         let m3u = app.buttons["M3U Playlist"].firstMatch
-        XCTAssertTrue(m3u.waitForExistence(timeout: 10), "M3U Playlist option not offered")
+        XCTAssertTrue(m3u.waitForExistence(timeout: 10))
         m3u.tap()
-        let editor = app.textViews["sources.live.playlistText"].firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 10), "Playlist Text editor missing for M3U")
-        XCTAssertTrue(app.buttons["sources.live.chooseFile"].exists, "Choose File missing for M3U")
-        editor.tap()
-        editor.typeText("#EXTM3U\n#EXTINF:-1,Test\nhttps://fixture.example/a.m3u8")
-        attach("add-live-m3u-playlist-text")
+        XCTAssertTrue(app.buttons["sources.live.chooseFile"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.textViews["sources.live.playlistText"].exists)
+        XCTAssertFalse(app.staticTexts["Playlist Text"].exists)
+        XCTAssertFalse(app.buttons["sources.live.save"].isEnabled)
+        XCTAssertFalse(app.buttons["sources.live.test"].isEnabled)
+        XCTAssertGreaterThanOrEqual(app.buttons["sources.live.save"].frame.height, 44)
+        XCTAssertGreaterThanOrEqual(app.buttons["sources.live.test"].frame.height, 44)
+        attach("add-live-m3u-native-actions")
     }
 
     /// Owner, 2026-09-17: a French M3U whose HLS streams sit behind
@@ -420,7 +461,7 @@ final class AppleiOSUITests: XCTestCase {
 
     /// Add Live TV → M3U → name + URL → Save (validation + stream probe, up
     /// to ~30 s). Leaves the app on the Sources page.
-    private func addUITestPlaylist(_ playlist: String) {
+    private func addUITestPlaylist(_ playlist: String, verifyConnection: Bool = false) {
         launch(screen: "add-live")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
         let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
@@ -433,6 +474,14 @@ final class AppleiOSUITests: XCTestCase {
         let url = app.textFields["Playlist URL"].firstMatch
         XCTAssertTrue(url.waitForExistence(timeout: 10)); url.tap(); url.typeText(playlist)
         if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        if verifyConnection {
+            let test = app.buttons["sources.live.test"].firstMatch
+            XCTAssertTrue(test.waitForExistence(timeout: 10))
+            test.tap()
+            let result = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Sample stream responded")).firstMatch
+            XCTAssertTrue(result.waitForExistence(timeout: 40), "Connection did not report a responding sample stream")
+            attach("live-test-connection-result")
+        }
         var save = app.buttons["sources.live.save"].firstMatch
         if !save.waitForExistence(timeout: 5) { save = app.buttons["Save"].firstMatch }
         XCTAssertTrue(save.waitForExistence(timeout: 10), "no Save button on Add Live TV"); save.tap()
@@ -518,6 +567,133 @@ final class AppleiOSUITests: XCTestCase {
         attach("billboard-play-after-30s")
         let alert = app.alerts.firstMatch
         XCTAssertFalse(alert.exists && alert.label.contains("Playback Failed"), "playback failed: \(alert.staticTexts.allElementsBoundByIndex.map(\.label))")
+    }
+
+    func testNativeTabRootsAndSourceHealthAudit() {
+        for screen in ["discover", "library", "live", "settings", "source-detail"] {
+            app.launchArguments = []
+            launch(screen: screen)
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+            Thread.sleep(forTimeInterval: 4)
+            if screen == "live" {
+                XCTAssertTrue(app.navigationBars.staticTexts["Live"].firstMatch.exists,
+                              "Live must use a navigation title, not a toolbar button")
+            }
+            if screen == "source-detail", app.staticTexts["Connected"].firstMatch.exists {
+                XCTAssertFalse(app.staticTexts["Username and password are required."].exists,
+                               "Resolved historical login errors must not appear as a current failure")
+            }
+            attach("native-audit-" + screen)
+            app.terminate()
+        }
+    }
+
+    func testAddLiveTVActionsFitAtLargestTextSize() {
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        launch(screen: "add-live")
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 20))
+        picker.tap()
+        app.buttons["M3U Playlist"].firstMatch.tap()
+        let test = app.buttons["sources.live.test"].firstMatch
+        var swipes = 0
+        while !test.isHittable, swipes < 5 { app.swipeUp(); swipes += 1 }
+        XCTAssertTrue(test.isHittable)
+        XCTAssertGreaterThanOrEqual(test.frame.height, 44)
+        XCTAssertLessThanOrEqual(test.frame.maxX, app.frame.maxX)
+        attach("add-live-largest-text")
+    }
+
+    func testSavedLiveSourceDoesNotShowResolvedLoginFailure() {
+        launch(screen: "settings")
+        let sources = app.buttons["Sources"].firstMatch
+        XCTAssertTrue(sources.waitForExistence(timeout: 20))
+        sources.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Live TV")).firstMatch
+        var swipes = 0
+        while swipes < 5 {
+            if row.waitForExistence(timeout: 2), row.isHittable,
+               row.frame.maxY < app.tabBars.firstMatch.frame.minY { break }
+            app.swipeUp(); swipes += 1
+        }
+        XCTAssertTrue(row.exists)
+        row.tap()
+        let connected = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Connected", "Connected")).firstMatch
+        let found = connected.waitForExistence(timeout: 10)
+        attach("live-source-current-health")
+        XCTAssertTrue(found)
+        XCTAssertFalse(app.staticTexts["Username and password are required."].exists)
+    }
+
+    func testFeaturedTrailerKeepsBackAndFillsLandscape() throws {
+        launch(screen: "discover")
+        let details = app.buttons["home.featured.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 40))
+        details.tap()
+        let back = app.buttons["detail.back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 20))
+        let screen = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        let selectedIdentity = screen.identifier
+        Thread.sleep(forTimeInterval: 26)
+        XCTAssertEqual(screen.identifier, selectedIdentity, "A rotating hero replaced the title after navigation")
+        attach("trailer-portrait")
+        XCTAssertTrue(back.isHittable)
+        let mute = app.buttons["detail.trailer.mute"].firstMatch
+        let hasTrailer = mute.waitForExistence(timeout: 15)
+        if hasTrailer {
+            XCTAssertGreaterThanOrEqual(mute.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(mute.frame.height, 44)
+            XCTAssertTrue(back.isHittable, "Back disappeared while the trailer was active")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 4)
+        attach("trailer-landscape")
+        XCTAssertTrue(back.isHittable)
+        XCTAssertFalse(app.tabBars.firstMatch.exists && app.tabBars.firstMatch.isHittable)
+        XCUIDevice.shared.orientation = .portrait
+        Thread.sleep(forTimeInterval: 3)
+        attach("trailer-portrait-return")
+        back.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        if !hasTrailer { throw XCTSkip("Featured title had no playable trailer; detail framing and Back were captured") }
+    }
+
+    func testLivePlaylistShowsChannelFailureAndRecovers() throws {
+        guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_M3U not set")
+        }
+        addUITestPlaylist(playlist, verifyConnection: true)
+        defer { removeUITestPlaylistSource() }
+        app.tabBars.buttons["Live"].firstMatch.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 30))
+        search.tap()
+        search.typeText("UITest Blocked Channel")
+        let blocked = app.buttons["Play UITest Blocked Channel"].firstMatch
+        XCTAssertTrue(blocked.waitForExistence(timeout: 30))
+        blocked.tap()
+        let failure = app.alerts.matching(NSPredicate(format: "label == %@ OR label == %@", "Channel Unavailable", "Playback Failed")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 35))
+        let message = failure.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        XCTAssertTrue(message.contains("403") || message.contains("Try again or choose another channel"))
+        XCTAssertFalse(message.contains("custom source probe"))
+        XCTAssertFalse(message.contains("username"))
+        attach("live-channel-denied")
+        failure.buttons["Close"].tap()
+        search.tap()
+        let clearSearch = search.buttons.firstMatch
+        XCTAssertTrue(clearSearch.waitForExistence(timeout: 5))
+        clearSearch.tap()
+        search.typeText("UITest Working Channel")
+        let working = app.buttons["Play UITest Working Channel"].firstMatch
+        XCTAssertTrue(working.waitForExistence(timeout: 30))
+        working.tap()
+        Thread.sleep(forTimeInterval: 12)
+        XCTAssertFalse(app.alerts["Channel Unavailable"].exists)
+        XCTAssertFalse(app.alerts["Playback Failed"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Choosing a channel should dismiss the search keyboard")
+        attach("live-channel-recovered")
     }
 
     /// Owner C8: landscape. The rule is that the phone hides the tab bar in

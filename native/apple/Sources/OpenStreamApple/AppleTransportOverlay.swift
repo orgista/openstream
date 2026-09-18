@@ -37,6 +37,7 @@ struct AppleTransportOverlay: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var model: AppleTransportOverlayModel
+    @State private var bottomBarHeight: CGFloat = 0
 
     /// Task 9: on Apple TV the surface overlay keeps only the scrubber and one
     /// captions control; the remote's buttons carry everything else.
@@ -116,7 +117,7 @@ struct AppleTransportOverlay: View {
                 case .right: Task { await model.skip(by: chrome.moveSkipSeconds) }
                 case .down:
                     model.bumpActivity()
-                    tvFocus = model.isScrubbable ? .scrubber : .captions
+                    tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
                 default: model.bumpActivity()
                 }
             }
@@ -130,6 +131,9 @@ struct AppleTransportOverlay: View {
                 if chrome.showsPlayPauseGlyph { centerRow }
                 Spacer()
                 bottomBar
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        bottomBarHeight = $0
+                    }
             }
             .padding()
             .opacity(model.controlsVisible ? 1 : 0)
@@ -153,6 +157,10 @@ struct AppleTransportOverlay: View {
                 }
             }
             .padding(nextEpisodeCardInset)
+            // Reserve the real control height, including Dynamic Type, so
+            // prompts cannot cover captions or the scrubber. Keep this space
+            // when the controls fade to avoid moving the button mid-tap.
+            .padding(.bottom, bottomBarHeight + AppleDesignTokens.spacingMedium)
 
             if model.showsWaitingIndicator { waitingIndicator }
             // Cues sit against the **picture**, not the screen. On Apple TV the
@@ -196,7 +204,7 @@ struct AppleTransportOverlay: View {
         .onChange(of: model.controlsVisible) { _, visible in
             // Focus returns to the invisible surface when the controls hide,
             // so nothing is drawn as focused during playback.
-            if !visible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
+            if !visible, chrome.hidesFocusDuringPlayback, tvFocus != .skipIntro { tvFocus = .surface }
         }
         .onPlayPauseCommand { model.togglePlayPause() }
         .onExitCommand {
@@ -314,6 +322,15 @@ struct AppleTransportOverlay: View {
                 .buttonStyle(.brandSecondary)
                 #if os(tvOS)
                 .focused($tvFocus, equals: .skipIntro)
+                .onDisappear {
+                    if tvFocus == .skipIntro { tvFocus = .surface }
+                }
+                .onMoveCommand { direction in
+                    if direction == .down {
+                        model.bumpActivity()
+                        tvFocus = model.isScrubbable ? .scrubber : .captions
+                    }
+                }
                 #endif
                 .accessibilityIdentifier("player.skipIntro")
                 .transition(.opacity)
@@ -392,14 +409,9 @@ struct AppleTransportOverlay: View {
                     model: model,
                     height: chrome.scrubberHeight,
                     tvFocus: $tvFocus,
-                    // Up used to hand focus to the invisible full-screen
-                    // surface, which reads as the remote dying: nothing is
-                    // drawn as focused and nothing can be selected (owner
-                    // 2026-09-15: "when I go up to select it, it stops and I
-                    // can't select anything"). The glyph row is the only other
-                    // control here, so both directions reach it and the
-                    // surface is only a destination when there is no row.
-                    onMoveUp: { tvFocus = controls.contains(.captions) ? .captions : .surface },
+                    // Reach the chapter action above the scrubber when it is
+                    // present; otherwise keep focus on a visible control.
+                    onMoveUp: { tvFocus = model.showsSkipIntro ? .skipIntro : (controls.contains(.captions) ? .captions : .surface) },
                     onMoveDown: { tvFocus = controls.contains(.captions) ? .captions : .surface }
                 )
                 #else

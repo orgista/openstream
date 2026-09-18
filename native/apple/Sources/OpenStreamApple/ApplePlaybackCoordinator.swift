@@ -47,6 +47,21 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
 
     public var errorDescription: String? { message }
 
+    /// Channel playback failures do not invalidate a saved playlist or account.
+    var liveChannelMessage: String {
+        switch kind {
+        case .authentication:
+            let status = message.contains("403") ? " (HTTP 403)" : message.contains("401") ? " (HTTP 401)" : ""
+            return "The provider denied access to this channel\(status). Try again or choose another channel."
+        case .player:
+            return "This channel could not start playing. Try again or choose another channel."
+        case .network, .timedOut:
+            return "This channel is not responding. Check your connection, then try again or choose another channel."
+        default:
+            return message
+        }
+    }
+
     public static func classify(_ error: any Error) -> ApplePlaybackFailure {
         // A cancelled load is a channel switch, not a failure the viewer caused.
         if error is CancellationError {

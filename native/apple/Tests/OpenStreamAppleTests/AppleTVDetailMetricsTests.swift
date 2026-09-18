@@ -69,7 +69,7 @@ struct AppleTVDetailMetricsTests {
 
     @Test func tabRootsDrawNoNavigationTitleOnAppleTV() {
         #expect(AppleAlignedTabTitle.style(for: .tvOS) == .hidden)
-        #expect(AppleAlignedTabTitle.style(for: .iOS) == .leadingToolbarItem)
+        #expect(AppleAlignedTabTitle.style(for: .iOS) == .largeNavigationTitle)
         #expect(AppleAlignedTabTitle.style(for: .macOS) == .inlineLargeNavigationTitle)
         #expect(AppleAlignedTabTitle.style(for: .visionOS) == .inlineLargeNavigationTitle)
     }

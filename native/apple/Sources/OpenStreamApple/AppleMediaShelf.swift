@@ -142,7 +142,7 @@ struct AppleFeaturedHero<Actions: View>: View {
 
 }
 
-struct AppleFeaturedActions<Play: View, Detail: View>: View {
+struct AppleFeaturedActions: View {
     let viewportSize: CGSize
     /// Landscape on any device, so the phone keeps the fixed-size pills too.
     private var isLandscapeLayout: Bool {
@@ -152,12 +152,12 @@ struct AppleFeaturedActions<Play: View, Detail: View>: View {
         false
         #endif
     }
-    @ViewBuilder var playDestination: Play
-    @ViewBuilder var detailDestination: Detail
+    let onPlay: () -> Void
+    let onDetails: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         #if os(tvOS)
-        AppleTVBillboardActions { playDestination } detailDestination: { detailDestination }
+        AppleTVBillboardActions(onPlay: onPlay, onDetails: onDetails)
         #else
         legacyBody
         #endif
@@ -168,12 +168,12 @@ struct AppleFeaturedActions<Play: View, Detail: View>: View {
     private var legacyBody: some View {
         if isLandscapeLayout {
             HStack(spacing: AppleDetailMetrics.actionButtonGap) {
-                NavigationLink { playDestination } label: {
+                Button(action: onPlay) {
                     AppleDetailActionButtonLabel(title: "Play", glyph: .systemImage("play.fill"), kind: .play,
                                                 width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
                 }
                 .accessibilityIdentifier("home.featured.play")
-                NavigationLink { detailDestination } label: {
+                Button(action: onDetails) {
                     AppleDetailActionButtonLabel(title: "Details", glyph: .systemImage("info.circle"), kind: .download,
                                                 width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
                 }
@@ -189,18 +189,14 @@ struct AppleFeaturedActions<Play: View, Detail: View>: View {
         let buttonWidth = AppleDetailMetrics
             .featuredActionButtonWidth(portraitViewportWidth: viewportSize.width) ?? .infinity
         layout {
-            NavigationLink {
-                playDestination
-            } label: {
+            Button(action: onPlay) {
                 Label("Play", systemImage: "play.fill")
                     .frame(maxWidth: buttonWidth)
             }
             .buttonStyle(.brandPrimary)
             .accessibilityIdentifier("home.featured.play")
 
-            NavigationLink {
-                detailDestination
-            } label: {
+            Button(action: onDetails) {
                 Label("Details", systemImage: "info.circle")
                     .frame(maxWidth: buttonWidth)
             }

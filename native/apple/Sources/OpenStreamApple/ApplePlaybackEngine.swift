@@ -141,6 +141,9 @@ public protocol ApplePlaybackEngine: AnyObject {
     /// `.surface` routes. Empty on `.avPlayer` routes where the system player's
     /// own captions menu renders the track.
     var subtitleCues: [AppleSubtitleCue] { get }
+    /// The stream's own chapter markers (Matroska chapters, MPEG-4 chapter
+    /// tracks), for Skip Intro. Empty when the file carries none.
+    var chapters: [AppleChapter] { get }
     var failure: ApplePlaybackFailure? { get }
     /// Non-nil only on `.avPlayer` routes.
     var avPlayer: AVPlayer? { get }
@@ -218,4 +221,8 @@ public extension ApplePlaybackEngine {
             native.captionsPreference = preference
         }
     }
+}
+
+public extension ApplePlaybackEngine {
+    var chapters: [AppleChapter] { [] }
 }

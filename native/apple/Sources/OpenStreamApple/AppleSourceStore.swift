@@ -94,6 +94,13 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     public var validationSummary: String?
     public var lastValidationFailureAt: Date?
     public var validationFailureSummary: String?
+
+    /// Failure history remains available, but a later success resolves its warning.
+    public var hasCurrentValidationFailure: Bool {
+        guard let failedAt = lastValidationFailureAt else { return false }
+        return failedAt > (lastValidatedAt ?? .distantPast)
+    }
+
     public var discoveredItemCount: Int?
     public var capabilities: [String]
     /// The readable Bonjour hostname for NAS sources. `url.host` remains the

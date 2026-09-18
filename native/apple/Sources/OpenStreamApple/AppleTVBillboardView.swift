@@ -164,15 +164,15 @@ struct AppleTVHeroRotationIndicator: View {
 
 /// Play and Details as content-sized pills (FEEDBACK X3); Play is the same
 /// white pill as the title page.
-struct AppleTVBillboardActions<Play: View, Detail: View>: View {
-    @ViewBuilder var playDestination: Play
-    @ViewBuilder var detailDestination: Detail
+struct AppleTVBillboardActions: View {
+    let onPlay: () -> Void
+    let onDetails: () -> Void
 
     private typealias M = AppleTVBillboardMetrics
 
     var body: some View {
         HStack(spacing: M.pillGap) {
-            NavigationLink { playDestination } label: {
+            Button(action: onPlay) {
                 HStack(spacing: M.pillGlyphSpacing) {
                     Image(systemName: "play.fill")
                         .font(.system(size: M.pillGlyphSize, weight: .semibold))
@@ -182,7 +182,7 @@ struct AppleTVBillboardActions<Play: View, Detail: View>: View {
             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: M.pillSize, fontSize: M.pillFontSize))
             .accessibilityIdentifier("home.featured.play")
 
-            NavigationLink { detailDestination } label: {
+            Button(action: onDetails) {
                 HStack(spacing: M.pillGlyphSpacing) {
                     Image(systemName: "info.circle")
                         .font(.system(size: M.pillGlyphSize, weight: .semibold))
