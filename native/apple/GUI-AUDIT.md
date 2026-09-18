@@ -2019,7 +2019,10 @@ order; this section grows as each lands.
   account) or URL + user + password. Stock Form mirroring Add Live TV; `AppleMediaServerFormPolicy`
   tests. Committed 687a52b; gate 1064 / 115. Plex joins the picker in step 5/6. Debug route
   `-OpenStreamVisionScreen add-media-server`; iPhone UI test
-  `testAddMediaServerSignsInToEmbyAndCleansUp` (live against the Emby test server) — running.
+  `testAddMediaServerSignsInToEmbyAndCleansUp` reached "Connected to Studio (4.10.0.40)" against
+  the live Emby test server on the iOS 18.6 sim. Caught: enabled Save rendered white-on-white
+  (`.borderedProminent` under the white tint) in this form AND Add Live TV → both moved to
+  `.brandPrimary`/`.brandSecondary`; re-verification running.
 - [ ] Step 4: Discover shelves per library (Continue Watching from the server, Latest Movies, Latest
   Shows), detail page, playback through the direct-stream URL with the token header, progress sync.
 - [ ] Step 5: Plex client (plex.tv PIN, resources, sections, metadata, direct play).

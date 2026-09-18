@@ -4357,3 +4357,11 @@ Off plus one entry — the best track for the preferred language from Settings (
 subtitles before closed captions, forced/SDH last). The entry is named after the language
 ("English"), never "English 1 (eng)". When the stream lacks the chosen language: nothing but Off if
 the viewer picked the language, one track if the app only guessed it.
+
+## 2026-09-18 00:45 — Add Media Server works against a real Emby; a white-on-white Save button caught
+
+The new Sources → Add Media Server screen signed in to the Emby server on the Mac and answered
+"Connected to Studio (4.10.0.40)". The photo also showed the enabled Save button as a blank white
+pill — the same white-on-white the owner once reported on the Live tab's Open Settings button:
+both this form and Add Live TV still used the stock prominent style under the app's white tint.
+Both now use the brand primary/secondary buttons (white pill, black label; grey pill for Test).

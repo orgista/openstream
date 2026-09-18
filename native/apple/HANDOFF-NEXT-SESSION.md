@@ -292,6 +292,11 @@ Report: AGENTS.md §7 format, under 60 lines.
 foreign diff; commit ONLY your own files; never `git add -A` here; never revert what you did not
 write; if a file you need is already modified by the other agent, say so and stop.
 
+- **Never build simulator apps with `CODE_SIGNING_ALLOWED=NO`.** The unsigned app has no
+  keychain-access-groups entitlement, so every Keychain write fails with "A required entitlement
+  isn't present." — Save on Add Media Server / Xtream credentials silently break while Test
+  Connection works. Plain `xcodebuild build -destination id=<sim>` signs ad hoc with the
+  entitlements; check with `codesign -d --entitlements :- <app>`. (2026-09-18 00:50)
 - **The UI-test scheme installs ITS OWN copy of the app.** `xcodebuild test -scheme
   OpenStreamiOSUITests -derivedDataPath DerivedData-uitests` builds the runner AND installs the
   app product found in *that* DerivedData (a 22:39 build) over whatever you just installed — three

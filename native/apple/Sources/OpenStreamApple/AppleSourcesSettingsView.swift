@@ -1238,14 +1238,14 @@ private struct AppleAddLiveTVSourceView: View {
             Button { connectionAction = .save(UUID()) } label: {
                 connectionLabel(saving: true)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.brandPrimary)
             .disabled(!canSubmit || isWorking)
             .accessibilityIdentifier("sources.live.save")
 
             Button { connectionAction = .test(UUID()) } label: {
                 connectionLabel(saving: false)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.brandSecondary)
             .disabled(!canSubmit || isWorking)
             .accessibilityIdentifier("sources.live.test")
         }

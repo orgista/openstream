@@ -456,12 +456,12 @@ struct AppleAddMediaServerView: View {
     private var connectionButtons: some View {
         Group {
             Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.brandPrimary)
                 .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
                 .accessibilityIdentifier("sources.mediaServer.save")
             
             Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
-                .buttonStyle(.bordered)
+                .buttonStyle(.brandSecondary)
                 .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
                 .accessibilityIdentifier("sources.mediaServer.test")
         }
