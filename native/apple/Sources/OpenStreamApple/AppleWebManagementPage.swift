@@ -73,6 +73,7 @@ public enum AppleWebManagementPage {
         <body>
           <main>
             <header>\(brandMark)<span class="wordmark">OpenStream</span></header>
+            <h1 class="visually-hidden">OpenStream</h1>
         \(body)
           </main>
         </body>
@@ -189,36 +190,39 @@ public enum AppleWebManagementPage {
     *{box-sizing:border-box}\
     body{min-height:100vh;margin:0;padding:max(24px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));background:#000}\
     main{width:min(100%,560px);margin:0 auto}\
+    @media(min-width:1024px){main{width:min(100%,720px)}}\
     header{display:flex;align-items:center;gap:10px;margin:0 0 28px 2px}\
     .mark{display:block;color:#f5f5f7}\
     .wordmark{font-size:19px;font-weight:600;letter-spacing:-.015em;color:#f5f5f7}\
+    .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);border:0}\
     section{margin-bottom:12px;padding:22px 20px;border:1px solid #232325;border-radius:14px;background:#0c0c0d}\
-    h2{margin:0 0 16px;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98989d}\
+    h2{margin:0 0 16px;font-size:15px;font-weight:600;color:#98989d}\
     form{position:relative;display:grid;gap:8px}\
     label{font-size:13px;font-weight:500;color:#98989d}\
     input[type=text],input[type=url],input[type=password]{width:100%;min-height:46px;padding:12px 14px;border:1px solid #3a3a3c;border-radius:10px;background:#1c1c1e;color:#f5f5f7;font:inherit;outline:none}\
+    input:focus-visible,button:focus-visible{outline:2px solid #FF3366;outline-offset:2px}\
     input:focus{border-color:#f5f5f7}\
     button{min-height:46px;margin-top:6px;padding:0 18px;border:0;border-radius:10px;background:#f5f5f7;color:#000;font:inherit;font-weight:600;cursor:pointer}\
     button:active{opacity:.7}\
-    button.secondary{min-height:34px;margin:0;padding:0 8px;border:0;background:transparent;color:#98989d;font-size:13px;font-weight:500}\
-    button.secondary:hover,button.secondary:focus-visible{color:#ff453a}\
+    button.secondary{min-height:44px;margin:0;padding:0 8px;border:0;background:transparent;color:#98989d;font-size:13px;font-weight:500}\
+    button.secondary:hover,button.secondary:focus-visible{color:#FF3366}\
     .type{position:absolute;width:1px;height:1px;margin:-1px;opacity:0;pointer-events:none}\
-    .types{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;padding:4px;border:1px solid #3a3a3c;border-radius:10px}\
-    .types label{min-height:38px;display:grid;place-items:center;border-radius:7px;color:#f5f5f7;font-size:14px;font-weight:500;text-align:center;cursor:pointer}\
+    .types{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;padding:1px;border:1px solid #3a3a3c;border-radius:10px}\
+    .types label{min-height:44px;display:grid;place-items:center;border-radius:7px;color:#f5f5f7;font-size:14px;font-weight:500;text-align:center;cursor:pointer}\
     #type-addon:checked~.types label[for=type-addon],#type-m3u:checked~.types label[for=type-m3u],#type-xtream:checked~.types label[for=type-xtream]{background:#f5f5f7;color:#000}\
-    #type-addon:focus-visible~.types label[for=type-addon],#type-m3u:focus-visible~.types label[for=type-m3u],#type-xtream:focus-visible~.types label[for=type-xtream]{outline:2px solid #f5f5f7;outline-offset:1px}\
+    #type-addon:focus-visible~.types label[for=type-addon],#type-m3u:focus-visible~.types label[for=type-m3u],#type-xtream:focus-visible~.types label[for=type-xtream]{outline:2px solid #FF3366;outline-offset:2px}\
     .fields{display:none;gap:8px}\
     #type-addon:checked~.fields.addon,#type-m3u:checked~.fields.m3u,#type-xtream:checked~.fields.xtream{display:grid}\
     .address{margin:0;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;word-break:break-all}\
     .lead{margin:-18px 0 22px 2px}\
     .lead .address{font-size:13px;font-weight:400;color:#98989d}\
-    ::placeholder{color:#5a5a5e}\
+    ::placeholder{color:#9a9a9e}\
     .address+.feedback,.address+form{margin-top:14px}\
     .feedback{margin:0;font-size:14px;line-height:1.4}\
-    .feedback.error{color:#ff9a9f}\
+    .feedback.error{color:#FF3366}\
     .feedback+form{margin-top:14px}\
     .sources{display:grid;gap:14px;margin:0;padding:0;list-style:none}\
-    .sources li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid #2c2c2e}\
+    .sources li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:7px;border-bottom:1px solid #2c2c2e}\
     .sources li:last-child{border-bottom:0;padding-bottom:0}\
     .detail{display:grid;gap:3px;min-width:0}\
     .detail span,.empty{color:#98989d;font-size:13px}\
