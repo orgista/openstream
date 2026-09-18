@@ -31,6 +31,7 @@ struct AppleTransportOverlay: View {
     let coordinator: ApplePlaybackCoordinator
     let request: ApplePlaybackRequest
     let otherSources: (() -> Void)?
+    let onShowChannels: (() -> Void)?
     let onRequestFullScreen: (() -> Void)?
     let onClose: (() -> Void)?
     let sharePlayMenu: SharePlayMenu?
@@ -59,10 +60,11 @@ struct AppleTransportOverlay: View {
     @FocusState private var tvFocus: TVFocus?
     #endif
 
-    init(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, otherSources: (() -> Void)? = nil, onRequestFullScreen: (() -> Void)? = nil, onClose: (() -> Void)? = nil, sharePlayMenu: SharePlayMenu? = nil, nextEpisode: AppleNextEpisodeContext? = nil) {
+    init(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, otherSources: (() -> Void)? = nil, onShowChannels: (() -> Void)? = nil, onRequestFullScreen: (() -> Void)? = nil, onClose: (() -> Void)? = nil, sharePlayMenu: SharePlayMenu? = nil, nextEpisode: AppleNextEpisodeContext? = nil) {
         self.coordinator = coordinator
         self.request = request
         self.otherSources = otherSources
+        self.onShowChannels = onShowChannels
         self.onRequestFullScreen = onRequestFullScreen
         self.onClose = onClose
         self.sharePlayMenu = sharePlayMenu
@@ -249,6 +251,13 @@ struct AppleTransportOverlay: View {
 
             Spacer()
 
+            if let onShowChannels {
+                Button(action: onShowChannels) {
+                    Image(systemName: "list.bullet")
+                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                }
+                .accessibilityLabel("Channels")
+            }
             if let otherSources, controls.contains(.otherSourcesMenu) {
                 Menu {
                     Button("Other sources", systemImage: "list.bullet", action: otherSources)

@@ -40,6 +40,7 @@ struct AppleLiveTVView: View {
     @State private var sharePlay = AppleSharePlaySessionStore.shared
     @State private var sharedChannelChoices: [AppleIPTVChannel] = []
     @State private var showsSharedChannelChoices = false
+    @State private var showsSearch = false
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewportSize: CGSize = .zero
@@ -104,17 +105,39 @@ struct AppleLiveTVView: View {
                         .accessibilityIdentifier("live.connecting")
                     }
                     if let selectedChannel {
-                        AppleLiveInlinePlayer(
-                            request: selectedChannel.playbackRequest(),
-                            coordinator: playbackCoordinator,
-                            playbackRevision: playbackRevision,
-                            logoURL: selectedChannel.logoURL,
-                            sharedChannel: try? AppleSharePlayChannel(channel: selectedChannel),
-                            sharePlay: sharePlay,
-                            liveChannel: selectedChannel
-                        )
-                        .id(ObjectIdentifier(playbackCoordinator))
+                        ZStack(alignment: .topTrailing) {
+                            AppleLiveInlinePlayer(
+                                request: selectedChannel.playbackRequest(),
+                                coordinator: playbackCoordinator,
+                                playbackRevision: playbackRevision,
+                                logoURL: selectedChannel.logoURL,
+                                sharedChannel: try? AppleSharePlayChannel(channel: selectedChannel),
+                                sharePlay: sharePlay,
+                                liveChannel: selectedChannel,
+                                channels: channelSnapshot.channels,
+                                onSwitchChannel: { startChannel($0, shareSelection: true) }
+                            )
+                            .id(ObjectIdentifier(playbackCoordinator))
+                            
+                            #if os(iOS)
+                            if verticalSizeClass == .compact {
+                                Button {
+                                    showsSearch = true
+                                } label: {
+                                    Image(systemName: "magnifyingglass")
+                                        .frame(width: 44, height: 44)
+                                        .foregroundStyle(.white)
+                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                                }
+                                .padding()
+                            }
+                            #endif
+                        }
+                        #if os(iOS)
+                        .livePinnedPlayerLayout(viewportSize: viewportSize, verticalSizeClass: verticalSizeClass)
+                        #else
                         .livePinnedPlayerLayout()
+                        #endif
                         .accessibilityLabel("Live player for \(selectedChannel.name)")
                     } else {
                         lastWatchedCard
@@ -192,7 +215,7 @@ struct AppleLiveTVView: View {
                 #endif
             }
         }
-        .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision) {
+.modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision, showsSearch: $showsSearch) {
             AppleIPTVGuideGridView(
                 channels: channelSnapshot.channels,
                 guide: guideStore.guide(for: channelSnapshot.channelIDs),
@@ -203,6 +226,9 @@ struct AppleLiveTVView: View {
                 onVisibleChannels: refreshGuide
             )
         })
+        #if os(iOS)
+        .toolbar(verticalSizeClass == .compact ? .hidden : .visible, for: .navigationBar)
+        #endif
         .task(id: settings.playbackEngine) {
             guard configuredEngine != settings.playbackEngine else { return }
             configuredEngine = settings.playbackEngine
@@ -678,9 +704,15 @@ struct AppleLiveTVView: View {
         }
     }
 
+    @ViewBuilder
     private var lastWatchedCard: some View {
+        #if os(iOS)
+        AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL)
+            .livePinnedPlayerLayout(isPlaceholder: true, viewportSize: viewportSize, verticalSizeClass: verticalSizeClass)
+        #else
         AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL)
             .livePinnedPlayerLayout(isPlaceholder: true)
+        #endif
     }
 
     private var lastWatchedChannel: AppleIPTVChannel? {
@@ -710,19 +742,32 @@ private struct AppleLiveConnectingArtwork: View {
 
 private struct LivePinnedPlayerLayout: ViewModifier {
     let isPlaceholder: Bool
+    #if os(iOS)
+    let viewportSize: CGSize?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    #endif
 
     func body(content: Content) -> some View {
         #if os(iOS)
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
-        let base = content
-            .aspectRatio(16 / 9, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .ignoresSafeArea(.container, edges: .horizontal)
-            
-        if isPlaceholder && isPad {
-            base.containerRelativeFrame(.vertical, count: 100, span: 40, spacing: 0, alignment: .center)
+        if verticalSizeClass == .compact, let viewportSize = viewportSize {
+            content
+                .aspectRatio(16 / 9, contentMode: .fit)
+                
+                .frame(width: viewportSize.width, height: viewportSize.height)
+                .background(Color.black)
+                .ignoresSafeArea(.container, edges: .all)
         } else {
-            base
+            let base = content
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .ignoresSafeArea(.container, edges: .horizontal)
+                
+            if isPlaceholder && isPad {
+                base.containerRelativeFrame(.vertical, count: 100, span: 40, spacing: 0, alignment: .center)
+            } else {
+                base
+            }
         }
         #else
         content
@@ -733,7 +778,13 @@ private struct LivePinnedPlayerLayout: ViewModifier {
 }
 
 private extension View {
+    #if os(iOS)
+    func livePinnedPlayerLayout(isPlaceholder: Bool = false, viewportSize: CGSize? = nil, verticalSizeClass: UserInterfaceSizeClass? = nil) -> some View { 
+        modifier(LivePinnedPlayerLayout(isPlaceholder: isPlaceholder, viewportSize: viewportSize, verticalSizeClass: verticalSizeClass)) 
+    }
+    #else
     func livePinnedPlayerLayout(isPlaceholder: Bool = false) -> some View { modifier(LivePinnedPlayerLayout(isPlaceholder: isPlaceholder)) }
+    #endif
 }
 
 /// Inline Live-tab playback surface. The coordinator and AVKit host stay owned
@@ -757,8 +808,10 @@ struct AppleLiveInlinePlayer: View {
     let sharedChannel: AppleSharePlayChannel?
     let sharePlay: AppleSharePlaySessionStore
     let liveChannel: AppleIPTVChannel?
+    let channels: [AppleIPTVChannel]
+    let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil) {
         self.request = request
         self.coordinator = coordinator
         self.playbackRevision = playbackRevision
@@ -766,6 +819,8 @@ struct AppleLiveInlinePlayer: View {
         self.sharedChannel = sharedChannel
         self.sharePlay = sharePlay
         self.liveChannel = liveChannel
+        self.channels = channels
+        self.onSwitchChannel = onSwitchChannel
         let audioSession = AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
         _host = State(initialValue: ApplePlayerHost(
@@ -797,6 +852,8 @@ struct AppleLiveInlinePlayer: View {
                     viewController: host.viewController,
                     captionsMenu: captionsMenu,
                     liveMenu: sharePlayMenu,
+                    channels: channels,
+                    onSwitchChannel: onSwitchChannel,
                     onFullScreenChanged: { lifetime.isFullScreen = $0 }
                 )
                 #endif
@@ -815,7 +872,7 @@ struct AppleLiveInlinePlayer: View {
         }
         #if !os(macOS)
         .fullScreenCover(isPresented: $showsSurfaceFullScreen, onDismiss: { lifetime.isFullScreen = false }) {
-            AppleLiveSurfaceFullScreenPlayer(coordinator: coordinator, request: request, sharePlayMenu: sharePlayMenu)
+            AppleLiveSurfaceFullScreenPlayer(coordinator: coordinator, request: request, sharePlayMenu: sharePlayMenu, channels: channels, onSwitchChannel: onSwitchChannel)
         }
         #endif
         .task(id: "\(requestIdentity):\(playbackRevision):\(scenePhase == .background)") {
@@ -886,16 +943,17 @@ struct AppleLiveInlinePlayer: View {
     private var sharePlayMenu: AppleTransportOverlay.SharePlayMenu? { nil }
     #else
     private var captionsMenu: UIMenu {
-        let tracks = coordinator.engine.subtitleTracks
-        let children: [UIMenuElement]
-        if tracks.isEmpty {
-            children = [UIAction(title: "This stream has no captions.", attributes: .disabled) { _ in }]
-        } else {
-            children = [UIAction(title: "Off") { _ in coordinator.engine.selectSubtitleTrack(id: nil) }] + tracks.map { track in
-                UIAction(title: track.title) { _ in coordinator.engine.selectSubtitleTrack(id: track.id) }
+        var children: [UIMenuElement] = [
+            UIAction(title: "Off", state: .off) { _ in
+                coordinator.engine.selectSubtitleTrack(id: nil)
             }
-        }
-        return UIMenu(title: "Captions", image: UIImage(systemName: "captions.bubble"), children: children)
+        ]
+        children.append(contentsOf: coordinator.engine.subtitleTracks.map { track in
+            UIAction(title: track.title, state: .off) { _ in
+                coordinator.engine.selectSubtitleTrack(id: track.id)
+            }
+        })
+        return UIMenu(title: "Audio & Subtitles", image: UIImage(systemName: "captions.bubble"), children: children)
     }
 
     private var sharePlayMenu: AppleTransportOverlay.SharePlayMenu? {
@@ -925,10 +983,12 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
     let viewController: AVPlayerViewController
     let captionsMenu: UIMenu
     let liveMenu: AppleTransportOverlay.SharePlayMenu?
+    let channels: [AppleIPTVChannel]
+    let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onFullScreenChanged: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> AppleLivePlayerContainerViewController {
-        AppleLivePlayerContainerViewController(playerViewController: viewController, captionsMenu: captionsMenu, liveMenu: liveMenu, onFullScreenChanged: onFullScreenChanged)
+        AppleLivePlayerContainerViewController(playerViewController: viewController, captionsMenu: captionsMenu, liveMenu: liveMenu, channels: channels, onSwitchChannel: onSwitchChannel, onFullScreenChanged: onFullScreenChanged)
     }
 
     func updateUIViewController(_ vc: AppleLivePlayerContainerViewController, context: Context) {
@@ -944,6 +1004,9 @@ private struct AppleLiveSurfaceFullScreenPlayer: View {
     let coordinator: ApplePlaybackCoordinator
     let request: ApplePlaybackRequest
     let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
+    let channels: [AppleIPTVChannel]
+    let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
+    @State private var showsChannelPicker = false
 
     var body: some View {
         ApplePlaybackSurfaceView(engine: coordinator.engine)
@@ -952,9 +1015,21 @@ private struct AppleLiveSurfaceFullScreenPlayer: View {
                 AppleTransportOverlay(
                     coordinator: coordinator,
                     request: request,
+                    onShowChannels: channels.isEmpty ? nil : { showsChannelPicker = true },
                     onClose: { dismiss() },
                     sharePlayMenu: sharePlayMenu
                 )
+            }
+            .overlay {
+                if showsChannelPicker {
+                    AppleLiveChannelPickerOverlay(channels: channels, onSelect: { channel in
+                        showsChannelPicker = false
+                        dismiss()
+                        onSwitchChannel?(channel)
+                    }, onDismiss: {
+                        showsChannelPicker = false
+                    })
+                }
             }
             .background(.black)
     }
@@ -968,16 +1043,25 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private let playerViewController: AVPlayerViewController
     private var captionsMenu: UIMenu
     private var liveMenu: AppleTransportOverlay.SharePlayMenu?
-    private var captionsButton: UIButton!
+    private var playPauseButton: UIButton!
+    private var muteButton: UIButton!
     private var fullscreenButton: UIButton!
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
+    private let channels: [AppleIPTVChannel]
+    private let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     private let onFullScreenChanged: (Bool) -> Void
 
-    init(playerViewController: AVPlayerViewController, captionsMenu: UIMenu, liveMenu: AppleTransportOverlay.SharePlayMenu?, onFullScreenChanged: @escaping (Bool) -> Void) {
+    private var playerObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
+    private var muteObservation: NSKeyValueObservation?
+
+    init(playerViewController: AVPlayerViewController, captionsMenu: UIMenu, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onFullScreenChanged: @escaping (Bool) -> Void) {
         self.playerViewController = playerViewController
         self.onFullScreenChanged = onFullScreenChanged
         self.captionsMenu = captionsMenu
         self.liveMenu = liveMenu
+        self.channels = channels
+        self.onSwitchChannel = onSwitchChannel
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -987,19 +1071,72 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        captionsButton = menuButton(imageName: "captions.bubble", accessibilityLabel: "Captions", menu: captionsMenu)
+        
+        playPauseButton = UIButton(type: .system)
+        playPauseButton.translatesAutoresizingMaskIntoConstraints = false
+        playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 34)), for: .normal)
+        playPauseButton.tintColor = .white
+        playPauseButton.accessibilityLabel = "Play"
+        playPauseButton.accessibilityIdentifier = "player.play-pause"
+        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .primaryActionTriggered)
+        
+        muteButton = menuButton(imageName: "speaker.wave.3.fill", accessibilityLabel: "Mute", menu: nil)
+        muteButton.accessibilityIdentifier = "player.mute"
+        muteButton.addTarget(self, action: #selector(toggleMute), for: .primaryActionTriggered)
+        
         fullscreenButton = menuButton(imageName: "arrow.up.left.and.arrow.down.right", accessibilityLabel: "Full Screen", menu: nil)
+        fullscreenButton.accessibilityIdentifier = "player.fullscreen"
         fullscreenButton.addTarget(self, action: #selector(requestFullScreen), for: .primaryActionTriggered)
-        view.addSubview(captionsButton)
+        
+        view.addSubview(playPauseButton)
+        view.addSubview(muteButton)
         view.addSubview(fullscreenButton)
+        
         NSLayoutConstraint.activate([
-            captionsButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            captionsButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            fullscreenButton.topAnchor.constraint(equalTo: captionsButton.topAnchor),
-            fullscreenButton.trailingAnchor.constraint(equalTo: captionsButton.leadingAnchor, constant: -8),
+            playPauseButton.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            playPauseButton.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            
+            muteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            muteButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            
+            fullscreenButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            fullscreenButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
         ])
-        chromeButtons = [captionsButton, fullscreenButton]
+        
+        chromeButtons = [playPauseButton, muteButton, fullscreenButton]
         attachPlayerIfNeeded()
+        
+        playerObservation = playerViewController.observe(\.player, options: [.initial, .new]) { [weak self] vc, _ in
+            self?.observePlayer(vc.player)
+        }
+    }
+    
+    private func observePlayer(_ player: AVPlayer?) {
+        timeControlObservation = player?.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+            let isPlaying = player.timeControlStatus == .playing
+            let config = UIImage.SymbolConfiguration(pointSize: 34)
+            self?.playPauseButton.setImage(UIImage(systemName: isPlaying ? "pause.fill" : "play.fill", withConfiguration: config), for: .normal)
+            self?.playPauseButton.accessibilityLabel = isPlaying ? "Pause" : "Play"
+        }
+        muteObservation = player?.observe(\.isMuted, options: [.initial, .new]) { [weak self] player, _ in
+            let isMuted = player.isMuted
+            self?.muteButton.setImage(UIImage(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill"), for: .normal)
+            self?.muteButton.accessibilityLabel = isMuted ? "Unmute" : "Mute"
+        }
+    }
+    
+    @objc private func togglePlayPause() {
+        guard let player = playerViewController.player else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
+        } else {
+            player.play()
+        }
+    }
+    
+    @objc private func toggleMute() {
+        guard let player = playerViewController.player else { return }
+        player.isMuted.toggle()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -1009,7 +1146,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
 
     func attachPlayerIfNeeded() {
         guard playerViewController.parent == nil, presentedFullscreen == nil else { return }
-        playerViewController.showsPlaybackControls = true
+        playerViewController.showsPlaybackControls = false
         playerViewController.videoGravity = .resizeAspect
         addChild(playerViewController)
         playerViewController.view.translatesAutoresizingMaskIntoConstraints = false
@@ -1026,7 +1163,6 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     func updateMenus(captionsMenu: UIMenu, liveMenu: AppleTransportOverlay.SharePlayMenu?) {
         self.captionsMenu = captionsMenu
         self.liveMenu = liveMenu
-        captionsButton?.menu = captionsMenu
     }
 
     func restorePlayer() {
@@ -1046,7 +1182,9 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             playerViewController: playerViewController,
             inlineContainer: self,
             captionsMenu: captionsMenu,
-            liveMenu: liveMenu
+            liveMenu: liveMenu,
+            channels: channels,
+            onSwitchChannel: onSwitchChannel
         )
         presentedFullscreen = fullscreen
         // Retain the guide's view hierarchy and its loading task while AVKit
@@ -1061,12 +1199,17 @@ private final class AppleLiveFullscreenPlayerViewController: AppleLiveChromeView
     private let captionsMenu: UIMenu
     private let liveMenu: AppleTransportOverlay.SharePlayMenu?
     private weak var inlineContainer: AppleLivePlayerContainerViewController?
+    private let channels: [AppleIPTVChannel]
+    private let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
+    private var channelPickerHostingController: UIHostingController<AppleLiveChannelPickerOverlay>?
 
-    init(playerViewController: AVPlayerViewController, inlineContainer: AppleLivePlayerContainerViewController, captionsMenu: UIMenu, liveMenu: AppleTransportOverlay.SharePlayMenu?) {
+    init(playerViewController: AVPlayerViewController, inlineContainer: AppleLivePlayerContainerViewController, captionsMenu: UIMenu, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil) {
         self.playerViewController = playerViewController
         self.inlineContainer = inlineContainer
         self.captionsMenu = captionsMenu
         self.liveMenu = liveMenu
+        self.channels = channels
+        self.onSwitchChannel = onSwitchChannel
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1078,13 +1221,9 @@ private final class AppleLiveFullscreenPlayerViewController: AppleLiveChromeView
         view.backgroundColor = .black
         let captions = menuButton(imageName: "captions.bubble", accessibilityLabel: "Captions", menu: captionsMenu)
         view.addSubview(captions)
-        let close = menuButton(imageName: "xmark", accessibilityLabel: "Close player", menu: nil)
-        close.addTarget(self, action: #selector(closePlayer), for: .primaryActionTriggered)
-        view.addSubview(close)
-        chromeButtons = [captions, close]
+        // Removed custom close button to prevent duplication with AVKit's native close button.
+        chromeButtons = [captions]
         NSLayoutConstraint.activate([
-            close.topAnchor.constraint(equalTo: captions.topAnchor),
-            close.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             captions.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             captions.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
@@ -1093,7 +1232,7 @@ private final class AppleLiveFullscreenPlayerViewController: AppleLiveChromeView
             view.addSubview(more)
             chromeButtons.append(more)
             NSLayoutConstraint.activate([
-                more.topAnchor.constraint(equalTo: captions.topAnchor),
+                more.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
                 more.trailingAnchor.constraint(equalTo: captions.leadingAnchor, constant: -8),
             ])
         }
@@ -1118,6 +1257,37 @@ private final class AppleLiveFullscreenPlayerViewController: AppleLiveChromeView
         playerViewController.view.removeFromSuperview()
         playerViewController.removeFromParent()
         inlineContainer?.restorePlayer()
+    }
+
+    @objc private func showChannelPicker() {
+        guard channelPickerHostingController == nil else { return }
+        let picker = AppleLiveChannelPickerOverlay(channels: channels, onSelect: { [weak self] channel in
+            self?.hideChannelPicker()
+            self?.closePlayer()
+            self?.onSwitchChannel?(channel)
+        }, onDismiss: { [weak self] in
+            self?.hideChannelPicker()
+        })
+        let hosting = UIHostingController(rootView: picker)
+        hosting.view.backgroundColor = .clear
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(hosting)
+        view.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hosting.view.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.5)
+        ])
+        hosting.didMove(toParent: self)
+        channelPickerHostingController = hosting
+    }
+
+    private func hideChannelPicker() {
+        channelPickerHostingController?.willMove(toParent: nil)
+        channelPickerHostingController?.view.removeFromSuperview()
+        channelPickerHostingController?.removeFromParent()
+        channelPickerHostingController = nil
     }
 
     @objc private func closePlayer() { dismiss(animated: true) }
@@ -1188,16 +1358,81 @@ private class AppleLiveChromeViewController: UIViewController, UIGestureRecogniz
 
 }
 
+struct AppleLiveChannelPickerOverlay: View {
+    let channels: [AppleIPTVChannel]
+    let onSelect: (AppleIPTVChannel) -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Channels")
+                    .font(.headline)
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                #if os(tvOS)
+                .buttonStyle(.plain)
+                #endif
+            }
+            .padding()
+            #if os(iOS)
+            .background(.regularMaterial)
+            #else
+            .background(Color.black.opacity(0.8))
+            #endif
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(channels) { channel in
+                        Button {
+                            onSelect(channel)
+                        } label: {
+                            HStack {
+                                if let url = channel.logoURL {
+                                    AsyncImage(url: url) { image in
+                                        image.resizable().scaledToFit()
+                                    } placeholder: { Color.clear }
+                                    .frame(width: 44, height: 44)
+                                } else {
+                                    Color.clear.frame(width: 44, height: 44)
+                                }
+                                Text(channel.name)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                        }
+                        #if os(tvOS)
+                        .buttonStyle(.card)
+                        #endif
+                        Divider()
+                    }
+                }
+            }
+            #if os(iOS)
+            .background(.regularMaterial)
+            #else
+            .background(Color.black.opacity(0.8))
+            #endif
+        }
+    }
+}
+
 #endif
 
 private struct AppleLiveSearchModifier<Results: View>: ViewModifier {
     let isEnabled: Bool
     @Binding var query: String
     let selectionRevision: Int
+    @Binding var showsSearch: Bool
     @ViewBuilder let results: () -> Results
     #if !os(tvOS)
     @FocusState private var searchFocused: Bool
-    @State private var showsSearch = false
     #endif
 
     @ViewBuilder

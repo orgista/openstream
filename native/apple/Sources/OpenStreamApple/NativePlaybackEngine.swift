@@ -95,6 +95,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// An explicit choice (including "Off") stops the auto-select from
     /// overriding it on the next track load.
     @ObservationIgnored private var subtitleSelectionOverridden = false
+    @ObservationIgnored private var readyToPlayTracksLoaded = false
     public private(set) var failure: ApplePlaybackFailure? = nil {
         didSet {
             guard failure != oldValue else { return }
@@ -226,6 +227,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         chapters = []
         videoSize = nil
         subtitleSelectionOverridden = false
+        readyToPlayTracksLoaded = false
         teardown()
         isSeeking = false
         position = 0
@@ -369,6 +371,15 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         case .unknown:
             phase = .loading
         case .readyToPlay:
+            if !readyToPlayTracksLoaded {
+                readyToPlayTracksLoaded = true
+                if let asset = item.asset as? AVURLAsset {
+                    Task { @MainActor [weak self, item] in
+                        guard let self else { return }
+                        await self.loadEmbeddedSubtitleTracks(of: asset, item: item)
+                    }
+                }
+            }
             guard let player else { return }
             if isSeeking {
                 phase = .seeking

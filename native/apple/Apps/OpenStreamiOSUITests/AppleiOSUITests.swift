@@ -1061,4 +1061,34 @@ final class AppleiOSUITests: XCTestCase {
         }
         XCTAssertTrue(row.exists, "TF1 row disappeared")
     }
+
+    /// Live tab, tapped states: inline controls shown, then full screen with its
+    /// chrome. Photographs only; the driver looks. Runs on a sim with a live source.
+    func testLiveTappedStatesArePhotographed() {
+        launch(screen: "live")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let any = app.descendants(matching: .any)
+        let firstChannel = any.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live.channel.")).firstMatch
+        if firstChannel.waitForExistence(timeout: 20) { firstChannel.tap() } else { app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "CBS")).firstMatch.tap() }
+        Thread.sleep(forTimeInterval: 12)
+        attach("live-inline-idle")
+        // Tap the video to show the inline controls.
+        let video = any.matching(identifier: "live.inline.player").firstMatch
+        if video.exists { video.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap() }
+        Thread.sleep(forTimeInterval: 1)
+        attach("live-inline-tapped")
+        let expand = any.matching(identifier: "player.fullscreen").firstMatch
+        if expand.waitForExistence(timeout: 5) {
+            expand.tap()
+            Thread.sleep(forTimeInterval: 4)
+            attach("live-fullscreen-idle")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            Thread.sleep(forTimeInterval: 1)
+            attach("live-fullscreen-tapped")
+            let captions = any.matching(NSPredicate(format: "label == %@", "Audio & Subtitles")).firstMatch
+            if captions.exists { captions.tap(); Thread.sleep(forTimeInterval: 1); attach("live-fullscreen-captions") }
+        } else {
+            attach("live-no-fullscreen-button")
+        }
+    }
 }
