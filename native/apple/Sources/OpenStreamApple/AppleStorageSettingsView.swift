@@ -174,6 +174,7 @@ struct AppleStorageSettingsView: View {
         } label: {
             if workingAction == action {
                 ProgressView()
+                    .accessibilityLabel(action.inProgressLabel)
             } else {
                 Text(title)
             }
@@ -227,6 +228,14 @@ private enum AppleStorageAction: String, Identifiable {
         switch self {
         case .cache, .metadata: "Clear"
         case .downloads: "Delete"
+        }
+    }
+
+    var inProgressLabel: String {
+        switch self {
+        case .cache: "Clearing cache"
+        case .metadata: "Clearing metadata"
+        case .downloads: "Deleting downloads"
         }
     }
 }
