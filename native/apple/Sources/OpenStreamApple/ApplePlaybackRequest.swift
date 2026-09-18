@@ -7,6 +7,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         case liveTV
         case files
         case networkShare
+        case mediaServer
     }
 
     public struct Hints: Equatable, Sendable {

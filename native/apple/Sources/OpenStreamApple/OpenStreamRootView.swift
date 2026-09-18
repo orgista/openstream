@@ -318,6 +318,7 @@ public struct OpenStreamRootView: View {
                     switch screen {
                     case "add-files": path.append(AppleSourceRoute.addFiles)
                     case "add-live": path.append(AppleSourceRoute.addLiveTV)
+                    case "add-media-server": path.append(AppleSourceRoute.addMediaServer)
                     case "add-catalog": path.append(AppleSourceRoute.addManifest)
                     case "network-share": path.append(AppleSourceRoute.addNetworkShare)
                     case "web-management": path.append(AppleSourceRoute.webManagement)
