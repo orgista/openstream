@@ -159,7 +159,7 @@ public struct AppleMediaServerClient: Sendable {
         self.appVersion = appVersion
     }
 
-    private func normalizedURL(base: URL, path: String, queryItems: [URLQueryItem]? = nil) throws -> URL {
+    func normalizedURL(base: URL, path: String, queryItems: [URLQueryItem]? = nil) throws -> URL {
         var baseStr = base.absoluteString
         if !baseStr.hasSuffix("/") {
             baseStr += "/"
@@ -177,7 +177,7 @@ public struct AppleMediaServerClient: Sendable {
         return finalURL
     }
 
-    private func request(url: URL, method: String = "GET", token: String? = nil) -> URLRequest {
+    func request(url: URL, method: String = "GET", token: String? = nil) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
         let auth = authorizationHeaderValue(token: token)
@@ -189,7 +189,7 @@ public struct AppleMediaServerClient: Sendable {
         return req
     }
 
-    private func perform(_ request: URLRequest) async throws -> Data {
+    func perform(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
