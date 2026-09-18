@@ -227,6 +227,18 @@ public struct AppleMediaServerItem: Codable, Equatable, Sendable {
     }
 }
 
+extension AppleMediaServerItem {
+    /// The same item with new viewer state (position, played, favourite, play count).
+    public func withUserData(_ userData: UserData?) -> AppleMediaServerItem {
+        AppleMediaServerItem(
+            id: id, name: name, type: type, year: year, overview: overview, runtimeSeconds: runtimeSeconds,
+            seriesID: seriesID, seriesName: seriesName, seasonID: seasonID, indexNumber: indexNumber,
+            parentIndexNumber: parentIndexNumber, primaryImageTag: primaryImageTag, logoImageTag: logoImageTag,
+            backdropImageTags: backdropImageTags, providerIDs: providerIDs, communityRating: communityRating,
+            genres: genres, userData: userData)
+    }
+}
+
 public struct AppleMediaServerItemPage: Codable, Equatable, Sendable {
     public let items: [AppleMediaServerItem]
     public let totalRecordCount: Int

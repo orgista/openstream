@@ -22,6 +22,7 @@ public struct AppleMediaServerSession: Codable, Equatable, Sendable {
     public let serverID: String?
     public let serverName: String?
     public let userName: String?
+    public var accountToken: String?
 
     public init(
         kind: AppleMediaServerKind,
@@ -30,7 +31,8 @@ public struct AppleMediaServerSession: Codable, Equatable, Sendable {
         userID: String,
         serverID: String? = nil,
         serverName: String? = nil,
-        userName: String? = nil
+        userName: String? = nil,
+        accountToken: String? = nil
     ) {
         self.kind = kind
         self.baseURL = baseURL
@@ -39,6 +41,7 @@ public struct AppleMediaServerSession: Codable, Equatable, Sendable {
         self.serverID = serverID
         self.serverName = serverName
         self.userName = userName
+        self.accountToken = accountToken
     }
 }
 

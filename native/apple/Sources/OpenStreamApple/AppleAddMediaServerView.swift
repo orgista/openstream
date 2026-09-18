@@ -84,6 +84,13 @@ struct AppleAddMediaServerView: View {
     @Environment(\.dismiss) private var dismiss
     let sourceStore: AppleSourceStore
     
+    @State private var plexModel: PlexSignInModel
+    
+    init(sourceStore: AppleSourceStore) {
+        self.sourceStore = sourceStore
+        self._plexModel = State(wrappedValue: PlexSignInModel(sourceStore: sourceStore))
+    }
+    
     @State private var kind: AppleMediaServerKind = .jellyfin
     @State private var embyMode: EmbyMode = .connect
     
@@ -194,6 +201,8 @@ struct AppleAddMediaServerView: View {
                                 .accessibilityIdentifier("sources.mediaServer.kind.jellyfin")
                             AppleTVChoicePill(title: AppleMediaServerKind.emby.title, isSelected: kind == .emby) { kind = .emby }
                                 .accessibilityIdentifier("sources.mediaServer.kind.emby")
+                            AppleTVChoicePill(title: AppleMediaServerKind.plex.title, isSelected: kind == .plex) { kind = .plex }
+                                .accessibilityIdentifier("sources.mediaServer.kind.plex")
                         }
                     }
                     
@@ -322,8 +331,67 @@ struct AppleAddMediaServerView: View {
                     .focusSection()
                 }
 
-                if let message {
-                    AppleTVFormMessage(text: message, isError: isError)
+                if kind == .plex {
+                    if let pin = plexModel.pin {
+                        AppleTVFormGroup("Sign In") {
+                            AppleTVFormField("Code") {
+                                Text(pin.code)
+                                    .font(.system(.title2, design: .monospaced))
+                                    .accessibilityIdentifier("sources.mediaServer.plex.code")
+                            }
+                            AppleTVFormField("Enter it at") {
+                                Text("plex.tv/link")
+                                    .accessibilityIdentifier("sources.mediaServer.plex.link")
+                            }
+                            HStack(spacing: metrics.pillSpacing) {
+                                Button("Cancel") { plexModel.reset() }
+                                    .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                            }
+                        }
+                        .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                        .focusSection()
+                    } else if !plexModel.servers.isEmpty {
+                        VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                            AppleTVFormField("Server") {
+                                HStack(spacing: metrics.iconSpacing) {
+                                    ForEach(plexModel.servers, id: \.clientIdentifier) { server in
+                                        AppleTVChoicePill(title: server.name, isSelected: plexModel.selectedServerID == server.clientIdentifier) { plexModel.selectedServerID = server.clientIdentifier }
+                                            .accessibilityIdentifier("sources.mediaServer.plex.server.\(server.clientIdentifier)")
+                                    }
+                                }
+                            }
+                            HStack(spacing: metrics.pillSpacing) {
+                                Button {
+                                    Task { await plexModel.saveSelectedServer() }
+                                } label: { connectionLabel(saving: true, text: "Save") }
+                                    .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                                    .disabled(plexModel.isWorking)
+                                    .accessibilityIdentifier("sources.mediaServer.plex.save")
+                            }
+                            .focusSection()
+                        }
+                        .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                        .focusSection()
+                    } else {
+                        HStack(spacing: metrics.pillSpacing) {
+                            Button {
+                                Task { await plexModel.signIn() }
+                            } label: { 
+                                HStack(spacing: 8) {
+                                    if plexModel.isWorking { ProgressView().accessibilityHidden(true) }
+                                    Text("Sign in with Plex")
+                                }
+                            }
+                            .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
+                            .disabled(plexModel.isWorking)
+                            .accessibilityIdentifier("sources.mediaServer.plexSignIn")
+                        }
+                        .focusSection()
+                    }
+                }
+
+                if let displayMessage = message ?? plexModel.message {
+                    AppleTVFormMessage(text: displayMessage, isError: isError || plexModel.isError)
                         .accessibilityIdentifier("sources.mediaServer.status")
                 }
             }
@@ -337,9 +405,18 @@ struct AppleAddMediaServerView: View {
             guard let connectionAction else { return }
             await perform(connectionAction)
         }
-        .onChange(of: kind) { _, _ in resetState() }
+        .onChange(of: kind) { _, _ in 
+            resetState()
+            plexModel.reset()
+        }
         .onChange(of: embyMode) { _, _ in resetState() }
-        .onDisappear { cancelQuickConnect() }
+        .onChange(of: plexModel.isDone) { _, done in
+            if done { dismiss() }
+        }
+        .onDisappear { 
+            cancelQuickConnect() 
+            plexModel.reset()
+        }
     }
     #else
     private var standardBody: some View {
@@ -348,6 +425,7 @@ struct AppleAddMediaServerView: View {
                 Picker("Server", selection: $kind) {
                     Text(AppleMediaServerKind.jellyfin.title).tag(AppleMediaServerKind.jellyfin)
                     Text(AppleMediaServerKind.emby.title).tag(AppleMediaServerKind.emby)
+                    Text(AppleMediaServerKind.plex.title).tag(AppleMediaServerKind.plex)
                 }
                 .accessibilityIdentifier("sources.mediaServer.kind")
             }
@@ -434,10 +512,56 @@ struct AppleAddMediaServerView: View {
                 }
             }
             
-            if let message {
+            if kind == .plex {
+                if let pin = plexModel.pin {
+                    Section {
+                        LabeledContent("Code", value: pin.code)
+                            .font(.system(.title2, design: .monospaced))
+                            .accessibilityIdentifier("sources.mediaServer.plex.code")
+                        LabeledContent("Enter it at", value: "plex.tv/link")
+                            .accessibilityIdentifier("sources.mediaServer.plex.link")
+                        Button("Cancel", role: .cancel) { plexModel.reset() }
+                    }
+                } else if !plexModel.servers.isEmpty {
+                    Section {
+                        Picker("Server", selection: $plexModel.selectedServerID) {
+                            ForEach(plexModel.servers, id: \.clientIdentifier) { server in
+                                Text(server.name).tag(server.clientIdentifier)
+                            }
+                        }
+                        .accessibilityIdentifier("sources.mediaServer.plex.server")
+                        Button {
+                            Task { await plexModel.saveSelectedServer() }
+                        } label: { 
+                            HStack(spacing: 8) {
+                                if plexModel.isWorking { ProgressView().accessibilityHidden(true) }
+                                Text("Save")
+                            }
+                        }
+                        .disabled(plexModel.isWorking)
+                        .accessibilityIdentifier("sources.mediaServer.plex.save")
+                    }
+                } else {
+                    Section {
+                        Button {
+                            Task { await plexModel.signIn() }
+                        } label: { 
+                            HStack(spacing: 8) {
+                                if plexModel.isWorking { ProgressView().accessibilityHidden(true) }
+                                Text("Sign in with Plex")
+                            }
+                        }
+                        .disabled(plexModel.isWorking)
+                        .accessibilityIdentifier("sources.mediaServer.plexSignIn")
+                    }
+                }
+            }
+            
+            if let displayMessage = message ?? plexModel.message {
                 Section {
-                    Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
-                        .foregroundStyle(isError ? .red : .secondary)
+                    let displayError = isError || plexModel.isError
+                    Label(displayMessage, systemImage: displayError ? "exclamationmark.circle" : "checkmark.circle")
+                        .foregroundStyle(displayError ? .red : .secondary)
                         .accessibilityIdentifier("sources.mediaServer.status")
                 }
             }
@@ -448,9 +572,18 @@ struct AppleAddMediaServerView: View {
             guard let connectionAction else { return }
             await perform(connectionAction)
         }
-        .onChange(of: kind) { _, _ in resetState() }
+        .onChange(of: kind) { _, _ in 
+            resetState()
+            plexModel.reset()
+        }
         .onChange(of: embyMode) { _, _ in resetState() }
-        .onDisappear { cancelQuickConnect() }
+        .onChange(of: plexModel.isDone) { _, done in
+            if done { dismiss() }
+        }
+        .onDisappear { 
+            cancelQuickConnect()
+            plexModel.reset()
+        }
     }
     
     private var connectionButtons: some View {
@@ -617,5 +750,148 @@ struct AppleAddMediaServerView: View {
         let session = try await client.embyConnectExchange(server: server, account: account)
         _ = try sourceStore.addMediaServer(kind: .emby, name: server.name, session: session)
         dismiss()
+    }
+}
+@MainActor
+@Observable
+final class PlexSignInModel {
+    let client: ApplePlexClient
+    let sourceStore: AppleSourceStore
+    var isWorking = false
+    var message: String?
+    var isError = false
+    
+    var pin: ApplePlexPIN?
+    var servers: [ApplePlexResource] = []
+    var selectedServerID: String = ""
+    var pollTask: Task<Void, Never>?
+    
+    private var account: ApplePlexAccount?
+    private var token: String?
+    
+    var isDone = false
+    
+    init(client: ApplePlexClient = ApplePlexClient(), sourceStore: AppleSourceStore) {
+        self.client = client
+        self.sourceStore = sourceStore
+    }
+    
+    func reset() {
+        isWorking = false
+        message = nil
+        isError = false
+        pin = nil
+        servers = []
+        selectedServerID = ""
+        pollTask?.cancel()
+        pollTask = nil
+        account = nil
+        token = nil
+    }
+    
+    func signIn() async {
+        reset()
+        isWorking = true
+        defer { isWorking = false }
+        
+        do {
+            let newPIN = try await client.requestPIN()
+            self.pin = newPIN
+            
+            let expirationDate = Date().addingTimeInterval(15 * 60)
+            
+            pollTask = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(3))
+                    if Task.isCancelled { break }
+                    
+                    if Date() > expirationDate {
+                        isError = true
+                        message = "The code expired."
+                        pin = nil
+                        break
+                    }
+                    
+                    do {
+                        if let fetchedToken = try await client.pollPIN(id: newPIN.id) {
+                            self.pin = nil
+                            await self.handleToken(fetchedToken)
+                            break
+                        }
+                    } catch {
+                        // ignore poll errors
+                    }
+                }
+            }
+        } catch let err as AppleMediaServerError {
+            isError = true
+            message = AppleMediaServerFormPolicy.message(for: err)
+        } catch {
+            isError = true
+            message = error.localizedDescription
+        }
+    }
+    
+    private func handleToken(_ fetchedToken: String) async {
+        isWorking = true
+        defer { isWorking = false }
+        
+        do {
+            let acc = try await client.account(token: fetchedToken)
+            let allResources = try await client.resources(token: fetchedToken)
+            let serverResources = allResources.filter { $0.isServer && $0.accessToken != nil }
+            
+            self.account = acc
+            self.token = fetchedToken
+            
+            if serverResources.isEmpty {
+                isError = true
+                message = "No Plex servers on this account."
+            } else if serverResources.count == 1 {
+                try await saveServer(resource: serverResources[0], account: acc, token: fetchedToken)
+            } else {
+                self.servers = serverResources
+                self.selectedServerID = serverResources[0].clientIdentifier
+            }
+        } catch let err as AppleMediaServerError {
+            isError = true
+            message = AppleMediaServerFormPolicy.message(for: err)
+        } catch {
+            isError = true
+            message = error.localizedDescription
+        }
+    }
+    
+    func saveSelectedServer() async {
+        guard let resource = servers.first(where: { $0.clientIdentifier == selectedServerID }),
+              let acc = account,
+              let tok = token else { return }
+        
+        isWorking = true
+        message = nil
+        isError = false
+        defer { isWorking = false }
+        
+        do {
+            try await saveServer(resource: resource, account: acc, token: tok)
+        } catch let err as AppleMediaServerError {
+            isError = true
+            message = AppleMediaServerFormPolicy.message(for: err)
+        } catch {
+            isError = true
+            message = error.localizedDescription
+        }
+    }
+    
+    private func saveServer(resource: ApplePlexResource, account: ApplePlexAccount, token: String) async throws {
+        guard let url = await client.firstReachableConnection(for: resource) else {
+            isError = true
+            message = "Can't reach \(resource.name) right now."
+            return
+        }
+        
+        let session = try client.makeSession(resource: resource, connection: url, account: account, accountToken: token)
+        _ = try sourceStore.addMediaServer(kind: .plex, name: resource.name, session: session)
+        isDone = true
     }
 }

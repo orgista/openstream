@@ -648,7 +648,8 @@ struct AppleDiscoverView: View {
             playbackResolver: playbackResolver,
             settings: settings,
             openSettings: openSettings,
-            initialAutoPlay: initialAutoPlay
+            initialAutoPlay: initialAutoPlay,
+            mediaServerLibrary: mediaServerLibrary
         )
     }
 
@@ -1325,6 +1326,7 @@ struct AppleCatalogItemDetailView: View {
     let initialAutoPlay: Bool
     let localGroup: AppleLibrarySeries?
     let localSourceStore: AppleSourceStore?
+    let mediaServerLibrary: AppleMediaServerLibraryStore?
     @State private var library = AppleLocalLibraryStore.shared
     @State private var selectedLocalFile: AppleLibraryItem?
     @State private var pickingStreams = false
@@ -1416,7 +1418,8 @@ struct AppleCatalogItemDetailView: View {
         openSettings: @escaping () -> Void,
         initialAutoPlay: Bool = false,
         localGroup: AppleLibrarySeries? = nil,
-        localSourceStore: AppleSourceStore? = nil
+        localSourceStore: AppleSourceStore? = nil,
+        mediaServerLibrary: AppleMediaServerLibraryStore? = nil
     ) {
         self.item = item
         self.source = source
@@ -1432,6 +1435,7 @@ struct AppleCatalogItemDetailView: View {
         self.initialAutoPlay = initialAutoPlay
         self.localGroup = localGroup
         self.localSourceStore = localSourceStore
+        self.mediaServerLibrary = mediaServerLibrary
         _isPreparingMetadata = State(
             initialValue: ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: item.mediaID)
         )
@@ -3609,6 +3613,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var showsDownloadAction: Bool {
+        guard AppleMediaServerItemReference.parse(item.mediaID) == nil else { return false }
         guard localGroup == nil else { return false }
         guard AppleLocalDownloadPlatformPolicy.isSupportedOnCurrentPlatform else { return false }
         #if os(tvOS) || os(visionOS)
@@ -3865,6 +3870,29 @@ struct AppleCatalogItemDetailView: View {
     private func resolvePlayback() async {
         playbackCoordinator.beginResolving()
         do {
+            if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
+                let msDetail = try await msLibrary.detail(for: msRef)
+                
+                let episodeToPlay: AppleMediaServerItem
+                if item.type == "series" || msDetail.item.type == .series || msDetail.item.type == .episode {
+                    let epID = selectedEpisodeID ?? msRef.itemID
+                    var found: AppleMediaServerItem?
+                    for eps in msDetail.episodesBySeason.values {
+                        if let e = eps.first(where: { $0.id == epID }) { found = e; break }
+                    }
+                    guard let foundEp = found else { throw AppleMediaServerError.unsupported }
+                    episodeToPlay = foundEp
+                } else {
+                    episodeToPlay = msDetail.item
+                }
+                
+                let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: true)
+                let presentation = AppleStremioPlayerPresentation(request: req, settings: settings)
+                playbackCoordinator = presentation.coordinator
+                playerPresentation = configuredSources(presentation, selectedID: req.url)
+                return
+            }
+
             if selectedStream == nil {
                 let files = selectedLocalFile.map { [$0] } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
                 selectedLocalFile = nil
@@ -4045,6 +4073,34 @@ struct AppleCatalogItemDetailView: View {
         selectedEpisodeID = nil
         resolvedMediaID = nil
         watchProviders = []
+        
+        if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
+            isPreparingMetadata = true
+            do {
+                let msDetail = try await msLibrary.detail(for: msRef)
+                guard !Task.isCancelled, preparationGeneration == generation else { return }
+                self.metadataDetails = msLibrary.metadata(from: msDetail)
+                self.resolvedMediaID = item.mediaID
+                self.episodes = msLibrary.episodes(from: msDetail)
+                self.downloadedEpisodeIDs = []
+                self.selectedSeason = AppleStremioEpisodePolicy.initialSeason(in: self.episodes)
+                self.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.selectedSeason, from: self.episodes)
+                    ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodes)
+                self.isPreparingMetadata = false
+                self.isLoadingEpisodes = false
+            } catch {
+                guard !Task.isCancelled, preparationGeneration == generation else { return }
+                self.isPreparingMetadata = false
+                self.isLoadingEpisodes = false
+                self.metadataDetails = AppleTMDBDetails(
+                    mediaID: item.mediaID,
+                    title: item.name,
+                    overview: (error as? AppleMediaServerError).map { AppleMediaServerFormPolicy.message(for: $0) } ?? "An unexpected error occurred."
+                )
+            }
+            return
+        }
+
         let isSeries = item.type == "series"
         // An item that already carries a canonical `tt…` id needs no meta
         // add-on round trip, so Play is usable before anything is awaited.

@@ -44,14 +44,37 @@ public final class AppleMediaServerLibraryStore {
     public private(set) var failures: [UUID: String] = [:]
     public private(set) var lastLoadedAt: Date?
     
+    private var plexIndex: [AppleMediaServerItemReference: ApplePlexItem] = [:]
     private var index: [AppleMediaServerItemReference: AppleMediaServerItem] = [:]
     private var sourceIndex: [UUID: AppleSource] = [:]
+    private var sessionIndex: [UUID: AppleMediaServerSession] = [:]
     
+    private struct CachedDetail: Sendable {
+        let detail: AppleMediaServerDetail
+        let fetchedAt: Date
+    }
+    private var detailCache: [AppleMediaServerItemReference: CachedDetail] = [:]
+    
+    public struct AppleMediaServerPlaybackTicket: Sendable {
+        let session: AppleMediaServerSession
+        let mediaSourceID: String
+        let playSessionID: String?
+    }
+
+    private var activeTickets: [String: AppleMediaServerPlaybackTicket] = [:]
+    private var stoppedSessions: Set<String> = []
+
     private let client: AppleMediaServerClient
+    private let plexClient: ApplePlexClient
     private var generation: Int = 0
     
-    public init(client: AppleMediaServerClient = AppleMediaServerClient()) {
+    public init(client: AppleMediaServerClient = AppleMediaServerClient(), plexClient: ApplePlexClient = ApplePlexClient()) {
         self.client = client
+        self.plexClient = plexClient
+    }
+    
+    public func plexItem(for reference: AppleMediaServerItemReference) -> ApplePlexItem? {
+        plexIndex[reference]
     }
     
     public func item(for reference: AppleMediaServerItemReference) -> AppleMediaServerItem? {
@@ -69,11 +92,67 @@ public final class AppleMediaServerLibraryStore {
         for key in keysToRemove {
             index.removeValue(forKey: key)
         }
+        let plexKeysToRemove = plexIndex.keys.filter { $0.sourceID == sourceID }
+        for key in plexKeysToRemove {
+            plexIndex.removeValue(forKey: key)
+        }
+        let cacheKeysToRemove = detailCache.keys.filter { $0.sourceID == sourceID }
+        for key in cacheKeysToRemove {
+            detailCache.removeValue(forKey: key)
+        }
         sourceIndex.removeValue(forKey: sourceID)
+        sessionIndex.removeValue(forKey: sourceID)
         failures.removeValue(forKey: sourceID)
         persist()
     }
     
+    nonisolated public func catalogItem(_ item: ApplePlexItem, source: AppleSource, session: AppleMediaServerSession) -> AppleCatalogItem {
+        let mappedType: String
+        switch item.type {
+        case .movie: mappedType = "movie"
+        case .show, .season, .episode: mappedType = "series"
+        default: mappedType = "movie"
+        }
+        
+        let mediaID = AppleMediaServerItemReference(sourceID: source.id, itemID: item.ratingKey).mediaID
+        
+        let plexClient = ApplePlexClient()
+        
+        let posterURL: URL?
+        if let thumb = item.thumbPath {
+            posterURL = plexClient.imageURL(session: session, path: thumb, width: 600, height: 900)
+        } else {
+            posterURL = nil
+        }
+        
+        let backgroundURL: URL?
+        if let art = item.artPath {
+            backgroundURL = plexClient.imageURL(session: session, path: art, width: 1920, height: 1080)
+        } else {
+            backgroundURL = nil
+        }
+        
+        let releaseInfo: String?
+        if let y = item.year {
+            releaseInfo = String(y)
+        } else {
+            releaseInfo = nil
+        }
+        
+        return AppleCatalogItem(
+            mediaID: mediaID,
+            type: mappedType,
+            name: item.title,
+            posterURL: posterURL,
+            backgroundURL: backgroundURL,
+            summary: item.summary,
+            releaseInfo: releaseInfo,
+            rating: nil, // Plex API in client didn't expose rating easily, so nil
+            genres: nil, // and genres
+            year: item.year
+        )
+    }
+
     nonisolated public func catalogItem(_ item: AppleMediaServerItem, source: AppleSource, session: AppleMediaServerSession) -> AppleCatalogItem {
         let mappedType: String
         switch item.type {
@@ -144,18 +223,55 @@ public final class AppleMediaServerLibraryStore {
             let shelves: [RawShelf]
             let continueWatching: [AppleCatalogItem]
             let allRawItems: [AppleMediaServerItem]
+            let allPlexItems: [ApplePlexItem]
             let source: AppleSource
             let error: String?
         }
         
         let client = self.client
-        let catalogMapper = self.catalogItem
+        let plexClient = self.plexClient
+        let catalogMapper: @Sendable (AppleMediaServerItem, AppleSource, AppleMediaServerSession) -> AppleCatalogItem = self.catalogItem
+        let plexCatalogMapper: @Sendable (ApplePlexItem, AppleSource, AppleMediaServerSession) -> AppleCatalogItem = self.catalogItem
         
         let results = await withTaskGroup(of: SourceResult.self) { group in
             for (source, sess) in validSources {
                 group.addTask {
                     do {
                         var allRawItems: [AppleMediaServerItem] = []
+                        var allPlexItems: [ApplePlexItem] = []
+                        
+                        if sess.kind == .plex {
+                            let onDeckItems = try await plexClient.onDeck(session: sess)
+                            let cwItems = onDeckItems.map { plexCatalogMapper($0, source, sess) }
+                            allPlexItems.append(contentsOf: onDeckItems)
+                            
+                            let sections = try await plexClient.sections(session: sess)
+                            var rawShelves: [RawShelf] = []
+                            for section in sections {
+                                guard section.type == .movie || section.type == .show else { continue }
+                                let recent = try await plexClient.recentlyAdded(session: sess, sectionKey: section.key)
+                                allPlexItems.append(contentsOf: recent)
+                                
+                                let shelfItems = recent.map { plexCatalogMapper($0, source, sess) }
+                                rawShelves.append(RawShelf(
+                                    id: "ms:\(source.id.uuidString.lowercased()):\(section.key):recent",
+                                    title: "Recently added in \(section.title)",
+                                    sourceID: source.id,
+                                    items: shelfItems,
+                                    rawItems: []
+                                ))
+                            }
+                            
+                            return SourceResult(
+                                sourceID: source.id,
+                                shelves: rawShelves,
+                                continueWatching: cwItems,
+                                allRawItems: [],
+                                allPlexItems: allPlexItems,
+                                source: source,
+                                error: nil
+                            )
+                        }
                         
                         let resumePage = try await client.resume(session: sess, limit: 20)
                         let cwItems = resumePage.items.map { catalogMapper($0, source, sess) }
@@ -185,6 +301,7 @@ public final class AppleMediaServerLibraryStore {
                             shelves: rawShelves,
                             continueWatching: cwItems,
                             allRawItems: allRawItems,
+                            allPlexItems: [],
                             source: source,
                             error: nil
                         )
@@ -202,6 +319,7 @@ public final class AppleMediaServerLibraryStore {
                             shelves: [],
                             continueWatching: [],
                             allRawItems: [],
+                            allPlexItems: [],
                             source: source,
                             error: errorMsg
                         )
@@ -239,9 +357,16 @@ public final class AppleMediaServerLibraryStore {
                 nextCW.append(contentsOf: res.continueWatching)
                 
                 self.sourceIndex[res.sourceID] = res.source
+                if let sess = validSources.first(where: { $0.source.id == res.sourceID })?.session {
+                    self.sessionIndex[res.sourceID] = sess
+                }
                 for item in res.allRawItems {
                     let ref = AppleMediaServerItemReference(sourceID: res.sourceID, itemID: item.id)
                     self.index[ref] = item
+                }
+                for item in res.allPlexItems {
+                    let ref = AppleMediaServerItemReference(sourceID: res.sourceID, itemID: item.ratingKey)
+                    self.plexIndex[ref] = item
                 }
             }
         }
@@ -310,5 +435,400 @@ public final class AppleMediaServerLibraryStore {
         self.shelves = state.shelves
         self.continueWatching = state.continueWatching
         self.lastLoadedAt = state.lastLoadedAt
+    }
+    
+    public struct AppleMediaServerDetail: Equatable, Sendable {
+        public let item: AppleMediaServerItem
+        public let source: AppleSource
+        public let session: AppleMediaServerSession
+        public let seasons: [AppleMediaServerItem]
+        public let episodesBySeason: [String: [AppleMediaServerItem]]
+        
+        public init(item: AppleMediaServerItem, source: AppleSource, session: AppleMediaServerSession, seasons: [AppleMediaServerItem], episodesBySeason: [String: [AppleMediaServerItem]]) {
+            self.item = item
+            self.source = source
+            self.session = session
+            self.seasons = seasons
+            self.episodesBySeason = episodesBySeason
+        }
+    }
+
+    public static func mergedResume(local: ApplePlaybackProgress?, server: AppleMediaServerItem.UserData?) -> Double? {
+        if let s = server, s.played {
+            return s.positionSeconds
+        }
+        let l = local?.position ?? 0
+        let s = server?.positionSeconds ?? 0
+        if l == 0 && s == 0 {
+            return local?.position ?? server?.positionSeconds
+        }
+        return max(l, s)
+    }
+
+    public static func resumePosition(for item: AppleMediaServerItem, local: ApplePlaybackProgress? = nil) -> Double? {
+        guard let position = mergedResume(local: local, server: item.userData),
+              let duration = item.runtimeSeconds,
+              duration > 0 else { return nil }
+        
+        if position >= 15.0 && position < duration * 0.95 {
+            return position
+        }
+        return nil
+    }
+
+    public func attach(to coordinator: ApplePlaybackCoordinator) {
+        coordinator.remoteProgressSink = { [weak self] mediaID, position, duration, event in
+            guard let self = self else { return }
+            self.handleRemoteProgress(mediaID: mediaID, position: position, duration: duration, event: event)
+        }
+    }
+
+    internal func handleRemoteProgress(mediaID: String, position: Double, duration: Double, event: ApplePlaybackCoordinator.RemoteProgressEvent) {
+        guard let ref = AppleMediaServerItemReference.parse(mediaID),
+              let ticket = activeTickets[mediaID] else { return }
+        
+        if event == .stopped {
+            // One stop per play: a second .stopped for the same request is ignored
+            // until `playbackRequest` hands out a new ticket for this media id.
+            if stoppedSessions.contains(mediaID) { return }
+            stoppedSessions.insert(mediaID)
+            applyStop(reference: ref, mediaID: mediaID, position: position, duration: duration)
+        }
+        
+        Task {
+            do {
+                if ticket.session.kind == .plex {
+                    guard let pItem = plexIndex[ref] else { return }
+                    let state: ApplePlexClient.PlaybackState
+                    switch event {
+                    case .started, .progress: state = .playing
+                    case .paused: state = .paused
+                    case .stopped: state = .stopped
+                    }
+                    try await self.plexClient.reportTimeline(session: ticket.session, item: pItem, state: state, positionSeconds: position)
+                    if event == .stopped && duration > 0 && position >= duration * 0.95 {
+                        try await self.plexClient.markPlayed(session: ticket.session, ratingKey: ref.itemID)
+                    }
+                } else {
+                    switch event {
+                    case .started:
+                        try await self.client.reportPlaybackStart(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position)
+                    case .progress:
+                        try await self.client.reportPlaybackProgress(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position, isPaused: false)
+                    case .paused:
+                        try await self.client.reportPlaybackProgress(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position, isPaused: true)
+                    case .stopped:
+                        try await self.client.reportPlaybackStopped(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position)
+                    }
+                }
+            } catch {
+                appleTrace("Remote progress failed: \(error)")
+            }
+        }
+    }
+
+    /// Mirrors a finished play into the in-memory item and the resume row at
+    /// once, so Continue Watching is right before the server answers.
+    private func applyStop(reference ref: AppleMediaServerItemReference, mediaID: String, position: Double, duration: Double) {
+        guard let item = index[ref] else { return }
+        let played = duration > 0 && position >= duration * 0.95
+        let old = item.userData
+        let newUserData = AppleMediaServerItem.UserData(
+            positionSeconds: played ? 0 : position,
+            played: played || (old?.played ?? false),
+            isFavorite: old?.isFavorite ?? false,
+            playCount: (old?.playCount ?? 0) + (played ? 1 : 0)
+        )
+        let newItem = item.withUserData(newUserData)
+        index[ref] = newItem
+        continueWatching.removeAll(where: { $0.mediaID == mediaID })
+        if !played, let source = sourceIndex[ref.sourceID], let sess = sessionIndex[ref.sourceID] {
+            continueWatching.insert(catalogItem(newItem, source: source, session: sess), at: 0)
+        }
+    }
+
+    public func detail(for reference: AppleMediaServerItemReference) async throws -> AppleMediaServerDetail {
+        if let cached = detailCache[reference], Date().timeIntervalSince(cached.fetchedAt) < 600 {
+            return cached.detail
+        }
+        
+        guard let source = sourceIndex[reference.sourceID],
+              let session = sessionIndex[reference.sourceID] else {
+            throw AppleMediaServerError.unsupported
+        }
+        
+        if session.kind == .plex {
+            let freshPlexItem = try await plexClient.item(session: session, ratingKey: reference.itemID)
+            plexIndex[reference] = freshPlexItem
+            
+            var plexSeasons: [ApplePlexItem] = []
+            var plexEpisodesBySeason: [String: [ApplePlexItem]] = [:]
+            
+            if freshPlexItem.type == .show {
+                plexSeasons = try await plexClient.children(session: session, ratingKey: freshPlexItem.ratingKey)
+                for season in plexSeasons {
+                    let episodes = try await plexClient.children(session: session, ratingKey: season.ratingKey)
+                    plexEpisodesBySeason[season.ratingKey] = episodes
+                }
+            }
+            
+            func toMediaServerItem(_ plex: ApplePlexItem) -> AppleMediaServerItem {
+                let type: AppleMediaServerItemType
+                switch plex.type {
+                case .movie: type = .movie
+                case .show: type = .series
+                case .season: type = .season
+                case .episode: type = .episode
+                case .other: type = .other
+                }
+                
+                var userData: AppleMediaServerItem.UserData?
+                if let viewOffset = plex.viewOffsetSeconds, let dur = plex.durationSeconds {
+                    userData = AppleMediaServerItem.UserData(
+                        positionSeconds: viewOffset,
+                        played: (plex.viewCount ?? 0) > 0 || viewOffset >= dur * 0.95,
+                        isFavorite: false,
+                        playCount: plex.viewCount ?? 0
+                    )
+                }
+                
+                return AppleMediaServerItem(
+                    id: plex.ratingKey,
+                    name: plex.title,
+                    type: type,
+                    year: plex.year,
+                    overview: plex.summary,
+                    runtimeSeconds: plex.durationSeconds,
+                    seriesID: freshPlexItem.ratingKey,
+                    seasonID: plex.parentRatingKey,
+                    indexNumber: plex.index,
+                    parentIndexNumber: plex.parentIndex,
+                    userData: userData
+                )
+            }
+            
+            let freshItem = toMediaServerItem(freshPlexItem)
+            index[reference] = freshItem
+            
+            var seasons: [AppleMediaServerItem] = []
+            var episodesBySeason: [String: [AppleMediaServerItem]] = [:]
+            
+            for pSeason in plexSeasons {
+                seasons.append(toMediaServerItem(pSeason))
+                if let pEps = plexEpisodesBySeason[pSeason.ratingKey] {
+                    episodesBySeason[pSeason.ratingKey] = pEps.map { toMediaServerItem($0) }
+                }
+            }
+            
+            let detail = AppleMediaServerDetail(item: freshItem, source: source, session: session, seasons: seasons, episodesBySeason: episodesBySeason)
+            detailCache[reference] = CachedDetail(detail: detail, fetchedAt: Date())
+            return detail
+        }
+        
+        let freshItem = try await client.item(session: session, id: reference.itemID)
+        index[reference] = freshItem
+        
+        var seasons: [AppleMediaServerItem] = []
+        var episodesBySeason: [String: [AppleMediaServerItem]] = [:]
+        
+        if freshItem.type == .series || freshItem.type == .episode {
+            let allSeasons = try await client.seasons(session: session, seriesID: reference.itemID)
+            
+            let episodes = await withTaskGroup(of: (String, [AppleMediaServerItem]).self) { group in
+                for season in allSeasons {
+                    group.addTask {
+                        let eps = (try? await self.client.episodes(session: session, seriesID: reference.itemID, seasonID: season.id)) ?? []
+                        return (season.id, eps)
+                    }
+                }
+                var collected: [String: [AppleMediaServerItem]] = [:]
+                for await res in group {
+                    if !res.1.isEmpty {
+                        collected[res.0] = res.1
+                    }
+                }
+                return collected
+            }
+            
+            for season in allSeasons {
+                if let eps = episodes[season.id], !eps.isEmpty {
+                    seasons.append(season)
+                    episodesBySeason[season.id] = eps
+                }
+            }
+        }
+        
+        let detail = AppleMediaServerDetail(item: freshItem, source: source, session: session, seasons: seasons, episodesBySeason: episodesBySeason)
+        detailCache[reference] = CachedDetail(detail: detail, fetchedAt: Date())
+        return detail
+    }
+
+    public func playbackRequest(for item: AppleMediaServerItem, in detail: AppleMediaServerDetail, resume: Bool) async throws -> ApplePlaybackRequest {
+        if detail.session.kind == .plex {
+            guard let plexItem = plexIndex[AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id)] else {
+                throw AppleMediaServerError.unsupported
+            }
+            guard let part = plexItem.parts.first else {
+                throw AppleMediaServerError.unsupported
+            }
+            let url = plexClient.directPlayURL(session: detail.session, part: part)
+            
+            let mediaID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
+            stoppedSessions.remove(mediaID)
+            activeTickets[mediaID] = AppleMediaServerPlaybackTicket(
+                session: detail.session,
+                mediaSourceID: part.key,
+                playSessionID: nil
+            )
+            
+            let position: Double?
+            if resume, let offset = plexItem.viewOffsetSeconds, let dur = plexItem.durationSeconds {
+                position = (offset >= dur * 0.95) ? nil : offset
+            } else {
+                position = nil
+            }
+            
+            let title: String
+            if item.type == .episode {
+                let sIdx = item.parentIndexNumber.map { String($0) } ?? "?"
+                let eIdx = item.indexNumber.map { String($0) } ?? "?"
+                let series = item.seriesName ?? detail.item.name
+                title = "\(series) S\(sIdx)E\(eIdx)"
+            } else {
+                title = item.name
+            }
+            
+            return ApplePlaybackRequest(
+                url: url,
+                headers: ["X-Plex-Token": detail.session.accessToken],
+                isLive: false,
+                resumePosition: position,
+                autoplay: true,
+                mediaID: mediaID,
+                title: title,
+                sourceName: detail.source.name,
+                sourceKind: .mediaServer,
+                hints: ApplePlaybackRequest.Hints()
+            )
+        }
+        
+        let info = try await client.playbackInfo(session: detail.session, itemID: item.id)
+        
+        guard let mediaSource = info.mediaSources.first(where: { $0.supportsDirectPlay || $0.supportsDirectStream }) else {
+            throw AppleMediaServerError.unsupported
+        }
+        
+        let container = mediaSource.container?.components(separatedBy: ",").first ?? mediaSource.container
+        let url = try client.directStreamURL(
+            session: detail.session,
+            itemID: item.id,
+            mediaSourceID: mediaSource.id,
+            container: container
+        )
+        
+        let mediaID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
+        stoppedSessions.remove(mediaID)
+        activeTickets[mediaID] = AppleMediaServerPlaybackTicket(
+            session: detail.session,
+            mediaSourceID: mediaSource.id,
+            playSessionID: info.playSessionID
+        )
+
+        let local = ApplePlaybackStore().progress(for: mediaID)
+        let position = resume ? Self.resumePosition(for: item, local: local) : nil
+        
+        let title: String
+        if item.type == .episode {
+            let sIdx = item.parentIndexNumber.map { String($0) } ?? "?"
+            let eIdx = item.indexNumber.map { String($0) } ?? "?"
+            let sName = item.seriesName ?? detail.item.name
+            title = "\(sName) · S\(sIdx)E\(eIdx) \(item.name)"
+        } else {
+            title = item.name
+        }
+        
+        return ApplePlaybackRequest(
+            url: url,
+            headers: [:],
+            isLive: false,
+            resumePosition: position,
+            autoplay: true,
+            mediaID: mediaID,
+            title: title,
+            sourceName: detail.source.name,
+            sourceKind: .mediaServer,
+            hints: ApplePlaybackRequest.Hints()
+        )
+    }
+
+    public func metadata(from detail: AppleMediaServerDetail) -> AppleTMDBDetails {
+        let item = detail.item
+        
+        let posterURL: URL? = {
+            if let tag = item.primaryImageTag {
+                return try? client.imageURL(session: detail.session, itemID: item.id, type: .primary, tag: tag, maxWidth: 600)
+            }
+            return nil
+        }()
+        
+        let backdropURL: URL? = {
+            if let tag = item.backdropImageTags.first {
+                return try? client.imageURL(session: detail.session, itemID: item.id, type: .backdrop, tag: tag, maxWidth: nil)
+            }
+            return nil
+        }()
+        
+        let logoURL: URL? = {
+            if let tag = item.logoImageTag {
+                return try? client.imageURL(session: detail.session, itemID: item.id, type: .logo, tag: tag, maxWidth: 600)
+            }
+            return nil
+        }()
+        
+        let runtimeMinutes = item.runtimeSeconds.map { Int($0 / 60) }
+        let mappedType = (item.type == .series || item.type == .episode) ? "series" : "movie"
+        
+        return AppleTMDBDetails(
+            mediaID: AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID,
+            mediaType: mappedType,
+            title: item.name,
+            releaseInfo: item.year.map { String($0) },
+            runtimeMinutes: runtimeMinutes,
+            genres: item.genres,
+            imdbRating: item.communityRating,
+            year: item.year,
+            overview: item.overview,
+            posterURL: posterURL,
+            backdropURL: backdropURL,
+            logoURL: logoURL
+        )
+    }
+
+    public func episodes(from detail: AppleMediaServerDetail) -> [AppleStremioEpisode] {
+        var results: [AppleStremioEpisode] = []
+        for season in detail.seasons {
+            if let eps = detail.episodesBySeason[season.id] {
+                for ep in eps {
+                    let thumbURL: URL? = {
+                        if let tag = ep.primaryImageTag {
+                            return try? client.imageURL(session: detail.session, itemID: ep.id, type: .primary, tag: tag, maxWidth: 600)
+                        }
+                        return nil
+                    }()
+                    
+                    results.append(AppleStremioEpisode(
+                        id: ep.id, // the raw item id for playbackRequest
+                        title: ep.name,
+                        season: ep.parentIndexNumber,
+                        episode: ep.indexNumber,
+                        releaseInfo: ep.year.map { String($0) },
+                        runtimeMinutes: ep.runtimeSeconds.map { Int($0 / 60) },
+                        overview: ep.overview,
+                        thumbnailURL: thumbURL
+                    ))
+                }
+            }
+        }
+        return results
     }
 }

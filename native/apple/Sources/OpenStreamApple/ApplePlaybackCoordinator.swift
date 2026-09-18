@@ -225,6 +225,19 @@ public final class ApplePlaybackCoordinator {
     private var surfaceProgressIdentity: String?
     private var surfaceProgressPartID: String?
 
+    public enum RemoteProgressEvent: Sendable {
+        case started
+        case progress
+        case paused
+        case stopped
+    }
+
+    public var remoteProgressSink: (@MainActor (_ mediaID: String, _ position: Double, _ duration: Double, _ event: RemoteProgressEvent) -> Void)?
+    private var remoteProgressStarted = false
+    private var lastKnownPosition: Double = 0
+    private var avPlayerProgressObserver: Any?
+    private weak var avPlayerProgressObserverPlayer: AVPlayer?
+
     /// Injected by tests (and the host) to record progress writes on `.surface`
     /// routes. Called at most once per `progressInterval` with `(position, duration)`.
     /// On `.avPlayer` routes the existing `ApplePlaybackProgressCoordinator`
@@ -320,6 +333,8 @@ public final class ApplePlaybackCoordinator {
         lastRequest = request
         liveRetryAttempted = false
         lastProgressWrite = nil
+        remoteProgressStarted = false
+        lastKnownPosition = 0
         cancelObservation()
         cancelTimeout()
         cancelLiveRetry()
@@ -378,12 +393,21 @@ public final class ApplePlaybackCoordinator {
         loadTask = nil
         fallbackTask?.cancel()
         fallbackTask = nil
+        if let req = lastRequest, req.sourceKind == .mediaServer, remoteProgressStarted {
+            remoteProgressSink?(req.mediaID, lastKnownPosition, engine.duration ?? 0, .stopped)
+            remoteProgressStarted = false
+        }
         lastRequest = nil
         clearFallback()
         stopMonitoring()
         cancelObservation()
         cancelTimeout()
         cancelLiveRetry()
+        if let token = avPlayerProgressObserver, let oldPlayer = avPlayerProgressObserverPlayer {
+            oldPlayer.removeTimeObserver(token)
+            avPlayerProgressObserver = nil
+            avPlayerProgressObserverPlayer = nil
+        }
         progressCoordinator?.stopObserving()
         progressCoordinator = nil
         engine.stop()
@@ -575,11 +599,18 @@ public final class ApplePlaybackCoordinator {
             // The first frame. Everything before this is the wait the owner
             // sees as a spinner, so it is the one timestamp worth having.
             if case .playing = phase {} else { appleTrace("first frame, route=\(route)") }
+            let isResume = (phase == .paused)
             phase = .playing
             cancelTimeout()
             clearFallback()
+            if isResume, request.sourceKind == .mediaServer, remoteProgressStarted {
+                remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .progress)
+            }
         case .paused:
             phase = .paused
+            if request.sourceKind == .mediaServer, remoteProgressStarted {
+                remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .paused)
+            }
         case .seeking:
             break
         case .rebuffering:
@@ -600,6 +631,10 @@ public final class ApplePlaybackCoordinator {
         guard request.isLive else {
             cancelTimeout()
             phase = .ended
+            if request.sourceKind == .mediaServer, remoteProgressStarted {
+                remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .stopped)
+                remoteProgressStarted = false
+            }
             return
         }
         if !liveRetryAttempted {
@@ -664,6 +699,11 @@ public final class ApplePlaybackCoordinator {
     private func setupProgress(for request: ApplePlaybackRequest) {
         progressCoordinator?.stopObserving()
         progressCoordinator = nil
+        if let token = avPlayerProgressObserver, let oldPlayer = avPlayerProgressObserverPlayer {
+            oldPlayer.removeTimeObserver(token)
+            avPlayerProgressObserver = nil
+            avPlayerProgressObserverPlayer = nil
+        }
         surfaceProgressIdentity = request.isLive ? nil : request.mediaID
         surfaceProgressPartID = AppleDetailResume.partID(type: request.hints.addonMediaType,
             mediaID: request.hints.addonMediaID)
@@ -678,6 +718,24 @@ public final class ApplePlaybackCoordinator {
                 )
                 coordinator.startObserving(player)
                 progressCoordinator = coordinator
+
+                if request.sourceKind == .mediaServer {
+                    let intervalSeconds = Double(progressInterval.components.seconds)
+                    let interval = CMTime(seconds: intervalSeconds, preferredTimescale: 600)
+                    avPlayerProgressObserverPlayer = player
+                    avPlayerProgressObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self, weak player] time in
+                        MainActor.assumeIsolated {
+                            guard let self, let player, let lastRequest = self.lastRequest, lastRequest.sourceKind == .mediaServer else { return }
+                            self.lastKnownPosition = time.seconds
+                            let duration = player.currentItem?.duration.seconds ?? 0
+                            if !self.remoteProgressStarted {
+                                self.remoteProgressStarted = true
+                                self.remoteProgressSink?(lastRequest.mediaID, time.seconds, duration, .started)
+                            }
+                            self.remoteProgressSink?(lastRequest.mediaID, time.seconds, duration, .progress)
+                        }
+                    }
+                }
             }
         default:
             progressCoordinator?.stopObserving()
@@ -686,10 +744,24 @@ public final class ApplePlaybackCoordinator {
     }
 
     private func handlePosition(_ position: Double) {
+        lastKnownPosition = position
+
+        if let req = lastRequest, req.sourceKind == .mediaServer {
+            if !remoteProgressStarted {
+                remoteProgressStarted = true
+                remoteProgressSink?(req.mediaID, position, engine.duration ?? 0, .started)
+            }
+        }
+
         guard route == .surface else { return }
         let now = ContinuousClock().now
         guard lastProgressWrite == nil || now - lastProgressWrite! >= progressInterval else { return }
         lastProgressWrite = now
+        
+        if let req = lastRequest, req.sourceKind == .mediaServer {
+            remoteProgressSink?(req.mediaID, position, engine.duration ?? 0, .progress)
+        }
+
         if let progressWriter {
             progressWriter(position, engine.duration ?? 0)
             return
