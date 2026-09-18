@@ -396,10 +396,15 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 21:45 (newest first)
+## 7. State as of 2026-09-17 21:55 (newest first)
 - Orchestration ACTIVE (§4e). Worker (agy) landed today: watch-trace throttle (39573de), artwork disk
   cache (75108d6), metadata disk cache for details/episodes/previewAssets (ebd6115, 62988cf), prefetch
-  API + policy (f26ba0e), launch snapshot + 10-min skip, tvOS guide laziness (−71 MB), iOS guide row models, tvOS minute tick, web portal polish, settings panes. Gate 1037 / 109. Running: Storage pane a11y (spec K).
+  API + policy (f26ba0e), launch snapshot + 10-min skip, tvOS guide laziness (−71 MB), iOS guide row models, tvOS minute tick, web portal polish, settings panes, Storage spinner label. Gate 1037 / 109. Nothing running.
+  Free next items (no Codex collision): portal second pass (fetch-based submit, inline validation,
+  pairing auto-advance — `AppleWebManagementPage.swift` only); everything else waits for Codex's
+  files or the owner (older tvOS runtime, Widgets App Group, 13 go/no-go, Mac certs).
+  Observed all day: `AppleMetadataResolverTests`/`AppleStremioPlaybackTests`/`AppleOfflineDownload-
+  CoordinatorTests` time out when two `swift test` runs overlap — never run the gate concurrently.
   Parked: prefetch view hooks (`specs/artwork-prefetch.md`) until
   Codex releases AppleDiscoverView.swift (open since 16:28; Codex also started
   `design/2026-09-17-iphone-native-ux/`). Gate 1030 / 105.
