@@ -2010,12 +2010,16 @@ order; this section grows as each lands.
 - [x] Step 1: `AppleMediaServerClient` (public info, AuthenticateByName, Quick Connect, Emby Connect),
   `AppleSource.serverKind`, `AppleSourceStore.addMediaServer/mediaServerSession`; worker (agy) +
   driver switch case; tests in `AppleMediaServerTests.swift`. Committed 9946b3f; gate 1045 / 113.
-- [ ] Step 2: libraries / items / seasons / episodes / resume / latest / PlaybackInfo / direct-stream
-  URL / image URL / progress reporting (spec `media-server-2-library.md`).
-- [ ] Step 3: Add Media Server screen (Sources → Add → Media Server): Jellyfin = URL + user +
+- [x] Step 2: libraries / items / seasons / episodes / resume / latest / PlaybackInfo / direct-stream
+  URL / image URL / progress reporting (`AppleMediaServerLibrary.swift`, worker agy; the direct
+  stream URL shape was checked live against Emby 4.10: 206 with `api_key`, 401 without).
+  Committed ab4be0d; gate 1058 / 114.
+- [x] Step 3: Add Media Server screen (Sources → Add Media Server): Jellyfin = URL + user +
   password or Quick Connect code; Emby = Emby Connect e-mail + password (server picked from the
-  account) or URL + user + password; Plex = "Sign in with Plex" (plex.tv code). Stock Form, no
-  explainer text, brand rules.
+  account) or URL + user + password. Stock Form mirroring Add Live TV; `AppleMediaServerFormPolicy`
+  tests. Committed 687a52b; gate 1064 / 115. Plex joins the picker in step 5/6. Debug route
+  `-OpenStreamVisionScreen add-media-server`; iPhone UI test
+  `testAddMediaServerSignsInToEmbyAndCleansUp` (live against the Emby test server) — running.
 - [ ] Step 4: Discover shelves per library (Continue Watching from the server, Latest Movies, Latest
   Shows), detail page, playback through the direct-stream URL with the token header, progress sync.
 - [ ] Step 5: Plex client (plex.tv PIN, resources, sections, metadata, direct play).
@@ -2031,5 +2035,26 @@ order; this section grows as each lands.
   reappearance.
 - [x] Repro tests `testPlayerCoverRoundTripInLandscapeKeepsTheSettingsStackAlive` /
   `…DiscoverStackAlive` added to `AppleiOSUITests.swift`.
-- [ ] Run on the iOS 18.6 simulator `OpenStream iPhone 16 Pro iOS18` (8ECED81F…); fix; re-run on
-  iOS 26 too.
+- [x] Ran on the iOS 18.6 simulator `OpenStream iPhone 16 Pro iOS18` (8ECED81F…): both round trips
+  pass (Settings stack 22 s, Discover stack incl. landscape pop + tab switch 25 s); the accidental
+  full iPhone suite there produced no crash either. Not reproduced — the trigger is still unknown.
+- [ ] Next: keep the two round-trip tests in the sweep; ask the fr-FR tester what they were doing
+  in the ~60–95 s before the crash (build 10, twice, same day) once build 13 is out.
+
+## 2026-09-17 23:48 — owner asks (23:50): subtitle picker = one option; AIOMetadata must work — IN PROGRESS
+- [x] Captions menu lists Off + exactly one subtitle entry: the best track for the preferred
+  language from Settings, labelled by language. Committed ab092ef; photographed on the iOS 18.6
+  sim with a fixture carrying two English tracks and a French one: the menu reads "English / Off"
+  (`testCaptionsMenuOffersOneSubtitleOption`, fixture `scratchpad/media/subs.mkv`).
+- [x] AIOMetadata: enabled with 12 catalogs / 140 titles; its shelves are on Discover
+  ("AIOMetadata | ElfHosted Movies/Shows"); an item from it opens a full detail (synopsis,
+  trailer, More Like This — `testAIOMetadataCatalogItemOpensADetailWithInformation`, iOS 18.6).
+  The real gap was precedence: a title from a Cinemeta catalog kept Cinemeta's one-line blurb
+  over AIOMetadata's synopsis/logo. Fixed in cf543ee (add-ons outrank the built-in fallback).
+- [ ] Photograph the Mormon Wives title page after the precedence change (`mw-title-page` in
+  `testMormonWivesEpisodeOnePlaysSomething`) — needs the rebuilt app on the sim.
+- [ ] iOS 18.6 sweep (accidental full run of the iPhone UI suite on the new sim): 14 pass, 4 skip
+  (env fixtures), 4 fail — my Discover round-trip (player elements not found; lookups widened),
+  return-key "next" label, saved Live source row absent on a fresh sim (fixture), secure field
+  focus on tap (`testTypingIntoASettingsFieldPersists`, iOS 18 only — check the password AutoFill
+  sheet). No crash report was produced by any of the 22 tests.

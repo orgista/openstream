@@ -292,6 +292,14 @@ Report: AGENTS.md §7 format, under 60 lines.
 foreign diff; commit ONLY your own files; never `git add -A` here; never revert what you did not
 write; if a file you need is already modified by the other agent, say so and stop.
 
+- **The UI-test scheme installs ITS OWN copy of the app.** `xcodebuild test -scheme
+  OpenStreamiOSUITests -derivedDataPath DerivedData-uitests` builds the runner AND installs the
+  app product found in *that* DerivedData (a 22:39 build) over whatever you just installed — three
+  "verification" runs on 2026-09-18 photographed old code. Run UI tests with the SAME
+  `-derivedDataPath` as the app build (DerivedData-deploy-ios), or delete the stale app product in
+  DerivedData-uitests first. After a run, compare `stat -f %m` of the container binary with the
+  product you meant to test. (Corrects the earlier note that UI-test schemes build only the runner.)
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/<name>/SKILL.md` and load automatically in Claude Code
   (`Skill` tool by name). For agy pass `--add-dir ~/.claude/skills`; codex reads them as files.
@@ -396,7 +404,30 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 23:22 (newest first)
+## 7. State as of 2026-09-18 00:32 (newest first)
+- Overnight so far (all committed, gate 1064/115): captions = Off + one entry (ab092ef, verified on
+  the iOS 18.6 sim); add-on metadata outranks Cinemeta (cf543ee); media servers steps 1–3
+  (9946b3f, ab4be0d, 687a52b: client, library API, Add Media Server screen). In flight: step 4a
+  (shelf store, spec `media-server-4a-store.md`), then 4b (Discover shelf + root reload), 4c
+  (detail/play/progress), 5 (Plex client), 6 (Plex in the UI). Uncommitted: `OpenStreamRootView.swift`
+  (`add-media-server` debug route, one line), `AppleiOSUITests.swift` (+5 tests), records.
+- Verification trap of the night: UI-test runs with `-derivedDataPath DerivedData-uitests` install
+  that DerivedData's OLD app; use the app's DerivedData (`scratchpad/run-ios18-verify2.sh`).
+- iOS 18 crash: not reproduced (both cover round trips pass on iOS 18.6; full iPhone suite there
+  had no crash). Parked with the repro tests in the suite.
+- Still to do before build 13: build tvOS / visionOS / macOS with the new media-server files;
+  Widgets App Group tick (owner); no upload without "ship 13".
+- Owner 23:50: captions menu = Off + one entry (committed ab092ef, gate 1045/113); "make
+  AIOMetadata work" = an added metadata add-on must outrank built-in Cinemeta in
+  `AppleMetadataResolver.candidates` (spec `metadata-addon-precedence.md`, dispatching next).
+  Verification on the iOS 18.6 sim: `scratchpad/run-ios18-verify.sh` (captions fixture
+  `media/subs.mkv` on :8765 with two English + one French track; AIO detail test; Discover
+  round trip). Uncommitted: `AppleiOSUITests.swift` (+4 tests), FEEDBACK/GUI-AUDIT lines.
+- iOS 18 nav-bar crash: not reproduced on iOS 18.6 (full iPhone UI suite ran there by accident:
+  14 pass / 4 env-skips / 4 fails, none a crash). Settings-stack round trip passes; Discover
+  round trip needed test fixes (alert is "Playback Unavailable" on a sim without stream sources).
+- Media servers: step 1 committed (9946b3f); Emby test server :8097; specs 2, 3, 4a, 5 written
+  in `~/Developer/openstream-build/specs/`; dispatch order 2 → 3 → 4a → 4b → 5 (one gate at a time).
 - Codex is idle; its tree is committed (281a220: chapters/Skip Intro, iPhone native UX, Live
   Activity, Watch assets, 8 UI tests). The iOS chapter test needs a Range-capable fixture server
   (`scratchpad/media/rangeserver.py`, port 8765); python's http.server has no byte ranges.

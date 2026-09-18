@@ -4337,3 +4337,23 @@ UIKit assertion in the navigation bar when a screen comes back after the full-sc
 away. Nothing in the app's own code is on the stack. The likeliest trigger is turning the phone while
 the player is up and then closing it. A UI test that does exactly that is written; it runs on a new
 iOS 18.6 simulator (the crash is iOS 18-specific and the phone simulators here are on iOS 26).
+
+## 2026-09-17 23:58 — AIOMetadata: why it looked like it did nothing
+
+The add-on is fine: it is enabled, its catalogs are on Discover, and its details answer for every
+IMDb id. What the owner saw was the built-in Cinemeta winning: when a title comes from a Cinemeta
+catalog, the app asks the title's own source first and keeps the first answer, so the one-line
+IMDb blurb ("Reality show about swingers…") beat AIOMetadata's full synopsis, logo and artwork.
+Change under way: an add-on the viewer added always outranks the built-in fallback; Cinemeta only
+fills what the add-on leaves empty.
+
+Also from the same batch of screenshots: the "metadata failed" one is the Live guide of a French
+M3U showing "No information" next to a playback failure — that playlist carries no programme
+guide, and the streams refuse the app (provider side, noted earlier).
+
+## 2026-09-17 23:58 — captions menu: one option
+
+Off plus one entry — the best track for the preferred language from Settings (default first, plain
+subtitles before closed captions, forced/SDH last). The entry is named after the language
+("English"), never "English 1 (eng)". When the stream lacks the chosen language: nothing but Off if
+the viewer picked the language, one track if the app only guessed it.
