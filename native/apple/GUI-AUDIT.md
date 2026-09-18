@@ -2005,3 +2005,31 @@ order; this section grows as each lands.
   and landscape, channel denial/recovery, and final Live root with the owner's existing source.
   No temporary sources or cached test channels remain; last channel belongs to an existing source.
   Private local test server stopped. Simulator left on Live with the current rebuilt app.
+
+## 2026-09-17 23:22 — media servers (Jellyfin / Emby / Plex) — IN PROGRESS
+- [x] Step 1: `AppleMediaServerClient` (public info, AuthenticateByName, Quick Connect, Emby Connect),
+  `AppleSource.serverKind`, `AppleSourceStore.addMediaServer/mediaServerSession`; worker (agy) +
+  driver switch case; tests in `AppleMediaServerTests.swift`. Committed 9946b3f; gate 1045 / 113.
+- [ ] Step 2: libraries / items / seasons / episodes / resume / latest / PlaybackInfo / direct-stream
+  URL / image URL / progress reporting (spec `media-server-2-library.md`).
+- [ ] Step 3: Add Media Server screen (Sources → Add → Media Server): Jellyfin = URL + user +
+  password or Quick Connect code; Emby = Emby Connect e-mail + password (server picked from the
+  account) or URL + user + password; Plex = "Sign in with Plex" (plex.tv code). Stock Form, no
+  explainer text, brand rules.
+- [ ] Step 4: Discover shelves per library (Continue Watching from the server, Latest Movies, Latest
+  Shows), detail page, playback through the direct-stream URL with the token header, progress sync.
+- [ ] Step 5: Plex client (plex.tv PIN, resources, sections, metadata, direct play).
+- [ ] Live test: Emby 4.10 on the Mac (`~/Developer/openstream-build/media-servers/emby`, port
+  8097, generated test account in `creds.env`, sample library of 2 movies + 1 show). Jellyfin.app
+  (brew cask 12.1) stalls in dyld on this Mac — not usable headlessly yet.
+
+## 2026-09-17 23:22 — iOS 18 navigation-bar crash on return from the player — INVESTIGATING
+- [x] Two TestFlight reports parsed (build 10, iPhone11,6, iOS 18.7.10): `UINavigationBar
+  layoutSubviews` assertion from `UINavigationController viewIsAppearing` → forced bar layout; no
+  app frames. Investigator digest: bar visibility toggles on the covered stack
+  (`OpenStreamRootView.swift` tab-bar hide on rotation; detail's hidden nav/tab bars) reconciled on
+  reappearance.
+- [x] Repro tests `testPlayerCoverRoundTripInLandscapeKeepsTheSettingsStackAlive` /
+  `…DiscoverStackAlive` added to `AppleiOSUITests.swift`.
+- [ ] Run on the iOS 18.6 simulator `OpenStream iPhone 16 Pro iOS18` (8ECED81F…); fix; re-run on
+  iOS 26 too.

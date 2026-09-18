@@ -396,7 +396,17 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-17 21:55 (newest first)
+## 7. State as of 2026-09-17 23:22 (newest first)
+- Codex is idle; its tree is committed (281a220: chapters/Skip Intro, iPhone native UX, Live
+  Activity, Watch assets, 8 UI tests). The iOS chapter test needs a Range-capable fixture server
+  (`scratchpad/media/rangeserver.py`, port 8765); python's http.server has no byte ranges.
+- Overnight streams (owner 22:30): (1) media servers — step 1 landed via agy (see GUI-AUDIT), Emby
+  test server on :8097, specs in `~/Developer/openstream-build/specs/media-server-*.md`; (2) iOS 18
+  crash repro on the new iOS 18.6 sim (runtime installed; device 8ECED81F-B0B3-46A5-A349-E60A037C43F5,
+  boot only while the iPhone 16 Pro is shut down — one sim rule); (3) per-platform sweep.
+- Owner rule: **iOS 18 minimum**, no work on older OS runtimes or older builds. Build 13 on all
+  platforms only on "ship 13". Stray `iPhone 17 Pro` sim (Codex's) shut down, not deleted.
+- Untracked `docs/REPO-STRUCTURE-PROPOSAL.md` at the repo root is Codex's; left alone.
 - Orchestration ACTIVE (§4e). Worker (agy) landed today: watch-trace throttle (39573de), artwork disk
   cache (75108d6), metadata disk cache for details/episodes/previewAssets (ebd6115, 62988cf), prefetch
   API + policy (f26ba0e), launch snapshot + 10-min skip, tvOS guide laziness (−71 MB), iOS guide row models, tvOS minute tick, web portal polish, settings panes, Storage spinner label. Gate 1037 / 109. Nothing running.

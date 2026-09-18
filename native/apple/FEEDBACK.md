@@ -4320,3 +4320,20 @@ Streaming Services was missing from the iPhone/iPad Settings list (Apple TV had 
 now. Small hygiene on the Radarr/Sonarr fields (URL keyboard, password autofill), VoiceOver labels,
 and the Streaming Services pane now looks like the other panes.
 
+## 2026-09-17 23:22 — tester feedback of 17 Sep, and the two crash reports
+
+The "toggles don't work once they're off" report (iPhone, iOS 27.0, en-CA) is build 10: the
+screenshot shows the off tab switches drawn disabled. Build 11 already changed that rule — a tab that
+is not on screen can always be switched back on — and the iPhone UI test for it passes. Nothing more
+to do there; the tester needs build 11 or later.
+
+The same tester asked for Plex, Jellyfin and Emby by account sign-in rather than a server URL. That
+is tonight's feature stream: the sign-in client (Jellyfin URL + user/password or Quick Connect, Emby
+Connect e-mail sign-in, Plex sign-in next) is written and going through the gate; the Add Media
+Server screen, library shelves and playback follow. A real Emby server runs on the Mac for testing.
+
+Two crash reports from 17 Sep (iPhone XS Max, iOS 18.7, French) are both build 10 and identical: a
+UIKit assertion in the navigation bar when a screen comes back after the full-screen player goes
+away. Nothing in the app's own code is on the stack. The likeliest trigger is turning the phone while
+the player is up and then closing it. A UI test that does exactly that is written; it runs on a new
+iOS 18.6 simulator (the crash is iOS 18-specific and the phone simulators here are on iOS 26).
