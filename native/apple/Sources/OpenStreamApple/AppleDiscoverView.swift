@@ -647,20 +647,20 @@ struct AppleDiscoverView: View {
         AppleMediaShelf(title: title) {
             ForEach(values) { value in
                 NavigationLink { detail(value) } label: {
+                    #if os(tvOS)
                     VStack(alignment: .leading, spacing: 8) {
                         AppleCatalogCard(item: value.item)
                         if showsProgress {
-                            // The bar belongs to the card above it, so it takes
-                            // the card's width. A fixed 140 pt was narrower than
-                            // the poster on every platform and, in a
-                            // leading-aligned stack, sat short and off to one
-                            // side — the owner's "these progress bars are not
-                            // symmetrical" (2026-09-15).
                             ProgressView(value: value.record.progress ?? 0)
                                 .frame(maxWidth: .infinity)
                                 .tint(.white)
                         }
                     }
+                    #else
+                    AppleCatalogCard(
+                        item: value.item,
+                        progress: showsProgress ? (value.record.progress ?? 0) : nil)
+                    #endif
                 }.accessibilityIdentifier("home.\(identifier).\(value.id)")
             }
         }
@@ -1193,17 +1193,20 @@ struct AppleCatalogCard: View {
     let item: AppleCatalogItem
     let sizing: AppleCatalogCardSizing
     let viewportWidth: CGFloat?
+    let progress: Double?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
+    @ScaledMetric(relativeTo: .caption) private var captionLineHeight = 16.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var artworkFailed = false
 
-    init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil) {
+    init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil, progress: Double? = nil) {
         self.item = item
         self.sizing = sizing
         self.viewportWidth = viewportWidth
+        self.progress = progress
     }
 
     private var resolvedPosterURL: URL? {
@@ -1231,6 +1234,24 @@ struct AppleCatalogCard: View {
                 .frame(width: cardWidth, height: cardHeight)
                 .overlay { if artworkFailed { artworkPlaceholder } }
                 .clipShape(.rect(cornerRadius: cornerRadius))
+                #if !os(tvOS)
+                .overlay(alignment: .bottom) {
+                    if let progress {
+                        GeometryReader { geometry in
+                            Capsule()
+                                .fill(.white.opacity(0.3))
+                                .overlay(alignment: .leading) {
+                                    Capsule()
+                                        .fill(.white)
+                                        .frame(width: geometry.size.width * min(max(progress, 0), 1))
+                                }
+                        }
+                        .frame(height: 3)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                }
+                #endif
                 .onChange(of: resolvedPosterURL) { _, _ in artworkFailed = false }
                 .task(id: item.id) {
                     guard item.posterURL == nil else { return }
@@ -1247,9 +1268,10 @@ struct AppleCatalogCard: View {
             // title lives on the artwork or in the X7 placeholder tile.
             #if !os(tvOS)
             Text(item.name)
-                .font(.headline)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                .font(.caption)
+                .lineLimit(2)
                 .frame(width: cardWidth, alignment: .leading)
+                .frame(height: captionLineHeight * 2, alignment: .top)
 
             if let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
                 Text(releaseInfo)
