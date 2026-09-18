@@ -2023,12 +2023,17 @@ order; this section grows as each lands.
   the live Emby test server on the iOS 18.6 sim. Caught: enabled Save rendered white-on-white
   (`.borderedProminent` under the white tint) in this form AND Add Live TV → both moved to
   `.brandPrimary`/`.brandSecondary`; re-verification running.
-- [ ] Step 4: Discover shelves per library (Continue Watching from the server, Latest Movies, Latest
-  Shows), detail page, playback through the direct-stream URL with the token header, progress sync.
+- [ ] Step 4: 4a shelf store (5ca9620) and 4b Discover wiring (fef2039) are in. 4c detail + play and
+  4d progress reporting are written (worker) and photographed on the iOS 18.6 sim: a server title
+  opens its detail and PLAYS through the direct stream (no failure alert); the driver reworked the
+  stop handling (one stop per play, state updated before the network call) and two worker tests;
+  gate + commit pending in the running chain.
 - [ ] Step 5: Plex client (plex.tv PIN, resources, sections, metadata, direct play).
-- [ ] Live test: Emby 4.10 on the Mac (`~/Developer/openstream-build/media-servers/emby`, port
-  8097, generated test account in `creds.env`, sample library of 2 movies + 1 show). Jellyfin.app
-  (brew cask 12.1) stalls in dyld on this Mac — not usable headlessly yet.
+- [x] Live test: Emby 4.10 on the Mac (`~/Developer/openstream-build/media-servers/emby`, port
+  8097, generated test account in `creds.env`, sample library of 2 movies + 1 show).
+  `testAddMediaServerSignsInToEmbyAndCleansUp` passes on the iOS 18.6 sim: sign in → Sources row →
+  Discover shelf → detail → Play (direct stream) → close → delete source (nothing left behind).
+  Jellyfin.app (brew cask 12.1) stalls in dyld on this Mac — not usable headlessly yet.
 
 ## 2026-09-17 23:22 — iOS 18 navigation-bar crash on return from the player — INVESTIGATING
 - [x] Two TestFlight reports parsed (build 10, iPhone11,6, iOS 18.7.10): `UINavigationBar

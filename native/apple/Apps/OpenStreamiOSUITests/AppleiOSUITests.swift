@@ -723,4 +723,274 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertTrue(tabBar.waitForExistence(timeout: 15),
                       "the tab bar did not come back when returning to portrait")
     }
+
+    /// TestFlight crash, build 10 on an iPhone XS Max running iOS 18.7: UIKit
+    /// asserts inside `-[UINavigationBar layoutSubviews]` when the covered
+    /// NavigationStack reappears after the player's full-screen cover leaves.
+    /// The tester's path was play → failure → Close → back, phone turned for
+    /// the video. Both stacks that present the player take the round trip.
+    func testPlayerCoverRoundTripInLandscapeKeepsTheSettingsStackAlive() {
+        launch(screen: "add-files")
+        let directURL = app.buttons["Direct URL"].firstMatch
+        XCTAssertTrue(directURL.waitForExistence(timeout: 30), "Direct URL row missing")
+        directURL.tap()
+        let dialog = app.alerts["Direct URL"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "Direct URL dialog missing")
+        let field = dialog.textFields.firstMatch
+        field.tap()
+        field.typeText("http://127.0.0.1:9/openstream-ui-test-unreachable.mkv")
+        dialog.buttons["Play"].tap()
+        coverRoundTrip(back: app.navigationBars.buttons.firstMatch, name: "settings")
+    }
+
+    func testPlayerCoverRoundTripInLandscapeKeepsTheDiscoverStackAlive() {
+        launch(screen: "discover")
+        let details = app.buttons["Details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 40), "no billboard Details")
+        details.tap()
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30), "detail Play missing")
+        play.tap()
+        coverRoundTrip(back: app.buttons["detail.back"].firstMatch, name: "discover", popInLandscape: true)
+        // The tab bar hides in landscape and returns in portrait; switching tabs
+        // afterwards makes every stack reconcile its bars once more.
+        let settingsTab = app.tabBars.buttons["Settings"].firstMatch
+        if settingsTab.waitForExistence(timeout: 5) { settingsTab.tap() }
+        let discoverTab = app.tabBars.buttons["Discover"].firstMatch
+        if discoverTab.waitForExistence(timeout: 5) { discoverTab.tap() }
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(app.state, .runningForeground, "the app died switching tabs after the cover")
+        attach("cover-round-trip-discover-tabs")
+    }
+
+    /// Turns the phone while the cover is up, leaves through whichever exit the
+    /// player offers, pops (in landscape when asked, else after turning back),
+    /// and expects a living app with its tab bar.
+    private func coverRoundTrip(back: XCUIElement, name: String, popInLandscape: Bool = false) {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        // "Playback Failed" for a dead URL, "Playback Unavailable" when no stream
+        // source is enabled: either one is the player's exit for this round trip.
+        let failed = app.alerts.firstMatch
+        let any = app.descendants(matching: .any)
+        let close = any.matching(identifier: "player.close").firstMatch
+        let controls = any.matching(identifier: "player.controls.show").firstMatch
+        let connecting = any.matching(identifier: "player.connecting").firstMatch
+        let exit = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                failed.exists || close.exists || controls.exists || connecting.exists
+            }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [exit], timeout: 60), .completed,
+                       "neither the failure alert nor the player appeared")
+        Thread.sleep(forTimeInterval: 3)
+        attach("cover-round-trip-\(name)-landscape")
+        if failed.exists {
+            let closeAlert = failed.buttons["Close"].exists ? failed.buttons["Close"] : failed.buttons.firstMatch
+            closeAlert.tap()
+        } else {
+            if !close.exists || !close.isHittable {
+                if controls.exists { controls.tap() } else { app.tap() }
+            }
+            if close.waitForExistence(timeout: 5) { close.tap() }
+        }
+        if popInLandscape {
+            if back.waitForExistence(timeout: 5) { back.tap() }
+            Thread.sleep(forTimeInterval: 2)
+            XCUIDevice.shared.orientation = .portrait
+        } else {
+            XCUIDevice.shared.orientation = .portrait
+            Thread.sleep(forTimeInterval: 2)
+            if back.waitForExistence(timeout: 5) { back.tap() }
+        }
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(app.state, .runningForeground, "the app died after the cover went away")
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10), "tab bar missing after returning")
+        attach("cover-round-trip-\(name)-portrait")
+    }
+
+    /// Owner (2026-09-17 23:50): "make AIOMetadata work". Opens the first title of
+    /// an AIOMetadata catalog shelf and photographs the detail page so the
+    /// driver can see what the add-on's metadata looks like in the app.
+    func testAIOMetadataCatalogItemOpensADetailWithInformation() {
+        launch(screen: "discover")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        XCTAssertTrue(app.buttons["home.featured.play"].firstMatch.waitForExistence(timeout: 60), "Discover never loaded its billboard")
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "AIOMetadata")).firstMatch
+        var swipes = 0
+        while !header.exists, swipes < 14 { app.swipeUp(); swipes += 1; Thread.sleep(forTimeInterval: 0.6) }
+        XCTAssertTrue(header.exists, "no AIOMetadata shelf on Discover")
+        while header.frame.midY > app.frame.height * 0.7 { app.swipeUp(); Thread.sleep(forTimeInterval: 0.6) }
+        attach("aio-shelf")
+        let headerBottom = header.frame.maxY
+        let posters = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.media."))
+        var first: XCUIElement?
+        for index in 0..<min(posters.count, 40) {
+            let candidate = posters.element(boundBy: index)
+            guard candidate.exists else { continue }
+            let frame = candidate.frame
+            if frame.minY > headerBottom, frame.minY < headerBottom + 320, frame.width > 60 { first = candidate; break }
+        }
+        guard let first else { return XCTFail("no title under the \(header.label) shelf") }
+        let title = first.label
+        first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30), "detail for \(title) never showed Play")
+        Thread.sleep(forTimeInterval: 8)
+        attach("aio-detail-top")
+        let overview = app.staticTexts.allElementsBoundByIndex.filter { $0.label.count > 80 }
+        XCTAssertFalse(overview.isEmpty, "no overview text on the detail for \(title)")
+        XCTAssertFalse(app.staticTexts["No information"].exists, "detail shows No information for \(title)")
+        app.swipeUp(); Thread.sleep(forTimeInterval: 2)
+        attach("aio-detail-lower")
+        let episodes = app.otherElements["detail.episodes"].firstMatch
+        if episodes.exists {
+            app.swipeUp(); Thread.sleep(forTimeInterval: 2)
+            attach("aio-detail-episodes")
+        }
+    }
+
+    /// Owner (2026-09-17 23:50): the captions menu offers Off plus ONE subtitle
+    /// entry — the preferred language — never "English 1" and "English 2".
+    /// Plays a fixture carrying two English tracks and a French one.
+    func testCaptionsMenuOffersOneSubtitleOption() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              !fixture.isEmpty else {
+            throw XCTSkip("OPENSTREAM_SUBTITLE_FIXTURE_URL not set")
+        }
+        launch(screen: "add-files")
+        let directURL = app.buttons["Direct URL"].firstMatch
+        XCTAssertTrue(directURL.waitForExistence(timeout: 30), "Direct URL row missing")
+        directURL.tap()
+        let dialog = app.alerts["Direct URL"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "Direct URL dialog missing")
+        let field = dialog.textFields.firstMatch
+        field.tap()
+        field.typeText(fixture)
+        dialog.buttons["Play"].tap()
+        let any = app.descendants(matching: .any)
+        let menu = any.matching(NSPredicate(format: "label == %@", "Audio & Subtitles")).firstMatch
+        if !menu.waitForExistence(timeout: 30) {
+            any.matching(identifier: "player.controls.show").firstMatch.tap()
+        }
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "captions menu button missing")
+        // The controls auto-hide after a few seconds: bring them back and tap at once.
+        let off = any.matching(NSPredicate(format: "label == %@", "Off")).firstMatch
+        var opened = false
+        for attempt in 0..<3 where !opened {
+            if !menu.isHittable { any.matching(identifier: "player.controls.show").firstMatch.tap(); Thread.sleep(forTimeInterval: 0.5) }
+            if attempt == 0 { menu.tap() } else { menu.press(forDuration: 0.3) }
+            opened = off.waitForExistence(timeout: 6)
+        }
+        Thread.sleep(forTimeInterval: 1)
+        attach("captions-menu")
+        XCTAssertTrue(opened, "menu did not open (no Off)")
+        let rows = app.menuItems.count > 0 ? app.menuItems : app.buttons
+        let items = rows.allElementsBoundByIndex
+            .map(\.label)
+            .filter { !$0.isEmpty && $0 != "Off" && $0 != "Audio & Subtitles" }
+            .filter { $0.range(of: "^(English|French|Français|Subtitle)", options: .regularExpression) != nil }
+        XCTAssertEqual(items.count, 1, "expected exactly one subtitle entry besides Off, got \(items)")
+        XCTAssertFalse(items.contains { $0.range(of: "\\d$", options: .regularExpression) != nil },
+                       "a numbered entry leaked into the menu: \(items)")
+    }
+
+    /// Media servers (owner, 2026-09-17): signs in to the Emby test server on the
+    /// Mac through the Add Media Server screen, saves the source, photographs
+    /// the result, then deletes the source so nothing is left on the simulator.
+    /// Needs OPENSTREAM_TEST_EMBY_URL / _USER / _PASSWORD in the runner's environment.
+    func testAddMediaServerSignsInToEmbyAndCleansUp() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let url = env["OPENSTREAM_TEST_EMBY_URL"], let user = env["OPENSTREAM_TEST_EMBY_USER"],
+              let password = env["OPENSTREAM_TEST_EMBY_PASSWORD"], !url.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_EMBY_* not set")
+        }
+        launch(screen: "add-media-server")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let any = app.descendants(matching: .any)
+        let kindPicker = any.matching(identifier: "sources.mediaServer.kind").firstMatch
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 30), "Add Media Server screen missing")
+        attach("add-media-server-jellyfin")
+        // Emby, signed in with a server URL (Emby Connect needs a real account).
+        let emby = any.matching(identifier: "sources.mediaServer.kind.emby").firstMatch
+        if emby.exists { emby.tap() } else { kindPicker.tap(); app.buttons["Emby"].firstMatch.tap() }
+        let serverMode = any.matching(identifier: "sources.mediaServer.embyMode.server").firstMatch
+        if serverMode.waitForExistence(timeout: 5) { serverMode.tap() }
+        else { any.matching(identifier: "sources.mediaServer.embyMode").firstMatch.tap(); app.buttons["Server URL"].firstMatch.tap() }
+        let urlField = any.matching(identifier: "sources.mediaServer.url").firstMatch
+        XCTAssertTrue(urlField.waitForExistence(timeout: 10), "Server URL field missing")
+        urlField.tap(); urlField.typeText(url)
+        let userField = any.matching(identifier: "sources.mediaServer.username").firstMatch
+        userField.tap(); userField.typeText(user)
+        let passwordField = any.matching(identifier: "sources.mediaServer.password").firstMatch
+        passwordField.tap(); passwordField.typeText(password)
+        attach("add-media-server-emby-filled")
+        let test = any.matching(identifier: "sources.mediaServer.test").firstMatch
+        if test.exists, test.isEnabled {
+            test.tap()
+            let connected = any.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Connected")).firstMatch
+            let failedStatus = any.matching(identifier: "sources.mediaServer.status").firstMatch
+            let answered = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in connected.exists || failedStatus.exists }, object: nil)], timeout: 30)
+            XCTAssertEqual(answered, .completed, "no status after Test Connection")
+            Thread.sleep(forTimeInterval: 1)
+            attach("add-media-server-emby-tested")
+            XCTAssertTrue(connected.exists, "test did not connect: \(failedStatus.exists ? failedStatus.label : "no status")")
+        }
+        let save = any.matching(identifier: "sources.mediaServer.save").firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10), "Save missing")
+        save.tap()
+        // Back on the Sources list, the server is listed under Your Sources.
+        // "Media Server · <host>" is the saved row's subtitle; "Add Media Server" has no dot.
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Media Server ·")).firstMatch
+        let listed = row.waitForExistence(timeout: 30)
+        attach("add-media-server-saved")
+        XCTAssertTrue(listed, "saved media server not listed")
+        // Discover should now carry the server's shelves ("Latest in Movies" …).
+        app.tabBars.buttons["Discover"].firstMatch.tap()
+        let shelf = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Latest in")).firstMatch
+        var shelfSwipes = 0
+        while !shelf.exists, shelfSwipes < 12 { app.swipeUp(); shelfSwipes += 1; Thread.sleep(forTimeInterval: 0.6) }
+        attach("add-media-server-discover")
+        XCTAssertTrue(shelf.exists, "no media-server shelf on Discover after saving the source")
+        // Open the first server title, expect a real detail page, and play it.
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch
+        if poster.waitForExistence(timeout: 10) {
+            poster.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+            let play = app.buttons["detail.play"].firstMatch
+            XCTAssertTrue(play.waitForExistence(timeout: 30), "server title detail never showed Play")
+            Thread.sleep(forTimeInterval: 4)
+            attach("add-media-server-detail")
+            play.tap()
+            let any = app.descendants(matching: .any)
+            let playing = any.matching(identifier: "player.controls.show").firstMatch
+            let close = any.matching(identifier: "player.close").firstMatch
+            let alert = app.alerts.firstMatch
+            let started = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in playing.exists || close.exists || alert.exists }, object: nil)], timeout: 60)
+            XCTAssertEqual(started, .completed, "player never appeared for the server title")
+            Thread.sleep(forTimeInterval: 8)
+            attach("add-media-server-playing")
+            XCTAssertFalse(alert.exists, "playback of the server title failed: \(alert.exists ? alert.label : "")")
+            if !close.exists || !close.isHittable { app.tap() }
+            if close.waitForExistence(timeout: 5) { close.tap() }
+            let back = app.buttons["detail.back"].firstMatch
+            if back.waitForExistence(timeout: 5) { back.tap() }
+        } else {
+            XCTFail("no server title under the shelf")
+        }
+        app.tabBars.buttons["Settings"].firstMatch.tap()
+        // Clean up: open it and delete.
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "source row gone before cleanup")
+        row.tap()
+        let delete = app.buttons["Delete Source"].firstMatch
+        var swipes = 0
+        while !delete.exists, swipes < 4 { app.swipeUp(); swipes += 1 }
+        XCTAssertTrue(delete.waitForExistence(timeout: 10), "Delete Source missing")
+        delete.tap()
+        let confirm = app.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Delete")).firstMatch
+        if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+        else { app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Delete")).element(boundBy: 1).tap() }
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(row.exists, "media server still listed after delete")
+        attach("add-media-server-deleted")
+    }
 }

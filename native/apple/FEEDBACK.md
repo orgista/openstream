@@ -4365,3 +4365,18 @@ The new Sources → Add Media Server screen signed in to the Emby server on the 
 pill — the same white-on-white the owner once reported on the Live tab's Open Settings button:
 both this form and Add Live TV still used the stock prominent style under the app's white tint.
 Both now use the brand primary/secondary buttons (white pill, black label; grey pill for Test).
+
+## 2026-09-18 01:08 — Emby, end to end on the iPhone sim
+
+Sign in with the server URL → "Studio · Media Server · 127.0.0.1" appears under Your Sources →
+Discover grows a "Latest in Movies" shelf with the server's titles → a title opens its own detail
+page. Playback of a server title is the step being wired in now (the direct stream with the
+server's token); the sample library has no artwork, so the cards show titles only — a real
+library shows posters and backdrops the same way the other shelves do.
+
+## 2026-09-18 01:24 — a server title plays
+
+Big Buck Bunny from the Emby test server: tap Play on its detail page and the video runs through
+the server's direct stream, chapters and all. Progress goes back to the server when playback
+stops so Continue Watching agrees everywhere. Jellyfin uses the same path; Plex is being wired
+next.

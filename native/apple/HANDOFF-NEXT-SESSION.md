@@ -409,7 +409,20 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-18 00:32 (newest first)
+## 7. State as of 2026-09-18 01:32 (newest first)
+- Media servers on the iPhone sim, end to end (Emby test server): sign in → Sources row → Discover
+  "Latest in Movies" → detail → Play through the direct stream → delete. UI test
+  `testAddMediaServerSignsInToEmbyAndCleansUp` (env `OPENSTREAM_TEST_EMBY_URL/_USER/_PASSWORD`,
+  creds in `~/Developer/openstream-build/media-servers/emby/creds.env`). Committed: steps 1–4b.
+  In the gate now: 4c detail/play + 4d progress (worker + driver fixes: one stop per play, state
+  updated before the network call, fetched details indexed) and step 5 Plex client
+  (`ApplePlexClient.swift`); step 6 (Plex in the UI) dispatches when that gate passes.
+- Owner's 23:50 asks done: captions = Off + one entry (ab092ef, photographed); AIOMetadata = added
+  add-ons outrank Cinemeta (cf543ee). White-on-white Save on both forms fixed (2b0e651).
+- Run UI tests through `scratchpad/run-ios18-verify2.sh <test…>` (shares DerivedData-deploy-ios);
+  build simulator apps WITHOUT `CODE_SIGNING_ALLOWED=NO` (Keychain). iOS 18 crash: not reproduced.
+- Before build 13: tvOS / visionOS / macOS builds with the media-server files; Widgets App Group
+  tick (owner); "ship 13" only.
 - Overnight so far (all committed, gate 1064/115): captions = Off + one entry (ab092ef, verified on
   the iOS 18.6 sim); add-on metadata outranks Cinemeta (cf543ee); media servers steps 1–3
   (9946b3f, ab4be0d, 687a52b: client, library API, Add Media Server screen). In flight: step 4a
