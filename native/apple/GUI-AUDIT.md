@@ -2023,12 +2023,17 @@ order; this section grows as each lands.
   the live Emby test server on the iOS 18.6 sim. Caught: enabled Save rendered white-on-white
   (`.borderedProminent` under the white tint) in this form AND Add Live TV → both moved to
   `.brandPrimary`/`.brandSecondary`; re-verification running.
-- [ ] Step 4: 4a shelf store (5ca9620) and 4b Discover wiring (fef2039) are in. 4c detail + play and
-  4d progress reporting are written (worker) and photographed on the iOS 18.6 sim: a server title
-  opens its detail and PLAYS through the direct stream (no failure alert); the driver reworked the
-  stop handling (one stop per play, state updated before the network call) and two worker tests;
-  gate + commit pending in the running chain.
-- [ ] Step 5: Plex client (plex.tv PIN, resources, sections, metadata, direct play).
+- [x] Step 4: 4a shelf store (5ca9620), 4b Discover wiring (fef2039), 4c detail + play and 4d progress
+  reporting — a server title opens its detail and plays through the direct stream; progress goes
+  back to the server (one stop per play). Committed with 5/6; gate 1079 / 117.
+- [x] Step 5: Plex client (`ApplePlexClient.swift`: PIN, account, resources, connection order,
+  sections/items/children/onDeck/recentlyAdded, direct play, timeline) — unit-tested on fixtures.
+- [ ] Step 6: Plex in the Add Media Server picker (code + plex.tv/link, poll, server choice) and
+  Plex shelves/detail/play in the store — code in (63d8035); photographed: "Code GN42 · Enter it at
+  plex.tv/link · Cancel" from a real plex.tv PIN. Caught: the URL/user/password section and
+  Save/Test still showed with Plex selected (both platforms) → guarded; tvOS build had failed on
+  private form helpers → made internal. Re-verification running. Live link needs the owner's
+  plex.tv account.
 - [x] Live test: Emby 4.10 on the Mac (`~/Developer/openstream-build/media-servers/emby`, port
   8097, generated test account in `creds.env`, sample library of 2 movies + 1 show).
   `testAddMediaServerSignsInToEmbyAndCleansUp` passes on the iOS 18.6 sim: sign in → Sources row →
@@ -2066,3 +2071,60 @@ order; this section grows as each lands.
   return-key "next" label, saved Live source row absent on a fresh sim (fixture), secure field
   focus on tap (`testTypingIntoASettingsFieldPersists`, iOS 18 only — check the password AutoFill
   sheet). No crash report was produced by any of the 22 tests.
+
+## 2026-09-18 11:19 — owner's list (02:1x) — QUEUE
+Owner: "add to the list … codex is running a build too so keep that in mind" (→ one build at a
+time, check for Codex's xcodebuild before every build; re-baseline `git status` before touching a
+file Codex may hold).
+- [ ] 1. Guide data for the M3U the owner sent does not populate ("No information") — find why
+  (no `url-tvg` in the playlist? `tvg-id` present? fallback EPG?) and fix.
+- [ ] 1b. Discover billboard still shows Cinemeta's one-line blurb for a title (seen 11:19 on the
+  iPhone 16 Pro: "Reality show about swingers…") — the featured card's summary comes from the
+  catalog entry, not the resolver; make the billboard use the resolved (add-on-first) synopsis.
+- [ ] 2. Live video player GUI needs work — test it (inline preview + full screen), iPhone first.
+- [ ] 3. Draft a list of every screen (GUI inventory) and check each one — the overnight sweep,
+  written down as a checklist in this file.
+- [ ] 4. Back button on the content (detail) page is a little too big.
+- [ ] 5. Continue Watching: a long title ("Masters of the Universe") gets the title and the progress
+  bar cut off on the card.
+- [ ] 6. Live tab: the player preview can be bigger; search becomes an icon (like Discover) so the
+  preview gets the room.
+- [ ] 7. Subtitles picker "needs to be fixed" — verify the one-entry menu on every route/platform
+  (surface + AVPlayer, iPhone/iPad/TV/Vision) and the label; ask what still looks wrong if it passes.
+- [ ] 8. "Other sources" on the detail page needs to be fixed.
+- [ ] 9. Player overlay: two overlays (one permanent, one on tap) → one overlay; everything shows
+  on tap and hides together when idle.
+
+## 2026-09-18 11:27 — GUI inventory (owner's item 3) — every screen, checked per platform
+Legend: iP = iPhone, iPd = iPad, TV = Apple TV, VP = Vision Pro, Mac. Tick a cell only with a
+photograph from that platform's simulator (or Mac) taken from the current build, looked at.
+| Screen | iP | iPd | TV | VP | Mac | Notes |
+|---|---|---|---|---|---|---|
+| Discover: home (billboard, Continue Watching, shelves, Top 10) | ☐ | ☐ | ☐ | ☐ | ☐ | 1b billboard blurb; 5 long-title card |
+| Discover: search (icon → screen, results shows/movies only) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Detail: movie (artwork, meta line, Play/Download, My List/Rate, overview, More Like This) | ☐ | ☐ | ☐ | ☐ | ☐ | 4 back button |
+| Detail: series (season picker, episode rows, download per episode) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Detail: Other Sources sheet | ☐ | ☐ | ☐ | ☐ | ☐ | 8 |
+| Detail: media-server title (ms:) + episodes | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Player: surface route (overlay idle / tapped, Skip Intro, Next Episode, captions menu, More menu) | ☐ | ☐ | ☐ | ☐ | ☐ | 9, 7 |
+| Player: AVPlayer route (HLS) — controls, captions | ☐ | ☐ | ☐ | ☐ | ☐ | 7 |
+| Player: failure alerts (Playback Failed / Unavailable) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Library: root, folder, item, downloads | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Live: root (title, search, preview, chips, guide) | ☐ | ☐ | ☐ | ☐ | ☐ | 2, 6, 1 guide data |
+| Live: channel preview → full screen player | ☐ | ☐ | ☐ | ☐ | ☐ | 2 |
+| Live: channel error + recovery | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: root (tabs, Top 10 toggle, services) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Sources list + source detail (health, Enabled, Delete) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Files (Direct URL, Network Shares) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Instance → Radarr/Sonarr | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Catalog | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Live TV (M3U / Xtream, Test, Save, largest text) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Media Server (Jellyfin / Emby / Plex) | ☐ | ☐ | ☐ | ☐ | ☐ | iP done 02:07 |
+| Settings: Channel Manager (+ picker) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Playback, Subtitle Languages | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Metadata, Radarr & Sonarr, Trakt, Streaming Services | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Privacy, Storage, About, Web Management | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Widgets / Top Shelf / Watch | ☐ | ☐ | ☐ | ☐ | ☐ | |
+Debug routes for headless captures: `-OpenStreamVisionScreen discover|library|live|settings|
+source-detail|add-files|add-live|add-catalog|add-media-server|network-share|web-management|
+subtitle-languages` + the top-level settings routes listed in OpenStreamRootView.swift.

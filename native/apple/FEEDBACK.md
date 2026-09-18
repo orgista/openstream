@@ -4380,3 +4380,13 @@ Big Buck Bunny from the Emby test server: tap Play on its detail page and the vi
 the server's direct stream, chapters and all. Progress goes back to the server when playback
 stops so Continue Watching agrees everywhere. Jellyfin uses the same path; Plex is being wired
 next.
+
+## 2026-09-18 02:01 — media servers, where they stand
+
+Jellyfin and Emby: sign in with a server URL (or Jellyfin's Quick Connect code, or an Emby Connect
+account), then the server's libraries appear on Discover as "Latest in <library>" shelves, its
+resume list joins Continue Watching, a title opens a full detail page (series with seasons and
+episodes) and plays through the server's own stream; where you stop goes back to the server.
+Plex: "Sign in with Plex" shows a short code to type at plex.tv/link, then the app picks the
+reachable server and does the same. Plex needs a real plex.tv account to try end to end; Emby was
+exercised live on the Mac's test server, Jellyfin shares the same code path.

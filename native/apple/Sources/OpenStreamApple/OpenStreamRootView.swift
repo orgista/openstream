@@ -508,7 +508,7 @@ public struct OpenStreamRootView: View {
                 settings: settingsStore,
                 openSettings: { selectedTab = .settings }
             )
-            .appleAlignedTabTitle(tab.title)
+            .appleAlignedTabTitle(tab.title, isLive: true)
         case .settings:
             AppleSettingsView(
                 settings: settingsStore,

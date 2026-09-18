@@ -117,7 +117,11 @@ struct AppleTransportOverlay: View {
                 case .right: Task { await model.skip(by: chrome.moveSkipSeconds) }
                 case .down:
                     model.bumpActivity()
-                    tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
+                    if model.nextEpisodePrompt != nil {
+                        tvFocus = .nextEpisode
+                    } else {
+                        tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
+                    }
                 default: model.bumpActivity()
                 }
             }
@@ -142,14 +146,17 @@ struct AppleTransportOverlay: View {
             .contentShape(.rect)
             .onTapGesture { model.bumpActivity() }
 
-            // Outside the chrome's fade on purpose: the transport auto-hides
-            // after three seconds of playback, and an end-of-episode prompt
-            // that vanishes while it is counting down is no prompt at all.
+            // Inside the chrome's fade: the transport auto-hides
+            // after three seconds of playback, so these prompts follow
+            // the same visibility as the rest of the controls.
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
                     skipIntroButton
+                        .opacity(model.controlsVisible ? 1 : 0)
+                        .allowsHitTesting(model.controlsVisible)
+                        .accessibilityHidden(!model.controlsVisible)
                 }
                 HStack {
                     Spacer()
@@ -204,7 +211,7 @@ struct AppleTransportOverlay: View {
         .onChange(of: model.controlsVisible) { _, visible in
             // Focus returns to the invisible surface when the controls hide,
             // so nothing is drawn as focused during playback.
-            if !visible, chrome.hidesFocusDuringPlayback, tvFocus != .skipIntro { tvFocus = .surface }
+            if !visible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
         }
         .onPlayPauseCommand { model.togglePlayPause() }
         .onExitCommand {
@@ -395,6 +402,9 @@ struct AppleTransportOverlay: View {
             // The card is the thing to act on while it is up, so focus lands
             // there rather than leaving the remote on the scrubber.
             .onAppear { tvFocus = .nextEpisode }
+            .onDisappear {
+                if tvFocus == .nextEpisode { tvFocus = .surface }
+            }
             #endif
         }
     }

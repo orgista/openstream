@@ -1918,13 +1918,15 @@ struct AppleCatalogItemDetailView: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.headline.weight(.bold))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 36, height: 36)
                     .background(
                         isLandscapeLayout ? .clear : .black.opacity(0.48),
                         in: Circle()
                     )
+                    .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
+                    .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -2612,48 +2614,66 @@ struct AppleCatalogItemDetailView: View {
 
     private var streamPicker: some View {
         NavigationStack {
-            List {
-                ForEach(localFiles) { file in
-                    Button {
-                        selectedLocalFile = file
-                        selectedStream = nil
-                        streamPickerPresented = false
-                        playRequest = UUID()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Local · \(library.sources.first { $0.id == file.sourceID }?.name ?? "Library")")
-                                .font(.body.weight(.medium))
-                            Text(AppleLocalLibraryStore.format(file)).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.accessibilityIdentifier("detail.other-sources.local")
-                }
-                ForEach(Array(streamChoices.enumerated()), id: \.offset) { index, candidate in
-                    Button {
-                        selectedLocalFile = nil
-                        selectedStream = candidate
-                        streamPickerPresented = false
-                        playRequest = UUID()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(appleStreamDisplayText(candidate.title))
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(.primary)
-                            if let sourceName = candidate.sourceName {
-                                Text("via \(appleStreamDisplayText(sourceName))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            if localFiles.isEmpty && streamChoices.isEmpty {
+                ContentUnavailableView("No other sources", systemImage: "antenna.radiowaves.left.and.right")
+                    .navigationTitle("Other Sources")
+                    #if os(iOS) || os(visionOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                    #endif
+            } else {
+                List {
+                    if !localFiles.isEmpty {
+                        Section("On this device") {
+                            ForEach(localFiles) { file in
+                                Button {
+                                    selectedLocalFile = file
+                                    selectedStream = nil
+                                    streamPickerPresented = false
+                                    playRequest = UUID()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Local · \(library.sources.first { $0.id == file.sourceID }?.name ?? "Library")")
+                                            .font(.body.weight(.medium))
+                                        Text(AppleLocalLibraryStore.format(file)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }.accessibilityIdentifier("detail.other-sources.local")
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .accessibilityIdentifier("detail.other-sources.\(index)")
+                    if !streamChoices.isEmpty {
+                        Section("Sources") {
+                            ForEach(Array(streamChoices.enumerated()), id: \.offset) { index, candidate in
+                                Button {
+                                    selectedLocalFile = nil
+                                    selectedStream = candidate
+                                    streamPickerPresented = false
+                                    playRequest = UUID()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(appleStreamDisplayText(candidate.title))
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                            .font(.body.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                        if let sourceName = candidate.sourceName {
+                                            Text(appleStreamDisplayText(sourceName))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .accessibilityIdentifier("detail.other-sources.\(index)")
+                            }
+                        }
+                    }
                 }
+                .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+                .navigationTitle("Other Sources")
+                #if os(iOS) || os(visionOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
             }
-            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-            .navigationTitle("Other sources")
-            #if os(iOS) || os(visionOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
         }
         .presentationDetents([.medium])
     }

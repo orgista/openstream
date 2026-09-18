@@ -105,9 +105,12 @@ public final class AppleIPTVGuideStore {
                     caches[id] = ChannelCache(programmes: programmes, fetchTime: now)
                 }
                 revision &+= 1
+                let filled = ids.filter { !(caches[$0]?.programmes.isEmpty ?? true) }.count
+                appleTrace("guide loaded: \(filled)/\(ids.count) visible channels have programmes")
             } catch {
                 // Keep previous data, and allow the next visible refresh to retry.
                 // Cancellation or a failed provider must not cache an empty guide.
+                appleTrace("guide load failed for \(ids.count) channels: \(AppleDiagnosticRedactor.redact(String(describing: error)))")
             }
         }
     }

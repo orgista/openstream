@@ -305,6 +305,12 @@ write; if a file you need is already modified by the other agent, say so and sto
   DerivedData-uitests first. After a run, compare `stat -f %m` of the container binary with the
   product you meant to test. (Corrects the earlier note that UI-test schemes build only the runner.)
 
+- **Simulator set (owner 2026-09-18):** iPhone 16 Pro `6A037503…` (iOS 26, content), OpenStream
+  iPhone 15 Pro Max iOS18 `C923FDAB…` (clean, paired with OpenStream Apple Watch `BD7F31DE…`),
+  OpenStream Review iPad `CC634933…` (content), OpenStream Apple TV `B251C620…`, OpenStream Vision
+  Pro `F598603A…`. All stock Xcode devices were deleted at the owner's request; never create more.
+  An iOS 27 iPhone 18 Pro Max waits for Xcode 27.
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/<name>/SKILL.md` and load automatically in Claude Code
   (`Skill` tool by name). For agy pass `--add-dir ~/.claude/skills`; codex reads them as files.
@@ -409,7 +415,18 @@ write; if a file you need is already modified by the other agent, say so and sto
   what is on him. Say what you did *not* do and why.
 - This file — update the "state" below when you finish a unit of work.
 
-## 7. State as of 2026-09-18 01:32 (newest first)
+## 7. State as of 2026-09-18 02:01 (newest first)
+- Media servers steps 1–6 committed (latest 63d8035, gate 1079/117): Jellyfin/Emby sign-in,
+  library API, Add Media Server screen, shelves + Continue Watching, detail + play (direct stream),
+  progress back to the server, Plex client + Plex sign-in/shelves/play. Live-verified on the iOS
+  18.6 sim against the Emby test server (`testAddMediaServerSignsInToEmbyAndCleansUp`). Plex live
+  run needs the owner's plex.tv account. Running now: tvOS / visionOS / macOS compile check
+  (`scratchpad/build-other-platforms.sh`), iOS rebuild, e2e re-run with a Plex code screenshot.
+- Owner 23:50: captions = Off + one entry (ab092ef, photographed); AIOMetadata = added add-ons
+  outrank Cinemeta (cf543ee). White-on-white Save on both forms fixed (2b0e651).
+- Traps of the night (§4b): UI-test DerivedData installs its own old app; unsigned sim builds
+  break Keychain; worker gates that report "12 issues" were overlap artefacts — always re-gate.
+- Before build 13: Widgets App Group tick (owner); all platforms on 13; "ship 13" only.
 - Media servers on the iPhone sim, end to end (Emby test server): sign in → Sources row → Discover
   "Latest in Movies" → detail → Play through the direct stream → delete. UI test
   `testAddMediaServerSignsInToEmbyAndCleansUp` (env `OPENSTREAM_TEST_EMBY_URL/_USER/_PASSWORD`,

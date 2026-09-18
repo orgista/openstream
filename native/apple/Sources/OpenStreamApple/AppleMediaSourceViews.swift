@@ -40,6 +40,10 @@ struct AppleLiveTVView: View {
     @State private var sharePlay = AppleSharePlaySessionStore.shared
     @State private var sharedChannelChoices: [AppleIPTVChannel] = []
     @State private var showsSharedChannelChoices = false
+    #if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var viewportSize: CGSize = .zero
+    #endif
     #if os(tvOS)
     @State private var tvPlayer: AppleTVLivePlayerPresentation?
     @State private var tvFocusRestore = 0
@@ -81,7 +85,14 @@ struct AppleLiveTVView: View {
                 #if os(tvOS)
                 tvGuide
                 #else
-                VStack(spacing: 0) {
+                #if os(iOS)
+                let isPad = UIDevice.current.userInterfaceIdiom == .pad
+                let isLandscape = verticalSizeClass == .compact || (isPad && viewportSize.width > viewportSize.height)
+                #else
+                let isLandscape = false
+                #endif
+
+                let videoColumn = VStack(spacing: 0) {
                     if let pendingProbe {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -108,7 +119,12 @@ struct AppleLiveTVView: View {
                     } else {
                         lastWatchedCard
                     }
+                    if isLandscape {
+                        Spacer(minLength: 0)
+                    }
+                }
 
+                let guideColumn = VStack(spacing: 0) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: AppleDesignTokens.spacingLarge) {
                             ForEach(channelSnapshot.categories, id: \.self) { category in
@@ -150,10 +166,43 @@ struct AppleLiveTVView: View {
                     )
                     .safeAreaPadding(.bottom, 8)
                 }
+
+                Group {
+                    if isLandscape {
+                        HStack(alignment: .top, spacing: 0) {
+                            #if os(iOS)
+                            videoColumn.frame(width: viewportSize.width * 0.5)
+                            #else
+                            videoColumn
+                            #endif
+                            guideColumn
+                        }
+                    } else {
+                        VStack(spacing: 0) {
+                            videoColumn
+                            guideColumn
+                        }
+                    }
+                }
+                #if os(iOS)
+                .onGeometryChange(for: CGSize.self) { proxy in
+                    proxy.size
+                } action: { viewportSize = $0 }
+                #endif
                 #endif
             }
         }
-        .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision))
+        .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision) {
+            AppleIPTVGuideGridView(
+                channels: channelSnapshot.channels,
+                guide: guideStore.guide(for: channelSnapshot.channelIDs),
+                entries: premierGuide,
+                favoriteIDs: settings.favoriteChannelIDs,
+                onSelect: play,
+                onToggleFavorite: toggleFavorite,
+                onVisibleChannels: refreshGuide
+            )
+        })
         .task(id: settings.playbackEngine) {
             guard configuredEngine != settings.playbackEngine else { return }
             configuredEngine = settings.playbackEngine
@@ -631,7 +680,7 @@ struct AppleLiveTVView: View {
 
     private var lastWatchedCard: some View {
         AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL)
-            .livePinnedPlayerLayout()
+            .livePinnedPlayerLayout(isPlaceholder: true)
     }
 
     private var lastWatchedChannel: AppleIPTVChannel? {
@@ -660,24 +709,20 @@ private struct AppleLiveConnectingArtwork: View {
 }
 
 private struct LivePinnedPlayerLayout: ViewModifier {
-    #if os(iOS)
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-    #endif
+    let isPlaceholder: Bool
 
     func body(content: Content) -> some View {
         #if os(iOS)
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
-        let isLandscapePad = isPad && verticalSizeClass == .compact
-        if isLandscapePad {
-            content
-                .frame(maxWidth: .infinity)
-                .containerRelativeFrame(.vertical, count: 100, span: 42, spacing: 0)
+        let base = content
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .ignoresSafeArea(.container, edges: .horizontal)
+            
+        if isPlaceholder && isPad {
+            base.containerRelativeFrame(.vertical, count: 100, span: 40, alignment: .center)
         } else {
-            content
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, isPad ? 16 : 0)
-                .ignoresSafeArea(.container, edges: .horizontal)
+            base
         }
         #else
         content
@@ -688,7 +733,7 @@ private struct LivePinnedPlayerLayout: ViewModifier {
 }
 
 private extension View {
-    func livePinnedPlayerLayout() -> some View { modifier(LivePinnedPlayerLayout()) }
+    func livePinnedPlayerLayout(isPlaceholder: Bool = false) -> some View { modifier(LivePinnedPlayerLayout(isPlaceholder: isPlaceholder)) }
 }
 
 /// Inline Live-tab playback surface. The coordinator and AVKit host stay owned
@@ -1135,12 +1180,14 @@ private class AppleLiveChromeViewController: UIViewController, UIGestureRecogniz
 
 #endif
 
-private struct AppleLiveSearchModifier: ViewModifier {
+private struct AppleLiveSearchModifier<Results: View>: ViewModifier {
     let isEnabled: Bool
     @Binding var query: String
     let selectionRevision: Int
-    #if os(iOS)
+    @ViewBuilder let results: () -> Results
+    #if !os(tvOS)
     @FocusState private var searchFocused: Bool
+    @State private var showsSearch = false
     #endif
 
     @ViewBuilder
@@ -1149,11 +1196,48 @@ private struct AppleLiveSearchModifier: ViewModifier {
         content
         #else
         if isEnabled {
-            content.searchable(text: $query, prompt: "Channels and groups")
-                #if os(iOS)
-                .searchFocused($searchFocused)
-                .onChange(of: selectionRevision) { _, _ in searchFocused = false }
-                #endif
+            content
+                .toolbar {
+                    #if os(iOS)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showsSearch = true
+                        } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        .accessibilityLabel("Search")
+                    }
+                    #else
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showsSearch = true
+                        } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        .accessibilityLabel("Search")
+                    }
+                    #endif
+                }
+                .navigationDestination(isPresented: $showsSearch) {
+                    results()
+                        .searchable(text: $query, prompt: "Channels and groups")
+                        .searchFocused($searchFocused)
+                        .onChange(of: selectionRevision) { _, _ in
+                            searchFocused = false
+                            showsSearch = false
+                        }
+                        .onAppear {
+                            // Focus search field automatically when pushing the screen
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(250))
+                                searchFocused = true
+                            }
+                        }
+                        .navigationTitle("Search")
+                        #if os(iOS)
+                        .navigationBarTitleDisplayMode(.inline)
+                        #endif
+                }
         } else {
             content
         }

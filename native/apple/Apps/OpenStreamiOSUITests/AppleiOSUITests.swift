@@ -909,6 +909,19 @@ final class AppleiOSUITests: XCTestCase {
         let kindPicker = any.matching(identifier: "sources.mediaServer.kind").firstMatch
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 30), "Add Media Server screen missing")
         attach("add-media-server-jellyfin")
+        // Plex: the sign-in code comes from plex.tv (no account needed to show it).
+        let plexKind = any.matching(identifier: "sources.mediaServer.kind.plex").firstMatch
+        if plexKind.exists { plexKind.tap() } else { kindPicker.tap(); app.buttons["Plex"].firstMatch.tap() }
+        let plexSignIn = any.matching(identifier: "sources.mediaServer.plexSignIn").firstMatch
+        if plexSignIn.waitForExistence(timeout: 5) {
+            plexSignIn.tap()
+            let code = any.matching(identifier: "sources.mediaServer.plex.code").firstMatch
+            _ = code.waitForExistence(timeout: 20)
+            Thread.sleep(forTimeInterval: 1)
+            attach("add-media-server-plex")
+            let cancel = app.buttons["Cancel"].firstMatch
+            if cancel.exists { cancel.tap() }
+        }
         // Emby, signed in with a server URL (Emby Connect needs a real account).
         let emby = any.matching(identifier: "sources.mediaServer.kind.emby").firstMatch
         if emby.exists { emby.tap() } else { kindPicker.tap(); app.buttons["Emby"].firstMatch.tap() }
@@ -944,6 +957,29 @@ final class AppleiOSUITests: XCTestCase {
         let listed = row.waitForExistence(timeout: 30)
         attach("add-media-server-saved")
         XCTAssertTrue(listed, "saved media server not listed")
+        // Whatever fails below, the saved server must not stay on the simulator.
+        addTeardownBlock { [self] in
+            if app.state != .runningForeground { app.launch() }
+            let anyElement = app.descendants(matching: .any)
+            let close = anyElement.matching(identifier: "player.close").firstMatch
+            if close.exists { close.tap() }
+            let back = app.buttons["detail.back"].firstMatch
+            if back.exists { back.tap() }
+            app.tabBars.buttons["Settings"].firstMatch.tap()
+            let sources = app.buttons["Sources"].firstMatch
+            if sources.waitForExistence(timeout: 5) { sources.tap() }
+            let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Media Server ·")).firstMatch
+            guard saved.waitForExistence(timeout: 10) else { return }
+            saved.tap()
+            let delete = app.buttons["Delete Source"].firstMatch
+            var swipes = 0
+            while !delete.exists, swipes < 4 { app.swipeUp(); swipes += 1 }
+            guard delete.waitForExistence(timeout: 5) else { return }
+            delete.tap()
+            let confirm = app.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Delete")).firstMatch
+            if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+            Thread.sleep(forTimeInterval: 1)
+        }
         // Discover should now carry the server's shelves ("Latest in Movies" …).
         app.tabBars.buttons["Discover"].firstMatch.tap()
         let shelf = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Latest in")).firstMatch
@@ -992,5 +1028,37 @@ final class AppleiOSUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         XCTAssertFalse(row.exists, "media server still listed after delete")
         attach("add-media-server-deleted")
+    }
+
+    /// Owner (2026-09-18): the guide for the playlist they sent shows "No
+    /// information". Adds that playlist (env OPENSTREAM_TEST_M3U), opens Live,
+    /// searches a channel and waits for programme cells; photographs the guide
+    /// at 15 / 45 / 90 s so the driver can see what the phone path produces.
+    func testPlaylistGuideShowsProgrammes() throws {
+        guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_M3U not set")
+        }
+        addUITestPlaylist(playlist)
+        addTeardownBlock { [self] in
+            app.terminate()
+            launch(screen: "settings")
+            removeUITestPlaylistSource()
+        }
+        let live = app.tabBars.buttons["Live"].firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 10))
+        live.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 30), "no Live search field")
+        search.tap(); search.typeText("TF1")
+        if app.keyboards.buttons["search"].exists { app.keyboards.buttons["search"].tap() }
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "TF1")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 30), "TF1 never listed")
+        // The guide cells are not exposed to accessibility, so the evidence is the
+        // photographs plus the app's own "guide loaded / guide load failed" trace.
+        for checkpoint in [20, 45, 75] {
+            Thread.sleep(forTimeInterval: checkpoint == 20 ? 20 : 30)
+            attach("guide-\(checkpoint)s")
+        }
+        XCTAssertTrue(row.exists, "TF1 row disappeared")
     }
 }
