@@ -167,13 +167,15 @@ public struct AppleIPTVGuideGridView: View {
                             Button { onSelect(row.channel) } label: {
                                 Text((row.number.map { "\($0) · " } ?? "") + row.channel.name)
                                     .font(.headline).multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Play \(row.channel.name)")
                             Button { onToggleFavorite(row.id) } label: {
                                 Image(systemName: favoriteIDs.contains(row.id) ? "heart.fill" : "heart")
                                     .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("\(favoriteIDs.contains(row.id) ? "Remove" : "Add") \(row.channel.name) \(favoriteIDs.contains(row.id) ? "from" : "to") favorites")
@@ -243,6 +245,7 @@ private struct GuideChannelRail: View {
             Button(action: onToggleFavorite) {
                 Image(systemName: isFavorite ? "heart.fill" : "heart")
                     .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .foregroundStyle(isFavorite ? AppleDesignTokens.brandAccent : .secondary)

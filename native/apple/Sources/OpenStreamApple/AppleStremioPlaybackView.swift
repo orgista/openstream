@@ -163,7 +163,9 @@ struct AppleStremioPlayerView: View {
                 Menu {
                     Button("Other sources", systemImage: "list.bullet") { showsOtherSources = true }
                 } label: {
-                    Image(systemName: "ellipsis").foregroundStyle(.white).frame(width: 44, height: 44)
+                    Image(systemName: "ellipsis").foregroundStyle(.white)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
                 }
                 .padding(.trailing, 16)
                 .accessibilityLabel("More")

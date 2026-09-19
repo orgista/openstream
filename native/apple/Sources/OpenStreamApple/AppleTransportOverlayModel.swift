@@ -166,7 +166,20 @@ public final class AppleTransportOverlayModel {
 
     private var observationTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
-    private let hideDelay: Duration = .seconds(3)
+    /// Three seconds of stillness hides the chrome. A UI test cannot read a
+    /// button's frame and its neighbour's inside that window — the second query
+    /// lands after the timer — so the crawler and the live photo tests launch
+    /// with `-OpenStreamHoldPlayerChrome YES` and the timer stands down.
+    private let hideDelay: Duration = AppleTransportOverlayModel.chromeIsHeldOpen ? .seconds(600) : .seconds(3)
+
+    static let chromeIsHeldOpen: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-OpenStreamHoldPlayerChrome")
+            || UserDefaults.standard.bool(forKey: "OpenStreamHoldPlayerChrome")
+        #else
+        return false
+        #endif
+    }()
 
     public init(coordinator: ApplePlaybackCoordinator, isLive: Bool) {
         self.coordinator = coordinator
@@ -388,6 +401,11 @@ public final class AppleTransportOverlayModel {
     public func bumpActivity() {
         controlsVisible = true
         scheduleAutoHide()
+    }
+
+    public func hideControls() {
+        controlsVisible = false
+        hideTask?.cancel()
     }
 
     // MARK: - Formatting

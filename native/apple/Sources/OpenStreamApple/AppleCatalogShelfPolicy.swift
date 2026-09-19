@@ -10,8 +10,15 @@ enum AppleCatalogShelfPolicy {
     static func style(for catalog: AppleStremioCatalog) -> Style {
         let name = title(for: catalog).lowercased()
         if name.hasPrefix("top 10") { return .ranked }
-        if name.hasPrefix("featured") { return .featured }
+        if name.hasPrefix("featured") || (name.contains("emmy") && name.contains("winners")) { return .featured }
         return .poster
+    }
+
+    static func rankedSubtitle(for item: AppleCatalogItem) -> String {
+        [item.year.map { String($0) } ?? item.releaseInfo, item.genres?.first]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
     static func visibleSections(
@@ -24,6 +31,14 @@ enum AppleCatalogShelfPolicy {
             let order = title(for: $0.catalog).localizedCaseInsensitiveCompare(title(for: $1.catalog))
             return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
         }.filter { seen.insert($0.id).inserted }
+    }
+
+    /// First occurrence wins. A shelf keys its `ForEach` on `id`, so a repeated
+    /// id draws one card twice under one accessibility identifier — which
+    /// SwiftUI treats as undefined and XCTest cannot resolve.
+    static func uniqueByID<Value: Identifiable>(_ values: [Value]) -> [Value] {
+        var seen = Set<Value.ID>()
+        return values.filter { seen.insert($0.id).inserted }
     }
 }
 

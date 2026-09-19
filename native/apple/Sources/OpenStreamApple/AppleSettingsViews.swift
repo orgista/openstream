@@ -514,6 +514,8 @@ private struct AppleChannelManagerView: View {
                             #else
                             Button { toggle(channel.id) } label: {
                                 Image(systemName: "minus.circle").foregroundStyle(.secondary)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(.rect)
                             }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Remove \(channel.name)")
@@ -1143,5 +1145,37 @@ private struct AppleAboutView: View {
             }
         }
         .appleSettingsPane("About", embedded: embeddedInSplit)
+    }
+}
+
+struct AppleWorkingButtonLabel: View {
+    let title: LocalizedStringKey
+    let workingTitle: LocalizedStringKey
+    let isWorking: Bool
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.mini).accessibilityHidden(true)
+                Text(workingTitle)
+            }
+            .hidden()
+            .accessibilityHidden(true)
+            
+            HStack(spacing: 8) {
+                Text(title)
+            }
+            .hidden()
+            .accessibilityHidden(true)
+            
+            HStack(spacing: 8) {
+                if isWorking {
+                    ProgressView().controlSize(.mini).accessibilityHidden(true)
+                }
+                Text(isWorking ? workingTitle : title)
+                    .contentTransition(.identity)
+            }
+            .animation(nil, value: isWorking)
+        }
     }
 }

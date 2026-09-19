@@ -396,12 +396,18 @@ public struct OpenStreamRootView: View {
             AppleFirstRunGuidanceContainer {
                 AppleFirstRunGuidanceView {
                     selectedTab = .settings
-                    #if os(visionOS)
+                    // The button says Open Sources. Off visionOS it only
+                    // switched tabs and left the viewer on the Settings root,
+                    // one row short of the thing they asked for (2026-09-19).
                     var path = NavigationPath()
                     path.append(AppleSettingsRoute.sources)
                     navigationPaths[.settings] = path
-                    #endif
                     firstRunGuidanceSeen = true
+                    #if DEBUG
+                    // The debug route forces the card; without this the card
+                    // stays up over the screen it just opened.
+                    debugForcesFirstRun = false
+                    #endif
                 }
                     #if os(visionOS)
                     .frame(width: 560, height: 300)

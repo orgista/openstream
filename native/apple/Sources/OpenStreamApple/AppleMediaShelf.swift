@@ -5,11 +5,31 @@ struct AppleMediaShelf<Content: View>: View {
     /// Optional control on the header line's trailing end (the Library's
     /// Sort menu on tvOS), so nothing has to float over the billboard.
     var accessory: AnyView? = nil
+    var onOpen: (() -> Void)? = nil
+    var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: titleSpacing) {
             HStack(alignment: .center) {
-                Text(title).font(titleFont).accessibilityAddTraits(.isHeader)
+                if let onOpen {
+                    Button(action: onOpen) {
+                        HStack(spacing: 8) {
+                            Text(title).font(titleFont)
+                            Image(systemName: "chevron.right")
+                                .font(.headline.bold())
+                        }
+                        .multilineTextAlignment(.leading)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier(headingIdentifier)
+                } else {
+                    Text(title).font(titleFont).accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier(headingIdentifier)
+                }
                 if let accessory {
                     Spacer(minLength: 16)
                     accessory
@@ -23,16 +43,15 @@ struct AppleMediaShelf<Content: View>: View {
         }.appleCatalogFocusSection()
     }
 
-    // tvOS rows: a Title 3 header on the copy column, 24 pt card gaps and room
-    // for the 1.06x focus lift (FEEDBACK X5). Other platforms are unchanged.
+    // tvOS retains its safe-area gutter and room for the focus lift.
     #if os(tvOS)
-    private var titleFont: Font { .system(size: AppleTVBillboardMetrics.rowTitleFontSize, weight: .semibold) }
+    private var titleFont: Font { .title.bold() }
     private var titleSpacing: CGFloat { AppleTVBillboardMetrics.rowTitleSpacing }
     private var horizontalInset: CGFloat { AppleTVBillboardMetrics.rowHorizontalInset }
     private var cardGap: CGFloat { AppleTVBillboardMetrics.cardGap }
     private var verticalBleed: CGFloat { AppleTVBillboardMetrics.rowVerticalBleed }
     #else
-    private var titleFont: Font { .system(size: 17, weight: .semibold) }
+    private var titleFont: Font { .title.bold() }
     private var titleSpacing: CGFloat { 12 }
     private var horizontalInset: CGFloat { 16 }
     private var cardGap: CGFloat { 8 }

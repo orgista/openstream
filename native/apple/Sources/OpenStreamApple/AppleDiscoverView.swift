@@ -60,6 +60,8 @@ struct AppleDiscoverView: View {
     @State private var selectedHero: IndexedCatalogItem?
     @State private var selectedHeroAutoPlay = false
     @State private var showsSelectedHero = false
+    @State private var selectedCatalog: AppleCatalogSection?
+    @State private var showsCatalog = false
     #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
     @State private var visionReviewDetail = false
     @State private var visionReviewAutoPlay = false
@@ -212,19 +214,7 @@ struct AppleDiscoverView: View {
 
                         ForEach(visibleSections) { section in
                             if let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-                                AppleCatalogSectionView(
-                                    section: section,
-                                    source: source,
-                                    relatedItems: catalogLookup.relatedItems(for: source.id),
-                                    mediaIndex: mediaIndex,
-                                    playbackSources: sourceStore.sources,
-                                    metadataConfiguration: metadataConfiguration,
-                                    gatewayConfig: gatewayConfig,
-                                    streamingServerConfiguration: streamingServerConfiguration,
-                                    playbackResolver: playbackResolver,
-                                    settings: settings,
-                                    openSettings: openSettings
-                                )
+                                catalogSection(section, source: source)
                             }
                         }
                     }
@@ -243,6 +233,12 @@ struct AppleDiscoverView: View {
                 .scrollClipDisabled()
                 .background(Color.black.ignoresSafeArea())
                 #endif
+            }
+        }
+        .navigationDestination(isPresented: $showsCatalog) {
+            if let selectedCatalog,
+               let source = sourceStore.sources.first(where: { $0.id == selectedCatalog.sourceID }) {
+                catalogSection(selectedCatalog, source: source).catalogList
             }
         }
         .navigationDestination(isPresented: $showsSelectedHero) {
@@ -424,7 +420,7 @@ struct AppleDiscoverView: View {
         let localItems = self.continueWatching.map { $0.item }
         let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
         
-        return mergedItems.compactMap { item -> IndexedCatalogItem? in
+        let resolved = mergedItems.compactMap { item -> IndexedCatalogItem? in
             if let existing = self.continueWatching.first(where: { $0.item.mediaID == item.mediaID }) {
                 return existing
             }
@@ -433,6 +429,13 @@ struct AppleDiscoverView: View {
             let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
             return IndexedCatalogItem(record: record, item: item, source: source)
         }
+        // The merge keys on `mediaID`, the shelf keys on `record.id`: a local
+        // record and a server record can agree on the second and differ on the
+        // first, and then `ForEach` draws the same card twice. Two cards under
+        // one identifier is undefined behaviour for SwiftUI and an ambiguous
+        // query for a test — `home.continue.<id>` could not even be asked
+        // whether it was hittable (2026-09-19).
+        return AppleCatalogShelfPolicy.uniqueByID(resolved)
     }
 
     private var topPicks: [IndexedCatalogItem] {
@@ -511,6 +514,24 @@ struct AppleDiscoverView: View {
                 }
             }
         }
+    }
+
+    private func catalogSection(_ section: AppleCatalogSection, source: AppleSource) -> AppleCatalogSectionView {
+        AppleCatalogSectionView(
+            section: section,
+            source: source,
+            viewportWidth: viewportSize.width,
+            relatedItems: catalogLookup.relatedItems(for: source.id),
+            mediaIndex: mediaIndex,
+            playbackSources: sourceStore.sources,
+            metadataConfiguration: metadataConfiguration,
+            gatewayConfig: gatewayConfig,
+            streamingServerConfiguration: streamingServerConfiguration,
+            playbackResolver: playbackResolver,
+            settings: settings,
+            openSettings: openSettings,
+            onOpen: { selectedCatalog = section; showsCatalog = true }
+        )
     }
 
     @ViewBuilder
@@ -656,7 +677,7 @@ struct AppleDiscoverView: View {
         #if os(tvOS)
         48
         #else
-        30
+        32
         #endif
     }
 
@@ -948,6 +969,7 @@ struct AppleSearchView: View {
 private struct AppleCatalogSectionView: View {
     let section: AppleCatalogSection
     let source: AppleSource
+    let viewportWidth: CGFloat
     let relatedItems: [AppleCatalogItem]
     let mediaIndex: AppleMediaIndexStore
     let playbackSources: [AppleSource]
@@ -957,6 +979,7 @@ private struct AppleCatalogSectionView: View {
     let playbackResolver: AppleStremioPlaybackResolver
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    let onOpen: () -> Void
     @FocusState private var focusedItemID: String?
 
     private var title: String {
@@ -969,51 +992,102 @@ private struct AppleCatalogSectionView: View {
     }
 
     var body: some View {
-        AppleMediaShelf(title: title) {
+        AppleMediaShelf(title: title, onOpen: onOpen,
+                        headingIdentifier: "discover.shelf.\(source.manifestID ?? source.id.uuidString).\(section.catalog.type).\(section.catalog.id)") {
             ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
                 NavigationLink {
-                    AppleCatalogItemDetailView(
-                        item: item,
-                        source: source,
-                        relatedItems: relatedItems,
-                        mediaIndex: mediaIndex,
-                        playbackSources: playbackSources,
-                        metadataConfiguration: metadataConfiguration,
-                        gatewayConfig: gatewayConfig,
-                        streamingServerConfiguration: streamingServerConfiguration,
-                        playbackResolver: playbackResolver,
-                        settings: settings,
-                        openSettings: openSettings
-                    )
+                    detail(item)
                 } label: {
                     if AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked {
                         AppleTop10Card(item: item, rank: index + 1)
+                    } else if AppleCatalogShelfPolicy.style(for: section.catalog) == .featured {
+                        ApplePortraitPromoCard(item: item, viewportWidth: viewportWidth)
                     } else {
-                        AppleCatalogCard(item: item, sizing:
-                            AppleCatalogShelfPolicy.style(for: section.catalog) == .featured ? .featured : .catalog)
+                        AppleCatalogCard(item: item)
                     }
                 }
                 .focused($focusedItemID, equals: item.id)
                 .accessibilityIdentifier("home.media.\(item.id)")
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.catalog.\(section.id)")
         #if os(tvOS)
         .defaultFocus($focusedItemID, section.items.first?.id)
         #endif
     }
+
+    var catalogList: some View {
+        List(section.items) { item in
+            NavigationLink { detail(item) } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name).font(.headline)
+                    let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
+                    if !subtitle.isEmpty { Text(subtitle).foregroundStyle(.secondary) }
+                }
+                .frame(minHeight: 44, alignment: .leading)
+            }
+        }
+        .navigationTitle(title)
+        .scrollIndicators(.hidden)
+        .tint(.primary)
+    }
+
+    private func detail(_ item: AppleCatalogItem) -> some View {
+        AppleCatalogItemDetailView(
+            item: item,
+            source: source,
+            relatedItems: relatedItems,
+            mediaIndex: mediaIndex,
+            playbackSources: playbackSources,
+            metadataConfiguration: metadataConfiguration,
+            gatewayConfig: gatewayConfig,
+            streamingServerConfiguration: streamingServerConfiguration,
+            playbackResolver: playbackResolver,
+            settings: settings,
+            openSettings: openSettings
+        )
+    }
+
 }
 
 private struct AppleTop10Card: View {
     let item: AppleCatalogItem
     let rank: Int
+
+    private var cardWidth: CGFloat {
+        #if os(tvOS)
+        480
+        #else
+        320
+        #endif
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
-            AppleTop10RankNumeral(rank: rank)
-            AppleCatalogCard(item: item)
+        VStack(alignment: .leading, spacing: 8) {
+            AppleCatalogCard(item: item, sizing: .ranked)
+            HStack(alignment: .center, spacing: 12) {
+                AppleTop10RankNumeral(rank: rank)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.gray)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: cardWidth, alignment: .leading)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(rank), \(item.name)")
+        .accessibilityValue(AppleCatalogShelfPolicy.rankedSubtitle(for: item))
     }
 }
 
@@ -1052,12 +1126,10 @@ private struct AppleTop10UnresolvedCard: View {
     let title: String
     let rank: Int
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
-            AppleTop10RankNumeral(rank: rank)
-            AppleCatalogCard(item: AppleCatalogItem(mediaID: "unresolved-rank-\(rank)", type: "movie", name: title))
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rank), \(title)")
+        AppleTop10Card(
+            item: AppleCatalogItem(mediaID: "unresolved-rank-\(rank)", type: "movie", name: title),
+            rank: rank
+        )
     }
 }
 
@@ -1186,22 +1258,31 @@ struct AppleCatalogCard: View {
         .appleVisionHover()
     }
 
-    private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching }
+    private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching || sizing == .ranked }
 
     private var showsTitle: Bool {
+        if sizing == .ranked || sizing == .portraitPromo { return false }
         #if os(tvOS)
-        isLandscapeCard
+        return isLandscapeCard
         #else
-        true
+        return true
         #endif
     }
 
     private var cardWidth: CGFloat {
+        if sizing == .portraitPromo {
+            #if os(tvOS)
+            return 400
+            #else
+            let width = viewportWidth.flatMap { $0 > 0 ? $0 : nil } ?? 390
+            return max(1, min(width - 32, 480))
+            #endif
+        }
         if isLandscapeCard {
             #if os(tvOS)
-            return sizing == .featured ? 480 : 360
+            return sizing == .continueWatching ? 360 : 480
             #else
-            return sizing == .featured ? 320 : 260
+            return sizing == .continueWatching ? 260 : 320
             #endif
         }
         if sizing == .detailSuggestions {
@@ -1239,6 +1320,8 @@ enum AppleCatalogCardSizing {
     case catalog
     case detailSuggestions
     case featured
+    case portraitPromo
+    case ranked
     case continueWatching
 }
 
@@ -1539,12 +1622,6 @@ struct AppleCatalogItemDetailView: View {
             #endif
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                guard rateChoicesExpanded else { return }
-                withAnimation(rateAnimation) { rateChoicesExpanded = false }
-            }
-        )
         .coordinateSpace(name: "detail-scroll")
         #if os(iOS)
         // The hero extends into the top safe area in both orientations; the
@@ -1808,12 +1885,15 @@ struct AppleCatalogItemDetailView: View {
     private var detailHeroContent: some View {
         GeometryReader { proxy in
             ZStack {
-            heroArtwork
-                .contentShape(Rectangle())
-                .onTapGesture { toggleTrailerPlayback() }
-                .frame(maxWidth: .infinity)
-                .frame(height: heroHeight)
-                .clipped()
+            Button(action: toggleTrailerPlayback) {
+                heroArtwork
+                    .frame(maxWidth: .infinity)
+                    .frame(height: heroHeight)
+                    .clipped()
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(trailerIsPlaying ? "Pause preview" : "Play preview")
 
             #if os(iOS) || os(visionOS)
             if trailerHasStarted, let embedURL = trailerEmbedURL,
@@ -1858,19 +1938,12 @@ struct AppleCatalogItemDetailView: View {
                     .accessibilityHidden(trailerIsActive)
             }
 
-            if isLandscapeLayout {
+            if isLandscapeLayout, landscapeOverlaysVisible {
                 landscapeHeroOverlay(in: proxy.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, overlayLeadingMargin)
                     .padding(.bottom, overlayBottomMargin)
-                    .opacity(landscapeOverlaysVisible ? 1 : 0)
-                    .allowsHitTesting(landscapeOverlaysVisible)
-                    .accessibilityHidden(!landscapeOverlaysVisible)
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.35),
-                        value: landscapeOverlaysVisible
-                    )
-            } else {
+                    .transition(.opacity)
             }
 
             if isLandscapeLayout, let trailerInteractionGlyph {
@@ -2427,6 +2500,7 @@ struct AppleCatalogItemDetailView: View {
                 .focusSection()
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("detail.episodes")
     }
 
@@ -3075,7 +3149,11 @@ struct AppleCatalogItemDetailView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if seasonDownloads.isRunning {
-                    Button("Cancel") { seasonDownloads.cancel(); downloadCoordinator.cancel() }
+                    Button { seasonDownloads.cancel(); downloadCoordinator.cancel() } label: {
+                        Text("Cancel")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(.rect)
+                    }
                 }
             }
             if let failure = seasonDownloads.failure {
@@ -3103,12 +3181,9 @@ struct AppleCatalogItemDetailView: View {
             width: dynamicTypeSize.isAccessibilitySize ? nil : primaryActionRowWidth,
             alignment: .leading
         )
-        .overlay {
-            Color.clear
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("My List, Rate")
-                .accessibilityIdentifier("detail.icon-row")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("My List, Rate")
+        .accessibilityIdentifier("detail.icon-row")
     }
 
     @ViewBuilder
@@ -3193,7 +3268,8 @@ struct AppleCatalogItemDetailView: View {
             // A fixed 44 pt slot cannot hold "My List" at these sizes, so above
             // the threshold the label decides its own width.
             .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth)
-            .frame(minHeight: scaledIconRowHeight)
+            .frame(minWidth: 44, minHeight: max(44, scaledIconRowHeight))
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
@@ -3339,6 +3415,7 @@ struct AppleCatalogItemDetailView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("detail.episodes")
     }
 
@@ -3441,8 +3518,10 @@ struct AppleCatalogItemDetailView: View {
             } label: {
                 episodeDownloadGlyph(episodeDownloadIndicator(for: episode))
                     .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+            .padding(.trailing, 8)
             .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
             .accessibilityLabel(episodeDownloadIndicator(for: episode).accessibilityLabel(episodeTitle: episodeDownloadTitle(episode)))
             .accessibilityIdentifier("detail.episode.download")
@@ -3634,58 +3713,25 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var rateControl: some View {
-        ZStack(alignment: .leading) {
-            Button {
-                withAnimation(rateAnimation) { rateChoicesExpanded.toggle() }
-            } label: {
-                VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
-                    Image(systemName: ratingGlyph(for: rating, selected: rating != nil))
-                        .font(.system(size: scaledIconGlyphSize))
-                    Text("Rate")
-                        .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
+        Menu {
+            ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
+                Button {
+                    selectRating(value)
+                } label: {
+                    Label(value.title, systemImage: ratingGlyph(for: value, selected: rating == value))
                 }
-                .frame(
-                    width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth,
-                    alignment: .leading
-                )
-                .frame(minHeight: scaledIconRowHeight)
             }
-            .buttonStyle(.plain)
-            .opacity(rateChoicesExpanded ? 0 : 1)
-            .accessibilityHidden(rateChoicesExpanded)
-
-            if rateChoicesExpanded {
-                HStack(spacing: 14) {
-                    ForEach(Array(AppleTitleRating.selectableCases.enumerated()), id: \.offset) { index, value in
-                        Button {
-                            selectRating(value)
-                        } label: {
-                            Image(systemName: ratingGlyph(for: value, selected: rating == value))
-                                .font(.system(size: 24, weight: .semibold))
-                                #if os(visionOS)
-                                .frame(width: 60, height: 60)
-                                #else
-                                .frame(width: 32, height: 40)
-                                #endif
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(value.title)
-                        .accessibilityAddTraits(rating == value ? .isSelected : [])
-                        .scaleEffect(rateChoicesExpanded ? 1 : 0.35)
-                        .opacity(rateChoicesExpanded ? 1 : 0)
-                        .animation(rateAnimation.delay(Double(index) * 0.04), value: rateChoicesExpanded)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 60)
-                .background(.black.opacity(0.92), in: .capsule)
-                .transition(.scale(scale: 0.25, anchor: .leading).combined(with: .opacity))
-                .zIndex(2)
+        } label: {
+            VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
+                Image(systemName: ratingGlyph(for: rating, selected: rating != nil))
+                    .font(.system(size: scaledIconGlyphSize))
+                Text("Rate")
+                    .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
             }
+            .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth)
+            .frame(minWidth: 44, minHeight: max(44, scaledIconRowHeight))
+            .contentShape(.rect)
         }
-        .frame(width: AppleDetailMetrics.iconActionWidth, alignment: .leading)
-        .frame(height: AppleDetailMetrics.iconRowHeight)
         .foregroundStyle(.white)
         .accessibilityLabel("Rate")
         .accessibilityValue(rating?.title ?? "Not rated")
@@ -3707,6 +3753,7 @@ struct AppleCatalogItemDetailView: View {
     private func selectRating(_ value: AppleTitleRating) {
         rating = value
         ratingStore.set(value, for: item.mediaID)
+        #if os(tvOS)
         ratingSelectionGeneration += 1
         let generation = ratingSelectionGeneration
         withAnimation(rateAnimation) { rateChoicesExpanded = true }
@@ -3715,6 +3762,7 @@ struct AppleCatalogItemDetailView: View {
             guard !Task.isCancelled, generation == ratingSelectionGeneration else { return }
             withAnimation(rateAnimation) { rateChoicesExpanded = false }
         }
+        #endif
     }
 
     private func toggleFavorite() {
@@ -4351,9 +4399,8 @@ struct AppleDetailActionButtonLabel: View {
                 RoundedRectangle(cornerRadius: AppleDetailMetrics.actionButtonCornerRadius)
                     .stroke(kind.stroke, lineWidth: 1)
             }
-            .contentShape(
-                RoundedRectangle(cornerRadius: AppleDetailMetrics.actionButtonCornerRadius)
-            )
+            .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
+            .contentShape(.rect)
     }
 }
 

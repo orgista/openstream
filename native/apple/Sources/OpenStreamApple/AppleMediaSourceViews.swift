@@ -153,15 +153,25 @@ struct AppleLiveTVView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: AppleDesignTokens.spacingLarge) {
                             ForEach(channelSnapshot.categories, id: \.self) { category in
-                                Button(category) { selectedCategory = category }
-                                    .font(AppleDesignTokens.fontSubheadline)
-                                    .foregroundStyle(selectedCategory == category ? AppleDesignTokens.textPrimary : AppleDesignTokens.textSecondary)
-                                    .padding(.vertical, 10)
-                                    .overlay(alignment: .bottom) {
-                                        Capsule().fill(AppleDesignTokens.brandAccent)
-                                            .frame(height: 2)
-                                            .opacity(selectedCategory == category ? 1 : 0)
-                                    }
+                                Button { selectedCategory = category } label: {
+                                    Text(category)
+                                        .font(AppleDesignTokens.fontSubheadline)
+                                        .foregroundStyle(selectedCategory == category ? AppleDesignTokens.textPrimary : AppleDesignTokens.textSecondary)
+                                        .padding(.vertical, 10)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(.rect)
+                                }
+                                .overlay(alignment: .bottom) {
+                                    Capsule().fill(AppleDesignTokens.brandAccent)
+                                        .frame(height: 2)
+                                        .opacity(selectedCategory == category ? 1 : 0)
+                                        .allowsHitTesting(false)
+                                }
+                                // The underline and the brighter text say which
+                                // category is showing; neither reaches
+                                // VoiceOver, which read all eleven pills
+                                // identically (2026-09-19).
+                                .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
                             }
                         }
                         .padding(.horizontal, AppleDesignTokens.spacingMedium)
@@ -1002,7 +1012,18 @@ private struct AppleLiveFullScreenControls: View {
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onClose: () -> Void
     let channelPicker: AppleLiveChannelPickerState
+    @State private var hideChromeSignal = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// tvOS keeps its focus catcher: the picker there is a focus destination,
+    /// not a touch target, and removing the surface would strand the engine.
+    private var transportIsObscured: Bool {
+        #if os(tvOS)
+        false
+        #else
+        channelPicker.isPresented
+        #endif
+    }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -1010,19 +1031,50 @@ private struct AppleLiveFullScreenControls: View {
                 ApplePlaybackSurfaceView(engine: coordinator.engine)
                     .ignoresSafeArea()
             }
-            AppleTransportOverlay(
+            let transport = AppleTransportOverlay(
                 coordinator: coordinator,
                 request: request,
                 onShowChannels: channels.isEmpty ? nil : { channelPicker.show() },
+                isObscured: transportIsObscured,
+                onBackgroundTap: { wasHidden in
+                    if wasHidden {
+                        if !channels.isEmpty { channelPicker.show() }
+                    } else if channelPicker.isPresented {
+                        channelPicker.dismiss()
+                    }
+                },
+                onControlsVisibilityChanged: { isVisible in
+                    if !isVisible && channelPicker.isPresented {
+                        channelPicker.dismiss()
+                    }
+                },
+                hideChromeSignal: hideChromeSignal,
                 onClose: onClose,
                 sharePlayMenu: sharePlayMenu
             )
-            .allowsHitTesting(!channelPicker.isPresented)
-            .accessibilityHidden(channelPicker.isPresented)
+            // Hidden from accessibility as well as from touch, on every
+            // platform. `allowsHitTesting(false)` alone leaves the transport's
+            // full-screen "Show playback controls" surface in the tree, and it
+            // is then the element found at every point over the channel panel:
+            // VoiceOver read the surface instead of the rows, and XCTest
+            // reported every visible row unhittable (2026-09-19).
+            transport
+                .allowsHitTesting(!channelPicker.isPresented)
+                .accessibilityHidden(channelPicker.isPresented)
             if channelPicker.isPresented {
+                Color.clear
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        channelPicker.dismiss()
+                        hideChromeSignal.toggle()
+                    }
                 AppleLiveChannelPickerOverlay(channels: channels, onSelect: { channel in
                     channelPicker.select(channel) { switched in onSwitchChannel?(switched) }
-                }, onDismiss: { channelPicker.dismiss() })
+                }, onDismiss: { 
+                    channelPicker.dismiss()
+                    hideChromeSignal.toggle()
+                })
+                .ignoresSafeArea()
                 .frame(maxWidth: 340)
                 .frame(maxHeight: .infinity)
                 .zIndex(1)
@@ -1098,6 +1150,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         view.addSubview(fullscreenButton)
         
         NSLayoutConstraint.activate([
+            playPauseButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            playPauseButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             playPauseButton.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             playPauseButton.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
             
@@ -1423,6 +1477,7 @@ struct AppleLiveChannelPickerOverlay: View {
                         .font(.title2)
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
                 }
                 .accessibilityLabel("Close channels")
                 .accessibilityIdentifier("live.picker.close")
@@ -1457,7 +1512,17 @@ struct AppleLiveChannelPickerOverlay: View {
                             .padding(.horizontal)
                             .padding(.vertical, 8)
                             .contentShape(.rect)
+                            // One element per row. Left as a container, the row
+                            // published its logo and its title as two elements
+                            // covering the same rectangle; a touch at the row's
+                            // centre resolved to the title, not to the row, so
+                            // every visible channel read as unhittable and
+                            // VoiceOver offered the name with no action
+                            // (2026-09-19). `.combine` on the Button is not
+                            // enough — the label's children have to go.
+                            .accessibilityElement(children: .ignore)
                         }
+                        .accessibilityLabel(channel.name)
                         .accessibilityIdentifier("live.picker.channel.\(channel.id)")
                         #if os(tvOS)
                         .buttonStyle(.card)
@@ -1469,6 +1534,7 @@ struct AppleLiveChannelPickerOverlay: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .accessibilityIdentifier("live.picker.list")
             #if os(iOS)
             .background(.regularMaterial)
             #else

@@ -2100,30 +2100,30 @@ Legend: iP = iPhone, iPd = iPad, TV = Apple TV, VP = Vision Pro, Mac. Tick a cel
 photograph from that platform's simulator (or Mac) taken from the current build, looked at.
 | Screen | iP | iPd | TV | VP | Mac | Notes |
 |---|---|---|---|---|---|---|
-| Discover: home (billboard, Continue Watching, shelves, Top 10) | ☐ | ☐ | ☐ | ☐ | ☐ | 1b billboard blurb; 5 long-title card 2026-09-18 implementer sweep blocked for all rows: sandbox denies CoreSimulator and required build/screenshot directories. No current-build photographs; all cells remain unchecked. |
+| Discover: home (billboard, Continue Watching, shelves, Top 10) | ☑ | ☑ | ☐ | ☐ | ☐ | 1b billboard blurb; 5 long-title card 2026-09-18 implementer sweep blocked for all rows: sandbox denies CoreSimulator and required build/screenshot directories. No current-build photographs; all cells remain unchecked. Button crawl 2026-09-19: every control on this screen pressed or named. |
 | Discover: search (icon → screen, results shows/movies only) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Detail: movie (artwork, meta line, Play/Download, My List/Rate, overview, More Like This) | ☐ | ☐ | ☐ | ☐ | ☐ | 4 back button |
-| Detail: series (season picker, episode rows, download per episode) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Detail: movie (artwork, meta line, Play/Download, My List/Rate, overview, More Like This) | ☑ | ☑ | ☐ | ☐ | ☐ | 4 back button Button crawl 2026-09-19: every control on this screen pressed or named. |
+| Detail: series (season picker, episode rows, download per episode) | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. |
 | Detail: Other Sources sheet | ☐ | ☐ | ☐ | ☐ | ☐ | 8 |
 | Detail: media-server title (ms:) + episodes | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Player: surface route (overlay idle / tapped, Skip Intro, Next Episode, captions menu, More menu) | ☐ | ☐ | ☐ | ☐ | ☐ | 9, 7 |
 | Player: AVPlayer route (HLS) — controls, captions | ☐ | ☐ | ☐ | ☐ | ☐ | 7 Live host now observes caption tracks through the shared overlay instead of freezing a UIMenu. Broadcast CEA-608/708 rendering NOT verified; simulator inaccessible. NativePlaybackEngine readyToPlay path reviewed, unchanged. |
 | Player: failure alerts (Playback Failed / Unavailable) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Library: root, folder, item, downloads | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Live: root (title, search, preview, chips, guide) | ☐ | ☐ | ☐ | ☐ | ☐ | 2, 6, 1 guide data |
+| Library: root, folder, item, downloads | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. |
+| Live: root (title, search, preview, chips, guide) | ☑ | ☑ | ☐ | ☐ | ☐ | 2, 6, 1 guide data Button crawl 2026-09-19: every control on this screen pressed or named. |
 | Live: channel preview → full screen player | ☐ | ☐ | ☐ | ☐ | ☐ | 2 2026-09-18 code: guide selections request full screen; Channels opens the existing material/logo list from the left; channel switches retain the player; one overlay with captions/More/mute in an HStack and one close. XCUITest assertions/captures added; execution and photographs blocked by sandbox. |
 | Live: channel error + recovery | ☐ | ☐ | ☐ | ☐ | ☐ | Full-screen channel failure/recovery still needs simulator verification after host changes; no photograph. |
-| Settings: root (tabs, Top 10 toggle, services) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Settings: Sources list + source detail (health, Enabled, Delete) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Settings: Add Files (Direct URL, Network Shares) | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: root (tabs, Top 10 toggle, services) | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. |
+| Settings: Sources list + source detail (health, Enabled, Delete) | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. Delete not pressed by policy. |
+| Settings: Add Files (Direct URL, Network Shares) | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. |
 | Settings: Add Instance → Radarr/Sonarr | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Settings: Add Catalog | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Settings: Add Live TV (M3U / Xtream, Test, Save, largest text) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Settings: Add Media Server (Jellyfin / Emby / Plex) | ☐ | ☐ | ☐ | ☐ | ☐ | iP done 02:07 |
-| Settings: Channel Manager (+ picker) | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Settings: Playback, Subtitle Languages | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Add Media Server (Jellyfin / Emby / Plex) | ☑ | ☐ | ☐ | ☐ | ☐ | iP done 02:07 Button crawl 2026-09-19: every control on this screen pressed or named. iPad: the Kind picker refuses a touch — see 2026-09-19 below. |
+| Settings: Channel Manager (+ picker) | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. |
+| Settings: Playback, Subtitle Languages | ☑ | ☐ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. iPad: Playback Info refuses a touch — see 2026-09-19 below. |
 | Settings: Metadata, Radarr & Sonarr, Trakt, Streaming Services | ☐ | ☐ | ☐ | ☐ | ☐ | |
-| Settings: Privacy, Storage, About, Web Management | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Settings: Privacy, Storage, About, Web Management | ☑ | ☑ | ☐ | ☐ | ☐ | Button crawl 2026-09-19: every control on this screen pressed or named. Web Management not reached inside the budget; Clear/Delete not pressed by policy. |
 | Widgets / Top Shelf / Watch | ☐ | ☐ | ☐ | ☐ | ☐ | |
 Debug routes for headless captures: `-OpenStreamVisionScreen discover|library|live|settings|
 source-detail|add-files|add-live|add-catalog|add-media-server|network-share|web-management|
@@ -2135,3 +2135,54 @@ OpenStream Content + the Review iPad (build 14:00). Verified by photo: Live port
 iPhone + iPad, inline tapped state (3 controls), full screen (one close, captions), Discover with
 the two-line Continue Watching card. Guide data loads a few seconds after the Live tab opens (trace
 `guide loaded`). Workers: agy until its quota ran out (~13:55, resets ~16:30), then Codex.
+
+## 2026-09-19 — every button on every screen (iPhone + iPad)
+New XCUITest `testEveryButtonRespondsOnEveryScreen`, plus the landscape iPad variant
+`testEveryButtonRespondsOnEveryScreenOnIPad` (`Apps/OpenStreamiOSUITests/AppleiOSUITests.swift`).
+It launches each of the 21 debug routes — the 19 in the brief plus the Settings root and Sources —
+enumerates buttons, rows, links, switches, segments and tab items (scrolling to reveal what is
+below the fold), classifies every control on the untouched screen, presses each one and requires
+an answer inside three seconds: a sheet, an alert, a navigation, a menu, a flipped switch, or a
+change in the control's own label / value / selection / enablement / count of controls on screen.
+Silence and "on screen, whole, enabled, refuses a touch" are failures with a screenshot named
+`<route>__<identifier>`; one attachment `button-crawl-report.txt` lists every screen and every
+verdict. Destructive labels (Delete, Remove, Sign Out, Clear, Reset, Erase, Forget, Disconnect,
+Unpair, Send, Upload, Ship, Purchase) and anything that would write to the owner's simulators
+(Save, Sign In, Import, Export, Restore, Pair, Download, Test Connection) are named and stepped
+over. Each run is under 21 minutes; routes share the budget evenly so none is starved.
+
+Product defects the crawl found and that are now fixed:
+- `AppleMediaSourceViews.swift:1500` live channel rows published their logo and their title as two
+  elements covering the same rectangle, so a touch at a row's centre resolved to the title, not the
+  row: **every visible channel in the full-screen picker was unhittable**, and VoiceOver offered the
+  name with no action. One element per row.
+- `AppleTransportOverlay.swift:114` / `AppleMediaSourceViews.swift:1000` the transport's clear
+  full-screen "Show playback controls" surface stayed in the hierarchy while the channel panel was
+  open and owned every hit point over it. It leaves the hierarchy now (`isObscured`).
+- `AppleMediaSourceViews.swift:169` the Live category pills carried no `.isSelected` trait: an
+  underline and brighter text said which one was showing and neither reached VoiceOver.
+- `OpenStreamRootView.swift:393` first run's **Open Sources** only switched to the Settings tab and
+  left the viewer on the Settings root, one row short of what the button names. It opens Sources.
+- `AppleWatchProviderSettingsView.swift:39` Streaming Services offered **Try Again** in a state its
+  own reload returns from before it reaches the network (metadata off or no key). Title only now.
+- `AppleDiscoverView.swift:431` Continue Watching merges on `mediaID` and draws on `record.id`, so
+  one card could be drawn twice under one identifier — undefined for `ForEach`, unanswerable for a
+  test (`home.continue.<id>` could not be asked whether it was hittable). Deduplicated, with a
+  Swift Testing case in `AppleCatalogTests.swift`.
+
+Inventory rows covered by this pass are ticked below. Open, not fixed: two iPad-only controls
+(`sources.mediaServer.kind` on Add Media Server, `Playback Info` on Playback) report a full frame
+inside the reported window and still refuse a touch; both sit at the edge of the floating tab bar
+on a Review iPad that runs the app in a resizable window smaller than the canvas XCUITest reports,
+and neither reproduces on the phone. Re-run with the iPad app full screen before treating them as
+layout defects. Streaming Services' **Try Again** answers a crawl with nothing when the request
+fails inside one frame; the retry does re-issue. And once, order-dependently: on the title page,
+**Play preview** followed by the floating back chevron left the page in place — `detail.back`
+answered in every other run, including the one immediately before, so it is filed rather than
+fixed.
+
+Final runs: iPhone 21 screens, 41 pressed, 0 unhittable, 2 no-response (both above), 20:00.
+iPad landscape 21 screens, 38 pressed, 0 no-response, 2 unhittable (both above), 19:50.
+`swift test` 54/54 in the touched suites. `testEveryRouteIsPhotographed`,
+`testLiveTappedStatesArePhotographed` pass; `testLiveBroadcastCaptionsArePhotographed` skips
+(no channel in the lineup published a caption track).

@@ -131,18 +131,14 @@ struct AppleStorageSettingsView: View {
             }
 
             Section("Actions") {
-                actionButton("Clear Cache", action: .cache)
+                actionButton("Clear Cache", action: .cache) { run(.cache) }
                     .disabled(snapshot.cacheBytes == 0 || workingAction != nil)
 
-                Button("Clear Metadata", role: .destructive) {
-                    confirmation = .metadata
-                }
-                .disabled(snapshot.metadataBytes == 0 || workingAction != nil)
+                actionButton("Clear Metadata", role: .destructive, action: .metadata) { confirmation = .metadata }
+                    .disabled(snapshot.metadataBytes == 0 || workingAction != nil)
 
-                Button("Delete All Downloads", role: .destructive) {
-                    confirmation = .downloads
-                }
-                .disabled(snapshot.downloadCount == 0 || workingAction != nil)
+                actionButton("Delete All Downloads", role: .destructive, action: .downloads) { confirmation = .downloads }
+                    .disabled(snapshot.downloadCount == 0 || workingAction != nil)
             }
 
             if let statusMessage {
@@ -168,16 +164,16 @@ struct AppleStorageSettingsView: View {
     }
 
     @ViewBuilder
-    private func actionButton(_ title: String, action: AppleStorageAction) -> some View {
-        Button {
-            run(action)
+    private func actionButton(_ title: String, role: ButtonRole? = nil, action: AppleStorageAction, perform: @escaping () -> Void) -> some View {
+        Button(role: role) {
+            perform()
         } label: {
-            if workingAction == action {
-                ProgressView()
-                    .accessibilityLabel(action.inProgressLabel)
-            } else {
-                Text(title)
-            }
+            AppleWorkingButtonLabel(
+                title: LocalizedStringKey(title),
+                workingTitle: LocalizedStringKey(action.workingLabel),
+                isWorking: workingAction == action
+            )
+            .accessibilityLabel(workingAction == action ? action.inProgressLabel : title)
         }
     }
 
@@ -236,6 +232,13 @@ private enum AppleStorageAction: String, Identifiable {
         case .cache: "Clearing cache"
         case .metadata: "Clearing metadata"
         case .downloads: "Deleting downloads"
+        }
+    }
+
+    var workingLabel: String {
+        switch self {
+        case .cache, .metadata: "Clearing…"
+        case .downloads: "Deleting…"
         }
     }
 }

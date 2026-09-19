@@ -42,7 +42,7 @@ struct AppleBackupSettingsView: View {
             Section {
                 SecureField("Export passphrase (optional)", text: $passphrase)
                     .textContentType(.password)
-                Button("Export Configuration…") {
+                Button {
                     Task {
                         do {
                             document = try await AppleConfigurationDocument(data: controller.export(passphrase: passphrase))
@@ -50,8 +50,13 @@ struct AppleBackupSettingsView: View {
                             exporting = true
                         } catch { controller.setResult("Could not export configuration") }
                     }
+                } label: {
+                    AppleWorkingButtonLabel(title: "Export Configuration…", workingTitle: "Exporting…", isWorking: controller.isBusy && !importing)
                 }
-                Button("Import Configuration…") { importing = true }
+                
+                Button { importing = true } label: {
+                    AppleWorkingButtonLabel(title: "Import Configuration…", workingTitle: "Importing…", isWorking: controller.isBusy && importing)
+                }
             }
             .disabled(controller.isBusy)
             if !controller.sources.sources.filter(\.needsSignIn).isEmpty {

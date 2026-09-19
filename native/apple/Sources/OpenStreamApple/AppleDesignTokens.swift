@@ -190,8 +190,8 @@ public extension View {
 /// content. It contains one title and one action, with no explanatory copy.
 public struct AppleSourceEmptyState: View {
     public let title: String
-    public let actionTitle: String
-    public let action: () -> Void
+    public let actionTitle: String?
+    public let action: (() -> Void)?
 
     public init(title: String, actionTitle: String, action: @escaping () -> Void) {
         self.title = title
@@ -199,13 +199,23 @@ public struct AppleSourceEmptyState: View {
         self.action = action
     }
 
+    /// Title only. For a dead end an action cannot open: a button that runs and
+    /// leaves the screen exactly as it was reads as a broken button.
+    public init(title: String) {
+        self.title = title
+        self.actionTitle = nil
+        self.action = nil
+    }
+
     public var body: some View {
         VStack(spacing: 16) {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
-            Button(actionTitle, action: action)
-                .buttonStyle(.brandPrimary)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.brandPrimary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(16)

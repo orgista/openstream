@@ -17,6 +17,13 @@ struct AppleWatchProviderSettingsView: View {
 
     private var region: String { AppleWatchProviderResponse.currentRegion() }
 
+    /// What `load()` needs before it can reach the network. Nil covers both the
+    /// switch being off and the key being absent, which is the same dead end.
+    private var configuration: AppleTMDBConfiguration? {
+        guard settings.metadataEnabled else { return nil }
+        return try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey)
+    }
+
     var body: some View {
         content
             .task { if providers.isEmpty { await load() } }
@@ -35,6 +42,14 @@ struct AppleWatchProviderSettingsView: View {
             Group {
                 if isLoading {
                     AppleSourceLoadingState()
+                } else if configuration == nil {
+                    // `load()` returns before it reaches the network when
+                    // metadata is off or the key is missing, so Try Again ran,
+                    // changed nothing and left the same screen — an
+                    // unresponsive button by every measure (button crawl,
+                    // 2026-09-19). The way out of this one is
+                    // Settings → Metadata, not a retry.
+                    AppleSourceEmptyState(title: "Metadata Is Off")
                 } else if let failure {
                     AppleSourceEmptyState(title: failure, actionTitle: "Try Again", action: reload)
                 } else {
@@ -82,12 +97,16 @@ struct AppleWatchProviderSettingsView: View {
     private func reload() { Task { await load() } }
 
     private func load() async {
-        guard settings.metadataEnabled,
-              let configuration = try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) else {
+        guard let configuration else {
             failure = "Metadata Is Off"
             return
         }
         isLoading = true
+        // The old failure comes off the screen while the new attempt runs.
+        // Leaving it up meant pressing Try Again changed nothing on screen at
+        // all, and on a fast failure the button read as dead (button crawl,
+        // 2026-09-19).
+        failure = nil
         defer { isLoading = false }
         do {
             providers = try await AppleTMDBClient().availableWatchProviders(

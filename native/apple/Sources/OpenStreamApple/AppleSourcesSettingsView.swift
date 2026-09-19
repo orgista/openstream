@@ -951,6 +951,8 @@ struct AppleRevealableSecureField: View {
             } label: {
                 Image(systemName: isRevealed ? "eye.slash" : "eye")
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .appleVisionActionTarget()
@@ -1272,10 +1274,11 @@ private struct AppleAddLiveTVSourceView: View {
 
     private func connectionLabel(saving: Bool) -> some View {
         let active = isWorking && (connectionAction?.shouldSave == saving)
-        return HStack(spacing: 8) {
-            if active { ProgressView().accessibilityHidden(true) }
-            Text(active ? (saving ? "Saving…" : "Testing…") : (saving ? "Save" : "Test Connection"))
-        }
+        return AppleWorkingButtonLabel(
+            title: saving ? "Save" : "Test Connection",
+            workingTitle: saving ? "Saving…" : "Testing…",
+            isWorking: active
+        )
     }
 
     private var canSubmit: Bool {
@@ -2119,7 +2122,11 @@ private struct AppleWebManagementView: View {
 
     /// Ends every active browser session.
     private var forgetBrowsersButton: some View {
-        Button("Forget Paired Browsers") { confirmForget = true }
+        Button { confirmForget = true } label: {
+            Text("Forget Paired Browsers")
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+        }
         #if !os(tvOS)
             .buttonStyle(.plain)
         #endif
@@ -2157,14 +2164,18 @@ private struct AppleWebManagementView: View {
             guard !isWorking else { return }
             confirmStop = true
         } label: {
-            if isWorking {
-                HStack {
-                    ProgressView()
-                    Text("Stopping")
+            Group {
+                if isWorking {
+                    HStack {
+                        ProgressView()
+                        Text("Stopping")
+                    }
+                } else {
+                    Text("Stop Web Management")
                 }
-            } else {
-                Text("Stop Web Management")
             }
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(.rect)
         }
         #if !os(tvOS)
         .buttonStyle(.plain)

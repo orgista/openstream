@@ -603,10 +603,12 @@ struct AppleAddMediaServerView: View {
     
     private func connectionLabel(saving: Bool, text: String) -> some View {
         let active = isWorking && (connectionAction?.shouldSave == saving)
-        return HStack(spacing: 8) {
-            if active { ProgressView().accessibilityHidden(true) }
-            Text(text)
-        }
+        let workingText = text == "Test Connection" ? "Testing…" : (text == "Sign In" ? "Signing In…" : (text == "Save" ? "Saving…" : (text == "Use Quick Connect" ? "Connecting…" : "\(text)…")))
+        return AppleWorkingButtonLabel(
+            title: LocalizedStringKey(text),
+            workingTitle: LocalizedStringKey(workingText),
+            isWorking: active
+        )
     }
     
     private func resetState() {

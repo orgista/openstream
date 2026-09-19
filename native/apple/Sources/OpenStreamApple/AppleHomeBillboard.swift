@@ -62,8 +62,18 @@ struct AppleHomeBillboard<Actions: View>: View {
         #if os(tvOS)
         AppleTVChromeMetrics.horizontalSafeInset
         #else
-        4
+        0
         #endif
+    }
+}
+
+/// Promotional posters carry their own title treatment and badges in the art.
+struct ApplePortraitPromoCard: View {
+    let item: AppleCatalogItem
+    let viewportWidth: CGFloat
+
+    var body: some View {
+        AppleCatalogCard(item: item, sizing: .portraitPromo, viewportWidth: viewportWidth)
     }
 }
 

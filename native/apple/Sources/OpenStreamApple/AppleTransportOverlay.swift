@@ -33,6 +33,18 @@ struct AppleTransportOverlay: View {
     let request: ApplePlaybackRequest
     let otherSources: (() -> Void)?
     let onShowChannels: (() -> Void)?
+    /// True while another surface — the live channel panel — is drawn over the
+    /// player. `allowsHitTesting(false)` is not enough on its own: the clear
+    /// full-screen "Show playback controls" button stays in the accessibility
+    /// tree and is then the element found at every point over the panel, so
+    /// VoiceOver read the surface instead of the channel rows and XCTest
+    /// reported every visible row unhittable. `accessibilityHidden` did not
+    /// remove the descendants either; the controls have to leave the
+    /// hierarchy (2026-09-19).
+    let isObscured: Bool
+    let onBackgroundTap: ((_ wasHidden: Bool) -> Void)?
+    let onControlsVisibilityChanged: ((Bool) -> Void)?
+    let hideChromeSignal: Bool
     let onRequestFullScreen: (() -> Void)?
     let onClose: (() -> Void)?
     let sharePlayMenu: SharePlayMenu?
@@ -62,11 +74,28 @@ struct AppleTransportOverlay: View {
     @FocusState private var tvFocus: TVFocus?
     #endif
 
-    init(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, otherSources: (() -> Void)? = nil, onShowChannels: (() -> Void)? = nil, onRequestFullScreen: (() -> Void)? = nil, onClose: (() -> Void)? = nil, sharePlayMenu: SharePlayMenu? = nil, nextEpisode: AppleNextEpisodeContext? = nil) {
+    init(
+        coordinator: ApplePlaybackCoordinator,
+        request: ApplePlaybackRequest,
+        otherSources: (() -> Void)? = nil,
+        onShowChannels: (() -> Void)? = nil,
+        isObscured: Bool = false,
+        onBackgroundTap: ((_ wasHidden: Bool) -> Void)? = nil,
+        onControlsVisibilityChanged: ((Bool) -> Void)? = nil,
+        hideChromeSignal: Bool = false,
+        onRequestFullScreen: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil,
+        sharePlayMenu: SharePlayMenu? = nil,
+        nextEpisode: AppleNextEpisodeContext? = nil
+    ) {
         self.coordinator = coordinator
         self.request = request
         self.otherSources = otherSources
         self.onShowChannels = onShowChannels
+        self.isObscured = isObscured
+        self.onBackgroundTap = onBackgroundTap
+        self.onControlsVisibilityChanged = onControlsVisibilityChanged
+        self.hideChromeSignal = hideChromeSignal
         self.onRequestFullScreen = onRequestFullScreen
         self.onClose = onClose
         self.sharePlayMenu = sharePlayMenu
@@ -95,41 +124,52 @@ struct AppleTransportOverlay: View {
 
     var body: some View {
         ZStack {
-            Button {
-                if chrome.selectTogglesPlayback { model.togglePlayPause() } else { model.bumpActivity() }
-            } label: {
-                Color.clear.contentShape(.rect)
-            }
-            #if os(tvOS)
-            // The stock plain style brightens and lifts a focused button; on a
-            // full-screen clear label that is a light platter over the whole
-            // picture (owner Y1: "washed out", inset rounded card).
-            .buttonStyle(AppleTVSurfaceButtonStyle())
-            #else
-            .buttonStyle(.plain)
-            #endif
-            .appleVisionHover()
-            .accessibilityLabel(chrome.selectTogglesPlayback ? "Play or pause" : "Show playback controls")
-            .accessibilityIdentifier("player.controls.show")
-            #if os(tvOS)
-            .focused($tvFocus, equals: .surface)
-            .onMoveCommand { direction in
-                // The surface holds focus while the video plays, so the
-                // clickpad edges skip and a swipe down reveals the controls.
-                switch direction {
-                case .left: Task { await model.skip(by: -chrome.moveSkipSeconds) }
-                case .right: Task { await model.skip(by: chrome.moveSkipSeconds) }
-                case .down:
-                    model.bumpActivity()
-                    if model.nextEpisodePrompt != nil {
-                        tvFocus = .nextEpisode
-                    } else {
-                        tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
+            // `isObscured` is always false on tvOS, so the focus catcher below
+            // never leaves the hierarchy there and the focus engine keeps its
+            // target.
+            if !isObscured {
+                Button {
+                    if chrome.selectTogglesPlayback { 
+                        model.togglePlayPause() 
+                    } else { 
+                        let wasHidden = !model.controlsVisible
+                        model.bumpActivity()
+                        onBackgroundTap?(wasHidden)
                     }
-                default: model.bumpActivity()
+                } label: {
+                    Color.clear.contentShape(.rect)
                 }
+                #if os(tvOS)
+                // The stock plain style brightens and lifts a focused button; on a
+                // full-screen clear label that is a light platter over the whole
+                // picture (owner Y1: "washed out", inset rounded card).
+                .buttonStyle(AppleTVSurfaceButtonStyle())
+                #else
+                .buttonStyle(.plain)
+                #endif
+                .appleVisionHover()
+                .accessibilityLabel(chrome.selectTogglesPlayback ? "Play or pause" : "Show playback controls")
+                .accessibilityIdentifier("player.controls.show")
+                #if os(tvOS)
+                .focused($tvFocus, equals: .surface)
+                .onMoveCommand { direction in
+                    // The surface holds focus while the video plays, so the
+                    // clickpad edges skip and a swipe down reveals the controls.
+                    switch direction {
+                    case .left: Task { await model.skip(by: -chrome.moveSkipSeconds) }
+                    case .right: Task { await model.skip(by: chrome.moveSkipSeconds) }
+                    case .down:
+                        model.bumpActivity()
+                        if model.nextEpisodePrompt != nil {
+                            tvFocus = .nextEpisode
+                        } else {
+                            tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
+                        }
+                    default: model.bumpActivity()
+                    }
+                }
+                #endif
             }
-            #endif
 
             #if os(tvOS)
             // The focus engine needs the chrome mounted: a swipe down sets
@@ -145,7 +185,7 @@ struct AppleTransportOverlay: View {
             // size, still hittable, and `allowsHitTesting(false)` silently
             // swallowed the tap — so the picker never opened and the tap never
             // reached the reveal surface underneath either (2026-09-18).
-            if model.controlsVisible { transportChrome }
+            if model.controlsVisible, !isObscured { transportChrome.transition(.opacity) }
             #endif
 
             // Inside the chrome's fade: the transport auto-hides
@@ -155,10 +195,14 @@ struct AppleTransportOverlay: View {
                 Spacer()
                 HStack {
                     Spacer()
+                    #if os(tvOS)
                     skipIntroButton
                         .opacity(model.controlsVisible ? 1 : 0)
                         .allowsHitTesting(model.controlsVisible)
                         .accessibilityHidden(!model.controlsVisible)
+                    #else
+                    if model.controlsVisible { skipIntroButton.transition(.opacity) }
+                    #endif
                 }
                 HStack {
                     Spacer()
@@ -213,10 +257,11 @@ struct AppleTransportOverlay: View {
         }
         #if os(tvOS)
         .defaultFocus($tvFocus, .surface)
-        .onChange(of: model.controlsVisible) { _, visible in
+        .onChange(of: model.controlsVisible) { _, isVisible in
+            onControlsVisibilityChanged?(isVisible)
             // Focus returns to the invisible surface when the controls hide,
             // so nothing is drawn as focused during playback.
-            if !visible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
+            if !isVisible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
         }
         .onPlayPauseCommand { model.togglePlayPause() }
         .onExitCommand {
@@ -264,7 +309,7 @@ struct AppleTransportOverlay: View {
                         .frame(width: 36, height: 36)
                         .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
                         .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
-                        .contentShape(Circle())
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .appleVisionHover()
@@ -280,7 +325,7 @@ struct AppleTransportOverlay: View {
                     Text("Channels")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                        .frame(minHeight: AppleDesignTokens.minimumActionSize)
+                        .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -302,6 +347,7 @@ struct AppleTransportOverlay: View {
                         Button("Other sources", systemImage: "list.bullet", action: otherSources)
                     } label: {
                         Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                            .contentShape(.rect)
                     }
                     .accessibilityLabel("More")
                 }
@@ -313,6 +359,7 @@ struct AppleTransportOverlay: View {
                         }
                     } label: {
                         Image(systemName: liveTopControls ? "ellipsis" : "shareplay").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                            .contentShape(.rect)
                     }
                     .accessibilityLabel(liveTopControls ? "More" : "SharePlay")
                     .accessibilityIdentifier("player.more")
@@ -325,6 +372,7 @@ struct AppleTransportOverlay: View {
                     } label: {
                         Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill")
                             .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                            .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(isMuted ? "Unmute" : "Mute")
@@ -354,6 +402,8 @@ struct AppleTransportOverlay: View {
                 Task { await model.seekToLiveEdge() }
             } label: {
                 liveBadgeLabel
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
             }
             .buttonStyle(.borderless)
             #if os(tvOS)
@@ -529,6 +579,8 @@ struct AppleTransportOverlay: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 34))
                     .foregroundStyle(.white)
+                    .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .appleVisionHover()
@@ -552,6 +604,7 @@ struct AppleTransportOverlay: View {
                 .font(.system(size: 34))
                 .foregroundStyle(.white)
                 .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
             .appleVisionHover()
@@ -709,12 +762,14 @@ struct AppleTransportTrackMenu: View {
                     Button(AppleSubtitleTrackFilter.menuLabel(for: track)) {
                         onSelectSubtitle(track.id)
                     }
+                    .accessibilityIdentifier("player.subtitle.track.\(track.id)")
                 }
             }
         } label: {
             Image(systemName: "captions.bubble")
                 .font(.system(size: 22))
                 .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .contentShape(.rect)
                 .foregroundStyle(.white)
         }
         .accessibilityLabel("Audio & Subtitles")
