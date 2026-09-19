@@ -73,7 +73,6 @@ struct AppleDiscoverView: View {
     /// the billboard simply never asked, which is why heroes only ever showed
     /// text (owner 2026-09-15).
     @State private var heroWordmarks: [String: URL] = [:]
-    @State private var heroOverviews: [String: String] = [:]
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -117,28 +116,7 @@ struct AppleDiscoverView: View {
                 .filter(\.isEnabled)
                 .map(\.id)
         )
-        let sections = catalogStore.sections.filter {
-            activeSourceIDs.contains($0.sourceID) && !$0.items.isEmpty
-        }
-        var seenTitles = Set<String>()
-        return sections
-            .sorted {
-                let left = appleCatalogShelfTitle(sourceName: $0.sourceName, catalogType: $0.catalog.type, catalogName: $0.catalog.name)
-                let right = appleCatalogShelfTitle(sourceName: $1.sourceName, catalogType: $1.catalog.type, catalogName: $1.catalog.name)
-                let titleOrder = left.localizedCaseInsensitiveCompare(right)
-                if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
-
-                // Metadata add-ons often expose several catalogs that map to
-                // the same human-facing shelf. Keep Cinemeta's `top` catalog
-                // as the representative section so Popular Movies/Shows are
-                // deterministic instead of depending on concurrent refresh
-                // completion order.
-                let leftIsTop = $0.catalog.id.caseInsensitiveCompare("top") == .orderedSame
-                let rightIsTop = $1.catalog.id.caseInsensitiveCompare("top") == .orderedSame
-                if leftIsTop != rightIsTop { return leftIsTop }
-                return $0.catalog.id.localizedCaseInsensitiveCompare($1.catalog.id) == .orderedAscending
-            }
-            .filter { seenTitles.insert(appleCatalogShelfTitle(sourceName: $0.sourceName, catalogType: $0.catalog.type, catalogName: $0.catalog.name)).inserted }
+        return AppleCatalogShelfPolicy.visibleSections(catalogStore.sections, activeSourceIDs: activeSourceIDs)
     }
 
     var body: some View {
@@ -170,7 +148,7 @@ struct AppleDiscoverView: View {
                             #if DEBUG
                             let _ = AppleLaunchClock.mark("discover.hero")
                             #endif
-                            TimelineView(.periodic(from: .now, by: AppleHeroRotation.interval)) { context in
+                            TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
                                 if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
                                     featuredHero(heroes[index], rotationCount: heroes.count, rotationIndex: index)
                                         .padding(.horizontal, heroHorizontalPadding)
@@ -513,8 +491,7 @@ struct AppleDiscoverView: View {
     private func top10Shelf(title: String, entries: [AppleNetflixTop10Entry], type: String) -> some View {
         let ordered = entries.sorted { $0.rank < $1.rank }
         if !ordered.isEmpty {
-            // Same shelf as every other row (header size, inset, gaps, focus
-            // treatment); only the rank badge marks it as a Top 10 row.
+            // Ranked shelves retain the standard row spacing and focus treatment.
             AppleMediaShelf(title: title) {
                 ForEach(ordered, id: \.rank) { entry in
                     Group {
@@ -538,43 +515,15 @@ struct AppleDiscoverView: View {
 
     @ViewBuilder
     private func featuredHero(_ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0) -> some View {
-        let itemToDisplay: AppleCatalogItem = {
-            if let resolvedOverview = heroOverviews[value.item.mediaID] {
-                return AppleCatalogItem(
-                    mediaID: value.item.mediaID,
-                    type: value.item.type,
-                    name: value.item.name,
-                    posterURL: value.item.posterURL,
-                    backgroundURL: value.item.backgroundURL,
-                    summary: resolvedOverview,
-                    releaseInfo: value.item.releaseInfo,
-                    rating: value.item.rating,
-                    contentRating: value.item.contentRating,
-                    formatBadges: value.item.formatBadges,
-                    genres: value.item.genres,
-                    cast: value.item.cast,
-                    director: value.item.director,
-                    writers: value.item.writers,
-                    year: value.item.year
-                )
-            }
-            return value.item
-        }()
-
-        AppleFeaturedHero(
-            item: itemToDisplay,
+        AppleHomeBillboard(
+            item: value.item,
+            sources: sourceStore.sources,
+            settings: settings,
             viewportSize: viewportSize,
             wordmark: heroWordmarks[value.item.mediaID],
             rotationCount: rotationCount,
             rotationIndex: rotationIndex
         ) { featuredActions(value) }
-        .task(id: value.item.mediaID) {
-            guard heroOverviews[value.item.mediaID] == nil else { return }
-            let resolver = AppleMetadataResolver()
-            if let details = try? await resolver.resolve(sources: sourceStore.sources, type: value.item.type, mediaID: value.item.mediaID), let overview = details.overview {
-                heroOverviews[value.item.mediaID] = overview
-            }
-        }
     }
 
     /// Reads whatever the prefetcher has already cached for the heroes. Cache
@@ -647,20 +596,10 @@ struct AppleDiscoverView: View {
         AppleMediaShelf(title: title) {
             ForEach(values) { value in
                 NavigationLink { detail(value) } label: {
-                    #if os(tvOS)
-                    VStack(alignment: .leading, spacing: 8) {
-                        AppleCatalogCard(item: value.item)
-                        if showsProgress {
-                            ProgressView(value: value.record.progress ?? 0)
-                                .frame(maxWidth: .infinity)
-                                .tint(.white)
-                        }
-                    }
-                    #else
                     AppleCatalogCard(
                         item: value.item,
+                        sizing: showsProgress ? .continueWatching : .featured,
                         progress: showsProgress ? (value.record.progress ?? 0) : nil)
-                    #endif
                 }.accessibilityIdentifier("home.\(identifier).\(value.id)")
             }
         }
@@ -1021,63 +960,47 @@ private struct AppleCatalogSectionView: View {
     @FocusState private var focusedItemID: String?
 
     private var title: String {
-        appleCatalogShelfTitle(sourceName: section.sourceName, catalogType: section.catalog.type, catalogName: section.catalog.name)
+        AppleCatalogShelfPolicy.title(for: section.catalog)
+    }
+
+    private var displayedItems: [AppleCatalogItem] {
+        AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
+            ? Array(section.items.prefix(10)) : section.items
     }
 
     var body: some View {
         AppleMediaShelf(title: title) {
-                    ForEach(section.items) { item in
-                        NavigationLink {
-                            AppleCatalogItemDetailView(
-                                item: item,
-                                source: source,
-                                relatedItems: relatedItems,
-                                mediaIndex: mediaIndex,
-                                playbackSources: playbackSources,
-                                metadataConfiguration: metadataConfiguration,
-                                gatewayConfig: gatewayConfig,
-                                streamingServerConfiguration: streamingServerConfiguration,
-                                playbackResolver: playbackResolver,
-                                settings: settings,
-                                openSettings: openSettings
-                            )
-                        } label: {
-                            AppleCatalogCard(item: item)
-                        }
+            ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
+                NavigationLink {
+                    AppleCatalogItemDetailView(
+                        item: item,
+                        source: source,
+                        relatedItems: relatedItems,
+                        mediaIndex: mediaIndex,
+                        playbackSources: playbackSources,
+                        metadataConfiguration: metadataConfiguration,
+                        gatewayConfig: gatewayConfig,
+                        streamingServerConfiguration: streamingServerConfiguration,
+                        playbackResolver: playbackResolver,
+                        settings: settings,
+                        openSettings: openSettings
+                    )
+                } label: {
+                    if AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked {
+                        AppleTop10Card(item: item, rank: index + 1)
+                    } else {
+                        AppleCatalogCard(item: item, sizing:
+                            AppleCatalogShelfPolicy.style(for: section.catalog) == .featured ? .featured : .catalog)
+                    }
+                }
                 .focused($focusedItemID, equals: item.id)
                 .accessibilityIdentifier("home.media.\(item.id)")
-                    }
+            }
         }
+        .accessibilityIdentifier("home.catalog.\(section.id)")
         #if os(tvOS)
         .defaultFocus($focusedItemID, section.items.first?.id)
         #endif
-    }
-
-    private var cardSpacing: CGFloat {
-        #if os(tvOS)
-        28
-        #else
-        16
-        #endif
-    }
-}
-
-func appleCatalogShelfTitle(sourceName: String, catalogType: String, catalogName: String? = nil) -> String {
-    let provider = sourceName.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-    let catalog = catalogName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let lowerProvider = provider.lowercased()
-    let metadataService = ["cinemeta", "rotten tomatoes", "tmdb", "the movie database", "omdb"].contains(lowerProvider)
-    let streamingCatalog = lowerProvider.contains("streaming catalog")
-    let serviceFromCatalog = streamingCatalog
-        ? AppleCatalogServiceName.service(fromCatalogID: nil, name: catalog)
-        : nil
-    let base = metadataService || streamingCatalog
-        ? (serviceFromCatalog ?? (metadataService ? "Popular" : "Streaming"))
-        : provider
-    switch catalogType.lowercased() {
-    case "series": return "\(base) Shows"
-    case "movie": return "\(base) Movies"
-    default: return base
     }
 }
 
@@ -1085,7 +1008,12 @@ private struct AppleTop10Card: View {
     let item: AppleCatalogItem
     let rank: Int
     var body: some View {
-        ZStack(alignment: .topLeading) { AppleCatalogCard(item: item); AppleTop10RankBadge(rank: rank).padding(8) }
+        HStack(alignment: .top, spacing: 4) {
+            AppleTop10RankNumeral(rank: rank)
+            AppleCatalogCard(item: item)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(rank), \(item.name)")
     }
 }
 
@@ -1124,42 +1052,13 @@ private struct AppleTop10UnresolvedCard: View {
     let title: String
     let rank: Int
     var body: some View {
-        #if os(tvOS)
-        // Card-sized titled tile, like every other artless card on tvOS (X7).
-        ZStack(alignment: .topLeading) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(white: 0.12))
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(4)
-                    .padding(12)
-            }
-            .frame(width: 230, height: 345)
-            AppleTop10RankBadge(rank: rank).padding(8)
+        HStack(alignment: .top, spacing: 4) {
+            AppleTop10RankNumeral(rank: rank)
+            AppleCatalogCard(item: AppleCatalogItem(mediaID: "unresolved-rank-\(rank)", type: "movie", name: title))
         }
-        #else
-        legacyBody
-        #endif
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(rank), \(title)")
     }
-
-    #if !os(tvOS)
-    private var legacyBody: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.13)).overlay { Image(systemName: "film").font(.title).foregroundStyle(.secondary) }.frame(width: 140, height: 210)
-                Text(title).font(.headline).lineLimit(3).frame(width: 140, alignment: .leading)
-            }
-            AppleTop10RankBadge(rank: rank).padding(8)
-        }
-    }
-    #endif
-}
-
-private struct AppleTop10RankBadge: View {
-    let rank: Int
-    var body: some View { Text("\(rank)").font(.headline.bold()).foregroundStyle(.white).frame(width: 34, height: 34).background(Color(white: 0.08), in: Circle()) }
 }
 
 extension View {
@@ -1198,7 +1097,6 @@ struct AppleCatalogCard: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
-    @ScaledMetric(relativeTo: .caption) private var captionLineHeight = 16.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var artworkFailed = false
 
@@ -1210,7 +1108,10 @@ struct AppleCatalogCard: View {
     }
 
     private var resolvedPosterURL: URL? {
-        item.posterURL ?? fallbackArtwork?.posterURL ?? item.backgroundURL
+        if isLandscapeCard {
+            return item.backgroundURL ?? fallbackArtwork?.backgroundURL ?? item.posterURL ?? fallbackArtwork?.posterURL
+        }
+        return item.posterURL ?? fallbackArtwork?.posterURL ?? item.backgroundURL
     }
 
     /// A card never renders as an empty slot: when the artwork is missing or
@@ -1232,9 +1133,8 @@ struct AppleCatalogCard: View {
             AppleCatalogArtwork(url: resolvedPosterURL, onFailure: { artworkFailed = true },
                                 onLoad: { artworkFailed = false })
                 .frame(width: cardWidth, height: cardHeight)
-                .overlay { if artworkFailed { artworkPlaceholder } }
+                .overlay { if artworkFailed || resolvedPosterURL == nil { artworkPlaceholder } }
                 .clipShape(.rect(cornerRadius: cornerRadius))
-                #if !os(tvOS)
                 .overlay(alignment: .bottom) {
                     if let progress {
                         GeometryReader { geometry in
@@ -1251,7 +1151,6 @@ struct AppleCatalogCard: View {
                         .accessibilityHidden(true)
                     }
                 }
-                #endif
                 .onChange(of: resolvedPosterURL) { _, _ in artworkFailed = false }
                 .task(id: item.id) {
                     guard item.posterURL == nil else { return }
@@ -1264,22 +1163,20 @@ struct AppleCatalogCard: View {
                     )
                 }
 
-            // tvOS rows are art only, like the TV app and the reference; the
-            // title lives on the artwork or in the X7 placeholder tile.
-            #if !os(tvOS)
-            Text(item.name)
-                .font(.caption)
-                .lineLimit(2)
-                .frame(width: cardWidth, alignment: .leading)
-                .frame(height: captionLineHeight * 2, alignment: .top)
-
-            if let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
+            if showsTitle {
+                Text(item.name)
+                    .font(.caption)
+                    .lineLimit(2, reservesSpace: true)
+                    .truncationMode(.tail)
+                    .frame(width: cardWidth, alignment: .leading)
+            }
+            if progress == nil, showsTitle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
                 Text(releaseInfo)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .frame(width: cardWidth, alignment: .leading)
             }
-            #endif
         }
         .contentShape(Rectangle())
         .foregroundStyle(.primary)
@@ -1289,7 +1186,24 @@ struct AppleCatalogCard: View {
         .appleVisionHover()
     }
 
+    private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching }
+
+    private var showsTitle: Bool {
+        #if os(tvOS)
+        isLandscapeCard
+        #else
+        true
+        #endif
+    }
+
     private var cardWidth: CGFloat {
+        if isLandscapeCard {
+            #if os(tvOS)
+            return sizing == .featured ? 480 : 360
+            #else
+            return sizing == .featured ? 320 : 260
+            #endif
+        }
         if sizing == .detailSuggestions {
             #if os(iOS)
             if horizontalSizeClass == .regular { return 150 }
@@ -1309,7 +1223,7 @@ struct AppleCatalogCard: View {
     }
 
     private var cardHeight: CGFloat {
-        cardWidth * 1.5
+        cardWidth * (isLandscapeCard ? 9.0 / 16.0 : 1.5)
     }
 
     private var cornerRadius: CGFloat {
@@ -1324,6 +1238,8 @@ struct AppleCatalogCard: View {
 enum AppleCatalogCardSizing {
     case catalog
     case detailSuggestions
+    case featured
+    case continueWatching
 }
 
 struct AppleCatalogArtwork: View {
@@ -1764,8 +1680,8 @@ struct AppleCatalogItemDetailView: View {
             guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: trailerCandidateIndex) else { return }
             guard !Task.isCancelled else { return }
             trailerCandidateIndex = playableIndex
+            guard prepareTrailerAudio() else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
-                prepareTrailerAudio()
                 trailerHasStarted = true
                 trailerIsActive = true
             }
@@ -1973,7 +1889,6 @@ struct AppleCatalogItemDetailView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.6), radius: 4)
                     .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                     .contentShape(Rectangle())
             }
@@ -2248,7 +2163,7 @@ struct AppleCatalogItemDetailView: View {
                 appleTraceFailure("trailer \"\(item.name)\": resolved but discarded (cancelled=\(Task.isCancelled) playerOpen=\(playerPresentation != nil))")
                 return
             }
-            prepareTrailerAudio()
+            guard prepareTrailerAudio() else { return }
             let kind = if case .hls = stream.source { "hls" } else { "adaptive" }
             appleTrace("trailer \"\(item.name)\" candidate \(index) resolved as \(kind)")
             withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
@@ -2277,7 +2192,7 @@ struct AppleCatalogItemDetailView: View {
                 .clipped()
                 .accessibilityHidden(true)
             if let tvTrailerSource, tvTrailerVisible {
-                AppleTVTrailerPlayerView(source: tvTrailerSource)
+                AppleTVTrailerPlayerView(source: tvTrailerSource, isMuted: trailerMuted)
                     .frame(
                         width: AppleTVDetailMetrics.screenSize.width,
                         height: AppleTVDetailMetrics.screenSize.height
@@ -2735,9 +2650,9 @@ struct AppleCatalogItemDetailView: View {
             logTrailerFailure("no trailer is available for this title")
             return
         }
-        trailerHasStarted = true
-        prepareTrailerAudio()
         let shouldPlay = !trailerIsActive
+        if shouldPlay, !prepareTrailerAudio() { return }
+        trailerHasStarted = true
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             trailerIsActive = shouldPlay
             trailerIsPlaying = false
@@ -2749,8 +2664,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func restartTrailer() {
-        prepareTrailerAudio()
-        guard trailerEmbedURL != nil else { return }
+        guard trailerEmbedURL != nil, prepareTrailerAudio() else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
             trailerIsActive = true
             trailerIsPlaying = false
@@ -2766,14 +2680,11 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private func prepareTrailerAudio() {
+    private func prepareTrailerAudio() -> Bool {
         #if os(iOS) || os(tvOS) || os(visionOS)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("[OpenStream] trailer audio unavailable: \(error.localizedDescription)")
-        }
+        ApplePlaybackSessionPolicy.prepareTrailerAudio()
+        #else
+        false
         #endif
     }
 
@@ -4464,7 +4375,7 @@ private struct AppleDetailRowButtonStyle: ButtonStyle {
 
 #if os(iOS) || os(visionOS)
 @MainActor
-private struct AppleYouTubeAutoPreview: UIViewRepresentable {
+struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let url: URL
     let artworkURL: URL?
     let isLandscape: Bool
@@ -4639,7 +4550,13 @@ private struct AppleYouTubeAutoPreview: UIViewRepresentable {
             configuration.allowsInlineMediaPlayback = true
             configuration.mediaTypesRequiringUserActionForPlayback = []
             configuration.allowsPictureInPictureMediaPlayback = false
+            configuration.allowsAirPlayForMediaPlayback = false
             configuration.websiteDataStore = .nonPersistent()
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
             configuration.userContentController.add(messageHandler, name: "trailerState")
             webView = WKWebView(frame: .zero, configuration: configuration)
             super.init(frame: frame)

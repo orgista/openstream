@@ -117,7 +117,7 @@ struct AppleLiveTVView: View {
                                 sharePlay: sharePlay,
                                 liveChannel: selectedChannel,
                                 channels: channelSnapshot.channels,
-                                onSwitchChannel: { startChannel($0, shareSelection: true) }
+                                onSwitchChannel: { startChannel($0, shareSelection: true, present: false) }
                             )
                             .id(ObjectIdentifier(playbackCoordinator))
                             
@@ -1001,8 +1001,8 @@ private struct AppleLiveFullScreenControls: View {
     let channels: [AppleIPTVChannel]
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onClose: () -> Void
+    let channelPicker: AppleLiveChannelPickerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showsChannelPicker = false
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -1013,23 +1013,24 @@ private struct AppleLiveFullScreenControls: View {
             AppleTransportOverlay(
                 coordinator: coordinator,
                 request: request,
-                onShowChannels: channels.isEmpty ? nil : { setPickerVisible(true) },
+                onShowChannels: channels.isEmpty ? nil : { channelPicker.show() },
                 onClose: onClose,
                 sharePlayMenu: sharePlayMenu
             )
-            if showsChannelPicker {
+            .allowsHitTesting(!channelPicker.isPresented)
+            .accessibilityHidden(channelPicker.isPresented)
+            if channelPicker.isPresented {
                 AppleLiveChannelPickerOverlay(channels: channels, onSelect: { channel in
-                    setPickerVisible(false)
-                    onSwitchChannel?(channel)
-                }, onDismiss: { setPickerVisible(false) })
+                    channelPicker.select(channel) { switched in onSwitchChannel?(switched) }
+                }, onDismiss: { channelPicker.dismiss() })
                 .frame(maxWidth: 340)
+                .frame(maxHeight: .infinity)
+                .zIndex(1)
                 .transition(.move(edge: .leading))
             }
         }
-    }
-
-    private func setPickerVisible(_ visible: Bool) {
-        withAnimation(reduceMotion ? nil : .default) { showsChannelPicker = visible }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : Animation.default, value: channelPicker.isPresented)
     }
 }
 
@@ -1270,6 +1271,7 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
     private let coordinator: ApplePlaybackCoordinator
     private weak var inlineContainer: AppleLivePlayerContainerViewController?
     private let controlsHost: UIHostingController<AppleLiveFullScreenControls>
+    private let channelPicker = AppleLiveChannelPickerState()
 
     init(playerViewController: AVPlayerViewController, inlineContainer: AppleLivePlayerContainerViewController,
          coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest,
@@ -1280,7 +1282,8 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
         self.coordinator = coordinator
         controlsHost = UIHostingController(rootView: AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
-            channels: channels, onSwitchChannel: onSwitchChannel, onClose: {}))
+            channels: channels, onSwitchChannel: onSwitchChannel, onClose: {},
+            channelPicker: channelPicker))
         super.init(nibName: nil, bundle: nil)
         update(request: request, liveMenu: liveMenu, channels: channels, onSwitchChannel: onSwitchChannel)
     }
@@ -1293,13 +1296,15 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
         controlsHost.rootView = AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
             channels: channels, onSwitchChannel: onSwitchChannel,
-            onClose: { [weak self] in self?.dismiss(animated: true) })
+            onClose: { [weak self] in self?.dismiss(animated: true) },
+            channelPicker: channelPicker)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         // AVKit owns picture/caption rendering; the shared overlay owns all controls.
+        view.accessibilityViewIsModal = true
         playerViewController.showsPlaybackControls = false
         playerViewController.videoGravity = .resizeAspect
         controlsHost.view.backgroundColor = .clear
@@ -1421,9 +1426,7 @@ struct AppleLiveChannelPickerOverlay: View {
                 }
                 .accessibilityLabel("Close channels")
                 .accessibilityIdentifier("live.picker.close")
-                #if os(tvOS)
                 .buttonStyle(.plain)
-                #endif
             }
             .padding()
             #if os(iOS)
@@ -1453,10 +1456,13 @@ struct AppleLiveChannelPickerOverlay: View {
                             }
                             .padding(.horizontal)
                             .padding(.vertical, 8)
+                            .contentShape(.rect)
                         }
                         .accessibilityIdentifier("live.picker.channel.\(channel.id)")
                         #if os(tvOS)
                         .buttonStyle(.card)
+                        #else
+                        .buttonStyle(.plain)
                         #endif
                         Divider()
                     }

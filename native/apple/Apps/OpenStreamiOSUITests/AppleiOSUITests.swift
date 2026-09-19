@@ -1096,9 +1096,17 @@ final class AppleiOSUITests: XCTestCase {
     /// A guide selection opens the player directly and channel changes stay there.
 
     /// Reveals the player chrome only when it is hidden; tapping the surface while chrome is up would hide it.
+    ///
+    /// The chrome auto-hides three seconds after the last interaction, and that
+    /// can expire between the query and the tap it was meant to guard, so this
+    /// retries until a control is really there rather than checking once.
     private func revealPlayerControls() {
-        if !app.buttons["player.captions"].exists { app.buttons["player.controls.show"].tap() }
-        _ = app.buttons["player.captions"].waitForExistence(timeout: 5)
+        let captions = app.buttons["player.captions"]
+        for _ in 0..<4 {
+            if captions.exists, captions.isHittable { return }
+            app.buttons["player.controls.show"].tap()
+            if captions.waitForExistence(timeout: 2) { return }
+        }
     }
 
     func testLiveTappedStatesArePhotographed() {

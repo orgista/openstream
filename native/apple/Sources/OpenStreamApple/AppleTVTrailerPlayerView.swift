@@ -17,14 +17,17 @@ import UIKit
 /// as a single item.
 struct AppleTVTrailerPlayerView: UIViewRepresentable {
     let source: AppleYouTubeStreamResolver.Source
+    var isMuted = true
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
+        view.isMuted = isMuted
         view.load(source: source)
         return view
     }
 
     func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        uiView.isMuted = isMuted
         if uiView.currentSource != source { uiView.load(source: source) }
     }
 
@@ -37,6 +40,7 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
 
         private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
         private var player: AVPlayer?
+        var isMuted = true { didSet { player?.isMuted = isMuted } }
         private var loadTask: Task<Void, Never>?
         /// `AVURLAsset` does not retain its resource-loader delegate, so the
         /// loaders have to be held here for as long as the item plays.
@@ -88,6 +92,8 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
 
         private func start(item: AVPlayerItem) {
             let player = AVPlayer(playerItem: item)
+            player.isMuted = isMuted
+            player.allowsExternalPlayback = false
             player.actionAtItemEnd = .pause
             player.preventsDisplaySleepDuringVideoPlayback = false
             playerLayer.player = player

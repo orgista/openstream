@@ -131,24 +131,22 @@ struct AppleTransportOverlay: View {
             }
             #endif
 
-            VStack {
-                topBar
-                Spacer()
-                // No play/pause or skip glyphs on Apple TV: Select, the
-                // Play/Pause button and the clickpad edges carry them.
-                if chrome.showsPlayPauseGlyph { centerRow }
-                Spacer()
-                bottomBar
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                        bottomBarHeight = $0
-                    }
-            }
-            .padding()
-            .opacity(model.controlsVisible ? 1 : 0)
-            .allowsHitTesting(model.controlsVisible)
-            .accessibilityHidden(!model.controlsVisible)
-            .contentShape(.rect)
-            .onTapGesture { model.bumpActivity() }
+            #if os(tvOS)
+            // The focus engine needs the chrome mounted: a swipe down sets
+            // `tvFocus` in the same update that reveals it.
+            transportChrome
+                .opacity(model.controlsVisible ? 1 : 0)
+                .allowsHitTesting(model.controlsVisible)
+                .accessibilityHidden(!model.controlsVisible)
+            #else
+            // Removed, not faded. Fading it left every button on screen as far
+            // as touch and assistive technology were concerned: after the
+            // three-second auto-hide, "Channels" was still reported at full
+            // size, still hittable, and `allowsHitTesting(false)` silently
+            // swallowed the tap — so the picker never opened and the tap never
+            // reached the reveal surface underneath either (2026-09-18).
+            if model.controlsVisible { transportChrome }
+            #endif
 
             // Inside the chrome's fade: the transport auto-hides
             // after three seconds of playback, so these prompts follow
@@ -228,6 +226,26 @@ struct AppleTransportOverlay: View {
         #endif
     }
 
+    /// The auto-hiding controls: top bar, centre transport, bottom bar. A tap
+    /// anywhere inside them restarts the hide timer instead of hiding them.
+    private var transportChrome: some View {
+        VStack {
+            topBar
+            Spacer()
+            // No play/pause or skip glyphs on Apple TV: Select, the
+            // Play/Pause button and the clickpad edges carry them.
+            if chrome.showsPlayPauseGlyph { centerRow }
+            Spacer()
+            bottomBar
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    bottomBarHeight = $0
+                }
+        }
+        .padding()
+        .contentShape(.rect)
+        .simultaneousGesture(TapGesture().onEnded { model.bumpActivity() })
+    }
+
     // MARK: - Top bar
 
     private var topBar: some View {
@@ -255,11 +273,18 @@ struct AppleTransportOverlay: View {
             }
 
             if let onShowChannels {
-                Button("Channels", action: onShowChannels)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .frame(minHeight: AppleDesignTokens.minimumActionSize)
-                    .accessibilityIdentifier("player.channels")
+                Button {
+                    model.bumpActivity()
+                    onShowChannels()
+                } label: {
+                    Text("Channels")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .frame(minHeight: AppleDesignTokens.minimumActionSize)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("player.channels")
             }
             Spacer(minLength: 0)
 

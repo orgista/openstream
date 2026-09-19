@@ -25,15 +25,12 @@ import Testing
     #expect(!AppleChannelVisibilityPolicy.isRegional(merelyRegional, zipCode: "60614"))
 }
 
-@Test func catalogShelvesSplitProviderNamesByMediaType() {
-    #expect(appleCatalogShelfTitle(sourceName: "Netflix", catalogType: "series") == "Netflix Shows")
-    #expect(appleCatalogShelfTitle(sourceName: "Netflix", catalogType: "movie") == "Netflix Movies")
-    #expect(appleCatalogShelfTitle(sourceName: "Featured", catalogType: "movie") != appleCatalogShelfTitle(sourceName: "Featured", catalogType: "series"))
-    #expect(appleCatalogShelfTitle(sourceName: "Prime Video", catalogType: "other") == "Prime Video")
-    #expect(appleCatalogShelfTitle(sourceName: "Cinemeta", catalogType: "movie", catalogName: "Popular") == "Popular Movies")
-    #expect(appleCatalogShelfTitle(sourceName: "Cinemeta", catalogType: "series", catalogName: "Popular") == "Popular Shows")
-    #expect(appleCatalogShelfTitle(sourceName: "Cinemeta", catalogType: "movie", catalogName: "Top") == "Popular Movies")
-    #expect(appleCatalogShelfTitle(sourceName: "Cinemeta", catalogType: "series", catalogName: "Top") == "Popular Shows")
+@Test func catalogShelvesUseCatalogNamesWithoutProviderBranding() {
+    #expect(appleCatalogShelfTitle(sourceName: "AIOMetadata", catalogType: "movie", catalogName: "Popular Movies") == "Popular Movies")
+    #expect(appleCatalogShelfTitle(sourceName: "AIOMetadata", catalogType: "series", catalogName: "Top 10 Disney+") == "Top 10 Disney+")
+    #expect(appleCatalogShelfTitle(sourceName: "Cinemeta", catalogType: "movie", catalogName: "Popular") == "Popular")
+    #expect(appleCatalogShelfTitle(sourceName: "Netflix", catalogType: "movie") == "Movies")
+    #expect(appleCatalogShelfTitle(sourceName: "Netflix", catalogType: "series") == "Shows")
 }
 
 @Test func titleRatingsPersistAllThreeStates() {
@@ -71,8 +68,7 @@ import Testing
     }
 }
 
-@Test func shelfTitlesCollapseProviderWhitespace() {
-    #expect(appleCatalogShelfTitle(sourceName: "Streaming Catalogs", catalogType: "movie", catalogName: "Prime  Video") == "Prime Movies")
-    #expect(appleCatalogShelfTitle(sourceName: "Streaming Catalogs", catalogType: "series", catalogName: " Prime\u{00a0} Video Catalog ") == "Prime Shows")
-    #expect(appleCatalogShelfTitle(sourceName: " Prime\tVideo ", catalogType: "movie") == "Prime Video Movies")
+@Test func shelfTitlesTrimCatalogWhitespace() {
+    #expect(appleCatalogShelfTitle(sourceName: "Streaming Catalogs", catalogType: "movie", catalogName: " Prime Video ") == "Prime Video")
+    #expect(appleCatalogShelfTitle(sourceName: "Provider", catalogType: "other", catalogName: "  ") == "Catalog")
 }
