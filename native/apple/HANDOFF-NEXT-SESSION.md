@@ -730,3 +730,7 @@ the paired iPhone 15 Pro Max iOS 18 sim); iMessage: no target exists; testLiveBr
 stream-dependent (CBS does not always publish CC); guide behind the full-screen player is still in the a11y tree
 (accessibilityViewIsModal not honoured). Follow-up specs live in ~/Developer/openstream-build/specs/.
 Codex sandbox cannot build/test/sim: give it code-only specs and verify here. `codex exec … < /dev/null` always.
+- 20:37 Watch now-playing sync verified: iPhone 15 Pro Max iOS 18 sim launched with
+  `-OpenStreamVisionScreen add-files -OpenStreamVisionPlaybackURL <url>`; the paired watch showed the title with
+  play/±10 s controls. Side finding: a direct HLS master playlist URL through Add Files fails in HLSVideoEngine
+  ("Demuxer: open failed, invalid data"); Add Files is meant for files, so the route needs a direct .mp4 for a full test.
