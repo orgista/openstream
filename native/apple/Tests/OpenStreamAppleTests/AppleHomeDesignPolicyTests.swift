@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if canImport(JavaScriptCore)
+import JavaScriptCore
+#endif
 @testable import OpenStreamApple
 
 @Suite struct AppleHomeDesignPolicyTests {
@@ -14,6 +17,58 @@ import Testing
         #expect(!preview.webMediaSessionSuppressionScript.isEmpty)
         #expect(ApplePlaybackSessionPolicy.playback.webMediaSessionSuppressionScript.isEmpty)
     }
+
+    @Test func trailersCannotRestoreLongFormAudioOrUnmuteWebPlayback() throws {
+        let preview = ApplePlaybackSessionPolicy.trailer
+        #expect(preview.requiresMutedWebPlayback)
+        #expect(!preview.shouldRestoreAudioSession(hasPlaybackRequest: true))
+        #expect(!preview.shouldRestoreAudioSession(hasPlaybackRequest: false))
+        #expect(!ApplePlaybackSessionPolicy.playback.requiresMutedWebPlayback)
+        #expect(ApplePlaybackSessionPolicy.playback.shouldRestoreAudioSession(hasPlaybackRequest: true))
+        #expect(!ApplePlaybackSessionPolicy.playback.shouldRestoreAudioSession(hasPlaybackRequest: false))
+
+        let embed = try #require(URL(string: "https://fixture.example/embed/trailer?mute=0&playsinline=0"))
+        let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true, startsMuted: false)
+        #expect(html.contains("mute=1"))
+        #expect(html.contains("playsinline=1"))
+        #expect(!html.contains("mute=0"))
+        #expect(!html.contains("playsinline=0"))
+        #expect(html.contains("var desiredMuted = true;"))
+        #expect(html.contains("desiredMuted = requiresMutedPlayback || Boolean(isMuted);"))
+    }
+
+    #if canImport(JavaScriptCore)
+    @Test func trailerScriptClearsExistingAndRejectsNewMediaSessionHandlers() throws {
+        let context = try #require(JSContext())
+        context.evaluateScript("""
+        var handlers = {play: () => {}, pause: () => {}, seekto: () => {}};
+        var events = {};
+        var document = {addEventListener: (name, callback) => { events[name] = callback; }};
+        var navigator = {mediaSession: {
+          metadata: {title: 'Fixture trailer'}, playbackState: 'playing',
+          setActionHandler: (name, handler) => {
+            if (name === 'stop') throw new Error('Unsupported action');
+            handlers[name] = handler;
+          },
+          setPositionState: () => {}
+        }};
+        """)
+        context.evaluateScript(ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript)
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("Object.values(handlers).every(handler => handler === null)")?.toBool() == true)
+        context.evaluateScript("""
+        navigator.mediaSession.metadata = {title: 'Provider rewrite'};
+        navigator.mediaSession.playbackState = 'playing';
+        navigator.mediaSession.setActionHandler('play', () => {});
+        handlers.seekto = () => {};
+        events.play();
+        """)
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("navigator.mediaSession.metadata === null")?.toBool() == true)
+        #expect(context.evaluateScript("navigator.mediaSession.playbackState === 'none'")?.toBool() == true)
+        #expect(context.evaluateScript("Object.values(handlers).every(handler => handler === null)")?.toBool() == true)
+    }
+    #endif
 
     @Test func manifestCatalogIdentityPreservesSameNamesAndTop10() throws {
         let data = Data(#"""

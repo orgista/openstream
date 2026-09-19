@@ -20,10 +20,14 @@ enum AppleTrailerSoundBridge {
 
 enum AppleYouTubePreviewHTML {
     static func document(embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true) -> String {
+        let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback
+        let effectiveMuted = requiresMutedPlayback || startsMuted
         var components = URLComponents(url: embedURL, resolvingAgainstBaseURL: false)
         let existingItems = components?.queryItems ?? []
-        components?.queryItems = existingItems.filter { !["mute", "autoplay"].contains($0.name) }
-            + [URLQueryItem(name: "mute", value: startsMuted ? "1" : "0"), URLQueryItem(name: "autoplay", value: startsPlaying ? "1" : "0")]
+        components?.queryItems = existingItems.filter { !["mute", "autoplay", "playsinline"].contains($0.name) }
+            + [URLQueryItem(name: "mute", value: effectiveMuted ? "1" : "0"),
+               URLQueryItem(name: "autoplay", value: startsPlaying ? "1" : "0"),
+               URLQueryItem(name: "playsinline", value: "1")]
         let safeSource = htmlEscaped((components?.url ?? embedURL).absoluteString)
         let safeAutoplay = startsPlaying ? 1 : 0
         let safeDesiredPlaying = startsPlaying ? "true" : "false"
@@ -39,10 +43,11 @@ enum AppleYouTubePreviewHTML {
         @media(prefers-reduced-motion:reduce){iframe{transition:none}}
         </style>
         </head><body>
-        <iframe id="player" src="\(safeSource)" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        <iframe id="player" src="\(safeSource)" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe>
         <script>
         var player = null;
-        var desiredMuted = \(startsMuted ? "true" : "false");
+        const requiresMutedPlayback = \(requiresMutedPlayback ? "true" : "false");
+        var desiredMuted = \(effectiveMuted ? "true" : "false");
         var lastPlayerWidth = 0, lastPlayerHeight = 0;
         var desiredPlaying = \(safeDesiredPlaying);
         var playerReady = false;
@@ -177,6 +182,7 @@ enum AppleYouTubePreviewHTML {
           hidePlayer();
           playbackGeneration += 1;
           previewEnding = false;
+          applyAudioPreference();
           player.playVideo();
           // An autoplaying iframe can reach PLAYING before onReady. playVideo
           // then emits no new state transition, so seed the reveal gate here.
@@ -222,7 +228,7 @@ enum AppleYouTubePreviewHTML {
         }
 
         window.setTrailerMuted = function(isMuted) {
-          desiredMuted = Boolean(isMuted);
+          desiredMuted = requiresMutedPlayback || Boolean(isMuted);
           applyAudioPreference();
           refreshAudioState();
           // The IFrame API updates its internal mute state asynchronously.
@@ -268,7 +274,7 @@ enum AppleYouTubePreviewHTML {
           player = new YT.Player('player', {
             playerVars: {
               autoplay: \(safeAutoplay),
-              mute: \(startsMuted ? 1 : 0),
+              mute: \(effectiveMuted ? 1 : 0),
               playsinline: 1,
               controls: 0,
               disablekb: 1,

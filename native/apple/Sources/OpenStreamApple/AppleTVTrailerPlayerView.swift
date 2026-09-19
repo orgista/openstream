@@ -91,7 +91,9 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
         }
 
         private func start(item: AVPlayerItem) {
+            guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
             let player = AVPlayer(playerItem: item)
+            player.audiovisualBackgroundPlaybackPolicy = .pauses
             player.isMuted = isMuted
             player.allowsExternalPlayback = false
             player.actionAtItemEnd = .pause

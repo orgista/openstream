@@ -4646,10 +4646,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func updateControls(isPlaying: Bool, isMuted: Bool, showsReplay: Bool) {
             self.isPlaying = isPlaying
             updatePlaybackValue()
-            // Keep the owned bottom-right control mounted in every trailer
-            // state. UIKit sits above SwiftUI hit testing, so replay must be
-            // handled here as well as drawn here.
-            muteButton.isHidden = false
+            // Web previews stay silent to avoid WebKit's automatic Now Playing
+            // session. Keep replay available without offering an inert unmute.
+            muteButton.isHidden = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !showsReplay
             touchShield.accessibilityLabel = isPlaying ? "Pause trailer preview" : "Play trailer preview"
             muteButton.setImage(
                 UIImage(systemName: showsReplay
@@ -4751,6 +4750,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             view.webView.evaluateJavaScript("window.setTrailerLandscape(\(isLandscape ? "true" : "false"));", completionHandler: nil)
         }
         if context.coordinator.lastPlaying != isPlaying {
+            if isPlaying, !ApplePlaybackSessionPolicy.prepareTrailerAudio() { return }
             context.coordinator.lastPlaying = isPlaying
             if isPlaying {
                 context.coordinator.prepareForPlayback()
@@ -4763,6 +4763,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             )
         }
         if context.coordinator.lastReplayGeneration != replayGeneration {
+            guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
             context.coordinator.lastReplayGeneration = replayGeneration
             context.coordinator.prepareForPlayback()
             view.webView.evaluateJavaScript("window.restartTrailer();", completionHandler: nil)
@@ -4786,6 +4787,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     }
 
     private func load(_ url: URL, in view: WKWebView, context: Context) {
+        guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
         context.coordinator.loadedURL = url
         context.coordinator.loadedLandscape = isLandscape
         let html = AppleYouTubePreviewHTML.document(

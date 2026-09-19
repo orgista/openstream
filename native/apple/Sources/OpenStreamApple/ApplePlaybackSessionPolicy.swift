@@ -12,6 +12,12 @@ enum ApplePlaybackSessionPolicy: Equatable, Sendable {
     var audioCategory: AudioCategory { self == .trailer ? .ambient : .playback }
     var publishesNowPlaying: Bool { self == .playback }
     var registersRemoteCommands: Bool { self == .playback }
+    // WebKit can publish its automatic audible-media session without JS metadata.
+    var requiresMutedWebPlayback: Bool { self == .trailer }
+
+    func shouldRestoreAudioSession(hasPlaybackRequest: Bool) -> Bool {
+        self == .playback && hasPlaybackRequest
+    }
 
     /// Installed at document start in every frame, including the provider iframe.
     /// WebKit's automatic audio behavior is separately constrained by ambient audio.
@@ -21,27 +27,46 @@ enum ApplePlaybackSessionPolicy: Equatable, Sendable {
         (() => {
           const session = navigator.mediaSession;
           if (!session) return;
-          session.metadata = null;
-          session.playbackState = 'none';
-          Object.defineProperty(session, 'metadata', {get: () => null, set: () => {}});
-          Object.defineProperty(session, 'playbackState', {get: () => 'none', set: () => {}});
-          Object.defineProperty(session, 'setActionHandler', {value: () => {}});
-          Object.defineProperty(session, 'setPositionState', {value: () => {}});
+          const attempt = (action) => { try { action(); } catch (_) {} };
+          const setActionHandler = session.setActionHandler?.bind(session);
+          const actions = ['play', 'pause', 'stop', 'seekbackward', 'seekforward',
+                           'seekto', 'previoustrack', 'nexttrack'];
+          const clear = () => {
+            attempt(() => { session.metadata = null; });
+            attempt(() => { session.playbackState = 'none'; });
+            for (const action of actions) attempt(() => setActionHandler?.(action, null));
+          };
+          clear();
+          attempt(() => Object.defineProperty(session, 'metadata', {get: () => null, set: () => {}}));
+          attempt(() => Object.defineProperty(session, 'playbackState', {get: () => 'none', set: () => {}}));
+          attempt(() => Object.defineProperty(session, 'setActionHandler', {
+            value: (action) => { attempt(() => setActionHandler?.(action, null)); }
+          }));
+          attempt(() => Object.defineProperty(session, 'setPositionState', {value: () => {}}));
+          document.addEventListener('play', clear, true);
+          document.addEventListener('playing', clear, true);
         })();
         """
     }
 
     #if os(iOS) || os(tvOS) || os(visionOS)
+    @MainActor static var activeAudioPolicy: Self?
+
     @MainActor static func prepareTrailerAudio() -> Bool {
         let policy = Self.trailer
         let session = AVAudioSession.sharedInstance()
         do {
-            let category: AVAudioSession.Category = policy.audioCategory == .ambient ? .ambient : .playback
-            try session.setCategory(category, mode: .default, options: [])
-            #if os(visionOS)
-            try session.setIsNowPlayingCandidate(policy.publishesNowPlaying)
-            #endif
-            try session.setActive(true)
+            // Drain pending long-form preparation/deactivation before taking over.
+            // Otherwise that queued work can overwrite ambient after this returns.
+            try AppleAudioSessionWorkQueue.shared.performSynchronously {
+                let category: AVAudioSession.Category = policy.audioCategory == .ambient ? .ambient : .playback
+                try session.setCategory(category, mode: .default, options: [])
+                #if os(visionOS)
+                try session.setIsNowPlayingCandidate(policy.publishesNowPlaying)
+                #endif
+                try session.setActive(true)
+            }
+            activeAudioPolicy = policy
             return true
         } catch {
             appleTraceFailure("trailer audio unavailable: \(error.localizedDescription)")
