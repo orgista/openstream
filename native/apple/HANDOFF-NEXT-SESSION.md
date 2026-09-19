@@ -717,3 +717,16 @@ Keep those corrections and seven cache regression tests when reviewing the pendi
 UX changes committed/pushed by Codex; prior clean build-12 publication and CI-only ActivityKit fix
 are separate. Cloud run5 green on all4platforms; no new TestFlight binary. Private install receipt:
 ~/Developer/openstream-build/codex-ios-ux-install-receipt.json. Temporary test source/cache removed.
+
+## 7c. State 2026-09-18 20:20 (Claude session)
+Commits 8f97b88, f9c008b, 9b87130 (all gate-green, iOS build installed on OpenStream Content + Review iPad, not uploaded).
+Verified on device: direct full-screen live, single close, no icon overlap, landscape fills, live captions render,
+Channels button opens the picker in both orientations (root cause: hidden chrome stayed hit-testable), iPhone GUI
+portrait-only with rotating player, Backup screen (iCloud toggle, export/import), portal auto-pair + 30-min sessions
+(listener had an 8-connection cap: removed), Discover billboard + dots + Top 10 numerals + catalog-only headings,
+trailer preview with no Dynamic Island capsule, Watch app builds/installs/launches ("Nothing Playing").
+Open: export/import device-to-device round trip not exercised; Watch now-playing sync not exercised (needs playback on
+the paired iPhone 15 Pro Max iOS 18 sim); iMessage: no target exists; testLiveBroadcastCaptionsArePhotographed is
+stream-dependent (CBS does not always publish CC); guide behind the full-screen player is still in the a11y tree
+(accessibilityViewIsModal not honoured). Follow-up specs live in ~/Developer/openstream-build/specs/.
+Codex sandbox cannot build/test/sim: give it code-only specs and verify here. `codex exec … < /dev/null` always.
