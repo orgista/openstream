@@ -13,6 +13,9 @@ enum AppleSettingsRoute: Hashable {
     case privacy
     case storage
     case about
+    #if !os(tvOS)
+    case backup
+    #endif
 }
 
 extension View {
@@ -51,6 +54,7 @@ struct AppleSettingsView: View {
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
     let webManagement: any AppleWebManagementServing
+    var backupController: AppleConfigurationController? = nil
 
     var body: some View {
         #if os(tvOS)
@@ -97,6 +101,10 @@ struct AppleSettingsView: View {
             AppleStorageSettingsView()
         case .about:
             AppleAboutView()
+        #if !os(tvOS)
+        case .backup:
+            if let backupController { AppleBackupSettingsView(controller: backupController) }
+        #endif
         }
     }
 
@@ -169,6 +177,7 @@ struct AppleSettingsView: View {
             }
 
             Section {
+                NavigationLink("Backup", value: AppleSettingsRoute.backup)
                 NavigationLink(value: AppleSettingsRoute.storage) {
                     AppleTVNavigationLabel("Storage", systemImage: "internaldrive")
                 }

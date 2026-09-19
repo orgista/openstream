@@ -69,22 +69,9 @@ import Testing
     )
 }
 
-@Test func tabBarHidesOnlyInCompactLandscape() {
-    #expect(OpenStreamTabBarVisibility.isHidden(
-        viewport: CGSize(width: 874, height: 402),
-        horizontalSizeClassIsCompact: true
-    ))
-    #expect(!OpenStreamTabBarVisibility.isHidden(
-        viewport: CGSize(width: 402, height: 874),
-        horizontalSizeClassIsCompact: true
-    ))
-    #expect(!OpenStreamTabBarVisibility.isHidden(
-        viewport: CGSize(width: 1_194, height: 834),
-        horizontalSizeClassIsCompact: false
-    ))
-    #expect(!OpenStreamTabBarVisibility.isHidden(
-        viewport: .zero,
-        horizontalSizeClassIsCompact: true
-    ))
+@Test func onlyFullScreenPlayersAllowPhoneLandscape() {
+    #expect(AppleOrientationPolicy.supportedOrientations(isPhone: true, allowsLandscape: false) == .portrait)
+    #expect(AppleOrientationPolicy.supportedOrientations(isPhone: true, allowsLandscape: true) == .allButUpsideDown)
+    #expect(AppleOrientationPolicy.supportedOrientations(isPhone: false, allowsLandscape: false) == .all)
+    #expect(AppleOrientationPolicy.supportedOrientations(isPhone: false, allowsLandscape: true) == .all)
 }
-

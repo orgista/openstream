@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 enum OpenStreamTab: String, CaseIterable, Identifiable {
     /// tvOS only: Search is a tab there, the stock TV pattern, instead of a
@@ -106,28 +109,21 @@ enum OpenStreamTabReselection {
     }
 }
 
-/// Decides whether the tab bar shows. The phone hides it in landscape so the
-/// content fills the screen the way it does on iPad; portrait keeps it.
-enum OpenStreamTabBarVisibility {
-    static func isHidden(viewport: CGSize, horizontalSizeClassIsCompact: Bool) -> Bool {
-        horizontalSizeClassIsCompact && AppleDetailMetrics.isLandscapeLayout(viewport: viewport)
-    }
-}
-
 /// Native Apple app shell with one independent navigation stack per tab.
 @MainActor
 public struct OpenStreamRootView: View {
     @State private var selectedTab = OpenStreamTab.home
     @State private var navigationPaths: [OpenStreamTab: NavigationPath] = [:]
     @State private var rootResets: [OpenStreamTab: Int] = [:]
-    @State private var rootViewportSize: CGSize = .zero
     #if os(iOS)
+    @State private var rootViewportSize: CGSize = .zero
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @State private var sourceStore = AppleSourceStore()
     @State private var catalogStore = AppleCatalogStore()
     @State private var settingsStore = AppleSettingsStore()
     @State private var mediaIndex = AppleMediaIndexStore()
+    @State private var backupController: AppleConfigurationController?
     @State private var mediaServerLibrary = AppleMediaServerLibraryStore()
     private let router: AppleAppRouter
     @State private var intentHandoff = AppleAppIntentHandoff.shared
@@ -202,7 +198,7 @@ public struct OpenStreamRootView: View {
                         // 2026-09-17): the floating glass bar on iOS 26, the
                         // classic bar on iOS 18 — no background or colour
                         // scheme of our own.
-                        .toolbar(tabBarIsHidden ? .hidden : .automatic, for: .tabBar)
+                        .toolbar(iPadTabBarIsHidden ? .hidden : .automatic, for: .tabBar)
                 }
                 .id(navigationIdentity(for: tab))
                 .tabItem {
@@ -237,16 +233,15 @@ public struct OpenStreamRootView: View {
         #endif
     }
 
-    private var tabBarIsHidden: Bool {
-        #if os(iOS)
-        return OpenStreamTabBarVisibility.isHidden(
-            viewport: rootViewportSize,
-            horizontalSizeClassIsCompact: horizontalSizeClass == .compact
-        )
-        #else
-        return false
-        #endif
+    // Compact iPad windows retain their existing landscape behavior.
+    // The phone shell is portrait-only, including while a player covers it.
+    #if os(iOS)
+    private var iPadTabBarIsHidden: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+            && horizontalSizeClass == .compact
+            && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
     }
+    #endif
 
     private func navigationIdentity(for tab: OpenStreamTab) -> String {
         let reset = rootResets[tab] ?? 0
@@ -270,9 +265,14 @@ public struct OpenStreamRootView: View {
         .background(Color.black.ignoresSafeArea())
         #endif
         .appleTraceSelection("tab", value: selectedTab)
+        .modifier(AppleConfigurationSync(
+            controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex
+        ))
+        #if os(iOS)
         .onGeometryChange(for: CGSize.self) { proxy in
-            proxy.size
+            UIDevice.current.userInterfaceIdiom == .pad ? proxy.size : .zero
         } action: { rootViewportSize = $0 }
+        #endif
         #if os(visionOS)
         .frame(minWidth: 760, minHeight: 540)
         .environment(\.defaultMinListRowHeight, 60)
@@ -513,7 +513,8 @@ public struct OpenStreamRootView: View {
             AppleSettingsView(
                 settings: settingsStore,
                 sourceStore: sourceStore,
-                webManagement: webManagement
+                webManagement: webManagement,
+                backupController: backupController
             )
             .appleAlignedTabTitle(tab.title)
         }
@@ -561,7 +562,8 @@ public struct OpenStreamRootView: View {
 
     #if DEBUG
     /// Settings pages that are children of Settings itself, not of Sources.
-    private static let debugTopLevelSettingsRoutes: [String: AppleSettingsRoute] = [
+    private static var debugTopLevelSettingsRoutes: [String: AppleSettingsRoute] {
+        var routes: [String: AppleSettingsRoute] = [
         "channels": .channels,
         "playback-settings": .playback,
         "metadata": .metadata,
@@ -571,7 +573,12 @@ public struct OpenStreamRootView: View {
         "privacy": .privacy,
         "storage": .storage,
         "about": .about,
-    ]
+        ]
+        #if !os(tvOS)
+        routes["backup"] = .backup
+        #endif
+        return routes
+    }
 
     private var debugScreen: String? {
         if let stored = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") {

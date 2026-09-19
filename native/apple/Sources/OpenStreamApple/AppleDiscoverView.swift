@@ -5409,7 +5409,13 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         #elseif os(macOS)
         content.sheet(item: $presentation) { AppleStremioPlayerView(presentation: $0) }
         #else
-        content.fullScreenCover(item: $presentation) { AppleStremioPlayerView(presentation: $0) }
+        content.fullScreenCover(item: $presentation) {
+            AppleStremioPlayerView(presentation: $0)
+                #if os(iOS)
+                .onAppear { AppleOrientationLock.shared.allowsLandscape = true }
+                .onDisappear { AppleOrientationLock.shared.allowsLandscape = false }
+                #endif
+        }
         #endif
     }
 }

@@ -4,6 +4,32 @@ import Testing
 @Suite("Web Management Page Style Tests")
 struct AppleWebManagementPageStyleTests {
 
+    @Test func pairingAndSessionRecoveryPreserveDrafts() {
+        let html = AppleWebManagementPage.setup(pairingCode: "ABCD2345")
+        #expect(html.contains("searchParams.get('pair')"))
+        #expect(html.contains("history.replaceState"))
+        #expect(html.contains("await submit(pairForm)"))
+        #expect(html.contains("credentials: 'same-origin'"))
+        #expect(html.contains("Session ended — scan the code again"))
+        #expect(html.contains("restoreDraft"))
+        #expect(!html.contains("localStorage"))
+        #expect(!html.contains("ABCD2345"))
+    }
+
+    @Test func liveSourceFieldsMatchTheApp() {
+        let html = AppleWebManagementPage.setup()
+        #expect(html.contains("M3U Playlist"))
+        #expect(html.contains("Xtream Account"))
+        #expect(!html.contains("IPTV playlist"))
+        #expect(html.contains("data-reveal=\"password\""))
+        #expect(html.contains("aria-label=\"Show password\""))
+        #expect(html.contains("eye.slash"))
+        #expect(html.contains("min-width:44px;min-height:44px"))
+        #expect(html.contains("sanitizeCredential"))
+        #expect(html.contains("addEventListener('input'"))
+        #expect(html.contains("input.value.trim()"))
+    }
+
     @Test("Page applies correct CSS and HTML per style guidelines")
     func pageHasCorrectStyling() {
         // The rendering entry point is AppleWebManagementPage.setup()

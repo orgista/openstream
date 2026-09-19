@@ -1,8 +1,14 @@
 import OpenStreamApple
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 @main
 struct OpenStreamPlatformApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(OpenStreamAppDelegate.self) private var appDelegate
+    #endif
     @State private var showLaunch = true
     @State private var router = AppleAppRouter()
     @State private var webManagement = AppleWebManagementController()
@@ -96,3 +102,17 @@ private struct AppleOpenStreamLaunchView: View {
         .accessibilityLabel("OpenStream")
     }
 }
+
+#if os(iOS)
+@MainActor
+private final class OpenStreamAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        AppleOrientationLock.shared.supportedOrientations(
+            for: UIDevice.current.userInterfaceIdiom
+        )
+    }
+}
+#endif

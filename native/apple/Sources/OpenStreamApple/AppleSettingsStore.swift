@@ -25,10 +25,14 @@ public protocol AppleCredentialStoring {
     func remove(_ account: String) throws
 }
 
-/// Stores credentials in the local data-protection Keychain. ThisDeviceOnly
-/// accessibility keeps them out of device backups and iCloud Keychain sync.
+/// Local credentials use ThisDeviceOnly; syncing is an explicit viewer choice.
 public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
+    static let syncPreferenceKey = "openstream.backup.icloud.enabled.v1"
     private let service: String
+    private var synchronizable: Bool { UserDefaults.standard.bool(forKey: Self.syncPreferenceKey) }
+    private var accessibility: CFString {
+        synchronizable ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    }
 
     public init(service: String = "com.orgista.openstream.settings") {
         self.service = service
@@ -57,14 +61,14 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
         let query = baseQuery(for: account)
         let update: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrAccessible as String: accessibility,
         ]
         let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
 
         if updateStatus == errSecItemNotFound {
             var item = query
             item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            item[kSecAttrAccessible as String] = accessibility
             let addStatus = SecItemAdd(item as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw AppleKeychainStoreError.unexpectedStatus(addStatus)
@@ -84,12 +88,46 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
         }
     }
 
+    /// Change accessibility and sync together; ThisDeviceOnly is incompatible with sync.
+    /// Roll back migrated services if a later update fails, leaving the toggle unchanged.
+    static func setSynchronizationEnabled(_ enabled: Bool) throws {
+        let previous = UserDefaults.standard.bool(forKey: syncPreferenceKey)
+        guard previous != enabled else { return }
+        var changed: [String] = []
+        do {
+            for service in ["com.orgista.openstream.settings", "com.orgista.openstream.instances"] {
+                try migrate(service: service, from: previous, to: enabled)
+                changed.append(service)
+            }
+        } catch {
+            for service in changed { try? migrate(service: service, from: enabled, to: previous) }
+            throw error
+        }
+        UserDefaults.standard.set(enabled, forKey: syncPreferenceKey)
+    }
+
+    private static func migrate(service: String, from old: Bool, to new: Bool) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrSynchronizable as String: old,
+        ]
+        let attributes: [String: Any] = [
+            kSecAttrSynchronizable as String: new,
+            kSecAttrAccessible as String: new ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw AppleKeychainStoreError.unexpectedStatus(status)
+        }
+    }
+
     private func baseQuery(for account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+            kSecAttrSynchronizable as String: synchronizable,
         ]
     }
 }
@@ -527,6 +565,149 @@ public final class AppleSettingsStore {
         } catch {
             persistenceError = error.localizedDescription
         }
+    }
+
+    // Explicit allowlist: importing a file must never write arbitrary defaults keys.
+    static var configurationKeys: [String] {
+        [
+            DefaultsKey.metadataEnabled,
+            DefaultsKey.radarrURL,
+            DefaultsKey.radarrRootFolderPath,
+            DefaultsKey.radarrQualityProfileID,
+            DefaultsKey.sonarrURL,
+            DefaultsKey.sonarrRootFolderPath,
+            DefaultsKey.sonarrQualityProfileID,
+            DefaultsKey.gatewayEnabled,
+            DefaultsKey.gatewayURL,
+            DefaultsKey.captionsAutoOn,
+            DefaultsKey.captionsPreference,
+            DefaultsKey.autoPlayTrailer,
+            DefaultsKey.autoPlayNextEpisode,
+            DefaultsKey.watchProviderIDs,
+            DefaultsKey.autoMuteTrailer,
+            DefaultsKey.deleteAfterWatching,
+            DefaultsKey.systemSearchEnabled,
+            DefaultsKey.topShelfEnabled,
+            DefaultsKey.liveTVEnabled,
+            DefaultsKey.discoverEnabled,
+            DefaultsKey.libraryEnabled,
+            DefaultsKey.top10ListsEnabled,
+            DefaultsKey.liveChannelScope,
+            DefaultsKey.liveChannelPackage,
+            DefaultsKey.showPayPerViewChannels,
+            DefaultsKey.show24x7Channels,
+            DefaultsKey.favoriteChannelIDs,
+            DefaultsKey.regionalZIPCode,
+            DefaultsKey.playbackEngine,
+            AppleSubtitleLanguages.defaultsKey,
+            AppleInteractionTrace.preferenceKey,
+            "openstream.settings.live.custom.v1",
+        ]
+    }
+
+    static let configurationURLKeys = [DefaultsKey.radarrURL, DefaultsKey.sonarrURL, DefaultsKey.gatewayURL]
+
+    func configurationValues() throws -> [String: Data] {
+        var values: [String: Data] = [:]
+        for key in Self.configurationKeys {
+            if let value = defaults.object(forKey: key) {
+                values[key] = try PropertyListSerialization.data(fromPropertyList: [value], format: .binary, options: 0)
+            }
+        }
+        return values
+    }
+
+    static func configurationValue(_ data: Data) throws -> Any {
+        guard let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [Any],
+              values.count == 1 else { throw AppleConfigurationError.invalidFile }
+        return values[0]
+    }
+
+    func restoreConfiguration(_ values: [String: Data]) throws {
+        // Decode before writing, so malformed values cannot leave half-applied settings.
+        var decoded: [String: Any] = [:]
+        for key in Self.configurationKeys {
+            if let data = values[key] { decoded[key] = try Self.configurationValue(data) }
+        }
+        for key in Self.configurationKeys {
+            if let value = decoded[key] { defaults.set(value, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        let restored = AppleSettingsStore(defaults: defaults, keychain: keychain)
+        metadataEnabled = restored.metadataEnabled
+        radarrURL = restored.radarrURL
+        radarrRootFolderPath = restored.radarrRootFolderPath
+        radarrQualityProfileID = restored.radarrQualityProfileID
+        sonarrURL = restored.sonarrURL
+        sonarrRootFolderPath = restored.sonarrRootFolderPath
+        sonarrQualityProfileID = restored.sonarrQualityProfileID
+        gatewayEnabled = restored.gatewayEnabled
+        gatewayURL = restored.gatewayURL
+        captionsPreference = restored.captionsPreference
+        subtitleLanguages = restored.subtitleLanguages
+        autoPlayNextEpisode = restored.autoPlayNextEpisode
+        watchProviderIDs = restored.watchProviderIDs
+        autoPlayTrailer = restored.autoPlayTrailer
+        autoMuteTrailer = restored.autoMuteTrailer
+        deleteAfterWatching = restored.deleteAfterWatching
+        systemSearchEnabled = restored.systemSearchEnabled
+        topShelfEnabled = restored.topShelfEnabled
+        diagnosticLoggingEnabled = restored.diagnosticLoggingEnabled
+        liveTVEnabled = restored.liveTVEnabled
+        discoverEnabled = restored.discoverEnabled
+        libraryEnabled = restored.libraryEnabled
+        top10ListsEnabled = restored.top10ListsEnabled
+        liveChannelScope = restored.liveChannelScope
+        liveChannelPackage = restored.liveChannelPackage
+        customChannelPackage = restored.customChannelPackage
+        showPayPerViewChannels = restored.showPayPerViewChannels
+        show24x7Channels = restored.show24x7Channels
+        favoriteChannelIDs = restored.favoriteChannelIDs
+        regionalZIPCode = restored.regionalZIPCode
+        playbackEngine = restored.playbackEngine
+    }
+
+    func prepareConfigurationKeychain() throws {
+        for key in Self.configurationURLKeys {
+            if let value = defaults.string(forKey: key), !value.isEmpty {
+                try keychain.set(value, for: "backup.url.\(key)")
+            } else { try keychain.remove("backup.url.\(key)") }
+        }
+    }
+
+    func synchronizedConfigurationURLs() throws -> [String: Data] {
+        var values: [String: Data] = [:]
+        for key in Self.configurationURLKeys {
+            if let value = try keychain.string(for: "backup.url.\(key)") {
+                values[key] = try PropertyListSerialization.data(fromPropertyList: [value], format: .binary, options: 0)
+            }
+        }
+        return values
+    }
+
+    func configurationCredentials() throws -> [String: String] {
+        var values: [String: String] = [:]
+        for account in Self.configurationSecretAccounts {
+            values[account] = try keychain.string(for: account)
+        }
+        return values
+    }
+
+    private static var configurationSecretAccounts: [String] {
+        [SecretKey.tmdbAPIKey, SecretKey.omdbAPIKey, SecretKey.radarrAPIKey, SecretKey.sonarrAPIKey, SecretKey.gatewayToken, SecretKey.traktClientID, SecretKey.traktClientSecret]
+    }
+
+    func restoreConfigurationCredentials(_ values: [String: String]) throws {
+        for account in Self.configurationSecretAccounts {
+            if let value = values[account] { try keychain.set(value, for: account) }
+        }
+        tmdbAPIKey = try keychain.string(for: SecretKey.tmdbAPIKey) ?? ""
+        omdbAPIKey = try keychain.string(for: SecretKey.omdbAPIKey) ?? ""
+        radarrAPIKey = try keychain.string(for: SecretKey.radarrAPIKey) ?? ""
+        sonarrAPIKey = try keychain.string(for: SecretKey.sonarrAPIKey) ?? ""
+        gatewayToken = try keychain.string(for: SecretKey.gatewayToken) ?? ""
+        traktClientID = try keychain.string(for: SecretKey.traktClientID) ?? ""
+        traktClientSecret = try keychain.string(for: SecretKey.traktClientSecret) ?? ""
     }
 
     private enum DefaultsKey {

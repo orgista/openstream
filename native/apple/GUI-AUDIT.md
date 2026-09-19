@@ -2100,19 +2100,19 @@ Legend: iP = iPhone, iPd = iPad, TV = Apple TV, VP = Vision Pro, Mac. Tick a cel
 photograph from that platform's simulator (or Mac) taken from the current build, looked at.
 | Screen | iP | iPd | TV | VP | Mac | Notes |
 |---|---|---|---|---|---|---|
-| Discover: home (billboard, Continue Watching, shelves, Top 10) | ☐ | ☐ | ☐ | ☐ | ☐ | 1b billboard blurb; 5 long-title card |
+| Discover: home (billboard, Continue Watching, shelves, Top 10) | ☐ | ☐ | ☐ | ☐ | ☐ | 1b billboard blurb; 5 long-title card 2026-09-18 implementer sweep blocked for all rows: sandbox denies CoreSimulator and required build/screenshot directories. No current-build photographs; all cells remain unchecked. |
 | Discover: search (icon → screen, results shows/movies only) | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Detail: movie (artwork, meta line, Play/Download, My List/Rate, overview, More Like This) | ☐ | ☐ | ☐ | ☐ | ☐ | 4 back button |
 | Detail: series (season picker, episode rows, download per episode) | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Detail: Other Sources sheet | ☐ | ☐ | ☐ | ☐ | ☐ | 8 |
 | Detail: media-server title (ms:) + episodes | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Player: surface route (overlay idle / tapped, Skip Intro, Next Episode, captions menu, More menu) | ☐ | ☐ | ☐ | ☐ | ☐ | 9, 7 |
-| Player: AVPlayer route (HLS) — controls, captions | ☐ | ☐ | ☐ | ☐ | ☐ | 7 |
+| Player: AVPlayer route (HLS) — controls, captions | ☐ | ☐ | ☐ | ☐ | ☐ | 7 Live host now observes caption tracks through the shared overlay instead of freezing a UIMenu. Broadcast CEA-608/708 rendering NOT verified; simulator inaccessible. NativePlaybackEngine readyToPlay path reviewed, unchanged. |
 | Player: failure alerts (Playback Failed / Unavailable) | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Library: root, folder, item, downloads | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Live: root (title, search, preview, chips, guide) | ☐ | ☐ | ☐ | ☐ | ☐ | 2, 6, 1 guide data |
-| Live: channel preview → full screen player | ☐ | ☐ | ☐ | ☐ | ☐ | 2 |
-| Live: channel error + recovery | ☐ | ☐ | ☐ | ☐ | ☐ | |
+| Live: channel preview → full screen player | ☐ | ☐ | ☐ | ☐ | ☐ | 2 2026-09-18 code: guide selections request full screen; Channels opens the existing material/logo list from the left; channel switches retain the player; one overlay with captions/More/mute in an HStack and one close. XCUITest assertions/captures added; execution and photographs blocked by sandbox. |
+| Live: channel error + recovery | ☐ | ☐ | ☐ | ☐ | ☐ | Full-screen channel failure/recovery still needs simulator verification after host changes; no photograph. |
 | Settings: root (tabs, Top 10 toggle, services) | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Settings: Sources list + source detail (health, Enabled, Delete) | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | Settings: Add Files (Direct URL, Network Shares) | ☐ | ☐ | ☐ | ☐ | ☐ | |

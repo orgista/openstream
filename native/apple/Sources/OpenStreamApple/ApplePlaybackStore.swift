@@ -75,6 +75,7 @@ public final class ApplePlaybackStore {
     /// store (write-through), but reads and each per-tick save no longer
     /// decode + re-encode the whole dictionary. `nil` means not yet loaded.
     private var cache: [String: ApplePlaybackProgress]?
+    private var cachedData: Data?
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -126,7 +127,8 @@ public final class ApplePlaybackStore {
     }
 
     private func entries() -> [String: ApplePlaybackProgress] {
-        if let cache { return cache }
+        let storedData = defaults.data(forKey: key)
+        if let cache, cachedData == storedData { return cache }
         let loaded: [String: ApplePlaybackProgress]
         if let data = defaults.data(forKey: key) {
             let decoded = (try? JSONDecoder().decode([String: ApplePlaybackProgress].self, from: data)) ?? [:]
@@ -144,11 +146,19 @@ public final class ApplePlaybackStore {
             loaded = [:]
         }
         cache = loaded
+        cachedData = defaults.data(forKey: key)
         return loaded
+    }
+
+    func configurationProgress() -> [String: ApplePlaybackProgress] { entries() }
+
+    func restoreConfigurationProgress(_ entries: [String: ApplePlaybackProgress]) {
+        persist(entries)
     }
 
     private func persist(_ entries: [String: ApplePlaybackProgress]) {
         cache = entries
-        defaults.set(try? JSONEncoder().encode(entries), forKey: key)
+        cachedData = try? JSONEncoder().encode(entries)
+        defaults.set(cachedData, forKey: key)
     }
 }

@@ -29,10 +29,19 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
 @MainActor
 public protocol AppleWebManagementServing: AnyObject {
     var session: AppleWebManagementSession? { get }
+    var connectedBrowsers: [AppleWebManagementServer.ConnectedBrowser] { get }
+    func endBrowser(id: UUID)
+    func endAllBrowsers()
 
     func sessionUpdates() -> AsyncStream<AppleWebManagementSession?>
     func start(sourceStore: AppleSourceStore) async throws -> AppleWebManagementSession
     func stop() async
+}
+
+public extension AppleWebManagementServing {
+    var connectedBrowsers: [AppleWebManagementServer.ConnectedBrowser] { [] }
+    func endBrowser(id: UUID) {}
+    func endAllBrowsers() {}
 }
 
 public struct AppleWebManagementUnavailableError: LocalizedError, Sendable {
@@ -1002,6 +1011,15 @@ private struct AppleAddLiveTVSourceView: View {
             standardBody
             #endif
         }
+        .onChange(of: username) { _, value in
+            username = AppleIPTVEndpointPolicy.sanitizeCredential(value)
+        }
+        .onChange(of: password) { _, value in
+            password = AppleIPTVEndpointPolicy.sanitizeCredential(value)
+        }
+        .onChange(of: endpoint) { _, value in
+            endpoint = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         .onChange(of: [type.rawValue, name, endpoint, username, password, pastedPlaylist]) { _, _ in
             message = nil
             isError = false
@@ -1273,8 +1291,12 @@ private struct AppleAddLiveTVSourceView: View {
                 ? "Enter the Xtream server URL, including the port."
                 : "Enter the playlist's HTTP or HTTPS URL."
         }
-        if type == .xtream, username.isEmpty || password.isEmpty {
-            return "Enter the Xtream username and password."
+        if type == .xtream {
+            do {
+                try AppleIPTVEndpointPolicy.validateCredentials(username: username, password: password)
+            } catch {
+                return error.localizedDescription
+            }
         }
         return nil
     }
@@ -1288,10 +1310,10 @@ private struct AppleAddLiveTVSourceView: View {
         let submittedType = type
         var submittedName = name
         let importingFile = usesPastedPlaylist
-        let submittedEndpoint = importingFile ? AppleLocalPlaylistStore.pastedURL.absoluteString : endpoint
+        let submittedEndpoint = importingFile ? AppleLocalPlaylistStore.pastedURL.absoluteString : endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         if importingFile && submittedName.isEmpty { submittedName = "Playlists" }
-        let submittedUsername = username
-        let submittedPassword = password
+        let submittedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let submittedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
         isWorking = true
         message = nil
         defer { isWorking = false }
@@ -1876,13 +1898,13 @@ private struct AppleWebManagementView: View {
     @State private var confirmStop = false
     @State private var confirmForget = false
     @State private var forgetNotice = false
+    @State private var connectedBrowsers: [AppleWebManagementServer.ConnectedBrowser] = []
 
     let sourceStore: AppleSourceStore
     let service: any AppleWebManagementServing
 
     private var activeSession: AppleWebManagementSession? {
-        guard let session, !session.isExpired else { return nil }
-        return session
+        session
     }
 
     var body: some View {
@@ -1917,7 +1939,7 @@ private struct AppleWebManagementView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         addressBlock(activeSession)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        AppleWebManagementQRCode(url: activeSession.friendlyURL)
+                        AppleWebManagementQRCode(url: activeSession.pairingURL)
                             .frame(width: 180, height: 180)
                             .frame(maxWidth: .infinity)
                     }
@@ -1939,6 +1961,12 @@ private struct AppleWebManagementView: View {
                     }
                     .buttonStyle(.brandSecondary)
                     .listRowBackground(Color.clear)
+                }
+
+                if !connectedBrowsers.isEmpty {
+                    Section("Connected browsers") {
+                        AppleWebManagementBrowserRows(browsers: connectedBrowsers, service: service)
+                    }
                 }
 
                 Section {
@@ -1972,6 +2000,7 @@ private struct AppleWebManagementView: View {
         }
         .alert("Forget Paired Browsers?", isPresented: $confirmForget) {
             Button("Forget", role: .destructive) {
+                service.endAllBrowsers()
                 AppleWebManagementTrust().forgetAllBrowsers()
                 appleTrace("web management: all trusted browsers forgotten")
                 forgetNotice = true
@@ -1985,6 +2014,7 @@ private struct AppleWebManagementView: View {
             for await updatedSession in service.sessionUpdates() {
                 guard !Task.isCancelled else { return }
                 session = updatedSession
+                connectedBrowsers = service.connectedBrowsers
             }
         }
     }
@@ -2016,18 +2046,18 @@ private struct AppleWebManagementView: View {
                             }
                         }
 
-                        AppleWebManagementQRCode(url: activeSession.friendlyURL)
+                        AppleWebManagementQRCode(url: activeSession.pairingURL)
                             .frame(width: 260, height: 260)
                     }
                     .padding(30)
                     .background(Color(white: 0.11), in: .rect(cornerRadius: 18))
                 }
 
-                // Revocation belongs wherever the feature is used, and the
-                // television is where it is used. A browser stays trusted for
-                // thirty days; leaving the only way to untrust it on the phone
-                // layout would make that a one-way door on the device that
-                // actually shows the pairing code.
+                if !connectedBrowsers.isEmpty {
+                    Text("Connected browsers").font(.headline)
+                    AppleWebManagementBrowserRows(browsers: connectedBrowsers, service: service)
+                }
+
                 HStack(spacing: 24) {
                     if activeSession == nil {
                         startButton
@@ -2067,6 +2097,7 @@ private struct AppleWebManagementView: View {
         }
         .alert("Forget Paired Browsers?", isPresented: $confirmForget) {
             Button("Forget", role: .destructive) {
+                service.endAllBrowsers()
                 AppleWebManagementTrust().forgetAllBrowsers()
                 appleTrace("web management: all trusted browsers forgotten")
                 forgetNotice = true
@@ -2080,15 +2111,13 @@ private struct AppleWebManagementView: View {
             for await updatedSession in service.sessionUpdates() {
                 guard !Task.isCancelled else { return }
                 session = updatedSession
+                connectedBrowsers = service.connectedBrowsers
             }
         }
     }
     #endif
 
-    /// Revokes every remembered browser, so the pairing code is required again.
-    ///
-    /// Trusting a browser for thirty days is only safe if it can be untrusted;
-    /// without this the feature would be a one-way door.
+    /// Ends every active browser session.
     private var forgetBrowsersButton: some View {
         Button("Forget Paired Browsers") { confirmForget = true }
         #if !os(tvOS)
@@ -2202,6 +2231,28 @@ private struct AppleWebManagementView: View {
         guard let host = url.host else { return url.absoluteString }
         guard let port = url.port else { return host }
         return "\(host):\(port)"
+    }
+}
+
+private struct AppleWebManagementBrowserRows: View {
+    let browsers: [AppleWebManagementServer.ConnectedBrowser]
+    let service: any AppleWebManagementServing
+
+    var body: some View {
+        ForEach(browsers) { browser in
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(browser.name)
+                    Text(browser.lastActivity, style: .time)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("End") { service.endBrowser(id: browser.id) }
+                    .buttonStyle(.brandSecondary)
+                    .accessibilityLabel("End \(browser.name) session")
+            }
+        }
     }
 }
 

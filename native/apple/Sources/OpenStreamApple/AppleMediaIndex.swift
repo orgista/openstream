@@ -272,6 +272,20 @@ public actor AppleMediaIndexRepository {
         recordsByID = next
     }
 
+    func restoreConfigurationWatchlist(_ watchlist: [AppleMediaRecord]) throws {
+        var next = recordsByID
+        for id in next.keys { next[id]?.isFavorite = false }
+        for record in watchlist {
+            var restored = next[record.id] ?? record
+            restored.isFavorite = true
+            next[record.id] = restored
+        }
+        try persist(next)
+        recordsByID = next
+        searchTextByID = Self.makeSearchTextByID(next)
+        orderedRecordIDs = Self.makeOrderedRecordIDs(next)
+    }
+
     public func setFavorite(_ isFavorite: Bool, recordID: String) throws {
         guard var record = recordsByID[recordID], record.isFavorite != isFavorite else { return }
         record.isFavorite = isFavorite
@@ -605,6 +619,11 @@ public final class AppleMediaIndexStore {
             progressByID[record.id] = min(max(progress.position / progress.duration, 0), 1)
         }
         try await repository.updateProgress(progressByID)
+        setRecords(await repository.records())
+    }
+
+    func restoreConfigurationWatchlist(_ watchlist: [AppleMediaRecord]) async throws {
+        try await repository.restoreConfigurationWatchlist(watchlist)
         setRecords(await repository.records())
     }
 

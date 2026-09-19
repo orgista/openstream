@@ -133,6 +133,41 @@ import Testing
         coordinator.stop()
     }
 
+    @Test func liveCaptionsArrivingAfterPresentationSelectTheCurrentTrack() async throws {
+        let engine = FakePlaybackEngine()
+        let request = makeRequest(isLive: true)
+        let coordinator = makeCoordinator(engine: engine, request: request, route: .avPlayer)
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        model.preferredSubtitleLanguages = ["en"]
+        model.subtitleLanguagesAreExplicit = true
+        defer { coordinator.stop() }
+        #expect(model.visibleSubtitleTracks.isEmpty)
+
+        // The broadcast legible group can arrive after the full-screen host exists.
+        await Task.yield()
+        engine.subtitleTracks = [ApplePlaybackTrack(id: 17, title: "English", language: "en", codec: "cc")]
+        engine.emit(.tracks)
+        for _ in 0..<20 where model.visibleSubtitleTracks.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let track = try #require(model.visibleSubtitleTracks.first)
+        #expect(track.id == 17)
+        model.selectSubtitle(track.id)
+        #expect(engine.selectedSubtitle == [17])
+
+        // A channel switch must not retain the first channel's menu indices.
+        engine.subtitleTracks = [ApplePlaybackTrack(id: 23, title: "English", language: "en", codec: "cc")]
+        engine.emit(.tracks)
+        for _ in 0..<20 where model.visibleSubtitleTracks.first?.id != 23 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let replacement = try #require(model.visibleSubtitleTracks.first)
+        #expect(replacement.id == 23)
+        model.selectSubtitle(replacement.id)
+        model.selectSubtitle(nil)
+        #expect(engine.selectedSubtitle == [17, 23, nil])
+    }
+
     @Test func ccStateFlagReflectsSubtitleSelection() {
         let engine = FakePlaybackEngine()
         engine.duration = 100

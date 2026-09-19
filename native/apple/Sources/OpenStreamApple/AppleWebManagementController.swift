@@ -9,6 +9,7 @@ public final class AppleWebManagementController: AppleWebManagementServing {
             for observer in sessionObservers.values { observer.yield(session) }
         }
     }
+    public private(set) var connectedBrowsers: [AppleWebManagementServer.ConnectedBrowser] = []
     public private(set) var error: String?
     public private(set) var isRunning = false
 
@@ -69,6 +70,15 @@ public final class AppleWebManagementController: AppleWebManagementServing {
                 self.error = nil
             }
         }
+        newServer.onSessionChange = { [weak self, weak newServer] updated in
+            guard let self, let newServer, self.server === newServer else { return }
+            self.session = updated
+        }
+        newServer.onBrowsersChange = { [weak self, weak newServer] browsers in
+            guard let self, let newServer, self.server === newServer else { return }
+            self.connectedBrowsers = browsers
+            for observer in self.sessionObservers.values { observer.yield(self.session) }
+        }
         server = newServer
 
         do {
@@ -91,6 +101,14 @@ public final class AppleWebManagementController: AppleWebManagementServing {
         }
     }
 
+    public func endBrowser(id: UUID) {
+        server?.endBrowser(id: id)
+    }
+
+    public func endAllBrowsers() {
+        server?.endAllBrowsers()
+    }
+
     public func stop() async {
         stopActiveServer(clearError: true)
     }
@@ -105,6 +123,7 @@ public final class AppleWebManagementController: AppleWebManagementServing {
         activeServer?.onStop = nil
         activeServer?.dispose()
         session = nil
+        connectedBrowsers = []
         isRunning = false
         if clearError { error = nil }
     }

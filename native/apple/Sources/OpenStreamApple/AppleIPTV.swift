@@ -319,6 +319,7 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
     case invalidEndpoint
     case invalidSource
     case missingCredentials
+    case credentialsContainWhitespace
     case authenticationFailed(status: String?)
     case unreachable(String)
     case httpStatus(Int)
@@ -337,6 +338,7 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
         case .invalidEndpoint: "Enter an HTTP or HTTPS IPTV address."
         case .invalidSource: "This Live TV source is invalid."
         case .missingCredentials: "Username and password are required."
+        case .credentialsContainWhitespace: "Username and password must not contain spaces."
         case .authenticationFailed(let status):
             if let status, !status.isEmpty {
                 "The IPTV provider rejected the account (auth=0, status: \(status)). Check the username and password, including capitalization."
@@ -368,6 +370,17 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public enum AppleIPTVEndpointPolicy {
+    public static func sanitizeCredential(_ value: String) -> String {
+        String(value.filter { !$0.isWhitespace })
+    }
+
+    public static func validateCredentials(username: String, password: String) throws {
+        guard !username.isEmpty, !password.isEmpty else { throw AppleIPTVError.missingCredentials }
+        guard !username.contains(where: \.isWhitespace), !password.contains(where: \.isWhitespace) else {
+            throw AppleIPTVError.credentialsContainWhitespace
+        }
+    }
+
     public static func normalize(_ value: String) throws -> URL {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         // Pasted/uploaded playlists live in the app (`openstream-playlist://local/…`).
@@ -467,6 +480,7 @@ public struct AppleIPTVClient: Sendable {
                   !credentials.password.isEmpty else {
                 throw AppleIPTVError.missingCredentials
             }
+            try AppleIPTVEndpointPolicy.validateCredentials(username: credentials.username, password: credentials.password)
             return try await xtreamChannels(source: source, credentials: credentials)
         }
 

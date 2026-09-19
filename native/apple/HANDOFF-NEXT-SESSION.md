@@ -311,6 +311,15 @@ write; if a file you need is already modified by the other agent, say so and sto
   Pro `F598603A…`. All stock Xcode devices were deleted at the owner's request; never create more.
   An iOS 27 iPhone 18 Pro Max waits for Xcode 27.
 
+- **Orientation rule (owner 2026-09-18 15:35):** iPhone is portrait-only except the full-screen video
+  player (any route), which rotates and plays in landscape; iPad unchanged. Implemented via an
+  app-level orientation lock + AppDelegate mask (spec `iphone-portrait-lock.md`), NOT by removing
+  landscape from the project.
+
+- **`codex exec` must get `< /dev/null`.** Run non-interactively it blocks forever on "Reading additional
+  input from stdin..." (the whole afternoon queue of 2026-09-18 stalled 3 h on this). Always:
+  `codex exec -C <tree> -s workspace-write "<spec>" < /dev/null > spec.out 2>&1`.
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/<name>/SKILL.md` and load automatically in Claude Code
   (`Skill` tool by name). For agy pass `--add-dir ~/.claude/skills`; codex reads them as files.

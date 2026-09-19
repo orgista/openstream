@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum AppleWebManagementPage {
@@ -16,8 +17,8 @@ public enum AppleWebManagementPage {
 
     static let sourceTypes: [(value: String, label: String)] = [
         ("addon", "Add-on"),
-        ("m3u", "IPTV playlist"),
-        ("xtream", "Xtream"),
+        ("m3u", "M3U Playlist"),
+        ("xtream", "Xtream Account"),
     ]
 
     /// Renders the whole portal. `pairingCode == nil` means the browser is
@@ -44,6 +45,10 @@ public enum AppleWebManagementPage {
         let isPaired = pairingCode == nil
         let body = isPaired
             ? """
+                <section id="pairingPanel" hidden>
+                  <p class="feedback error" role="alert">Session ended — scan the code again</p>
+                  \(pairingForm())
+                </section>
                 <div class="lead">\(addressRow)</div>
             \(feedback.isEmpty ? "" : "<section>\(feedback)</section>")
             \(addCard(manifest: manifest, sourceType: sourceType, draft: draft))
@@ -53,7 +58,7 @@ public enum AppleWebManagementPage {
                 </section>
             """
             : """
-                <section>
+                <section id="pairingPanel">
                   \(addressRow)
                   \(feedback)
                   \(pairingForm())
@@ -71,11 +76,12 @@ public enum AppleWebManagementPage {
           <style>\(styles)</style>
         </head>
         <body>
-          <main>
+          <main data-paired="\(isPaired)">
             <header>\(brandMark)<span class="wordmark">OpenStream</span></header>
             <h1 class="visually-hidden">OpenStream</h1>
         \(body)
           </main>
+          <script>\(script)</script>
         </body>
         </html>
         """
@@ -87,7 +93,7 @@ public enum AppleWebManagementPage {
 
     private static func pairingForm() -> String {
         """
-        <form method="post" action="/" autocomplete="off">
+        <form id="pairForm" method="post" action="/" autocomplete="off">
                 <input type="hidden" name="action" value="pair">
                 <label for="pairingCode">Pairing code</label>
                 <input id="pairingCode" name="pairingCode" type="text" required inputmode="text"
@@ -98,7 +104,7 @@ public enum AppleWebManagementPage {
     }
 
     /// One card, one form. The type is a radio group; CSS shows the fields
-    /// for the checked type, so the page needs no script. Type-specific
+    /// for the checked type. Type-specific
     /// fields carry no `required` attribute because a hidden required field
     /// blocks submission silently; the server names the missing value.
     private static func addCard(manifest: String, sourceType: String, draft: [String: String]) -> String {
@@ -130,7 +136,7 @@ public enum AppleWebManagementPage {
                   <input id="playlistURL" name="playlistURL" type="url" inputmode="url"
                     value="\(escape(draft["playlistURL"] ?? ""))"
                     autocapitalize="none" autocomplete="url" spellcheck="false">
-                  <label for="epgURL">EPG URL</label>
+                  <label for="epgURL">EPG URL (optional)</label>
                   <input id="epgURL" name="epgURL" type="url" inputmode="url"
                     value="\(escape(draft["epgURL"] ?? ""))"
                     autocapitalize="none" autocomplete="url" spellcheck="false">
@@ -148,7 +154,15 @@ public enum AppleWebManagementPage {
                     value="\(escape(draft["username"] ?? ""))"
                     autocapitalize="none" spellcheck="false">
                   <label for="password">Password</label>
-                  <input id="password" name="password" type="password" autocomplete="current-password">
+                  <div class="secure-field">
+                    <input id="password" name="password" type="password" autocomplete="current-password">
+                    <button type="button" class="reveal" data-reveal="password" aria-label="Show password" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <g data-symbol="eye"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></g>
+                        <path data-symbol="eye.slash" d="M3 3l18 18" hidden/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <button type="submit">Add</button>
               </form>
@@ -174,6 +188,114 @@ public enum AppleWebManagementPage {
         """
     }
 
+    static var scriptHash: String {
+        Data(SHA256.hash(data: Data(script.utf8))).base64EncodedString()
+    }
+
+    // Drafts live only in this page's closure, including while the app is
+    // unavailable. Re-pairing never persists a password or resubmits a mutation.
+    static let script = #"""
+    (() => {
+      let pendingDraft = null;
+      let busy = false;
+      const sanitizeCredential = value => value.replace(/[\s\u0085]+/gu, '');
+      const main = () => document.querySelector('main');
+      const captureDraft = () => Array.from(main().querySelectorAll('input:not([name="pairingCode"])'))
+        .map(input => ({id: input.id, value: input.value, checked: input.checked})).filter(item => item.id);
+      const restoreDraft = draft => {
+        for (const item of draft || []) {
+          const input = document.getElementById(item.id);
+          if (input) { input.value = item.value; input.checked = item.checked; }
+        }
+      };
+      const showSessionEnded = () => {
+        main().dataset.paired = 'false';
+        const panel = document.getElementById('pairingPanel');
+        panel.hidden = false;
+        let feedback = panel.querySelector('.feedback');
+        if (!feedback) {
+          feedback = document.createElement('p');
+          feedback.className = 'feedback error';
+          feedback.setAttribute('role', 'alert');
+          panel.prepend(feedback);
+        }
+        feedback.textContent = 'Session ended — scan the code again';
+        for (const button of main().querySelectorAll('form:not(#pairForm) button[type="submit"]')) button.disabled = true;
+        document.getElementById('pairingCode').focus();
+      };
+      async function submit(form) {
+        if (busy) return;
+        busy = true;
+        const pairing = form.id === 'pairForm';
+        for (const input of form.querySelectorAll('input[type="url"], #username, #password')) {
+          input.value = input.value.trim();
+          if (input.id === 'username' || input.id === 'password') input.value = sanitizeCredential(input.value);
+        }
+        if (!pairing) pendingDraft = captureDraft();
+        const data = new URLSearchParams(new FormData(form));
+        const buttons = Array.from(form.querySelectorAll('button[type="submit"]'));
+        buttons.forEach(button => { button.disabled = true; });
+        try {
+          const response = await fetch('/', {method: 'POST', body: data, credentials: 'same-origin'});
+          const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const next = page.querySelector('main');
+          if (!next) throw new Error('Session unavailable');
+          main().replaceWith(next);
+          if (response.status === 401) {
+            showSessionEnded();
+          } else if ((pairing && next.dataset.paired === 'true') || !response.ok) {
+            restoreDraft(pendingDraft);
+          } else {
+            pendingDraft = null;
+          }
+        } catch {
+          showSessionEnded();
+        } finally {
+          busy = false;
+          buttons.forEach(button => { button.disabled = false; });
+        }
+      }
+      document.addEventListener('submit', event => {
+        if (!(event.target instanceof HTMLFormElement)) return;
+        event.preventDefault();
+        void submit(event.target);
+      });
+      document.addEventListener('input', event => {
+        const input = event.target;
+        if (input.id === 'username' || input.id === 'password') {
+          const position = input.selectionStart;
+          const prefix = position === null ? null : sanitizeCredential(input.value.slice(0, position)).length;
+          input.value = sanitizeCredential(input.value);
+          if (prefix !== null) input.setSelectionRange(prefix, prefix);
+        }
+      });
+      document.addEventListener('focusout', event => {
+        if (event.target.matches('input[type="url"]')) event.target.value = event.target.value.trim();
+      });
+      document.addEventListener('click', event => {
+        const button = event.target.closest('[data-reveal]');
+        if (!button) return;
+        const input = document.getElementById(button.dataset.reveal);
+        const reveal = input.type === 'password';
+        input.type = reveal ? 'text' : 'password';
+        button.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+        button.setAttribute('aria-pressed', String(reveal));
+        button.querySelector('[data-symbol="eye.slash"]').toggleAttribute('hidden', !reveal);
+      });
+      const address = new URL(location.href);
+      const code = address.searchParams.get('pair');
+      if (code !== null) {
+        address.searchParams.delete('pair');
+        history.replaceState(null, '', address.pathname + address.search + address.hash);
+        if (main().dataset.paired !== 'true') {
+          const pairForm = document.getElementById('pairForm');
+          document.getElementById('pairingCode').value = code;
+          void (async () => { await submit(pairForm); })();
+        }
+      }
+    })();
+    """#
+
     private static func escape(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
@@ -188,6 +310,10 @@ public enum AppleWebManagementPage {
     private static let styles = """
     :root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#f5f5f7;background:#000}\
     *{box-sizing:border-box}\
+    [hidden]{display:none!important}\
+    .secure-field{position:relative}\
+    .secure-field input{padding-right:52px}\
+    button.reveal{min-width:44px;min-height:44px;position:absolute;right:1px;top:1px;margin:0;padding:0;display:grid;place-items:center;background:transparent;color:inherit}\
     body{min-height:100vh;margin:0;padding:max(24px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));background:#000}\
     main{width:min(100%,560px);margin:0 auto}\
     @media(min-width:1024px){main{width:min(100%,720px)}}\

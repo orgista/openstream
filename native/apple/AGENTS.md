@@ -62,6 +62,16 @@ Glass on iOS 26) — no custom tab-bar paint. Downloads are automatic — no sou
 Live view options are Provider Lineup and My Channels only. Trailers and intro fingerprinting are
 tabled; chapter markers are approved.
 
+
+### 4.1 Design references (owner, 2026-09-18 15:40)
+Design every screen against these, as a blend: **Home/Discover = Netflix** (billboard hero, dense
+poster rows with tight spacing, titles under posters, Continue Watching with progress on the
+artwork, Top 10 numerals); **Live = Paramount+** (video pinned at the top, edge to edge, channel
+list with logos and what's-on-now under it, guide secondary, search as an icon); **Player and
+overall feel = the Apple TV app** (transport layout, scrubber with times, info/captions/audio menus,
+chapter and skip affordances, quiet chrome that hides together). On iPhone the app is portrait-only
+except the full-screen player, which follows the device orientation and also plays in portrait.
+
 ## 5. Architecture traps (each one cost an hour)
 - The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
   are picked up automatically — but `#if os(tvOS)` files never compile in the SPM gate (macOS),

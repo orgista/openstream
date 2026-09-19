@@ -1,6 +1,7 @@
+import AVFoundation
 import SwiftUI
 
-/// Transport controls for codecs that require a decoded video surface.
+/// Transport controls for decoded video surfaces and the full-screen Live player.
 @MainActor
 struct AppleTransportOverlay: View {
     struct SharePlayMenu {
@@ -39,13 +40,14 @@ struct AppleTransportOverlay: View {
 
     @State private var model: AppleTransportOverlayModel
     @State private var bottomBarHeight: CGFloat = 0
+    @State private var isMuted = false
 
     /// Task 9: on Apple TV the surface overlay keeps only the scrubber and one
     /// captions control; the remote's buttons carry everything else.
     private let chrome = AppleTVPlaybackPresentationPolicy.surfaceChrome()
 
     /// The controls this overlay draws, from the same policy. The overlay is
-    /// only mounted on the surface route, so the route is fixed here.
+    /// also owns Live chrome, which uses the same controls as the surface route.
     private var controls: [AppleTVPlaybackPresentationPolicy.SurfaceControl] {
         AppleTVPlaybackPresentationPolicy.visibleControls(
             route: .surface,
@@ -198,11 +200,14 @@ struct AppleTransportOverlay: View {
         }
         .foregroundStyle(.white)
         .tint(.white)
-        .task {
+        .task(id: request.effectiveDVRWindowSeconds) {
             // The request's DVR window and the coordinator's route are not
             // available through `init`, so the view seeds the model here.
             model.route = coordinator.route
             model.dvrWindowSeconds = request.effectiveDVRWindowSeconds
+        }
+        .onChange(of: coordinator.engine.avPlayer.map(ObjectIdentifier.init), initial: true) { _, _ in
+            isMuted = coordinator.engine.avPlayer?.isMuted ?? false
         }
         .onChange(of: coordinator.phase) { _, _ in model.playbackPhaseChanged() }
         .onChange(of: coordinator.route) { _, newRoute in
@@ -226,7 +231,7 @@ struct AppleTransportOverlay: View {
     // MARK: - Top bar
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             if controls.contains(.close) {
                 Button {
                     if let onRequestFullScreen { onRequestFullScreen() }
@@ -249,39 +254,71 @@ struct AppleTransportOverlay: View {
                 .accessibilityIdentifier(onRequestFullScreen == nil ? "player.close" : "player.fullscreen")
             }
 
-            Spacer()
-
             if let onShowChannels {
-                Button(action: onShowChannels) {
-                    Image(systemName: "list.bullet")
-                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
-                }
-                .accessibilityLabel("Channels")
+                Button("Channels", action: onShowChannels)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .frame(minHeight: AppleDesignTokens.minimumActionSize)
+                    .accessibilityIdentifier("player.channels")
             }
-            if let otherSources, controls.contains(.otherSourcesMenu) {
-                Menu {
-                    Button("Other sources", systemImage: "list.bullet", action: otherSources)
-                } label: {
-                    Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                if liveTopControls {
+                    AppleTransportTrackMenu(
+                        audioTracks: model.audioTracks,
+                        subtitleTracks: model.visibleSubtitleTracks,
+                        onSelectAudio: { model.selectAudio($0) },
+                        onSelectSubtitle: { model.selectSubtitle($0) }
+                    )
                 }
-                .accessibilityLabel("More")
-            }
-            if let sharePlayMenu, controls.contains(.sharePlayMenu) {
-                Menu {
-                    Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
-                    if let secondaryTitle = sharePlayMenu.secondaryTitle, let secondaryAction = sharePlayMenu.secondaryAction {
-                        Button(secondaryTitle, role: .destructive, action: secondaryAction)
+                if let otherSources, controls.contains(.otherSourcesMenu) {
+                    Menu {
+                        Button("Other sources", systemImage: "list.bullet", action: otherSources)
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                     }
-                } label: {
-                    Image(systemName: "shareplay").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                    .accessibilityLabel("More")
                 }
-                .accessibilityLabel("SharePlay")
+                if let sharePlayMenu, controls.contains(.sharePlayMenu) {
+                    Menu {
+                        Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
+                        if let secondaryTitle = sharePlayMenu.secondaryTitle, let secondaryAction = sharePlayMenu.secondaryAction {
+                            Button(secondaryTitle, role: .destructive, action: secondaryAction)
+                        }
+                    } label: {
+                        Image(systemName: liveTopControls ? "ellipsis" : "shareplay").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                    }
+                    .accessibilityLabel(liveTopControls ? "More" : "SharePlay")
+                    .accessibilityIdentifier("player.more")
+                }
+                if liveTopControls, let player = coordinator.engine.avPlayer {
+                    Button {
+                        player.isMuted.toggle()
+                        isMuted = player.isMuted
+                        model.bumpActivity()
+                    } label: {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill")
+                            .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isMuted ? "Unmute" : "Mute")
+                    .accessibilityIdentifier("player.mute")
+                }
             }
-            if request.isLive {
+            if request.isLive, !liveTopControls {
                 liveBadge
             }
 
         }
+    }
+
+    private var liveTopControls: Bool {
+        #if os(iOS) || os(visionOS)
+        request.isLive
+        #else
+        false
+        #endif
     }
 
     @ViewBuilder
@@ -438,9 +475,10 @@ struct AppleTransportOverlay: View {
                 #endif
             }
             HStack {
+                if liveTopControls { liveBadge }
                 Spacer()
                 // The one captions control on every platform.
-                if controls.contains(.captions) {
+                if controls.contains(.captions), !liveTopControls {
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.visibleSubtitleTracks,
@@ -459,7 +497,7 @@ struct AppleTransportOverlay: View {
     /// Big centered play/pause flanked by 10 s skip buttons.
     private var centerRow: some View {
         HStack(spacing: 48) {
-            skipButton(seconds: -10, systemName: "gobackward.10")
+            if model.isScrubbable { skipButton(seconds: -10, systemName: "gobackward.10") }
             Button {
                 model.togglePlayPause()
             } label: {
@@ -476,7 +514,7 @@ struct AppleTransportOverlay: View {
             .focusable()
             #endif
 
-            skipButton(seconds: 10, systemName: "goforward.10")
+            if model.isScrubbable { skipButton(seconds: 10, systemName: "goforward.10") }
         }
     }
 
@@ -655,6 +693,7 @@ struct AppleTransportTrackMenu: View {
                 .foregroundStyle(.white)
         }
         .accessibilityLabel("Audio & Subtitles")
+        .accessibilityIdentifier("player.captions")
         #if os(tvOS)
         // A `.focusable()` wrapper used to take the focus and swallow Select,
         // so the menu never opened (owner 16:27). The menu is focusable on its

@@ -79,6 +79,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var url: URL
     public var isEnabled: Bool
+    public var needsSignIn: Bool = false
     public let addedAt: Date
     public var manifestID: String?
     public var version: String?
@@ -180,6 +181,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case needsSignIn
         case id, kind, name, url, isEnabled, addedAt, manifestID, version, resources, catalogs, isManagedImports
         case logoURL, iptvType, epgURL, credentialReference, transportReference, username, password, bookmarkData
         case configurationRevision, lastValidatedAt, validationSummary
@@ -194,6 +196,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         name = try container.decode(String.self, forKey: .name)
         url = try container.decode(URL.self, forKey: .url)
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        needsSignIn = try container.decodeIfPresent(Bool.self, forKey: .needsSignIn) ?? false
         addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
         manifestID = try container.decodeIfPresent(String.self, forKey: .manifestID)
         version = try container.decodeIfPresent(String.self, forKey: .version)
@@ -237,6 +240,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(url, forKey: .url)
         try container.encode(isEnabled, forKey: .isEnabled)
+        if needsSignIn { try container.encode(true, forKey: .needsSignIn) }
         try container.encode(addedAt, forKey: .addedAt)
         try container.encodeIfPresent(manifestID, forKey: .manifestID)
         try container.encodeIfPresent(version, forKey: .version)
@@ -1104,7 +1108,7 @@ public final class AppleSourceStore {
 
     public func setEnabled(_ enabled: Bool, id: AppleSource.ID) {
         guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
-        guard sources[index].isEnabled != enabled else { return }
+        guard sources[index].isEnabled != enabled, !enabled || !sources[index].needsSignIn else { return }
         sources[index].isEnabled = enabled
         sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
         persist()
@@ -1343,7 +1347,8 @@ public final class AppleSourceStore {
             return false
         }
         appleTrace("remove source \"\(source.name)\" (\(source.kind))")
-        let references = [source.credentialReference, source.transportReference].compactMap { $0 }
+        let referenceID = source.id.uuidString.lowercased()
+        let references = [source.credentialReference, source.transportReference, referenceID, "transport.\(referenceID)", "guide.\(referenceID)"].compactMap { $0 }
         pendingCredentialCleanupReferences.append(contentsOf: references)
         pendingCredentialCleanupReferences = Array(Set(pendingCredentialCleanupReferences)).sorted()
         persistPendingCredentialCleanup()
@@ -1461,6 +1466,7 @@ public final class AppleSourceStore {
             guard candidate.kind == .mediaServer, candidate.serverKind == kind else { return false }
             guard candidate.url.host?.lowercased() == session.baseURL.host?.lowercased() else { return false }
             guard candidate.url.port == session.baseURL.port else { return false }
+            if candidate.needsSignIn { return true }
             return (try? mediaServerSession(for: candidate))?.userID == session.userID
         }) {
             let existing = sources[index]
@@ -1471,7 +1477,7 @@ public final class AppleSourceStore {
                 kind: .mediaServer,
                 name: displayName,
                 url: session.baseURL,
-                isEnabled: existing.isEnabled,
+                isEnabled: existing.needsSignIn ? true : existing.isEnabled,
                 addedAt: existing.addedAt,
                 credentialReference: reference,
                 transportReference: existing.transportReference,
@@ -1588,7 +1594,7 @@ public final class AppleSourceStore {
     private func scheduleLogoBackfill() {
         let attempted = Set(defaults.stringArray(forKey: logoBackfillKey) ?? [])
         let pending = sources
-            .filter { $0.kind == .stremio && $0.logoURL == nil && !attempted.contains($0.id.uuidString) }
+            .filter { $0.kind == .stremio && !$0.needsSignIn && $0.logoURL == nil && !attempted.contains($0.id.uuidString) }
             .map(\.id)
         guard !pending.isEmpty else { return }
         Task { [weak self, delay = logoBackfillDelay] in
@@ -1636,6 +1642,121 @@ public final class AppleSourceStore {
         if changed { persist() }
     }
 
+    func configurationSecrets() throws -> AppleConfigurationSecrets {
+        var result = AppleConfigurationSecrets()
+        for source in sources {
+            if let reference = source.credentialReference {
+                result.sourceCredentials[source.id] = try keychain.string(for: reference)
+            }
+            if !source.needsSignIn {
+                result.sourceAddresses[source.id] = source.url
+                result.guideAddresses[source.id] = source.epgURL
+            }
+        }
+        return result
+    }
+
+    func restoreConfigurationSources(_ incoming: [AppleSource], secrets: AppleConfigurationSecrets?, merge: Bool = true) throws {
+        var merged = merge ? sources : []
+        for portable in incoming {
+            var restored = AppleConfigurationSnapshot.portableSource(portable)
+            let existing = sources.first { $0.id == restored.id }
+            if let existing, existing.kind == restored.kind,
+               AppleConfigurationSnapshot.publicAddress(existing.url) == restored.url {
+                restored.bookmarkData = existing.bookmarkData
+                restored.credentialReference = existing.credentialReference
+                restored.transportReference = existing.transportReference
+                restored.url = existing.url
+                restored.epgURL = existing.epgURL
+                restored.needsSignIn = existing.needsSignIn
+            }
+            if let address = secrets?.sourceAddresses[restored.id] {
+                restored.url = address
+                restored.epgURL = secrets?.guideAddresses[restored.id]
+                restored.needsSignIn = false
+            }
+            if let value = secrets?.sourceCredentials[restored.id] {
+                let reference = restored.id.uuidString.lowercased()
+                try keychain.set(value, for: reference)
+                restored.credentialReference = reference
+            } else if UserDefaults.standard.bool(forKey: AppleKeychainStore.syncPreferenceKey), restored.kind != .library {
+                // Stable accounts reconnect independently arriving iCloud Keychain items.
+                let reference = restored.id.uuidString.lowercased()
+                if try keychain.string(for: reference) != nil { restored.credentialReference = reference }
+                let transport = "transport.\(reference)"
+                if let address = try keychain.string(for: transport), let url = URL(string: address) {
+                    restored.url = url
+                    restored.transportReference = transport
+                    restored.epgURL = try keychain.string(for: "guide.\(reference)").flatMap(URL.init(string:))
+                    restored.needsSignIn = false
+                    if existing?.needsSignIn == true { restored.isEnabled = true }
+                }
+            }
+            if restored.kind == .library || AppleLocalPlaylistStore.isLocal(restored.url) {
+                restored.needsSignIn = existing == nil || existing?.needsSignIn == true
+            }
+            if (restored.kind == .mediaServer || restored.kind == .nas || restored.iptvType == .xtream), restored.credentialReference == nil {
+                restored.needsSignIn = true
+            }
+            if restored.needsSignIn { restored.isEnabled = false }
+            else { restored = try securedTransportSource(restored) }
+            if let existing, existing.url != restored.url || existing.isEnabled != restored.isEnabled
+                || existing.credentialReference != restored.credentialReference {
+                restored.configurationRevision = nextConfigurationRevision(max(existing.configurationRevision, restored.configurationRevision))
+            }
+            if let index = merged.firstIndex(where: { $0.id == restored.id }) { merged[index] = restored }
+            else { merged.append(restored) }
+        }
+        sources = merged
+        persist()
+    }
+
+    func reconnectConfigurationFolder(id: UUID, url: URL, bookmark: Data?) {
+        guard let index = sources.firstIndex(where: { $0.id == id }), sources[index].kind == .library else { return }
+        sources[index].url = url
+        sources[index].bookmarkData = bookmark
+        sources[index].isManagedImports = false
+        sources[index].needsSignIn = false
+        sources[index].isEnabled = true
+        persist()
+    }
+
+    func prepareConfigurationKeychain() throws {
+        for source in sources where !source.needsSignIn && source.kind != .library && !AppleLocalPlaylistStore.isLocal(source.url) {
+            let id = source.id.uuidString.lowercased()
+            try keychain.set(source.url.absoluteString, for: "transport.\(id)")
+            if let guide = source.epgURL { try keychain.set(guide.absoluteString, for: "guide.\(id)") }
+            if let reference = source.credentialReference, reference != id,
+               let credential = try keychain.string(for: reference) {
+                try keychain.set(credential, for: id)
+            }
+        }
+    }
+
+    func refreshConfigurationKeychain() throws {
+        let pending = sources.filter { $0.needsSignIn && $0.kind != .library }
+        guard !pending.isEmpty else { return }
+        try restoreConfigurationSources(pending, secrets: nil)
+    }
+
+    func restoreSourceSignIn(id: UUID, address: URL, username: String, password: String) throws {
+        guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
+        var source = sources[index]
+        let reference = id.uuidString.lowercased()
+        if source.kind == .liveTV, source.iptvType == .xtream {
+            try updateIPTVCredentials(type: .xtream, reference: reference, username: username, password: password)
+            source.credentialReference = reference
+        } else if source.kind == .nas {
+            try updateNetworkCredentials(.init(username: username, password: password), reference: reference)
+            source.credentialReference = reference
+        }
+        source.url = address
+        source.needsSignIn = false
+        source.isEnabled = true
+        sources[index] = try securedTransportSource(source)
+        persist()
+    }
+
     private func securedTransportSource(_ source: AppleSource) throws -> AppleSource {
         guard Self.protectsTransportURL(source) else { return source }
         var secured = source
@@ -1647,7 +1768,7 @@ public final class AppleSourceStore {
 
     private func hydrateProtectedTransportURLs() {
         var migrated = false
-        for index in sources.indices where Self.protectsTransportURL(sources[index]) {
+        for index in sources.indices where Self.protectsTransportURL(sources[index]) && !sources[index].needsSignIn {
             if let reference = sources[index].transportReference {
                 do {
                     guard let stored = try keychain.string(for: reference),
@@ -1718,7 +1839,7 @@ public final class AppleSourceStore {
             return
         }
         guard !sources.contains(where: {
-            Self.protectsTransportURL($0) && $0.transportReference == nil
+            Self.protectsTransportURL($0) && !$0.needsSignIn && $0.transportReference == nil
         }) else {
             appleTraceFailure("sources not saved: a protected source has no transport reference")
             return

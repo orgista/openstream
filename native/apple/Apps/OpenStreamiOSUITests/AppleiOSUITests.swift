@@ -650,7 +650,10 @@ final class AppleiOSUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 4)
         attach("trailer-landscape")
         XCTAssertTrue(back.isHittable)
-        XCTAssertFalse(app.tabBars.firstMatch.exists && app.tabBars.firstMatch.isHittable)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            assertInterfaceOrientation(landscape: false)
+            XCTAssertTrue(app.tabBars.firstMatch.isHittable)
+        }
         XCUIDevice.shared.orientation = .portrait
         Thread.sleep(forTimeInterval: 3)
         attach("trailer-portrait-return")
@@ -696,32 +699,57 @@ final class AppleiOSUITests: XCTestCase {
         attach("live-channel-recovered")
     }
 
-    /// Owner C8: landscape. The rule is that the phone hides the tab bar in
-    /// landscape so content fills the screen, and brings it back in portrait.
-    /// Both directions are asserted, because a bar that never comes back is the
-    /// failure that would actually strand someone.
-    func testLandscapeHidesTheTabBarAndPortraitBringsItBack() {
-        launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "the app never came to the foreground")
-
-        // Match the tab *bar*, not the label "Discover" — the navigation title
-        // says "Discover" too, so a label match is true whether or not the bar
-        // is on screen. The first version of this test failed for exactly that
-        // reason while the screenshot showed the bar correctly hidden.
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 30), "no tab bar in portrait")
-
+    /// The phone shell stays portrait; only the full-screen video rotates.
+    /// Uses the configured Content simulator lineup, as in the Live player tests.
+    func testLandscapeHidesTheTabBarAndPortraitBringsItBack() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .phone, "iPhone orientation policy")
+        launch(screen: "discover")
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30))
         XCUIDevice.shared.orientation = .landscapeLeft
-        Thread.sleep(forTimeInterval: 3.0)
-        attach("ios-landscape")
-        XCTAssertFalse(tabBar.exists && tabBar.isHittable,
-                       "the tab bar is still showing in landscape")
+        Thread.sleep(forTimeInterval: 3)
+        assertInterfaceOrientation(landscape: false)
+        XCTAssertTrue(app.tabBars.firstMatch.isHittable)
+        attach("discover-stays-portrait-after-rotation")
+
+        app.tabBars.buttons["Live"].firstMatch.tap()
+        assertInterfaceOrientation(landscape: false)
+        let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
+        channel.tap()
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 30), "Video did not reach playback")
+        assertInterfaceOrientation(landscape: true)
+        XCTAssertFalse(app.alerts["Playback Failed"].exists)
+        attach("player-landscape")
 
         XCUIDevice.shared.orientation = .portrait
-        Thread.sleep(forTimeInterval: 3.0)
-        attach("ios-portrait-again")
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 15),
-                      "the tab bar did not come back when returning to portrait")
+        assertInterfaceOrientation(landscape: false)
+        XCUIDevice.shared.orientation = .landscapeRight
+        assertInterfaceOrientation(landscape: true)
+        let customClose = app.buttons["player.close"].firstMatch
+        let nativeClose = app.buttons["Close"].firstMatch
+        if !customClose.isHittable && !nativeClose.isHittable {
+            let controls = app.buttons["player.controls.show"].firstMatch
+            if controls.exists { controls.tap() } else { app.tap() }
+        }
+        let close = customClose.exists ? customClose : nativeClose
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        assertInterfaceOrientation(landscape: false)
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        app.tabBars.buttons["Discover"].firstMatch.tap()
+        assertInterfaceOrientation(landscape: false)
+        attach("discover-portrait-after-landscape-player")
+    }
+
+    private func assertInterfaceOrientation(landscape: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        let orientation = XCTNSPredicateExpectation(predicate: NSPredicate { [self] _, _ in
+            let frame = app.frame
+            return frame.width > 0 && frame.height > 0
+                && (landscape ? frame.width > frame.height : frame.height > frame.width)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [orientation], timeout: 10), .completed,
+                       "Expected \(landscape ? "landscape" : "portrait") interface", file: file, line: line)
     }
 
     /// TestFlight crash, build 10 on an iPhone XS Max running iOS 18.7: UIKit
@@ -752,8 +780,8 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 30), "detail Play missing")
         play.tap()
         coverRoundTrip(back: app.buttons["detail.back"].firstMatch, name: "discover", popInLandscape: true)
-        // The tab bar hides in landscape and returns in portrait; switching tabs
-        // afterwards makes every stack reconcile its bars once more.
+        // Closing the player restores portrait even while the phone stays sideways;
+        // switching tabs makes every stack reconcile its bars once more.
         let settingsTab = app.tabBars.buttons["Settings"].firstMatch
         if settingsTab.waitForExistence(timeout: 5) { settingsTab.tap() }
         let discoverTab = app.tabBars.buttons["Discover"].firstMatch
@@ -791,6 +819,9 @@ final class AppleiOSUITests: XCTestCase {
                 if controls.exists { controls.tap() } else { app.tap() }
             }
             if close.waitForExistence(timeout: 5) { close.tap() }
+        }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            assertInterfaceOrientation(landscape: false)
         }
         if popInLandscape {
             if back.waitForExistence(timeout: 5) { back.tap() }
@@ -1062,33 +1093,81 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertTrue(row.exists, "TF1 row disappeared")
     }
 
-    /// Live tab, tapped states: inline controls shown, then full screen with its
-    /// chrome. Photographs only; the driver looks. Runs on a sim with a live source.
+    /// A guide selection opens the player directly and channel changes stay there.
+
+    /// Reveals the player chrome only when it is hidden; tapping the surface while chrome is up would hide it.
+    private func revealPlayerControls() {
+        if !app.buttons["player.captions"].exists { app.buttons["player.controls.show"].tap() }
+        _ = app.buttons["player.captions"].waitForExistence(timeout: 5)
+    }
+
     func testLiveTappedStatesArePhotographed() {
         launch(screen: "live")
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let any = app.descendants(matching: .any)
-        let firstChannel = any.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live.channel.")).firstMatch
-        if firstChannel.waitForExistence(timeout: 20) { firstChannel.tap() } else { app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "CBS")).firstMatch.tap() }
-        Thread.sleep(forTimeInterval: 12)
-        attach("live-inline-idle")
-        // Tap the video to show the inline controls.
-        let video = any.matching(identifier: "live.inline.player").firstMatch
-        if video.exists { video.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap() }
-        Thread.sleep(forTimeInterval: 1)
-        attach("live-inline-tapped")
-        let expand = any.matching(identifier: "player.fullscreen").firstMatch
-        if expand.waitForExistence(timeout: 5) {
-            expand.tap()
-            Thread.sleep(forTimeInterval: 4)
-            attach("live-fullscreen-idle")
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            Thread.sleep(forTimeInterval: 1)
-            attach("live-fullscreen-tapped")
-            let captions = any.matching(NSPredicate(format: "label == %@", "Audio & Subtitles")).firstMatch
-            if captions.exists { captions.tap(); Thread.sleep(forTimeInterval: 1); attach("live-fullscreen-captions") }
-        } else {
-            attach("live-no-fullscreen-button")
+        let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
+        channel.tap()
+        let close = app.buttons["player.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Guide selection did not open full screen")
+        attach("live-direct-fullscreen")
+
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            revealPlayerControls()
+            let captions = app.buttons["player.captions"]
+            let more = app.buttons["player.more"]
+            let mute = app.buttons["player.mute"]
+            XCTAssertTrue(captions.waitForExistence(timeout: 10))
+            XCTAssertEqual(app.buttons.matching(identifier: "player.close").count, 1)
+            if more.exists { XCTAssertFalse(captions.frame.intersects(more.frame)) }
+            if mute.exists {
+                XCTAssertFalse(captions.frame.intersects(mute.frame))
+                if more.exists { XCTAssertFalse(more.frame.intersects(mute.frame)) }
+            }
+            attach("live-chrome-\(orientation.rawValue)")
         }
+
+        revealPlayerControls()
+        app.buttons["player.channels"].tap()
+        let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live.picker.channel."))
+        let pickerShown = choices.firstMatch.waitForExistence(timeout: 5)
+        attach("live-after-channels-tap")
+        XCTAssertTrue(pickerShown, "Channels button did not open the picker")
+        attach("live-channel-picker")
+        XCTAssertGreaterThan(choices.count, 1)
+        let originalChannelID = channel.identifier.replacingOccurrences(of: "guide.play.", with: "")
+        let replacement = choices.allElementsBoundByIndex.first {
+            $0.identifier != "live.picker.channel.\(originalChannelID)" && $0.isHittable
+        }
+        XCTAssertNotNil(replacement, "No different channel is visible in the picker")
+        replacement?.tap()
+        revealPlayerControls()
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Switching channels dismissed full screen")
+        attach("live-channel-switched-fullscreen")
+        close.tap()
+        XCTAssertTrue(app.buttons["player.fullscreen"].waitForExistence(timeout: 10))
+        attach("live-inline-after-return")
+    }
+
+    /// Captures real broadcast captions for visual review; no fixture captions are injected.
+    func testLiveBroadcastCaptionsArePhotographed() {
+        launch(screen: "live")
+        let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 30))
+        channel.tap()
+        XCTAssertTrue(app.buttons["player.close"].waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 12)
+        revealPlayerControls()
+        app.buttons["player.captions"].tap()
+        let english = app.buttons.matching(NSPredicate(format: "label == 'Closed Captions' OR label BEGINSWITH 'English'")).firstMatch
+        XCTAssertTrue(english.waitForExistence(timeout: 10), "No broadcast caption track was published")
+        attach("live-broadcast-caption-menu")
+        english.tap()
+        Thread.sleep(forTimeInterval: 12)
+        attach("live-broadcast-caption-text-review-required")
+        revealPlayerControls()
+        app.buttons["player.captions"].tap()
+        app.buttons["Off"].firstMatch.tap()
+        revealPlayerControls()
+        app.buttons["player.close"].tap()
     }
 }
