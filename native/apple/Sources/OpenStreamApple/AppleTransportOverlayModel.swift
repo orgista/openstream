@@ -222,6 +222,10 @@ public final class AppleTransportOverlayModel {
         self.subtitleLanguagesAreExplicit = chosen != nil
         self.route = coordinator.route
         self.liveSeekableRange = isLive ? coordinator.engine.seekableRange : nil
+        // The engine may already have auto-selected a track from the viewer's
+        // captions preference before the overlay existed. Without this the CC
+        // key would open reading "off" over a picture with captions on it.
+        self.selectedSubtitleID = coordinator.engine.activeSubtitleTrackID
         startObserving()
         scheduleAutoHide()
     }
@@ -373,10 +377,28 @@ public final class AppleTransportOverlayModel {
         coordinator.engine.selectSubtitleTrack(id: id)
     }
 
-    /// True when a subtitle track is selected. The CC button shows filled while
-    /// this is set; "Off" clears it. Local to the overlay's own selection so the
-    /// flag is the immediate, testable signal a track was picked.
-    public var isCCActive: Bool { selectedSubtitleID != nil }
+    /// True when a subtitle track is selected. The CC key reads pressed-in
+    /// while this is set; "Off" clears it. Seeded from the engine's own
+    /// selection and then driven by the overlay, so it is the immediate,
+    /// testable signal that captions are on screen.
+    public var isCCActive: Bool { AppleCaptionsToggle.isOn(selected: selectedSubtitleID) }
+
+    /// Whether the CC key is drawn: only when there is a preferred-language
+    /// track for it to turn on.
+    public var showsCaptionsToggle: Bool {
+        AppleCaptionsToggle.isAvailable(visible: visibleSubtitleTracks)
+    }
+
+    /// One tap: on selects the preferred-language track, off clears it. The
+    /// Audio & Subtitles menu stays the place a *different* track is chosen.
+    public func toggleCaptions() {
+        selectSubtitle(
+            AppleCaptionsToggle.nextSelection(
+                selected: selectedSubtitleID,
+                visible: visibleSubtitleTracks
+            )
+        )
+    }
 
     /// The cue active at the current position, for the overlay to render on
     /// `.surface`. nil when no track is selected, no cue overlaps the position,
@@ -540,6 +562,14 @@ public final class AppleTransportOverlayModel {
             if subtitleTracks != subtitles { subtitleTracks = subtitles }
             let cues = coordinator.engine.subtitleCues
             if subtitleCues != cues { subtitleCues = cues }
+            // Tracks arrive after `load`, and that is when the engine runs its
+            // auto-selection — so this is where an engine-chosen track becomes
+            // visible to the CC key. Only adopted when the engine reports one:
+            // an engine that cannot report says nil for "off" too, and the
+            // overlay's own record is the better answer there.
+            if let active = coordinator.engine.activeSubtitleTrackID, selectedSubtitleID != active {
+                selectedSubtitleID = active
+            }
         case .failure:
             break
         }

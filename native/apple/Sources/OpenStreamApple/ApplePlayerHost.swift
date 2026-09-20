@@ -129,6 +129,9 @@ public final class ApplePlayerHost {
         // offering transport for a player that has gone.
         AppleWatchCompanion.shared.detach()
         #endif
+        #if os(tvOS)
+        AppleDevicePlaybackBeacon.shared.detach()
+        #endif
         #if os(macOS)
         _playerView.player = nil
         #else
@@ -153,6 +156,12 @@ public final class ApplePlayerHost {
         AppleWatchCompanion.shared.activate()
         AppleWatchCompanion.shared.attach(engine: coordinator.engine, title: title)
         #endif
+        #if os(tvOS)
+        // The television has no watch of its own to talk to; it leaves a note
+        // in the shared key-value store instead, and any watch on the account
+        // can read it. See `AppleDevicePlaybackBeacon`.
+        AppleDevicePlaybackBeacon.shared.attach(engine: coordinator.engine, title: title)
+        #endif
     }
 
     /// Keeps the lock-screen scrubber tracking the player.
@@ -162,6 +171,9 @@ public final class ApplePlayerHost {
         #endif
         #if canImport(WatchConnectivity) && os(iOS)
         AppleWatchCompanion.shared.publish()
+        #endif
+        #if os(tvOS)
+        AppleDevicePlaybackBeacon.shared.publish()
         #endif
     }
 
@@ -178,6 +190,12 @@ public final class ApplePlayerHost {
         // runs while playback is in flight, and `publish` drops a context that
         // has not changed, so it costs nothing on the quiet ticks.
         AppleWatchCompanion.shared.publish()
+        #endif
+        #if os(tvOS)
+        // Same reasoning as the wrist above: this is the one thing that runs
+        // while playback is in flight, and a write that would change nothing
+        // is dropped before it reaches iCloud.
+        AppleDevicePlaybackBeacon.shared.publish()
         #endif
         let player = coordinator.engine.avPlayer
         if let channel = coordinator.sharePlayChannel {

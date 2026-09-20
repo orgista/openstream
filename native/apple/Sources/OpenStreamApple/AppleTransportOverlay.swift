@@ -337,6 +337,7 @@ struct AppleTransportOverlay: View {
 
             HStack(spacing: 8) {
                 if liveTopControls {
+                    captionsToggle
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.visibleSubtitleTracks,
@@ -560,8 +561,10 @@ struct AppleTransportOverlay: View {
             HStack {
                 if liveTopControls { liveBadge }
                 Spacer()
-                // The one captions control on every platform.
                 if controls.contains(.captions), !liveTopControls {
+                    // The quick key, then the menu where a different track or
+                    // audio language is chosen.
+                    captionsToggle
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.visibleSubtitleTracks,
@@ -575,6 +578,23 @@ struct AppleTransportOverlay: View {
             }
         }
         .padding(.horizontal, 8)
+    }
+
+    /// The quick CC key.
+    ///
+    /// Apple TV does not get it. The owner's standing rule for that platform is
+    /// one captions control and no boxed icons (AGENTS.md §4), and the Siri
+    /// Remote already reaches the existing menu in one click — a second
+    /// focusable next to it would cost a focus move to gain a tap. Everywhere
+    /// there is a finger or a pointer, the key sits left of the menu: instant
+    /// on/off there, choosing among tracks in the menu.
+    @ViewBuilder
+    private var captionsToggle: some View {
+        #if !os(tvOS)
+        if model.showsCaptionsToggle {
+            AppleCaptionsToggleButton(isOn: model.isCCActive) { model.toggleCaptions() }
+        }
+        #endif
     }
 
     /// Big centered play/pause flanked by 10 s skip buttons.

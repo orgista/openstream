@@ -56,6 +56,11 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         }
     }
 
+    /// The legible option `applySubtitleSelection` last selected, or nil for
+    /// none. The overlay's CC key reads it so it starts in the state the
+    /// picture is actually in.
+    public private(set) var activeSubtitleTrackID: Int?
+
     /// Always empty on the native route: AVFoundation draws the selected
     /// legible track itself, so the host overlay has no cues to render.
     // TODO: add-on subtitle files still need a side-load (an `AVMutableComposition`
@@ -233,6 +238,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         chapters = []
         videoSize = nil
         subtitleSelectionOverridden = false
+        activeSubtitleTrackID = nil
         readyToPlayTracksLoaded = false
         teardown()
         isSeeking = false
@@ -286,9 +292,11 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         guard let item, let legibleGroup else { return }
         guard let id, let option = legibleOptions[id] else {
             item.select(nil, in: legibleGroup)
+            activeSubtitleTrackID = nil
             return
         }
         item.select(option, in: legibleGroup)
+        activeSubtitleTrackID = id
     }
 
     /// Keep the legible-group index as the track ID, even when forced options

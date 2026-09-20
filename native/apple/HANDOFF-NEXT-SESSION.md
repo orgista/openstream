@@ -827,3 +827,43 @@ Closes "live skip-back does nothing" (owner, GUI audit 2026-09-19). Not committe
   search. Proving the overlay end-to-end on a simulator needs either a raw-MPEG-TS provider as the
   first live source, or a way to choose which live source the guide uses. Left alone — reordering the
   owner's sources is not this task's call.
+
+## 7f. State 2026-09-20 16:45 (Claude session) — watch wordmark, CC key, Apple TV → Watch awareness
+Not committed (driver commits). Gate 1208 tests / 127 suites (baseline was 1178/125).
+
+- **The Watch app cannot read the shared key-value store until its entitlement exists.**
+  `AppleDevicePlaybackBeacon` writes what the Apple TV is playing to
+  `NSUbiquitousKeyValueStore` under `openstream.nowplaying.device.v1`, and the watch reads it
+  directly. iOS/tvOS/macOS all carry
+  `com.apple.developer.ubiquity-kvstore-identifier = $(TeamIdentifierPrefix)$(CFBundleIdentifier)`
+  and all three are bundle id `com.orgista.openstream`, so they already share one store. The Watch
+  target has **no entitlements file at all** and its bundle id is
+  `com.orgista.openstream.watchkitapp`, so `$(CFBundleIdentifier)` would give it a *different*
+  store. It needs `Apps/Shared/OpenStreamWatch.entitlements` with
+  `com.apple.developer.ubiquity-kvstore-identifier = $(TeamIdentifierPrefix)com.orgista.openstream`
+  — the literal id, not the variable — plus `CODE_SIGN_ENTITLEMENTS` on both Watch build
+  configurations. **Not done here: AGENTS.md §3 forbids touching entitlements and
+  `CODE_SIGN_*`.** Every line of the feature is in place behind it; until it is added the watch
+  simply reads an empty store and falls back to the phone, which is the correct empty behaviour.
+- **iCloud key-value sync cannot be exercised on this Mac's simulators.** None of them has an
+  iCloud account signed in, and `NSUbiquitousKeyValueStore` leaves no backing file on the watch sim
+  without the entitlement above. The freshness window, the expiry, the phone-vs-television tie-break
+  and the wire format are unit-tested instead (`AppleDevicePlaybackBeaconTests`, 20 tests, injected
+  clock, no iCloud). Proving the round trip needs a real Apple TV and a real Apple Watch signed into
+  one iCloud account.
+- **The CC key is drawn on every platform except tvOS.** Apple TV keeps one captions control and no
+  boxed icons (§5 owner rules), and the Siri Remote already reaches the menu in one click. If the
+  owner wants it there too it is one `#if` in `AppleTransportOverlay.captionsToggle` plus a tvOS
+  focus case.
+- **The CC key could not be photographed inside the player.** It only draws when the stream carries
+  a subtitle track in the viewer's language, which needs the owner's provider playlist, and `idb` is
+  not installed on this Mac so the simulator cannot be driven headlessly to reach the player. The
+  two states were rendered from the view's own source through `ImageRenderer` instead —
+  `verification-artifacts/watch-cc-tvsync-2026-09-20/cc-key-{off-raised,on-pressed}.png`.
+  Note for whoever draws the next depth-based control: `ImageRenderer` silently drops
+  `.shadow(.inner:)`, so the bevels are drawn as masked, blurred strokes.
+- **Two pre-existing tests flake under the full parallel run**, `AppleMetadataResolverTests
+  .fallbackOrderingMergesRicherFieldsAndPreservesIdentity` and `AppleLiveChannelSnapshotTests
+  .aLineupThatMatchesNothingFallsBackToTheChannelsWeHave`. Both pass in isolation and both flake
+  with this session's two new suites skipped, so it is shared global state between suites, not this
+  work. Roughly one full run in three.

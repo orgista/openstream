@@ -132,6 +132,13 @@ public protocol ApplePlaybackEngine: AnyObject {
     var duration: Double? { get }
     var audioTracks: [ApplePlaybackTrack] { get }
     var subtitleTracks: [ApplePlaybackTrack] { get }
+    /// The subtitle track the engine is rendering right now, or nil for none.
+    ///
+    /// The overlay keeps its own record of what the viewer picked, but that
+    /// record starts empty — and the engine auto-selects a track at load when
+    /// the viewer's captions preference asks for one. Without this the CC key
+    /// would read "off" over a picture with captions on it.
+    var activeSubtitleTrackID: Int? { get }
     /// The picture's pixel dimensions once known, for laying out anything that
     /// has to sit against the video rather than the screen — subtitles, above
     /// all. Nil while unknown, and on routes that cannot report it; callers
@@ -174,6 +181,9 @@ public protocol ApplePlaybackEngine: AnyObject {
 
 public extension ApplePlaybackEngine {
     func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {}
+    /// Engines that cannot report their selection say nothing, and the overlay
+    /// falls back to the last track it selected itself.
+    var activeSubtitleTrackID: Int? { nil }
     /// Most routes cannot report this; the fitting falls back to 16:9.
     var videoSize: CGSize? { nil }
 

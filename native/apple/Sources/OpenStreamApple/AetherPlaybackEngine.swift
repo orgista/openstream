@@ -83,6 +83,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// re-reads it on position ticks. Empty on `.avPlayer` routes where the
     /// system player's own captions menu renders the track.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
+    /// The track `applySubtitleSelection` last put on screen, auto-selection
+    /// included. The overlay's CC key reads it so it starts in the state the
+    /// picture is actually in.
+    public private(set) var activeSubtitleTrackID: Int?
     /// Container chapters from the engine's probe demuxer (`mediaChapters`),
     /// mapped for `AppleChapterMarkers`. B32: the Skip Intro button used to
     /// read chapters from the native engine only, so it never appeared on the
@@ -183,6 +187,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     public func load(_ request: ApplePlaybackRequest) async throws {
         hasReachedPlaying = false
         subtitleSelectionOverridden = false
+        activeSubtitleTrackID = nil
         clearExternalSubtitles()
         failure = nil
         var options = LoadOptions(
@@ -232,6 +237,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public func stop() {
         aether.stop()
+        activeSubtitleTrackID = nil
         clearExternalSubtitles()
         hasReachedPlaying = false
         position = 0
@@ -269,6 +275,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private func applySubtitleSelection(id: Int?) {
         externalSubtitleLoad?.cancel()
         externalSubtitleLoad = nil
+        activeSubtitleTrackID = id
         let previousExternal = activeExternalSubtitleID
         activeExternalSubtitleID = nil
         guard let id else {
