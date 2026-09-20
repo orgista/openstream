@@ -1295,7 +1295,11 @@ struct AppleCatalogCard: View {
         }
         if isLandscapeCard {
             #if os(tvOS)
-            return sizing == .continueWatching ? 360 : 480
+            // Continue Watching is the row people come back to, so it is not
+            // the smallest one on the screen: 480 on a 1920 pt stage is the
+            // same quarter-width card the Apple TV app's Up Next uses. It was
+            // 360, which read as an afterthought next to the billboard.
+            return 480
             #else
             return sizing == .continueWatching ? 260 : 320
             #endif

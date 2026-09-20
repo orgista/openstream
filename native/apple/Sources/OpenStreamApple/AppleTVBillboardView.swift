@@ -13,16 +13,26 @@ struct AppleTVBillboard<Actions: View>: View {
     /// One (or fewer) draws no indicator: there is nothing to cycle to.
     var rotationCount: Int = 0
     var rotationIndex: Int = 0
+    /// What fills the billboard's art frame. Discover passes a stage that can
+    /// swap the still for an inline trailer; Library passes nothing and gets
+    /// the still. Either way the frame, fade and copy block are the same.
+    var stage: AnyView? = nil
     @ViewBuilder var actions: Actions
 
     private typealias M = AppleTVBillboardMetrics
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AppleCatalogArtwork(
-                url: item.backgroundURL ?? item.posterURL,
-                loadingFill: AppleDesignTokens.surface
-            )
+            Group {
+                if let stage {
+                    stage
+                } else {
+                    AppleCatalogArtwork(
+                        url: item.backgroundURL ?? item.posterURL,
+                        loadingFill: AppleDesignTokens.surface
+                    )
+                }
+            }
                 .frame(width: M.screenSize.width, height: M.artHeight)
                 .clipped()
                 .overlay {

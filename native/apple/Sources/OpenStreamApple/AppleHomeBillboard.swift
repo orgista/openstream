@@ -5,6 +5,12 @@ import Combine
 #endif
 
 /// Artwork and inline previews share one large stage; copy never obscures it.
+///
+/// tvOS does not get this card layout. The Apple TV home hero is
+/// `AppleTVBillboard` — full-bleed 1920 x 980 art, the app's one fade, copy
+/// anchored bottom-leading over the art, the first row peeking in underneath.
+/// This view only supplies the preview stage that plays inside it, so Discover
+/// keeps its inline trailer without losing the billboard the owner signed off.
 struct AppleHomeBillboard<Actions: View>: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
@@ -16,6 +22,27 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
+        #if os(tvOS)
+        AppleTVBillboard(
+            item: item,
+            wordmark: wordmark,
+            rotationCount: rotationCount,
+            rotationIndex: rotationIndex,
+            stage: AnyView(
+                AppleHomeHeroPreview(
+                    item: item, sources: sources, settings: settings,
+                    loadingFill: AppleDesignTokens.surface
+                )
+                .id(item.id)
+            )
+        ) { actions }
+        #else
+        card
+        #endif
+    }
+
+    #if !os(tvOS)
+    private var card: some View {
         VStack(alignment: .leading, spacing: 16) {
             AppleHomeHeroPreview(item: item, sources: sources, settings: settings)
                 .id(item.id)
@@ -24,8 +51,13 @@ struct AppleHomeBillboard<Actions: View>: View {
                 .clipShape(.rect(cornerRadius: 18))
             VStack(alignment: .leading, spacing: 12) {
                 if let wordmark {
+                    // A definite height, not `maxHeight`: the wordmark is drawn
+                    // inside a GeometryReader, and in a scroll view an upper
+                    // bound leaves the height proposal unresolved, which
+                    // collapsed the mark to a few illegible points.
                     AppleTrimmedTitleLogo(url: wordmark, alignment: .leading) { _ in }
-                        .frame(maxWidth: 300, maxHeight: 90, alignment: .leading)
+                        .frame(maxWidth: 300, alignment: .leading)
+                        .frame(height: 90)
                         .accessibilityLabel(item.name)
                         .accessibilityAddTraits(.isHeader)
                 } else {
@@ -36,7 +68,6 @@ struct AppleHomeBillboard<Actions: View>: View {
                 }
                 actions
             }
-            .padding(.horizontal, copyInset)
             if rotationCount > 1 {
                 AppleHomeHeroPageIndicator(count: rotationCount, index: rotationIndex)
                     .frame(maxWidth: .infinity)
@@ -44,27 +75,13 @@ struct AppleHomeBillboard<Actions: View>: View {
         }
         .foregroundStyle(.primary)
         .accessibilityElement(children: .contain)
-        #if os(tvOS)
-        .focusSection()
-        #endif
     }
 
     private var artworkHeight: CGFloat {
-        #if os(tvOS)
-        620
-        #else
         let width = max(viewportSize.width - 32, 320)
         return min(600, max(240, width * 9 / 16))
-        #endif
     }
-
-    private var copyInset: CGFloat {
-        #if os(tvOS)
-        AppleTVChromeMetrics.horizontalSafeInset
-        #else
-        0
-        #endif
-    }
+    #endif
 }
 
 /// Promotional posters carry their own title treatment and badges in the art.
@@ -114,6 +131,9 @@ private struct AppleHomeHeroPreview: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
+    /// The billboard wants its own ground while the still loads; shelf-sized
+    /// callers keep `AppleCatalogArtwork`'s near-invisible default.
+    var loadingFill: Color = .white.opacity(0.025)
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
@@ -140,7 +160,7 @@ private struct AppleHomeHeroPreview: View {
 
     var body: some View {
         ZStack {
-            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL, loadingFill: loadingFill)
             #if os(iOS) || os(visionOS)
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(
@@ -155,7 +175,11 @@ private struct AppleHomeHeroPreview: View {
             }
             #elseif os(tvOS)
             if shouldPreview, let nativeSource {
-                AppleTVTrailerPlayerView(source: nativeSource, isMuted: isMuted)
+                AppleTVTrailerPlayerView(source: nativeSource, isMuted: isMuted) {
+                    // The stream will not play. Drop back to the backdrop
+                    // rather than leaving a dead player over the billboard.
+                    self.nativeSource = nil
+                }
             }
             #endif
         }

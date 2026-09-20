@@ -18,15 +18,22 @@ import UIKit
 struct AppleTVTrailerPlayerView: UIViewRepresentable {
     let source: AppleYouTubeStreamResolver.Source
     var isMuted = true
+    /// Called on the main actor when the trailer cannot play. The caller takes
+    /// the layer away again; without it a dead player sits over the billboard
+    /// as an opaque black rectangle until the hero rotates (owner, 2026-09-20:
+    /// "Apple TV regressed ... it looks smaller and off", hero fully black).
+    var onFailure: () -> Void = {}
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
+        view.onFailure = onFailure
         view.isMuted = isMuted
         view.load(source: source)
         return view
     }
 
     func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        uiView.onFailure = onFailure
         uiView.isMuted = isMuted
         if uiView.currentSource != source { uiView.load(source: source) }
     }
@@ -42,18 +49,25 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
         private var player: AVPlayer?
         var isMuted = true { didSet { player?.isMuted = isMuted } }
         private var loadTask: Task<Void, Never>?
+        /// Set by the representable before `load(source:)`.
+        var onFailure: () -> Void = {}
+        /// A source that already failed. Reported failure clears
+        /// `currentSource`, and without this the next `updateUIView` would see
+        /// a mismatch and start the same dead stream over again.
+        private var failedSource: AppleYouTubeStreamResolver.Source?
         /// `AVURLAsset` does not retain its resource-loader delegate, so the
         /// loaders have to be held here for as long as the item plays.
         private var loaders: [AppleRangedAssetLoader] = []
-        #if DEBUG
         private var statusObservation: NSKeyValueObservation?
-        #endif
         private(set) var currentSource: AppleYouTubeStreamResolver.Source?
 
         func load(source: AppleYouTubeStreamResolver.Source) {
+            guard source != failedSource else { return }
             stop()
             currentSource = source
-            backgroundColor = .black
+            // Clear, not black: the billboard's artwork is behind this layer
+            // and has to stay visible until there are video frames to cover it.
+            backgroundColor = .clear
 
             switch source {
             case .hls(let url):
@@ -78,6 +92,7 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
                             for: video, contentType: AVFileType.mp4.rawValue
                         ) else {
                             appleTraceFailure("trailer: could not build a video-only asset either")
+                            await MainActor.run { self?.reportFailure() }
                             return
                         }
                         composed = (AVPlayerItem(asset: asset), [loader])
@@ -91,7 +106,10 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
         }
 
         private func start(item: AVPlayerItem) {
-            guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+            guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else {
+                reportFailure()
+                return
+            }
             let player = AVPlayer(playerItem: item)
             player.audiovisualBackgroundPlaybackPolicy = .pauses
             player.isMuted = isMuted
@@ -102,19 +120,27 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
             playerLayer.videoGravity = .resizeAspectFill
             player.play()
             self.player = player
-            #if DEBUG
-            // "Playing" with a black layer means the item never became ready;
-            // its own error says why.
-            statusObservation = item.observe(\.status, options: [.initial, .new]) { item, _ in
+            // A player that never becomes ready draws nothing, so the caller
+            // has to hear about it and put the still back. This observation is
+            // not DEBUG-only: the release build has the same dead layer.
+            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
                 switch item.status {
                 case .readyToPlay: appleTrace("trailer item ready")
                 case .failed:
                     let ns = (item.error ?? NSError(domain: "none", code: 0)) as NSError
                     appleTraceFailure("trailer item failed: \(ns.domain) \(ns.code) \(ns.localizedDescription)")
+                    Task { @MainActor in self?.reportFailure() }
                 default: break
                 }
             }
-            #endif
+        }
+
+        /// Tears the dead player down and tells the page once.
+        private func reportFailure() {
+            guard let source = currentSource else { return }
+            stop()
+            failedSource = source
+            onFailure()
         }
 
         /// One item carrying both halves of an adaptive pair, plus the loaders
@@ -158,6 +184,7 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
         func stop() {
             loadTask?.cancel()
             loadTask = nil
+            statusObservation = nil
             player?.pause()
             playerLayer.player = nil
             player = nil
