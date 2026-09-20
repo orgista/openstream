@@ -734,3 +734,29 @@ Codex sandbox cannot build/test/sim: give it code-only specs and verify here. `c
   `-OpenStreamVisionScreen add-files -OpenStreamVisionPlaybackURL <url>`; the paired watch showed the title with
   play/±10 s controls. Side finding: a direct HLS master playlist URL through Add Files fails in HLSVideoEngine
   ("Demuxer: open failed, invalid data"); Add Files is meant for files, so the route needs a direct .mp4 for a full test.
+
+## 7d. State 2026-09-20 01:55 (Claude session) — iMessage extension now exists
+Closes the "iMessage: no target exists" item in §7c. Not committed (driver commits), not uploaded.
+- Target **"OpenStream Messages"** (`com.apple.product-type.app-extension.messages`, bundle id
+  `com.orgista.openstream.messages`), embedded in "OpenStream iOS" › PlugIns, links the local
+  `OpenStreamApple` package exactly as "OpenStream Widgets" does. Added with the `xcodeproj` gem, never
+  by hand; a semantic before/after diff of every target confirmed only the three intended changes.
+  Product is `OpenStreamMessages.appex` (no space), matching the Widgets extension's naming.
+  Xcode auto-creates the scheme — there is still no `xcshareddata/xcschemes`, so do not add one.
+- Files: `Apps/OpenStreamMessages/` (Info.plist, entitlements, `OpenStreamMessagesViewController.swift`,
+  `Assets.xcassets`), `Sources/OpenStreamApple/AppleMessagesShare.swift` (the pure part — what is offered
+  and what the bubble says), `Tests/OpenStreamAppleTests/AppleMessagesShareTests.swift` (12 tests),
+  `Apps/OpenStreamiOSUITests/AppleMessagesExtensionUITests.swift`.
+- It reads the **same** `topshelf-v1.json` the widgets and Top Shelf read; no new store was invented.
+  So it is empty unless Continue Watching publishing is on under Settings › Privacy — the C923 sim has it
+  OFF (launching the app there deletes the file), the Content sim has it ON.
+- Verified on both sims by driving the real Messages app (see `AppleMessagesExtensionUITests`): listed in
+  the send menu, compact view renders the titles, tapping one composes an `MSMessageTemplateLayout`
+  bubble, and the draft is removed again. iOS 18 and iOS 26 differ: iOS 26 shows a one-time screening
+  notice, the conversation cell is not `isHittable` (coordinate-tap it), the Apps button is unlabelled,
+  and it appends ", 1 image" to the staged bubble's label. The send-menu list is lazy — scroll it.
+- **Owner actions before any TestFlight build:** (1) App Store Connect needs an App ID for
+  `com.orgista.openstream.messages` with the App Groups capability, plus a provisioning profile — an
+  archive/upload will fail without it, and signing was deliberately left untouched here. (2) The iMessage
+  app icon is a **placeholder**: the existing 1024 app icon centre-cropped to 4:3. It is legible but was
+  not designed at these sizes; replace before shipping.
