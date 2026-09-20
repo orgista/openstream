@@ -1,5 +1,12 @@
 import Foundation
+import OSLog
 import TVServices
+
+/// The shelf failing is invisible from the outside: tvOS silently falls back
+/// to the static Top Shelf image, which looks like a design choice rather than
+/// a bug. Every exit from `loadTopShelfContent` says why, into
+/// `log stream --predicate 'subsystem == "com.orgista.openstream.topshelf"'`.
+private let log = Logger(subsystem: "com.orgista.openstream.topshelf", category: "content")
 
 final class TopShelfProvider: TVTopShelfContentProvider {
     private struct Snapshot: Decodable {
@@ -36,10 +43,21 @@ final class TopShelfProvider: TVTopShelfContentProvider {
     override func loadTopShelfContent(completionHandler: @escaping ((any TVTopShelfContent)?) -> Void) {
         guard let root = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.com.orgista.openstream"
-        ), let data = try? Data(contentsOf: root.appending(path: "topshelf-v1.json")),
-        data.count <= 1_000_000,
-        let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
-        snapshot.version == 1 else {
+        ) else {
+            log.error("no app group container — check the extension's entitlement")
+            completionHandler(nil)
+            return
+        }
+        let url = root.appending(path: "topshelf-v1.json")
+        guard let data = try? Data(contentsOf: url) else {
+            log.error("no snapshot at \(url.path, privacy: .public) — the app has not published one")
+            completionHandler(nil)
+            return
+        }
+        guard data.count <= 1_000_000,
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+              snapshot.version == 1 else {
+            log.error("snapshot unreadable — \(data.count) bytes")
             completionHandler(nil)
             return
         }
@@ -50,6 +68,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             collection(title: "Continue Watching", values: snapshot.continueWatching),
             collection(title: "Top Picks", values: snapshot.topPicks),
         ].compactMap { $0 }
+        log.info("serving \(sections.count) section(s): continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 

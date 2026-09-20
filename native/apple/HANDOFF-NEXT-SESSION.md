@@ -320,6 +320,35 @@ write; if a file you need is already modified by the other agent, say so and sto
   input from stdin..." (the whole afternoon queue of 2026-09-18 stalled 3 h on this). Always:
   `codex exec -C <tree> -s workspace-write "<spec>" < /dev/null > spec.out 2>&1`.
 
+- **`screencapture` on this Mac returns the wallpaper, not the windows (2026-09-20 09:47).** The
+  shell has no Screen Recording permission, and macOS's failure mode is silent: `screencapture -x
+  <file>.png` succeeds and writes real, non-black pixels — of the desktop picture and menu bar
+  only, with every window erased. `-l<windowid>` and `-R<rect>` are honest about it and print
+  "could not create image from window/display". Proof: crop the rect of any known-visible window
+  out of a full-screen capture and you get wallpaper. So **a macOS screenshot cannot be taken
+  headlessly from here** until the owner ticks Screen Recording for the terminal in System
+  Settings → Privacy & Security. Nothing in the app is at fault; don't file it as one, and don't
+  trust a "screenshot taken" that was never looked at. (`osascript`/System Events is also blocked
+  — "osascript is not allowed assistive access" — so window targeting has no fallback either;
+  window ids come from `CGWindowListCopyWindowInfo`, which does work.)
+
+- **SpringBoard and the document picker ARE scriptable — both were wrongly called unautomatable.**
+  `Apps/OpenStreamiOSUITests/AppleiOSSystemIntegrationUITests.swift` does both, on `6A037503…`:
+  - *Home Screen widget*: long-press an empty spot at normalized (0.5, 0.86) → jiggle mode → the
+    gallery is behind **"Edit"**, not a bare `+`, on iOS 26 → search field → "OpenStream" → "Add
+    Widget". The placed widget and the app icon share the identifier `OpenStream`; only the
+    widget's `value` is `Widget`, so match on that. Remove it with a 1.6 s press → "Remove
+    Widget" → alert "Remove". **Never log SpringBoard by enumerating
+    `buttons.allElementsBoundByIndex`** — with a keyboard up, the keys resolve as a different
+    automation type between query and property read and fail the test ("computed Button from
+    legacy attributes vs Key from modern attribute"). `debugDescription` is safe.
+  - *`.fileExporter` / `.fileImporter`*: the picker is a remote view but it IS in the host app's
+    own element tree — at the very end, past the whole form, so a 12 000-char `debugDescription`
+    slice cuts it off and looks empty. Print 40 000. Both sheets reopen wherever the picker was
+    left, so the import half finds the file already on screen; **steering it to "Browse → On My
+    iPhone" is what loses it**, since the save lands in `On My iPhone → OpenStream → Imports`.
+    Saving twice raises a "Replace" confirmation.
+
 ### 4c. Skills and `asc` (installed 2026-09-17 — use them, don't reinstall)
 - 18 skills live in `~/.claude/skills/<name>/SKILL.md` and load automatically in Claude Code
   (`Skill` tool by name). For agy pass `--add-dir ~/.claude/skills`; codex reads them as files.
