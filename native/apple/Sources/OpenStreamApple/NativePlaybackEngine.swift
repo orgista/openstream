@@ -105,6 +105,12 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
 
     public var avPlayer: AVPlayer? { player }
 
+    /// The item's own seekable span. On this route `position` is the player's
+    /// clock, so the range needs no axis conversion.
+    public var seekableRange: AppleSeekableRange? {
+        avPlayerSeekableRange(player)?.expanded(toInclude: position)
+    }
+
     public var events: AsyncStream<ApplePlaybackEngineEvent> {
         eventStream.stream()
     }
@@ -241,7 +247,18 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         guard let player, seconds.isFinite else { return }
         isSeeking = true
         phase = .seeking
-        let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        // AVPlayer never errors on an out-of-range seek: it lands on the
+        // nearest seekable time and reports `completed == true`, which reads
+        // from here as a seek that worked and from the screen as nothing
+        // happening. Clamp against the item's real range so the target we log
+        // is the target we get.
+        var requested = max(0, seconds)
+        if let range = avPlayerSeekableRange(player), !range.contains(requested) {
+            let clamped = Swift.min(range.end, Swift.max(range.start, requested))
+            appleTrace("native seek \(Int(requested))s is outside seekable \(Int(range.start))–\(Int(range.end))s → \(Int(clamped))s")
+            requested = clamped
+        }
+        let target = CMTime(seconds: requested, preferredTimescale: 600)
         let completed = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
         guard self.player === player else { return }
         if completed {

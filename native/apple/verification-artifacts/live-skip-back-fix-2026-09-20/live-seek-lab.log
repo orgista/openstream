@@ -1,0 +1,7 @@
+WIDE WINDOW — seekable range from AVPlayerItem.seekableTimeRanges: 0.00–84.25s (span 84.25s), playhead 84.25s
+request.effectiveDVRWindowSeconds would have been 1800s — 21.36× the real window
+frame → before-skip-back.png at 84.25s
+skip-back 10s: target 74.25s → landed 74.25s (from 84.25s)
+frame → after-skip-back.png at 74.25s
+EDGE ONLY — seekable 6.00–7.75s (span 1.75s), playhead 7.75s
+old math on an edge-only stream: target 0.00s → landed 8.01s (asked for -2.25s)

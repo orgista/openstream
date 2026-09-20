@@ -789,3 +789,41 @@ Closes the "iMessage: no target exists" item in §7c. Not committed (driver comm
   archive/upload will fail without it, and signing was deliberately left untouched here. (2) The iMessage
   app icon is a **placeholder**: the existing 1024 app icon centre-cropped to 4:3. It is legible but was
   not designed at these sizes; replace before shipping.
+
+## 7e. State 2026-09-20 13:20 (Claude session) — live skip-back reads the real seekable range
+Closes "live skip-back does nothing" (owner, GUI audit 2026-09-19). Not committed (driver commits).
+- The transport computed every live seek against `ApplePlaybackRequest.effectiveDVRWindowSeconds`,
+  which is `dvrWindowSeconds ?? 1800` — the same 1800 for every live channel, with no relationship to
+  the playlist. Measured against a real sliding-window live origin, the seekable span is **84 s, not
+  1800** (21× out). `AVPlayer` never errors on an out-of-range seek; it lands on the nearest seekable
+  time and reports success, and the badge and scrubber were drawn from the same 1800, so a press that
+  did land still looked like nothing had happened.
+- Now `ApplePlaybackEngine.seekableRange` reports what the player actually holds —
+  `AVPlayerItem.seekableTimeRanges` on the native engine, `AetherEngine.seekableLiveRange` folded with
+  the item's own range on the demuxing one — and `AppleLiveSeekPolicy` does the arithmetic.
+  `effectiveDVRWindowSeconds` keeps its real job: the retention hint in `LoadOptions`.
+- **A live channel with no rewind now shows no scrubber and no skip buttons** instead of two enabled
+  buttons that swallow the tap. `AppleLiveSeekPolicy.minimumUsefulSpan` (20 s) is the threshold.
+- **Reproducing a live stream locally** (no provider URL, no credentials). Two ffmpeg origins plus
+  `python3 -m http.server 8099 --directory /tmp/livehls`:
+  ```
+  # 90 s rewind window
+  ffmpeg -re -f lavfi -i "testsrc=size=854x480:rate=25" -f lavfi -i "sine=frequency=440" \
+    -c:v libx264 -preset veryfast -tune zerolatency -g 50 -keyint_min 50 -sc_threshold 0 \
+    -c:a aac -b:a 64k -ac 2 -f hls -hls_time 2 -hls_list_size 45 \
+    -hls_flags delete_segments+independent_segments+omit_endlist \
+    -hls_segment_filename /tmp/livehls/dvr/seg%05d.ts /tmp/livehls/dvr/index.m3u8
+  # live-edge only: the same with -hls_list_size 3 into /tmp/livehls/edge/
+  ```
+  Then `OPENSTREAM_LIVE_LAB_HLS=… OPENSTREAM_LIVE_LAB_HLS_EDGE=… OPENSTREAM_LIVE_LAB_ARTIFACTS=…
+  swift test --scratch-path … --filter AppleLiveSeekIntegrationTests` runs
+  `Tests/OpenStreamAppleTests/AppleLiveSeekIntegrationTests.swift` against a real `AVPlayer`; it skips
+  when the variables are unset, so the ordinary gate is unaffected. `testsrc` burns a clock into the
+  picture, so the captured frames show the ten seconds coming off.
+- **The custom transport is not reachable for live on this Content sim.** `AppleTransportOverlay` only
+  draws on `.surface` routes; the sim's configured provider (`Live TV`, jktv4.xyz) serves HLS, which
+  takes `route=avPlayer` and AVKit's own controls. Adding a lab playlist does not help: the Live guide
+  binds to the first `liveTV` source, so a second playlist's channels never appear in the guide or its
+  search. Proving the overlay end-to-end on a simulator needs either a raw-MPEG-TS provider as the
+  first live source, or a way to choose which live source the guide uses. Left alone — reordering the
+  owner's sources is not this task's call.

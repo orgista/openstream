@@ -56,7 +56,6 @@ import Testing
         engine.duration = 100
         let coordinator = makeCoordinator(engine: engine, request: makeRequest())
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
-        model.dvrWindowSeconds = nil
         #expect(model.isScrubbable)
         coordinator.stop()
     }
@@ -65,17 +64,30 @@ import Testing
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = nil
         #expect(!model.isScrubbable)
+        #expect(!model.canSkip)
         coordinator.stop()
     }
 
     @Test func liveWithDvrIsScrubbable() {
         let engine = FakePlaybackEngine()
+        engine.seekableRange = AppleSeekableRange(start: 0, end: 30)
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 30))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = 30
         #expect(model.isScrubbable)
+        #expect(model.canSkip)
+        coordinator.stop()
+    }
+
+    /// The request's 1800 s hint is not a window. A channel whose player
+    /// reports eight seconds of rewind gets no scrubber and no skip buttons.
+    @Test func liveWhosePlayerReportsANarrowWindowIsNotScrubbable() {
+        let engine = FakePlaybackEngine()
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_608)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        #expect(!model.isScrubbable)
+        #expect(!model.canSkip)
         coordinator.stop()
     }
 
@@ -86,7 +98,6 @@ import Testing
         engine.position = 0
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = nil
         #expect(model.isAtLiveEdge)
         coordinator.stop()
     }
@@ -94,9 +105,9 @@ import Testing
     @Test func liveWithDvrIsAtTheEdgeAtTheEndOfItsWindow() {
         let engine = FakePlaybackEngine()
         engine.position = 600
+        engine.seekableRange = AppleSeekableRange(start: 0, end: 600)
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = 600
         #expect(model.isAtLiveEdge)
         coordinator.stop()
     }
@@ -106,17 +117,17 @@ import Testing
     @Test func liveWithDvrLeavesTheEdgeOnceTheViewerScrubsBack() {
         let engine = FakePlaybackEngine()
         engine.position = 600 - AppleTransportOverlayModel.liveEdgeTolerance + 1
+        engine.seekableRange = AppleSeekableRange(start: 0, end: 600)
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = 600
         #expect(model.isAtLiveEdge)
         coordinator.stop()
 
         let behind = FakePlaybackEngine()
         behind.position = 590
+        behind.seekableRange = AppleSeekableRange(start: 0, end: 600)
         let secondCoordinator = makeCoordinator(engine: behind, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
         let scrubbedBack = AppleTransportOverlayModel(coordinator: secondCoordinator, isLive: true)
-        scrubbedBack.dvrWindowSeconds = 600
         #expect(!scrubbedBack.isAtLiveEdge)
         secondCoordinator.stop()
     }
@@ -135,7 +146,6 @@ import Testing
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = nil
         #expect(model.positionText.isEmpty)
         coordinator.stop()
     }
@@ -347,9 +357,76 @@ import Testing
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
-        model.dvrWindowSeconds = nil
         await model.skip(by: 10)
         #expect(engine.seeks.isEmpty)
+        coordinator.stop()
+    }
+
+    /// The regression this whole change exists for: a live channel whose
+    /// player reports a real 90 s window, sitting at the edge. Skipping back
+    /// used to clamp `position - 10` against a fictional 1800 s window and
+    /// hand AVPlayer a time it silently swallowed. It must now land inside the
+    /// reported range, and the badge must stop saying LIVE.
+    @Test func skipBackOnLiveWithARealWindowSeeksInsideIt() async {
+        let engine = FakePlaybackEngine()
+        engine.position = 3_690
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_690)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        #expect(model.isAtLiveEdge)
+        await model.skip(by: -10)
+        #expect(engine.seeks == [3_680])
+        coordinator.stop()
+    }
+
+    /// Skipping back at the floor of the window has nowhere to go and must not
+    /// issue a seek that only stalls the picture.
+    @Test func skipBackAtTheFloorOfTheWindowIssuesNoSeek() async {
+        let engine = FakePlaybackEngine()
+        engine.position = 3_600
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_690)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        await model.skip(by: -10)
+        #expect(engine.seeks.isEmpty)
+        coordinator.stop()
+    }
+
+    /// The LIVE badge seeks to the real edge, not to `dvrWindowSeconds`.
+    @Test func liveBadgeSeeksToTheEndOfTheRealWindow() async {
+        let engine = FakePlaybackEngine()
+        engine.position = 3_620
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_690)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        #expect(!model.isAtLiveEdge)
+        await model.seekToLiveEdge()
+        #expect(engine.seeks == [3_690])
+        coordinator.stop()
+    }
+
+    /// The scrubber spans the real window, so the thumb sits where the
+    /// playhead actually is inside it instead of pinned at 1.0.
+    @Test func liveProgressAndDurationReadTheRealWindow() {
+        let engine = FakePlaybackEngine()
+        engine.position = 3_645
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_690)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        #expect(abs(model.progress - 0.5) < 0.001)
+        #expect(model.durationText == "1:30")
+        coordinator.stop()
+    }
+
+    /// A live scrub is a fraction of the real window, on the window's own axis.
+    @Test func liveScrubTargetsTheRealWindow() async {
+        let engine = FakePlaybackEngine()
+        engine.position = 3_690
+        engine.seekableRange = AppleSeekableRange(start: 3_600, end: 3_690)
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 1_800))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        await model.scrub(to: 0.25)
+        #expect(engine.seeks == [3_622.5])
         coordinator.stop()
     }
 

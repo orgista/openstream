@@ -147,6 +147,14 @@ public protocol ApplePlaybackEngine: AnyObject {
     var failure: ApplePlaybackFailure? { get }
     /// Non-nil only on `.avPlayer` routes.
     var avPlayer: AVPlayer? { get }
+    /// The span the stream can actually be seeked within, on the same axis as
+    /// `position`. Nil when the engine has nothing to report — no item loaded,
+    /// or a live source with no rewind at all.
+    ///
+    /// Read from the player, never from `ApplePlaybackRequest.dvrWindowSeconds`:
+    /// that number is a load hint every live request carries as 1800, and the
+    /// transport used to clamp its seeks to it. See `AppleSeekableRange`.
+    var seekableRange: AppleSeekableRange? { get }
     /// A fresh stream per call; every property change is emitted.
     var events: AsyncStream<ApplePlaybackEngineEvent> { get }
     func load(_ request: ApplePlaybackRequest) async throws
@@ -168,6 +176,26 @@ public extension ApplePlaybackEngine {
     func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {}
     /// Most routes cannot report this; the fitting falls back to 16:9.
     var videoSize: CGSize? { nil }
+
+    /// Engines that know nothing about their seekable span report none, and
+    /// the transport treats the stream as live-edge-only.
+    var seekableRange: AppleSeekableRange? { nil }
+
+    /// `AVPlayerItem.seekableTimeRanges`, folded to the one contiguous range
+    /// that matters. Live HLS reports a single sliding range; a VOD item
+    /// reports its whole timeline. Shared by both engines, because both end up
+    /// behind an `AVPlayer` on the routes where this is knowable.
+    @MainActor
+    func avPlayerSeekableRange(_ player: AVPlayer?) -> AppleSeekableRange? {
+        guard let item = player?.currentItem else { return nil }
+        let ranges = item.seekableTimeRanges.map(\.timeRangeValue).filter { $0.duration.isNumeric }
+        guard let first = ranges.first else { return nil }
+        // Take the outer bounds: a stream with a gap is still seekable across
+        // the parts it holds, and the player clamps inside them for us.
+        let start = ranges.reduce(first.start.seconds) { Swift.min($0, $1.start.seconds) }
+        let end = ranges.reduce(first.end.seconds) { Swift.max($0, $1.end.seconds) }
+        return AppleSeekableRange(start: start, end: end)
+    }
 
     var maximumPlaybackRate: Float { 2 }
     func setPlaybackRate(_ rate: Float) {

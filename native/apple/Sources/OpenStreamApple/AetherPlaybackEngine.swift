@@ -125,6 +125,40 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public var avPlayer: AVPlayer? { aether.currentAVPlayer }
 
+    /// What the live source can actually rewind, on the session axis
+    /// `position` is published on.
+    ///
+    /// Two sources, folded: the engine's `seekableLiveRange`, and — where an
+    /// `AVPlayer` is doing the playing — the item's own `seekableTimeRanges`.
+    /// Neither alone is right. `seekableLiveRange` is window arithmetic
+    /// (`edge - dvrWindowSeconds`) on the remote-HLS path, where no segment
+    /// cache exists to report an honest floor, so it advertises the 1800 s
+    /// every live request carries; the item knows the truth but speaks its own
+    /// axis. `shift` measures the offset between the two from a single sample
+    /// of each (the engine folds a constant `playlistShiftSeconds +
+    /// liveItemAxisOffsetSeconds` into the playhead), then the narrower of the
+    /// two wins.
+    public var seekableRange: AppleSeekableRange? {
+        let claimed = aether.seekableLiveRange.flatMap {
+            AppleSeekableRange(start: $0.lowerBound, end: $0.upperBound)
+        }
+        guard let player = aether.currentAVPlayer,
+              let item = avPlayerSeekableRange(player) else {
+            return claimed?.expanded(toInclude: position)
+        }
+        let playerTime = player.currentTime().seconds
+        guard playerTime.isFinite, position.isFinite else {
+            return claimed?.expanded(toInclude: position)
+        }
+        let shift = position - playerTime
+        guard let onSessionAxis = AppleSeekableRange(start: item.start + shift,
+                                                     end: item.end + shift) else {
+            return claimed?.expanded(toInclude: position)
+        }
+        let folded = claimed.flatMap { onSessionAxis.intersected(with: $0) } ?? onSessionAxis
+        return folded.expanded(toInclude: position)
+    }
+
     /// Exposed for `ApplePlaybackSurfaceView`, which mounts the engine's own
     /// SwiftUI surface on `.surface` routes.
     internal var aetherEngine: AetherEngine { aether }

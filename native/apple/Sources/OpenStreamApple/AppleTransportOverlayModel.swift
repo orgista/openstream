@@ -13,9 +13,11 @@ import Observation
 ///
 /// Policy table (see T5 spec):
 /// - VOD with a known duration → scrubber enabled, `m:ss` / `h:mm:ss` times.
-/// - live without a DVR window → scrubber hidden, "LIVE" badge, empty times.
-/// - live with a DVR window (`dvrWindowSeconds > 0`) → scrubber over the DVR
-///   window; the "LIVE" badge is tappable to seek back to the live edge.
+/// - live the player reports no usable rewind for → scrubber and skip buttons
+///   hidden, "LIVE" badge, empty times.
+/// - live with a real seekable range (`liveSeekableRange`, wider than
+///   `AppleLiveSeekPolicy.minimumUsefulSpan`) → scrubber over that range; the
+///   "LIVE" badge is tappable to seek back to the live edge.
 @MainActor
 @Observable
 public final class AppleTransportOverlayModel {
@@ -26,11 +28,15 @@ public final class AppleTransportOverlayModel {
     /// the view passes `request.isLive`.
     public let isLive: Bool
 
-    /// DVR window in seconds for live streams. The view sets this from
-    /// `request.effectiveDVRWindowSeconds` after construction (kept out of
-    /// `init` so the initializer signature stays `(coordinator:, isLive:)`).
-    /// `nil` (or `0`) means "no DVR window".
-    public var dvrWindowSeconds: Double? = nil
+    /// What the stream can ACTUALLY be seeked within, mirrored from the engine
+    /// on every position tick. Nil until the player reports one, and nil for a
+    /// live-edge-only source that can never rewind.
+    ///
+    /// Every live seek and every live readout is computed from this, not from
+    /// `dvrWindowSeconds`: that number is the load hint, identical (1800) for
+    /// every live channel, and clamping against it is why skip-back on a live
+    /// channel moved nothing a viewer could see (owner, GUI audit 2026-09-19).
+    public private(set) var liveSeekableRange: AppleSeekableRange? = nil
 
     /// Presentation route. Seeded from the coordinator in `init` and updated
     /// when the engine emits a `.route` event; drives whether the overlay and
@@ -89,6 +95,18 @@ public final class AppleTransportOverlayModel {
     private func refreshIntroChapter() {
         let found = AppleChapterMarkers.intro(in: coordinator.engine.chapters, duration: duration)
         if introChapter != found { introChapter = found }
+    }
+
+    /// Re-reads the engine's real seekable span. Write-guarded: the position
+    /// observer ticks four times a second and an unchanged range must not
+    /// invalidate every Observation reader of this model.
+    private func refreshSeekableRange() {
+        // Live only. A VOD item's seekable range grows as it buffers, and
+        // mirroring that at four ticks a second would invalidate every
+        // Observation reader of this model — the track menu included — for a
+        // value nothing on a VOD screen reads.
+        let found = isLive ? coordinator.engine.seekableRange : nil
+        if liveSeekableRange != found { liveSeekableRange = found }
     }
 
     /// Drops the opening and the sticky skip when the engine leaves the item.
@@ -203,6 +221,7 @@ public final class AppleTransportOverlayModel {
         self.preferredSubtitleLanguages = chosen ?? []
         self.subtitleLanguagesAreExplicit = chosen != nil
         self.route = coordinator.route
+        self.liveSeekableRange = isLive ? coordinator.engine.seekableRange : nil
         startObserving()
         scheduleAutoHide()
     }
@@ -245,7 +264,10 @@ public final class AppleTransportOverlayModel {
     /// `true` when the scrubber should be shown and accept input.
     public var isScrubbable: Bool {
         if isLive {
-            return (dvrWindowSeconds ?? 0) > 0
+            // The window the player proves it holds, not the one the request
+            // asked for. A sliding-window IPTV playlist with three segments in
+            // it gets no scrubber, because there is nothing to scrub.
+            return AppleLiveSeekPolicy.offersDVR(liveSeekableRange)
         }
         // VOD: scrubbable once a positive duration is known.
         return (duration ?? 0) > 0
@@ -265,8 +287,19 @@ public final class AppleTransportOverlayModel {
     /// live carries no time readout (button crawl, 2026-09-19).
     public var isAtLiveEdge: Bool {
         guard isLive else { return false }
-        guard let window = dvrWindowSeconds, window > 0 else { return true }
-        return position >= window - Self.liveEdgeTolerance
+        return AppleLiveSeekPolicy.isAtLiveEdge(
+            position: position,
+            in: liveSeekableRange,
+            tolerance: Self.liveEdgeTolerance
+        )
+    }
+
+    /// `true` when the ±10 s skip buttons belong on screen: they move the
+    /// picture. A live channel with no rewind gets none rather than two that
+    /// look enabled and swallow the tap.
+    public var canSkip: Bool {
+        if isLive { return AppleLiveSeekPolicy.offersDVR(liveSeekableRange) }
+        return (duration ?? 0) > 0
     }
 
     /// `m:ss` or `h:mm:ss` for VOD; empty for live (the LIVE badge carries the
@@ -279,10 +312,8 @@ public final class AppleTransportOverlayModel {
     /// stream it is the window length; empty for plain live.
     public var durationText: String {
         if isLive {
-            if let window = dvrWindowSeconds, window > 0 {
-                return Self.timeText(window)
-            }
-            return ""
+            guard let range = liveSeekableRange, AppleLiveSeekPolicy.offersDVR(range) else { return "" }
+            return Self.timeText(range.span)
         }
         guard let duration, duration > 0 else { return "" }
         return Self.timeText(duration)
@@ -292,18 +323,11 @@ public final class AppleTransportOverlayModel {
     /// DVR window for live-with-DVR). `0` when not scrubbable.
     public var progress: Double {
         guard isScrubbable, position >= 0 else { return 0 }
-        let span = scrubSpan
-        guard span > 0 else { return 0 }
-        return min(1, max(0, position / span))
-    }
-
-    /// Total seconds the scrubber spans — duration for VOD, DVR window for
-    /// live-with-DVR. Used by `progress` and `scrub(to:)`.
-    private var scrubSpan: Double {
         if isLive {
-            return dvrWindowSeconds ?? 0
+            return AppleLiveSeekPolicy.progress(position: position, in: liveSeekableRange)
         }
-        return duration ?? 0
+        guard let duration, duration > 0 else { return 0 }
+        return min(1, max(0, position / duration))
     }
 
     // MARK: - Actions
@@ -320,18 +344,22 @@ public final class AppleTransportOverlayModel {
     /// Seek to `fraction` of the scrubbed window (`0...1`).
     public func scrub(to fraction: Double) async {
         bumpActivity()
-        let span = scrubSpan
-        guard span > 0 else { return }
-        let clamped = min(1, max(0, fraction))
-        let target = clamped * span
+        let target: Double
+        if isLive {
+            guard let live = AppleLiveSeekPolicy.scrubTarget(fraction: fraction, in: liveSeekableRange) else { return }
+            target = live
+        } else {
+            guard let duration, duration > 0 else { return }
+            target = min(1, max(0, fraction)) * duration
+        }
         await coordinator.userSeek(to: target)
     }
 
     /// Seek back to the live edge of the DVR window. Bound to the "LIVE" badge.
     public func seekToLiveEdge() async {
-        guard isLive, let window = dvrWindowSeconds, window > 0 else { return }
+        guard isLive, let range = liveSeekableRange, AppleLiveSeekPolicy.offersDVR(range) else { return }
         bumpActivity()
-        await coordinator.userSeek(to: window)
+        await coordinator.userSeek(to: range.end)
     }
 
     public func selectAudio(_ id: Int) {
@@ -399,18 +427,25 @@ public final class AppleTransportOverlayModel {
 
     // MARK: - Skip
 
-    /// Skip by `seconds` (typically ±10). Clamped to `[0, duration]` for
-    /// VOD, to the DVR window for live-with-DVR; no-op for live without DVR.
+    /// Skip by `seconds` (typically ±10). Clamped to `[0, duration]` for VOD
+    /// and to the stream's real seekable range for live; a no-op for a live
+    /// source with no rewind, and for a move the range leaves nowhere to go.
     public func skip(by seconds: Double) async {
         bumpActivity()
         let target: Double
         if isLive {
-            guard let window = dvrWindowSeconds, window > 0 else { return }
-            target = min(window, max(0, position + seconds))
+            guard let live = AppleLiveSeekPolicy.skipTarget(
+                from: position, by: seconds, in: liveSeekableRange
+            ) else {
+                appleTrace("live skip \(Int(seconds))s ignored — seekable \(liveSeekableRange.map { "\(Int($0.start))–\(Int($0.end))s" } ?? "none") at \(Int(position))s")
+                return
+            }
+            target = live
         } else {
             guard let duration, duration > 0 else { return }
             target = min(duration, max(0, position + seconds))
         }
+        appleTrace("skip \(Int(seconds))s: \(Int(position))s → \(Int(target))s")
         await coordinator.userSeek(to: target)
     }
 
@@ -464,6 +499,8 @@ public final class AppleTransportOverlayModel {
             // coordinator's attempt counter is private). The opening belongs to
             // the item, so both the marker and the skip end with it.
             if phase == .idle { clearIntroForNewItem() }
+            // A load boundary replaces the item and with it the window.
+            refreshSeekableRange()
             // Phase is otherwise read directly from the coordinator;
             // re-evaluate auto-hide.
             scheduleAutoHide()
@@ -472,6 +509,9 @@ public final class AppleTransportOverlayModel {
         case .position(let seconds):
             let clamped = max(0, seconds)
             if position != clamped { position = clamped }
+            // The window slides with the stream: re-read it on every tick so
+            // the badge, the scrubber and the skip bounds all follow the edge.
+            refreshSeekableRange()
             advanceToNextEpisodeIfDue()
             // Cues carry source PTS and the active cue rolls with the position;
             // re-read on each tick so the overlay renders the current cue, but

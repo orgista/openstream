@@ -28,6 +28,9 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
     var subtitleCues: [AppleSubtitleCue] = []
     var failure: ApplePlaybackFailure? = nil
     var avPlayer: AVPlayer? { nil }
+    /// The real seekable span the transport reads for every live decision.
+    /// Scripted here because no AVPlayer exists in a unit test.
+    var seekableRange: AppleSeekableRange? = nil
 
     private var continuations: [AsyncStream<ApplePlaybackEngineEvent>.Continuation] = []
 

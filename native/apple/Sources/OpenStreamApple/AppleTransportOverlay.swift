@@ -156,8 +156,8 @@ struct AppleTransportOverlay: View {
                     // The surface holds focus while the video plays, so the
                     // clickpad edges skip and a swipe down reveals the controls.
                     switch direction {
-                    case .left: Task { await model.skip(by: -chrome.moveSkipSeconds) }
-                    case .right: Task { await model.skip(by: chrome.moveSkipSeconds) }
+                    case .left where model.canSkip: Task { await model.skip(by: -chrome.moveSkipSeconds) }
+                    case .right where model.canSkip: Task { await model.skip(by: chrome.moveSkipSeconds) }
                     case .down:
                         model.bumpActivity()
                         if model.nextEpisodePrompt != nil {
@@ -242,11 +242,13 @@ struct AppleTransportOverlay: View {
         }
         .foregroundStyle(.white)
         .tint(.white)
-        .task(id: request.effectiveDVRWindowSeconds) {
-            // The request's DVR window and the coordinator's route are not
-            // available through `init`, so the view seeds the model here.
+        .task(id: request.mediaID) {
+            // The coordinator's route is not available through `init`, so the
+            // view seeds the model here. The DVR window is NOT seeded from the
+            // request: `effectiveDVRWindowSeconds` is the engine's retention
+            // hint (1800 for every live channel), and the transport reads the
+            // player's real seekable range instead — see `liveSeekableRange`.
             model.route = coordinator.route
-            model.dvrWindowSeconds = request.effectiveDVRWindowSeconds
         }
         .onChange(of: coordinator.engine.avPlayer.map(ObjectIdentifier.init), initial: true) { _, _ in
             isMuted = coordinator.engine.avPlayer?.isMuted ?? false
@@ -578,7 +580,7 @@ struct AppleTransportOverlay: View {
     /// Big centered play/pause flanked by 10 s skip buttons.
     private var centerRow: some View {
         HStack(spacing: 48) {
-            if model.isScrubbable { skipButton(seconds: -10, systemName: "gobackward.10") }
+            if model.canSkip { skipButton(seconds: -10, systemName: "gobackward.10") }
             Button {
                 model.togglePlayPause()
             } label: {
@@ -597,7 +599,7 @@ struct AppleTransportOverlay: View {
             .focusable()
             #endif
 
-            if model.isScrubbable { skipButton(seconds: 10, systemName: "goforward.10") }
+            if model.canSkip { skipButton(seconds: 10, systemName: "goforward.10") }
         }
     }
 
