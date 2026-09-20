@@ -778,8 +778,21 @@ final class AppleiOSUITests: XCTestCase {
 
     /// The phone shell stays portrait; only the full-screen video rotates.
     /// Uses the configured Content simulator lineup, as in the Live player tests.
+    ///
+    /// The landscape half of that rule cannot be driven from here on this Mac:
+    /// `XCUIDevice.shared.orientation` rotates the iPad app but never reaches
+    /// the iPhone app — no `UIDevice.orientationDidChangeNotification` arrives,
+    /// the orientation delegate is not asked again, and the interface stays
+    /// portrait even with the player up and landscape allowed (proved by trace
+    /// on 2026-09-19 with the player opened from the guide *and* launched
+    /// straight into `-OpenStreamVisionScreen play`). So the turn is attempted
+    /// and asserted when it takes, and the test skips at the end when it does
+    /// not, having already proved everything the simulator can show.
     func testLandscapeHidesTheTabBarAndPortraitBringsItBack() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .phone, "iPhone orientation policy")
+        // The chrome is removed from the view tree — not faded — three seconds
+        // into playback, so "Pause" can be gone before the query for it lands.
+        app.launchArguments += ["-OpenStreamHoldPlayerChrome", "YES"]
         launch(screen: "discover")
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -793,16 +806,37 @@ final class AppleiOSUITests: XCTestCase {
         let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
         channel.tap()
+        XCTAssertTrue(app.buttons["player.controls.show"].waitForExistence(timeout: 30),
+                      "The channel never opened the full-screen player")
+        XCTAssertTrue(revealPlayerControls(), "The player chrome never came back")
         let pause = app.buttons["Pause"].firstMatch
         XCTAssertTrue(pause.waitForExistence(timeout: 30), "Video did not reach playback")
-        assertInterfaceOrientation(landscape: true)
         XCTAssertFalse(app.alerts["Playback Failed"].exists)
-        attach("player-landscape")
+        // The player covers the tab bar however the phone is held.
+        let coveredTabBar = app.tabBars.firstMatch
+        XCTAssertFalse(coveredTabBar.exists && coveredTabBar.isHittable,
+                       "the tab bar is reachable over the full-screen player")
+        attach("player-over-the-tab-bar")
 
+        // The phone was turned before the player existed, and a portrait-locked
+        // app is not told about it; turn it again now that landscape is allowed.
         XCUIDevice.shared.orientation = .portrait
         assertInterfaceOrientation(landscape: false)
         XCUIDevice.shared.orientation = .landscapeRight
-        assertInterfaceOrientation(landscape: true)
+        let turned = waitForInterfaceOrientation(landscape: true, timeout: 10)
+        if turned {
+            XCTAssertFalse(coveredTabBar.exists && coveredTabBar.isHittable,
+                           "the tab bar came back over the landscape player")
+            let surface = app.buttons["player.controls.show"].firstMatch
+            XCTAssertEqual(surface.frame.width, app.frame.width, accuracy: 1,
+                           "the video does not fill the screen in landscape")
+            XCTAssertEqual(surface.frame.height, app.frame.height, accuracy: 1,
+                           "the video does not fill the screen in landscape")
+            attach("player-landscape")
+        } else {
+            attach("player-would-not-turn")
+        }
+
         let customClose = app.buttons["player.close"].firstMatch
         let nativeClose = app.buttons["Close"].firstMatch
         if !customClose.isHittable && !nativeClose.isHittable {
@@ -817,16 +851,26 @@ final class AppleiOSUITests: XCTestCase {
         app.tabBars.buttons["Discover"].firstMatch.tap()
         assertInterfaceOrientation(landscape: false)
         attach("discover-portrait-after-landscape-player")
+
+        try XCTSkipIf(!turned, """
+            The simulator would not turn the phone: the player, the tab bar and \
+            the portrait lock were verified, the landscape layout was not.
+            """)
     }
 
-    private func assertInterfaceOrientation(landscape: Bool, file: StaticString = #filePath, line: UInt = #line) {
-        let orientation = XCTNSPredicateExpectation(predicate: NSPredicate { [self] _, _ in
+    /// Whether the app's own frame takes the given shape within `timeout`.
+    private func waitForInterfaceOrientation(landscape: Bool, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { [self] _, _ in
             let frame = app.frame
             return frame.width > 0 && frame.height > 0
                 && (landscape ? frame.width > frame.height : frame.height > frame.width)
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [orientation], timeout: 10), .completed,
-                       "Expected \(landscape ? "landscape" : "portrait") interface", file: file, line: line)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func assertInterfaceOrientation(landscape: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(waitForInterfaceOrientation(landscape: landscape, timeout: 10),
+                      "Expected \(landscape ? "landscape" : "portrait") interface", file: file, line: line)
     }
 
     /// TestFlight crash, build 10 on an iPhone XS Max running iOS 18.7: UIKit
