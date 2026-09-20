@@ -406,6 +406,9 @@ struct AppleTransportOverlay: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Live")
+            .accessibilityValue(model.isAtLiveEdge ? "At the live edge" : "Behind live")
+            .accessibilityIdentifier("player.live")
             #if os(tvOS)
             .focusable()
             #endif
@@ -415,13 +418,16 @@ struct AppleTransportOverlay: View {
     }
 
     private var liveBadgeLabel: some View {
+        // Red while the stream is at its edge, plain once the viewer has
+        // scrubbed back into the DVR window — the same way the TV app's LIVE
+        // pill behaves, and the only thing on the screen that says a ten
+        // second skip did anything.
         Text("LIVE")
             .font(.caption)
             .bold()
-            .foregroundStyle(.red)
+            .foregroundStyle(model.isAtLiveEdge ? Color.red : Color.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-
     }
 
     // MARK: - Waiting indicator

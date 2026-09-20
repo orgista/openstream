@@ -1180,13 +1180,17 @@ final class AppleiOSUITests: XCTestCase {
     /// The chrome auto-hides three seconds after the last interaction, and that
     /// can expire between the query and the tap it was meant to guard, so this
     /// retries until a control is really there rather than checking once.
-    private func revealPlayerControls() {
+    /// Brings the transport back up, and says whether it is up now — the crawl
+    /// has to read the screen again once it is, or it sees one control.
+    @discardableResult
+    private func revealPlayerControls() -> Bool {
         let captions = app.buttons["player.captions"]
         for _ in 0..<4 {
-            if captions.exists, captions.isHittable { return }
-            app.buttons["player.controls.show"].tap()
-            if captions.waitForExistence(timeout: 2) { return }
+            if captions.exists, captions.isHittable { return true }
+            guard tapIfPossible(app.buttons["player.controls.show"].firstMatch) else { return false }
+            if captions.waitForExistence(timeout: 2) { return true }
         }
+        return false
     }
 
     func testLiveTappedStatesArePhotographed() {
@@ -1282,6 +1286,7 @@ final class AppleiOSUITests: XCTestCase {
         throw XCTSkip("No channel in the available lineup published a legible caption track within 20 seconds per channel (\(visited.count) checked).")
     }
 
+
     // MARK: - Every button on every screen
 
     /// One control on screen, one press, one required answer.
@@ -1294,18 +1299,66 @@ final class AppleiOSUITests: XCTestCase {
     /// within three seconds: a sheet, an alert, a navigation, a menu, a flipped
     /// switch, or a change in the control's own state. Silence is a defect, and
     /// so is a control that exists, at a usable size, and refuses a touch.
+    ///
+    /// Two things make it exhaustive rather than a sampler. There is no budget:
+    /// the first version gave each screen a slice of twenty minutes and pressed
+    /// 41 of the 129 controls it found, which is a report about the budget. And
+    /// it reads the screen through one whole-app snapshot per look instead of
+    /// one query per control: on Discover a single `app.buttons.count` costs
+    /// seconds, and the old enumeration spent five of them per element.
+    private struct CrawlNode {
+        let type: XCUIElement.ElementType
+        let identifier: String
+        let label: String
+        let value: String
+        let placeholder: String
+        let frame: CGRect
+        let isEnabled: Bool
+        let isSelected: Bool
+        let collection: String?
+    }
+
+    /// Everything one look at the screen says, taken in a single round trip.
+    private struct CrawlScene {
+        var nodes: [CrawlNode] = []
+        var navigation = ""
+        var alerts = 0
+        var sheets = 0
+        var keyboards = 0
+        var buttons = 0
+        var lists: [CGRect] = []
+        var appState: UInt = 0
+        /// Everything the screen says, and how many things it says. A
+        /// validation message, a disclosure opening onto a field, a label
+        /// swapping to "Copied": none of them change a count of buttons, and
+        /// all of them are the screen answering.
+        var texts = 0
+        var textDigest = Hasher()
+        var textHash = 0
+        /// What every control on the screen says about itself. A press that
+        /// changes another control's state — the LIVE badge dropping off the
+        /// live edge when the viewer skips back ten seconds — changes nothing
+        /// else the walk can see.
+        var controlDigest = Hasher()
+        var controlHash = 0
+    }
+
     private struct CrawlTarget {
         let typeName: String
         let type: XCUIElement.ElementType
         let identifier: String
         let label: String
         let isTab: Bool
-        var reach: CrawlReach = .hittable
+        var collection: String? = nil
 
         var key: String {
             let named = identifier.isEmpty ? label : identifier
             return named.isEmpty ? "\(typeName)-unnamed" : named
         }
+
+        /// What makes this control this control, for the walk's "already done"
+        /// list: a screen is read again after every press.
+        var signature: String { "\(typeName)\u{1}\(identifier)\u{1}\(label)" }
 
         var name: String { "\(typeName) \(key)" }
 
@@ -1315,6 +1368,46 @@ final class AppleiOSUITests: XCTestCase {
     }
 
     private enum CrawlReach { case hittable, offScreen, blocked, disabled, gone }
+
+    private struct CrawlResult {
+        var found = 0
+        var pressed = 0
+        var silent = 0
+        var unreachable = 0
+        var skipped = 0
+        var defects: [String] = []
+
+        mutating func add(_ other: CrawlResult) {
+            found += other.found
+            pressed += other.pressed
+            silent += other.silent
+            unreachable += other.unreachable
+            skipped += other.skipped
+            defects += other.defects
+        }
+    }
+
+    /// How a screen is reached when a debug route alone does not reach it: the
+    /// players are two taps past a route, and they are where half the controls
+    /// in this app live.
+    private enum CrawlOpener { case none, vodPlayer, livePlayer }
+
+    private struct CrawlScreen {
+        let route: String
+        var opener: CrawlOpener = .none
+        var landscape = false
+        var includesTabs = false
+
+        var name: String {
+            let surface: String
+            switch opener {
+            case .none: surface = route
+            case .vodPlayer: surface = "\(route)→player"
+            case .livePlayer: surface = "\(route)→live-player"
+            }
+            return landscape ? "\(surface) (landscape)" : surface
+        }
+    }
 
     /// Where the floating tab bar is drawn. Rows under it are on screen, half
     /// visible and not touchable until they are scrolled clear — scrolling to
@@ -1328,6 +1421,31 @@ final class AppleiOSUITests: XCTestCase {
     /// as on screen, whole, and untouchable — a defect that was only a scroll.
     private var crawlWindowRect: CGRect = .null
 
+    private var crawlReport: [String] = []
+    private var crawlPressesPerCollection: [String: Int] = [:]
+
+    /// One download per screen, and none at all once a cancel has failed. Each
+    /// one that outruns its cancel leaves a gigabyte or two on the owner's
+    /// simulator — twice today it filled the disk — so the walk presses the
+    /// control, proves it answers, takes the download back, and stops there.
+    private var crawlDownloadsPressed = 0
+    private var crawlDownloadsAreOff = false
+
+    /// How many lists the screen holds before anything is pressed. A SwiftUI
+    /// menu is neither a `menuItem` nor a `popover` on the phone — it arrives
+    /// as one more collection view, narrower than the screen — so an open one
+    /// is recognised by the list it added rather than by its type.
+    private var crawlBaselineLists = 0
+
+    /// Whether this screen's text stays put when nobody touches it.
+    private var crawlTextIsStable = true
+    private var crawlControlsAreStable = true
+
+    /// The owner asked for the first three cards of every shelf. A shelf holds
+    /// as many as the provider sends, and every card press is a detail page
+    /// pushed and popped.
+    private static let crawlCardsPerCollection = 3
+
     /// Anything that throws work away, spends money, or leaves the simulator
     /// different than it was found. The crawler names them in its report and
     /// walks past: this suite runs on the owner's content simulators.
@@ -1336,12 +1454,32 @@ final class AppleiOSUITests: XCTestCase {
         "forget", "disconnect", "unpair", "send", "upload", "ship", "purchase", "buy",
     ]
     private static let crawlMutatingWords = [
-        "save", "sign in", "log in", "add source", "import", "export", "restore",
-        "pair", "subscribe", "download", "test connection",
+        "add source", "import", "export", "restore", "pair", "subscribe", "shareplay",
+    ]
+    /// Buttons that submit a form. The owner's rule: press them only with empty
+    /// fields, which is the validation path, and never with something typed in
+    /// them — the fields on these screens hold credentials.
+    private static let crawlSubmitWords = [
+        "save", "sign in", "log in", "connect", "test connection", "load shares",
     ]
 
-    /// Every route `OpenStreamRootView` can be launched into, plus the Settings
-    /// root and the Sources page that hangs off it.
+    /// Cards and rows that arrive in unbounded numbers. The first three of each
+    /// are pressed; the rest are reported as a policy skip rather than silently
+    /// dropped.
+    private static let crawlCollectionPrefixes = [
+        "home.media.", "home.continue.", "home.top10.", "home.ms.", "home.top-picks.",
+        "library.title.", "librarytv.channel.", "detail.similar.", "detail.other-sources.",
+        "guide.play.", "guide.favorite.", "live.footer.", "live.picker.channel.",
+        "settings.subtitleLanguages.", "watchprovider.", "sources.smb.share.",
+        "sources.mediaServer.embyServer.", "sources.mediaServer.plex.server.",
+    ]
+
+    /// Controls that answer a press by turning on and a second press by turning
+    /// off. Pressed twice, so the simulator keeps the setting it had.
+    private static let crawlRestorablePrefixes = [
+        "settings.subtitleLanguages.", "watchprovider.", "guide.favorite.",
+    ]
+
     /// iPadOS publishes each tab item's symbol name where the phone publishes
     /// its title, and does not expose the bar as a `tabBar` at all, so the
     /// items have to be recognised by name or they are pressed on every screen.
@@ -1350,220 +1488,541 @@ final class AppleiOSUITests: XCTestCase {
         "sparkles", "books.vertical", "dot.radiowaves.left.and.right", "gearshape",
     ]
 
-    private static let crawlRoutes = [
-        "discover", "library", "live", "backup", "channels", "playback-settings",
-        "metadata", "server-downloads", "trakt", "watch-providers", "privacy",
-        "storage", "about", "add-files", "add-media-server", "subtitle-languages",
-        "detail", "episodes", "first-run", "settings", "sources",
-    ]
+    private static let crawlExitLabels: Set<String> = ["Cancel", "Close", "Done", "Dismiss", "OK", "Not Now", "Later"]
 
-    func testEveryButtonRespondsOnEveryScreen() {
-        runButtonCrawl(landscape: false)
+    // MARK: Crawl groups — one test per screen group, each re-runnable alone
+
+    func testCrawlDiscover() {
+        runCrawlGroup("discover", [CrawlScreen(route: "discover", includesTabs: true)])
+    }
+
+    func testCrawlLibrary() {
+        runCrawlGroup("library", [CrawlScreen(route: "library", includesTabs: true)])
+    }
+
+    func testCrawlLive() {
+        runCrawlGroup("live", [CrawlScreen(route: "live"), CrawlScreen(route: "channels")])
+    }
+
+    func testCrawlSettingsRoot() {
+        runCrawlGroup("settings-root", [
+            CrawlScreen(route: "settings", includesTabs: true),
+            CrawlScreen(route: "sources"),
+            CrawlScreen(route: "first-run"),
+        ])
+    }
+
+    func testCrawlSettingsPages() {
+        runCrawlGroup("settings-pages", [
+            CrawlScreen(route: "playback-settings"),
+            CrawlScreen(route: "subtitle-languages"),
+            CrawlScreen(route: "metadata"),
+            CrawlScreen(route: "server-downloads"),
+            CrawlScreen(route: "trakt"),
+            CrawlScreen(route: "watch-providers"),
+            CrawlScreen(route: "privacy"),
+            CrawlScreen(route: "storage"),
+            CrawlScreen(route: "about"),
+            CrawlScreen(route: "backup"),
+        ])
+    }
+
+    func testCrawlSourcesForms() {
+        runCrawlGroup("sources-forms", [
+            CrawlScreen(route: "add-files"),
+            CrawlScreen(route: "add-live"),
+            CrawlScreen(route: "add-catalog"),
+            CrawlScreen(route: "add-media-server"),
+            CrawlScreen(route: "network-share"),
+            CrawlScreen(route: "web-management"),
+        ])
+    }
+
+    func testCrawlDetailAndEpisodes() {
+        runCrawlGroup("detail", [CrawlScreen(route: "detail"), CrawlScreen(route: "episodes")])
+    }
+
+    /// Both players, both ways up. The transport is the one surface whose
+    /// controls move between orientations, and the live player's channel panel
+    /// only exists there.
+    func testCrawlPlayers() {
+        runCrawlGroup("players", [
+            CrawlScreen(route: "detail", opener: .vodPlayer),
+            CrawlScreen(route: "detail", opener: .vodPlayer, landscape: true),
+            CrawlScreen(route: "live", opener: .livePlayer),
+            CrawlScreen(route: "live", opener: .livePlayer, landscape: true),
+        ])
     }
 
     /// The iPad variant. A regular-width split layout puts a different set of
     /// controls on screen than the phone does, and landscape is where the tab
     /// bar and the player chrome trade places.
-    func testEveryButtonRespondsOnEveryScreenOnIPad() throws {
+    func testCrawlLandscapeOnIPad() throws {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("The landscape crawl is the iPad variant; run it on the iPad simulator.")
         }
-        runButtonCrawl(landscape: true)
+        runCrawlGroup("landscape", [
+            CrawlScreen(route: "discover", landscape: true, includesTabs: true),
+            CrawlScreen(route: "library", landscape: true),
+            CrawlScreen(route: "live", landscape: true),
+            CrawlScreen(route: "settings", landscape: true),
+            CrawlScreen(route: "detail", landscape: true),
+        ])
     }
 
-    private func runButtonCrawl(landscape: Bool) {
+    private func runCrawlGroup(_ group: String, _ screens: [CrawlScreen]) {
         // Every screen has to be reported on, so one silent button must not end
         // the walk at the screen it was found on.
         continueAfterFailure = true
+        executionTimeAllowance = 3600
         let device = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
-        let deadline = Date().addingTimeInterval(20 * 60)
-        var report = ["button crawl — \(device) \(landscape ? "landscape" : "portrait") — \(Date())", ""]
-        var screens = 0, pressed = 0, silent = 0, unreachable = 0, skipped = 0
-        var defects: [String] = []
+        crawlReport = ["button crawl — \(device) — group \(group) — \(Date())", ""]
+        var totals = CrawlResult()
+        for screen in screens { totals.add(crawl(screen)) }
 
-        for route in Self.crawlRoutes {
-            guard Date() < deadline else {
-                report.append("== \(route): not visited — the 20-minute budget ran out")
-                continue
-            }
-            screens += 1
-            let left = Self.crawlRoutes.count - screens + 1
-            let result = crawl(route: route, landscape: landscape, deadline: deadline,
-                               screensLeft: left, report: &report)
-            pressed += result.pressed
-            silent += result.silent
-            unreachable += result.unreachable
-            skipped += result.skipped
-            defects += result.defects
-        }
-
-        report.insert(contentsOf: [
-            "screens: \(screens)  pressed: \(pressed)  no response: \(silent)  "
-                + "unhittable: \(unreachable)  not pressed: \(skipped)",
+        crawlReport.insert(contentsOf: [
+            "group \(group)  screens: \(screens.count)  controls found: \(totals.found)  "
+                + "pressed: \(totals.pressed)  no response: \(totals.silent)  "
+                + "unhittable: \(totals.unreachable)  skipped: \(totals.skipped)",
             "",
         ], at: 1)
-        let attachment = XCTAttachment(string: report.joined(separator: "\n"))
-        attachment.name = "button-crawl-report.txt"
+        let attachment = XCTAttachment(string: crawlReport.joined(separator: "\n"))
+        attachment.name = "button-crawl-\(device)-\(group).txt"
         attachment.lifetime = .keepAlways
         add(attachment)
-        for defect in defects { XCTFail(defect) }
+        for defect in totals.defects { XCTFail(defect) }
     }
 
-    private struct CrawlResult {
-        var pressed = 0
-        var silent = 0
-        var unreachable = 0
-        var skipped = 0
-        var defects: [String] = []
-    }
-
-    private func crawl(route: String, landscape: Bool, deadline: Date, screensLeft: Int,
-                       report: inout [String]) -> CrawlResult {
-        var result = CrawlResult()
+    private func crawlNote(_ line: String) {
         // Echoed as it is written: a walk that dies on its last screen would
         // otherwise take the whole report with it, and the log survives.
-        func note(_ line: String) {
-            print("CRAWL| " + line)
-            report.append(line)
+        print("CRAWL| " + line)
+        crawlReport.append(line)
+    }
+
+    // MARK: Reading the screen
+
+    /// One look at the whole app, flattened. Every count the walk needs comes
+    /// out of this: the alternative — `app.buttons.count`, `app.sheets.count`,
+    /// `app.alerts.count` and the rest, one query each — costs a full snapshot
+    /// per question and made a single press on Discover take a minute.
+    private func crawlScene() -> CrawlScene {
+        var scene = CrawlScene()
+        scene.appState = app.state.rawValue
+        guard let snapshot = try? app.snapshot() else { return scene }
+        crawlWalk(snapshot, shelf: nil, into: &scene)
+        scene.textHash = scene.textDigest.finalize()
+        scene.controlHash = scene.controlDigest.finalize()
+        return scene
+    }
+
+    private func crawlWalk(_ node: XCUIElementSnapshot, shelf: String?, into scene: inout CrawlScene) {
+        let identifier = node.identifier
+        let shelfHere = identifier.hasPrefix("home.catalog.") ? identifier : shelf
+        switch node.elementType {
+        case .button, .link, .switch, .segmentedControl, .cell, .textField, .secureTextField, .slider:
+            scene.nodes.append(CrawlNode(
+                type: node.elementType,
+                identifier: identifier,
+                label: node.label,
+                value: (node.value as? String) ?? "",
+                placeholder: node.placeholderValue ?? "",
+                frame: node.frame,
+                isEnabled: node.isEnabled,
+                isSelected: node.isSelected,
+                collection: crawlCollectionKey(identifier, shelf: shelfHere)))
+            scene.controlDigest.combine(identifier)
+            scene.controlDigest.combine(node.label)
+            scene.controlDigest.combine((node.value as? String) ?? "")
+            scene.controlDigest.combine(node.isSelected)
+            scene.controlDigest.combine(node.isEnabled)
+            if node.elementType == .button { scene.buttons += 1 }
+            // The scrubber is in the scene for its value — a ten-second skip on
+            // a live stream with a DVR window moves nothing else — but not in
+            // the list of things to press: it is dragged, not tapped, and the
+            // chapter test drives it.
+        case .navigationBar:
+            if scene.navigation.isEmpty { scene.navigation = identifier }
+        case .alert:
+            scene.alerts += 1
+        case .sheet, .popover:
+            scene.sheets += 1
+        case .keyboard:
+            scene.keyboards += 1
+        case .staticText:
+            scene.texts += 1
+            scene.textDigest.combine(node.label)
+        case .collectionView, .table:
+            scene.lists.append(node.frame)
+        default:
+            break
         }
+        for child in node.children { crawlWalk(child, shelf: shelfHere, into: &scene) }
+    }
 
-        // An even share of what is left, counted from before the launch: a
-        // screen that spends forty seconds loading and enumerating has spent
-        // its own budget, not the next screen's. Every route gets a slice.
-        let share = min(75, max(30, deadline.timeIntervalSinceNow / Double(max(1, screensLeft))))
-        let screenDeadline = min(deadline, Date().addingTimeInterval(share))
+    private func crawlCollectionKey(_ identifier: String, shelf: String?) -> String? {
+        guard let prefix = Self.crawlCollectionPrefixes.first(where: { identifier.hasPrefix($0) }) else { return nil }
+        // Every catalog card carries the same prefix whatever row it is in, so
+        // the row has to come from the shelf that holds it.
+        if prefix == "home.media.", let shelf { return shelf }
+        // The two Top 10 rows, and one media server's shelf against another's.
+        if prefix == "home.top10." || prefix == "home.ms." {
+            let parts = identifier.split(separator: ".")
+            if parts.count >= 3 { return parts.prefix(3).joined(separator: ".") }
+        }
+        return String(prefix.dropLast())
+    }
 
-        launchForCrawl(route: route, landscape: landscape)
-        crawlWindowRect = (try? app.windows.firstMatch.snapshot())?.frame ?? .null
-        crawlBarRect = tabBarRectForCrawl()
-        note("== \(route)")
+    private func crawlScrollSignature(_ scene: CrawlScene) -> String {
+        "\(scene.nodes.count)|\(scene.nodes.first?.identifier ?? "")|\(scene.nodes.first?.frame.origin.y ?? 0)|"
+            + "\(scene.nodes.last?.identifier ?? "")|\(scene.nodes.last?.frame.origin.y ?? 0)"
+    }
+
+    private func crawlFind(_ target: CrawlTarget, in scene: CrawlScene) -> CrawlNode? {
+        scene.nodes.first {
+            $0.type == target.type
+                && (target.identifier.isEmpty ? $0.label == target.label : $0.identifier == target.identifier)
+        }
+    }
+
+    private func crawlStateString(_ scene: CrawlScene, target: CrawlTarget?) -> String {
+        let own = target.flatMap { crawlFind($0, in: scene) }
+            .map { "\($0.label)|\($0.value)|\($0.isSelected)|\($0.isEnabled)" } ?? "none"
+        return [
+            // A link that opens Safari answers by taking the app off screen.
+            "state:\(scene.appState)",
+            scene.navigation,
+            "alerts:\(scene.alerts)",
+            "sheets:\(scene.sheets)",
+            "keyboard:\(scene.keyboards)",
+            // How much is on the screen. A menu, a pushed page that kept the
+            // title, a spinner that replaced a button while a retry ran: all of
+            // them change one of these counts and nothing else does.
+            "breadth:\(scene.buttons)",
+            "controls:\(scene.nodes.count)",
+            "lists:\(scene.lists.count)",
+            "texts:\(scene.texts)",
+            // A screen with a clock on it rewrites itself while nobody is
+            // pressing anything; there, what the screen says cannot be the
+            // evidence that a press did something.
+            crawlTextIsStable ? "says:\(scene.textHash)" : "says:-",
+            crawlControlsAreStable ? "controls-say:\(scene.controlHash)" : "controls-say:-",
+            own,
+        ].joined(separator: "|")
+    }
+
+    private func waitForCrawlResponse(from before: String, target: CrawlTarget) -> (Bool, CrawlScene) {
+        let deadline = Date().addingTimeInterval(3)
+        while true {
+            let scene = crawlScene()
+            if crawlStateString(scene, target: target) != before { return (true, scene) }
+            guard Date() < deadline else { return (false, scene) }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+    }
+
+    // MARK: The walk
+
+    /// Walks the screen where it stands rather than listing it and coming back.
+    ///
+    /// A `LazyVStack` builds a shelf as it nears the fold and throws it away
+    /// when it leaves, so a list made at the bottom of Discover names controls
+    /// that do not exist while the screen sits at the top — the first attempt
+    /// at this reported ninety of Discover's hundred and thirty controls as
+    /// "gone", which was the screen scrolling, not the app failing. So: press
+    /// everything the screen is showing now, scroll by one screen, press
+    /// whatever that brought, and stop when a scroll changes nothing.
+    private func crawl(_ screen: CrawlScreen) -> CrawlResult {
+        var result = CrawlResult()
+        let route = screen.route
+        let isPlayer = screen.opener != .none
+
+        launchForCrawl(screen)
+        crawlNote("== \(screen.name)")
         guard app.state == .runningForeground else {
-            note("   the app did not reach the foreground")
-            result.defects.append("[\(route)] the app never reached the foreground")
+            crawlNote("   the app did not reach the foreground")
+            result.defects.append("[\(screen.name)] the app never reached the foreground")
+            return result
+        }
+        guard openForCrawl(screen.opener) else {
+            crawlNote("   the screen could not be opened")
+            result.defects.append("[\(screen.name)] the screen could not be opened for the crawl")
+            app.terminate()
             return result
         }
 
+        crawlWindowRect = (try? app.windows.firstMatch.snapshot())?.frame ?? .null
+        crawlBarRect = isPlayer ? .null : tabBarRectForCrawl()
+        crawlPressesPerCollection = [:]
+        crawlDownloadsPressed = 0
         let homeTab = selectedTabLabel()
-        let baseline = navigationTitle()
-        // Reach is measured on an untouched screen. Measured later, a menu left
-        // open by an earlier press would report every control behind it as a
-        // tap-target defect, and one real finding would arrive with ten false
-        // ones behind it.
-        let targets = enumerateCrawlTargets(includesTabs: route == "discover").map { target in
-            var target = target
-            target.reach = classifyForCrawl(resolveCrawlTarget(target), isTab: target.isTab)
-            return target
+        var scene = crawlScene()
+        crawlBaselineLists = scene.lists.count
+        // Read twice, untouched: a guide with what's-on-now times in it, or a
+        // player with a clock, rewrites its own labels, and on those screens a
+        // changed word is not an answer to a press.
+        crawlTextIsStable = true
+        crawlControlsAreStable = true
+        Thread.sleep(forTimeInterval: 0.8)
+        let second = crawlScene()
+        crawlTextIsStable = second.textHash == scene.textHash && second.texts == scene.texts
+        crawlControlsAreStable = second.controlHash == scene.controlHash
+        scene = second
+        if !crawlTextIsStable {
+            crawlNote("   (this screen rewrites its own text while untouched; "
+                      + "what it says is not read as an answer here)")
         }
-        note("   controls found: \(targets.count)  window \(crawlScreenRect)  tab bar \(crawlBarRect)")
+        let baseline = scene.navigation
+        // The screen's own first control, to check the screen against after a
+        // press: if it is gone, a modal is still up and the rest of the walk
+        // would be nonsense.
+        let anchor = crawlTargets(from: scene, includesTabs: false, playerOnly: isPlayer)
+            .first { !isCrawlExit($0) }
 
-        // A card presented over a screen is meant to block what is behind it,
-        // and `app.sheets` does not always report one. When most of a screen
-        // refuses a touch, the screen is behind something rather than broken:
-        // the first-run card put all eight Sources rows in the report.
-        let onScreen = targets.filter { $0.reach == .hittable || $0.reach == .blocked }
-        let behindAPresentation = onScreen.count > 2
-            && onScreen.filter { $0.reach == .blocked }.count * 2 > onScreen.count
-        if behindAPresentation {
-            note("   (most of this screen is behind a presented view; only what is in front was pressed)")
-        }
-
-        for target in targets where target.reach != .hittable && target.reach != .offScreen {
-            switch target.reach {
-            case .blocked where behindAPresentation:
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: behind a presented view")
-            case .blocked:
-                result.unreachable += 1
-                let where_ = (try? resolveCrawlTarget(target).snapshot()).map { "\($0.frame)" } ?? "no frame"
-                note("   ✗ \(target.name) — UNHITTABLE on an untouched screen at \(where_)")
-                attach("\(route)__\(target.slug)")
-                result.defects.append("[\(route)] \(target.name) is on screen and refuses a touch — tap-target defect")
-            case .offScreen:
-                break  // the press pass scrolls to it
-
-            case .disabled:
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: disabled")
-            default:
-                note("   · \(target.name) — gone before its turn (the screen redrew)")
-            }
-        }
-
-        // Something known-good to check the screen against after every press:
-        // if the anchor stops answering, a modal is still up and the rest of
-        // the walk would be nonsense.
-        let anchor = targets.first { $0.reach == .hittable && !$0.isTab }.map(resolveCrawlTarget)
+        // A control that is on the screen, whole, enabled, and will not take a
+        // touch is a tap-target defect — unless most of the screen is like that,
+        // in which case the screen is behind a card that `app.sheets` did not
+        // report and none of it is a defect. Which it is cannot be known until
+        // the screen has been walked, so the verdicts are held to the end.
+        var blocked: [CrawlTarget] = []
+        var handled = Set<String>()
+        var exits: [CrawlTarget] = []
         var relaunches = 0
+        var scrolls = 0
 
-        for target in targets where target.reach == .hittable || target.reach == .offScreen {
-            if let word = Self.crawlDestructiveWords.first(where: { matchesCrawlWord(target, $0) }) {
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: destructive (\(word))")
+        while true {
+            // The transport hides itself, and a screen read with the chrome
+            // down holds one control: the clear surface that brings it back.
+            if isPlayer, revealPlayerControls() { scene = crawlScene() }
+            let here = crawlTargets(from: scene, includesTabs: screen.includesTabs, playerOnly: isPlayer)
+            for target in here where isCrawlExit(target) && !handled.contains(target.signature) {
+                handled.insert(target.signature)
+                result.found += 1
+                exits.append(target)
+            }
+            guard let target = here.first(where: { !handled.contains($0.signature) }) else {
+                // Nothing new at this offset. A player has no scroll, and a
+                // sheet is dismissed by a swipe, so neither is scrolled.
+                if isPlayer || scene.sheets > 0 || scrolls >= 16 { break }
+                let before = crawlScrollSignature(scene)
+                crawlScrollDown()
+                Thread.sleep(forTimeInterval: 0.6)
+                scrolls += 1
+                scene = crawlScene()
+                if crawlScrollSignature(scene) == before { break }
                 continue
             }
-            if let word = Self.crawlMutatingWords.first(where: { matchesCrawlWord(target, $0) }) {
+            handled.insert(target.signature)
+            result.found += 1
+
+            if let reason = crawlPolicySkip(target, route: route, scene: scene) {
                 result.skipped += 1
-                note("   · \(target.name) — not pressed: would change saved data (\(word))")
+                crawlNote("   · \(target.name) — not pressed: \(reason)")
                 continue
             }
-            guard Date() < screenDeadline else {
+            if let collection = target.collection,
+               (crawlPressesPerCollection[collection] ?? 0) >= Self.crawlCardsPerCollection {
                 result.skipped += 1
-                note("   · \(target.name) — not pressed: screen budget")
+                crawlNote("   · \(target.name) — not pressed: past the first "
+                          + "\(Self.crawlCardsPerCollection) of \(collection) (policy)")
+                continue
+            }
+            guard let node = crawlFind(target, in: scene) else { continue }
+            // A disabled control is meant to do nothing, and an option that is
+            // already the chosen one is meant to stay chosen. Pressing either
+            // and calling the silence a defect would bury the real findings.
+            guard node.isEnabled else {
+                result.skipped += 1
+                crawlNote("   · \(target.name) — not pressed: disabled")
                 continue
             }
 
             let element = resolveCrawlTarget(target)
-            guard let state = try? element.snapshot() else {
-                note("   · \(target.name) — gone before its turn (the screen redrew)")
-                continue
+            let reach = revealForCrawl(element, node: node, isTab: target.isTab)
+            // A guide cell for a programme that started before the window runs
+            // off the leading edge, and its centre — the point `tap()` uses —
+            // is past the edge of the screen while a good part of the cell is
+            // in plain sight and takes a finger. Press the part that is there.
+            var hitOffset: CGVector? = nil
+            if reach == .offScreen, let live = (try? element.snapshot())?.frame,
+               let offset = crawlVisibleHitOffset(live) {
+                hitOffset = offset
+                crawlNote("   (\(target.name) hangs off the edge; pressing the part that is on screen)")
             }
-            // A disabled control is meant to do nothing, and an option that is
-            // already the chosen one is meant to stay chosen. Pressing either
-            // and calling the silence a defect would bury the real findings.
-            guard state.isEnabled else {
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: disabled")
-                continue
-            }
-            guard !state.isSelected else {
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: already the selected option")
-                continue
-            }
-            guard revealForCrawl(element, isTab: target.isTab) == .hittable else {
-                result.skipped += 1
-                note("   · \(target.name) — not pressed: not on screen when its turn came")
+            guard reach == .hittable || hitOffset != nil else {
+                switch reach {
+                case .gone:
+                    result.skipped += 1
+                    crawlNote("   · \(target.name) — not pressed: it left the screen before its turn")
+                case .disabled:
+                    result.skipped += 1
+                    crawlNote("   · \(target.name) — not pressed: disabled")
+                case .offScreen where (try? element.snapshot())?.frame.intersects(crawlScreenRect) == true:
+                    // A guide cell for a programme that began before the
+                    // window starts is drawn partly under the pinned channel
+                    // rail, with too little of it clear of the rail to aim at.
+                    // A finger finds the part it can see; XCUITest aims at the
+                    // centre, and the centre is past the edge. Not a defect.
+                    result.skipped += 1
+                    crawlNote("   · \(target.name) — not pressed: it hangs off the leading edge with too "
+                              + "little of it clear to aim at")
+                case .offScreen:
+                    result.unreachable += 1
+                    crawlNote("   ✗ \(target.name) — COULD NOT BE SCROLLED ON SCREEN: nothing of it is on the screen")
+                    attach("\(screen.name)__\(target.slug)")
+                    result.defects.append("[\(screen.name)] \(target.name) could not be brought on screen by scrolling")
+                case .blocked where scene.navigation != baseline:
+                    // The system document picker is another process's view and
+                    // is reported as neither a sheet nor an alert; behind it,
+                    // the app's own back chevron is correctly untouchable.
+                    result.skipped += 1
+                    crawlNote("   · \(target.name) — not pressed: another view was over the screen when its turn came")
+                default:
+                    blocked.append(target)
+                    // Photographed where it happened: taken with the verdict at
+                    // the end of the screen, the picture would be of wherever
+                    // the walk had scrolled to by then.
+                    attach("\(screen.name)__\(target.slug)")
+                    crawlNote("   ? \(target.name) — would not take a touch at "
+                              + "\((try? element.snapshot())?.frame.debugDescription ?? "no frame")"
+                              + "; judged at the end of the screen")
+                }
+                scene = crawlScene()
                 continue
             }
 
-            let before = crawlState(of: element)
-            pressForCrawl(element, type: target.type)
-            let answered = waitForCrawlResponse(from: before, element: element)
+            if (target.label + " " + target.identifier).lowercased().contains("download") {
+                crawlDownloadsPressed += 1
+            }
+            // Counted here, where the press actually happens: counted at the
+            // top, three rows that turned out to be disabled used up a shelf's
+            // whole allowance and nothing in it was pressed.
+            if let collection = target.collection {
+                crawlPressesPerCollection[collection] = (crawlPressesPerCollection[collection] ?? 0) + 1
+            }
+            let before = crawlStateString(scene, target: target)
+            pressForCrawl(element, node: node, at: hitOffset)
+            let (answered, _) = waitForCrawlResponse(from: before, target: target)
             result.pressed += 1
             if answered {
-                note("   ✓ \(target.name) — responded")
+                crawlNote("   ✓ \(target.name) — responded")
+            } else if node.isSelected {
+                // An option that was already the chosen one is meant to stay
+                // chosen; it is pressed for the sake of pressing everything,
+                // and its silence is the correct answer.
+                crawlNote("   ✓ \(target.name) — no change, and it was already the selected option")
             } else {
                 result.silent += 1
-                note("   ✗ \(target.name) — NO VISIBLE RESPONSE")
-                attach("\(route)__\(target.slug)")
-                result.defects.append("[\(route)] \(target.name) produced no visible response within 3 s")
+                crawlNote("   ✗ \(target.name) — NO VISIBLE RESPONSE")
+                attach("\(screen.name)__\(target.slug)")
+                result.defects.append("[\(screen.name)] \(target.name) produced no visible response within 3 s")
             }
 
-            // A switch the walk flipped is a setting the owner's simulator
-            // keeps, so it goes straight back.
-            if target.type == .switch, answered { pressForCrawl(element, type: .switch) }
-            if target.isTab, let homeTab, !tapIfPossible(app.tabBars.buttons[homeTab].firstMatch) {
-                tapIfPossible(app.buttons[homeTab].firstMatch)
+            // Everything the press opened is walked before it is closed. The
+            // response can land while the menu is still on its way in, so the
+            // screen is given a moment to finish before it is read.
+            Thread.sleep(forTimeInterval: 0.6)
+            var after = crawlScene()
+            if crawlMenuRect(after) != nil {
+                crawlMenu(owner: element, ownerName: target.name, scene: &after, result: &result)
             }
-            _ = restoreCrawlScreen(baseline: baseline, route: route)
-            if let anchor, !isSafelyHittable(anchor) {
-                guard relaunches < 3 else {
-                    note("   … the screen could not be put back; the rest of \(route) was not pressed")
+            if after.sheets > 0 || after.alerts > 0 {
+                crawlPresentation(screen: screen, scene: &after, result: &result)
+            }
+
+            crawlRestore(target, element: element, node: node, screen: screen,
+                         answered: answered, result: &result)
+            if target.isTab, let homeTab {
+                _ = tapIfPossible(app.tabBars.buttons[homeTab].firstMatch)
+                    || tapIfPossible(app.buttons[homeTab].firstMatch)
+            }
+            scene = restoreCrawlScreen(baseline: baseline, screen: screen)
+            // A full-screen player keeps the page it was opened from in the
+            // accessibility tree, and the page keeps the player's controls in
+            // it after the player has gone, so neither one's identifiers say
+            // which is in front. What can be touched does.
+            if isPlayer, !crawlPlayerIsUp() {
+                attach("\(screen.name)__player-is-gone")
+                crawlNote("   … nothing of the player would take a touch; the rest of \(screen.name) was not pressed")
+                break
+            }
+            let lost = anchor.map { crawlFind($0, in: scene) == nil && scene.navigation != baseline } ?? false
+            if lost || scene.alerts > 0 || scene.sheets > 0 {
+                guard relaunches < 5 else {
+                    crawlNote("   … the screen could not be put back; the rest of \(screen.name) was not pressed")
                     break
                 }
                 relaunches += 1
-                note("   … relaunched \(route): something was still covering the screen")
-                launchForCrawl(route: route, landscape: landscape)
+                scrolls = 0
+                crawlNote("   … relaunched \(screen.name): something was still covering the screen")
+                launchForCrawl(screen)
+                guard openForCrawl(screen.opener) else {
+                    crawlNote("   … the screen could not be re-opened; the rest of \(screen.name) was not pressed")
+                    break
+                }
+                scene = crawlScene()
+            }
+        }
+
+        // The ways off the screen go last, or the walk leaves before it has
+        // pressed what the screen is made of. Each one is given the screen back
+        // first, because the one before it was a way off.
+        for target in exits.prefix(6) {
+            // The press before this one was usually the one that put a player
+            // up, and a chevron tapped while the player is still dismissing is
+            // a tap on the player.
+            Thread.sleep(forTimeInterval: 1.5)
+            scene = restoreCrawlScreen(baseline: baseline, screen: screen)
+            Thread.sleep(forTimeInterval: 1)
+            if crawlFind(target, in: scene) == nil {
+                guard relaunches < 8 else { break }
+                relaunches += 1
+                launchForCrawl(screen)
+                guard openForCrawl(screen.opener) else { break }
+                scene = crawlScene()
+            }
+            if isPlayer, revealPlayerControls() { scene = crawlScene() }
+            if let reason = crawlPolicySkip(target, route: route, scene: scene) {
+                result.skipped += 1
+                crawlNote("   · \(target.name) — not pressed: \(reason)")
+                continue
+            }
+            guard let node = crawlFind(target, in: scene), node.isEnabled else {
+                result.skipped += 1
+                crawlNote("   · \(target.name) — not pressed: it was not on the screen when its turn came")
+                continue
+            }
+            let element = resolveCrawlTarget(target)
+            guard revealForCrawl(element, node: node, isTab: false) == .hittable else {
+                blocked.append(target)
+                attach("\(screen.name)__\(target.slug)")
+                crawlNote("   ? \(target.name) — would not take a touch; judged at the end of the screen")
+                continue
+            }
+            let before = crawlStateString(scene, target: target)
+            element.tap()
+            let (answered, _) = waitForCrawlResponse(from: before, target: target)
+            result.pressed += 1
+            if answered {
+                crawlNote("   ✓ \(target.name) — responded")
+            } else {
+                result.silent += 1
+                crawlNote("   ✗ \(target.name) — NO VISIBLE RESPONSE")
+                attach("\(screen.name)__\(target.slug)")
+                result.defects.append("[\(screen.name)] \(target.name) produced no visible response within 3 s")
+            }
+        }
+
+        crawlNote("   controls found: \(result.found)  window \(crawlScreenRect)  tab bar \(crawlBarRect)")
+        if blocked.count >= 3, blocked.count * 2 > max(1, result.found) {
+            result.skipped += blocked.count
+            crawlNote("   (most of this screen refused a touch: it is behind a presented view, "
+                      + "so its \(blocked.count) untouchable controls are reported as skipped, not as defects)")
+        } else {
+            for target in blocked {
+                result.unreachable += 1
+                crawlNote("   ✗ \(target.name) — UNHITTABLE: on screen, enabled, and refuses a touch")
+                result.defects.append("[\(screen.name)] \(target.name) is on screen and refuses a touch — tap-target defect")
             }
         }
 
@@ -1571,82 +2030,361 @@ final class AppleiOSUITests: XCTestCase {
         return result
     }
 
-    private func launchForCrawl(route: String, landscape: Bool) {
+    private func crawlPlayerIsUp() -> Bool {
+        ["player.close", "player.fullscreen", "player.controls.show", "live.picker.close"]
+            .contains { isSafelyHittable(app.buttons[$0].firstMatch) }
+    }
+
+    /// Every control the screen is showing right now, in the order they are
+    /// drawn.
+    ///
+    /// `playerOnly` keeps the walk to the transport's own controls. The page
+    /// underneath a full-screen player stays in the tree, and pressing its
+    /// buttons through the player would report every one of them as a control
+    /// that refuses a touch.
+    private func crawlTargets(from scene: CrawlScene, includesTabs: Bool,
+                              playerOnly: Bool = false) -> [CrawlTarget] {
+        let names: [XCUIElement.ElementType: String] = [
+            .button: "button", .link: "link", .switch: "switch",
+            .segmentedControl: "segment", .cell: "cell",
+        ]
+        var seen = Set<String>()
+        var targets: [CrawlTarget] = []
+        for node in scene.nodes {
+            guard let typeName = names[node.type] else { continue }
+            if node.identifier.isEmpty && node.label.isEmpty { continue }
+            if playerOnly, !node.identifier.hasPrefix("player."),
+               !node.identifier.hasPrefix("live.picker.") { continue }
+            // A Form row is a cell wrapping the button it already offered us;
+            // pressing both would double the walk.
+            if node.type == .cell, seen.contains("button\u{1}\(node.identifier)\u{1}\(node.label)") { continue }
+            let signature = "\(typeName)\u{1}\(node.identifier)\u{1}\(node.label)"
+            guard seen.insert(signature).inserted else { continue }
+            let isTab = Self.crawlTabLabels.contains(node.label)
+            guard includesTabs || !isTab else { continue }
+            targets.append(CrawlTarget(typeName: typeName, type: node.type, identifier: node.identifier,
+                                       label: node.label, isTab: isTab, collection: node.collection))
+        }
+        return targets
+    }
+
+    /// A press that changed something the owner's simulator keeps is undone
+    /// here: a switch is flipped back, My List is emptied again, a download the
+    /// walk started is cancelled.
+    private func crawlRestore(_ target: CrawlTarget, element: XCUIElement, node: CrawlNode,
+                              screen: CrawlScreen, answered: Bool, result: inout CrawlResult) {
+        if target.type == .switch, answered {
+            pressForCrawl(element, node: node, at: nil)
+            return
+        }
+        let name = (target.label + " " + target.identifier).lowercased()
+        if name.contains("my list") || Self.crawlRestorablePrefixes.contains(where: { target.identifier.hasPrefix($0) }) {
+            if tapIfPossible(element) { crawlNote("   ↩ \(target.name) — pressed again to leave it as it was") }
+            return
+        }
+        guard name.contains("download"), answered else { return }
+        undoCrawlDownload(control: element, screen: screen, result: &result)
+    }
+
+    /// The download control is the one press in the walk that leaves a file on
+    /// the simulator. Pressing it again opens its options, where the download
+    /// is cancelled — the screen is left as it was found.
+    private func undoCrawlDownload(control: XCUIElement, screen: CrawlScreen, result: inout CrawlResult) {
+        // The options dialog offers to cancel only once the coordinator owns
+        // the download, and resolving a stream takes longer than a moment.
+        Thread.sleep(forTimeInterval: 3)
+        for _ in 0..<8 {
+            var scene = crawlScene()
+            if scene.sheets == 0, scene.alerts == 0 {
+                // The control that started it is the control that offers to
+                // stop it.
+                if !tapIfPossible(control),
+                   !tapIfPossible(app.buttons["detail.episode.download"].firstMatch) {
+                    break
+                }
+                Thread.sleep(forTimeInterval: 1.2)
+                scene = crawlScene()
+            }
+            let stop = scene.nodes.first {
+                $0.type == .button
+                    && ($0.label.localizedCaseInsensitiveContains("cancel download")
+                        || $0.label.localizedCaseInsensitiveContains("stop download"))
+            }
+            if let stop, tapIfPossible(app.buttons[stop.label].firstMatch) {
+                crawlNote("   ↩ the download the walk started was cancelled")
+                Thread.sleep(forTimeInterval: 1)
+                return
+            }
+            _ = restoreCrawlScreen(baseline: scene.navigation, screen: screen)
+            Thread.sleep(forTimeInterval: 3)
+        }
+        crawlDownloadsAreOff = true
+        crawlNote("   ! a download the walk started could not be cancelled from the UI — CHECK THE SIMULATOR")
+        result.defects.append("[\(screen.name)] the download the crawl started could not be cancelled from its own options")
+    }
+
+    /// Presses the menu's every item, then puts the menu's own selection back.
+    private func crawlMenu(owner: XCUIElement, ownerName: String, scene: inout CrawlScene,
+                           result: inout CrawlResult) {
+        guard let rect = crawlMenuRect(scene) else { return }
+        let items = crawlMenuItems(scene, rect: rect)
+        guard !items.isEmpty else { return }
+        let original = items.first(where: \.isSelected)?.label
+        crawlNote("   ↳ menu \(ownerName): \(items.count) item(s)\(original.map { ", on \($0)" } ?? "")")
+
+        for item in items {
+            if crawlMenuRect(scene) == nil {
+                guard tapIfPossible(owner) else { break }
+                Thread.sleep(forTimeInterval: 0.8)
+                scene = crawlScene()
+            }
+            let name = item.label
+            if let word = Self.crawlDestructiveWords.first(where: { name.lowercased().contains($0) }) {
+                result.skipped += 1
+                crawlNote("   ↳ · \(name) — not pressed: destructive (\(word))")
+                continue
+            }
+            if let word = Self.crawlMutatingWords.first(where: { name.lowercased().contains($0) }) {
+                result.skipped += 1
+                crawlNote("   ↳ · \(name) — not pressed: would change saved data (\(word))")
+                continue
+            }
+            let target = CrawlTarget(typeName: "menu", type: .button, identifier: "", label: name, isTab: false)
+            // Scoped to the menu: a track called "English" is also a row on the
+            // page behind the player, and `firstMatch` reached through the menu
+            // and reported the row underneath as untouchable.
+            guard let element = crawlMenuElement(named: name, in: rect) else {
+                result.skipped += 1
+                crawlNote("   ↳ · \(name) — not pressed: it left the menu before its turn")
+                continue
+            }
+            guard isSafelyHittable(element) else {
+                result.unreachable += 1
+                crawlNote("   ↳ ✗ \(name) — the open menu would not take a touch")
+                attach("menu__\(name.prefix(40))")
+                result.defects.append("[menu \(ownerName)] the item \(name) is in an open menu and refuses a touch")
+                continue
+            }
+            let before = crawlStateString(scene, target: target)
+            element.tap()
+            var (answered, after) = waitForCrawlResponse(from: before, target: target)
+            // A menu that closes on the press has answered it, even when the
+            // item chosen was the one already in force and nothing else on the
+            // screen moved.
+            let closedOnIt = !answered && crawlMenuRect(after) == nil
+            if closedOnIt { answered = true }
+            scene = after
+            result.pressed += 1
+            if closedOnIt {
+                crawlNote("   ↳ ✓ \(name) — the menu closed on it")
+            } else if answered {
+                crawlNote("   ↳ ✓ \(name) — responded")
+            } else if item.isSelected {
+                // Choosing the choice that is already made is meant to change
+                // nothing. "Off" in a captions menu with no tracks is the whole
+                // menu and already the answer.
+                crawlNote("   ↳ ✓ \(name) — no change, and it was already the selected item")
+            } else {
+                result.silent += 1
+                crawlNote("   ↳ ✗ \(name) — NO VISIBLE RESPONSE")
+                attach("menu__\(name.prefix(40))")
+                result.defects.append("[menu \(ownerName)] the item \(name) produced no visible response within 3 s")
+            }
+            Thread.sleep(forTimeInterval: 0.4)
+            scene = crawlScene()
+            if scene.sheets > 0 || scene.alerts > 0 { break }
+        }
+
+        guard let original else {
+            if crawlMenuRect(scene) != nil { crawlDismissMenu() }
+            return
+        }
+        if crawlMenuRect(scene) == nil {
+            _ = tapIfPossible(owner)
+            Thread.sleep(forTimeInterval: 0.8)
+            scene = crawlScene()
+        }
+        let reopened = crawlMenuRect(scene) ?? rect
+        let restore = crawlMenuElement(named: original, in: reopened) ?? app.buttons[original].firstMatch
+        if crawlMenuRect(scene) != nil, tapIfPossible(restore) {
+            crawlNote("   ↩ menu \(ownerName) — put back on \(original)")
+            Thread.sleep(forTimeInterval: 0.6)
+        } else if crawlMenuRect(scene) != nil {
+            crawlDismissMenu()
+        }
+        scene = crawlScene()
+    }
+
+    /// The rectangle an open menu is drawn in, or nothing when none is open.
+    ///
+    /// On iOS 26 a SwiftUI `Menu` and a `.menu` Picker present as a plain
+    /// collection view over the screen: no menu item, no popover, no sheet to
+    /// find them by — which is why the first crawl pressed a Sort menu open,
+    /// failed to see it, and relaunched the screen instead of walking it.
+    /// Two things tell it from a list the screen already had: it is one more
+    /// than the screen started with, and it is narrower than the screen.
+    private func crawlMenuRect(_ scene: CrawlScene) -> CGRect? {
+        guard scene.alerts == 0, scene.sheets == 0, scene.lists.count > crawlBaselineLists else { return nil }
+        let screen = crawlScreenRect
+        return scene.lists.last {
+            $0.width > 60 && $0.width < screen.width - 40 && $0.height > 30
+        }
+    }
+
+    /// The button with that label that is inside the open menu.
+    private func crawlMenuElement(named name: String, in rect: CGRect) -> XCUIElement? {
+        let matches = app.buttons.matching(NSPredicate(format: "label == %@", name))
+        for element in matches.allElementsBoundByIndex.prefix(6) {
+            guard let frame = (try? element.snapshot())?.frame else { continue }
+            if rect.insetBy(dx: -4, dy: -4).contains(CGPoint(x: frame.midX, y: frame.midY)) { return element }
+        }
+        return nil
+    }
+
+    private func crawlMenuItems(_ scene: CrawlScene, rect: CGRect) -> [CrawlNode] {
+        scene.nodes.filter { $0.type == .button && rect.insetBy(dx: -2, dy: -2).contains($0.frame.origin) && !$0.label.isEmpty }
+    }
+
+    private func crawlDismissMenu() {
+        let dismissRegion = app.otherElements["PopoverDismissRegion"]
+        if tapIfPossible(dismissRegion) { return }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97)).tap()
+    }
+
+    /// Presses what a sheet or an alert brought with it, then leaves it to the
+    /// screen restore to close. Only one level deep: a sheet opened from a
+    /// sheet is dismissed rather than walked, or the walk never comes back.
+    private func crawlPresentation(screen: CrawlScreen, scene: inout CrawlScene, result: inout CrawlResult) {
+        let isAlert = scene.alerts > 0
+        let root = isAlert ? app.alerts.firstMatch : app.sheets.firstMatch
+        let names = root.buttons.allElementsBoundByIndex.prefix(16)
+            .compactMap { (try? $0.snapshot())?.label }
+            .filter { !$0.isEmpty && !Self.crawlExitLabels.contains($0) }
+        guard !names.isEmpty else { return }
+        crawlNote("   ↳ \(isAlert ? "alert" : "sheet"): \(names.count) control(s) besides its way out")
+
+        for name in names {
+            guard scene.sheets > 0 || scene.alerts > 0 else {
+                crawlNote("   ↳ … it closed before \(name) came up")
+                break
+            }
+            let target = CrawlTarget(typeName: "button", type: .button, identifier: "", label: name, isTab: false)
+            if let reason = crawlPolicySkip(target, route: screen.route, scene: scene) {
+                result.skipped += 1
+                crawlNote("   ↳ · \(name) — not pressed: \(reason)")
+                continue
+            }
+            let element = root.buttons.matching(NSPredicate(format: "label == %@", name)).firstMatch
+            guard isSafelyHittable(element) else {
+                result.unreachable += 1
+                crawlNote("   ↳ ✗ \(name) — on a presented card and refuses a touch")
+                attach("\(screen.name)__presented__\(name.prefix(40))")
+                result.defects.append("[\(screen.name)] \(name) is on a presented card and refuses a touch")
+                continue
+            }
+            let before = crawlStateString(scene, target: target)
+            element.tap()
+            let (answered, after) = waitForCrawlResponse(from: before, target: target)
+            scene = after
+            result.pressed += 1
+            if answered {
+                crawlNote("   ↳ ✓ \(name) — responded")
+            } else {
+                result.silent += 1
+                crawlNote("   ↳ ✗ \(name) — NO VISIBLE RESPONSE")
+                attach("\(screen.name)__presented__\(name.prefix(40))")
+                result.defects.append("[\(screen.name)] \(name) produced no visible response within 3 s")
+            }
+            if scene.keyboards > 0 { break }
+        }
+    }
+
+    private func crawlPolicySkip(_ target: CrawlTarget, route: String, scene: CrawlScene) -> String? {
+        let name = (target.label + " " + target.identifier.replacingOccurrences(of: ".", with: " ")).lowercased()
+        // A card in a shelf is a place to go, not an action, and its label is
+        // somebody's title: one of Netflix's carried the word "send" in it and
+        // was reported as a destructive control.
+        if target.collection != nil { return nil }
+        // My List is a switch wearing a button's clothes: its own second press
+        // puts the list back, so "Remove from My List" is walked, not skipped.
+        if !name.contains("my list") {
+            if let word = Self.crawlDestructiveWords.first(where: { matchesCrawlWord(target, $0) }) {
+                return "destructive (\(word))"
+            }
+        }
+        if let word = Self.crawlMutatingWords.first(where: { matchesCrawlWord(target, $0) }) {
+            return "would change saved data (\(word))"
+        }
+        if name.contains("download"), !["detail", "episodes"].contains(route) {
+            return "would start a download away from the title page"
+        }
+        // One episode is pressed and cancelled again; a season is six of them
+        // at once, and the first time the walk pressed it the cancel came too
+        // late and left nine gigabytes on the owner's simulator.
+        if target.identifier == "detail.download.season" {
+            return "a season download writes gigabytes to the owner's simulator faster than the crawl can cancel it (policy)"
+        }
+        if name.contains("download"), crawlDownloadsAreOff {
+            return "a download the walk started earlier outran its cancel, so no more are started (policy)"
+        }
+        if name.contains("download"), crawlDownloadsPressed >= 1 {
+            return "one download is pressed and cancelled per screen; the rest are the same control (policy)"
+        }
+        if let word = Self.crawlSubmitWords.first(where: { matchesCrawlWord(target, $0) }),
+           !crawlFieldsAreEmpty(scene) {
+            return "a field on this screen is filled in; \(word) is pressed only with empty fields (credential policy)"
+        }
+        return nil
+    }
+
+    /// The owner's rule for the source forms: a submit button is pressed only
+    /// when there is nothing typed to submit. An empty field publishes its
+    /// placeholder as its value, which is why the two are compared.
+    private func crawlFieldsAreEmpty(_ scene: CrawlScene) -> Bool {
+        !scene.nodes.contains {
+            ($0.type == .textField || $0.type == .secureTextField)
+                && !$0.value.isEmpty && $0.value != $0.placeholder
+        }
+    }
+
+    private func isCrawlExit(_ target: CrawlTarget) -> Bool {
+        ["player.close", "player.fullscreen", "detail.back", "live.picker.close"].contains(target.identifier)
+            || Self.crawlExitLabels.contains(target.label) || target.label == "Back"
+    }
+
+    private func launchForCrawl(_ screen: CrawlScreen) {
         app.terminate()
         app.launchArguments = []
-        XCUIDevice.shared.orientation = landscape ? .landscapeLeft : .portrait
+        XCUIDevice.shared.orientation = screen.landscape ? .landscapeLeft : .portrait
         app.launchArguments += ["-OpenStreamHoldPlayerChrome", "YES"]
-        launch(screen: route)
+        launch(screen: screen.route)
         _ = app.wait(for: .runningForeground, timeout: 30)
         // Discover and Live pull their shelves over the network; the rest of the
         // app is drawn by the time the first frame lands.
-        Thread.sleep(forTimeInterval: ["discover", "live", "library", "detail", "episodes"].contains(route) ? 7 : 2)
+        Thread.sleep(forTimeInterval: ["discover", "live", "library", "detail", "episodes"].contains(screen.route) ? 8 : 2)
     }
 
-    /// One scroll pass, so an element below the fold is on the list before any
-    /// of them is pressed.
-    ///
-    /// The tab bar is on nearly every screen and a tab round trip costs more
-    /// than any other press, so all four are pressed once, on Discover, and
-    /// left off every other screen's list — otherwise they take four of the ten
-    /// slots a screen gets and the screen's own controls never come up.
-    private func enumerateCrawlTargets(includesTabs: Bool) -> [CrawlTarget] {
-        var seen = Set<String>()
-        var targets: [CrawlTarget] = []
-        let tabLabels = Set(app.tabBars.buttons.allElementsBoundByIndex.map(\.label))
-        // A sheet is meant to block what is behind it, so the screen under one
-        // is not the screen under test: enumerating the whole app reported
-        // every row of the Sources page beneath the first-run card as an
-        // untouchable control.
-        let root: XCUIElementTypeQueryProvider = app.sheets.count > 0 ? app.sheets.firstMatch
-            : (app.alerts.count > 0 ? app.alerts.firstMatch : app)
-
-        func collect() {
-            let queries: [(String, XCUIElement.ElementType, XCUIElementQuery)] = [
-                ("button", .button, root.buttons),
-                ("link", .link, root.links),
-                ("switch", .switch, root.switches),
-                ("segment", .segmentedControl, root.segmentedControls),
-                ("cell", .cell, root.cells),
-            ]
-            for (typeName, type, query) in queries {
-                // A shelf-heavy screen answers with hundreds of elements and
-                // each identifier costs a round trip; the walk has a budget.
-                for element in query.allElementsBoundByIndex.prefix(40) {
-                    guard let snapshot = try? element.snapshot() else { continue }
-                    let identifier = snapshot.identifier
-                    let label = snapshot.label
-                    if identifier.isEmpty && label.isEmpty { continue }
-                    // A Form row is a cell wrapping the button it already
-                    // offered us; pressing both would double the walk.
-                    if type == .cell, seen.contains("button\u{1}\(identifier)\u{1}\(label)") { continue }
-                    let signature = "\(typeName)\u{1}\(identifier)\u{1}\(label)"
-                    guard seen.insert(signature).inserted else { continue }
-                    let isTab = tabLabels.contains(label) || Self.crawlTabLabels.contains(label)
-                    guard includesTabs || !isTab else { continue }
-                    targets.append(CrawlTarget(typeName: typeName, type: type, identifier: identifier,
-                                               label: label, isTab: isTab))
-                }
-            }
+    private func openForCrawl(_ opener: CrawlOpener) -> Bool {
+        switch opener {
+        case .none:
+            return true
+        case .vodPlayer:
+            let play = app.buttons["detail.play"].firstMatch
+            guard play.waitForExistence(timeout: 60), tapIfPossible(play) else { return false }
+            guard app.buttons["player.play-pause"].waitForExistence(timeout: 60)
+                    || app.buttons["player.close"].waitForExistence(timeout: 10) else { return false }
+            Thread.sleep(forTimeInterval: 4)
+            revealPlayerControls()
+            return true
+        case .livePlayer:
+            let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+            guard channels.firstMatch.waitForExistence(timeout: 60),
+                  tapIfPossible(channels.firstMatch) else { return false }
+            guard app.buttons["player.close"].waitForExistence(timeout: 40) else { return false }
+            Thread.sleep(forTimeInterval: 4)
+            revealPlayerControls()
+            return true
         }
-
-        collect()
-        // A swipe down dismisses a sheet, and the sheet is the screen under
-        // test: its own two buttons were gone by the time their turn came.
-        let scrollable = app.scrollViews.count + app.tables.count + app.collectionViews.count > 0
-        let scrolls = scrollable && app.sheets.count == 0 ? 2 : 0
-        for _ in 0..<scrolls {
-            app.swipeUp()
-            Thread.sleep(forTimeInterval: 0.4)
-            collect()
-        }
-        for _ in 0..<(scrolls + 1) {
-            app.swipeDown()
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        // A long screen would otherwise eat the whole budget and starve the
-        // screens behind it; what is left over is reported, not dropped.
-        return Array(targets.prefix(10))
     }
 
     /// Taps only what is still there and still reachable. `tap()` raises on an
@@ -1654,7 +2392,7 @@ final class AppleiOSUITests: XCTestCase {
     /// the whole walk.
     @discardableResult
     private func tapIfPossible(_ element: XCUIElement) -> Bool {
-        guard (try? element.snapshot()) != nil, isSafelyHittable(element) else { return false }
+        guard isSafelyHittable(element) else { return false }
         element.tap()
         return true
     }
@@ -1662,40 +2400,59 @@ final class AppleiOSUITests: XCTestCase {
     /// A switch fills its whole Form row, and the row's centre is dead space:
     /// a press there leaves the switch exactly as it was. The knob is at the
     /// trailing edge, which is where a finger goes.
-    private func pressForCrawl(_ element: XCUIElement, type: XCUIElement.ElementType) {
+    private func pressForCrawl(_ element: XCUIElement, node: CrawlNode, at offset: CGVector? = nil) {
+        if let offset {
+            element.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
+            return
+        }
         // A fraction of the row's width lands in different places on a phone
         // row and on an iPad row; the knob is a fixed distance from the
         // trailing edge, so measure from there.
-        guard type == .switch, let frame = (try? element.snapshot())?.frame, frame.width > 120 else {
+        guard node.type == .switch, node.frame.width > 120 else {
             element.tap()
             return
         }
         element.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: frame.width - 45, dy: frame.height / 2))
+            .withOffset(CGVector(dx: node.frame.width - 45, dy: node.frame.height / 2))
             .tap()
     }
 
-    private func matchesCrawlWord(_ target: CrawlTarget, _ word: String) -> Bool {
-        target.label.lowercased().contains(word)
-            || target.identifier.lowercased().replacingOccurrences(of: ".", with: " ").contains(word)
+    /// Where to press a control the screen is only showing part of: the middle
+    /// of the part it is showing, measured from the control's own origin.
+    private func crawlVisibleHitOffset(_ frame: CGRect) -> CGVector? {
+        let visible = frame.intersection(crawlScreenRect)
+        guard visible.width >= 24, visible.height >= 24 else { return nil }
+        if !crawlBarRect.isNull, visible.intersects(crawlBarRect) { return nil }
+        return CGVector(dx: visible.midX - frame.minX, dy: visible.midY - frame.minY)
     }
 
+    /// Whole words only. "Disconnect" is not "connect", and a title with
+    /// "send" in it is not the Send button.
+    private func matchesCrawlWord(_ target: CrawlTarget, _ word: String) -> Bool {
+        let haystack = (target.label + " "
+            + target.identifier.replacingOccurrences(of: ".", with: " ")).lowercased()
+        guard let range = haystack.range(of: "\\b\(NSRegularExpression.escapedPattern(for: word))\\b",
+                                         options: .regularExpression) else { return false }
+        return !range.isEmpty
+    }
+
+    /// One identifier does not always mean one control: every episode row's
+    /// download button is `detail.episode.download`, so resolving by
+    /// identifier alone pressed the first episode's button five times over and
+    /// started five downloads the walk then could not cancel.
     private func resolveCrawlTarget(_ target: CrawlTarget) -> XCUIElement {
         let query = app.descendants(matching: target.type)
-        if !target.identifier.isEmpty {
+        switch (target.identifier.isEmpty, target.label.isEmpty) {
+        case (false, false):
+            return query.matching(NSPredicate(format: "identifier == %@ AND label == %@",
+                                              target.identifier, target.label)).firstMatch
+        case (false, true):
             return query.matching(identifier: target.identifier).firstMatch
+        default:
+            return query.matching(NSPredicate(format: "label == %@", target.label)).firstMatch
         }
-        return query.matching(NSPredicate(format: "label == %@", target.label)).firstMatch
     }
 
-    /// Reads a control where it stands. `blocked` is the verdict that matters:
-    /// the control is on the screen, at a usable size, enabled, and still
-    /// refuses a touch — something is drawn over it, or its own hit region is
-    /// somewhere its frame is not.
-    ///
-    /// Deliberately still: the first pass classifies every control before any
-    /// of them is pressed, and a pass that scrolled would leave the list
-    /// somewhere else than it found it and report the rest as gone.
     /// The floating tab bar, whichever edge it floats at: the phone puts it
     /// along the bottom and covers the last row of every list, iPadOS puts it
     /// along the top and covers the first.
@@ -1709,17 +2466,23 @@ final class AppleiOSUITests: XCTestCase {
         }
         // iPadOS does not publish its tab bar as a `tabBar` at all; the items
         // come through as loose buttons, so the bar is their union.
-        let items = app.buttons.allElementsBoundByIndex.prefix(24)
-            .compactMap { try? $0.snapshot() }
-            .filter { Self.crawlTabLabels.contains($0.label) }
+        let items = crawlScene().nodes
+            .filter { $0.type == .button && Self.crawlTabLabels.contains($0.label) }
             .map(\.frame)
         guard items.count >= 2 else { return .null }
         return items.dropFirst().reduce(items[0]) { $0.union($1) }
     }
 
-    private func classifyForCrawl(_ element: XCUIElement, isTab: Bool) -> CrawlReach {
-        guard let snapshot = try? element.snapshot() else { return .gone }
-        let frame = snapshot.frame
+    /// Reads a control where it stands. `blocked` is the verdict that matters:
+    /// the control is on the screen, at a usable size, enabled, and still
+    /// refuses a touch — something is drawn over it, or its own hit region is
+    /// somewhere its frame is not.
+    private func classifyForCrawl(_ element: XCUIElement, frame stale: CGRect, isTab: Bool) -> CrawlReach {
+        // Read where it is now, not where the last look at the screen found it:
+        // a player that closed left three of its controls in the report as
+        // "on screen and refuses a touch" when they were simply gone.
+        guard let frame = (try? element.snapshot())?.frame else { return .gone }
+        _ = stale
         if frame.width < 1 || frame.height < 1 { return .blocked }
         let screen = crawlScreenRect
         guard screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return .offScreen }
@@ -1737,138 +2500,139 @@ final class AppleiOSUITests: XCTestCase {
         if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
             return .offScreen
         }
-        // A toolbar action is disabled while its screen loads, and a disabled
-        // control is correctly untouchable — not a defect.
-        return snapshot.isEnabled ? .blocked : .disabled
+        return .blocked
     }
 
-    /// Scrolls a control that was below the fold back into view, for the press
-    /// pass only.
-    private func revealForCrawl(_ element: XCUIElement, isTab: Bool) -> CrawlReach {
-        for _ in 0..<4 {
-            let reach = classifyForCrawl(element, isTab: isTab)
-            guard reach == .offScreen, let frame = (try? element.snapshot())?.frame else { return reach }
+    /// Scrolls a control back into view for its press. A card that has run off
+    /// the end of a horizontal row is dragged back along its own row, so the
+    /// shelf under the finger is the shelf that moves.
+    private func revealForCrawl(_ element: XCUIElement, node: CrawlNode, isTab: Bool) -> CrawlReach {
+        var frame = node.frame
+        for _ in 0..<6 {
+            let reach = classifyForCrawl(element, frame: frame, isTab: isTab)
+            guard reach == .offScreen else { return reach }
             let screen = crawlScreenRect
             let centre = CGPoint(x: frame.midX, y: frame.midY)
+            // Dragged from a band of the screen the page will scroll on, never
+            // `app.swipeUp()`: that starts in the middle, which on Discover
+            // and on a title page is the hero, and the hero takes the gesture.
+            // On the iPad that left twenty-three cards reported as off the
+            // screen when the page had simply never moved.
             if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
                 // Push the content away from the bar it is hiding under.
-                if crawlBarRect.midY < screen.midY { app.swipeDown(velocity: .slow) }
-                else { app.swipeUp(velocity: .slow) }
+                if crawlBarRect.midY < screen.midY { crawlScrollUp() } else { crawlScrollDown() }
             }
-            else if centre.y > screen.maxY { app.swipeUp(velocity: .slow) }
-            else if centre.y < screen.minY { app.swipeDown(velocity: .slow) }
-            else if centre.x > screen.maxX { app.swipeLeft(velocity: .slow) }
-            else { app.swipeRight(velocity: .slow) }
-            Thread.sleep(forTimeInterval: 0.4)
+            else if centre.y > screen.maxY { crawlScrollDown() }
+            else if centre.y < screen.minY { crawlScrollUp() }
+            else if centre.x > screen.maxX || centre.x < screen.minX {
+                dragCrawlRow(at: centre.y, towardsLeading: centre.x > screen.maxX)
+            }
+            else { dragCrawlRow(at: centre.y, towardsLeading: false) }
+            Thread.sleep(forTimeInterval: 0.45)
+            guard let moved = (try? element.snapshot())?.frame else { return .gone }
+            frame = moved
         }
-        return .offScreen
+        return classifyForCrawl(element, frame: frame, isTab: isTab)
     }
 
-    /// The modal counts, the navigation title, and the control's own label,
-    /// value, selection and enablement.
+    /// One screenful down, dragged from low on the screen.
     ///
-    /// Read through `snapshot()`, which throws, rather than through the
-    /// properties, which raise: a press that destroys the control it was made
-    /// on is the normal case here, not an error, and a raise would end the
-    /// walk on the spot.
-    private func crawlState(of element: XCUIElement) -> String {
-        let own = (try? element.snapshot()).map {
-            "\($0.label)|\(String(describing: $0.value))|\($0.isSelected)|\($0.isEnabled)"
-        } ?? "gone"
-        return [
-            // A link that opens Safari answers by taking the app off screen.
-            "state:\(app.state.rawValue)",
-            navigationTitle(),
-            "alerts:\(app.alerts.count)",
-            "sheets:\(app.sheets.count)",
-            "menus:\(app.menuItems.count)",
-            "keyboard:\(app.keyboards.count)",
-            // How much is on the screen. A menu with no menu items, a pushed
-            // page that kept the title, a spinner that replaced a button while
-            // a retry ran: all of them change the count and nothing else does.
-            "breadth:\(app.buttons.count)",
-            own,
-        ].joined(separator: "|")
+    /// `app.swipeUp()` starts in the middle, which on the title page is the
+    /// trailer: the gesture went to the video and the page never moved, so
+    /// everything below the hero — My List, Rate, the episode rows — was never
+    /// found.
+    private func crawlScrollDown() {
+        let screen = crawlScreenRect
+        let from = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: screen.midX, dy: screen.maxY - screen.height * 0.12))
+        let to = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: screen.midX, dy: screen.minY + screen.height * 0.18))
+        from.press(forDuration: 0.25, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
-    private func waitForCrawlResponse(from before: String, element: XCUIElement) -> Bool {
-        let deadline = Date().addingTimeInterval(3)
-        while true {
-            if crawlState(of: element) != before { return true }
-            guard Date() < deadline else { return false }
-            Thread.sleep(forTimeInterval: 0.5)
-        }
+    private func crawlScrollUp() {
+        let screen = crawlScreenRect
+        let from = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: screen.midX, dy: screen.minY + screen.height * 0.18))
+        let to = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: screen.midX, dy: screen.maxY - screen.height * 0.12))
+        from.press(forDuration: 0.25, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
-    private func navigationTitle() -> String {
-        let bar = app.navigationBars.firstMatch
-        return bar.exists ? bar.identifier : ""
+    /// One horizontal row moved on its own, by dragging along the line the row
+    /// is drawn on: `swipeLeft()` on the whole app moves whichever row the
+    /// gesture happens to land in.
+    private func dragCrawlRow(at y: CGFloat, towardsLeading: Bool) {
+        let screen = crawlScreenRect
+        let row = min(max(y, screen.minY + 20), screen.maxY - 20)
+        let from = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: towardsLeading ? screen.maxX - 30 : screen.minX + 30, dy: row))
+        let to = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: towardsLeading ? screen.minX + 30 : screen.maxX - 30, dy: row))
+        // Long enough to start a pan and held at the end so the row stops where
+        // it was put: a 0.05 s drag read as a flick and moved nothing at all,
+        // and every card past the fold of a shelf came back untouchable.
+        from.press(forDuration: 0.25, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
     private func selectedTabLabel() -> String? {
         if let phone = app.tabBars.buttons.allElementsBoundByIndex.first(where: { $0.isSelected }) {
             return phone.label
         }
-        return app.buttons.allElementsBoundByIndex.prefix(16)
-            .first { Self.crawlTabLabels.contains($0.label) && $0.isSelected }?.label
+        return crawlScene().nodes
+            .first { $0.type == .button && Self.crawlTabLabels.contains($0.label) && $0.isSelected }?.label
     }
 
     /// Closes whatever the press opened and gets back to the screen the walk
     /// started on. Only non-destructive exits are used.
     @discardableResult
-    private func restoreCrawlScreen(baseline: String, route: String) -> Bool {
-        let exits = ["Cancel", "Close", "Done", "Dismiss", "OK", "Not Now", "Later"]
-        // A press on Play puts a full-screen player up, and nothing in `exits`
-        // closes it; without these the walk relaunched the route after every
-        // Play and spent the screen's budget getting back.
-        // Not on the title page itself: there, `detail.back` is a control
-        // under test, and popping the page before its turn came made the walk
-        // press it on the screen behind and call it unresponsive.
-        let covers = ["detail", "episodes"].contains(route) ? ["player.close"] : ["player.close", "detail.back"]
-        for attempt in 0..<4 {
-            for cover in covers where tapIfPossible(app.buttons[cover].firstMatch) {
-                Thread.sleep(forTimeInterval: 0.6)
+    private func restoreCrawlScreen(baseline: String, screen: CrawlScreen) -> CrawlScene {
+        // A press on Play puts a full-screen player up, and nothing in the exit
+        // labels closes it; without these the walk relaunched the route after
+        // every Play and spent the screen's budget getting back. Not on the
+        // title page itself: there, `detail.back` is a control under test, and
+        // popping the page before its turn came made the walk press it on the
+        // screen behind and call it unresponsive. And never in a player under
+        // test — closing that is the screen's own last press.
+        var covers = ["detail", "episodes"].contains(screen.route) ? ["player.close"] : ["player.close", "detail.back"]
+        if screen.opener != .none { covers = ["live.picker.close"] }
+        var scene = crawlScene()
+        for attempt in 0..<7 {
+            let present = Set(scene.nodes.map(\.identifier))
+            for cover in covers where present.contains(cover) {
+                if tapIfPossible(app.buttons[cover].firstMatch) { Thread.sleep(forTimeInterval: 0.6) }
             }
-            if app.alerts.count > 0 {
+            if scene.alerts > 0 {
                 let alert = app.alerts.firstMatch
-                if !exits.contains(where: { tapIfPossible(alert.buttons[$0].firstMatch) }) {
+                if !Self.crawlExitLabels.contains(where: { tapIfPossible(alert.buttons[$0].firstMatch) }) {
                     tapIfPossible(alert.buttons.element(boundBy: max(0, alert.buttons.count - 1)))
                 }
                 Thread.sleep(forTimeInterval: 0.5)
+                scene = crawlScene()
                 continue
             }
-            if app.keyboards.count > 0 {
+            if scene.keyboards > 0 {
                 if !tapIfPossible(app.keyboards.buttons["Return"].firstMatch),
                    !tapIfPossible(app.toolbars.buttons["Done"].firstMatch) {
                     app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
                 }
                 Thread.sleep(forTimeInterval: 0.5)
+                scene = crawlScene()
                 continue
             }
-            if app.sheets.count > 0 {
+            if scene.sheets > 0 {
                 let sheet = app.sheets.firstMatch
-                if !exits.contains(where: { tapIfPossible(sheet.buttons[$0].firstMatch) }) {
+                if !Self.crawlExitLabels.contains(where: { tapIfPossible(sheet.buttons[$0].firstMatch) }) {
                     sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
                         .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
                 }
                 Thread.sleep(forTimeInterval: 0.6)
+                scene = crawlScene()
                 continue
             }
-            if navigationTitle() != baseline {
-                // `element(boundBy: 0)` picked whichever button the bar happened
-                // to list first — on Live that was Search, and the walk pressed
-                // it instead of going back.
-                if tapIfPossible(app.navigationBars.buttons["BackButton"].firstMatch) { }
-                else if let exit = exits.first(where: { tapIfPossible(app.buttons[$0].firstMatch) }) {
-                    _ = exit
-                } else { return false }
-                Thread.sleep(forTimeInterval: 0.6)
-                continue
-            }
-            // A menu draws no alert and no sheet, and SwiftUI does not always
-            // publish its rows as menu items; a press outside it is the only
-            // exit that always works.
-            if app.menuItems.count > 0 || app.popovers.count > 0 {
+            // A menu draws no alert and no sheet; a press outside it is the
+            // only exit that always works.
+            if crawlMenuRect(scene) != nil {
                 let dismissRegion = app.otherElements["PopoverDismissRegion"]
                 if !tapIfPossible(dismissRegion) {
                     // A menu covers whichever corner it was opened from, so the
@@ -1878,10 +2642,22 @@ final class AppleiOSUITests: XCTestCase {
                     app.coordinate(withNormalizedOffset: elsewhere[attempt % elsewhere.count]).tap()
                 }
                 Thread.sleep(forTimeInterval: 0.5)
+                scene = crawlScene()
                 continue
             }
-            return true
+            if screen.opener == .none, scene.navigation != baseline {
+                if tapIfPossible(app.navigationBars.buttons["BackButton"].firstMatch) { }
+                else if Self.crawlExitLabels.contains(where: { tapIfPossible(app.buttons[$0].firstMatch) }) { }
+                // A player takes a moment to put its chrome up, and its close
+                // button is the only way back out. Giving up on the first look
+                // relaunched the whole screen after every press on Play.
+                else { Thread.sleep(forTimeInterval: 1.2) }
+                Thread.sleep(forTimeInterval: 0.6)
+                scene = crawlScene()
+                continue
+            }
+            return scene
         }
-        return app.alerts.count == 0 && app.sheets.count == 0 && navigationTitle() == baseline
+        return scene
     }
 }

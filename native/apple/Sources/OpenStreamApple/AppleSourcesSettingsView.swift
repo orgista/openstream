@@ -1902,6 +1902,8 @@ private struct AppleWebManagementView: View {
     @State private var confirmForget = false
     @State private var forgetNotice = false
     @State private var connectedBrowsers: [AppleWebManagementServer.ConnectedBrowser] = []
+    @State private var addressWasCopied = false
+    @State private var copyReceipt: Task<Void, Never>?
 
     let sourceStore: AppleSourceStore
     let service: any AppleWebManagementServing
@@ -1959,11 +1961,23 @@ private struct AppleWebManagementView: View {
                 }
 
                 Section {
-                    Button("Copy Address") {
+                    // The button says what it did. Copying is invisible —
+                    // nothing on the screen changes and there is no way to tell
+                    // it from a dead control (button crawl, 2026-09-19) — so
+                    // the label carries the receipt and goes back on its own.
+                    Button(addressWasCopied ? "Address Copied" : "Copy Address") {
                         copy(activeSession.friendlyURL)
+                        addressWasCopied = true
+                        copyReceipt?.cancel()
+                        copyReceipt = Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            guard !Task.isCancelled else { return }
+                            addressWasCopied = false
+                        }
                     }
                     .buttonStyle(.brandSecondary)
                     .listRowBackground(Color.clear)
+                    .animation(nil, value: addressWasCopied)
                 }
 
                 if !connectedBrowsers.isEmpty {

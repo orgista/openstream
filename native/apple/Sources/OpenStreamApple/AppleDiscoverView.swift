@@ -55,6 +55,9 @@ struct AppleDiscoverView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
+    /// Held up for `AppleProgressVisibility.minimum` even when the catalogues
+    /// come back at once, so a press on Refresh is visible as a refresh.
+    @State private var isRefreshing = false
     @State private var loadedCache = false
     @State private var showsSearch = false
     @State private var selectedHero: IndexedCatalogItem?
@@ -276,11 +279,19 @@ struct AppleDiscoverView: View {
                 Button {
                     refresh()
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    // The spinner takes the glyph's place while the shelves
+                    // reload. Dimming was the only answer the button gave, and
+                    // against cached catalogues that is over in a frame
+                    // (button crawl, 2026-09-19).
+                    if isRefreshing || catalogStore.isLoading {
+                        ProgressView()
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
                 .accessibilityLabel("Refresh")
                 .appleVisionActionTarget()
-                .disabled(catalogStore.isLoading)
+                .disabled(isRefreshing || catalogStore.isLoading)
             }
         }
         #endif
@@ -701,10 +712,14 @@ struct AppleDiscoverView: View {
 
     private func refresh() {
         Task { @MainActor in
+            isRefreshing = true
+            let started = ContinuousClock.now
+            defer { isRefreshing = false }
             await catalogStore.refresh(sources: sourceStore.sources, force: true)
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
             await indexCatalogs()
+            try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
         }
     }
 
@@ -1711,7 +1726,11 @@ struct AppleCatalogItemDetailView: View {
                 EmptyView()
             }
             if downloadCoordinator.state.ownsDownload {
-                Button("Cancel", role: .destructive) { downloadCoordinator.cancel() }
+                // Named for what it cancels. A confirmation dialog always
+                // carries its own Cancel, so "Cancel" here gave the viewer two
+                // buttons with one word between them and no way to tell which
+                // one stopped the download (button crawl, 2026-09-19).
+                Button("Cancel Download", role: .destructive) { downloadCoordinator.cancel() }
             }
         } message: {
             Text(downloadActionMessage)
@@ -1729,7 +1748,7 @@ struct AppleCatalogItemDetailView: View {
             default:
                 EmptyView()
             }
-            Button("Cancel", role: .destructive) {
+            Button("Cancel Season Download", role: .destructive) {
                 seasonDownloads.cancel()
                 downloadCoordinator.cancel()
             }
@@ -3496,6 +3515,7 @@ struct AppleCatalogItemDetailView: View {
                     }
                     Spacer(minLength: 8)
                 }
+                .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
                 .contentShape(.rect)
             }
@@ -4409,8 +4429,12 @@ private struct AppleDetailRowButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
+        // The inset belongs to the label, which is already asked to fill the
+        // row: padding it here grew the button twenty points past the width it
+        // was given, and the overflow lay over the download glyph beside it —
+        // on the iPad XCUITest could find no hit point on that button at all
+        // (button crawl, 2026-09-19).
         configuration.label
-            .padding(.horizontal, 10)
             .background(
                 .white.opacity(isFocused ? 0.16 : (configuration.isPressed ? 0.1 : 0)),
                 in: .rect(cornerRadius: 12)

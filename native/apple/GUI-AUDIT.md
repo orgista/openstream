@@ -2186,3 +2186,62 @@ iPad landscape 21 screens, 38 pressed, 0 no-response, 2 unhittable (both above),
 `swift test` 54/54 in the touched suites. `testEveryRouteIsPhotographed`,
 `testLiveTappedStatesArePhotographed` pass; `testLiveBroadcastCaptionsArePhotographed` skips
 (no channel in the lineup published a caption track).
+
+## Button crawl, exhaustive — 2026-09-19 (owner: "press EVERY pressable control")
+
+The first crawl gave each screen a slice of a twenty-minute budget and pressed 41 of the 129
+controls it found on the phone, 38 of 114 on the iPad. The budget is gone. `testEveryButton…`
+is now eight tests, one per screen group — `testCrawlDiscover`, `testCrawlLibrary`,
+`testCrawlLive`, `testCrawlSettingsRoot`, `testCrawlSettingsPages`, `testCrawlSourcesForms`,
+`testCrawlDetailAndEpisodes`, `testCrawlPlayers`, plus `testCrawlLandscapeOnIPad` — each
+re-runnable on its own. Each one walks the screen where it stands: press everything on show,
+scroll one screenful, press what that brought, stop when a scroll changes nothing. Shelves give
+up their first three cards each (the owner's floor) and their heading chevron; menus are opened,
+every item pressed and the original selection put back; sheets and alerts are walked before they
+are dismissed; switches are flipped and flipped back; My List, the language rows and the guide
+favourites are pressed twice so the simulator keeps what it had. Reports:
+`~/Developer/openstream-build/button-crawl-exhaustive-{iphone,ipad}.txt`.
+
+Four things the crawler could not see before, and now can — each one had been hiding defects:
+a SwiftUI menu on iOS 26 is neither a `menuItem` nor a `popover` but one more collection view
+(no menu was ever walked); what a screen *says* (a validation message, a disclosure opening onto
+a field, a label swapping to "Address Copied") was invisible to a check that counted only
+buttons; a page scrolls only if the drag starts clear of the hero, which eats `app.swipeUp()`;
+and one identifier is not one control — every episode's download button is
+`detail.episode.download`, so the walk pressed the first row five times and started five
+downloads it then could not cancel.
+
+Product defects this pass found and fixed:
+- [x] `AppleDiscoverView.swift:286` Discover's **Refresh** answered a press with nothing when the
+      catalogues came back cached — the same spinner and the same 600 ms floor as below.
+- [x] `AppleSettingsViews.swift:547` Channel Manager's **Refresh** answered a press with nothing:
+      the only feedback was the toolbar glyph dimming, and against a playlist held on disk the
+      fetch is over before the dimming is drawn. The glyph gives way to a `ProgressView`, and the
+      reload holds it for `AppleProgressVisibility.minimum` (600 ms) so the press is visible.
+- [x] `AppleWatchProviderSettingsView.swift:126` Streaming Services' **Try Again** did the same on
+      a machine with no network — the request failed inside a frame. Same floor.
+- [x] `AppleSourcesSettingsView.swift:1968` Web Management's **Copy Address** copied silently.
+      The button now says "Address Copied" for two seconds and goes back on its own.
+- [x] `AppleDiscoverView.swift:1733,1751` the Download Options dialog carried a destructive
+      **Cancel** beside the sheet's own **Cancel** — two buttons, one word, no way to tell which
+      stops the download. "Cancel Download" and "Cancel Season Download" now.
+- [x] `AppleDiscoverView.swift:3518,4431` the episode row's play button was padded by its
+      *style*, which grew the button twenty points past the width it was given; the overflow lay
+      over the download glyph beside it and on the iPad XCUITest could find no hit point on that
+      button at all. The inset moved inside the label, which is the thing asked to fill the row.
+- [x] `AppleTransportOverlay.swift:428` + `AppleTransportOverlayModel.swift:266` the LIVE badge
+      stayed red however far back the viewer had scrubbed, so a ten-second skip on a DVR channel
+      changed nothing anybody could see. `isAtLiveEdge` (with the five-second tolerance a seek
+      needs) now drives the badge's colour and its accessibility value. Four Swift Testing cases.
+
+Ticked by this pass: A5 (disabled semantics — every disabled control the walk met is named in the
+report), A13 (icon-only controls — each one answered a press), B21/B22 (the title page's action
+row: Play, My List, Rate, Download, the season picker and the episode rows all pressed), B31
+(player transport: on the iPad every control of our surface player, both ways up), C4 (the source
+forms: each field's reveal, each submit button with the form empty), C8 (landscape, iPad).
+
+Open, not fixed — see the reports' own exception lists: the live ±10 s skips call
+`coordinator.userSeek` and the stream does not move (three skips back left the badge at the edge
+and the scrubber still); the VOD player on the phone plays through `AVPlayerViewController` for
+this content, so the transport on screen there is Apple's own; two Discover cards could not be
+brought back on screen after the walk had scrolled past their row.

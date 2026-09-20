@@ -538,7 +538,16 @@ private struct AppleChannelManagerView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { Task { await reload() } } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    // The glyph gives way to the spinner while the lineup is
+                    // being fetched. Dimming alone was the only answer this
+                    // button gave, and against a playlist held on disk the
+                    // fetch is over before the dimming is drawn, so the press
+                    // read as dead (button crawl, 2026-09-19).
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
                 .disabled(isLoading)
             }
@@ -697,6 +706,7 @@ private struct AppleChannelManagerView: View {
             return
         }
         isLoading = true
+        let started = ContinuousClock.now
         defer { isLoading = false }
         var loaded: [AppleIPTVChannel] = []
         var errors: [String] = []
@@ -715,6 +725,7 @@ private struct AppleChannelManagerView: View {
         channels = loaded
         channelsRevision &+= 1
         errorMessage = errors.first
+        try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
     }
 }
 

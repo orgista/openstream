@@ -79,6 +79,58 @@ import Testing
         coordinator.stop()
     }
 
+    // MARK: - The live edge
+
+    @Test func liveWithoutDvrIsAlwaysAtTheLiveEdge() {
+        let engine = FakePlaybackEngine()
+        engine.position = 0
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        model.dvrWindowSeconds = nil
+        #expect(model.isAtLiveEdge)
+        coordinator.stop()
+    }
+
+    @Test func liveWithDvrIsAtTheEdgeAtTheEndOfItsWindow() {
+        let engine = FakePlaybackEngine()
+        engine.position = 600
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        model.dvrWindowSeconds = 600
+        #expect(model.isAtLiveEdge)
+        coordinator.stop()
+    }
+
+    /// A seek lands a moment off the edge and the edge itself moves, so the
+    /// badge holds within the tolerance and drops outside it.
+    @Test func liveWithDvrLeavesTheEdgeOnceTheViewerScrubsBack() {
+        let engine = FakePlaybackEngine()
+        engine.position = 600 - AppleTransportOverlayModel.liveEdgeTolerance + 1
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        model.dvrWindowSeconds = 600
+        #expect(model.isAtLiveEdge)
+        coordinator.stop()
+
+        let behind = FakePlaybackEngine()
+        behind.position = 590
+        let secondCoordinator = makeCoordinator(engine: behind, request: makeRequest(isLive: true, dvrWindowSeconds: 600))
+        let scrubbedBack = AppleTransportOverlayModel(coordinator: secondCoordinator, isLive: true)
+        scrubbedBack.dvrWindowSeconds = 600
+        #expect(!scrubbedBack.isAtLiveEdge)
+        secondCoordinator.stop()
+    }
+
+    @Test func vodIsNeverAtALiveEdge() {
+        let engine = FakePlaybackEngine()
+        engine.duration = 100
+        engine.position = 100
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest())
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        #expect(!model.isAtLiveEdge)
+        coordinator.stop()
+    }
+
     @Test func liveWithoutDvrHasEmptyPositionText() {
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))

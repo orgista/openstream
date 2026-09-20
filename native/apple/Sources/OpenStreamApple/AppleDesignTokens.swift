@@ -279,3 +279,27 @@ public extension View {
         #endif
     }
 }
+
+/// How long a control has to look busy for the press to have visibly happened.
+///
+/// A Refresh over a playlist already on disk, or a retry that fails on a
+/// simulator with no network, is finished inside one frame: the spinner is put
+/// up and taken down between two displays and the viewer sees a control that
+/// did nothing (button crawl, 2026-09-19). The same floor UIKit's refresh
+/// control keeps for its own animation is kept here, in one place, so every
+/// busy control in the app agrees on it.
+public enum AppleProgressVisibility {
+    public static let minimum: Duration = .milliseconds(600)
+
+    /// What is left of the floor after work that took `elapsed` — zero once
+    /// the work itself has been on screen long enough.
+    public static func remaining(after elapsed: Duration) -> Duration {
+        elapsed >= minimum ? .zero : minimum - elapsed
+    }
+
+    /// The pause a caller should take before it stops looking busy.
+    public static func remaining(since start: ContinuousClock.Instant,
+                                 now: ContinuousClock.Instant = .now) -> Duration {
+        remaining(after: start.duration(to: now))
+    }
+}

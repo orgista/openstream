@@ -102,6 +102,7 @@ struct AppleWatchProviderSettingsView: View {
             return
         }
         isLoading = true
+        let started = ContinuousClock.now
         // The old failure comes off the screen while the new attempt runs.
         // Leaving it up meant pressing Try Again changed nothing on screen at
         // all, and on a fast failure the button read as dead (button crawl,
@@ -118,5 +119,10 @@ struct AppleWatchProviderSettingsView: View {
             // failure presentation follows.
             failure = "Could Not Load Services"
         }
+        // On a machine with no network the request comes back inside a frame,
+        // and the loading state was up for less time than it takes to draw:
+        // Try Again answered a press with the screen it was pressed on
+        // (button crawl, 2026-09-19).
+        try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
     }
 }

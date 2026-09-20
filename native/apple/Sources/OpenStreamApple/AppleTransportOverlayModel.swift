@@ -251,6 +251,24 @@ public final class AppleTransportOverlayModel {
         return (duration ?? 0) > 0
     }
 
+    /// How far behind the live edge the viewer still counts as being at it.
+    /// A seek lands a fraction of a second off, and a stream's own edge moves
+    /// while the seek is in flight.
+    public static let liveEdgeTolerance: Double = 5
+
+    /// `true` while a live stream is playing at its edge — always true for a
+    /// live stream with no DVR window, because there is nowhere else to be.
+    ///
+    /// The LIVE badge is drawn from this. Without it, skipping back ten
+    /// seconds on a channel with a DVR window changed nothing a viewer could
+    /// see: the badge stayed red, the thumb moved a tenth of a percent, and
+    /// live carries no time readout (button crawl, 2026-09-19).
+    public var isAtLiveEdge: Bool {
+        guard isLive else { return false }
+        guard let window = dvrWindowSeconds, window > 0 else { return true }
+        return position >= window - Self.liveEdgeTolerance
+    }
+
     /// `m:ss` or `h:mm:ss` for VOD; empty for live (the LIVE badge carries the
     /// status, DVR or not).
     public var positionText: String {
