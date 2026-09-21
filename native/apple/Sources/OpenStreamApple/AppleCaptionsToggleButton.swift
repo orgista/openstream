@@ -38,7 +38,7 @@ struct AppleCaptionsToggleButton: View {
                 .contentShape(.rect)
         }
         .buttonStyle(Style())
-        .appleVisionHover()
+        .appleHoverAffordance()
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isOn)
         .accessibilityLabel("Closed Captions")
         .accessibilityValue(isOn ? "On" : "Off")

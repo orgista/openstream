@@ -202,6 +202,9 @@ struct AppleStremioPlayerView: View {
         }
         #if os(macOS)
         .onExitCommand { closePlayer() }
+        // ␣, ⌘→ and ⌘← reach this session while it is on screen, and nothing
+        // else while it is not — see `appleMacPlaybackCommands`.
+        .appleMacPlaybackCommands(coordinator)
         #elseif os(tvOS)
         // Menu leaves the player on both routes (FEEDBACK Y1). The stock
         // AVPlayerViewController is a child of the cover, not the presented

@@ -33,14 +33,14 @@ struct OpenStreamPlatformApp: App {
         .windowResizability(.contentMinSize)
         #endif
         #if os(macOS)
-        // Without this the Mac window opens at AppKit's 900 x 450 default.
-        // Every Settings page lays its content out low in the window (the
-        // macOS `Form` centres rather than top-aligns), so at 450 points high
-        // About, Privacy, Backup, Metadata, Trakt, Storage, Add Catalog and
-        // Web Management all had their only content below the bottom edge and
-        // read as blank pages. This does not fix that layout — see the report
-        // — but it stops the pages being empty on first launch.
+        // Without this the Mac window opens at AppKit's 900 x 450 default,
+        // which is smaller than any shape this app's Discover billboard and
+        // poster rows were designed for. The Settings pages that read as blank
+        // at that size were a separate fault and are fixed at the source now
+        // (`AppleSettingsContentModifier`, macOS branch); this is just a
+        // sensible opening size for a media app.
         .defaultSize(width: 1280, height: 860)
+        .commands { AppleMacMenuCommands() }
         #endif
 
         #if os(visionOS)
@@ -77,6 +77,21 @@ struct OpenStreamPlatformApp: App {
                 try? await Task.sleep(for: .milliseconds(reduceMotion ? 220 : 1_300))
                 withAnimation(.easeOut(duration: 0.22)) { showLaunch = false }
             }
+            #if DEBUG
+            .task {
+                guard AppleAppGroupDiagnostics.isEnabled() else { return }
+                AppleAppGroupDiagnostics.emit(AppleAppGroupDiagnostics.run())
+            }
+            #endif
+            #if DEBUG && os(macOS)
+            // Renders this window to a PNG and dumps the menu bar, so a macOS
+            // screen can be reviewed from a headless session. See
+            // `AppleMacWindowShot` for why nothing else works here.
+            .task {
+                guard let request = AppleMacWindowShot.request() else { return }
+                await AppleMacWindowShot.run(request)
+            }
+            #endif
             #if DEBUG
             .task {
                 guard AppleSavedSourceDiagnosticsLaunch.isEnabled() else { return }

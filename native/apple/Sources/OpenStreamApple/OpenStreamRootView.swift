@@ -126,6 +126,11 @@ public struct OpenStreamRootView: View {
     @State private var backupController: AppleConfigurationController?
     @State private var mediaServerLibrary = AppleMediaServerLibraryStore()
     private let router: AppleAppRouter
+    #if os(macOS)
+    /// The menu bar's end of the wire. Not `@State`: the menu bar outlives
+    /// every view and owns this, so the root view only observes it.
+    private let macCommands = AppleMacCommandCenter.shared
+    #endif
     @State private var intentHandoff = AppleAppIntentHandoff.shared
     @State private var sharePlay = AppleSharePlaySessionStore.shared
     @AppStorage("openstream.firstRunGuidanceSeen") private var firstRunGuidanceSeen = false
@@ -285,6 +290,19 @@ public struct OpenStreamRootView: View {
         // at the root means no tab, and no branch inside a tab, can drift
         // again.
         .background(Color.black.ignoresSafeArea())
+        #elseif os(macOS)
+        // The same ground, for the same reason, on the Mac.
+        //
+        // macOS gave every tab AppKit's window background instead — measured
+        // rgb(40,40,40) behind the Discover billboard, behind the Live empty
+        // state, behind everything (2026-09-21). The owner's complaint that
+        // the Mac app "doesn't match Apple TV or the other apps" starts here:
+        // the other three platforms draw this app on black, and a media app on
+        // mid-grey reads as a different product. Settings panes sit on it the
+        // way an iOS inset-grouped list does, black ground with dark row
+        // boxes, because their own scroll background is hidden
+        // (`AppleSettingsContentModifier`).
+        .background(Color.black.ignoresSafeArea())
         #endif
         .appleTraceSelection("tab", value: selectedTab)
         .modifier(AppleConfigurationSync(
@@ -316,7 +334,9 @@ public struct OpenStreamRootView: View {
             firstRunGuidanceSeen = true
             if screen == "library" { selectedTab = .library }
             else if screen == "live" { selectedTab = .live }
-            else if screen != "discover" && screen != "detail" && screen != "episodes" && screen != "play" {
+            // "search" stays on Discover: Search is a page pushed from there
+            // off Apple TV, and Discover's own debug hook pushes it.
+            else if !["discover", "detail", "episodes", "play", "search"].contains(screen) {
                 selectedTab = .settings
                 // Every platform binds its Settings tab to the same
                 // `navigationPaths[.settings]` and declares the same
@@ -384,7 +404,18 @@ public struct OpenStreamRootView: View {
         // already hide the tab the view starts on.
         .onChange(of: visibleTabs, initial: true) { _, visible in
             selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visible)
+            #if os(macOS)
+            macCommands.availableTabs = Set(visible.compactMap(AppleMacTabTarget.init(tab:)))
+            #endif
         }
+        #if os(macOS)
+        .onChange(of: macCommands.revision) { applyMacCommand() }
+        // The owner's "no scroll indicators" rule, which had no macOS branch:
+        // `AppleDesignTokens.scrollIndicatorVisibility` was only ever applied
+        // under `#if os(visionOS)` here, so every shelf and list on the Mac
+        // drew one (macOS sweep, 2026-09-21).
+        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+        #endif
         .task { sharePlay.startListening(); mediaServerLibrary.loadPersisted() }
         .onChange(of: sharePlay.revision) {
             if sharePlay.channel != nil { selectedTab = .live }
@@ -547,6 +578,27 @@ public struct OpenStreamRootView: View {
             .appleAlignedTabTitle(tab.title)
         }
     }
+
+    #if os(macOS)
+    /// Runs the menu item the viewer just chose.
+    ///
+    /// Playback commands are not here: the Controls menu calls the player's
+    /// own closures through the command centre, because the root view has no
+    /// coordinator to hand them to.
+    private func applyMacCommand() {
+        switch macCommands.command {
+        case .selectTab(let target):
+            selectedTab = OpenStreamTab(macTarget: target)
+        case .openSearch:
+            // Search hangs off Discover on macOS, so the tab has to be the one
+            // showing before the route can push it.
+            selectedTab = OpenStreamTabVisibility.selection(current: .home, visible: visibleTabs)
+            router.openSearch()
+        case .togglePlayPause, .skipForward, .skipBackward, .none:
+            break
+        }
+    }
+    #endif
 
     private func apply(_ route: AppleAppRoute) async {
         // Every route lands on Discover; when that tab is hidden, stay on the
@@ -786,6 +838,13 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 }
             }
         #else
+        // macOS. The shared app group container works here now (the
+        // entitlement was added and `AppleTopShelfSnapshotWriter.appGroup`
+        // takes the team-id prefix it needs — see that file), but there is no
+        // macOS widget or Top Shelf target, so nothing in the system would
+        // read a snapshot written on this platform. This stays excluded on
+        // purpose rather than by omission, which is what it was before; the
+        // day a Mac widget target exists, delete this branch.
         content
         #endif
     }

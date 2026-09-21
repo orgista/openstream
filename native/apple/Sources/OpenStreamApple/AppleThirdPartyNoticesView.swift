@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 struct AppleThirdPartyNoticesView: View {
     var body: some View {
-        List {
+        AppleSettingsCollection {
             Section {
                 ForEach(AppleThirdPartyNotices.all()) { notice in
                     NavigationLink {

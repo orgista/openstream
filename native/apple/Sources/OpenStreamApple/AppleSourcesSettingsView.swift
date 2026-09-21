@@ -88,7 +88,7 @@ struct AppleSourcesSettingsView: View {
     var embeddedInSplit = false
 
     var body: some View {
-        List {
+        AppleSettingsCollection {
             Section {
                 NavigationLink(value: AppleSourceRoute.addFiles) {
                     AppleTVNavigationLabel("Add Files", systemImage: "folder.badge.plus")
@@ -753,6 +753,15 @@ private struct AppleAddManifestSourceView: View {
         Form {
             Section("Manifest URL") {
                 manifestField
+                    #if os(macOS)
+                    // A macOS form draws a text field's own title as a leading
+                    // label, so this row said "Manifest URL" twice — once as
+                    // the section header, once beside the field (macOS sweep,
+                    // 2026-09-21). iOS and visionOS never show that title (the
+                    // field carries a `prompt`), which is why it went unseen.
+                    // The header keeps the name and the field takes the row.
+                    .labelsHidden()
+                    #endif
             }
 
             if let errorMessage {

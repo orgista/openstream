@@ -31,3 +31,39 @@ struct AppleSearchRoutePolicyTests {
         #expect(pushes != AppleSearchRoutePolicy.platformHasDedicatedSearchTab)
     }
 }
+
+/// `openSearch()` is the Mac ⌘F path, added because Search on macOS is a page
+/// pushed from Discover with no tab and no shortcut to reach it.
+@Suite("Opening search with no query")
+@MainActor
+struct AppleAppRouterOpenSearchTests {
+    @Test("⌘F routes to Search with an empty field")
+    func openSearchRoutesWithNoQuery() {
+        let router = AppleAppRouter()
+        router.openSearch()
+        #expect(router.route == .search(""))
+        #expect(router.searchQuery.isEmpty)
+        #expect(router.revision == 1)
+    }
+
+    /// `showSearch(_:)` serves `openstream://search?query=…`, where a link with
+    /// no term in it is a malformed link. That refusal is why ⌘F needed its own
+    /// entry point rather than passing an empty string through this one.
+    @Test("A deep link with no term is still refused")
+    func showSearchStillRefusesAnEmptyQuery() {
+        let router = AppleAppRouter()
+        router.showSearch("   ")
+        #expect(router.route == nil)
+        #expect(router.revision == 0)
+    }
+
+    @Test("⌘F clears a query left over from an earlier deep link")
+    func openSearchClearsAPreviousQuery() {
+        let router = AppleAppRouter()
+        router.showSearch("dune")
+        #expect(router.searchQuery == "dune")
+        router.openSearch()
+        #expect(router.searchQuery.isEmpty)
+        #expect(router.revision == 2)
+    }
+}

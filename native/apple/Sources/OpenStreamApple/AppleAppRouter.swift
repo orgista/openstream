@@ -54,6 +54,18 @@ public final class AppleAppRouter {
         revision &+= 1
     }
 
+    /// Opens Search with nothing typed yet — the Mac ⌘F path.
+    ///
+    /// Separate from `showSearch(_:)` because that one deliberately refuses an
+    /// empty query: it serves `openstream://search?query=…` deep links, and a
+    /// link with no term in it is a malformed link. A menu command is the
+    /// opposite case — an empty field is exactly what it should open.
+    public func openSearch() {
+        searchQuery = ""
+        route = .search("")
+        revision &+= 1
+    }
+
     public func showSearch(_ query: String) {
         let clean = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         guard !clean.isEmpty else { return }

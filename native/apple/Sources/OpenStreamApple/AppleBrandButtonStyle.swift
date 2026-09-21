@@ -56,7 +56,7 @@ public struct AppleBrandPrimaryButtonStyle: ButtonStyle {
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
                 .opacity(configuration.isPressed ? 0.7 : 1)
                 .contentShape(appleBrandButtonShape)
-                .appleVisionHover()
+                .appleHoverAffordance()
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
         }
     }
@@ -104,7 +104,7 @@ public struct AppleBrandSecondaryButtonStyle: ButtonStyle {
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
                 .opacity(configuration.isPressed ? 0.72 : 1)
                 .contentShape(appleBrandButtonShape)
-                .appleVisionHover()
+                .appleHoverAffordance()
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
         }
     }
@@ -187,6 +187,18 @@ public struct AppleTVNavigationLabel: View {
                     Image(systemName: systemImage)
                         .foregroundStyle(.primary)
                 }
+                // The same style again, on the outside.
+                //
+                // On macOS a `Label` inside a `List` row re-tints its icon
+                // after the icon closure has been evaluated, so the
+                // `.foregroundStyle(.primary)` above lost and every glyph in
+                // the Sources list drew in the system accent — measured
+                // rgb(92,121,245) against a white-tinted app (macOS sweep,
+                // 2026-09-21), which breaks the owner's "nothing blue except
+                // the brand mark" rule. Applied out here it wins, and it is a
+                // no-op on iOS and visionOS, where the title is `.primary`
+                // already and the icon was never re-tinted.
+                .foregroundStyle(.primary)
             }
         } else {
             Text(title)

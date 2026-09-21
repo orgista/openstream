@@ -166,7 +166,31 @@ public struct AppleTopShelfSnapshotReader: Sendable {
 
 public actor AppleTopShelfSnapshotWriter {
     public static let shared = AppleTopShelfSnapshotWriter()
-    public static let appGroup = "group.com.orgista.openstream"
+    /// The shared container every system surface reads through.
+    ///
+    /// macOS needs the team-id prefix and the other platforms must not have
+    /// it. On iOS and tvOS an app group is a bare `group.…` identifier; a
+    /// sandboxed Mac app's group container is named
+    /// `<TeamID>.group.…` and `containerURL(forSecurityApplicationGroupIdentifier:)`
+    /// hands back a path under `~/Library/Group Containers/` that only that
+    /// exact string resolves to. Asking for the unprefixed form returned a URL
+    /// that then failed every read and write with EPERM — `NSCocoaErrorDomain
+    /// 513` on write, `257` on a directory listing (measured inside the
+    /// sandboxed app, 2026-09-21), which is why the `guard let root` at the
+    /// call sites never caught it.
+    ///
+    /// The prefix is written out here rather than read from the build: this is
+    /// a package constant with no `$(TeamIdentifierPrefix)` to expand, and the
+    /// entitlement that grants it (`Apps/Shared/OpenStreamMacOS.entitlements`)
+    /// does use the build setting, so the two cannot disagree silently — a
+    /// mismatch fails to launch.
+    public static let appGroup: String = {
+        #if os(macOS)
+        "2VQ74PD5YG.group.com.orgista.openstream"
+        #else
+        "group.com.orgista.openstream"
+        #endif
+    }()
     public static let filename = "topshelf-v1.json"
 
     private let containerProvider: @Sendable () -> URL?

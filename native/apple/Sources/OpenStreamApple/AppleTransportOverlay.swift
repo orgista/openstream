@@ -147,7 +147,7 @@ struct AppleTransportOverlay: View {
                 #else
                 .buttonStyle(.plain)
                 #endif
-                .appleVisionHover()
+                .appleHoverAffordance()
                 .accessibilityLabel(chrome.selectTogglesPlayback ? "Play or pause" : "Show playback controls")
                 .accessibilityIdentifier("player.controls.show")
                 #if os(tvOS)
@@ -314,7 +314,7 @@ struct AppleTransportOverlay: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .appleVisionHover()
+                .appleHoverAffordance()
                 .accessibilityLabel(onRequestFullScreen == nil ? "Close player" : "Full Screen")
                 .accessibilityIdentifier(onRequestFullScreen == nil ? "player.close" : "player.fullscreen")
             }
@@ -352,6 +352,7 @@ struct AppleTransportOverlay: View {
                         Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                             .contentShape(.rect)
                     }
+                    .appleBareMenu()
                     .accessibilityLabel("More")
                 }
                 if let sharePlayMenu, controls.contains(.sharePlayMenu) {
@@ -364,6 +365,7 @@ struct AppleTransportOverlay: View {
                         Image(systemName: liveTopControls ? "ellipsis" : "shareplay").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                             .contentShape(.rect)
                     }
+                    .appleBareMenu()
                     .accessibilityLabel(liveTopControls ? "More" : "SharePlay")
                     .accessibilityIdentifier("player.more")
                 }
@@ -611,7 +613,7 @@ struct AppleTransportOverlay: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .appleVisionHover()
+            .appleHoverAffordance()
             .accessibilityLabel(isPlaying ? "Pause" : "Play")
             .appleVisionActionTarget()
             .accessibilityIdentifier("player.play-pause")
@@ -635,7 +637,7 @@ struct AppleTransportOverlay: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-            .appleVisionHover()
+            .appleHoverAffordance()
         .accessibilityLabel(seconds < 0 ? "Back 10 seconds" : "Forward 10 seconds")
         .accessibilityIdentifier(seconds < 0 ? "player.skip-back" : "player.skip-forward")
         #if os(tvOS)
@@ -800,6 +802,7 @@ struct AppleTransportTrackMenu: View {
                 .contentShape(.rect)
                 .foregroundStyle(.white)
         }
+        .appleBareMenu()
         .accessibilityLabel("Audio & Subtitles")
         .accessibilityIdentifier("player.captions")
         #if os(tvOS)

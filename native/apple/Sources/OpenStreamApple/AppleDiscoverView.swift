@@ -65,7 +65,11 @@ struct AppleDiscoverView: View {
     @State private var showsSelectedHero = false
     @State private var selectedCatalog: AppleCatalogSection?
     @State private var showsCatalog = false
-    #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
+    // macOS is in this list now. It was left out of all four of these debug
+    // review hooks, which is why a headless macOS sweep could photograph the
+    // Settings tree but never the title page, the episode list or the player —
+    // the three screens this app is mostly about (macOS sweep, 2026-09-21).
+    #if DEBUG
     @State private var visionReviewDetail = false
     @State private var visionReviewAutoPlay = false
     #endif
@@ -302,12 +306,18 @@ struct AppleDiscoverView: View {
             }
         }
         #endif
-        #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
+        #if DEBUG
         .navigationDestination(isPresented: $visionReviewDetail) {
             if let value = visionReviewItem { detail(value, initialAutoPlay: visionReviewAutoPlay) }
         }
         .task(id: visibleSections.count) {
             let screen = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen")
+            // Search is a page pushed from Discover everywhere except Apple TV,
+            // so it had no debug route at all and no sweep could reach it —
+            // the macOS sweep recorded it as NOT TESTED for exactly that
+            // reason. Pushing it here is the same one-line hook every other
+            // screen already has.
+            if screen == "search" { showsSearch = true }
             // "play" opens the same title page and starts its first stream, so
             // the player can be captured headlessly on the TV simulator.
             if (screen == "detail" || screen == "episodes" || screen == "play"), visionReviewItem != nil {
@@ -625,7 +635,7 @@ struct AppleDiscoverView: View {
         #endif
     }
 
-    #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
+    #if DEBUG
     private var visionReviewItem: IndexedCatalogItem? {
         guard let section = visibleSections.first(where: { $0.catalog.type == "series" }),
               let item = section.items.first,
@@ -1310,7 +1320,7 @@ struct AppleCatalogCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(item.name)
         .accessibilityValue(item.releaseInfo ?? "")
-        .appleVisionHover()
+        .appleHoverAffordance()
     }
 
     private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching || sizing == .ranked }
@@ -1554,7 +1564,7 @@ struct AppleCatalogItemDetailView: View {
 
     var body: some View {
         Group {
-            #if DEBUG && (os(visionOS) || os(tvOS) || os(iOS))
+            #if DEBUG
             ScrollViewReader { reader in
                 detailContent.task(id: episodes.count) {
                     guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodes", !episodes.isEmpty else { return }
@@ -2018,7 +2028,11 @@ struct AppleCatalogItemDetailView: View {
                     .allowsHitTesting(false)
             }
 
-            #if !os(visionOS)
+            // Not on macOS: the navigation bar is only hidden on iOS and
+            // visionOS, so a Mac window already has a back chevron in its
+            // titlebar and this drew a second one over the artwork two points
+            // below it (macOS sweep, 2026-09-21).
+            #if !os(visionOS) && !os(macOS)
             Button {
                 dismiss()
             } label: {
@@ -2066,6 +2080,11 @@ struct AppleCatalogItemDetailView: View {
             in: viewportSize,
             horizontalSizeClassIsRegular: horizontalSizeClass == .regular
         )
+        #elseif os(macOS)
+        // Was a flat 420 pt at every window size, which is a third of a
+        // full-screen Mac display and read as a letterbox strip. The same
+        // proportion visionOS uses, so the two agree on what a wide hero is.
+        min(viewportSize.height * 0.78, viewportSize.width * 9 / 16)
         #else
         420
         #endif
@@ -2084,6 +2103,16 @@ struct AppleCatalogItemDetailView: View {
         detailViewportSize == .zero ? CGSize(width: 1100, height: 760) : detailViewportSize
         #elseif os(iOS)
         detailViewportSize
+        #elseif os(macOS)
+        // `detailViewportSize` has always been measured on macOS too — the
+        // `.onGeometryChange` that fills it is unconditional — but this
+        // property threw the measurement away and answered `.zero`, so every
+        // metric derived from it fell back to a constant and the detail page
+        // never changed shape however large the window was dragged (macOS
+        // sweep, 2026-09-21). A Mac window with no measurement yet is assumed
+        // to be the default opening size rather than nothing, the same
+        // substitution visionOS makes for its own default.
+        detailViewportSize == .zero ? CGSize(width: 1280, height: 860) : detailViewportSize
         #else
         .zero
         #endif
@@ -2095,6 +2124,11 @@ struct AppleCatalogItemDetailView: View {
         #elseif os(iOS)
         horizontalSizeClass == .regular
             && viewportSize.width > viewportSize.height
+        #elseif os(macOS)
+        // A Mac window is resizable to any shape, so there is no size class to
+        // ask — the window's own proportions are the answer, which is exactly
+        // how visionOS decides it.
+        AppleMacChromeMetrics.isRegularLayout(viewport: viewportSize)
         #else
         false
         #endif
@@ -2107,6 +2141,8 @@ struct AppleCatalogItemDetailView: View {
         isLandscapeRegularLayout
         #elseif os(iOS)
         AppleDetailMetrics.isLandscapeLayout(viewport: viewportSize)
+        #elseif os(macOS)
+        isLandscapeRegularLayout
         #else
         false
         #endif
@@ -3564,7 +3600,7 @@ struct AppleCatalogItemDetailView: View {
                 .contentShape(.rect)
             }
             .buttonStyle(AppleDetailRowButtonStyle())
-            .appleVisionHover()
+            .appleHoverAffordance()
             .accessibilityLabel("Play \(episode.displayTitle)")
             .accessibilityValue(selectedEpisodeID == episode.id ? "\(episodeNumber(episode)), selected" : episodeNumber(episode))
             .accessibilityAddTraits(selectedEpisodeID == episode.id ? .isSelected : [])
@@ -3796,6 +3832,7 @@ struct AppleCatalogItemDetailView: View {
             .frame(minWidth: 44, minHeight: max(44, scaledIconRowHeight))
             .contentShape(.rect)
         }
+        .appleBareMenu()
         .foregroundStyle(.white)
         .accessibilityLabel("Rate")
         .accessibilityValue(rating?.title ?? "Not rated")
@@ -5441,7 +5478,27 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         #if os(visionOS)
         content.modifier(AppleVisionPlayerPresentationModifier(presentation: $presentation))
         #elseif os(macOS)
-        content.sheet(item: $presentation) { AppleStremioPlayerView(presentation: $0) }
+        content.sheet(item: $presentation) {
+            AppleStremioPlayerView(presentation: $0)
+                // A macOS sheet sizes to its content, and an `AVPlayerView`
+                // wrapped in an `NSViewRepresentable` has no intrinsic size to
+                // give it — so playing anything on the Mac opened a **470 x 80
+                // black sliver** while the engine decoded happily behind it
+                // (measured on a local file: the trace logged "first frame,
+                // route=avPlayer" into a sheet window 80 points tall,
+                // 2026-09-21). The previous sweep never saw this because
+                // playback was the row it could not test.
+                //
+                // A floor only, and 16:9. With an `idealWidth` as well SwiftUI
+                // took the *minimum* width and the *ideal* height and drew a
+                // portrait 640 x 720 sheet for a landscape video (measured),
+                // because the player has no intrinsic size to break the tie
+                // with. One pair of numbers is unambiguous. 1024 x 576 fits
+                // inside the 1280 x 860 default window with room for the
+                // sheet's own inset; the sheet is resizable from there and
+                // ⌃⌘F (View ▸ Toggle Full Screen) takes it to the display.
+                .frame(minWidth: 1024, minHeight: 576)
+        }
         #else
         content.fullScreenCover(item: $presentation) {
             AppleStremioPlayerView(presentation: $0)
