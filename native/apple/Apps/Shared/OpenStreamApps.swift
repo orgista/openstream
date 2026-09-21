@@ -32,6 +32,16 @@ struct OpenStreamPlatformApp: App {
         .defaultSize(width: 1100, height: 760)
         .windowResizability(.contentMinSize)
         #endif
+        #if os(macOS)
+        // Without this the Mac window opens at AppKit's 900 x 450 default.
+        // Every Settings page lays its content out low in the window (the
+        // macOS `Form` centres rather than top-aligns), so at 450 points high
+        // About, Privacy, Backup, Metadata, Trakt, Storage, Add Catalog and
+        // Web Management all had their only content below the bottom edge and
+        // read as blank pages. This does not fix that layout — see the report
+        // — but it stops the pages being empty on first launch.
+        .defaultSize(width: 1280, height: 860)
+        #endif
 
         #if os(visionOS)
         AppleVisionPlaybackScene()

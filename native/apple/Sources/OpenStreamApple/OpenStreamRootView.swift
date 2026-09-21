@@ -223,6 +223,28 @@ public struct OpenStreamRootView: View {
                 }
                 .tag(tab)
                 .onExitCommand(perform: exitCommandHandler(for: tab))
+                #else
+                // macOS. This branch is `#else` and not `#elseif os(macOS)` on
+                // purpose. While the chain was closed, macOS matched none of
+                // the three branches above, so the `ForEach` body compiled to
+                // `EmptyView`, the `TabView` was built with no tabs in it, and
+                // the app opened a window whose hosting view had zero
+                // subviews — build 13 shipped a completely blank window. A
+                // trailing `#else` is the only shape of this chain that no
+                // platform can fall out of.
+                //
+                // The shell itself is the visionOS one: a plain stack per tab,
+                // with no `.toolbar(_:for: .tabBar)` (that placement does not
+                // exist on macOS) and no iPad size-class handling.
+                NavigationStack(path: Binding(
+                    get: { navigationPaths[tab] ?? NavigationPath() },
+                    set: { navigationPaths[tab] = $0 }
+                )) {
+                    content(for: tab)
+                }
+                .id(navigationIdentity(for: tab))
+                .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+                .tag(tab)
                 #endif
             }
         }
