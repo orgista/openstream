@@ -29,7 +29,13 @@ public protocol AppleCredentialStoring {
 public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     static let syncPreferenceKey = "openstream.backup.icloud.enabled.v1"
     private let service: String
-    private var synchronizable: Bool { UserDefaults.standard.bool(forKey: Self.syncPreferenceKey) }
+    /// The Apple TV has no switch, so the policy answers for it: its
+    /// credentials are read from the synchronizing keychain the phone wrote.
+    private var synchronizable: Bool {
+        AppleConfigurationSyncPolicy.isEnabled(
+            storedPreference: UserDefaults.standard.bool(forKey: Self.syncPreferenceKey)
+        )
+    }
     private var accessibility: CFString {
         synchronizable ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }

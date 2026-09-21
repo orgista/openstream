@@ -62,19 +62,25 @@ struct AppleMediaShelf<Content: View>: View {
 struct AppleFeaturedHero<Actions: View>: View {
     let item: AppleCatalogItem
     let viewportSize: CGSize
-    /// The title's wordmark, when known. tvOS only; the other platforms' hero
-    /// draws its own copy block.
+    /// The title's wordmark, when the preview-assets cache has one. Every
+    /// platform's hero uses it: the lockup over the art is the shape the owner
+    /// asked for on the iPad as well as the Apple TV (2026-09-18 references).
     var wordmark: URL? = nil
-    /// Passed straight to the tvOS billboard's rotation indicator; the other
-    /// platforms' hero does not cycle.
+    /// How many heroes the screen rotates through, and which is showing. One
+    /// (or fewer) draws no indicator: there is nothing to cycle to.
     var rotationCount: Int = 0
     var rotationIndex: Int = 0
+    /// What fills the art frame. Discover passes a stage that can swap the
+    /// still for an inline trailer; Library passes nothing and gets the still.
+    /// Either way the frame, the one fade and the copy block are the same.
+    var stage: AnyView? = nil
     @ViewBuilder var actions: Actions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     var body: some View {
         #if os(tvOS)
-        AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount, rotationIndex: rotationIndex) { actions }
+        AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
+                         rotationIndex: rotationIndex, stage: stage) { actions }
         #else
         legacyHero
         #endif
@@ -85,7 +91,7 @@ struct AppleFeaturedHero<Actions: View>: View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 0) {
-                    AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+                    art
                         .frame(maxWidth: .infinity)
                         .frame(height: 220)
                         .clipped()
@@ -104,50 +110,140 @@ struct AppleFeaturedHero<Actions: View>: View {
                                 .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
                         }
                         actions
+                        pageIndicator
                     }
                     .padding(20)
                 }
                 .background(Color(white: 0.10))
             } else {
-                ZStack(alignment: .bottomLeading) {
-                    AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: featuredHeight)
-                        .clipped()
+                // The copy is an overlay on the art, not a sibling in a ZStack:
+                // an overlay is offered its host's size and can never widen it.
+                art
+                    .frame(maxWidth: .infinity)
+                    .frame(height: featuredHeight)
+                    .clipped()
                     // The same single bottom-to-black fade the owner approved
                     // for the Apple TV billboard (X2), for the same reason: a
                     // 6 pt text shadow is not enough over bright busy art, and
                     // "Remarkably Bright Creatures" over a lit aquarium was
                     // unreadable on iPad (2026-09-15). One fade, nowhere else.
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.85)],
-                        startPoint: .init(x: 0.5, y: AppleTVBillboardMetrics.fadeStartFraction),
-                        endPoint: .bottom
-                    )
-                    .frame(height: featuredHeight)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(item.name)
-                            .font(.largeTitle.bold())
-                            .lineLimit(2)
-                            .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                            .accessibilityAddTraits(.isHeader)
-                        if let summary = item.summary, !summary.isEmpty {
-                            Text(summary)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .frame(maxWidth: 700, alignment: .leading)
-                                .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                        }
-                        actions
+                    .overlay {
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.85)],
+                            startPoint: .init(x: 0.5, y: AppleTVBillboardMetrics.fadeStartFraction),
+                            endPoint: .bottom
+                        )
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                     }
-                    .padding(24)
-                }
+                    .overlay(alignment: .bottomLeading) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            titleTreatment
+                            if let metadataLine {
+                                Text(metadataLine)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.75))
+                                    .lineLimit(1)
+                                    .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                            }
+                            if let summary = item.summary, !summary.isEmpty {
+                                // White at 90 %, the same as the Apple TV
+                                // billboard, not `.secondary`: a hierarchical
+                                // grey over bright art disappears, and "TOXIC"
+                                // sits on a white backdrop (2026-09-20). The one
+                                // approved fade covers the bottom of the frame;
+                                // nothing else may be dimmed, so the type
+                                // carries it.
+                                Text(summary)
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .lineLimit(2)
+                                    .frame(maxWidth: min(700, copyColumnWidth), alignment: .leading)
+                                    .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                            }
+                            actions
+                            pageIndicator
+                        }
+                        // Measured, not inferred. A `maxWidth` only clamps when
+                        // the proposal is finite, and the copy column inside the
+                        // hero was being sized against an unbounded proposal:
+                        // the synopsis took its full 700 pt on a 393 pt iPhone
+                        // and pushed Details past the right edge (2026-09-20).
+                        // The hero's own width is known, so use it.
+                        .frame(width: copyColumnWidth, alignment: .leading)
+                        .padding(24)
+                    }
             }
         }
         .clipShape(.rect(cornerRadius: 18))
         .accessibilityElement(children: .contain)
+    }
+
+    /// The inline trailer when Discover supplies one, otherwise the still.
+    @ViewBuilder
+    private var art: some View {
+        if let stage {
+            stage
+        } else {
+            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+        }
+    }
+
+    /// The wordmark lockup when the title has one, otherwise its name — the
+    /// same rule the Apple TV billboard follows.
+    @ViewBuilder
+    private var titleTreatment: some View {
+        switch AppleTVBillboardTitleTreatment.choose(hasBackdrop: item.backgroundURL != nil, wordmark: wordmark) {
+        case .wordmark(let url):
+            // A definite height, not `maxHeight`: the wordmark is drawn inside
+            // a GeometryReader, and in a scroll view an upper bound leaves the
+            // height proposal unresolved, which collapsed the mark to a few
+            // illegible points (2026-09-20).
+            AppleTrimmedTitleLogo(url: url, alignment: .leading) { _ in }
+                .frame(maxWidth: wordmarkWidth, alignment: .leading)
+                .frame(height: wordmarkHeight)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(item.name)
+                .accessibilityAddTraits(.isHeader)
+        case .text:
+            Text(item.name)
+                .font(.largeTitle.bold())
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                .accessibilityAddTraits(.isHeader)
+        case .none:
+            // The poster already carries the title; a second copy is noise.
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var pageIndicator: some View {
+        if rotationCount > 1 {
+            AppleHomeHeroPageIndicator(count: rotationCount, index: rotationIndex)
+                .padding(.top, 2)
+        }
+    }
+
+    private var metadataLine: String? {
+        AppleBillboardCopy.metadataLine(genres: item.genres, year: item.year, releaseInfo: item.releaseInfo)
+    }
+
+    /// Scaled off the canvas, not off a constant: at the flat 300 x 90 the
+    /// stacked card used, the lockup read as a banner on the iPhone and as a
+    /// postage stamp on an iPad in landscape. Capped so it never runs past the
+    /// copy column on a wide canvas.
+    private var wordmarkWidth: CGFloat {
+        min(copyColumnWidth * 0.55, 460)
+    }
+
+    /// The hero spans the page's content column: the viewport less the 16 pt
+    /// card margin on each side, less the copy block's own 24 pt inset.
+    private var copyColumnWidth: CGFloat {
+        max(viewportSize.width - 32 - 48, 220)
+    }
+
+    private var wordmarkHeight: CGFloat {
+        min(max(featuredHeight * 0.20, 52), AppleDetailMetrics.titleLogoMaxHeight)
     }
 
     private var featuredHeight: CGFloat {

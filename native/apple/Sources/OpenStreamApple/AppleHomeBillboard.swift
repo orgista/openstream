@@ -4,13 +4,18 @@ import UIKit
 import Combine
 #endif
 
-/// Artwork and inline previews share one large stage; copy never obscures it.
+/// Discover's home hero. Every platform draws the same composition —
+/// `AppleFeaturedHero`: art edge to edge, the app's one fade, the wordmark
+/// lockup with genre/year, a two-line synopsis, Play and Details, and the
+/// rotation dots, all anchored bottom-leading over the art, with the first row
+/// peeking in underneath.
 ///
-/// tvOS does not get this card layout. The Apple TV home hero is
-/// `AppleTVBillboard` — full-bleed 1920 x 980 art, the app's one fade, copy
-/// anchored bottom-leading over the art, the first row peeking in underneath.
-/// This view only supplies the preview stage that plays inside it, so Discover
-/// keeps its inline trailer without losing the billboard the owner signed off.
+/// This view's only job is to hand that hero a *stage* — the inline trailer
+/// preview that can take the still's place — so Discover keeps its preview
+/// without owning a second layout. A stacked card lived here between 2026-09-18
+/// and 2026-09-20 and was the iPad landscape regression the owner reported: the
+/// art was capped at a flat 600 pt, the wordmark sat below it at a flat 90 pt,
+/// and Play/Details were pushed off the bottom of the screen.
 struct AppleHomeBillboard<Actions: View>: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
@@ -22,9 +27,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
-        #if os(tvOS)
-        AppleTVBillboard(
+        AppleFeaturedHero(
             item: item,
+            viewportSize: viewportSize,
             wordmark: wordmark,
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
@@ -36,52 +41,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                 .id(item.id)
             )
         ) { actions }
-        #else
-        card
-        #endif
     }
-
-    #if !os(tvOS)
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            AppleHomeHeroPreview(item: item, sources: sources, settings: settings)
-                .id(item.id)
-                .frame(height: artworkHeight)
-                .clipped()
-                .clipShape(.rect(cornerRadius: 18))
-            VStack(alignment: .leading, spacing: 12) {
-                if let wordmark {
-                    // A definite height, not `maxHeight`: the wordmark is drawn
-                    // inside a GeometryReader, and in a scroll view an upper
-                    // bound leaves the height proposal unresolved, which
-                    // collapsed the mark to a few illegible points.
-                    AppleTrimmedTitleLogo(url: wordmark, alignment: .leading) { _ in }
-                        .frame(maxWidth: 300, alignment: .leading)
-                        .frame(height: 90)
-                        .accessibilityLabel(item.name)
-                        .accessibilityAddTraits(.isHeader)
-                } else {
-                    Text(item.name)
-                        .font(.largeTitle.bold())
-                        .lineLimit(2)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                actions
-            }
-            if rotationCount > 1 {
-                AppleHomeHeroPageIndicator(count: rotationCount, index: rotationIndex)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .foregroundStyle(.primary)
-        .accessibilityElement(children: .contain)
-    }
-
-    private var artworkHeight: CGFloat {
-        let width = max(viewportSize.width - 32, 320)
-        return min(600, max(240, width * 9 / 16))
-    }
-    #endif
 }
 
 /// Promotional posters carry their own title treatment and badges in the art.
@@ -94,7 +54,9 @@ struct ApplePortraitPromoCard: View {
     }
 }
 
-private struct AppleHomeHeroPageIndicator: View {
+/// The rotation dots under the hero's buttons. `AppleFeaturedHero` draws it on
+/// iPhone, iPad, Mac and Vision Pro; tvOS has its own focus-aware indicator.
+struct AppleHomeHeroPageIndicator: View {
     let count: Int
     let index: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -172,6 +134,21 @@ private struct AppleHomeHeroPreview: View {
                     onMute: { isMuted.toggle() },
                     onReplay: { replayGeneration &+= 1; isPlaying = true }
                 )
+                // Cover the art frame instead of fitting inside it. The embed
+                // letterboxes the video against its own black ground, so a
+                // 2.57:1 hero frame put ~180 pt of black down each side of a
+                // 16:9 trailer — the "black bars around the video" the owner
+                // reported on the iPad (2026-09-20). Sizing the web view to
+                // 16:9 *over* the frame and letting the hero's `clipped()`
+                // crop it means the still and the preview fill identically.
+                .aspectRatio(16.0 / 9.0, contentMode: .fill)
+                // …and then report only the space it was offered. A covering
+                // child otherwise widens the stage, the stage widens the hero,
+                // and the hero's copy column is laid out against a width wider
+                // than the screen — which put Details off the right edge of an
+                // iPhone and stopped the synopsis wrapping (2026-09-20).
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
             }
             #elseif os(tvOS)
             if shouldPreview, let nativeSource {

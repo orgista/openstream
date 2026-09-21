@@ -117,6 +117,7 @@ struct AppleLiveTVView: View {
                                 sharePlay: sharePlay,
                                 liveChannel: selectedChannel,
                                 channels: channelSnapshot.channels,
+                                guide: guideStore.guide(for: channelSnapshot.channelIDs),
                                 onSwitchChannel: { startChannel($0, shareSelection: true, present: false) }
                             )
                             .id(ObjectIdentifier(playbackCoordinator))
@@ -193,6 +194,7 @@ struct AppleLiveTVView: View {
                     AppleIPTVGuideGridView(
                         channels: channelSnapshot.channels,
                         guide: guideStore.guide(for: channelSnapshot.channelIDs),
+                        guideRevision: guideStore.revision,
                         entries: premierGuide,
                         favoriteIDs: settings.favoriteChannelIDs,
                         onSelect: play,
@@ -231,6 +233,7 @@ struct AppleLiveTVView: View {
             AppleIPTVGuideGridView(
                 channels: channelSnapshot.channels,
                 guide: guideStore.guide(for: channelSnapshot.channelIDs),
+                guideRevision: guideStore.revision,
                 entries: premierGuide,
                 favoriteIDs: settings.favoriteChannelIDs,
                 onSelect: play,
@@ -596,6 +599,18 @@ struct AppleLiveTVView: View {
 
     private func startChannelNow(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
         if shareSelection { sharePlay.selected(channel) }
+        // Alongside playback, never in front of it: one bounded read of this
+        // channel's first segment, looking for CEA-608 captions the provider
+        // never declared in its manifest. The answer only reaches the trace for
+        // now — see `AppleLiveCaptionProbe` for why nothing acts on it yet.
+        let probed = channel
+        Task.detached(priority: .utility) {
+            await AppleLiveCaptionProbe.shared.probe(
+                channelID: probed.id,
+                playlistURL: probed.streamURL,
+                headers: AppleLiveCaptionProbe.headers(for: probed)
+            )
+        }
         #if os(tvOS)
         if present { ensureTVEngine(for: channel.playbackRequest()) }
         #endif
@@ -823,9 +838,10 @@ struct AppleLiveInlinePlayer: View {
     let sharePlay: AppleSharePlaySessionStore
     let liveChannel: AppleIPTVChannel?
     let channels: [AppleIPTVChannel]
+    let guide: AppleIPTVGuide
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil) {
         self.request = request
         self.coordinator = coordinator
         self.playbackRevision = playbackRevision
@@ -835,6 +851,7 @@ struct AppleLiveInlinePlayer: View {
         self.sharePlay = sharePlay
         self.liveChannel = liveChannel
         self.channels = channels
+        self.guide = guide
         self.onSwitchChannel = onSwitchChannel
         let audioSession = AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
@@ -867,6 +884,8 @@ struct AppleLiveInlinePlayer: View {
                 fullScreenRevision: fullScreenRevision,
                 liveMenu: sharePlayMenu,
                 channels: channels,
+                guide: guide,
+                currentChannelID: liveChannel?.id,
                 onSwitchChannel: onSwitchChannel,
                 onFullScreenChanged: {
                     lifetime.isFullScreen = $0
@@ -983,18 +1002,22 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
     let fullScreenRevision: Int
     let liveMenu: AppleTransportOverlay.SharePlayMenu?
     let channels: [AppleIPTVChannel]
+    let guide: AppleIPTVGuide
+    let currentChannelID: String?
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onFullScreenChanged: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> AppleLivePlayerContainerViewController {
         AppleLivePlayerContainerViewController(playerViewController: viewController,
             coordinator: coordinator, request: request, liveMenu: liveMenu,
-            channels: channels, onSwitchChannel: onSwitchChannel,
+            channels: channels, guide: guide, currentChannelID: currentChannelID,
+            onSwitchChannel: onSwitchChannel,
             onFullScreenChanged: onFullScreenChanged)
     }
 
     func updateUIViewController(_ vc: AppleLivePlayerContainerViewController, context: Context) {
         vc.update(request: request, liveMenu: liveMenu, channels: channels,
+                  guide: guide, currentChannelID: currentChannelID,
                   onSwitchChannel: onSwitchChannel, fullScreenRevision: fullScreenRevision)
         vc.attachPlayerIfNeeded()
     }
@@ -1009,11 +1032,59 @@ private struct AppleLiveFullScreenControls: View {
     let request: ApplePlaybackRequest
     let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
     let channels: [AppleIPTVChannel]
+    /// What is on each channel now. The Live tab has already loaded it; the
+    /// picker only reads it.
+    let guide: AppleIPTVGuide
+    let currentChannelID: String?
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onClose: () -> Void
     let channelPicker: AppleLiveChannelPickerState
     @State private var hideChromeSignal = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The iPad browses channels in a strip along the bottom of the video;
+    /// every other platform keeps the leading-edge panel.
+    @ViewBuilder
+    private var picker: some View {
+        let onSelect: (AppleIPTVChannel) -> Void = { channel in
+            channelPicker.select(channel) { switched in onSwitchChannel?(switched) }
+        }
+        let onDismiss: () -> Void = {
+            channelPicker.dismiss()
+            hideChromeSignal.toggle()
+        }
+        // While the picker is up the transport is out of the hit-test tree, so
+        // its Close button cannot be reached: without this there is no way back
+        // to the Live tab's guide except closing the picker first and waiting
+        // for the chrome to come back (owner, 2026-09-20). Playback survives —
+        // this is the same dismissal the Close button performs.
+        // tvOS is left alone: its picker is a focus destination and a new
+        // focusable control in the header would change where the remote lands.
+        #if os(tvOS)
+        let onBack: (() -> Void)? = nil
+        #else
+        let onBack: (() -> Void)? = {
+            channelPicker.dismiss()
+            onClose()
+        }
+        #endif
+        switch AppleLiveChannelPickerPresentation.current {
+        case .bottomStrip:
+            AppleLiveChannelStripOverlay(
+                channels: channels, guide: guide, currentChannelID: currentChannelID,
+                onSelect: onSelect, onDismiss: onDismiss, onBack: onBack)
+                .ignoresSafeArea(edges: .horizontal)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom))
+        case .panel:
+            AppleLiveChannelPickerOverlay(
+                channels: channels, guide: guide, currentChannelID: currentChannelID,
+                onSelect: onSelect, onDismiss: onDismiss, onBack: onBack)
+                .frame(maxWidth: 340)
+                .frame(maxHeight: .infinity)
+                .transition(.move(edge: .leading))
+        }
+    }
 
     /// tvOS keeps its focus catcher: the picker there is a focus destination,
     /// not a touch target, and removing the surface would strand the engine.
@@ -1068,17 +1139,8 @@ private struct AppleLiveFullScreenControls: View {
                         channelPicker.dismiss()
                         hideChromeSignal.toggle()
                     }
-                AppleLiveChannelPickerOverlay(channels: channels, onSelect: { channel in
-                    channelPicker.select(channel) { switched in onSwitchChannel?(switched) }
-                }, onDismiss: { 
-                    channelPicker.dismiss()
-                    hideChromeSignal.toggle()
-                })
-                .ignoresSafeArea()
-                .frame(maxWidth: 340)
-                .frame(maxHeight: .infinity)
-                .zIndex(1)
-                .transition(.move(edge: .leading))
+                picker
+                    .zIndex(1)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -1104,6 +1166,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private var surfaceHost: UIHostingController<ApplePlaybackSurfaceView>?
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
     private var channels: [AppleIPTVChannel]
+    private var guide: AppleIPTVGuide
+    private var currentChannelID: String?
     private var onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     private let onFullScreenChanged: (Bool) -> Void
 
@@ -1111,13 +1175,15 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private var timeControlObservation: NSKeyValueObservation?
     private var muteObservation: NSKeyValueObservation?
 
-    init(playerViewController: AVPlayerViewController, coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onFullScreenChanged: @escaping (Bool) -> Void) {
+    init(playerViewController: AVPlayerViewController, coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), currentChannelID: String? = nil, onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onFullScreenChanged: @escaping (Bool) -> Void) {
         self.playerViewController = playerViewController
         self.onFullScreenChanged = onFullScreenChanged
         self.coordinator = coordinator
         self.request = request
         self.liveMenu = liveMenu
         self.channels = channels
+        self.guide = guide
+        self.currentChannelID = currentChannelID
         self.onSwitchChannel = onSwitchChannel
         super.init(nibName: nil, bundle: nil)
     }
@@ -1250,11 +1316,14 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     }
 
     func update(request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?,
-                channels: [AppleIPTVChannel], onSwitchChannel: ((AppleIPTVChannel) -> Void)?,
+                channels: [AppleIPTVChannel], guide: AppleIPTVGuide, currentChannelID: String?,
+                onSwitchChannel: ((AppleIPTVChannel) -> Void)?,
                 fullScreenRevision: Int) {
         self.request = request
         self.liveMenu = liveMenu
         self.channels = channels
+        self.guide = guide
+        self.currentChannelID = currentChannelID
         self.onSwitchChannel = onSwitchChannel
         self.fullScreenRevision = fullScreenRevision
         if isViewLoaded { updateInlineSurface() }
@@ -1265,7 +1334,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             playPauseButton.accessibilityLabel = playing ? "Pause" : "Play"
         }
         presentedFullscreen?.update(request: request, liveMenu: liveMenu,
-                                    channels: channels, onSwitchChannel: onSwitchChannel)
+                                    channels: channels, guide: guide, currentChannelID: currentChannelID,
+                                    onSwitchChannel: onSwitchChannel)
         // UIKit presentation calls back into SwiftUI state; leave this update first.
         if fullScreenRevision != presentedRevision, presentationTask == nil {
             presentationTask = Task { @MainActor [weak self] in
@@ -1310,6 +1380,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             request: request,
             liveMenu: liveMenu,
             channels: channels,
+            guide: guide,
+            currentChannelID: currentChannelID,
             onSwitchChannel: onSwitchChannel
         )
         presentedFullscreen = fullscreen
@@ -1330,26 +1402,31 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
     init(playerViewController: AVPlayerViewController, inlineContainer: AppleLivePlayerContainerViewController,
          coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest,
          liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel],
+         guide: AppleIPTVGuide, currentChannelID: String?,
          onSwitchChannel: ((AppleIPTVChannel) -> Void)?) {
         self.playerViewController = playerViewController
         self.inlineContainer = inlineContainer
         self.coordinator = coordinator
         controlsHost = UIHostingController(rootView: AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
-            channels: channels, onSwitchChannel: onSwitchChannel, onClose: {},
+            channels: channels, guide: guide, currentChannelID: currentChannelID,
+            onSwitchChannel: onSwitchChannel, onClose: {},
             channelPicker: channelPicker))
         super.init(nibName: nil, bundle: nil)
-        update(request: request, liveMenu: liveMenu, channels: channels, onSwitchChannel: onSwitchChannel)
+        update(request: request, liveMenu: liveMenu, channels: channels,
+               guide: guide, currentChannelID: currentChannelID, onSwitchChannel: onSwitchChannel)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?,
-                channels: [AppleIPTVChannel], onSwitchChannel: ((AppleIPTVChannel) -> Void)?) {
+                channels: [AppleIPTVChannel], guide: AppleIPTVGuide, currentChannelID: String?,
+                onSwitchChannel: ((AppleIPTVChannel) -> Void)?) {
         controlsHost.rootView = AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
-            channels: channels, onSwitchChannel: onSwitchChannel,
+            channels: channels, guide: guide, currentChannelID: currentChannelID,
+            onSwitchChannel: onSwitchChannel,
             onClose: { [weak self] in self?.dismiss(animated: true) },
             channelPicker: channelPicker)
     }
@@ -1459,89 +1536,6 @@ private class AppleLiveChromeViewController: UIViewController, UIGestureRecogniz
         return button
     }
 
-}
-
-struct AppleLiveChannelPickerOverlay: View {
-    let channels: [AppleIPTVChannel]
-    let onSelect: (AppleIPTVChannel) -> Void
-    let onDismiss: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Channels")
-                    .font(.headline)
-                Spacer()
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(.rect)
-                }
-                .accessibilityLabel("Close channels")
-                .accessibilityIdentifier("live.picker.close")
-                .buttonStyle(.plain)
-            }
-            .padding()
-            #if os(iOS)
-            .background(.regularMaterial)
-            #else
-            .background(Color.black.opacity(0.8))
-            #endif
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(channels) { channel in
-                        Button {
-                            onSelect(channel)
-                        } label: {
-                            HStack {
-                                if let url = channel.logoURL {
-                                    AsyncImage(url: url) { image in
-                                        image.resizable().scaledToFit()
-                                    } placeholder: { Color.clear }
-                                    .frame(width: 44, height: 44)
-                                } else {
-                                    Color.clear.frame(width: 44, height: 44)
-                                }
-                                Text(channel.name)
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-                            .padding(.vertical, 8)
-                            .contentShape(.rect)
-                            // One element per row. Left as a container, the row
-                            // published its logo and its title as two elements
-                            // covering the same rectangle; a touch at the row's
-                            // centre resolved to the title, not to the row, so
-                            // every visible channel read as unhittable and
-                            // VoiceOver offered the name with no action
-                            // (2026-09-19). `.combine` on the Button is not
-                            // enough — the label's children have to go.
-                            .accessibilityElement(children: .ignore)
-                        }
-                        .accessibilityLabel(channel.name)
-                        .accessibilityIdentifier("live.picker.channel.\(channel.id)")
-                        #if os(tvOS)
-                        .buttonStyle(.card)
-                        #else
-                        .buttonStyle(.plain)
-                        #endif
-                        Divider()
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .accessibilityIdentifier("live.picker.list")
-            #if os(iOS)
-            .background(.regularMaterial)
-            #else
-            .background(Color.black.opacity(0.8))
-            #endif
-        }
-    }
 }
 
 #endif
@@ -1670,6 +1664,9 @@ struct AppleLibraryView: View {
     @State private var selectedHero: AppleLibrarySeries?
     @State private var selectedHeroAutoPlay = false
     @State private var showsSelectedHero = false
+    /// Textless hero art, keyed by media id, once TMDB has been asked for it.
+    /// Empty is the normal state on first paint — see `upgradeHeroArtwork`.
+    @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
     @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
@@ -1727,9 +1724,15 @@ struct AppleLibraryView: View {
         TimelineView(.periodic(from: .now, by: AppleHeroRotation.interval)) { context in
             if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
                 let featured = heroes[index]
+                let item = heroItem(featured)
+                // The wordmark was never passed. `AppleFeaturedHero.wordmark`
+                // defaults to nil, so `AppleTVBillboardTitleTreatment` could
+                // only ever answer `.text` here, which is exactly what the
+                // owner saw on the Apple TV Library hero (2026-09-20).
                 AppleFeaturedHero(
-                    item: library.catalogItem(for: featured),
+                    item: item,
                     viewportSize: viewportSize,
+                    wordmark: item.logoURL,
                     rotationCount: heroes.count,
                     rotationIndex: index
                 ) {
@@ -1741,6 +1744,45 @@ struct AppleLibraryView: View {
                 }
                 .padding(.horizontal, heroHorizontalPadding)
             }
+        }
+        .task(id: heroUpgradeIdentity(heroes)) { await upgradeHeroArtwork(heroes) }
+    }
+
+    /// The hero's own record, with any textless art that has since arrived.
+    private func heroItem(_ group: AppleLibrarySeries) -> AppleCatalogItem {
+        let item = library.catalogItem(for: group)
+        guard let upgrade = heroArtwork[item.mediaID] else { return item }
+        return item.withHeroArtwork(backgroundURL: upgrade.backdropURL, logoURL: upgrade.logoURL)
+    }
+
+    private func heroUpgradeIdentity(_ heroes: [AppleLibrarySeries]) -> String {
+        heroes.map { library.catalogItem(for: $0).mediaID }.joined(separator: ",")
+    }
+
+    /// Asks TMDB for a backdrop with no title burned into it, for the handful
+    /// of titles the billboard rotates through.
+    ///
+    /// Never on the way to first paint: the hero has already drawn the art the
+    /// Library resolver cached for it, and this only swaps that art if a
+    /// textless one exists. `AppleHeroArtworkUpgrade` answers from the
+    /// metadata disk cache after the first visit, so the swap is a first-run
+    /// event, not something the viewer sees every time.
+    private func upgradeHeroArtwork(_ heroes: [AppleLibrarySeries]) async {
+        guard settings.metadataEnabled,
+              let configuration = try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) else { return }
+        for group in heroes {
+            let item = library.catalogItem(for: group)
+            guard heroArtwork[item.mediaID] == nil,
+                  let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item) else { continue }
+            let upgrade = await AppleHeroArtworkUpgrade.shared.artwork(
+                imdbID: imdbID,
+                kind: item.type == "series" ? .series : .movie,
+                configuration: configuration
+            )
+            guard !Task.isCancelled else { return }
+            // Nothing to show for it is still an answer worth holding on to:
+            // it stops the loop asking again every time the view reappears.
+            heroArtwork[item.mediaID] = upgrade
         }
     }
 

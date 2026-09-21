@@ -1237,6 +1237,82 @@ final class AppleiOSUITests: XCTestCase {
         return false
     }
 
+    /// The cross-device scaling sweep (2026-09-20): Discover, Library, Live and
+    /// the full-screen live player with its channel picker open, in every
+    /// orientation this device supports, so the same screens can be compared
+    /// side by side across the iPhone and iPad simulators. Adds nothing and
+    /// changes no saved state.
+    func testScalingSweepIsPhotographed() {
+        continueAfterFailure = true
+        executionTimeAllowance = 3600
+        let idiom = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
+        let orientations: [(UIDeviceOrientation, String)] = [(.portrait, "portrait"), (.landscapeLeft, "landscape")]
+        for (orientation, orientationName) in orientations {
+            for route in ["discover", "library", "live"] {
+                app.terminate()
+                app.launchArguments = []
+                XCUIDevice.shared.orientation = orientation
+                launch(screen: route)
+                XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+                Thread.sleep(forTimeInterval: route == "discover" ? 26 : 12)
+                attach("scale-\(idiom)-\(orientationName)-\(route)")
+            }
+        }
+
+        // The full-screen live player, and the channel picker in whichever
+        // presentation this device uses — the iPad's bottom strip, the phone's
+        // leading panel.
+        for (orientation, orientationName) in orientations {
+            app.terminate()
+            app.launchArguments = ["-OpenStreamHoldPlayerChrome", "YES"]
+            XCUIDevice.shared.orientation = orientation
+            launch(screen: "live")
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+            let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+            guard channels.firstMatch.waitForExistence(timeout: 60) else {
+                crawlNote("no live channel appeared in \(orientationName)")
+                continue
+            }
+            // In landscape the guide sits below the pinned player and its first
+            // row can start off-screen, where `tap()` has no hit point.
+            var opened = tapIfPossible(channels.firstMatch)
+            for _ in 0..<3 where !opened {
+                app.swipeUp()
+                Thread.sleep(forTimeInterval: 1)
+                opened = tapIfPossible(channels.allElementsBoundByIndex.first { isSafelyHittable($0) } ?? channels.firstMatch)
+            }
+            guard opened else {
+                crawlNote("no live channel could be opened in \(orientationName)")
+                continue
+            }
+            guard app.buttons["player.close"].waitForExistence(timeout: 40) else {
+                crawlNote("the live player did not reach full screen in \(orientationName)")
+                continue
+            }
+            Thread.sleep(forTimeInterval: 6)
+            _ = revealPlayerControls()
+            attach("scale-\(idiom)-\(orientationName)-live-fullscreen")
+            guard tapIfPossible(app.buttons["player.channels"].firstMatch) else {
+                crawlNote("the Channels button was not reachable in \(orientationName)")
+                continue
+            }
+            let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "live.picker.channel."))
+            XCTAssertTrue(choices.firstMatch.waitForExistence(timeout: 10), "the channel picker did not open")
+            Thread.sleep(forTimeInterval: 2)
+            attach("scale-\(idiom)-\(orientationName)-live-picker")
+            // The picker's own way back to the guide. While the picker is up the
+            // transport is out of the hit-test tree, so this is the only control
+            // that can reach it.
+            let back = app.buttons["live.picker.back"].firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5), "the picker offered no way back to the guide")
+            XCTAssertTrue(tapIfPossible(back), "the picker's Guide button was not hittable")
+            XCTAssertTrue(app.buttons["player.fullscreen"].waitForExistence(timeout: 15),
+                          "Back to guide did not land on the Live tab with the inline player still up")
+            Thread.sleep(forTimeInterval: 2)
+            attach("scale-\(idiom)-\(orientationName)-live-after-back")
+        }
+    }
+
     func testLiveTappedStatesArePhotographed() {
         // Two queries cannot both land inside a three-second auto-hide, and the
         // second one used to fail on a chrome that had already gone.

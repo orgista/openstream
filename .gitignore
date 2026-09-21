@@ -10,3 +10,4 @@ native/android-xr/app/src/main/assets/
 artifacts/
 .claude/
 *.old.*
+native/apple/verification-artifacts/

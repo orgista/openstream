@@ -53,6 +53,15 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
     public let name: String
     public let posterURL: URL?
     public let backgroundURL: URL?
+    /// The title's wordmark art, when the meta response carried one.
+    ///
+    /// Optional, and decoded with `decodeIfPresent`, so cached payloads written
+    /// before the field existed still read back. The Library hero had no way to
+    /// show a wordmark at all because this was dropped on the floor: the meta
+    /// response that fills a Library card already contains `logo`, and
+    /// `AppleLibraryMetadataResolver.liveLookup` simply did not copy it across
+    /// (owner 2026-09-20: "wordmarks not loading on (library) ap tv").
+    public let logoURL: URL?
     public let summary: String?
     public let releaseInfo: String?
     public let rating: Double?
@@ -81,7 +90,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
         cast: [String]? = nil,
         director: String? = nil,
         writers: [String]? = nil,
-        year: Int? = nil
+        year: Int? = nil,
+        logoURL: URL? = nil
     ) {
         let normalizedType = String(type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(40))
         let normalizedMediaID = String(mediaID.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
@@ -96,6 +106,7 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         self.posterURL = posterURL
         self.backgroundURL = backgroundURL
+        self.logoURL = logoURL
         self.summary = AppleHTMLEntities.decoded(summary)?.trimmedAndLimited(to: 4_000)
         self.releaseInfo = releaseInfo?.trimmedAndLimited(to: 100)
         self.rating = rating.flatMap { $0.isFinite && (0 ... 10).contains($0) ? $0 : nil }
@@ -138,7 +149,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             cast: try container.decodeIfPresent([String].self, forKey: .cast),
             director: try container.decodeIfPresent(String.self, forKey: .director),
             writers: try container.decodeIfPresent([String].self, forKey: .writers),
-            year: try container.decodeIfPresent(Int.self, forKey: .year)
+            year: try container.decodeIfPresent(Int.self, forKey: .year),
+            logoURL: try container.decodeIfPresent(URL.self, forKey: .logoURL)
         )
     }
 
@@ -170,7 +182,34 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             cast: cast,
             director: director,
             writers: writers,
-            year: year
+            year: year,
+            logoURL: logoURL
+        )
+    }
+
+    /// Returns a copy whose hero art has been upgraded in place.
+    ///
+    /// Everything else — identity included — stays put, so swapping in a
+    /// textless backdrop after first paint cannot change a view's identity and
+    /// so cannot move focus on tvOS.
+    public func withHeroArtwork(backgroundURL: URL?, logoURL: URL?) -> AppleCatalogItem {
+        AppleCatalogItem(
+            mediaID: mediaID,
+            type: type,
+            name: name,
+            posterURL: posterURL,
+            backgroundURL: backgroundURL ?? self.backgroundURL,
+            summary: summary,
+            releaseInfo: releaseInfo,
+            rating: rating,
+            contentRating: contentRating,
+            formatBadges: formatBadges,
+            genres: genres,
+            cast: cast,
+            director: director,
+            writers: writers,
+            year: year,
+            logoURL: logoURL ?? self.logoURL
         )
     }
 
@@ -192,7 +231,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             cast: cast ?? (details.cast.isEmpty ? nil : details.cast),
             director: director ?? details.director,
             writers: writers ?? (details.writers.isEmpty ? nil : details.writers),
-            year: year ?? details.year
+            year: year ?? details.year,
+            logoURL: logoURL ?? details.logoURL
         )
     }
 }

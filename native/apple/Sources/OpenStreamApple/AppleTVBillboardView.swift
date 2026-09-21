@@ -110,16 +110,7 @@ struct AppleTVBillboard<Actions: View>: View {
     /// "Action · Comedy · 2024" from the item's own fields; nothing when it has
     /// none, so the block never shows a lonely separator.
     private var metadataLine: String? {
-        var parts: [String] = []
-        if let genres = item.genres {
-            parts += genres.prefix(2)
-        }
-        if let year = item.year {
-            parts.append(String(year))
-        } else if let release = item.releaseInfo, !release.isEmpty {
-            parts.append(release)
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        AppleBillboardCopy.metadataLine(genres: item.genres, year: item.year, releaseInfo: item.releaseInfo)
     }
 }
 

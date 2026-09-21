@@ -10,6 +10,13 @@ private final class GuideScrollState {
 public struct AppleIPTVGuideGridView: View {
     let channels: [AppleIPTVChannel]
     let guide: AppleIPTVGuide
+    /// Bumped by `AppleIPTVGuideStore` whenever programmes arrive. Without it
+    /// in the projection's identity the grid kept whatever it had projected
+    /// before the guide loaded — every row reading "No information" until the
+    /// next minute tick happened to rebuild it (measured on the iPad,
+    /// 2026-09-20: the channel picker listed real programmes while the grid
+    /// behind it still said there were none).
+    let guideRevision: Int
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
     let onSelect: (AppleIPTVChannel) -> Void
@@ -25,12 +32,14 @@ public struct AppleIPTVGuideGridView: View {
     
     @ScaledMetric(relativeTo: .body) private var rowHeight = 76.0
 
-    public init(channels: [AppleIPTVChannel], guide: AppleIPTVGuide, entries: [AppleChannelLineupEntry],
+    public init(channels: [AppleIPTVChannel], guide: AppleIPTVGuide, guideRevision: Int = 0,
+                entries: [AppleChannelLineupEntry],
                 favoriteIDs: Set<String>, onSelect: @escaping (AppleIPTVChannel) -> Void,
                 onToggleFavorite: @escaping (String) -> Void,
                 onVisibleChannels: @escaping (Set<String>) async -> Void) {
         self.channels = channels
         self.guide = guide
+        self.guideRevision = guideRevision
         self.entries = entries
         self.favoriteIDs = favoriteIDs
         self.onSelect = onSelect
@@ -112,8 +121,8 @@ public struct AppleIPTVGuideGridView: View {
                 }
             }
             .background(Color.black)
-            .task(id: GuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)) {
-                let input = GuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)
+            .task(id: GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)) {
+                let input = GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)
                 let now = context.date
                 
                 let result = await Task.detached(priority: .userInitiated) {
@@ -206,6 +215,7 @@ public struct AppleIPTVGuideGridView: View {
 
 private struct GuideProjectionInput: Equatable, Sendable {
     let channels: [AppleIPTVChannel]
+    let guideRevision: Int
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
     let window: DateInterval

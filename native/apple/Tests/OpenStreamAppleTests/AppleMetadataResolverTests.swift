@@ -14,9 +14,16 @@ struct AppleMetadataResolverTests {
         let oversized = metadataSource(host: "oversized.fixture", name: "Oversized")
         let insecure = metadataSource(host: "insecure.fixture", name: "Insecure")
         let defaultSource = metadataSource(host: "default.fixture", name: "Default")
+        // This test is about *ordering and merging*, not the deadline: it has
+        // to walk all seven fixtures to assert the host order. Seven 5 ms
+        // sleeps fit a 250 ms budget on an idle machine and do not when the
+        // whole suite is running in parallel, which made it fail roughly one
+        // run in four — every assertion at once, because a cut-short walk
+        // merges nothing. The deadline itself is covered by the next test,
+        // which keeps its 250 ms and asserts the elapsed time.
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
-            overallDeadline: .milliseconds(250),
+            overallDeadline: .seconds(5),
             defaultSource: defaultSource
         )
 

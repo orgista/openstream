@@ -37,6 +37,13 @@ public struct AppleTMDBDetails: Equatable, Sendable {
     public let overview: String?
     public let posterURL: URL?
     public let backdropURL: URL?
+    /// The backdrop with no title burned into it, when the record has one.
+    ///
+    /// `backdropURL` already prefers this, so most callers need only that one.
+    /// A hero that has usable art from somewhere else needs to know whether
+    /// TMDB actually found something *better*, and swapping one
+    /// title-in-the-picture backdrop for another is not better.
+    public let textlessBackdropURL: URL?
     public let logoURL: URL?
     public let trailerYouTubeKeys: [String]
 
@@ -62,7 +69,8 @@ public struct AppleTMDBDetails: Equatable, Sendable {
         backdropURL: URL? = nil,
         logoURL: URL? = nil,
         trailerYouTubeKey: String? = nil,
-        trailerYouTubeKeys: [String] = []
+        trailerYouTubeKeys: [String] = [],
+        textlessBackdropURL: URL? = nil
     ) {
         self.mediaID = mediaID
         self.mediaType = mediaType
@@ -81,6 +89,7 @@ public struct AppleTMDBDetails: Equatable, Sendable {
         self.overview = AppleHTMLEntities.decoded(overview)
         self.posterURL = posterURL
         self.backdropURL = backdropURL
+        self.textlessBackdropURL = textlessBackdropURL
         self.logoURL = logoURL
         self.trailerYouTubeKeys = ([trailerYouTubeKey].compactMap { $0 } + trailerYouTubeKeys)
             .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
@@ -355,6 +364,23 @@ public struct AppleTMDBClient: Sendable {
                 return (lhs.voteAverage ?? 0) > (rhs.voteAverage ?? 0)
             }
             .first?.filePath
+        // The hero draws the wordmark itself, so it wants the frame without
+        // one painted on. `include_image_language=en,null` already brings the
+        // textless entries back in the same request this response came from —
+        // choosing between them costs nothing (owner 2026-09-20).
+        let heroArtwork = AppleTextlessBackdropPolicy.choose(
+            backdrops: (value.images?.backdrops ?? []).map(\.artworkImage),
+            backdropPath: value.backdropPath,
+            posterPath: value.posterPath
+        )
+        // A poster answer leaves `backdropURL` nil on purpose: `posterURL`
+        // already carries it, and a hero that falls back to a poster must not
+        // draw a wordmark over art that already says the name.
+        let backdropPath = (heroArtwork?.isBackdrop ?? false) ? heroArtwork?.path : nil
+        let textlessPath: String? = {
+            guard case .textlessBackdrop(let path)? = heroArtwork else { return nil }
+            return path
+        }()
         return AppleTMDBDetails(
             runtimeMinutes: runtime.flatMap { (1 ... 24 * 60).contains($0) ? $0 : nil },
             genres: value.genres.prefix(12).compactMap { bounded($0.name, limit: 60) },
@@ -363,9 +389,10 @@ public struct AppleTMDBClient: Sendable {
             tagline: bounded(value.tagline, limit: 300),
             overview: bounded(value.overview, limit: 4_000),
             posterURL: imageURL(path: value.posterPath, width: "w500"),
-            backdropURL: imageURL(path: value.backdropPath, width: "w1280"),
+            backdropURL: imageURL(path: backdropPath, width: "w1280"),
             logoURL: imageURL(path: logoPath, width: "w500"),
-            trailerYouTubeKeys: trailers
+            trailerYouTubeKeys: trailers,
+            textlessBackdropURL: imageURL(path: textlessPath, width: "w1280")
         )
     }
 
@@ -432,8 +459,25 @@ public struct AppleTMDBClient: Sendable {
     }
     private struct CrewValue: Decodable, Sendable { let name: String?; let job: String? }
     private struct Videos: Decodable, Sendable { let results: [Video] }
-    private struct Images: Decodable, Sendable { let logos: [Logo] }
-    private struct Logo: Decodable, Sendable {
+
+    /// Both lists default to empty rather than being required. `images` is
+    /// decoded with `try?`, so a record that has logos but no backdrops (or
+    /// the other way round) used to throw the whole block away and take the
+    /// wordmark with it.
+    private struct Images: Decodable, Sendable {
+        let logos: [ImageEntry]
+        let backdrops: [ImageEntry]
+
+        enum CodingKeys: String, CodingKey { case logos, backdrops }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            logos = (try? container.decode([ImageEntry].self, forKey: .logos)) ?? []
+            backdrops = (try? container.decode([ImageEntry].self, forKey: .backdrops)) ?? []
+        }
+    }
+
+    private struct ImageEntry: Decodable, Sendable {
         let filePath: String?
         let language: String?
         let voteAverage: Double?
@@ -441,6 +485,10 @@ public struct AppleTMDBClient: Sendable {
             case filePath = "file_path"
             case language = "iso_639_1"
             case voteAverage = "vote_average"
+        }
+
+        var artworkImage: AppleArtworkImage {
+            AppleArtworkImage(filePath: filePath, languageCode: language, voteAverage: voteAverage)
         }
     }
     private struct Video: Decodable, Sendable {
@@ -612,7 +660,8 @@ public struct AppleMetadataResolver: Sendable {
             logoURL: lhs.logoURL ?? rhs.logoURL,
             trailerYouTubeKeys: (lhs.trailerYouTubeKeys + rhs.trailerYouTubeKeys).reduce(into: []) { keys, key in
                 if !keys.contains(key) { keys.append(key) }
-            }
+            },
+            textlessBackdropURL: lhs.textlessBackdropURL ?? rhs.textlessBackdropURL
         )
     }
 

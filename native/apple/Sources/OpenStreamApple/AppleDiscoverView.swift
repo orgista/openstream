@@ -78,6 +78,9 @@ struct AppleDiscoverView: View {
     /// the billboard simply never asked, which is why heroes only ever showed
     /// text (owner 2026-09-15).
     @State private var heroWordmarks: [String: URL] = [:]
+    /// Textless hero art, keyed by media id, once TMDB has been asked. Empty
+    /// through first paint by design — see `upgradeHeroArtwork`.
+    @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -165,6 +168,10 @@ struct AppleDiscoverView: View {
                                 await resolveHeroWordmarks(heroes)
                                 try? await Task.sleep(for: .seconds(2))
                                 await resolveHeroWordmarks(heroes)
+                                // Last, and only after the billboard has long
+                                // since drawn: the textless backdrop is an
+                                // upgrade, never something first paint waits on.
+                                await upgradeHeroArtwork(heroes)
                             }
                         }
 
@@ -545,17 +552,50 @@ struct AppleDiscoverView: View {
         )
     }
 
-    @ViewBuilder
+    /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
+    /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(_ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0) -> some View {
-        AppleHomeBillboard(
-            item: value.item,
+        let item = heroItem(value.item)
+        return AppleHomeBillboard(
+            item: item,
             sources: sourceStore.sources,
             settings: settings,
             viewportSize: viewportSize,
-            wordmark: heroWordmarks[value.item.mediaID],
+            wordmark: heroWordmarks[value.item.mediaID] ?? item.logoURL,
             rotationCount: rotationCount,
             rotationIndex: rotationIndex
         ) { featuredActions(value) }
+    }
+
+    /// The hero's own record, with any textless art that has since arrived.
+    /// `id` is unchanged by the swap, so the billboard keeps its identity and
+    /// tvOS keeps its focus.
+    private func heroItem(_ item: AppleCatalogItem) -> AppleCatalogItem {
+        guard let upgrade = heroArtwork[item.mediaID] else { return item }
+        return item.withHeroArtwork(backgroundURL: upgrade.backdropURL, logoURL: upgrade.logoURL)
+    }
+
+    /// Asks TMDB for a backdrop with no title burned into it, for the five
+    /// titles the billboard rotates through.
+    ///
+    /// This runs after the wordmark passes, so the art on screen is already
+    /// the art the catalog gave us; a textless backdrop replaces it only if
+    /// one exists. `AppleHeroArtworkUpgrade` answers from the metadata disk
+    /// cache once a title has been seen, so later launches draw the right art
+    /// straight away.
+    private func upgradeHeroArtwork(_ heroes: [IndexedCatalogItem]) async {
+        guard let configuration = metadataConfiguration else { return }
+        for hero in heroes {
+            guard heroArtwork[hero.item.mediaID] == nil,
+                  let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: hero.item) else { continue }
+            let upgrade = await AppleHeroArtworkUpgrade.shared.artwork(
+                imdbID: imdbID,
+                kind: hero.item.type == "series" ? .series : .movie,
+                configuration: configuration
+            )
+            guard !Task.isCancelled else { return }
+            heroArtwork[hero.item.mediaID] = upgrade
+        }
     }
 
     /// Reads whatever the prefetcher has already cached for the heroes. Cache

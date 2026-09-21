@@ -439,4 +439,51 @@ final class AppleTVFocusUITests: XCTestCase {
 
         XCTAssertTrue(focusedElement.exists, "pressing down from Play left focus nowhere")
     }
+
+    // MARK: - Hero artwork
+
+    /// Owner 2026-09-20: "wordmarks not loading on (library) ap tv".
+    ///
+    /// The Library hero built `AppleFeaturedHero` without a `wordmark:`
+    /// argument at all, so `AppleTVBillboardTitleTreatment` could only ever
+    /// answer `.text`. This walks to the Library tab with the remote and keeps
+    /// the frame, so the wordmark lockup is something a person can look at.
+    func testLibraryHeroDrawsItsWordmarkOverTheBackdrop() {
+        launch(screen: "library")
+        let play = element("home.featured.play")
+        XCTAssertTrue(wait(for: play, 60), "the Library billboard never appeared")
+        // Give the wordmark and any textless upgrade time to land before the
+        // frame is taken; neither blocks the billboard from drawing.
+        Thread.sleep(forTimeInterval: 8.0)
+
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "tvos-library-hero-wordmark"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        // Focus has to reach the hero for the frame to be worth anything.
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        let focusedShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        focusedShot.name = "tvos-library-hero-focused"
+        focusedShot.lifetime = .keepAlways
+        add(focusedShot)
+
+        print("LIBRARY HERO focused='\(focusedElement.label)'")
+    }
+
+    /// Discover's hero already worked. The textless change touches the same
+    /// billboard, so this is the no-regression frame beside it.
+    func testDiscoverHeroStillDrawsAfterTheTextlessChange() {
+        launch(screen: "discover")
+        let play = element("home.featured.play")
+        XCTAssertTrue(wait(for: play, 60), "the Discover billboard never appeared")
+        Thread.sleep(forTimeInterval: 8.0)
+
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "tvos-discover-hero"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertTrue(play.exists, "Discover lost its billboard actions")
+    }
 }

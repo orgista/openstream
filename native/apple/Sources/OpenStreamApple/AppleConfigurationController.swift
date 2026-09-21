@@ -12,7 +12,7 @@ final class AppleConfigurationController {
     private let settings: AppleSettingsStore
     private let mediaIndex: AppleMediaIndexStore
     private let defaults: UserDefaults
-    private let cloud: NSUbiquitousKeyValueStore
+    private let cloud: AppleCloudKeyValueStore
     private var pendingWrite: Task<Void, Never>?
     private var lastContent: Data?
     private var applying = false
@@ -21,13 +21,17 @@ final class AppleConfigurationController {
     private static let savedAtKey = "openstream.backup.savedAt.v1"
 
     init(sources: AppleSourceStore, settings: AppleSettingsStore, mediaIndex: AppleMediaIndexStore,
-         defaults: UserDefaults = .standard, cloud: NSUbiquitousKeyValueStore = .default) {
+         defaults: UserDefaults = .standard, cloud: AppleCloudKeyValueStore = NSUbiquitousKeyValueStore.default) {
         self.sources = sources
         self.settings = settings
         self.mediaIndex = mediaIndex
         self.defaults = defaults
         self.cloud = cloud
-        syncEnabled = defaults.bool(forKey: AppleKeychainStore.syncPreferenceKey)
+        // The Apple TV has no switch to read, so the policy answers for it:
+        // always on, and read-only. See `AppleConfigurationSyncPolicy`.
+        syncEnabled = AppleConfigurationSyncPolicy.isEnabled(
+            storedPreference: defaults.bool(forKey: AppleKeychainStore.syncPreferenceKey)
+        )
     }
 
     func start() async {
@@ -35,6 +39,22 @@ final class AppleConfigurationController {
         await mediaIndex.load()
         started = true
         lastContent = try? contentFingerprint()
+        // A device that syncs without ever being asked still has to move its
+        // existing credentials into the synchronizing keychain. They were
+        // written ThisDeviceOnly, and a synchronizable query does not find a
+        // ThisDeviceOnly item — the Apple TV would have looked signed out of
+        // every source it had already signed in to. Runs once: the migration
+        // writes the preference it reads.
+        if AppleConfigurationSyncPolicy.isAlwaysOn,
+           !defaults.bool(forKey: AppleKeychainStore.syncPreferenceKey) {
+            do {
+                try AppleKeychainStore.setSynchronizationEnabled(true)
+                appleTrace("configuration sync: migrated the keychain to synchronizing")
+            } catch {
+                appleTrace("configuration sync: keychain migration failed, reading local credentials only")
+            }
+        }
+        appleTrace("configuration sync start: enabled=\(syncEnabled) publishes=\(AppleConfigurationSyncPolicy.publishesChanges())")
         if syncEnabled {
             cloud.synchronize()
             await readCloud()
@@ -69,7 +89,9 @@ final class AppleConfigurationController {
     }
 
     func setSyncEnabled(_ enabled: Bool) async {
-        guard enabled != syncEnabled else { return }
+        // Nothing on the Apple TV can reach this, but if anything ever did,
+        // the television's answer is not the viewer's to change.
+        guard AppleConfigurationSyncPolicy.offersToggle(), enabled != syncEnabled else { return }
         do {
             try AppleKeychainStore.setSynchronizationEnabled(enabled)
             syncEnabled = enabled
@@ -89,30 +111,40 @@ final class AppleConfigurationController {
             let content = try contentFingerprint()
             guard content != lastContent else { return }
             lastContent = content
+            // A reader never stamps a local edit. `savedAt` is how `readCloud`
+            // decides whether the cloud snapshot is newer than this device's
+            // configuration; on the Apple TV it means "the snapshot I last
+            // applied", so a setting nudged with the remote cannot leave the
+            // television permanently ahead of the phone and stop it syncing.
+            guard AppleConfigurationSyncPolicy.publishesChanges() else { return }
             defaults.set(Date.now, forKey: Self.savedAtKey)
             if syncEnabled { scheduleWrite() }
         } catch { result = "Could not prepare configuration" }
     }
 
     func readCloud() async {
-        guard started, syncEnabled, !applying else { return }
+        guard started, syncEnabled, !applying else {
+            appleTrace("configuration sync read skipped: started=\(started) enabled=\(syncEnabled) applying=\(applying)")
+            return
+        }
         do {
             applying = true
             try sources.refreshConfigurationKeychain()
             try settings.restoreConfigurationCredentials([:])
             applying = false
-            guard let data = cloud.data(forKey: Self.cloudKey) else { return }
-            guard data.count <= AppleConfigurationSnapshot.maximumCloudBytes else {
-                throw AppleConfigurationError.tooLarge
+            let decision = try AppleCloudConfigurationRead.decide(
+                data: cloud.data(forKey: Self.cloudKey),
+                localSavedAt: defaults.object(forKey: Self.savedAtKey) as? Date
+            )
+            guard case .apply(let snapshot) = decision else {
+                appleTrace("configuration sync read: \(decision.traceDescription)")
+                return
             }
-            let snapshot = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
-            try snapshot.validate()
-            let localDate = defaults.object(forKey: Self.savedAtKey) as? Date ?? .distantPast
-            guard snapshot.savedAt > localDate else { return }
             pendingWrite?.cancel()
             try await apply(snapshot, secrets: nil, mergeSources: false)
             defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
+            appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
             result = "Synced with iCloud"
         } catch { applying = false; result = "Could not restore iCloud configuration" }
     }
@@ -164,6 +196,7 @@ final class AppleConfigurationController {
     }
 
     private func scheduleWrite() {
+        guard AppleConfigurationSyncPolicy.publishesChanges() else { return }
         pendingWrite?.cancel()
         pendingWrite = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(2)) }
