@@ -103,9 +103,25 @@ The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDO
   entry describes them; never into the tree root, never `scratch/`, never `*.log`.
 - Do not create new markdown files, plans, proposals, or handoffs. If you think one is needed, put
   the content in the matching section of the documents above.
-- Build scratch lives in `~/Developer/openstream-build/`: `main-merge-spm` + the DerivedData dirs +
-  the last two builds' `.xcarchive`s. Older archives, `export-*` folders and worktrees are deleted by
-  the tidy pass (`/openstream-tidy`, run at the end of every heartbeat).
+- Build scratch lives in `~/Developer/openstream-build/`: `main-merge-spm` + the three
+  `DerivedData-deploy-{ios,tvos,macos}` dirs + the last two builds' `.xcarchive`s +
+  `ExportOptions*.plist` + the signing material. Nothing else belongs there. A fourth DerivedData
+  dir is a bug, not a convenience.
+- **Retired artifacts are archived, not deleted.** The tidy pass moves older `.xcarchive`s,
+  `export-*` folders, worker logs/specs, screenshot piles and media fixtures to
+  `/Volumes/OSArchive/` (`archives/ exports/ logs/ specs/ ui-artifacts/ fixtures/`) — a 4 TB
+  case-insensitive APFS external. Hot build paths NEVER move there: it is ~15x slower on the
+  small-file metadata churn that dominates Swift builds (measured 2026-09-21), and AGENTS.md §1
+  hands out the internal paths verbatim. No symlinks, ever.
+- **Nothing secret goes on `/Volumes/OSArchive`** — it is unencrypted, and that is only safe
+  because of this rule. Private keys, `openstream.keychain-db`, `*.mobileprovision`, `*.m3u`,
+  `pbxproj-backup-*` and `ExportOptions*.plist` stay on the FileVault-encrypted internal disk.
+  Old gate logs can contain `player_api.php?username=…&password=…` traces, so filter by CONTENT
+  and not just by filename before archiving anything.
+- Guard every write to the drive on the mount sentinel, because an unclean eject leaves an empty
+  stub directory behind and a re-attach can land at `/Volumes/OSArchive 1`:
+  `[ -f /Volumes/OSArchive/.osarchive-ok ] || { echo "OSArchive not mounted — STOP"; exit 1; }`
+  Copy with `ditto`, verify, then delete — never `mv` across volumes.
 
 ## 7. Report format (return exactly this, under 60 lines — as your final message, NEVER as a file in the tree)
 ```
