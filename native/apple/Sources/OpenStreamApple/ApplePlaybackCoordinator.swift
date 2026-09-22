@@ -256,16 +256,29 @@ public final class ApplePlaybackCoordinator {
     private var fallbackTotal = 0
     private var fallbackTitle: String? = nil
 
+    // MARK: - Display sleep
+
+    /// Holds the display awake while this coordinator has a picture on screen.
+    /// The coordinator is the only thing every playback path goes through, so
+    /// it is the only thing that needs to know about the lock — see
+    /// `ApplePlaybackWakeLock` for why the live route needed one at all.
+    private let wakeLock: ApplePlaybackWakeLock
+    /// This coordinator's name in the lock. Unique per instance so two players
+    /// on screen at once each hold their own claim.
+    private let wakeOwner = "playback.\(UUID().uuidString)"
+
     public init(
         engine: any ApplePlaybackEngine,
         timeout: Duration = .seconds(20),
         retryDelay: Duration = .seconds(3),
-        progressInterval: Duration = .seconds(5)
+        progressInterval: Duration = .seconds(5),
+        wakeLock: ApplePlaybackWakeLock = .shared
     ) {
         self.engine = engine
         self.timeoutDuration = timeout
         self.retryDelay = retryDelay
         self.progressInterval = progressInterval
+        self.wakeLock = wakeLock
     }
 
     /// Convenience initializer that creates a default engine via the factory so
@@ -282,9 +295,34 @@ public final class ApplePlaybackCoordinator {
         fallbackTask?.cancel()
         timeoutTask?.cancel()
         liveRetryTask?.cancel()
+        // A player that goes away without stopping first must not leave the
+        // television awake for the rest of the day.
+        wakeLock.release(wakeOwner)
     }
 
-    public func beginResolving() { phase = .resolving }
+    /// Every write to `phase` goes through here, so the display assertion can
+    /// never drift out of step with what is on screen.
+    private func setPhase(_ newPhase: ApplePlaybackPhase) {
+        phase = newPhase
+        updateWakeLock()
+    }
+
+    /// Every write to `route` goes through here, for the same reason: the route
+    /// decides whether there is a picture to keep lit at all.
+    private func setRoute(_ newRoute: ApplePlaybackPresentationRoute) {
+        route = newRoute
+        updateWakeLock()
+    }
+
+    private func updateWakeLock() {
+        if ApplePlaybackWakePolicy.shouldHoldDisplayAwake(phase: phase, route: route) {
+            wakeLock.acquire(wakeOwner)
+        } else {
+            wakeLock.release(wakeOwner)
+        }
+    }
+
+    public func beginResolving() { setPhase(.resolving) }
 
     func configureExternalPlayback(on player: AVPlayer) {
         let playerURL = (player.currentItem?.asset as? AVURLAsset)?.url
@@ -339,8 +377,8 @@ public final class ApplePlaybackCoordinator {
         cancelTimeout()
         cancelLiveRetry()
         engine.stop()
-        phase = .loading
-        route = engine.route
+        setPhase(.loading)
+        setRoute(engine.route)
         appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") route=\(route)")
         startExternalSubtitles(for: request, attempt: attempt)
         setupProgress(for: request)
@@ -411,18 +449,18 @@ public final class ApplePlaybackCoordinator {
         progressCoordinator?.stopObserving()
         progressCoordinator = nil
         engine.stop()
-        phase = .idle
-        route = .none
+        setPhase(.idle)
+        setRoute(.none)
     }
 
-    public func update(_ phase: ApplePlaybackPhase) { self.phase = phase }
+    public func update(_ phase: ApplePlaybackPhase) { setPhase(phase) }
 
     public func reset() {
         stopMonitoring()
         cancelObservation()
         cancelTimeout()
         cancelLiveRetry()
-        phase = .idle
+        setPhase(.idle)
     }
 
     @discardableResult
@@ -431,7 +469,7 @@ public final class ApplePlaybackCoordinator {
         cancelTimeout()
         let failure = ApplePlaybackFailure.classify(error)
         cancelObservation()
-        phase = .failed(failure)
+        setPhase(.failed(failure))
         return failure
     }
 
@@ -576,7 +614,7 @@ public final class ApplePlaybackCoordinator {
             applyEnginePhase(enginePhase, request: request)
         case .route(let newRoute):
             appleTrace("route \(route) → \(newRoute)")
-            route = newRoute
+            setRoute(newRoute)
             setupProgress(for: request)
         case .position(let position):
             handlePosition(position)
@@ -594,20 +632,20 @@ public final class ApplePlaybackCoordinator {
         case .idle:
             break
         case .loading:
-            phase = .loading
+            setPhase(.loading)
         case .playing:
             // The first frame. Everything before this is the wait the owner
             // sees as a spinner, so it is the one timestamp worth having.
             if case .playing = phase {} else { appleTrace("first frame, route=\(route)") }
             let isResume = (phase == .paused)
-            phase = .playing
+            setPhase(.playing)
             cancelTimeout()
             clearFallback()
             if isResume, request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .progress)
             }
         case .paused:
-            phase = .paused
+            setPhase(.paused)
             if request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .paused)
             }
@@ -615,10 +653,10 @@ public final class ApplePlaybackCoordinator {
             break
         case .rebuffering:
             appleTrace("rebuffering")
-            phase = .waiting("Buffering…")
+            setPhase(.waiting("Buffering…"))
         case .stalled(let reconnecting):
             appleTrace("stalled reconnecting=\(reconnecting)")
-            phase = .waiting(reconnecting ? "Reconnecting…" : "Reconnecting…")
+            setPhase(.waiting(reconnecting ? "Reconnecting…" : "Reconnecting…"))
         case .ended:
             handleEnded(request: request)
         case .error(let message):
@@ -630,7 +668,7 @@ public final class ApplePlaybackCoordinator {
     private func handleEnded(request: ApplePlaybackRequest) {
         guard request.isLive else {
             cancelTimeout()
-            phase = .ended
+            setPhase(.ended)
             if request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .stopped)
                 remoteProgressStarted = false
@@ -639,7 +677,7 @@ public final class ApplePlaybackCoordinator {
         }
         if !liveRetryAttempted {
             liveRetryAttempted = true
-            phase = .waiting("Stream ended. Reconnecting…")
+            setPhase(.waiting("Stream ended. Reconnecting…"))
             let delay = retryDelay
             liveRetryTask?.cancel()
             liveRetryTask = Task { @MainActor [weak self] in
@@ -651,10 +689,10 @@ public final class ApplePlaybackCoordinator {
             }
         } else {
             cancelTimeout()
-            phase = .failed(ApplePlaybackFailure(
+            setPhase(.failed(ApplePlaybackFailure(
                 kind: .sourceEnded,
                 message: "The channel stopped sending data."
-            ))
+            )))
         }
     }
 
@@ -795,11 +833,11 @@ public final class ApplePlaybackCoordinator {
     // MARK: - Sync
 
     private func syncFromEngine(request: ApplePlaybackRequest) {
-        route = engine.route
+        setRoute(engine.route)
         setupProgress(for: request)
         if let failure = engine.failure {
             cancelTimeout()
-            phase = .failed(failure)
+            setPhase(.failed(failure))
             return
         }
         applyEnginePhase(engine.phase, request: request)
