@@ -1255,6 +1255,9 @@ struct AppleTVLivePlayerScreen: View {
     /// Whether the channel on screen has ever played a frame. Reset per
     /// channel; it decides what Menu means while the picture is still black.
     @State private var hasPlayed = false
+    /// "Captions on" / "off" / "none", shown briefly after a swipe up.
+    @State private var captionsNotice: String?
+    @State private var captionsNoticeTask: Task<Void, Never>?
     @Binding var footer: AppleTVLiveFooterState
 
     let channel: AppleIPTVChannel
@@ -1431,6 +1434,21 @@ struct AppleTVLivePlayerScreen: View {
                 .accessibilityIdentifier("live.player.surface")
             }
 
+            if let captionsNotice, !footer.isVisible {
+                VStack {
+                    Text(captionsNotice)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(.black.opacity(0.6), in: .capsule)
+                        .padding(.top, metrics.verticalSafeInset)
+                    Spacer()
+                }
+                .transition(.opacity)
+                .accessibilityIdentifier("live.player.captionsNotice")
+            }
+
             if coordinator.phase == .paused {
                 Image(systemName: "pause.fill")
                     .font(.system(size: 72, weight: .semibold))
@@ -1553,8 +1571,35 @@ struct AppleTVLivePlayerScreen: View {
             focus = .surface
         case .exit:
             dismiss()
+        case .toggleCaptions:
+            toggleCaptions()
         case .none, .switchChannel:
             break
+        }
+    }
+
+    /// The live player hides the stock transport and info panel, so without
+    /// this there was no way to reach captions at all during live TV.
+    private func toggleCaptions() {
+        let engine = coordinator.engine
+        let tracks = engine.subtitleTracks
+        let next = AppleCaptionsToggle.nextSelection(selected: engine.activeSubtitleTrackID, visible: tracks)
+        let notice: String
+        if tracks.isEmpty {
+            notice = "No captions on this channel"
+        } else {
+            engine.selectSubtitleTrack(id: next)
+            notice = next == nil ? "Captions off" : "Captions on"
+        }
+        #if DEBUG
+        AppleInteractionTrace.record(.press, "live captions \(notice) tracks=\(tracks.count)")
+        #endif
+        captionsNoticeTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { captionsNotice = notice }
+        captionsNoticeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { captionsNotice = nil }
         }
     }
 

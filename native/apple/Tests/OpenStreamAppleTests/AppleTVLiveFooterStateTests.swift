@@ -31,7 +31,8 @@ struct AppleTVLiveFooterStateTests {
         #expect(state.apply(.swipeDown) == .none)
         #expect(state.apply(.swipeUp) == .hide)
         #expect(!state.isVisible)
-        #expect(state.apply(.swipeUp) == .none)
+        #expect(state.apply(.swipeUp) == .toggleCaptions)
+        #expect(!state.isVisible)
     }
 
     @Test func menuAfterSwipeUpExits() {
@@ -59,9 +60,9 @@ struct AppleTVLiveFooterStateTests {
         #expect(state.apply(.select) == .show)
     }
 
-    @Test func swipeUpOnAFreshPlayerIsIgnored() {
+    @Test func swipeUpOnAFreshPlayerTogglesCaptionsWithoutTouchingTheFooter() {
         var state = AppleTVLiveFooterState()
-        #expect(state.apply(.swipeUp) == .none)
+        #expect(state.apply(.swipeUp) == .toggleCaptions)
         #expect(state.phase == .hidden)
         // Still fresh: the next Menu shows the footer instead of exiting.
         #expect(state.apply(.menu) == .show)

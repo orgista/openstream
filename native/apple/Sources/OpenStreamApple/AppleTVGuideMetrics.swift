@@ -137,7 +137,10 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
 /// state machine so the remote can be asserted without a view.
 ///
 /// From a fresh player the footer is hidden. Menu, Select or a swipe down
-/// shows it; Menu again or a swipe up hides it; once it has been dismissed,
+/// shows it; Menu again or a swipe up hides it. With the footer off screen a
+/// swipe up toggles captions instead (owner 2026-09-21: swipe down already
+/// means the channel picker, so captions take the other direction). Once it
+/// has been dismissed,
 /// Menu leaves playback and returns to the guide. The view applies each
 /// remote command here and acts on the returned effect, so `onExitCommand`
 /// never swallows a Menu press the viewer meant as "back".
@@ -167,6 +170,7 @@ public struct AppleTVLiveFooterState: Equatable, Sendable {
         case hide
         case exit
         case switchChannel
+        case toggleCaptions
     }
 
     public private(set) var phase: Phase
@@ -201,7 +205,7 @@ public struct AppleTVLiveFooterState: Equatable, Sendable {
             phase = .dismissed
             return .hide
         case (.swipeUp, .hidden), (.swipeUp, .dismissed):
-            return .none
+            return .toggleCaptions
 
         case (.channelSelected, .shown):
             return .switchChannel
