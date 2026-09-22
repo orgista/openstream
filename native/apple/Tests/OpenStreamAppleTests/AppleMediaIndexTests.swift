@@ -479,6 +479,50 @@ import Testing
     #expect(store.record(id: record.id)?.title == "A Series")
 }
 
+/// A download is matched to its record by its media id: the record id itself,
+/// or `<record id>:<episode id>` for an episode. The keyed lookup has to give
+/// the same answer the scan over `records` gave, earliest record first.
+@MainActor
+@Test func recordLookupByDownloadMediaIDMatchesTheScanItReplaced() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "record-prefix-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    let instance = UUID()
+    let series = AppleMediaRecord(canonicalID: "tt1000001", kind: .series, title: "A Series",
+        availability: [.init(instanceID: instance, capability: .resolvable, itemReference: "series|tt1000001")])
+    let movie = AppleMediaRecord(canonicalID: "tt1000002", kind: .movie, title: "A Movie",
+        availability: [.init(instanceID: instance, capability: .resolvable, itemReference: "movie|tt1000002")])
+    try await store.replace(instanceID: instance, with: [series, movie])
+    let scan = { (mediaID: String) in
+        store.records.first { mediaID == $0.id || mediaID.hasPrefix($0.id + ":") }?.id
+    }
+    for mediaID in [series.id, movie.id, "\(series.id):\(series.id):1:2", "\(movie.id)", "\(series.id)x:1:2",
+                    "tt9999999:1:1", "", ":", series.id + ":"] {
+        #expect(store.record(matchingMediaID: mediaID)?.id == scan(mediaID), "\(mediaID)")
+    }
+    #expect(store.record(matchingMediaID: "\(series.id):tt1000001:1:2")?.title == "A Series")
+    #expect(store.record(matchingMediaID: "\(series.id)x:1:2") == nil)
+}
+
+@MainActor
+@Test func recordLookupByDownloadMediaIDObservesTheIndex() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "record-prefix-observe-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    let record = AppleMediaRecord(canonicalID: "tt1000003", kind: .series, title: "Another Series",
+        availability: [.init(instanceID: UUID(), capability: .resolvable, itemReference: "series|tt1000003")])
+    let flag = RecordLookupChangeFlag()
+    withObservationTracking {
+        _ = store.record(matchingMediaID: record.id + ":tt1000003:1:1")
+    } onChange: {
+        Task { @MainActor in flag.changed = true }
+    }
+    try await store.upsert(record)
+    for _ in 0..<50 where !flag.changed { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(flag.changed)
+    #expect(store.record(matchingMediaID: record.id + ":tt1000003:1:1")?.title == "Another Series")
+}
+
 @MainActor
 private final class RecordLookupChangeFlag {
     var changed = false

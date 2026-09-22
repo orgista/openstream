@@ -1811,7 +1811,9 @@ struct AppleLibraryView: View {
     /// `rotatingHero`: two nested `ForEach`es carrying four `let` bindings and a
     /// closure were more than the visionOS type-checker would finish.
     private var sourceShelves: some View {
-        ForEach(library.sources) { source in
+        // Once, not once per shelf: it filters every group per source.
+        let accessory = accessoryShelf
+        return ForEach(library.sources) { source in
             let local = groups.filter { $0.items.first?.sourceID == source.id }
             ForEach([AppleLibraryTitle.Kind.movie, .show, .other], id: \.rawValue) { kind in
                 let titles = local.filter { $0.parsed.kind == kind }
@@ -1820,7 +1822,7 @@ struct AppleLibraryView: View {
                     // source name only disambiguates when there are several (Z9).
                     let kindName = kind == .movie ? "Movies" : kind == .show ? "Shows" : "Other"
                     let name = library.sources.count > 1 ? "\(kindName) · \(source.name)" : kindName
-                    let isFirstShelf = accessoryShelf.map {
+                    let isFirstShelf = accessory.map {
                         $0.sourceIndex == library.sources.firstIndex(where: { $0.id == source.id })
                             && $0.kind == kind
                     } ?? false
@@ -1840,7 +1842,8 @@ struct AppleLibraryView: View {
                 if let error = library.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle").padding(.horizontal, 16)
                 }
-                if !library.continueWatching.isEmpty { shelf("Continue Watching", library.continueWatching, progress: true) }
+                let resumable = library.continueWatching
+                if !resumable.isEmpty { shelf("Continue Watching", resumable, progress: true) }
                 sourceShelves
                 if !groups.isEmpty { shelf("Recently Added", library.sorted(.added).prefix(24).map { $0 }) }
                 if library.isLoading && groups.isEmpty {

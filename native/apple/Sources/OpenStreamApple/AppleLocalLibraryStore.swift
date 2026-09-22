@@ -207,7 +207,7 @@ final class AppleLocalLibraryStore {
         if !downloads.isEmpty {
             sources.append(AppleSource(id: Self.downloadsID, kind: .library, name: "Downloads", url: downloads[0].localURL.deletingLastPathComponent()))
             for record in downloads {
-                let indexed = mediaIndex.records.first { record.mediaID == $0.id || record.mediaID.hasPrefix($0.id + ":") }
+                let indexed = mediaIndex.record(matchingMediaID: record.mediaID)
                 let filename = [record.title ?? indexed?.title ?? record.localURL.deletingPathExtension().lastPathComponent,
                     indexed?.year.map(String.init), record.subtitle].compactMap { $0 }.joined(separator: " ")
                 let file = AppleLibraryItem(sourceID: Self.downloadsID, name: filename,

@@ -576,6 +576,9 @@ public final class AppleMediaIndexStore {
     /// page's critical path. Not observed: it is a lookup table, and the
     /// array beside it is what views watch.
     @ObservationIgnored private var recordsByID: [String: AppleMediaRecord] = [:]
+    /// Where each id first occurs in `records`, so a prefix lookup can still
+    /// answer with the earliest match the way `records.first` did.
+    @ObservationIgnored private var recordOffsetByID: [String: Int] = [:]
     private let repository: AppleMediaIndexRepository
 
     public init(repository: AppleMediaIndexRepository = AppleMediaIndexRepository()) {
@@ -591,9 +594,25 @@ public final class AppleMediaIndexStore {
         return recordsByID[id]
     }
 
+    /// The record a download belongs to: the one whose id is the download's
+    /// media id, or a leading `id:` part of it (an episode download is
+    /// `<record id>:<episode id>`). Looks up each such prefix instead of
+    /// scanning the index once per download; with several matches, the one
+    /// earliest in `records` wins, as the scan it replaces did.
+    public func record(matchingMediaID mediaID: String) -> AppleMediaRecord? {
+        _ = records
+        var best = recordOffsetByID[mediaID]
+        for index in mediaID.indices where mediaID[index] == ":" {
+            guard let offset = recordOffsetByID[String(mediaID[..<index])] else { continue }
+            best = min(best ?? offset, offset)
+        }
+        return best.map { records[$0] }
+    }
+
     private func setRecords(_ values: [AppleMediaRecord]) {
         records = values
         recordsByID = Dictionary(values.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        recordOffsetByID = Dictionary(values.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     public func upsert(_ record: AppleMediaRecord) async throws {

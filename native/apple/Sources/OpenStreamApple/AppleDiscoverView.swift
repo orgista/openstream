@@ -189,8 +189,9 @@ struct AppleDiscoverView: View {
                             )
                         }
 
-                        if !library.resolvedGroups.isEmpty {
-                            AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
+                        let libraryGroups = library.resolvedGroups
+                        if !libraryGroups.isEmpty {
+                            AppleLocalTitleShelf(title: "Your Library", groups: libraryGroups,
                                 sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
                                 .accessibilityIdentifier("home.your-library")
                         }
@@ -211,8 +212,9 @@ struct AppleDiscoverView: View {
                             }
                         }
 
-                        if !topPicks.isEmpty {
-                            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: topPicks, showsProgress: false)
+                        let picks = topPicks
+                        if !picks.isEmpty {
+                            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: picks, showsProgress: false)
                         }
 
                         if settings.top10ListsEnabled {
@@ -445,11 +447,14 @@ struct AppleDiscoverView: View {
 
     private var mergedContinueWatching: [IndexedCatalogItem] {
         let serverItems = mediaServerLibrary.continueWatching
-        let localItems = self.continueWatching.map { $0.item }
+        // Once per pass: `continueWatching` filters the whole media index, and
+        // it was being rebuilt again for every merged item below.
+        let local = self.continueWatching
+        let localItems = local.map { $0.item }
         let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
         
         let resolved = mergedItems.compactMap { item -> IndexedCatalogItem? in
-            if let existing = self.continueWatching.first(where: { $0.item.mediaID == item.mediaID }) {
+            if let existing = local.first(where: { $0.item.mediaID == item.mediaID }) {
                 return existing
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
@@ -2754,7 +2759,9 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var streamPicker: some View {
-        NavigationStack {
+        // Once per pass: `localFiles` matches the item against every library group.
+        let localFiles = self.localFiles
+        return NavigationStack {
             if localFiles.isEmpty && streamChoices.isEmpty {
                 ContentUnavailableView("No other sources", systemImage: "antenna.radiowaves.left.and.right")
                     .navigationTitle("Other Sources")
