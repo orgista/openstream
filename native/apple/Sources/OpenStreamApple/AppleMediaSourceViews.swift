@@ -1231,23 +1231,38 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         chromeButtons = [playPauseButton, muteButton, fullscreenButton]
         attachPlayerIfNeeded()
         
-        playerObservation = playerViewController.observe(\.player, options: [.initial, .new]) { [weak self] vc, _ in
-            self?.observePlayer(vc.player)
+        // KVO calls back on whichever thread changed the value, with no main-queue
+        // guarantee, so every observer below hops to the main actor explicitly.
+        playerObservation = playerViewController.observe(\.player, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.observePlayer(self.playerViewController.player)
+            }
         }
     }
     
     private func observePlayer(_ player: AVPlayer?) {
-        timeControlObservation = player?.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
-            let isPlaying = player.timeControlStatus == .playing
-            let config = UIImage.SymbolConfiguration(pointSize: 34)
-            self?.playPauseButton.setImage(UIImage(systemName: isPlaying ? "pause.fill" : "play.fill", withConfiguration: config), for: .normal)
-            self?.playPauseButton.accessibilityLabel = isPlaying ? "Pause" : "Play"
+        // The hops can land out of order, so each one re-reads the player's current
+        // state on the main actor instead of carrying the value it was fired with.
+        timeControlObservation = player?.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.updatePlayPauseButton() }
         }
-        muteObservation = player?.observe(\.isMuted, options: [.initial, .new]) { [weak self] player, _ in
-            let isMuted = player.isMuted
-            self?.muteButton.setImage(UIImage(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill"), for: .normal)
-            self?.muteButton.accessibilityLabel = isMuted ? "Unmute" : "Mute"
+        muteObservation = player?.observe(\.isMuted, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.updateMuteButton() }
         }
+    }
+
+    private func updatePlayPauseButton() {
+        let isPlaying = playerViewController.player?.timeControlStatus == .playing
+        let config = UIImage.SymbolConfiguration(pointSize: 34)
+        playPauseButton.setImage(UIImage(systemName: isPlaying ? "pause.fill" : "play.fill", withConfiguration: config), for: .normal)
+        playPauseButton.accessibilityLabel = isPlaying ? "Pause" : "Play"
+    }
+
+    private func updateMuteButton() {
+        let isMuted = playerViewController.player?.isMuted ?? false
+        muteButton.setImage(UIImage(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill"), for: .normal)
+        muteButton.accessibilityLabel = isMuted ? "Unmute" : "Mute"
     }
     
     @objc private func togglePlayPause() {
