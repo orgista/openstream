@@ -309,8 +309,8 @@ public struct OpenStreamRootView: View {
             controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex
         ))
         #if os(iOS)
-        .onGeometryChange(for: CGSize.self) { proxy in
-            UIDevice.current.userInterfaceIdiom == .pad ? proxy.size : .zero
+        .onGeometryChange(for: CGSize.self) { [isPad = UIDevice.current.userInterfaceIdiom == .pad] proxy in
+            isPad ? proxy.size : .zero
         } action: { rootViewportSize = $0 }
         #endif
         #if os(visionOS)

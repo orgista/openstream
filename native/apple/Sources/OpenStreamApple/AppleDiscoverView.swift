@@ -4580,7 +4580,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         }
 
         private func reveal(muted: Bool) {
-            guard playbackIntent, let webView, let container else { return }
+            guard playbackIntent, let webView, let _ = container else { return }
             let generation = revealGeneration
             measurePicture(webView: webView) { [weak self] window in
                 guard let self, self.revealGeneration == generation, self.playbackIntent,

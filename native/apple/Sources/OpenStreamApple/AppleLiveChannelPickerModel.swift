@@ -18,6 +18,7 @@ public enum AppleLiveChannelPickerPresentation: Equatable, Sendable {
         isPad ? .bottomStrip : .panel
     }
 
+    @MainActor
     public static var current: AppleLiveChannelPickerPresentation {
         #if os(iOS)
         choose(isPad: UIDevice.current.userInterfaceIdiom == .pad)
