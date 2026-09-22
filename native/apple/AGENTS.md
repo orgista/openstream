@@ -140,9 +140,12 @@ The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDO
 ```
 
 ## 8. Skills — read the matching SKILL.md BEFORE writing that kind of code
-They live in `~/.claude/skills/<name>/SKILL.md` (Claude Code loads them by name; agy needs
-`--add-dir ~/.claude/skills`; codex reads them as files). Each is a checklist + references; the
-references folder next to it has the details. Apply the one that matches, then do the task.
+They live in `~/.claude/skills/<name>/SKILL.md`. Every worker loads them **by name** — the iOS/Swift
+set below is symlinked into `~/.claude-work/skills` (work Claude and Muse), `~/.codex/skills`,
+`~/.codex-headless/skills` and `~/.gemini/config/skills` (agy), verified 2026-09-22. If you do not
+see e.g. `swiftui-pro` in your skill list, stop and say so. Each is a checklist + references; the
+references folder next to it has the details. Apply the one that matches, then do the task, and
+check your diff against that skill's review list before you report.
 
 | When the task touches… | Read | Then |
 |---|---|---|
