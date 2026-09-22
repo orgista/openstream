@@ -302,9 +302,30 @@ public final class ApplePlaybackCoordinator {
 
     /// Every write to `phase` goes through here, so the display assertion can
     /// never drift out of step with what is on screen.
+    private var attemptCountedStart = false
+    private var attemptCountedFailure = false
+
     private func setPhase(_ newPhase: ApplePlaybackPhase) {
+        let previous = phase
         phase = newPhase
         updateWakeLock()
+        countTransition(from: previous, to: newPhase)
+    }
+
+    /// Feeds the trace's per-launch tallies: at most one start and one
+    /// failure per attempt, so a rebuffer or a resume is not a new start.
+    private func countTransition(from previous: ApplePlaybackPhase, to next: ApplePlaybackPhase) {
+        let isLive = lastRequest?.isLive ?? false
+        switch next {
+        case .playing where !attemptCountedStart:
+            attemptCountedStart = true
+            AppleInteractionTrace.count { $0.recordStarted(isLive: isLive) }
+        case .failed(let failure) where !attemptCountedFailure:
+            attemptCountedFailure = true
+            AppleInteractionTrace.count { $0.recordFailure(failure.kind, isLive: isLive) }
+        default:
+            break
+        }
     }
 
     /// Every write to `route` goes through here, for the same reason: the route
@@ -369,6 +390,9 @@ public final class ApplePlaybackCoordinator {
         let attempt = generation
         loadTask?.cancel()
         lastRequest = request
+        attemptCountedStart = false
+        attemptCountedFailure = false
+        AppleInteractionTrace.count { $0.recordAttempt(isLive: request.isLive) }
         liveRetryAttempted = false
         lastProgressWrite = nil
         remoteProgressStarted = false
