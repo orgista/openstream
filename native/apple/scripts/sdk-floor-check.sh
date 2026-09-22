@@ -41,19 +41,31 @@ checked=0
 while IFS= read -r -d '' file; do
     file -b "$file" | grep -q "Mach-O" || continue
     rel="${file#"$target"/}"
-    # One file can carry several slices; check every LC_BUILD_VERSION.
-    while read -r platform minos; do
-        [[ -z "$platform" ]] && continue
-        floor="$(floor_for "$platform")"
-        checked=$((checked + 1))
-        if [[ -z "$floor" ]]; then
-            fail "$rel: unknown platform $platform"
-        elif version_gt "$minos" "$floor"; then
-            fail "$rel: $platform minos $minos > floor $floor"
-        else
-            pass "$rel: $platform minos $minos"
-        fi
-    done < <(vtool -show-build "$file" 2>/dev/null | awk '/platform /{p=$2} /minos /{print p, $2}')
+    archs="$(lipo -archs "$file" 2>/dev/null)"
+    # One file can carry several slices; check every LC_BUILD_VERSION, per arch.
+    for arch in ${archs:-unknown}; do
+        arch_args=(); [[ "$arch" != unknown ]] && arch_args=(-arch "$arch")
+        while read -r platform minos; do
+            [[ -z "$platform" ]] && continue
+            floor="$(floor_for "$platform")"
+            # Xcode 27 adds an arm64 slice to watch binaries for the watches that run
+            # watchOS 26+; Apple gives that slice minos 26.0. Older watches load the
+            # arm64_32 slice, which is checked against the real floor, so the arm64
+            # slice is only allowed 26.0 when an arm64_32 slice sits beside it.
+            if [[ -z "${FLOOR_OVERRIDE:-}" && "$platform" == WATCHOS && "$arch" == arm64 \
+                  && " $archs " == *" arm64_32 "* ]]; then
+                floor=26.0
+            fi
+            checked=$((checked + 1))
+            if [[ -z "$floor" ]]; then
+                fail "$rel [$arch]: unknown platform $platform"
+            elif version_gt "$minos" "$floor"; then
+                fail "$rel [$arch]: $platform minos $minos > floor $floor"
+            else
+                pass "$rel [$arch]: $platform minos $minos"
+            fi
+        done < <(vtool ${arch_args[@]+"${arch_args[@]}"} -show-build "$file" 2>/dev/null | awk '/platform /{p=$2} /minos /{print p, $2}')
+    done
 done < <(find "$target" -type f -print0)
 [[ $checked -eq 0 ]] && fail "no Mach-O build versions found under $target"
 
