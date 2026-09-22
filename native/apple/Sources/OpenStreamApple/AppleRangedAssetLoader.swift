@@ -14,7 +14,12 @@ import Foundation
 ///
 /// So the asset is handed a custom scheme instead, which routes every read
 /// through here, and each read goes out as an explicit ranged `GET`.
-final class AppleRangedAssetLoader: NSObject, AVAssetResourceLoaderDelegate {
+///
+/// `@unchecked Sendable` because the one piece of mutable state, `tasks`, is
+/// only ever read or written inside a block on the serial `queue` (the delegate
+/// callbacks run on it too, via `setDelegate(_:queue:)`); every other stored
+/// property is an immutable `let` of a Sendable type.
+final class AppleRangedAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
     /// Swapped in for `https` so AVFoundation hands the load to this delegate
     /// rather than fetching the URL itself.
     static let scheme = "openstream-ranged"
@@ -97,7 +102,7 @@ final class AppleRangedAssetLoader: NSObject, AVAssetResourceLoaderDelegate {
     private func send(
         range: String,
         for loadingRequest: AVAssetResourceLoadingRequest,
-        completion: @escaping (Data?, HTTPURLResponse?) -> Void
+        completion: @escaping @Sendable (Data?, HTTPURLResponse?) -> Void
     ) {
         var request = URLRequest(url: origin)
         request.setValue(range, forHTTPHeaderField: "Range")
