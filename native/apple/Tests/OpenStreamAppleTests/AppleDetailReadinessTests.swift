@@ -83,4 +83,16 @@ struct AppleDetailReadinessTests {
         #expect(OpenStreamTabReselection.popsToRoot(current: .home, selected: .library) == false)
         #expect(OpenStreamTabReselection.popsToRoot(current: .settings, selected: .live) == false)
     }
+
+    @Test
+    func episodesSectionOnlyClaimsNoEpisodesAfterTheLoadFinished() {
+        // Before the fetch starts, while it runs, and after a superseded load
+        // cleared the flag: placeholders, never the "not available" text.
+        #expect(AppleEpisodeListPresentation.resolve(episodeCount: 0, isLoading: false, hasFinishedLoading: false) == .loading)
+        #expect(AppleEpisodeListPresentation.resolve(episodeCount: 0, isLoading: true, hasFinishedLoading: false) == .loading)
+        #expect(AppleEpisodeListPresentation.resolve(episodeCount: 0, isLoading: true, hasFinishedLoading: true) == .loading)
+        // Finished (or failed) with nothing: now the text is honest.
+        #expect(AppleEpisodeListPresentation.resolve(episodeCount: 0, isLoading: false, hasFinishedLoading: true) == .unavailable)
+        #expect(AppleEpisodeListPresentation.resolve(episodeCount: 12, isLoading: false, hasFinishedLoading: true) == .episodes)
+    }
 }

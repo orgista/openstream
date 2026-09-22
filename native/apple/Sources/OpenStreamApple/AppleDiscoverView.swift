@@ -1465,6 +1465,10 @@ struct AppleCatalogItemDetailView: View {
     @State private var selectedSeason: Int?
     @State private var selectedEpisodeID: String?
     @State private var isLoadingEpisodes = false
+    /// Set only when the current title's episode load has finished, so a
+    /// superseded load clearing `isLoadingEpisodes` cannot surface the
+    /// "not available" text while the newer fetch is still in flight.
+    @State private var episodeLoadFinished = false
     @State private var isFavorite = false
     @State private var downloadCoordinator = AppleOfflineDownloadCoordinator()
     @State private var seasonDownloads = AppleSeasonDownloadQueue()
@@ -2568,16 +2572,17 @@ struct AppleCatalogItemDetailView: View {
                     .foregroundStyle(AppleDesignTokens.textSecondary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             }
-            if isLoadingEpisodes {
+            switch episodeListPresentation {
+            case .loading:
                 ProgressView()
                     .tint(.white)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
-            } else if episodes.isEmpty {
+            case .unavailable:
                 Text("Episodes aren’t available from the connected metadata sources.")
                     .font(.system(size: AppleTVDetailMetrics.episodeTitleFontSize))
                     .foregroundStyle(AppleDesignTokens.textSecondary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
-            } else {
+            case .episodes:
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: AppleTVDetailMetrics.episodeCardGap) {
                         ForEach(visibleEpisodes) { episode in
@@ -3476,17 +3481,25 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    private var episodeListPresentation: AppleEpisodeListPresentation {
+        AppleEpisodeListPresentation.resolve(
+            episodeCount: episodes.count,
+            isLoading: isLoadingEpisodes,
+            hasFinishedLoading: episodeLoadFinished
+        )
+    }
+
     private var episodeSection: some View {
         VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
             episodeSectionHeader
 
-            if isLoadingEpisodes {
+            if episodeListPresentation == .loading {
                 VStack(spacing: 10) {
                     episodePlaceholderRow
                     episodePlaceholderRow
                 }
                 .redacted(reason: .placeholder)
-            } else if episodes.isEmpty {
+            } else if episodeListPresentation == .unavailable {
                 Text("Episodes aren’t available from the connected metadata sources.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -4197,6 +4210,7 @@ struct AppleCatalogItemDetailView: View {
         previewAssets = nil
         fallbackArtwork = nil
         episodes = []
+        episodeLoadFinished = false
         selectedSeason = nil
         selectedEpisodeID = nil
         resolvedMediaID = nil
@@ -4216,10 +4230,12 @@ struct AppleCatalogItemDetailView: View {
                     ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodes)
                 self.isPreparingMetadata = false
                 self.isLoadingEpisodes = false
+                self.episodeLoadFinished = true
             } catch {
                 guard !Task.isCancelled, preparationGeneration == generation else { return }
                 self.isPreparingMetadata = false
                 self.isLoadingEpisodes = false
+                self.episodeLoadFinished = true
                 self.metadataDetails = AppleTMDBDetails(
                     mediaID: item.mediaID,
                     title: item.name,
@@ -4306,6 +4322,7 @@ struct AppleCatalogItemDetailView: View {
             selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes)
                 ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes)
             isLoadingEpisodes = false
+            episodeLoadFinished = true
             await refreshDownloadedEpisodeIDs()
             guard !Task.isCancelled, preparationGeneration == generation else { return }
         }
