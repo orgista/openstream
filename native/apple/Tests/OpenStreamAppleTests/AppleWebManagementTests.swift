@@ -559,37 +559,40 @@ private final class AppleNoRedirectSessionDelegate: NSObject, URLSessionTaskDele
     }
 }
 
+/// Holds a loopback port BELOW the ephemeral range (49152…65535 on macOS).
+/// An OS-assigned port sits inside that range, where the kernel hands the
+/// next ports out to every other test's sockets while this one runs — so the
+/// server's P+1…P+63 fallback could find all of them taken ("Address already
+/// in use"). Nothing allocates below the range implicitly, so the ports after
+/// this one stay free unless a named listener already owns them.
 private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
-    let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-    guard descriptor >= 0 else { throw POSIXError(.ENFILE) }
+    let firstCandidate = UInt16.random(in: 20_000 ..< 40_000)
+    for offset in 0 ..< 256 {
+        let port = firstCandidate + UInt16(offset)
+        let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw POSIXError(.ENFILE) }
 
-    var address = sockaddr_in()
-    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    address.sin_family = sa_family_t(AF_INET)
-    address.sin_port = 0
-    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
 
-    let bindResult = withUnsafePointer(to: &address) { pointer in
-        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if bindResult == 0, Darwin.listen(descriptor, 1) == 0 {
+            return (descriptor, port)
+        }
+        let failure = errno
+        Darwin.close(descriptor)
+        guard failure == EADDRINUSE else {
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
         }
     }
-    guard bindResult == 0, Darwin.listen(descriptor, 1) == 0 else {
-        Darwin.close(descriptor)
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-
-    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-    let nameResult = withUnsafeMutablePointer(to: &address) { pointer in
-        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            Darwin.getsockname(descriptor, $0, &length)
-        }
-    }
-    guard nameResult == 0 else {
-        Darwin.close(descriptor)
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-    return (descriptor, UInt16(bigEndian: address.sin_port))
+    throw POSIXError(.EADDRINUSE)
 }
 
 @MainActor

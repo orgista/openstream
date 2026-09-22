@@ -325,35 +325,36 @@ struct AppleMediaServerLibraryStoreTests {
         // Emulate coordinator sink
         store.handleRemoteProgress(mediaID: mediaID, position: 10, duration: 100, event: .started)
         
-        // Wait for async task to complete
-        try await Task.sleep(nanoseconds: 50_000_000)
+        // The report runs in an unstructured task: await the request itself, not a fixed delay.
+        await waitUntil { state.started }
         #expect(state.started == true)
         
         store.handleRemoteProgress(mediaID: mediaID, position: 20, duration: 100, event: .progress)
         store.handleRemoteProgress(mediaID: mediaID, position: 25, duration: 100, event: .progress)
         store.handleRemoteProgress(mediaID: mediaID, position: 30, duration: 100, event: .paused)
         
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitUntil { state.progress == 3 && state.pausedSent }
         #expect(state.progress == 3) // It sends what it gets. Throttling is in Coordinator
         #expect(state.pausedSent == true)
         
         // Stopped at 40% (moved to front of continue watching)
         store.handleRemoteProgress(mediaID: mediaID, position: 40, duration: 100, event: .stopped)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitUntil { state.stopped == 1 }
         #expect(state.stopped == 1)
         #expect(store.continueWatching.first?.mediaID == mediaID)
         #expect(store.item(for: ref)?.userData?.positionSeconds == 40)
         
-        // Second stopped is ignored
+        // Second stopped is ignored: it returns before spawning a report, so the
+        // count cannot move. The `== 2` below (not 3) re-proves it once the next
+        // stop has landed.
         store.handleRemoteProgress(mediaID: mediaID, position: 40, duration: 100, event: .stopped)
-        try await Task.sleep(nanoseconds: 50_000_000)
         #expect(state.stopped == 1) // still 1
         
         // Stopped at 96% (marked played, removed from continue watching)
         // Reset stopped tracking by pretending it's a new session, wait we need a new request
         let req2 = try await store.playbackRequest(for: detail.item, in: detail, resume: false)
         store.handleRemoteProgress(mediaID: req2.mediaID, position: 96, duration: 100, event: .stopped)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitUntil { state.stopped >= 2 }
         #expect(state.stopped == 2)
         #expect(store.continueWatching.first?.mediaID != mediaID)
         #expect(store.item(for: ref)?.userData?.played == true)
@@ -451,5 +452,16 @@ struct AppleMediaServerLibraryStoreTests {
         #expect(req.url.absoluteString.contains("/library/parts/1/123/file.mp4"))
         #expect(req.resumePosition == 50.0)
         #expect(req.headers["X-Plex-Token"] == "p_tok")
+    }
+}
+
+/// Polls a condition the store satisfies from an unstructured task; a fixed
+/// sleep races the scheduler when the whole gate runs in parallel.
+@MainActor
+private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async {
+    let clock = ContinuousClock()
+    let deadline = clock.now + timeout
+    while !condition(), clock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(10))
     }
 }

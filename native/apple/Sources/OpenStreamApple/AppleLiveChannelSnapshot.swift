@@ -6,26 +6,23 @@ import os
 /// One immutable projection per lineup/filter change. SwiftUI reads these
 /// arrays directly instead of normalizing every channel during each render.
 
-private final class AppleLiveChannelMatchCache: @unchecked Sendable {
+final class AppleLiveChannelMatchCache: @unchecked Sendable {
     static let shared = AppleLiveChannelMatchCache()
     private let lock = NSLock()
     private var matches = [String: AppleChannelLineupEntry?]()
     private var lastEntries: [AppleChannelLineupEntry] = []
+    /// Bumped on every lineup change, so matches computed (outside the lock)
+    /// against an older lineup are dropped instead of cached under the new one.
+    private var generation = 0
     
     func match(channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [String: AppleChannelLineupEntry] {
         lock.lock()
-        #if DEBUG
-        let shouldClearCache = !AppleLiveChannelSnapshot.debugDisableCacheClear.withLock { $0 }
-        if shouldClearCache && entries != lastEntries {
-            matches.removeAll()
-            lastEntries = entries
-        }
-        #else
         if entries != lastEntries {
             matches.removeAll()
             lastEntries = entries
+            generation += 1
         }
-        #endif
+        let computedGeneration = generation
         var result = [String: AppleChannelLineupEntry](minimumCapacity: channels.count)
         var toCompute = [(String, String)]()
         for channel in channels {
@@ -55,8 +52,10 @@ private final class AppleLiveChannelMatchCache: @unchecked Sendable {
         }
         
         lock.lock()
-        for (k, v) in computed {
-            matches[k] = v
+        if generation == computedGeneration {
+            for (k, v) in computed {
+                matches[k] = v
+            }
         }
         lock.unlock()
         
@@ -70,7 +69,9 @@ struct AppleLiveChannelSnapshot: Sendable {
         let calls = OSAllocatedUnfairLock<Int>(initialState: 0)
     }
     @TaskLocal static var debugMatchCallsCounter: DebugCounter?
-    static let debugDisableCacheClear = OSAllocatedUnfairLock<Bool>(initialState: false)
+    /// A private cache for a test that counts matches, so other suites
+    /// building with other lineups in parallel cannot clear it mid-test.
+    @TaskLocal static var debugMatchCache: AppleLiveChannelMatchCache?
 #endif
 
     /// How many lineup numbers the Premier Guide must match before All is
@@ -138,7 +139,12 @@ struct AppleLiveChannelSnapshot: Sendable {
         // deduplicated list), then the grouping below — and on the owner's
         // 9376 channels they cost **761 ms** of the Live tab's start-up
         // (measured 2026-09-15).
-        let entryByChannelID = AppleLiveChannelMatchCache.shared.match(channels: selected, entries: entries)
+        #if DEBUG
+        let matchCache = debugMatchCache ?? AppleLiveChannelMatchCache.shared
+        #else
+        let matchCache = AppleLiveChannelMatchCache.shared
+        #endif
+        let entryByChannelID = matchCache.match(channels: selected, entries: entries)
 
         var categoryByID = [String: String](minimumCapacity: entryByChannelID.count)
         for (id, entry) in entryByChannelID {
