@@ -54,29 +54,46 @@ struct ContinueWatchingProvider: TimelineProvider {
             completion(entry(artwork: [:]))
             return
         }
-        Task { completion(await loadedEntry(in: context)) }
+        let layout = Layout(context)
+        Task { completion(await loadedEntry(layout)) }
     }
 
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<ContinueWatchingEntry>) -> Void) {
+        let layout = Layout(context)
         Task {
             // The app reloads timelines whenever it rewrites the snapshot, so
             // this interval is only a backstop for a device the app has not run
             // on in a while — not the mechanism that keeps the widget current.
             completion(Timeline(
-                entries: [await loadedEntry(in: context)],
+                entries: [await loadedEntry(layout)],
                 policy: .after(.now.addingTimeInterval(60 * 60))
             ))
         }
     }
 
-    private func loadedEntry(in context: Context) async -> ContinueWatchingEntry {
+    /// What the artwork load needs from the context, copied out before the
+    /// Task: `TimelineProviderContext` is not Sendable, and Swift 6.4 rejects
+    /// sending a closure that captures it (region-isolation error).
+    struct Layout: Sendable {
+        let family: WidgetFamily
+        let widthInPoints: Double
+        let scale: Double
+
+        init(_ context: Context) {
+            family = context.family
+            widthInPoints = context.displaySize.width
+            scale = Double(context.environmentVariants[\.displayScale]?.max() ?? 3)
+        }
+    }
+
+    private func loadedEntry(_ layout: Layout) async -> ContinueWatchingEntry {
         let entry = entry(artwork: [:])
-        let visible = Array(entry.items.prefix(ContinueWatchingLayout.visibleCount(for: context.family)))
+        let visible = Array(entry.items.prefix(ContinueWatchingLayout.visibleCount(for: layout.family)))
         guard !visible.isEmpty else { return entry }
         let pixelSize = AppleWidgetArtworkPolicy.pixelSize(
-            widthInPoints: context.displaySize.width,
+            widthInPoints: layout.widthInPoints,
             columns: visible.count,
-            scale: Double(context.environmentVariants[\.displayScale]?.max() ?? 3)
+            scale: layout.scale
         )
         return ContinueWatchingEntry(
             date: entry.date,
