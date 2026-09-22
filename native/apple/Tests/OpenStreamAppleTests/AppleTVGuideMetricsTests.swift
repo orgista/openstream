@@ -46,7 +46,7 @@ struct AppleTVGuideMetricsTests {
     /// than a thumbnail (owner: "i'd like a bigger preview like paramount").
     @Test func theChannelPreviewIsWidescreenAndFitsTheStrip() {
         #expect(metrics.stripLogoSize == CGSize(width: 320, height: 180))
-        #expect(metrics.stripLogoSize.width / metrics.stripLogoSize.height == 16.0 / 9.0)
+        #expect(metrics.stripLogoSize.width / metrics.stripLogoSize.height == 16.0 / 9.0 as CGFloat)
         #expect(metrics.stripLogoSize.height <= metrics.stripHeight)
     }
 

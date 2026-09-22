@@ -132,7 +132,7 @@ import Testing
 }
 
 @Test func detailHeroUsesOwnerLogoAndTrailerGeometry() {
-    #expect(AppleDetailMetrics.phoneAspectRatio == 4.0 / 3.0)
+    #expect(AppleDetailMetrics.phoneAspectRatio == 4.0 / 3.0 as CGFloat)
     #expect(AppleDetailMetrics.iPadHeightFraction == 0.60)
     #expect(AppleDetailMetrics.landscapeHeightFraction == 1.0)
     #expect(AppleDetailMetrics.titleLogoWidthFraction == 0.70)
