@@ -34,13 +34,33 @@ struct AppleHomeBillboard<Actions: View>: View {
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
             stage: AnyView(
-                AppleHomeHeroPreview(
-                    item: item, sources: sources, settings: settings,
-                    loadingFill: AppleDesignTokens.surface
-                )
-                .id(item.id)
+                ZStack {
+                    // The still sits outside the per-title identity below. It
+                    // was inside it, so every page change remounted it empty
+                    // and the hero showed a bare surface under the new copy
+                    // until the backdrop decoded (sim finding c, 2026-09-22).
+                    // On tvOS it keeps the old still until the new one lands;
+                    // `AppleTVHeroPageGate` has already warmed it by then.
+                    AppleCatalogArtwork(
+                        url: item.backgroundURL ?? item.posterURL,
+                        loadingFill: AppleDesignTokens.surface,
+                        keepsImageWhileReloading: Self.keepsStillWhileReloading
+                    )
+                    AppleHomeHeroPreview(item: item, sources: sources, settings: settings)
+                        .id(item.id)
+                }
             )
         ) { actions }
+    }
+
+    /// Only the Apple TV holds a page until its art is ready; elsewhere the new
+    /// copy would sit over the previous title's still while it loads.
+    private static var keepsStillWhileReloading: Bool {
+        #if os(tvOS)
+        true
+        #else
+        false
+        #endif
     }
 }
 
@@ -93,9 +113,6 @@ private struct AppleHomeHeroPreview: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
-    /// The billboard wants its own ground while the still loads; shelf-sized
-    /// callers keep `AppleCatalogArtwork`'s near-invisible default.
-    var loadingFill: Color = .white.opacity(0.025)
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
@@ -122,7 +139,9 @@ private struct AppleHomeHeroPreview: View {
 
     var body: some View {
         ZStack {
-            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL, loadingFill: loadingFill)
+            // Holds the art frame so scroll visibility is measured even with
+            // no trailer up; the still itself is drawn by `AppleHomeBillboard`.
+            Color.clear
             #if os(iOS) || os(visionOS)
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(

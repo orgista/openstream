@@ -162,8 +162,16 @@ struct AppleDiscoverView: View {
                             #endif
                             TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
                                 if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
+                                    #if os(tvOS)
+                                    AppleTVHeroPageGate(pages: heroes.map(heroPageArt), requested: index) { shown, wordmarkFailed in
+                                        featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
+                                                     wordmarkFailed: wordmarkFailed)
+                                    }
+                                    .padding(.horizontal, heroHorizontalPadding)
+                                    #else
                                     featuredHero(heroes[index], rotationCount: heroes.count, rotationIndex: index)
                                         .padding(.horizontal, heroHorizontalPadding)
+                                    #endif
                                 }
                             }
                             .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
@@ -569,18 +577,39 @@ struct AppleDiscoverView: View {
 
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
     /// explicit `return`, which would switch the builder off anyway.
-    private func featuredHero(_ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0) -> some View {
+    private func featuredHero(
+        _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false
+    ) -> some View {
         let item = heroItem(value.item)
         return AppleHomeBillboard(
             item: item,
             sources: sourceStore.sources,
             settings: settings,
             viewportSize: viewportSize,
-            wordmark: heroWordmarks[value.item.mediaID] ?? item.logoURL,
+            wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
             rotationCount: rotationCount,
             rotationIndex: rotationIndex
         ) { featuredActions(value) }
     }
+
+    private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
+        heroWordmarks[value.item.mediaID] ?? item.logoURL
+    }
+
+    #if os(tvOS)
+    /// The art `featuredHero` will draw for a page, for `AppleTVHeroPageGate`
+    /// to warm before the page is shown.
+    private func heroPageArt(_ value: IndexedCatalogItem) -> AppleTVHeroPageArt {
+        let item = heroItem(value.item)
+        let wordmark: URL? = switch AppleTVBillboardTitleTreatment.choose(
+            hasBackdrop: item.backgroundURL != nil, wordmark: heroWordmark(value, item: item)
+        ) {
+        case .wordmark(let url): url
+        case .text, .none: nil
+        }
+        return AppleTVHeroPageArt(id: value.item.mediaID, backdrop: item.backgroundURL ?? item.posterURL, wordmark: wordmark)
+    }
+    #endif
 
     /// The hero's own record, with any textless art that has since arrived.
     /// `id` is unchanged by the swap, so the billboard keeps its identity and
@@ -1411,12 +1440,15 @@ struct AppleCatalogArtwork: View {
     /// bare numbers on the Apple TV while the same two titles showed full
     /// artwork on the phone (2026-09-15).
     var onLoad: (() -> Void)? = nil
+    /// See `AppleRemoteImage.keepsImageWhileReloading`.
+    var keepsImageWhileReloading = false
 
     var body: some View {
         AppleRemoteImage(url: url, placeholderSystemImage: "",
                          onLoad: onLoad.map { callback in { _ in callback() } },
                          onFailure: onFailure,
-                         loadingFill: loadingFill)
+                         loadingFill: loadingFill,
+                         keepsImageWhileReloading: keepsImageWhileReloading)
     }
 }
 

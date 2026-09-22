@@ -19,6 +19,9 @@ struct AppleTVBillboard<Actions: View>: View {
     var stage: AnyView? = nil
     @ViewBuilder var actions: Actions
 
+    /// A wordmark that failed to load; the name is drawn in its place.
+    @State private var failedWordmark: URL?
+
     private typealias M = AppleTVBillboardMetrics
 
     var body: some View {
@@ -87,10 +90,16 @@ struct AppleTVBillboard<Actions: View>: View {
     private var titleTreatment: some View {
         switch AppleTVBillboardTitleTreatment.choose(
             hasBackdrop: item.backgroundURL != nil,
-            wordmark: wordmark
+            wordmark: wordmark == failedWordmark ? nil : wordmark
         ) {
         case .wordmark(let url):
-            AppleTrimmedTitleLogo(url: url, alignment: .leading) { _ in }
+            AppleTrimmedTitleLogo(url: url, alignment: .leading) { loaded in
+                if !loaded { failedWordmark = url }
+            }
+                // One view per wordmark: the logo view keeps its image while a
+                // new URL loads, which left the last title's mark over the next
+                // title's copy (sim finding c, 2026-09-22).
+                .id(url)
                 .frame(maxWidth: M.copyColumnWidth * 0.62, maxHeight: M.titleFontSize * 2.2, alignment: .leading)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)
