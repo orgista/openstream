@@ -28,6 +28,18 @@ struct AppleSMBLibraryScanner: Sendable {
         self.maximumDepth = max(0, maximumDepth)
     }
 
+    /// Download-client staging, NAS recycle bins and hidden folders hold
+    /// leftover copies of titles the library already has. Skipped only when
+    /// found beneath the selected folder; choosing one as the source still
+    /// scans it.
+    static let stagingFolderNames: Set<String> = [
+        "downloads", "download", "incomplete", "#recycle", "@eadir", "$recycle.bin",
+    ]
+
+    static func isStagingFolder(_ name: String) -> Bool {
+        name.hasPrefix(".") || stagingFolderNames.contains(name.lowercased())
+    }
+
     func scan(
         source: AppleSource,
         credentials: AppleSMBCredentials,
@@ -72,7 +84,8 @@ struct AppleSMBLibraryScanner: Sendable {
                 guard !components.contains(".."), !components.contains("."),
                       root.isEmpty || path.hasPrefix(root + "/") else { continue }
                 if entry.isDirectory {
-                    guard !visited.contains(path) else { continue }
+                    guard !visited.contains(path),
+                          !Self.isStagingFolder(String(components.last ?? "")) else { continue }
                     guard folder.depth < maximumDepth, pending.count < maximumFolders else {
                         result.reachedLimit = true
                         continue
