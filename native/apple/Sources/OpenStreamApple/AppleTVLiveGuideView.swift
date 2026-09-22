@@ -261,6 +261,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         // the default when the rows arrive, which a plain assignment from the
         // projection task could not do (the rail cells were not built yet).
         .defaultFocus($focus, initialFocus, priority: .userInitiated)
+        .onExitCommand(perform: menuToCategoryRow)
         .background {
             AppleTVGuideVisibilityReporter(visibility: visibility, nowPlayingID: nowPlaying?.id,
                 report: onVisibleChannels)
@@ -301,6 +302,20 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             isEnabled: previewsEnabled,
             isPlayerOpen: isPlayerOpen
         )
+    }
+
+    /// Menu from anywhere in the grid lands on the current category chip, so
+    /// Favorites and the search glyph are one press away from any row (owner
+    /// 2026-09-21: "back goes to the main top nav bar"). From the chip row
+    /// there is no handler, and the system takes Menu on to the tab bar.
+    private var menuToCategoryRow: (() -> Void)? {
+        switch focus {
+        case .channel, .favorite, .cell:
+            guard let chip = categories.contains(selectedCategory) ? selectedCategory : categories.first else { return nil }
+            return { focus = .category(chip) }
+        case .watch, .category, .search, nil:
+            return nil
+        }
     }
 
     /// First channel once the rows exist; the current category chip until then.
@@ -477,6 +492,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
                                 fontSize: metrics.categoryFontSize
                             ))
                             .focused($focus, equals: .category(category))
+                            .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
                             .accessibilityIdentifier("live.category.\(category)")
                     }
                 }

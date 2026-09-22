@@ -196,6 +196,77 @@ final class AppleTVFocusUITests: XCTestCase {
         )
     }
 
+    /// Owner 2026-09-21: "in live tv page you are unable to select favs bar
+    /// back goes to the main top nav bar but there is no way to search in live
+    /// or go to the favs bar". Menu from the grid lands on the category row
+    /// first, a second Menu reaches the tab bar, and from the grid the
+    /// Favorites chip and the search glyph are both reachable and selectable.
+    func testLiveMenuReachesTheCategoryRowThenFavoritesAndSearch() {
+        launch(screen: "live")
+        XCTAssertTrue(wait(for: element("live.tv.info")), "the guide never appeared")
+        XCTAssertTrue(focusedElement.waitForExistence(timeout: 10), "nothing holds focus at all")
+
+        func settle() { Thread.sleep(forTimeInterval: 1.5) }
+        func snap(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+
+        // (b) A few rows into the grid, Menu goes to the chip row, not the tab bar.
+        remote.press(.down); settle()
+        remote.press(.down); settle()
+        remote.press(.down); settle()
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."),
+                      "expected a channel before Menu, got '\(focusedElement.identifier)'")
+        remote.press(.menu); settle()
+        snap("4b-1-menu-from-grid-lands-on-chips")
+        XCTAssertEqual(focusedElement.identifier, "live.category.All",
+                       "Menu from the grid should land on the current chip, got '\(focusedElement.identifier)'")
+
+        // A second Menu from the chip row is the system's: the tab bar.
+        remote.press(.menu); settle()
+        snap("4b-2-second-menu-reaches-tab-bar")
+        XCTAssertEqual(focusedElement.label, "Live",
+                       "Menu from the chip row should reach the tab bar, got '\(focusedElement.label)'")
+
+        // (a) Into the grid, up to the chip row, right to Favorites, select.
+        remote.press(.down); settle()
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."),
+                      "down from the tab bar should reach a channel, got '\(focusedElement.identifier)'")
+        remote.press(.up); settle()
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("live.category."),
+                      "up from the grid should reach the chip row, got '\(focusedElement.identifier)'")
+        remote.press(.right); settle()
+        XCTAssertEqual(focusedElement.identifier, "live.category.Favorites")
+        remote.press(.select); settle()
+        snap("4b-3-favorites-selected")
+        XCTAssertTrue(element("live.category.Favorites").isSelected, "Select did not choose the Favorites chip")
+
+        // Back to All so the next launch finds the guide as it was.
+        remote.press(.left); settle()
+        remote.press(.select); settle()
+        XCTAssertTrue(element("live.category.All").isSelected, "could not return to All")
+
+        // (c) Right along the chip row to the search glyph, then open it.
+        for _ in 0 ..< 20 where focusedElement.identifier != "live.search" {
+            remote.press(.right)
+            Thread.sleep(forTimeInterval: 0.8)
+        }
+        XCTAssertEqual(focusedElement.identifier, "live.search", "never reached the search glyph")
+        snap("4b-4-search-glyph-focused")
+        remote.press(.select)
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "selecting the glyph did not open channel search")
+        settle()
+        snap("4b-5-channel-search-open")
+
+        // Menu pops the search and returns to the guide.
+        remote.press(.menu); settle()
+        XCTAssertTrue(wait(for: element("live.search"), 10), "Menu did not return from search to the guide")
+    }
+
     // MARK: - Search
 
     /// Owner F2/F4: reaching Search and what it shows.
@@ -486,4 +557,5 @@ final class AppleTVFocusUITests: XCTestCase {
         add(shot)
         XCTAssertTrue(play.exists, "Discover lost its billboard actions")
     }
+
 }
