@@ -20,6 +20,13 @@ cd Apps && xcodebuild -project OpenStreamApps.xcodeproj -scheme "OpenStream tvOS
 #   iOS: scheme "OpenStream iOS", id=6A037503-AF3A-4A22-B900-CF6573B15FB1,
 #        -derivedDataPath ~/Developer/openstream-build/DerivedData-uitests
 ```
+- **Toolchain (2026-09-22):** Xcode 27.0 (27A266a), Swift 6.4, is `/Applications/Xcode.app` and is the ship
+  toolchain. Floors are unchanged (iOS/tvOS 18, macOS 15, watchOS 11, visionOS 2). Never accept "Update to
+  recommended settings" (keeps `objectVersion 71` / `LastUpgradeCheck` so an older Xcode can still open the project).
+  After a Release build or archive run `scripts/sdk-floor-check.sh <.app|.xcarchive>` — it must exit 0.
+- **Long jobs:** run every build, test and archive in the FOREGROUND. A headless worker that backgrounds a job and
+  ends its turn kills it (`** BUILD INTERRUPTED **`). If a step can exceed 10 min, `nohup` it with a done-marker
+  and poll the marker in foreground loops. Never create scratch files inside this tree — use `/tmp`.
 
 ## 2. The SMB share lies — the protocol, no exceptions
 The repo is on an SMB share. Builds see stale files and stale directory listings.
