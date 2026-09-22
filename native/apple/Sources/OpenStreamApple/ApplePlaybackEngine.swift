@@ -219,7 +219,6 @@ public extension ApplePlaybackEngine {
 // Cues are immutable values (text runs, or a decoded CGImage that is never
 // mutated after creation); they may be parsed off the main actor and handed
 // back to it.
-extension AppleSubtitleTextRun: @unchecked Sendable {}
 extension AppleSubtitleCueBody: @unchecked Sendable {}
 extension AppleSubtitleCue: @unchecked Sendable {}
 

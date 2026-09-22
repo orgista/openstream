@@ -39,7 +39,7 @@ public enum AppleInteractionTrace {
 
     nonisolated(unsafe) private static var entries: [String] = []
     nonisolated(unsafe) private static var origin = Date()
-    nonisolated(unsafe) private static let lock = NSLock()
+    private static let lock = NSLock()
 
     /// The key a viewer's own choice is stored under. An explicitly stored
     /// value always wins, on either side of the default.

@@ -8,7 +8,7 @@ import Foundation
 public enum AppleLaunchClock {
     nonisolated(unsafe) private static var origin = Date()
     nonisolated(unsafe) private static var seen = Set<String>()
-    nonisolated(unsafe) private static let lock = NSLock()
+    private static let lock = NSLock()
 
     private static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: "OpenStreamTiming")

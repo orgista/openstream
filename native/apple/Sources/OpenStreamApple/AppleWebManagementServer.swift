@@ -388,7 +388,7 @@ public final class AppleWebManagementServer {
     }
 
     private func serve(_ connection: NWConnection, id: ObjectIdentifier, generation acceptedGeneration: UUID) async {
-        var timeout = Task { @MainActor in
+        let timeout = Task { @MainActor in
             do {
                 try await Task.sleep(nanoseconds: 8_000_000_000)
             } catch {
