@@ -3790,7 +3790,11 @@ struct AppleCatalogItemDetailView: View {
         #if os(tvOS) || os(visionOS)
         return false
         #else
-        let indexedRecord = mediaIndex.records.first { $0.id == recordID }
+        // Keyed lookup. This was `records.first { $0.id == recordID }`, which
+        // rebuilt the catalog record for every entry in the index, several
+        // times per body pass — seconds of main thread inside the push, so
+        // Discover's large title stayed drawn over this page (F-e).
+        let indexedRecord = mediaIndex.record(id: recordID)
         let availabilityIDs = Set(indexedRecord?.availability.map(\.instanceID) ?? [])
         let hasLiveAvailability = source.kind == .liveTV || playbackSources.contains {
             $0.kind == .liveTV && availabilityIDs.contains($0.id)

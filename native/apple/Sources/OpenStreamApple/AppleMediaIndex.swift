@@ -584,8 +584,12 @@ public final class AppleMediaIndexStore {
 
     public func load() async { setRecords(await repository.records()) }
 
-    /// One record by id, without touching the array.
-    public func record(id: String) -> AppleMediaRecord? { recordsByID[id] }
+    /// One record by id, without scanning the array. Reads `records` so a
+    /// view that looks a record up still redraws when the index changes.
+    public func record(id: String) -> AppleMediaRecord? {
+        _ = records
+        return recordsByID[id]
+    }
 
     private func setRecords(_ values: [AppleMediaRecord]) {
         records = values

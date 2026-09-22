@@ -456,3 +456,30 @@ import Testing
     #expect(await repository.search("Title", limit: 1, eligibility: .systemDiscovery).map(\.title) == ["Title Z"])
     #expect(await repository.search("Title", limit: 1, eligibility: .playableVideo).map(\.title) == ["Title Z"])
 }
+
+/// The content page reads its record through `record(id:)` in its body; the
+/// lookup has to be observed so the Download button appears once the index
+/// loads, even though the keyed table beside the array is not (F-e).
+@MainActor
+@Test func recordLookupByIDObservesTheIndex() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "record-lookup-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    let record = AppleMediaRecord(canonicalID: "tt7654321", kind: .series, title: "A Series",
+        availability: [.init(instanceID: UUID(), capability: .resolvable, itemReference: "series|tt7654321")])
+    let flag = RecordLookupChangeFlag()
+    withObservationTracking {
+        _ = store.record(id: record.id)
+    } onChange: {
+        Task { @MainActor in flag.changed = true }
+    }
+    try await store.upsert(record)
+    for _ in 0..<50 where !flag.changed { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(flag.changed)
+    #expect(store.record(id: record.id)?.title == "A Series")
+}
+
+@MainActor
+private final class RecordLookupChangeFlag {
+    var changed = false
+}
