@@ -1487,6 +1487,7 @@ struct AppleCatalogItemDetailView: View {
     @State private var detailViewportSize: CGSize = .zero
     @State private var detailSafeAreaInsets = EdgeInsets()
     @State private var trailerHasStarted = false
+    @State private var heroArtworkImage: CGImage?
     @State private var trailerMuted = false
     @State private var trailerCandidateIndex = 0
     @State private var trailerPortraitKeys: Set<String> = []
@@ -1984,6 +1985,7 @@ struct AppleCatalogItemDetailView: View {
                 AppleYouTubeAutoPreview(
                     url: embedURL,
                     artworkURL: heroArtworkURL,
+                    artworkImage: heroArtworkImage,
                     isLandscape: viewportSize.width > viewportSize.height,
                     isPlaying: $trailerIsActive,
                     isMuted: $trailerMuted,
@@ -2700,8 +2702,16 @@ struct AppleCatalogItemDetailView: View {
     }
     #endif
 
+    /// The hero still that is on screen, handed to the trailer preview so its
+    /// cover paints the same pixels the moment it is inserted.
     private var heroArtwork: some View {
-        AppleCatalogArtwork(url: heroArtworkURL)
+        AppleRemoteImage(
+            url: heroArtworkURL,
+            placeholderSystemImage: "",
+            onLoad: { heroArtworkImage = $0 },
+            onFailure: { heroArtworkImage = nil },
+            keepsImageWhileReloading: true
+        )
     }
 
     private var heroArtworkURL: URL? {
@@ -4558,6 +4568,10 @@ private struct AppleDetailRowButtonStyle: ButtonStyle {
 struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let url: URL
     let artworkURL: URL?
+    /// The caller's already-decoded still, when it has one. The cover shows it
+    /// synchronously; without it the cover's own image load left the black
+    /// iframe showing for as long as that load took (sim finding f).
+    var artworkImage: CGImage? = nil
     let isLandscape: Bool
     @Binding var isPlaying: Bool
     @Binding var isMuted: Bool
@@ -4707,6 +4721,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 
     final class PlayerContainer: UIView {
         let webView: WKWebView
+        /// Everything that stands in for the video until it has frames: the
+        /// caller's still under the URL-loaded artwork. Faded as one on reveal.
+        private let cover = UIView()
+        private let artworkStill = UIImageView()
         private let artworkCover: UIView & UIContentView
         private var artworkURL: URL?
         let touchShield = UIButton(type: .custom)
@@ -4762,10 +4780,16 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 
             // Measure WebKit under artwork, but keep native controls above
             // the cover so pause, sound, and replay always remain available.
-            artworkCover.isUserInteractionEnabled = false
-            artworkCover.accessibilityElementsHidden = true
+            cover.isUserInteractionEnabled = false
+            cover.accessibilityElementsHidden = true
+            cover.clipsToBounds = true
+            artworkStill.contentMode = .scaleAspectFill
+            artworkStill.clipsToBounds = true
+            artworkStill.accessibilityIgnoresInvertColors = true
+            cover.addSubview(artworkStill)
             artworkCover.clipsToBounds = true
-            addSubview(artworkCover)
+            cover.addSubview(artworkCover)
+            addSubview(cover)
 
             // WKWebView can still become the effective UIKit touch surface
             // beneath SwiftUI's transparent layers. Keep the iframe entirely
@@ -4807,7 +4831,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             if viewport.width > 0, viewport.height > 0 {
                 webView.transform = CGAffineTransform(scaleX: picture.width / viewport.width, y: picture.height / viewport.height)
             }
-            artworkCover.frame = bounds
+            cover.frame = bounds
+            artworkStill.frame = cover.bounds
+            artworkCover.frame = cover.bounds
             touchShield.frame = bounds
             #if os(visionOS)
             let controlSide: CGFloat = 60
@@ -4851,9 +4877,27 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             }.margins(.all, 0)
         }
 
+        func updateStill(_ image: CGImage?) {
+            guard artworkStill.image?.cgImage !== image else { return }
+            artworkStill.image = image.map { UIImage(cgImage: $0) }
+        }
+
+        /// Reveal cross-fades the cover away over the live frames; anything
+        /// that hides the preview puts the cover back at once, because the
+        /// page acts on "ended" only after the video pixels are gone.
         func setPreviewVisible(_ visible: Bool) {
+            let wasVisible = previewVisible
             previewVisible = visible
-            artworkCover.isHidden = visible
+            cover.layer.removeAllAnimations()
+            if visible, !wasVisible, !UIAccessibility.isReduceMotionEnabled {
+                UIView.animate(
+                    withDuration: AppleDetailMetrics.trailerCrossfadeDuration,
+                    delay: 0,
+                    options: [.curveEaseInOut, .beginFromCurrentState]
+                ) { self.cover.alpha = 0 }
+            } else {
+                cover.alpha = visible ? 0 : 1
+            }
             updatePlaybackValue()
         }
 
@@ -4887,6 +4931,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         context.coordinator.lastReplayGeneration = replayGeneration
         context.coordinator.setPlaybackIntent(isPlaying)
         let container = PlayerContainer(frame: .zero, messageHandler: context.coordinator, artworkURL: artworkURL)
+        container.updateStill(artworkImage)
         container.isLandscape = isLandscape
         container.onTap = onTap
         container.onMute = onMute
@@ -4910,6 +4955,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.onPause = context.coordinator.hidePreview
         view.isLandscape = isLandscape
         view.updateArtwork(artworkURL)
+        view.updateStill(artworkImage)
         view.updateControls(
             isPlaying: isPlaying,
             isMuted: isMuted,

@@ -35,6 +35,11 @@ struct AppleRemoteImage: View {
     /// nothing until the art lands (owner's recurring "GUI with no content",
     /// seen again 2026-09-15). A hero passes a real surface instead.
     var loadingFill: Color = .white.opacity(0.025)
+    /// Keeps the current image on screen while a new URL or size loads, and
+    /// swaps only once the replacement has decoded. A full-bleed hero opts in:
+    /// its backdrop upgrades mid-view, and clearing first painted the hero
+    /// black between the two stills (sim finding f, 2026-09-22).
+    var keepsImageWhileReloading = false
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
@@ -56,9 +61,10 @@ struct AppleRemoteImage: View {
                 }
             }
             .task(id: loadIdentity(url: url, size: geometry.size)) {
-                image = nil
+                if !keepsImageWhileReloading { image = nil }
                 failed = false
                 guard let url else {
+                    image = nil
                     failed = true
                     onFailure?()
                     return
@@ -76,6 +82,7 @@ struct AppleRemoteImage: View {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
+                    image = nil
                     failed = true
                     onFailure?()
                 }
