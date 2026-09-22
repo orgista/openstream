@@ -129,7 +129,13 @@ final class AppleLocalLibraryStore {
     /// seconds after its scan had already finished at 2.5s, and why scrolling
     /// it crawled (owner, 2026-09-15). Decorating drops it to one call per
     /// group; the memo drops repeat passes to nothing.
+    ///
+    /// The memo is not observed, so a hit reads `groups` and `metadata` first:
+    /// a shelf whose body reads only this still redraws when the scan or a
+    /// title's metadata lands.
     func sorted(_ sort: AppleLibrarySort) -> [AppleLibrarySeries] {
+        _ = groups
+        _ = metadata
         if let cached = sortedCache[sort], cached.revision == contentRevision { return cached.value }
         let decorated = groups.map { (group: $0, item: catalogItem(for: $0)) }
         let value = decorated.sorted {
