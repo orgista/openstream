@@ -44,11 +44,13 @@ struct AppleRemoteImage: View {
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
     @State private var failed = false
+    /// The load `image` belongs to.
+    @State private var imageIdentity: String?
 
     var body: some View {
         GeometryReader { geometry in
             Group {
-                if let image {
+                if let image = displayedImage(size: geometry.size) {
                     rendered(image)
                 } else if failed {
                     placeholder
@@ -69,14 +71,14 @@ struct AppleRemoteImage: View {
                     onFailure?()
                     return
                 }
-                let maximumDimension = max(64, Int(max(geometry.size.width, geometry.size.height) * displayScale))
                 do {
                     let loaded = try await AppleRemoteImageCache.shared.image(
                         url: url,
-                        maximumPixelDimension: min(maximumDimension, 2_560)
+                        maximumPixelDimension: maximumPixelDimension(for: geometry.size)
                     )
                     guard !Task.isCancelled else { return }
                     image = loaded
+                    imageIdentity = loadIdentity(url: url, size: geometry.size)
                     onLoad?(loaded)
                 } catch is CancellationError {
                     return
@@ -110,6 +112,23 @@ struct AppleRemoteImage: View {
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// What to draw this frame. A view that keeps its image across reloads
+    /// draws the new one on the very frame its URL changes when the memory
+    /// cache already holds it, rather than one async hop later: the rotating
+    /// hero swaps its copy and art together, and on a busy main thread that
+    /// hop left the previous title's still under the next title's copy for
+    /// ~270 ms (iPad sim trace, 2026-09-22).
+    private func displayedImage(size: CGSize) -> CGImage? {
+        guard keepsImageWhileReloading, let url,
+              imageIdentity != loadIdentity(url: url, size: size) else { return image }
+        return AppleRemoteImageCache.shared.cachedImage(url: url, maximumPixelDimension: maximumPixelDimension(for: size))
+            ?? image
+    }
+
+    private func maximumPixelDimension(for size: CGSize) -> Int {
+        min(max(64, Int(max(size.width, size.height) * displayScale)), 2_560)
     }
 
     private func loadIdentity(url: URL?, size: CGSize) -> String {
@@ -218,7 +237,7 @@ actor AppleRemoteImageCache {
         init(_ image: CGImage) { self.image = image }
     }
 
-    private let cache = NSCache<NSString, Entry>()
+    nonisolated(unsafe) private let cache = NSCache<NSString, Entry>()
     private var inFlight: [NSString: Task<CGImage, any Error>] = [:]
     private let loader: Loader
 
@@ -226,6 +245,12 @@ actor AppleRemoteImageCache {
         self.loader = loader
         cache.countLimit = 300
         cache.totalCostLimit = 160 * 1_024 * 1_024
+    }
+
+    /// The decoded image if it is already in memory, without waiting on the
+    /// actor. `NSCache` is thread-safe.
+    nonisolated func cachedImage(url: URL, maximumPixelDimension: Int) -> CGImage? {
+        cache.object(forKey: "\(url.absoluteString)|\(maximumPixelDimension)" as NSString)?.image
     }
 
     func image(url: URL, maximumPixelDimension: Int) async throws -> CGImage {

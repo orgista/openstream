@@ -77,6 +77,8 @@ struct AppleFeaturedHero<Actions: View>: View {
     @ViewBuilder var actions: Actions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// A wordmark that failed to load; the name is drawn in its place.
+    @State private var failedWordmark: URL?
     var body: some View {
         #if os(tvOS)
         AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
@@ -93,7 +95,7 @@ struct AppleFeaturedHero<Actions: View>: View {
                 VStack(alignment: .leading, spacing: 0) {
                     art
                         .frame(maxWidth: .infinity)
-                        .frame(height: 220)
+                        .frame(height: AppleFeaturedHeroMetrics.accessibilityArtHeight)
                         .clipped()
 
                     VStack(alignment: .leading, spacing: 14) {
@@ -193,18 +195,24 @@ struct AppleFeaturedHero<Actions: View>: View {
     @ViewBuilder
     private var titleTreatment: some View {
         switch AppleTVBillboardTitleTreatment.choose(hasBackdrop: item.backgroundURL != nil, wordmark: wordmark) {
-        case .wordmark(let url):
+        case .wordmark(let url) where url != failedWordmark:
             // A definite height, not `maxHeight`: the wordmark is drawn inside
             // a GeometryReader, and in a scroll view an upper bound leaves the
             // height proposal unresolved, which collapsed the mark to a few
             // illegible points (2026-09-20).
-            AppleTrimmedTitleLogo(url: url, alignment: .leading) { _ in }
+            AppleTrimmedTitleLogo(url: url, alignment: .leading) { loaded in
+                if !loaded { failedWordmark = url }
+            }
+                // One view per wordmark: the logo view keeps its image while a
+                // new URL loads, which left the last title's mark over the next
+                // title's copy (iPad, 2026-09-22) — as on the Apple TV.
+                .id(url)
                 .frame(maxWidth: wordmarkWidth, alignment: .leading)
                 .frame(height: wordmarkHeight)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)
                 .accessibilityAddTraits(.isHeader)
-        case .text:
+        case .wordmark, .text:
             Text(item.name)
                 .font(.largeTitle.bold())
                 .lineLimit(2)
@@ -228,30 +236,20 @@ struct AppleFeaturedHero<Actions: View>: View {
         AppleBillboardCopy.metadataLine(genres: item.genres, year: item.year, releaseInfo: item.releaseInfo)
     }
 
-    /// Scaled off the canvas, not off a constant: at the flat 300 x 90 the
-    /// stacked card used, the lockup read as a banner on the iPhone and as a
-    /// postage stamp on an iPad in landscape. Capped so it never runs past the
-    /// copy column on a wide canvas.
     private var wordmarkWidth: CGFloat {
-        min(copyColumnWidth * 0.55, 460)
+        AppleFeaturedHeroMetrics.wordmarkSize(viewport: viewportSize).width
     }
 
-    /// The hero spans the page's content column: the viewport less the 16 pt
-    /// card margin on each side, less the copy block's own 24 pt inset.
     private var copyColumnWidth: CGFloat {
-        max(viewportSize.width - 32 - 48, 220)
+        AppleFeaturedHeroMetrics.copyColumnWidth(viewport: viewportSize)
     }
 
     private var wordmarkHeight: CGFloat {
-        min(max(featuredHeight * 0.20, 52), AppleDetailMetrics.titleLogoMaxHeight)
+        AppleFeaturedHeroMetrics.wordmarkSize(viewport: viewportSize).height
     }
 
     private var featuredHeight: CGFloat {
-        #if os(visionOS)
-        min(max(viewportSize.height * 0.50, 280), (max(viewportSize.width, 760) - 32) * 9 / 16)
-        #else
-        AppleDetailMetrics.featuredHeroHeight(in: viewportSize)
-        #endif
+        AppleFeaturedHeroMetrics.artHeight(viewport: viewportSize)
     }
     #endif
 

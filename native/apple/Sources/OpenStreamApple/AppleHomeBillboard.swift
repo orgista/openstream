@@ -62,31 +62,29 @@ struct AppleHomeBillboard<Actions: View>: View {
                 // was inside it, so every page change remounted it empty
                 // and the hero showed a bare surface under the new copy
                 // until the backdrop decoded (sim finding c, 2026-09-22).
-                // On tvOS it keeps the old still until the new one lands;
-                // `AppleTVHeroPageGate` has already warmed it by then.
+                // It keeps the old still until the new one lands: across a
+                // page change `AppleHeroPageGate` has already warmed it (the
+                // iPhone portrait pages are separate views), and a resize
+                // must never paint the loading surface over the hero.
                 AppleRemoteImage(
                     url: item.backgroundURL ?? item.posterURL,
                     placeholderSystemImage: "",
-                    onLoad: { stillImage = $0 },
-                    onFailure: { stillImage = nil },
+                    onLoad: { image in
+                        stillImage = image
+                        appleTrace("hero still loaded \(item.name) \(image.width)px")
+                    },
+                    onFailure: { stillImage = nil; appleTrace("hero still failed \(item.name)") },
                     loadingFill: AppleDesignTokens.surface,
-                    keepsImageWhileReloading: Self.keepsStillWhileReloading
+                    keepsImageWhileReloading: true
                 )
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
                                      artworkImage: phone != nil ? stillImage : nil)
                     .id(item.id)
             }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                appleTrace("hero stage \(item.name) \(Int(size.width))x\(Int(size.height))")
+            }
         )
-    }
-
-    /// Only the Apple TV holds a page until its art is ready; elsewhere the new
-    /// copy would sit over the previous title's still while it loads.
-    private static var keepsStillWhileReloading: Bool {
-        #if os(tvOS)
-        true
-        #else
-        false
-        #endif
     }
 }
 
@@ -194,7 +192,14 @@ private struct AppleHomeHeroPreview: View {
                 // and the hero's copy column is laid out against a width wider
                 // than the screen — which put Details off the right edge of an
                 // iPhone and stopped the synopsis wrapping (2026-09-20).
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The zero minimums are what make it so: a flexible frame
+                // with no minimum takes its child's size as the minimum, so
+                // `maxWidth: .infinity` alone still reported 960 pt on a
+                // 402 pt iPhone. The still behind it then reloaded at the new
+                // size (the grey frame when the trailer started) and the
+                // preview fell under half visible, stopped, and restarted
+                // every few seconds (traced on the iPhone sim, 2026-09-22).
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()
             }
             #elseif os(tvOS)
@@ -240,6 +245,7 @@ private struct AppleHomeHeroPreview: View {
         nativeSource = stream.source
         #else
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+        appleTrace("hero trailer start \(item.name)")
         embedURL = url
         isPlaying = true
         #endif

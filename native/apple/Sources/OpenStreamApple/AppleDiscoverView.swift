@@ -585,23 +585,37 @@ struct AppleDiscoverView: View {
     }
 
     /// Every hero but the iPhone portrait one: the page the rotation clock
-    /// picks, with the Apple TV holding a page until its art is ready.
-    @ViewBuilder
+    /// picks, held until that page's art is ready (`AppleHeroPageGate`).
     private func rotatingHero(_ heroes: [IndexedCatalogItem]) -> some View {
         TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
             if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
-                #if os(tvOS)
-                AppleTVHeroPageGate(pages: heroes.map(heroPageArt), requested: index) { shown, wordmarkFailed in
+                AppleHeroPageGate(pages: heroes.map(heroPageArt), requested: index, slots: heroPageSlots) { shown, wordmarkFailed in
                     featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
                                  wordmarkFailed: wordmarkFailed)
                 }
                 .padding(.horizontal, heroHorizontalPadding)
-                #else
-                featuredHero(heroes[index], rotationCount: heroes.count, rotationIndex: index)
-                    .padding(.horizontal, heroHorizontalPadding)
-                #endif
             }
         }
+    }
+
+    /// Where `featuredHero` draws a page's backdrop and wordmark.
+    private var heroPageSlots: AppleHeroPageSlots {
+        #if os(tvOS)
+        AppleHeroPageSlots(
+            backdropWidth: AppleTVBillboardMetrics.screenSize.width,
+            backdropHeight: AppleTVBillboardMetrics.artHeight,
+            wordmark: CGSize(width: AppleTVBillboardMetrics.copyColumnWidth * 0.62,
+                             height: AppleTVBillboardMetrics.titleFontSize * 2.2)
+        )
+        #else
+        AppleHeroPageSlots(
+            backdropWidth: nil,
+            backdropHeight: dynamicTypeSize.isAccessibilitySize
+                ? AppleFeaturedHeroMetrics.accessibilityArtHeight
+                : AppleFeaturedHeroMetrics.artHeight(viewport: viewportSize),
+            wordmark: AppleFeaturedHeroMetrics.wordmarkSize(viewport: viewportSize)
+        )
+        #endif
     }
 
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
@@ -624,7 +638,8 @@ struct AppleDiscoverView: View {
         ) {
             if phone {
                 AppleHomePhoneHeroActions(
-                    playTitle: AppleBillboardCopy.playTitle(progress: ApplePlaybackStore().progress(for: value.record.id)),
+                    playTitle: AppleBillboardCopy.playTitle(progress: ApplePlaybackStore().progress(for: value.record.id),
+                                                            type: value.item.type),
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onPlay: { selectHero(value, autoPlay: true) },
                     onToggleList: { toggleHeroInList(value) }
@@ -662,20 +677,22 @@ struct AppleDiscoverView: View {
         heroWordmarks[value.item.mediaID] ?? item.logoURL
     }
 
-    #if os(tvOS)
-    /// The art `featuredHero` will draw for a page, for `AppleTVHeroPageGate`
+    /// The art `featuredHero` will draw for a page, for `AppleHeroPageGate`
     /// to warm before the page is shown.
-    private func heroPageArt(_ value: IndexedCatalogItem) -> AppleTVHeroPageArt {
+    private func heroPageArt(_ value: IndexedCatalogItem) -> AppleHeroPageArt {
         let item = heroItem(value.item)
-        let wordmark: URL? = switch AppleTVBillboardTitleTreatment.choose(
+        var wordmark: URL? = switch AppleTVBillboardTitleTreatment.choose(
             hasBackdrop: item.backgroundURL != nil, wordmark: heroWordmark(value, item: item)
         ) {
         case .wordmark(let url): url
         case .text, .none: nil
         }
-        return AppleTVHeroPageArt(id: value.item.mediaID, backdrop: item.backgroundURL ?? item.posterURL, wordmark: wordmark)
+        #if !os(tvOS)
+        // The accessibility layout draws the name, never the wordmark.
+        if dynamicTypeSize.isAccessibilitySize { wordmark = nil }
+        #endif
+        return AppleHeroPageArt(id: value.item.mediaID, backdrop: item.backgroundURL ?? item.posterURL, wordmark: wordmark)
     }
-    #endif
 
     /// The hero's own record, with any textless art that has since arrived.
     /// `id` is unchanged by the swap, so the billboard keeps its identity and
@@ -4441,7 +4458,8 @@ struct AppleCatalogItemDetailView: View {
             episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
                 mediaID: resolvedMediaID ?? item.mediaID, enriched: fetched) } ?? fetched
             downloadedEpisodeIDs = []
-            selectedSeason = library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
+            selectedSeason = savedEpisode(in: episodes)?.season
+                ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
                 ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
             // Play needs an episode: fall back to the first episode of the
             // first season so the button works the moment the list arrives.
@@ -4512,10 +4530,17 @@ struct AppleCatalogItemDetailView: View {
         watchProviders = AppleWatchProviderPolicy.visible(all ?? [], enabledProviderIDs: enabled)
     }
 
+    /// The episode the show's saved position names — what Continue Watching
+    /// and the home hero's Resume button promise — when it is in `loaded`.
+    private func savedEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
+        AppleStremioEpisodePolicy.savedEpisode(progress: playbackStore.progress(for: recordID), in: loaded)
+    }
+
     private func nextUnwatchedEpisodeID(
         in season: Int?,
         from loadedEpisodes: [AppleStremioEpisode]
     ) -> String? {
+        if let saved = savedEpisode(in: loadedEpisodes.filter { $0.season == season }) { return saved.id }
         if let resumed = library.resumeEpisode(for: item, group: localGroup,
             episodes: loadedEpisodes.filter { $0.season == season }) { return resumed.id }
         let completedIDs = Set(
@@ -4742,7 +4767,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 // displayed.
                 webView.alpha = 1
                 container.setPreviewVisible(true)
-                print("[OpenStream] trailer native reveal: live viewport")
+                appleTrace("trailer native reveal: live viewport")
                 self.onStateChange?("revealed", muted, nil)
                 if !container.hasMeasuredPicture {
                     self.scheduleRemeasure(generation: generation, remaining: 3)
@@ -4758,12 +4783,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             config.snapshotWidth = NSNumber(value: 256)
             webView.takeSnapshot(with: config) { image, _ in
                 guard let cgImage = image?.cgImage else {
-                    print("[OpenStream] trailer picture snapshot: no image")
+                    appleTrace("trailer picture snapshot: no image")
                     completion(nil)
                     return
                 }
                 let window = AppleTrailerPreviewLayout.pictureWindow(in: cgImage)
-                print("[OpenStream] trailer picture snapshot: \(cgImage.width)x\(cgImage.height) window=\(window.map { "\($0.lowerBound)...\($0.upperBound)" } ?? "nil")")
+                appleTrace("trailer picture snapshot: \(cgImage.width)x\(cgImage.height) window=\(window.map { "\($0.lowerBound)...\($0.upperBound)" } ?? "nil")")
                 completion(window)
             }
         }
@@ -4802,7 +4827,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             let errorCode = payload["errorCode"] as? Int
             let mediaTime = payload["mediaTime"] as? Double ?? 0
             let quality = payload["quality"] as? String ?? ""
-            print("[OpenStream] trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
+            appleTrace("trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             if state == "revealed" {
                 guard playbackIntent else { return }
                 reveal(muted: muted)
@@ -4992,6 +5017,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         /// page acts on "ended" only after the video pixels are gone.
         func setPreviewVisible(_ visible: Bool) {
             let wasVisible = previewVisible
+            if visible != wasVisible { appleTrace("trailer cover \(visible ? "fading out" : "up")") }
             previewVisible = visible
             cover.layer.removeAllAnimations()
             if visible, !wasVisible, !UIAccessibility.isReduceMotionEnabled {
@@ -5037,6 +5063,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         context.coordinator.setPlaybackIntent(isPlaying)
         let container = PlayerContainer(frame: .zero, messageHandler: context.coordinator, artworkURL: artworkURL)
         container.updateStill(artworkImage)
+        appleTrace("trailer view inserted, still=\(artworkImage.map { "\($0.width)px" } ?? "none")")
         container.isLandscape = isLandscape
         container.onTap = onTap
         container.onMute = onMute

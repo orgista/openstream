@@ -197,6 +197,24 @@ public enum AppleStremioEpisodePolicy {
         return ordered.first { !completedIDs.contains($0.id) } ?? ordered.first
     }
 
+    /// The episode a show's saved position belongs to, while that position is
+    /// still a resume point.
+    ///
+    /// A series keeps one progress entry under the show, naming its episode in
+    /// `partID`; that entry is what Continue Watching lists and what the home
+    /// hero's "Resume S1, E3" reads. The title page chose its episode without
+    /// it — the next unwatched one — so pressing Resume could start another
+    /// episode than the button named (driver review, 2026-09-22). Nil when
+    /// the entry names no episode, is not resumable, or its episode is not in
+    /// the list: the page then keeps its usual choice.
+    public static func savedEpisode(
+        progress: ApplePlaybackProgress?,
+        in episodes: [AppleStremioEpisode]
+    ) -> AppleStremioEpisode? {
+        guard let progress, progress.resumePosition != nil, let part = progress.partID else { return nil }
+        return episodes.first { $0.id == part && isSafe($0) }
+    }
+
     /// The episode after `episode` in the order the detail page lists them,
     /// crossing into the next season when the current one runs out.
     ///

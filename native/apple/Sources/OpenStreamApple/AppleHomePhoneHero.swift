@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Discover's hero on an iPhone in portrait, after the Apple TV app's (owner
 /// 2026-09-22 with two reference screenshots, and the Figma "iOS-OpenStream"
-/// frame): art edge to edge, 540 pt tall, fading to black by 65 %; then,
+/// frame): art edge to edge, 500 pt tall, fading to black by 65 %; then,
 /// centred, an optional "New Season" capsule, the wordmark (or the name in
 /// black-weight capitals), "TV Show · Thriller · Drama" with the rating, and
 /// the buttons. iPad, landscape and every other platform keep
@@ -12,7 +12,11 @@ import SwiftUI
 /// sizes it grows the hero downwards past the art rather than clipping the
 /// buttons, and the fade has already reached black by then.
 struct AppleHomePhoneHero<Actions: View>: View {
-    static var artHeight: CGFloat { 540 }
+    /// 500, not the Figma's 540: at 540 the Continue Watching tiles began
+    /// exactly at the tab bar's top edge on an iPhone 16 Pro, so only the
+    /// header peeked; the owner's inspiration asks for the first row to show
+    /// above the fold (INSPO §1). Never under 480.
+    static var artHeight: CGFloat { 500 }
 
     let item: AppleCatalogItem
     let wordmark: URL?

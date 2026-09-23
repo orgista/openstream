@@ -54,9 +54,14 @@ public enum AppleBillboardCopy {
 
     /// The hero's play button: "Resume S1, E3" when a series is part-way into
     /// an episode, "Resume" for a part-watched film, "Play" otherwise. Read
-    /// from the saved position, so it never promises a resume that is not there.
-    public static func playTitle(progress: ApplePlaybackProgress?) -> String {
+    /// from the saved position, so it never promises a resume that is not there:
+    /// a series entry saved before episodes were recorded (no `partID`) cannot
+    /// be resumed by the title page, so it says Play. Pressing it opens the
+    /// title page, which starts the episode the entry names at its position
+    /// (`AppleStremioEpisodePolicy.savedEpisode`).
+    public static func playTitle(progress: ApplePlaybackProgress?, type: String? = nil) -> String {
         guard let progress, progress.resumePosition != nil else { return "Play" }
+        if type == "series", progress.partID == nil { return "Play" }
         if let part = progress.partID, let episode = AppleStremioMetadataClient.episodeIdentity(part) {
             return "Resume S\(episode.season), E\(episode.episode)"
         }
