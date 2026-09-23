@@ -18,7 +18,8 @@ public enum AppleSubtitleTrackFilter: Sendable {
     /// *picked* and one the app *guessed* from the device:
     ///
     /// - **Picked** (Settings → Playback → Subtitle Languages): that language
-    ///   is the whole menu. If the stream carries none, the menu is empty, and
+    ///   is the whole menu. Nil-language captions and add-on tracks remain
+    ///   eligible when no language matches. Otherwise the menu is empty, and
     ///   that is the honest answer — the owner asked for "English can be
     ///   default, only option as well" (2026-09-15), and quietly listing
     ///   fifteen other languages is what made the menu unusable in the first
@@ -46,10 +47,16 @@ public enum AppleSubtitleTrackFilter: Sendable {
         
         if matchedLanguageTracks.isEmpty {
             if !wanted.isEmpty && isExplicitChoice {
-                return []
+                // Missing language metadata does not mean the track is in a
+                // different language. Keep synthetic 608 and unlabelled add-ons.
+                matchedLanguageTracks = tracks.filter {
+                    $0.language == nil && ($0.codec?.lowercased() == "eia_608"
+                        || $0.codec?.lowercased() == "cc" || $0.id >= 1_000_000)
+                }
+            } else {
+                // Empty preferences or guessed with no match -> single best of all
+                matchedLanguageTracks = tracks
             }
-            // Empty preferences or guessed with no match -> single best of all
-            matchedLanguageTracks = tracks
         }
         
         guard let best = matchedLanguageTracks.min(by: { a, b in

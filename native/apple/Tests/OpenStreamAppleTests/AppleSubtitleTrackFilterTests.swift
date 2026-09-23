@@ -32,6 +32,29 @@ struct AppleSubtitleTrackFilterTests {
         #expect(visible.isEmpty)
     }
 
+    @Test(arguments: ["eia_608", "cc"])
+    func explicitSpanishKeepsNilLanguageCaptions(codec: String) {
+        let tracks = [track(99_608, nil, "Closed Captions", codec: codec)]
+        let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["es"], isExplicitChoice: true)
+        #expect(visible.map(\.id) == [99_608])
+    }
+
+    @Test(arguments: [0, 1_000_000])
+    func explicitSpanishStillRejectsEnglishOnly(id: Int) {
+        let tracks = [track(id, "en", "English")]
+        let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["es"], isExplicitChoice: true)
+        #expect(visible.isEmpty)
+    }
+
+    @Test func explicitChoiceKeepsTheBestNilLanguageAddOn() {
+        let tracks = [
+            track(1_000_000, nil, "Add-on 1"),
+            track(1_000_001, nil, "Add-on 2", isDefault: true)
+        ]
+        let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["es"], isExplicitChoice: true)
+        #expect(visible.map(\.id) == [1_000_001])
+    }
+
     @Test func guessedWithNoMatchReturnsOneTrack() {
         let tracks = [
             track(0, "spa", "Spanish 1"),
