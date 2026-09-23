@@ -320,6 +320,7 @@ public struct OpenStreamRootView: View {
         .defaultHoverEffect(.highlight)
         #endif
         #if DEBUG
+        .onAppear { AppleLaunchClock.mark("root.appear") }
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()

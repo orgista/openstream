@@ -118,8 +118,13 @@ struct AppleHomeBillboard<Actions: View>: View {
                     onLoad: { image in
                         stillImage = image
                         appleTrace("hero still loaded \(item.name) \(image.width)px")
+                        AppleLaunchReadiness.shared.markFirstScreenReady()
                     },
-                    onFailure: { stillImage = nil; appleTrace("hero still failed \(item.name)") },
+                    onFailure: {
+                        stillImage = nil
+                        appleTrace("hero still failed \(item.name)")
+                        AppleLaunchReadiness.shared.markFirstScreenReady()
+                    },
                     loadingFill: AppleDesignTokens.surface,
                     keepsImageWhileReloading: true,
                     // The Mac window resizes live; decode the still once.

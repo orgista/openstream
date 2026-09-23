@@ -1,26 +1,29 @@
 #if DEBUG
+import Darwin
 import Foundation
 
 /// Milestone timing for the simulator, so "how long does this take" is a
 /// number rather than an impression (owner 2026-09-14: "make note of loading
 /// times"). Prints `[OpenStream] timing <label> <ms>` and nothing else; only
 /// compiled into DEBUG builds, and silent unless `OpenStreamTiming` is set.
+///
+/// Every mark is measured from the moment the kernel started the process, so
+/// the numbers include pre-main and the first frame. They used to count from
+/// the root view's first `.task`, which starts after the first frame — and a
+/// mark reached before that task (the Discover billboard, often) was measured
+/// from whenever the clock was first touched, so it read far too small.
 public enum AppleLaunchClock {
-    nonisolated(unsafe) private static var origin = Date()
     nonisolated(unsafe) private static var seen = Set<String>()
     private static let lock = NSLock()
+    private static let origin: Date = processStartDate() ?? Date()
 
     private static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: "OpenStreamTiming")
     }
 
-    /// Called as early in launch as the app has a chance to.
+    /// Called from the root view's first `.task`; recorded as `root.task`.
     public static func begin() {
-        guard isEnabled else { return }
-        lock.lock()
-        origin = Date()
-        seen.removeAll()
-        lock.unlock()
+        mark("root.task")
     }
 
     /// Records the first time a milestone is reached. Later calls with the
@@ -34,6 +37,15 @@ public enum AppleLaunchClock {
         lock.unlock()
         guard isFirst else { return }
         print("[OpenStream] timing \(label) \(Int((elapsed * 1000).rounded()))ms")
+    }
+
+    private static func processStartDate() -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, u_int(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
     }
 }
 #endif

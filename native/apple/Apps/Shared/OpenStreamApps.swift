@@ -10,6 +10,8 @@ struct OpenStreamPlatformApp: App {
     @UIApplicationDelegateAdaptor(OpenStreamAppDelegate.self) private var appDelegate
     #endif
     @State private var showLaunch = true
+    @State private var launchReadiness = AppleLaunchReadiness.shared
+    @State private var launchCoverShownAt: ContinuousClock.Instant?
     @State private var router = AppleAppRouter()
     @State private var webManagement = AppleWebManagementController()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -81,9 +83,23 @@ struct OpenStreamPlatformApp: App {
             // it." Green toggles stay (system on/off), red stays destructive.
             .tint(.white)
             .onOpenURL { router.open($0) }
-            .task {
-                try? await Task.sleep(for: .milliseconds(reduceMotion ? 220 : 1_300))
+            // The cover lifts as soon as the Discover billboard has drawn,
+            // held just long enough for the mark to read, and never longer
+            // than the fixed timer it used to be (`AppleLaunchCoverPolicy`).
+            .task(id: launchReadiness.firstScreenIsReady) {
+                guard showLaunch else { return }
+                let shownAt = launchCoverShownAt ?? .now
+                launchCoverShownAt = shownAt
+                let hold = AppleLaunchCoverPolicy.remainingHold(
+                    elapsed: .now - shownAt,
+                    firstScreenIsReady: launchReadiness.firstScreenIsReady,
+                    reduceMotion: reduceMotion
+                )
+                do { try await Task.sleep(for: hold) } catch { return }
                 withAnimation(.easeOut(duration: 0.22)) { showLaunch = false }
+                #if DEBUG
+                AppleLaunchClock.mark("launch.cover.hidden")
+                #endif
             }
             #if DEBUG
             .task {

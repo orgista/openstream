@@ -143,6 +143,14 @@ struct AppleDiscoverView: View {
     }
 
     var body: some View {
+        // Once per pass. The billboard, the Top Picks row, Continue Watching
+        // and the prefetch key each rebuilt these on their own — Top Picks
+        // walks and digests every catalog item — and all of it ran on the
+        // main thread between the catalog cache landing and the billboard's
+        // first draw at launch.
+        let localContinueWatching = continueWatching
+        let picks = topPicks(continueWatching: localContinueWatching)
+        let heroes = featuredCandidates(continueWatching: localContinueWatching, picks: picks)
         Group {
             if visibleSections.isEmpty && library.groups.isEmpty {
                 AppleSourceEmptyState(
@@ -166,7 +174,6 @@ struct AppleDiscoverView: View {
                         // The billboard cycles through the candidates. Only
                         // this subtree re-renders on the tick; the shelves
                         // below it are untouched.
-                        let heroes = featuredCandidates
                         if !heroes.isEmpty {
                             #if DEBUG
                             let _ = AppleLaunchClock.mark("discover.hero")
@@ -233,8 +240,7 @@ struct AppleDiscoverView: View {
                         // One list of rails. The iPhone held upright orders
                         // it by the A4 rhythm (stills, then posters, then
                         // stills); everywhere else it is the list as built.
-                        let continueShelf = continueWatchingShelf
-                        let picks = topPicks
+                        let continueShelf = continueWatchingShelf(local: localContinueWatching)
                         ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
                             railView(rail, continueWatching: continueShelf, picks: picks)
                         }
@@ -407,10 +413,24 @@ struct AppleDiscoverView: View {
         }
         .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
             await mediaIndex.load()
+            #if DEBUG
+            AppleLaunchClock.mark("index.loaded(\(mediaIndex.records.count))")
+            #endif
             try? await mediaIndex.synchronizePlaybackProgress()
             if !loadedCache {
                 await catalogStore.loadCachedSections(sources: sourceStore.sources)
                 loadedCache = true
+                #if DEBUG
+                AppleLaunchClock.mark("discover.cache(\(catalogStore.sections.count))")
+                #endif
+                // Nothing cached to put in the billboard: the launch cover
+                // has nothing to wait for. (Not the billboard candidates —
+                // building them walks the media index and digests every
+                // catalog item, ~90 ms on the Apple TV sim, and sat between
+                // the cache and the billboard's first draw.)
+                if catalogStore.sections.allSatisfy(\.items.isEmpty) {
+                    AppleLaunchReadiness.shared.markFirstScreenReady()
+                }
             }
             await catalogStore.refresh(sources: sourceStore.sources)
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
@@ -423,10 +443,12 @@ struct AppleDiscoverView: View {
         }
         // Fetch, while the viewer is still on the home screen, what a content
         // page would otherwise wait 1.36 s for (owner: "preload metadata like
-        // wordmark art so that it loads basically instantly").
-        .task(id: prefetchIdentity) {
+        // wordmark art so that it loads basically instantly"). Keyed on the
+        // set of billboard titles, so it re-runs when the set changes, not
+        // when the rotation moves through it.
+        .task(id: heroes.map(\.item.mediaID).joined(separator: "\u{1f}")) {
             await AppleMetadataPrefetcher.warm(
-                featuredCandidates.map {
+                heroes.map {
                     AppleMetadataPrefetcher.Title(type: $0.item.type, mediaID: $0.item.mediaID)
                 },
                 sources: sourceStore.sources
@@ -438,20 +460,15 @@ struct AppleDiscoverView: View {
         }
     }
 
-    /// The billboard candidates, as a key: the prefetch re-runs when the set
-    /// changes, not when the rotation moves through it.
-    private var prefetchIdentity: String {
-        featuredCandidates.map(\.item.mediaID).joined(separator: "\u{1f}")
-    }
-
     /// What the hero rotates through: what the owner is part-way into first,
     /// then the recommendations, then the newest catalog items (FEEDBACK X9) —
     /// only titles with a backdrop, so no page is a poster or a placeholder
     /// with no title over it. The first catalog offers more than five so the
     /// rotation can still fill once the art-less ones are passed over.
-    private var featuredCandidates: [IndexedCatalogItem] {
+    private func featuredCandidates(continueWatching: [IndexedCatalogItem],
+                                    picks: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         var values = continueWatching
-        values += topPicks
+        values += picks
         if let section = visibleSections.first,
            let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
             values += section.items.prefix(AppleHeroRotation.maximumCandidates * 4).map { item in
@@ -485,11 +502,10 @@ struct AppleDiscoverView: View {
             .map { $0 }
     }
 
-    private var mergedContinueWatching: [IndexedCatalogItem] {
+    private func mergedContinueWatching(local: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         let serverItems = mediaServerLibrary.continueWatching
         // Once per pass: `continueWatching` filters the whole media index, and
         // it was being rebuilt again for every merged item below.
-        let local = self.continueWatching
         let localItems = local.map { $0.item }
         let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
         
@@ -511,7 +527,7 @@ struct AppleDiscoverView: View {
         return AppleCatalogShelfPolicy.uniqueByID(resolved)
     }
 
-    private var topPicks: [IndexedCatalogItem] {
+    private func topPicks(continueWatching: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         let ratingStore = AppleTitleRatingStore()
         let ratings = ratingStore.allRatings
         let history = continueWatching.map { value in
@@ -531,9 +547,15 @@ struct AppleDiscoverView: View {
                 values[record.id] = IndexedCatalogItem(record: record, item: item, source: source)
             }
         }
+        // One digest per title. The lookup below used to digest every
+        // candidate again for every ranked title — twenty passes over the
+        // whole catalog.
+        var byDigest: [String: IndexedCatalogItem] = [:]
         let rankable = values.values.map { value in
-            AppleRankableTitle(
-                id: ApplePlaybackIdentity.digest(for: value.item.mediaID),
+            let digest = ApplePlaybackIdentity.digest(for: value.item.mediaID)
+            if byDigest[digest] == nil { byDigest[digest] = value }
+            return AppleRankableTitle(
+                id: digest,
                 genres: [],
                 releaseYear: Int(value.item.releaseInfo ?? ""),
                 metadataCompleteness: Double([
@@ -547,9 +569,7 @@ struct AppleDiscoverView: View {
             )
         }
         let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: .now, limit: 20)
-        return ranked.compactMap { rankedTitle in
-            values.values.first { ApplePlaybackIdentity.digest(for: $0.item.mediaID) == rankedTitle.id }
-        }
+        return ranked.compactMap { byDigest[$0.id] }
     }
 
     /// A row on the home screen, in the order it is drawn.
@@ -567,8 +587,8 @@ struct AppleDiscoverView: View {
     /// Continue Watching as the shelf shows it. Review builds can stand in an
     /// in-memory fixture (`-OpenStreamDebugContinueWatching YES`) when the
     /// simulator has no progress; it is never written anywhere.
-    private var continueWatchingShelf: (values: [IndexedCatalogItem], isFixture: Bool) {
-        let merged = mergedContinueWatching
+    private func continueWatchingShelf(local: [IndexedCatalogItem]) -> (values: [IndexedCatalogItem], isFixture: Bool) {
+        let merged = mergedContinueWatching(local: local)
         #if DEBUG
         if merged.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
         #endif
