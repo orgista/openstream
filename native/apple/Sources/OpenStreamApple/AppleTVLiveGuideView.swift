@@ -1441,8 +1441,8 @@ struct AppleTVLivePlayerScreen: View {
             // Below the invisible focus button so it can never be a focus or
             // press target; the strip lifts it rather than covering it.
             if AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route) {
-                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles)
-                    .padding(.bottom, footer.isVisible ? metrics.footerHeight : 0)
+                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles,
+                                         textBottomLift: footer.isVisible ? metrics.footerHeight : 0)
                     .ignoresSafeArea()
             }
 

@@ -27,13 +27,18 @@ public struct ApplePlaybackTrack: Identifiable, Equatable, Sendable {
     public let language: String?
     public let codec: String?
     public let isDefault: Bool
+    /// Container disposition FORCED: every cue on the track is a forced one
+    /// (signs, foreign dialogue). Carried as data; drawn like any cue.
+    public let isForced: Bool
 
-    public init(id: Int, title: String, language: String? = nil, codec: String? = nil, isDefault: Bool = false) {
+    public init(id: Int, title: String, language: String? = nil, codec: String? = nil,
+                isDefault: Bool = false, isForced: Bool = false) {
         self.id = id
         self.title = title
         self.language = language
         self.codec = codec
         self.isDefault = isDefault
+        self.isForced = isForced
     }
 }
 
@@ -57,12 +62,43 @@ public struct AppleSubtitleTextRun: Sendable, Equatable {
     }
 }
 
+/// One decoded bitmap subtitle object (PGS/DVB), bridged from the engine's
+/// `SubtitleImage` with the geometry the disc authored. A PGS composition
+/// arrives as one cue per object, so a sign and a line of dialogue on screen
+/// together are two of these.
+public struct AppleSubtitleBitmap {
+    public let image: CGImage
+    /// The object's rect, normalized to `canvasSize` ([0, 1], top-left origin).
+    public let rect: CGRect
+    /// The composition canvas `rect` is normalized against (e.g. 1920×1080).
+    /// `.zero` when unknown: the canvas is then taken to be the picture.
+    public let canvasSize: CGSize
+    /// AV_SUBTITLE_FLAG_FORCED. Carried as data; drawn like any cue.
+    public let isForced: Bool
+
+    public init(image: CGImage, rect: CGRect, canvasSize: CGSize = .zero, isForced: Bool = false) {
+        self.image = image
+        self.rect = rect
+        self.canvasSize = canvasSize
+        self.isForced = isForced
+    }
+}
+
+extension AppleSubtitleBitmap: Equatable {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        // CGImage has no value equality; identity is the practical signal
+        // that the decoded bitmap is unchanged.
+        lhs.image === rhs.image && lhs.rect == rhs.rect
+            && lhs.canvasSize == rhs.canvasSize && lhs.isForced == rhs.isForced
+    }
+}
+
 /// The payload of a subtitle cue, mirroring the engine's `SubtitleCue.Body`:
 /// plain `.text`, styled `.richText`, or a rendered `.image` bitmap (PGS/DVB).
 public enum AppleSubtitleCueBody {
     case text(String)
     case richText([AppleSubtitleTextRun])
-    case image(CGImage)
+    case image(AppleSubtitleBitmap)
 }
 
 extension AppleSubtitleCueBody: Equatable {
@@ -73,9 +109,7 @@ extension AppleSubtitleCueBody: Equatable {
         case (.richText(let a), .richText(let b)):
             return a == b
         case (.image(let a), .image(let b)):
-            // CGImage has no value equality; identity is the practical signal
-            // that the decoded bitmap is unchanged.
-            return a === b
+            return a == b
         default:
             return false
         }
@@ -105,6 +139,13 @@ public struct AppleSubtitleCue: Identifiable, Equatable {
         case .richText(let runs): return runs.map(\.text).joined()
         case .image: return nil
         }
+    }
+
+    /// True for a bitmap object the disc flagged forced. Text cues carry no
+    /// flag of their own; a forced *track* is handled by its disposition.
+    public var isForced: Bool {
+        if case .image(let bitmap) = body { return bitmap.isForced }
+        return false
     }
 }
 

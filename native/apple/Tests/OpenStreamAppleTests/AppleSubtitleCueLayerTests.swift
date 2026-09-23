@@ -38,11 +38,18 @@ struct AppleSubtitleCueLayerTests {
         #expect(AppleSubtitleCueContent(cue) == .text("Hello, world"))
     }
 
-    @Test func bitmapCuesDrawTheSameImage() throws {
+    @Test func bitmapCuesDrawTheSameImageWithItsGeometry() throws {
         let image = try #require(Self.pixel())
-        let cue = AppleSubtitleCue(id: 1, startTime: 1, endTime: 3, body: .image(image))
-        #expect(AppleSubtitleCueContent(cue) == .image(image))
-        #expect(AppleSubtitleCueContent(cue) != .image(try #require(Self.pixel())))
+        let bitmap = AppleSubtitleBitmap(image: image, rect: CGRect(x: 0.3, y: 0.884, width: 0.402, height: 0.056),
+                                         canvasSize: CGSize(width: 1920, height: 1080), isForced: true)
+        let cue = AppleSubtitleCue(id: 1, startTime: 1, endTime: 3, body: .image(bitmap))
+        #expect(AppleSubtitleCueContent(cue) == .image(bitmap))
+        #expect(cue.isForced)
+        let other = AppleSubtitleBitmap(image: try #require(Self.pixel()), rect: bitmap.rect,
+                                        canvasSize: bitmap.canvasSize, isForced: true)
+        #expect(AppleSubtitleCueContent(cue) != .image(other))
+        let moved = AppleSubtitleBitmap(image: image, rect: .zero, canvasSize: bitmap.canvasSize, isForced: true)
+        #expect(AppleSubtitleCueContent(cue) != .image(moved))
     }
 
     // MARK: - Active cue
@@ -52,11 +59,27 @@ struct AppleSubtitleCueLayerTests {
             AppleSubtitleCue(id: 1, startTime: 1, endTime: 3, body: .text("one")),
             AppleSubtitleCue(id: 2, startTime: 4, endTime: 6, body: .text("two")),
         ]
-        #expect(AppleSubtitleCueLayerPolicy.activeCue(in: cues, at: 0.5) == nil)
-        #expect(AppleSubtitleCueLayerPolicy.activeCue(in: cues, at: 1)?.id == 1)
-        #expect(AppleSubtitleCueLayerPolicy.activeCue(in: cues, at: 3) == nil)
-        #expect(AppleSubtitleCueLayerPolicy.activeCue(in: cues, at: 5.9)?.id == 2)
-        #expect(AppleSubtitleCueLayerPolicy.activeCue(in: [], at: 2) == nil)
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 0.5).isEmpty)
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 1).map(\.id) == [1])
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 3).isEmpty)
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 5.9).map(\.id) == [2])
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: [], at: 2).isEmpty)
+    }
+
+    /// A PGS composition is one cue per object; `.first` used to drop the
+    /// sign or the dialogue depending on array order (Q4a8 §4).
+    @Test func everyOverlappingCueIsActiveSoASignAndDialogueShowTogether() throws {
+        let image = try #require(Self.pixel())
+        let canvas = CGSize(width: 1920, height: 1080)
+        let sign = AppleSubtitleCue(id: 0, startTime: 0.5, endTime: 58, body: .image(AppleSubtitleBitmap(
+            image: image, rect: CGRect(x: 0.321, y: 0.078, width: 0.359, height: 0.05), canvasSize: canvas, isForced: true)))
+        let dialogue = AppleSubtitleCue(id: 1, startTime: 2, endTime: 5, body: .image(AppleSubtitleBitmap(
+            image: image, rect: CGRect(x: 0.3, y: 0.884, width: 0.402, height: 0.056), canvasSize: canvas)))
+        let later = AppleSubtitleCue(id: 2, startTime: 6, endTime: 8, body: .text("later"))
+        let cues = [dialogue, sign, later]
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 1).map(\.id) == [0])
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 3).map(\.id) == [1, 0])
+        #expect(AppleSubtitleCueLayerPolicy.activeCues(in: cues, at: 7).map(\.id) == [0, 2])
     }
 
     // MARK: - Menu
@@ -82,14 +105,14 @@ struct AppleSubtitleCueLayerTests {
         engine.position = 36006
         let subtitles = AppleStockPlayerSubtitles()
         subtitles.refresh(from: engine)
-        #expect(subtitles.cue?.id == 7)
+        #expect(subtitles.cues.map(\.id) == [7])
 
         // "Off": the engine drops its cues and the layer empties at once,
         // without waiting for a position tick that a paused player never sends.
         engine.subtitleCues = []
         subtitles.select(nil, on: engine)
         #expect(engine.selectedSubtitle == [nil])
-        #expect(subtitles.cue == nil)
+        #expect(subtitles.cues.isEmpty)
     }
 
     private static func pixel() -> CGImage? {

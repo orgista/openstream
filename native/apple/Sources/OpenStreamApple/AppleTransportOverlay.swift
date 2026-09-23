@@ -218,8 +218,8 @@ struct AppleTransportOverlay: View {
             if model.showsWaitingIndicator { waitingIndicator }
             // Cues sit against the **picture**, not the screen; the same
             // layer is mounted over the stock player on `.avPlayer`.
-            AppleSubtitleCueLayer(cue: model.activeSubtitleCue, videoSize: coordinator.engine.videoSize)
-                .padding(.bottom, model.controlsVisible ? 100 : 24)
+            AppleSubtitleCueLayer(cues: model.activeSubtitleCues, videoSize: coordinator.engine.videoSize,
+                                  textBottomLift: model.controlsVisible ? 100 : 24)
         }
         .foregroundStyle(.white)
         .tint(.white)

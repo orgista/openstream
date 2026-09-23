@@ -399,11 +399,11 @@ public final class AppleTransportOverlayModel {
         )
     }
 
-    /// The cue active at the current position, for the overlay to render on
-    /// `.surface`. nil when no track is selected or no cue overlaps the
+    /// The cues active at the current position, for the overlay to render on
+    /// `.surface`. Empty when no track is selected or no cue overlaps the
     /// position. The stock player has its own `AppleStockPlayerSubtitles`.
-    public var activeSubtitleCue: AppleSubtitleCue? {
-        AppleSubtitleCueLayerPolicy.activeCue(in: subtitleCues, at: position)
+    public var activeSubtitleCues: [AppleSubtitleCue] {
+        AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: position)
     }
 
     // MARK: - Route-derived secondary actions

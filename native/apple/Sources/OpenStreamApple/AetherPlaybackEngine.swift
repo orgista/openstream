@@ -35,6 +35,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var externalSubtitleTracks: [AppleExternalSubtitleTrack] = []
     private var activeExternalSubtitleID: Int?
     private var externalSubtitleLoad: Task<Void, Never>?
+    /// Latest `sourceVideoWidth/Height` and `softwareDisplaySize`, captured in
+    /// the sinks for the same `willSet` reason as `lastPublishedDuration`.
+    private var lastSourceVideoWidth: Int32 = 0
+    private var lastSourceVideoHeight: Int32 = 0
+    private var lastSoftwareDisplaySize: CGSize?
 
     /// Track ids at or above this value address `externalSubtitleTracks`; the
     /// engine's own track indices are small integers.
@@ -58,6 +63,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
     public private(set) var position: Double = 0
+    /// The picture's display size, so the cue layer fits bitmap subtitles to
+    /// the picture rather than to an assumed 16:9 (a 2.39:1 film letterboxes).
+    /// The software route reports what it renders; the AVPlayer routes use the
+    /// probed coded size times the pixel aspect. nil until probed.
+    public private(set) var videoSize: CGSize?
     public private(set) var duration: Double? = nil {
         didSet {
             guard duration != oldValue else { return }
@@ -376,6 +386,24 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                 self.refreshDuration()
             }
             .store(in: &cancellables)
+        aether.$sourceVideoWidth
+            .sink { [weak self] width in
+                self?.lastSourceVideoWidth = width
+                self?.refreshVideoSize()
+            }
+            .store(in: &cancellables)
+        aether.$sourceVideoHeight
+            .sink { [weak self] height in
+                self?.lastSourceVideoHeight = height
+                self?.refreshVideoSize()
+            }
+            .store(in: &cancellables)
+        aether.$softwareDisplaySize
+            .sink { [weak self] size in
+                self?.lastSoftwareDisplaySize = size
+                self?.refreshVideoSize()
+            }
+            .store(in: &cancellables)
         aether.clock.$currentTime
             .sink { [weak self] seconds in self?.applyPosition(seconds) }
             .store(in: &cancellables)
@@ -383,6 +411,30 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     private func applyPhase(_ phase: PlaybackPhase) {
         self.phase = Self.mapPhase(phase)
+        // The pixel aspect is set after the coded size and is not published;
+        // the next phase change picks it up.
+        refreshVideoSize()
+    }
+
+    private func refreshVideoSize() {
+        let next = Self.displaySize(
+            software: lastSoftwareDisplaySize,
+            codedWidth: lastSourceVideoWidth,
+            codedHeight: lastSourceVideoHeight,
+            pixelAspect: aether.sourceVideoPixelAspectRatio
+        )
+        if next != videoSize { videoSize = next }
+    }
+
+    /// What the picture presents at: the software renderer's own size when it
+    /// has one, else the coded size widened by the pixel aspect. nil unknown.
+    nonisolated static func displaySize(
+        software: CGSize?, codedWidth: Int32, codedHeight: Int32, pixelAspect: Double
+    ) -> CGSize? {
+        if let software, software.width > 0, software.height > 0 { return software }
+        guard codedWidth > 0, codedHeight > 0 else { return nil }
+        let aspect = pixelAspect.isFinite && pixelAspect > 0 ? pixelAspect : 1
+        return CGSize(width: (Double(codedWidth) * aspect).rounded(), height: Double(codedHeight))
     }
 
     private func applyFailure(_ info: PlaybackErrorInfo?) {
@@ -465,7 +517,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             title: track.name,
             language: track.language,
             codec: track.codec,
-            isDefault: track.isDefault
+            isDefault: track.isDefault,
+            isForced: track.isForced
         )
     }
 
@@ -493,7 +546,12 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                 )
             })
         case .image(let image):
-            return .image(image.cgImage)
+            return .image(AppleSubtitleBitmap(
+                image: image.cgImage,
+                rect: image.position,
+                canvasSize: image.canvasSize,
+                isForced: image.isForced
+            ))
         }
     }
 
