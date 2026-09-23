@@ -1,4 +1,5 @@
 import Foundation
+import MediaAccessibility
 import Observation
 import Security
 
@@ -208,6 +209,12 @@ public enum AppleCaptionsPreference: String, CaseIterable, Sendable {
         }
     }
 
+    /// The system CC + SDH switch is an extra ON signal; switching it off
+    /// never disables an app preference or rewrites the saved choice.
+    static func effective(_ stored: Self, systemCaptionsEnabled: Bool) -> Self {
+        stored == .off && systemCaptionsEnabled ? .always : stored
+    }
+
     /// True when a track should be auto-selected on load regardless of language.
     var autoSelectsAnyTrack: Bool { self == .always }
 
@@ -300,11 +307,16 @@ public final class AppleSettingsStore {
         didSet { persistSecret(traktClientSecret, account: SecretKey.traktClientSecret) }
     }
 
-    /// Preferred caption behaviour (Settings → Playback → Captions). Persisted
-    /// as the raw value; an invalid or missing stored string falls back to `.off`.
-    public var captionsPreference: AppleCaptionsPreference {
-        didSet { defaults.set(captionsPreference.rawValue, forKey: DefaultsKey.captionsPreference) }
+    /// Saved app choice. The system CC + SDH switch can additionally enable
+    /// captions, without changing this value or its persisted representation.
+    private var storedCaptionsPreference: AppleCaptionsPreference {
+        didSet { defaults.set(storedCaptionsPreference.rawValue, forKey: DefaultsKey.captionsPreference) }
     }
+    public var captionsPreference: AppleCaptionsPreference {
+        get { .effective(storedCaptionsPreference, systemCaptionsEnabled: systemCaptionsEnabled()) }
+        set { storedCaptionsPreference = newValue }
+    }
+    @ObservationIgnored private let systemCaptionsEnabled: () -> Bool
 
     /// Compatibility shim for the former "Captions Auto-On" toggle, now folded
     /// into `captionsPreference`: `true` ↔ `.always`, `false` ↔ `.off`. Kept so
@@ -470,10 +482,14 @@ public final class AppleSettingsStore {
 
     public init(
         defaults: UserDefaults = .standard,
-        keychain: any AppleCredentialStoring = AppleKeychainStore()
+        keychain: any AppleCredentialStoring = AppleKeychainStore(),
+        systemCaptionsEnabled: @escaping () -> Bool = {
+            MACaptionAppearanceGetDisplayType(.user) == .alwaysOn
+        }
     ) {
         self.defaults = defaults
         self.keychain = keychain
+        self.systemCaptionsEnabled = systemCaptionsEnabled
 
         metadataEnabled = defaults.object(forKey: DefaultsKey.metadataEnabled) as? Bool ?? false
         radarrURL = defaults.string(forKey: DefaultsKey.radarrURL) ?? ""
@@ -484,19 +500,13 @@ public final class AppleSettingsStore {
         sonarrQualityProfileID = defaults.string(forKey: DefaultsKey.sonarrQualityProfileID) ?? ""
         gatewayEnabled = defaults.bool(forKey: DefaultsKey.gatewayEnabled)
         gatewayURL = defaults.string(forKey: DefaultsKey.gatewayURL) ?? ""
-        // Captions are on unless the viewer has turned them off, so they work
-        // out of the box rather than sitting behind two settings screens
-        // (owner 2026-09-15: "auto on captions should be enabled by default
-        // but can be toggled off"). Only a stored preference overrides this —
-        // including `.off`, so turning them off sticks. The former
-        // "Captions Auto-On" boolean is read here too, for installs that
-        // predate the preference, and both of its values map to the same
-        // answer they used to mean.
+        // Keep the app's saved choice intact. The effective getter adds the
+        // system CC + SDH signal; an unset app preference still defaults to on.
         if let stored = defaults.string(forKey: DefaultsKey.captionsPreference),
            let pref = AppleCaptionsPreference(rawValue: stored) {
-            captionsPreference = pref
+            storedCaptionsPreference = pref
         } else {
-            captionsPreference = .always
+            storedCaptionsPreference = .always
         }
         if let storedLanguages = defaults.stringArray(forKey: AppleSubtitleLanguages.defaultsKey) {
             storedSubtitleLanguages = AppleSubtitleLanguages.sanitized(storedLanguages)
@@ -649,7 +659,7 @@ public final class AppleSettingsStore {
         sonarrQualityProfileID = restored.sonarrQualityProfileID
         gatewayEnabled = restored.gatewayEnabled
         gatewayURL = restored.gatewayURL
-        captionsPreference = restored.captionsPreference
+        storedCaptionsPreference = restored.storedCaptionsPreference
         subtitleLanguages = restored.subtitleLanguages
         autoPlayNextEpisode = restored.autoPlayNextEpisode
         watchProviderIDs = restored.watchProviderIDs

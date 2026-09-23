@@ -1,4 +1,6 @@
 import XCTest
+import CoreText
+import MediaAccessibility
 import Vision
 
 /// iPhone and iPad behaviour that needs a touch or a rotation.
@@ -1190,6 +1192,47 @@ final class AppleiOSUITests: XCTestCase {
         capture("n7-ios-inline-off")
         XCTAssertTrue(app.buttons["Off"].firstMatch.isSelected)
         XCTAssertFalse(try cueVisible())
+    }
+
+    /// The session script installs a temporary system caption profile while the
+    /// simulator is shut down, and restores its preference file after this test.
+    func testSystemCaptionStylePreservesSRTItalics() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_CAPTION_STYLE_PROOF"] == "1",
+              let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost rich SRT fixture and temporary system style")
+        }
+        let previousDisplayType = MACaptionAppearanceGetDisplayType(.user)
+        defer { MACaptionAppearanceSetDisplayType(.user, previousDisplayType) }
+        MACaptionAppearanceSetDisplayType(.user, .alwaysOn)
+        let color = MACaptionAppearanceCopyForegroundColor(.user, nil).takeRetainedValue()
+        let rgb = try XCTUnwrap(color.converted(to: CGColorSpaceCreateDeviceRGB(), intent: .defaultIntent, options: nil)?.components)
+        XCTAssertEqual(rgb[0], 1, accuracy: 0.01)
+        XCTAssertEqual(rgb[1], 1, accuracy: 0.01)
+        XCTAssertEqual(rgb[2], 0, accuracy: 0.01)
+        let descriptor = MACaptionAppearanceCopyFontDescriptorForStyle(.user, nil, .default).takeRetainedValue()
+        let font = CTFontCreateWithFontDescriptor(descriptor, 15, nil)
+        XCTAssertTrue((CTFontCopyFamilyName(font) as String).contains("Courier"))
+        XCTAssertEqual(MACaptionAppearanceGetBackgroundOpacity(.user, nil), 1, accuracy: 0.01)
+        XCTAssertEqual(MACaptionAppearanceGetRelativeCharacterSize(.user, nil), 1.5, accuracy: 0.01)
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "NO",
+            "-openstream.playback.engine", "engine", "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.settings.subtitle.languages.v1", "(en)",
+            "-openstream.sources.v1", "()", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        launch(screen: "add-files")
+        let cue = app.staticTexts["Plain and italic captions"].firstMatch
+        XCTAssertTrue(cue.waitForExistence(timeout: 45), "System CC switch should enable the SRT track")
+        Thread.sleep(forTimeInterval: 4)
+        attach("n9-ios-custom-caption-style-italics")
     }
 
     func testLibrarySiblingSubtitlesShowSpanishCue() throws {

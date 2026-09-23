@@ -122,12 +122,31 @@ func captionsPreferenceDefaultsToOnWhenUnset() {
 @Test
 func captionsPreferenceOffSurvivesAReread() {
     let defaults = makeIsolatedDefaults()
-    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(), systemCaptionsEnabled: { false })
     store.captionsPreference = .off
 
-    let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(), systemCaptionsEnabled: { false })
     #expect(reread.captionsPreference == .off)
     #expect(reread.captionsAutoOn == false)
+}
+
+@MainActor
+@Test
+func systemCaptionsEnableWithoutOverwritingTheSavedAppChoice() throws {
+    let name = "openstream.tests.caption-system.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    defaults.set("off", forKey: captionsPreferenceKey)
+    var systemOn = true
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(),
+                                   systemCaptionsEnabled: { systemOn })
+    #expect(store.captionsPreference == .always)
+    #expect(defaults.string(forKey: captionsPreferenceKey) == "off")
+    systemOn = false
+    #expect(store.captionsPreference == .off)
+    store.captionsPreference = .english
+    #expect(store.captionsPreference == .english)
+    #expect(defaults.string(forKey: captionsPreferenceKey) == "english")
 }
 
 @MainActor

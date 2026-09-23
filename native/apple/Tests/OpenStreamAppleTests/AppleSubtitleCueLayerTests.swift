@@ -55,12 +55,15 @@ struct AppleSubtitleCueLayerTests {
         #expect(AppleSubtitleCueContent(cue) == .text("CC ONE AT 1S"))
     }
 
-    @Test func richTextRunsAreFlattenedIntoOneLine() {
+    @Test func richTextRunsKeepTheirEmphasis() {
         let cue = AppleSubtitleCue(id: 1, startTime: 1, endTime: 3, body: .richText([
             AppleSubtitleTextRun(text: "Hello, ", isItalic: true),
             AppleSubtitleTextRun(text: "world", isBold: true),
         ]))
-        #expect(AppleSubtitleCueContent(cue) == .text("Hello, world"))
+        #expect(AppleSubtitleCueContent(cue) == .richText([
+            AppleSubtitleTextRun(text: "Hello, ", isItalic: true),
+            AppleSubtitleTextRun(text: "world", isBold: true),
+        ]))
     }
 
     @Test func bitmapCuesDrawTheSameImageWithItsGeometry() throws {

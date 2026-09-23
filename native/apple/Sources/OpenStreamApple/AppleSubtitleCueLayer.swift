@@ -1,19 +1,20 @@
 import CoreGraphics
 import Foundation
+import MediaAccessibility
 import Observation
 import SwiftUI
 
 /// What the cue layer draws for one cue: a line of text or a decoded bitmap
-/// (PGS/DVB) with its authored geometry. Rich-text runs are flattened, as the
-/// transport overlay always did.
+/// (PGS/DVB) with its authored geometry and rich-text emphasis intact.
 enum AppleSubtitleCueContent: Equatable {
     case text(String)
+    case richText([AppleSubtitleTextRun])
     case image(AppleSubtitleBitmap)
 
     init(_ cue: AppleSubtitleCue) {
         switch cue.body {
         case .text(let s): self = .text(s)
-        case .richText(let runs): self = .text(runs.map(\.text).joined())
+        case .richText(let runs): self = .richText(runs)
         case .image(let bitmap): self = .image(bitmap)
         }
     }
@@ -143,6 +144,14 @@ struct AppleSubtitleCueLayer: View {
 
 /// Text cues as centred lines at the bottom of the picture.
 private struct AppleSubtitleTextCues: View {
+    @State private var appearance = AppleCaptionAppearance.system()
+    #if os(tvOS)
+    @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 29
+    #elseif os(macOS)
+    @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 12
+    #else
+    @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 15
+    #endif
     let cues: [AppleSubtitleCue]
     let videoSize: CGSize?
 
@@ -157,9 +166,7 @@ private struct AppleSubtitleTextCues: View {
                 if !cues.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(cues) { cue in
-                            Text(cue.text ?? "")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
+                            Text(appearance.text(for: cue, baseSize: baseSize))
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -178,6 +185,10 @@ private struct AppleSubtitleTextCues: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String))) { _ in
+            appearance = .system()
         }
     }
 }
