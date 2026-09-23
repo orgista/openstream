@@ -403,7 +403,8 @@ public final class ApplePlaybackCoordinator {
         engine.stop()
         setPhase(.loading)
         setRoute(engine.route)
-        appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") route=\(route)")
+        let joinProfile = request.hints.nativeRemoteHLS ? "standard" : "fastZap"
+        appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") route=\(route)\(request.isLive ? " join=\(joinProfile)" : "")")
         startExternalSubtitles(for: request, attempt: attempt)
         setupProgress(for: request)
         startTimeout()

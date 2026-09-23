@@ -233,6 +233,33 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             sourceURL = master
             headers = [:]
         }
+        let options = Self.loadOptions(
+            for: request, headers: headers,
+            preferredSubtitleLanguages: preferredSubtitleLanguages,
+            captionsPreference: captionsPreference
+        )
+        _ = try await aether.load(
+            url: sourceURL,
+            startPosition: request.resumePosition,
+            options: options
+        )
+        print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
+        guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
+        observeLiveCaptions(request, generation: generation)
+        if !request.autoplay, let resume = request.resumePosition, resume.isFinite, resume > 0 {
+            // A paused mount prepares the demuxer at the resume offset but
+            // does not arm its clock. Seek while paused to publish that offset.
+            await aether.seek(to: resume)
+        }
+    }
+
+    /// Builds the engine policy without loading media or reading viewer defaults.
+    nonisolated static func loadOptions(
+        for request: ApplePlaybackRequest,
+        headers: [String: String],
+        preferredSubtitleLanguages: [String] = [],
+        captionsPreference: AppleCaptionsPreference = .off
+    ) -> LoadOptions {
         var options = LoadOptions(
             httpHeaders: headers,
             isLive: request.isLive,
@@ -248,6 +275,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // Live HLS from an extension-less URL: AVPlayer plays the origin
         // directly; the raw live path would hand it to FFmpeg and fail.
         if request.hints.nativeRemoteHLS { options.nativeRemoteHLS = true }
+        // Raw live TS is demuxed here and re-served as HLS. The lean-back default waits for 3 x TARGETDURATION
+        // (18 s with 4 s cuts) before the first playlist; a strict-realtime origin can only fill that in wall-clock
+        // time, which is what the 10 s live timeout was firing on. fastZap cuts on the source GOP so the holdback
+        // tracks it, and serves a bounded first window if the origin is strict realtime (AE#195/#208).
+        if request.isLive, !request.hints.nativeRemoteHLS { options.liveJoinProfile = .fastZap }
         options.autoplay = request.autoplay
         // A language the viewer picked wins over one derived from the captions
         // preference: under `.always` the preference contributes no languages
@@ -256,19 +288,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         options.preferredSubtitleLanguages = preferredSubtitleLanguages.isEmpty
             ? captionsPreference.preferredSubtitleLanguages
             : preferredSubtitleLanguages
-        _ = try await aether.load(
-            url: sourceURL,
-            startPosition: request.resumePosition,
-            options: options
-        )
-        print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
-        guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
-        observeLiveCaptions(request, generation: generation)
-        if !request.autoplay, let resume = request.resumePosition, resume.isFinite, resume > 0 {
-            // A paused mount prepares the demuxer at the resume offset but
-            // does not arm its clock. Seek while paused to publish that offset.
-            await aether.seek(to: resume)
-        }
+        return options
     }
 
     private func observeLiveCaptions(_ request: ApplePlaybackRequest, generation: Int) {
