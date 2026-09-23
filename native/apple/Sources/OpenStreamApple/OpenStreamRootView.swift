@@ -323,7 +323,8 @@ public struct OpenStreamRootView: View {
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()
-            if !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
+            let playbackFixture = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL").flatMap(URL.init(string:))
+            if !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"), playbackFixture?.isFileURL != true {
                 Task { await sourceStore.seedTestCatalogsIfNeeded() }
             }
             // Simulator-only navigation to real screens; no fixtures or saved sources.

@@ -14,6 +14,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         public var notWebReady: Bool
         public var proxyHeaders: [String: String]
         public var filename: String?
+        /// Original library file, before local export or the SMB playback proxy.
+        public var libraryFileURL: URL?
         /// The add-on media id for this title (`tt0111161`, or `tt0903747:1:2`
         /// for an episode) and its type. Present only when the stream came from
         /// an add-on, and used to ask add-ons for subtitle files.
@@ -31,6 +33,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             notWebReady: Bool = false,
             proxyHeaders: [String: String] = [:],
             filename: String? = nil,
+            libraryFileURL: URL? = nil,
             addonMediaID: String? = nil,
             addonMediaType: String? = nil,
             nativeRemoteHLS: Bool = false,
@@ -39,6 +42,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
             self.filename = filename
+            self.libraryFileURL = libraryFileURL
             self.addonMediaID = addonMediaID
             self.addonMediaType = addonMediaType
             self.nativeRemoteHLS = nativeRemoteHLS

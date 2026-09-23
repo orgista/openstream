@@ -40,6 +40,26 @@ struct AppleSMBLibraryScanner: Sendable {
         name.hasPrefix(".") || stagingFolderNames.contains(name.lowercased())
     }
 
+    /// Playback-only, non-recursive discovery. Library scans never fetch sidecars.
+    func siblingSubtitles(for video: URL, credentials: AppleSMBCredentials) async throws -> [AppleExternalSubtitleTrack] {
+        try Task.checkCancellation()
+        let folder = video.deletingLastPathComponent()
+        let parts = try AppleSMBEndpointPolicy.parts(from: folder)
+        let entries = try await client.listDirectory(url: folder, credentials: credentials, recursive: false)
+        let urls = try entries.compactMap { entry -> URL? in
+            let path = entry.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !entry.isDirectory, entry.sizeBytes > 0,
+                  entry.sizeBytes <= AppleExternalSubtitleService.maximumSubtitleBytes,
+                  !path.split(separator: "/").contains(".."),
+                  !path.split(separator: "/").contains("."),
+                  path.split(separator: "/").dropLast().joined(separator: "/") == parts.path else { return nil }
+            return try AppleSMBEndpointPolicy.makeURL(
+                host: parts.host, port: parts.port, share: parts.share, path: path)
+        }
+        try Task.checkCancellation()
+        return AppleLibrarySubtitleService.matching(video: video, files: urls)
+    }
+
     func scan(
         source: AppleSource,
         credentials: AppleSMBCredentials,

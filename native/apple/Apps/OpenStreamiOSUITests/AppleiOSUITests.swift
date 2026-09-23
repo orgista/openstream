@@ -1192,6 +1192,52 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertFalse(try cueVisible())
     }
 
+    func testLibrarySiblingSubtitlesShowSpanishCue() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SIBLING_FIXTURE_URL"],
+              URL(string: fixture)?.isFileURL == true else {
+            throw XCTSkip("Requires a local Movie.mkv with English and Spanish sibling SRT files")
+        }
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture,
+            "-OpenStreamVisionPlaybackIsLive", "NO",
+            "-openstream.playback.engine", "engine",
+            "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.settings.subtitle.languages.v1", "(en)"
+        ]
+        // Argument-domain values keep saved sources out of this local fixture run.
+        app.launchArguments += ["-openstream.sources.v1", "()",
+                                "-openstream.sources.v1.pending-keychain-removals", "()",
+                                "-openstream.settings.discover.top10Lists.v1", "NO"]
+        launch(screen: "add-files")
+        let reveal = app.buttons["player.controls.show"].firstMatch
+        XCTAssertTrue(reveal.waitForExistence(timeout: 45))
+        Thread.sleep(forTimeInterval: 5)
+        func openSubtitles() {
+            let captions = app.buttons["player.captions"].firstMatch
+            if !captions.exists { reveal.tap() }
+            let transport = app.buttons["player.play-pause"].firstMatch
+            if transport.label == "Pause" { transport.tap() }
+            XCTAssertTrue(captions.waitForExistence(timeout: 5))
+            captions.tap()
+        }
+        openSubtitles()
+        XCTAssertTrue(app.buttons["English"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Spanish"].firstMatch.exists)
+        attach("n8-ios-sibling-menu")
+        app.buttons["Spanish"].firstMatch.tap()
+        app.buttons["player.play-pause"].firstMatch.tap()
+        let cue = app.staticTexts["HOLA DESDE ESPANA"].firstMatch
+        XCTAssertTrue(cue.waitForExistence(timeout: 15))
+        Thread.sleep(forTimeInterval: 4)
+        attach("n8-ios-spanish-cue")
+        openSubtitles()
+        attach("n8-ios-spanish-selected")
+        XCTAssertTrue(app.buttons["Spanish"].firstMatch.isSelected)
+        app.buttons["Off"].firstMatch.tap()
+        XCTAssertTrue(cue.waitForNonExistence(timeout: 5))
+        attach("n8-ios-subtitles-off")
+    }
+
     func testCaptionsMenuOffersAllSubtitleOptions() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],

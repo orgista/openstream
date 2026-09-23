@@ -1790,7 +1790,7 @@ enum AppleSMBPlaybackRequestFactory {
             mediaID: AppleMediaIngestion.libraryRecord(source: source, item: item).id,
             title: AppleLibraryTitleParser.parse(item).title,
             sourceKind: .networkShare,
-            hints: ApplePlaybackRequest.Hints(filename: item.name)
+            hints: ApplePlaybackRequest.Hints(filename: item.name, libraryFileURL: item.url)
         )
     }
 }

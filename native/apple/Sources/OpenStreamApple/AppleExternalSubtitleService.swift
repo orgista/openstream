@@ -1,6 +1,6 @@
 import Foundation
 
-/// A subtitle file offered by an installed add-on for the title being played.
+/// A subtitle file offered by a library folder or installed add-on.
 /// `displayName` is what the player's Subtitles section shows, so it already
 /// carries the language and the add-on it came from.
 public struct AppleExternalSubtitleTrack: Identifiable, Equatable, Sendable {
@@ -205,6 +205,23 @@ public actor AppleExternalSubtitleService {
     /// Downloads one subtitle file with the shared bounded HTTP client. Used by
     /// the engine when the viewer picks an add-on subtitle track.
     public static let liveDataLoader: @Sendable (URL) async throws -> Data = { url in
+        if url.isFileURL {
+            return try await AppleLibrarySubtitleService.localData(url)
+        }
+        if url.scheme?.lowercased() == "smb" {
+            let credentials = try await AppleLibrarySubtitleService.credentials(for: url)
+            let client = AppleSMBClient()
+            do {
+                let data = try await client.read(url: url, credentials: credentials,
+                    range: 0..<UInt64(maximumSubtitleBytes + 1))
+                await client.closeAll()
+                guard data.count <= maximumSubtitleBytes else { throw AppleLibrarySourceError.unavailable }
+                return data
+            } catch {
+                await client.closeAll()
+                throw error
+            }
+        }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
         let (data, _) = try await AppleBoundedHTTPDataLoader.load(

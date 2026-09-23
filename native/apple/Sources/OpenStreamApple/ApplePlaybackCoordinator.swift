@@ -248,6 +248,7 @@ public final class ApplePlaybackCoordinator {
     /// by tests; the default asks every enabled add-on that offers subtitles.
     public var externalSubtitleFetcher: (@Sendable (AppleExternalSubtitleQuery) async -> [AppleExternalSubtitleTrack])?
     private var externalSubtitleTask: Task<Void, Never>?
+    private var librarySubtitles = AppleLibrarySubtitleService()
 
     // MARK: - Candidate fallback
 
@@ -360,6 +361,7 @@ public final class ApplePlaybackCoordinator {
     /// load failures and engine failures land in `phase` as `.failed`.
     public func begin(_ request: ApplePlaybackRequest) async {
         fallbackTask?.cancel()
+        librarySubtitles = AppleLibrarySubtitleService()
         fallbackCandidates = []
         fallbackAttempted = 0
         fallbackTotal = 0
@@ -376,6 +378,7 @@ public final class ApplePlaybackCoordinator {
         fallbackCandidates: [ApplePlaybackRequest]
     ) async {
         fallbackTask?.cancel()
+        librarySubtitles = AppleLibrarySubtitleService()
         hasShownFallbackNotice = false
         let ordered = [request] + fallbackCandidates.prefix(2)
         self.fallbackCandidates = Array(ordered.dropFirst())
@@ -405,12 +408,12 @@ public final class ApplePlaybackCoordinator {
         setRoute(engine.route)
         let joinProfile = request.hints.nativeRemoteHLS ? "standard" : "fastZap"
         appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") route=\(route)\(request.isLive ? " join=\(joinProfile)" : "")")
-        startExternalSubtitles(for: request, attempt: attempt)
         setupProgress(for: request)
         startTimeout()
         let engine = self.engine
         let task = Task { @MainActor in try await engine.load(request) }
         loadTask = task
+        startExternalSubtitles(for: request, attempt: attempt, load: task)
         do {
             try await withTaskCancellationHandler {
                 try await task.value
@@ -461,6 +464,7 @@ public final class ApplePlaybackCoordinator {
             remoteProgressStarted = false
         }
         lastRequest = nil
+        librarySubtitles = AppleLibrarySubtitleService()
         clearFallback()
         stopMonitoring()
         cancelObservation()
@@ -498,31 +502,37 @@ public final class ApplePlaybackCoordinator {
         return failure
     }
 
-    // MARK: - Add-on subtitles
+    // MARK: - External subtitles
 
-    /// Asks the installed add-ons for subtitle files for this title, without
-    /// holding up the load: the fetch runs alongside it and the tracks are
-    /// appended to the engine whenever they arrive. A newer attempt (a stream
-    /// switch) discards the result.
-    private func startExternalSubtitles(for request: ApplePlaybackRequest, attempt: Int) {
+    /// Discover alongside playback, but attach only after load has reset the
+    /// engine's tracks. Siblings arrive first and keep their IDs when add-ons land.
+    private func startExternalSubtitles(
+        for request: ApplePlaybackRequest, attempt: Int, load: Task<Void, any Error>
+    ) {
         externalSubtitleTask?.cancel()
         externalSubtitleTask = nil
-        guard let query = AppleExternalSubtitleQuery(request: request) else { return }
+        guard !request.isLive else { return }
+        let query = AppleExternalSubtitleQuery(request: request)
+        let video = request.hints.libraryFileURL ?? (request.url.isFileURL ? request.url : nil)
+        guard query != nil || video != nil else { return }
         let fetcher = externalSubtitleFetcher
+        let library = librarySubtitles
         let engine = self.engine
         externalSubtitleTask = Task { @MainActor [weak self] in
+            let siblings = if let video { await library.tracks(for: video) } else { [AppleExternalSubtitleTrack]() }
+            do { try await load.value } catch { return }
+            guard let self, !Task.isCancelled, self.generation == attempt else { return }
+            engine.addExternalSubtitleTracks(siblings)
+            guard let query else { return }
             let tracks: [AppleExternalSubtitleTrack]
             if let fetcher {
                 tracks = await fetcher(query)
             } else {
-                let sources = AppleSourceStore().sources
                 tracks = await AppleExternalSubtitleService.shared.tracks(
-                    for: query,
-                    sources: sources,
-                    preferredLanguages: AppleSubtitleLanguages.storedPreferredLanguages()
-                )
+                    for: query, sources: AppleSourceStore().sources,
+                    preferredLanguages: AppleSubtitleLanguages.storedPreferredLanguages())
             }
-            guard let self, !Task.isCancelled, self.generation == attempt, !tracks.isEmpty else { return }
+            guard !Task.isCancelled, self.generation == attempt else { return }
             engine.addExternalSubtitleTracks(tracks)
         }
     }

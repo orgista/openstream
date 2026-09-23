@@ -386,7 +386,7 @@ final class AppleLocalLibraryStore {
         defer { withExtendedLifetime(access) {} }
         let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: settings.playbackEngine)
         return tracked(AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
-            resumePosition: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, mediaID: playbackID(file), title: title, sourceKind: .files), settings: settings, securityScopedURL: root), file: file)
+            resumePosition: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, mediaID: playbackID(file), title: title, sourceKind: .files, hints: .init(libraryFileURL: file.url)), settings: settings, securityScopedURL: root), file: file)
     }
     private func tracked(_ presentation: AppleStremioPlayerPresentation, file: AppleLibraryItem) -> AppleStremioPlayerPresentation {
         let store = ApplePlaybackStore()

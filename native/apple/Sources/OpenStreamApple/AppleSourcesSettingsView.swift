@@ -358,7 +358,7 @@ private struct AppleAddFilesView: View {
         #if DEBUG
         .task {
             if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
-               let url = AppleDirectPlaybackInput.url(raw) {
+               let url = AppleDirectPlaybackInput.url(raw) ?? URL(string: raw).flatMap({ $0.isFileURL ? $0 : nil }) {
                 let mediaID = ApplePlaybackIdentity.digest(for: url.absoluteString)
                 let request: ApplePlaybackRequest
                 if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
@@ -375,9 +375,8 @@ private struct AppleAddFilesView: View {
         .task(id: discoveryTaskIdentity) {
             #if DEBUG
             // The local playback proof needs no LAN discovery or saved source.
-            if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"),
-               let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
-               URL(string: raw)?.host == "127.0.0.1" { return }
+            if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
+               let url = URL(string: raw), url.host == "127.0.0.1" || url.isFileURL { return }
             #endif
             isDiscovering = true
             // `defer`, not a trailing assignment: the cancellation guard below
