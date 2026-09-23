@@ -854,6 +854,7 @@ struct AppleLiveInlinePlayer: View {
     @State private var suspendedWasPlaying: Bool?
     @State private var isFullScreen = false
     @State private var lifetime = AppleLivePlaybackLifetime()
+    @State private var inlineSubtitles = AppleStockPlayerSubtitles()
 
     let request: ApplePlaybackRequest
     let coordinator: ApplePlaybackCoordinator
@@ -898,7 +899,13 @@ struct AppleLiveInlinePlayer: View {
                         isFullScreen = true
                     }, sharePlayMenu: sharePlayMenu)
             } else {
-                AppleLiveMacPlayerRepresentable(playerView: host.playerView)
+                AppleLiveMacPlayerRepresentable(playerView: host.playerView,
+                    engine: coordinator.engine, subtitles: inlineSubtitles,
+                    entries: inlineSubtitles.menuEntries)
+                if AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(
+                    engine: coordinator.engine.kind, route: coordinator.route) {
+                    AppleLiveInlineCueLayer(engine: coordinator.engine, subtitles: inlineSubtitles)
+                }
             }
             #else
             // Keep the container mounted across native/surface route changes.
@@ -1016,9 +1023,46 @@ struct AppleLiveInlinePlayer: View {
 #if os(macOS)
 private struct AppleLiveMacPlayerRepresentable: NSViewRepresentable {
     let playerView: AVPlayerView
+    let engine: any ApplePlaybackEngine
+    let subtitles: AppleStockPlayerSubtitles
+    let entries: [AppleSubtitleCueLayerPolicy.MenuEntry]
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> AVPlayerView { playerView }
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {}
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        context.coordinator.engine = engine
+        context.coordinator.subtitles = subtitles
+        // Native embedded captions already have AVKit's picker. Engine-drawn
+        // captions and sidecars need the same app selection path as full screen.
+        guard !entries.isEmpty,
+              engine.kind == .openStream || engine.subtitleTracks.contains(where: { $0.id >= 1_000_000 }) else {
+            nsView.actionPopUpButtonMenu = nil
+            return
+        }
+        let menu = NSMenu(title: "Subtitles")
+        let tracks = NSMenu(title: "Subtitles")
+        for entry in entries {
+            let item = NSMenuItem(title: entry.title, action: #selector(Coordinator.selectSubtitle(_:)), keyEquivalent: "")
+            item.target = context.coordinator
+            item.representedObject = entry.trackID
+            item.state = entry.isSelected ? .on : .off
+            tracks.addItem(item)
+        }
+        let item = NSMenuItem(title: "Subtitles", action: nil, keyEquivalent: "")
+        item.submenu = tracks
+        menu.addItem(item)
+        nsView.actionPopUpButtonMenu = menu
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var engine: (any ApplePlaybackEngine)?
+        var subtitles: AppleStockPlayerSubtitles?
+
+        @objc func selectSubtitle(_ sender: NSMenuItem) {
+            guard let engine else { return }
+            subtitles?.select(sender.representedObject as? Int, on: engine)
+        }
+    }
 }
 #else
 private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresentable {
@@ -1190,6 +1234,9 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private var muteButton: UIButton!
     private var fullscreenButton: UIButton!
     private var surfaceHost: UIHostingController<ApplePlaybackSurfaceView>?
+    private let inlineSubtitles = AppleStockPlayerSubtitles()
+    private var cueHost: UIHostingController<AppleLiveInlineCueLayer>?
+    private var captionsButton: UIButton!
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
     private var channels: [AppleIPTVChannel]
     private var guide: AppleIPTVGuide
@@ -1237,11 +1284,17 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         fullscreenButton.accessibilityIdentifier = "player.fullscreen"
         fullscreenButton.addTarget(self, action: #selector(requestFullScreen), for: .primaryActionTriggered)
         
+        captionsButton = menuButton(imageName: "captions.bubble", accessibilityLabel: "Subtitles", menu: nil)
+        captionsButton.accessibilityIdentifier = "player.inline.subtitles"
+        captionsButton.showsMenuAsPrimaryAction = true
+        view.addSubview(captionsButton)
         view.addSubview(playPauseButton)
         view.addSubview(muteButton)
         view.addSubview(fullscreenButton)
         
         NSLayoutConstraint.activate([
+            captionsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            captionsButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             playPauseButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             playPauseButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             playPauseButton.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
@@ -1254,7 +1307,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             fullscreenButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
         ])
         
-        chromeButtons = [playPauseButton, muteButton, fullscreenButton]
+        chromeButtons = [playPauseButton, muteButton, fullscreenButton, captionsButton]
         attachPlayerIfNeeded()
         
         // KVO calls back on whichever thread changed the value, with no main-queue
@@ -1328,6 +1381,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     }
 
     private func updateInlineSurface() {
+        updateInlineCues()
         guard coordinator.route == .surface, presentedFullscreen == nil else {
             removeInlineSurface()
             return
@@ -1347,6 +1401,48 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         ])
         hosting.didMove(toParent: self)
         surfaceHost = hosting
+    }
+
+    private func updateInlineCues() {
+        guard presentedFullscreen == nil, playerViewController.parent === self else { return }
+        guard cueHost == nil else { return }
+        let hosting = UIHostingController(rootView: AppleLiveInlineCueLayer(
+            engine: coordinator.engine, subtitles: inlineSubtitles,
+            onMenuChange: { [weak self] in self?.updateCaptionMenu() }))
+        hosting.view.backgroundColor = .clear
+        hosting.view.isUserInteractionEnabled = false
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(hosting)
+        view.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        hosting.didMove(toParent: self)
+        cueHost = hosting
+    }
+
+    private func updateCaptionMenu() {
+        let entries = inlineSubtitles.menuEntries
+        captionsButton.isEnabled = !entries.isEmpty
+        captionsButton.accessibilityValue = entries.contains { $0.trackID != nil && $0.isSelected } ? "On" : "Off"
+        captionsButton.menu = UIMenu(title: "Subtitles", options: .singleSelection, children: entries.map { entry in
+            UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.inlineSubtitles.select(entry.trackID, on: self.coordinator.engine)
+                self.updateCaptionMenu()
+                self.showControls()
+            }
+        })
+    }
+
+    private func removeInlineCues() {
+        cueHost?.willMove(toParent: nil)
+        cueHost?.view.removeFromSuperview()
+        cueHost?.removeFromParent()
+        cueHost = nil
     }
 
     private func removeInlineSurface() {
@@ -1410,6 +1506,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
               playerViewController.presentingViewController == nil else { return }
         presentedRevision = fullScreenRevision
         onFullScreenChanged(true)
+        removeInlineCues()
         removeInlineSurface()
         playerViewController.willMove(toParent: nil)
         playerViewController.view.removeFromSuperview()
@@ -1521,7 +1618,7 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
     #endif
 }
 
-/// The inline preview has one timer for its play, mute and full-screen buttons.
+/// The inline preview hides play, mute, captions and full-screen controls together.
 private class AppleLiveChromeViewController: UIViewController, UIGestureRecognizerDelegate {
     var chromeButtons: [UIButton] = []
     private var hideTask: Task<Void, Never>?

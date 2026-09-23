@@ -1,15 +1,15 @@
 import Foundation
 import Observation
 
-/// Backing model for `AppleTransportOverlay` on `.surface` routes. It mirrors
+/// Backing model for `AppleTransportOverlay` on surface and full-screen Live routes. It mirrors
 /// the engine's position/duration/tracks through `events` into observable
 /// stored properties, applies the transport policy table (scrubbability, time
 /// formatting, live/DVR behaviour), and owns the 3-second control auto-hide
 /// timer. The view stays declarative; this type owns the state.
 ///
-/// Per T7e the overlay exists only on `.surface` routes; on `.avPlayer`
-/// routes the system player UI owns every control, so `showsOverlay` is
-/// `false` and no custom waiting indicator is ever shown.
+/// VOD uses this transport on `.surface`; full-screen Live also uses it on
+/// `.avPlayer`. Stock and inline players share `AppleSubtitleCueLayer` and
+/// use `AppleStockPlayerSubtitles` when they own their controls.
 ///
 /// Policy table (see T5 spec):
 /// - VOD with a known duration → scrubber enabled, `m:ss` / `h:mm:ss` times.
@@ -171,7 +171,7 @@ public final class AppleTransportOverlayModel {
     }
 
     /// Decoded cues for the active subtitle track, mirrored from the engine for
-    /// the overlay to render on `.surface`.
+    /// the overlay to render on either video route.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
 
     /// The subtitle track the user selected through the overlay, tracked locally
@@ -231,8 +231,8 @@ public final class AppleTransportOverlayModel {
 
     // MARK: - Overlay visibility
 
-    /// The custom overlay exists only on `.surface` routes. On `.avPlayer`
-    /// routes the system player UI owns every control.
+    /// Whether VOD needs the custom transport. Live hosts can also mount it
+    /// on `.avPlayer` in place of AVKit's controls.
     public var showsOverlay: Bool { route == .surface }
 
     /// `true` when the centered spinning waiting indicator should be shown.
@@ -399,9 +399,9 @@ public final class AppleTransportOverlayModel {
         )
     }
 
-    /// The cues active at the current position, for the overlay to render on
-    /// `.surface`. Empty when no track is selected or no cue overlaps the
-    /// position. The stock player has its own `AppleStockPlayerSubtitles`.
+    /// The cues active at the current position on either video route. Empty
+    /// when no track is selected or no cue overlaps the position. Stock and
+    /// inline players use the same policy through `AppleStockPlayerSubtitles`.
     public var activeSubtitleCues: [AppleSubtitleCue] {
         AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: position)
     }

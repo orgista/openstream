@@ -23,6 +23,31 @@ struct AppleSubtitleCueLayerTests {
         #expect(AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: engine, route: route) == mounted)
     }
 
+    @Test("Inline Live draws cues on AVPlayer and surface routes", arguments: [
+        ApplePlaybackEngineKind.openStream, .native,
+    ])
+    func inlineLiveMountDecision(engine kind: ApplePlaybackEngineKind) {
+        let engine = FakePlaybackEngine()
+        engine.kind = kind
+        let subtitles = AppleStockPlayerSubtitles()
+        for route in [ApplePlaybackPresentationRoute.avPlayer, .surface, .none, .audioOnly] {
+            engine.scriptedRoute = route
+            subtitles.refresh(from: engine)
+            #expect(subtitles.drawsInlineCues == (route == .avPlayer || route == .surface))
+        }
+    }
+
+    @Test func inlineMenuUsesThePreferredLanguageAndOffersOff() {
+        let tracks = [
+            ApplePlaybackTrack(id: 1, title: "English", language: "en"),
+            ApplePlaybackTrack(id: 2, title: "French", language: "fr"),
+        ]
+        let entries = AppleSubtitleCueLayerPolicy.menuEntries(
+            tracks: tracks, preferredLanguages: ["fr"], languagesAreExplicit: true, activeTrackID: 2)
+        #expect(entries.map(\.trackID) == [nil, 2])
+        #expect(entries.map(\.isSelected) == [false, true])
+    }
+
     // MARK: - Cue → content
 
     @Test func textCuesDrawTheirText() {

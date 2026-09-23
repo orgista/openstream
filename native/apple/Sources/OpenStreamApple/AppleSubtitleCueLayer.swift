@@ -76,6 +76,8 @@ enum AppleSubtitleCueLayerPolicy {
 @Observable
 final class AppleStockPlayerSubtitles {
     private(set) var cues: [AppleSubtitleCue] = []
+    /// Inline UIKit players have no transport overlay, including on surface routes.
+    private(set) var drawsInlineCues = false
     private(set) var menuEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
 
     /// Runs for as long as the calling `.task` lives.
@@ -99,6 +101,8 @@ final class AppleStockPlayerSubtitles {
     }
 
     func refresh(from engine: any ApplePlaybackEngine) {
+        drawsInlineCues = engine.route == .surface || AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(
+            engine: engine.kind, route: engine.route)
         let next = AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.position)
         if next != cues { cues = next }
         // Same persisted list the overlay model reads, so both menus agree.

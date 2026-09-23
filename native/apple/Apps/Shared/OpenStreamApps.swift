@@ -17,7 +17,9 @@ struct OpenStreamPlatformApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG && !os(tvOS)
-            if ProcessInfo.processInfo.arguments.contains("-OpenStreamLibraryTitlesFixture") {
+            if ProcessInfo.processInfo.arguments.contains("-OpenStreamInlineLiveFixture") {
+                AppleLiveInlineFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-OpenStreamLibraryTitlesFixture") {
                 AppleLibraryTitlesDebugView()
             } else if ProcessInfo.processInfo.arguments.contains("-OpenStreamDownloadFixture") {
                 AppleOfflineDownloadDebugView()
