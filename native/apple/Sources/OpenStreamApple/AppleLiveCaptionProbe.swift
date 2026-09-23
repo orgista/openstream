@@ -4,16 +4,10 @@ import Synchronization
 /// Asks one question about a live channel: does it carry CEA-608 captions the
 /// manifest never declared?
 ///
-/// It fetches the head of the playlist's first segment and hands the bytes to
-/// `AppleCEA608Detector`. The answer is cached per channel, so a channel is
-/// probed once per app run and never while the viewer is waiting — the probe
-/// is started alongside playback, not in front of it.
-///
-/// A yes for an HLS media playlist is acted on at the channel's NEXT start
-/// (`AppleLiveCaptionWrapPolicy`): the local proxy serves a one-variant master
-/// that declares `INSTREAM-ID="CC1"` in front of the provider's playlist, and
-/// AVFoundation's own caption pipeline does the rest. A channel already playing
-/// when the answer lands is never reloaded for it.
+/// Bare media playlists are declared before the first play. Alongside playback,
+/// bounded segment samples confirm 608 or suppress the next declaration after a
+/// 60-second observation window. The current item is never reloaded. Failed or cancelled observations stay unknown;
+/// completed answers are cached per channel for this app run.
 public actor AppleLiveCaptionProbe {
     public static let shared = AppleLiveCaptionProbe()
 
@@ -21,6 +15,7 @@ public actor AppleLiveCaptionProbe {
     /// threshold — and small enough that a probe costs a fraction of a second.
     public static let maximumProbeBytes = 512 * 1024
     public static let requestTimeout: TimeInterval = 8
+    public static let preflightTimeout: Duration = .milliseconds(1_500)
 
     public struct Result: Equatable, Sendable {
         public let carriesUndeclaredCaptions: Bool
@@ -40,30 +35,82 @@ public actor AppleLiveCaptionProbe {
     }
 
     private var answers: [String: Result] = [:]
-    /// The channels whose next start should be wrapped, readable without a
-    /// hop: `startChannelNow` builds the request synchronously on the main
-    /// actor and must not wait on this actor.
-    private nonisolated let wrappedChannelIDs = Mutex<Set<String>>([])
-    private var inFlight = Set<String>()
+    /// nil is unknown, false is a completed negative observation. The channel
+    /// picker reads this synchronously while constructing a playback request.
+    private nonisolated let wrapDecisions = Mutex<[String: Bool]>([:])
     private let session: URLSession
+    private let observationDuration: Duration
+    private let pollingInterval: Duration
+    public static let observationWindow: Duration = .seconds(60)
 
-    public init(session: URLSession? = nil) {
+    public init(
+        session: URLSession? = nil,
+        observationDuration: Duration = observationWindow,
+        pollingInterval: Duration = .seconds(5)
+    ) {
+        self.observationDuration = observationDuration
+        self.pollingInterval = pollingInterval
         if let session {
             self.session = session
         } else {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.timeoutIntervalForRequest = Self.requestTimeout
+            configuration.timeoutIntervalForResource = Self.requestTimeout
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
             self.session = URLSession(configuration: configuration)
         }
     }
 
     public func cachedResult(channelID: String) -> Result? { answers[channelID] }
 
-    /// True once a finished probe said this channel is an HLS media playlist
-    /// carrying CEA-608 its manifest never declared. False until then, so a
-    /// probe still in flight leaves the current start untouched.
-    public nonisolated func wrapsInCaptionMaster(channelID: String) -> Bool {
-        wrappedChannelIDs.withLock { $0.contains(channelID) }
+    /// Unknown channels are eligible immediately; a completed negative probe
+    /// suppresses the wrapper on subsequent starts.
+    public nonisolated func wrapsInCaptionMaster(channelID: String) -> Bool? {
+        wrapDecisions.withLock { $0[channelID] }
+    }
+
+    /// Validate the fetched playlist before either engine asks the proxy for a
+    /// master. The segment probe never delays this first-play declaration.
+    public func preparedRequest(_ request: ApplePlaybackRequest) async throws -> ApplePlaybackRequest {
+        guard request.isLive, request.hints.nativeRemoteHLS,
+              request.hints.declaresEmbeddedCaptions else { return request }
+        var prepared = request
+        prepared.hints.declaresEmbeddedCaptions = false
+        guard wrapsInCaptionMaster(channelID: request.mediaID) != false else { return prepared }
+        let clock = ContinuousClock()
+        let started = clock.now
+        defer {
+            let elapsed = started.duration(to: clock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000
+                + Double(elapsed.components.attoseconds) / 1e15
+            appleTrace("caption preflight \(Int(milliseconds.rounded())) ms")
+        }
+        do {
+            // An inactivity timeout alone allows a trickling response to hold up
+            // a channel switch indefinitely. Race the entire read against one
+            // deadline, cancelling the URLSession task when the budget expires.
+            let (data, _) = try await withThrowingTaskGroup(of: (Data, URL).self) { group in
+                group.addTask {
+                    try await self.bytes(at: request.url, headers: request.effectiveHeaders,
+                                         limit: Self.maximumProbeBytes, timeout: 1.5)
+                }
+                group.addTask {
+                    try await clock.sleep(until: started.advanced(by: Self.preflightTimeout))
+                    throw URLError(.timedOut)
+                }
+                defer { group.cancelAll() }
+                guard let result = try await group.next() else { throw CancellationError() }
+                return result
+            }
+            if let playlist = Self.playlistText(data) {
+                prepared.hints.declaresEmbeddedCaptions = AppleLiveCaptionWrapPolicy.shouldWrap(playlist: playlist)
+            }
+        } catch {
+            // A caption preflight failure must not prevent ordinary playback.
+            try Task.checkCancellation()
+        }
+        try Task.checkCancellation()
+        return prepared
     }
 
     /// The headers a provider insists on. Same three a live request carries, so
@@ -76,52 +123,66 @@ public actor AppleLiveCaptionProbe {
         return headers
     }
 
-    /// Probes once per channel per run. Returns whatever is known now; a first
-    /// call starts the work and returns `nil`, which is why the caller treats
-    /// this as reporting rather than as a gate on playback.
+    /// Observes media playlists for a full minute before caching a negative.
+    /// Callers own cancellation. Completed answers affect the next start only;
+    /// playback is never interrupted. Errors never mean "no captions".
     @discardableResult
     public func probe(channelID: String, playlistURL: URL, headers: [String: String] = [:]) async -> Result? {
         if let answer = answers[channelID] { return answer }
-        guard !inFlight.contains(channelID) else { return nil }
-        inFlight.insert(channelID)
-        defer { inFlight.remove(channelID) }
-        appleTrace("caption probe started for \(channelID)")
+        let clock = ContinuousClock()
+        let started = clock.now
+        var sampledSegments = Set<URL>()
         do {
-            let head = try await bytes(at: playlistURL, headers: headers, limit: Self.maximumProbeBytes)
-            var alreadyDeclares = false
-            var isMediaPlaylist = false
-            var sample = head
-            if let manifest = Self.playlistText(head) {
-                // An HLS channel: read what the manifest says, then scan the
-                // first segment it names.
-                alreadyDeclares = AppleHLSCaptionDeclaration.declaresClosedCaptions(manifest)
-                isMediaPlaylist = !AppleHLSCaptionDeclaration.isMasterPlaylist(manifest)
-                guard let segmentURI = AppleHLSCaptionDeclaration.firstSegmentURI(in: manifest),
-                      let segmentURL = URL(string: segmentURI, relativeTo: playlistURL)?.absoluteURL else {
-                    appleTrace("caption probe \(channelID): the playlist names no segment")
-                    return nil
+            while true {
+                try Task.checkCancellation()
+                let (head, resolvedURL) = try await bytes(at: playlistURL, headers: headers,
+                                                         limit: Self.maximumProbeBytes)
+                guard let manifest = Self.playlistText(head) else {
+                    return remember(Result(carriesUndeclaredCaptions: AppleCEA608Detector.carriesCEA608(in: head),
+                                           manifestAlreadyDeclares: false), channelID: channelID)
                 }
-                sample = try await bytes(at: segmentURL, headers: headers, limit: Self.maximumProbeBytes)
+                let declares = AppleHLSCaptionDeclaration.declaresClosedCaptions(manifest)
+                let media = manifest.contains("#EXTINF:") && !AppleHLSCaptionDeclaration.isMasterPlaylist(manifest)
+                guard media, !declares else {
+                    return remember(Result(carriesUndeclaredCaptions: false, manifestAlreadyDeclares: declares,
+                                           isMediaPlaylist: media), channelID: channelID)
+                }
+                // Sample recent segments, not always the oldest entry in the
+                // DVR window. Resolve relative URIs against the final URL.
+                let segments = manifest.components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                    .suffix(3)
+                    .compactMap { URL(string: $0, relativeTo: resolvedURL)?.absoluteURL }
+                guard !segments.isEmpty else { return nil }
+                for segment in segments where !sampledSegments.contains(segment) {
+                    let (sample, _) = try await bytes(at: segment, headers: headers, limit: Self.maximumProbeBytes)
+                    guard !sample.isEmpty else { return nil }
+                    if AppleCEA608Detector.carriesCEA608(in: sample) {
+                        return remember(Result(carriesUndeclaredCaptions: true, manifestAlreadyDeclares: false,
+                                               isMediaPlaylist: true), channelID: channelID)
+                    }
+                    sampledSegments.insert(segment)
+                }
+                if started.duration(to: clock.now) >= observationDuration {
+                    return remember(Result(carriesUndeclaredCaptions: false, manifestAlreadyDeclares: false,
+                                           isMediaPlaylist: true), channelID: channelID)
+                }
+                // Bound history even for providers with tiny live segments.
+                if sampledSegments.count > 64 { sampledSegments = Set(segments) }
+                try await Task.sleep(for: min(pollingInterval, observationDuration - started.duration(to: clock.now)))
             }
-            // A provider that hands back the transport stream itself, with no
-            // manifest, is the common case on this lineup — those bytes are
-            // exactly what needs scanning, so they are used as they arrived.
-            let carries = AppleCEA608Detector.carriesCEA608(in: sample)
-            let result = Result(carriesUndeclaredCaptions: carries && !alreadyDeclares,
-                                manifestAlreadyDeclares: alreadyDeclares,
-                                isMediaPlaylist: isMediaPlaylist)
-            answers[channelID] = result
-            if result.wrapsInCaptionMaster {
-                wrappedChannelIDs.withLock { _ = $0.insert(channelID) }
-            }
-            appleTrace("caption probe \(channelID): read \(sample.count) bytes, embedded CEA-608 "
-                + "\(carries ? "found" : "not found"), manifest declares captions: \(alreadyDeclares), "
-                + "caption master on next start: \(result.wrapsInCaptionMaster)")
-            return result
         } catch {
-            appleTrace("caption probe failed for \(channelID): \(AppleDiagnosticRedactor.redact(String(describing: error)))")
             return nil
         }
+    }
+
+    private func remember(_ result: Result, channelID: String) -> Result? {
+        guard !Task.isCancelled else { return nil }
+        if let answer = answers[channelID], answer.wrapsInCaptionMaster { return answer }
+        answers[channelID] = result
+        wrapDecisions.withLock { $0[channelID] = result.wrapsInCaptionMaster }
+        return result
     }
 
     /// The bytes read as an HLS playlist, or `nil` when the provider handed
@@ -140,19 +201,30 @@ public actor AppleLiveCaptionProbe {
     /// written that way sat on the connection until the app was killed
     /// (measured on the iPad, 2026-09-20). `Range` is still sent for the
     /// servers that honour it; the byte count is what guarantees the stop.
-    private func bytes(at url: URL, headers: [String: String], limit: Int) async throws -> Data {
+    private func bytes(
+        at url: URL, headers: [String: String], limit: Int, timeout: TimeInterval = requestTimeout
+    ) async throws -> (Data, URL) {
         var request = URLRequest(url: url)
-        request.timeoutInterval = Self.requestTimeout
+        request.timeoutInterval = timeout
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         request.setValue("bytes=0-\(limit - 1)", forHTTPHeaderField: "Range")
-        let (stream, _) = try await session.bytes(for: request)
-        var data = Data()
-        data.reserveCapacity(min(limit, 512 * 1024))
-        for try await byte in stream {
-            data.append(byte)
-            if data.count >= limit { break }
+        let (stream, response) = try await session.bytes(for: request)
+        defer { stream.task.cancel() }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
         }
-        return data
+        return try await withTaskCancellationHandler {
+            var data = Data()
+            data.reserveCapacity(min(limit, 512 * 1024))
+            for try await byte in stream {
+                data.append(byte)
+                if data.count >= limit { break }
+            }
+            try Task.checkCancellation()
+            return (data, response.url ?? url)
+        } onCancel: {
+            stream.task.cancel()
+        }
     }
 }
 
@@ -166,6 +238,13 @@ public actor AppleLiveCaptionProbe {
 /// provider's word and stays as served, and a raw transport stream or a master
 /// has nothing a one-variant wrapper could correctly stand in front of.
 public enum AppleLiveCaptionWrapPolicy {
+    public static func shouldWrap(playlist: String) -> Bool {
+        playlist.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#EXTM3U")
+            && playlist.contains("#EXTINF:")
+            && !AppleHLSCaptionDeclaration.isMasterPlaylist(playlist)
+            && !AppleHLSCaptionDeclaration.declaresClosedCaptions(playlist)
+    }
+
     public static func shouldWrap(
         carriesEmbeddedCaptions: Bool, manifestDeclaresCaptions: Bool, isMediaPlaylist: Bool
     ) -> Bool {

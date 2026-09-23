@@ -359,14 +359,26 @@ private struct AppleAddFilesView: View {
         .task {
             if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
                let url = AppleDirectPlaybackInput.url(raw) {
-                playback = AppleStremioPlayerPresentation(
-                    request: ApplePlaybackRequest(url: url,
-                        mediaID: ApplePlaybackIdentity.digest(for: url.absoluteString),
-                        title: url.lastPathComponent, sourceKind: .files), settings: settings)
+                let mediaID = ApplePlaybackIdentity.digest(for: url.absoluteString)
+                let request: ApplePlaybackRequest
+                if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
+                    request = AppleIPTVChannel(id: mediaID, sourceID: UUID(), name: "Caption fixture",
+                                               streamURL: url).playbackRequest()
+                } else {
+                    request = ApplePlaybackRequest(url: url, mediaID: mediaID,
+                                                   title: url.lastPathComponent, sourceKind: .files)
+                }
+                playback = AppleStremioPlayerPresentation(request: request, settings: settings)
             }
         }
         #endif
         .task(id: discoveryTaskIdentity) {
+            #if DEBUG
+            // The local playback proof needs no LAN discovery or saved source.
+            if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"),
+               let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
+               URL(string: raw)?.host == "127.0.0.1" { return }
+            #endif
             isDiscovering = true
             // `defer`, not a trailing assignment: the cancellation guard below
             // returns early, and without this the flag stayed true for the

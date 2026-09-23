@@ -40,7 +40,7 @@ extension AppleIPTVChannel {
             title: name,
             sourceKind: .liveTV,
             hints: .init(nativeRemoteHLS: nativeRemoteHLS,
-                         declaresEmbeddedCaptions: nativeRemoteHLS && wrapsInCaptionMaster == true)
+                         declaresEmbeddedCaptions: nativeRemoteHLS && wrapsInCaptionMaster != false)
         )
     }
 }

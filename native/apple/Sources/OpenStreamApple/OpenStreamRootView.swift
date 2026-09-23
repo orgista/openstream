@@ -323,7 +323,9 @@ public struct OpenStreamRootView: View {
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()
-            Task { await sourceStore.seedTestCatalogsIfNeeded() }
+            if !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
+                Task { await sourceStore.seedTestCatalogsIfNeeded() }
+            }
             // Simulator-only navigation to real screens; no fixtures or saved sources.
             let screen = debugScreen
             guard let screen else { return }

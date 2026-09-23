@@ -10,8 +10,8 @@ import Foundation
 /// of our own.
 ///
 /// Nothing here changes a manifest that already declares captions, and nothing
-/// here changes a manifest at all unless the detector said yes — a provider
-/// that carries no captions gets the bytes it always got.
+/// here changes a media playlist's bytes. Live playback can optimistically
+/// wrap an undeclared media playlist while the bounded 608 probe observes it.
 public enum AppleHLSCaptionDeclaration: Sendable {
     public static let groupID = "openstream-cc"
     public static let instreamID = "CC1"

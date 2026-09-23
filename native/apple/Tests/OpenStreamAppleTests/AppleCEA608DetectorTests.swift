@@ -217,14 +217,14 @@ struct AppleLiveCaptionWrapTests {
         #expect(request.effectiveHeaders == ["User-Agent": "FixtureAgent"])
     }
 
-    @Test func unstampedAndNonHLSChannelsPlayAsServed() {
-        #expect(!channel("live.m3u8").playbackRequest().hints.declaresEmbeddedCaptions)
+    @Test func firstHLSPlayIsEligibleUnlessAProbeAlreadyRuledOutCaptions() {
+        #expect(channel("live.m3u8").playbackRequest().hints.declaresEmbeddedCaptions)
         #expect(!channel("live.m3u8").withCaptionMaster(false).playbackRequest().hints.declaresEmbeddedCaptions)
         #expect(!channel("live.ts").withCaptionMaster(true).playbackRequest().hints.declaresEmbeddedCaptions)
     }
 
-    @Test func noProbeAnswerMeansNoWrap() {
-        #expect(!AppleLiveCaptionProbe().wrapsInCaptionMaster(channelID: "never-probed"))
+    @Test func noProbeAnswerPreservesTheUnknownState() {
+        #expect(AppleLiveCaptionProbe().wrapsInCaptionMaster(channelID: "never-probed") == nil)
     }
 }
 

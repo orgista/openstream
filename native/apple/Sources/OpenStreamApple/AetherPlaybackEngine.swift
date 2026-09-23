@@ -23,6 +23,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// The proxy's caption-declaring master for this load, revoked on the next
     /// load or stop (`ApplePlaybackRequest.Hints.declaresEmbeddedCaptions`).
     private var captionMasterURL: URL?
+    private var captionObservation: Task<Void, Never>?
+    private var loadGeneration = 0
     private var subtitleSelectionOverridden = false
     private var lastPositionUpdate = Date.distantPast
     /// Latest values published by `aether.$duration` / `aether.$isLive`. Used by
@@ -198,12 +200,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     // MARK: - ApplePlaybackEngine
 
     public func load(_ request: ApplePlaybackRequest) async throws {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        captionObservation?.cancel()
+        captionObservation = nil
         hasReachedPlaying = false
         subtitleSelectionOverridden = false
         activeSubtitleTrackID = nil
         clearExternalSubtitles()
         failure = nil
         revokeCaptionMaster()
+        let request = try await AppleLiveCaptionProbe.shared.preparedRequest(request)
+        guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
         var sourceURL = request.url
         var headers = request.effectiveHeaders
         // Undeclared CEA-608 in a live HLS media playlist: AVPlayer (the
@@ -212,7 +220,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         if request.isLive, request.hints.nativeRemoteHLS, request.hints.declaresEmbeddedCaptions {
             let master = try await AppleProtectedHTTPPlaybackServer.shared.playbackURL(
                 upstreamURL: request.url, requestHeaders: headers, declaringCaptions: true)
-            guard !Task.isCancelled else {
+            guard generation == loadGeneration, !Task.isCancelled else {
                 await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: master)
                 throw CancellationError()
             }
@@ -249,13 +257,29 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             options: options
         )
         print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
-        try Task.checkCancellation()
+        guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
+        observeLiveCaptions(request, generation: generation)
         if !request.autoplay, let resume = request.resumePosition, resume.isFinite, resume > 0 {
             // A paused mount prepares the demuxer at the resume offset but
             // does not arm its clock. Seek while paused to publish that offset.
             await aether.seek(to: resume)
         }
     }
+
+    private func observeLiveCaptions(_ request: ApplePlaybackRequest, generation: Int) {
+        guard request.isLive, request.hints.declaresEmbeddedCaptions else { return }
+        captionObservation = Task { [weak self] in
+            guard !Task.isCancelled, self?.loadGeneration == generation else { return }
+            await AppleLiveCaptionProbe.shared.probe(
+                channelID: request.mediaID, playlistURL: request.url, headers: request.effectiveHeaders)
+            guard !Task.isCancelled, let self, self.loadGeneration == generation else { return }
+            // The probe caches the next-start decision. Leave this item playing,
+            // even if its empty captions option remains until the viewer leaves.
+            self.captionObservation = nil
+        }
+    }
+
+    isolated deinit { captionObservation?.cancel() }
 
     private func revokeCaptionMaster() {
         guard let url = captionMasterURL else { return }
@@ -272,6 +296,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     public func stop() {
+        loadGeneration &+= 1
+        captionObservation?.cancel()
+        captionObservation = nil
         aether.stop()
         revokeCaptionMaster()
         activeSubtitleTrackID = nil

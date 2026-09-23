@@ -608,7 +608,7 @@ private func childResourceURLs(inPlaylist data: Data) -> [URL] {
 /// response, close. Two distinct ports on 127.0.0.1 count as different
 /// origins for the server's own isSameOrigin check, which is what lets this
 /// fixture simulate a cross-origin redirect without touching the network.
-private actor AppleLiveTVUpstreamFixture {
+actor AppleLiveTVUpstreamFixture {
     struct Route: Sendable {
         let status: Int
         let statusText: String

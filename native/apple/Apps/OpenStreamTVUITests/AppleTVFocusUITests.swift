@@ -49,6 +49,58 @@ final class AppleTVFocusUITests: XCTestCase {
 
     // MARK: - The guide
 
+    func testFirstLiveHLSPlayOffersCaptions() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_CAPTION_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("A localhost OPENSTREAM_CAPTION_FIXTURE_URL is required")
+        }
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "always",
+            "-openstream.sources.v1", "", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        launch(screen: "add-files")
+        let subtitles = app.descendants(matching: .any).matching(identifier: "Subtitles").firstMatch
+        for _ in 0..<12 {
+            remote.press(.down)
+            if subtitles.waitForExistence(timeout: 2) { break }
+        }
+        XCTAssertTrue(subtitles.exists, "Captions must be available on the first fixture open")
+        let controls = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        controls.name = "first-play-hls-cc-controls"
+        controls.lifetime = .keepAlways
+        add(controls)
+        // Down reveals the transport with focus on its timeline. Up reaches
+        // the row of AVKit menu controls before moving across that row.
+        remote.press(.up)
+        for _ in 0..<6 {
+            if subtitles.hasFocus || subtitles.descendants(matching: .any)
+                .matching(NSPredicate(format: "hasFocus == true")).count > 0 { break }
+            remote.press(.right)
+        }
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "first-play-caption-controls-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        XCTAssertTrue(subtitles.hasFocus || subtitles.descendants(matching: .any)
+            .matching(NSPredicate(format: "hasFocus == true")).count > 0,
+            "The remote must reach the captions menu")
+        remote.press(.select)
+        let cc = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS[c] 'CC' OR label CONTAINS[c] 'English'")).firstMatch
+        XCTAssertTrue(cc.waitForExistence(timeout: 5), "The first-play menu must contain the embedded caption track")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "first-play-hls-cc-menu"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testChapterIntroCanBeReachedAndSkippedWithTheRemote() throws {
         guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_CHAPTER_FIXTURE_URL"],
               !fixture.isEmpty else {

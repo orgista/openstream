@@ -21,8 +21,10 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     private let eventStream = ApplePlaybackEventStream()
     private var isSeeking = false
     private var lastPositionUpdate = Date.distantPast
-    private var loadGeneration = 0
+    private(set) var loadGeneration = 0
     private var protectedPlaybackURL: URL?
+    private(set) var captionObservation: Task<Void, Never>?
+    private let captionProbe: AppleLiveCaptionProbe
 
     public private(set) var phase: ApplePlaybackEnginePhase = .idle {
         didSet {
@@ -125,7 +127,11 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         eventStream.stream()
     }
 
-    public init() {}
+    public init() { captionProbe = .shared }
+
+    init(captionProbe: AppleLiveCaptionProbe) {
+        self.captionProbe = captionProbe
+    }
 
     isolated deinit { teardown() }
 
@@ -140,6 +146,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         position = 0
         lastPositionUpdate = .distantPast
 
+        let request = try await captionProbe.preparedRequest(request)
+        guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
         let headers = request.effectiveHeaders
         var playbackURL = request.url
         // Undeclared CEA-608 in a live media playlist: AVPlayer only finds it
@@ -169,9 +177,24 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         }
         if request.autoplay { avPlayer.play() }
         else { avPlayer.pause(); derivePhase() }
+        observeLiveCaptions(request, generation: generation)
         describeTracks(of: asset, title: request.title)
         await loadEmbeddedSubtitleTracks(of: asset, item: playerItem)
         await loadChapters(of: asset, item: playerItem)
+    }
+
+    private func observeLiveCaptions(_ request: ApplePlaybackRequest, generation: Int) {
+        guard request.isLive, request.hints.declaresEmbeddedCaptions else { return }
+        let probe = captionProbe
+        captionObservation = Task { [weak self] in
+            guard !Task.isCancelled, self?.loadGeneration == generation else { return }
+            await probe.probe(
+                channelID: request.mediaID, playlistURL: request.url, headers: request.effectiveHeaders)
+            guard !Task.isCancelled, let self, self.loadGeneration == generation else { return }
+            // The probe caches the next-start decision. Leave this item playing,
+            // even if its empty captions option remains until the viewer leaves.
+            self.captionObservation = nil
+        }
     }
 
     /// Reads the chapter markers AVFoundation exposes as timed metadata groups
@@ -532,6 +555,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     }
 
     private func teardown() {
+        captionObservation?.cancel()
+        captionObservation = nil
         externalSubtitleLoad?.cancel()
         externalSubtitleLoad = nil
         externalSubtitleTracks = []
