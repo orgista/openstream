@@ -1381,6 +1381,16 @@ struct AppleTVLivePlayerScreen: View {
             AppleInteractionTrace.record(.playback, "live \(channel.name) phase=\(phase) route=\(coordinator.route)")
             #endif
         }
+        .task(id: ObjectIdentifier(coordinator.engine)) {
+            for await event in coordinator.engine.events {
+                switch event {
+                case .tracks, .route:
+                    selectArmedCaptionsIfAvailable()
+                default:
+                    break
+                }
+            }
+        }
         .onChange(of: focus) { _, value in
             #if DEBUG
             AppleInteractionTrace.record(.focus, "live player \(value.map(String.init(describing:)) ?? "none")")
@@ -1655,9 +1665,15 @@ struct AppleTVLivePlayerScreen: View {
         let tracks = engine.subtitleTracks
         let next = AppleCaptionsToggle.nextSelection(selected: engine.activeSubtitleTrackID, visible: tracks)
         let notice: String
-        if tracks.isEmpty {
+        if tracks.isEmpty, canArmLiveCaptions {
+            notice = footer.togglePendingCaptions()
+            // Record a manual choice now, so default-on discovery cannot undo
+            // a second swipe (Off) before the first caption packet arrives.
+            stockSubtitles.select(nil, on: engine)
+        } else if tracks.isEmpty {
             notice = "No captions on this channel"
         } else {
+            footer.cancelPendingCaptions()
             // Through the cue layer's object so a pick while paused shows (or
             // clears) the cue at once rather than on the next position tick.
             stockSubtitles.select(next, on: engine)
@@ -1673,6 +1689,20 @@ struct AppleTVLivePlayerScreen: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { captionsNotice = nil }
         }
+    }
+
+    /// Raw live input is demuxed by OpenStream. Its loopback route discovers
+    /// 608 lazily; HLS/native and software routes keep their existing controls.
+    private var canArmLiveCaptions: Bool {
+        request.isLive && !request.hints.nativeRemoteHLS
+            && coordinator.engine.kind == .openStream
+            && (coordinator.route == .none || coordinator.route == .avPlayer)
+    }
+
+    private func selectArmedCaptionsIfAvailable() {
+        guard canArmLiveCaptions,
+              let id = footer.takeArmedCaptionTrack(in: coordinator.engine.subtitleTracks) else { return }
+        stockSubtitles.select(id, on: coordinator.engine)
     }
 
     /// The footer's `defaultFocus` covers the first appearance; this covers

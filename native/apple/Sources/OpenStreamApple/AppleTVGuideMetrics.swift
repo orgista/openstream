@@ -177,6 +177,25 @@ public struct AppleTVLiveFooterState: Equatable, Sendable {
     }
 
     public private(set) var phase: Phase
+    /// A live TS may not announce 608 until its first packet. Remember the
+    /// viewer's choice until discovery, without treating an empty list as Off.
+    public private(set) var captionsArmed = false
+
+    public mutating func togglePendingCaptions() -> String {
+        captionsArmed.toggle()
+        return captionsArmed ? "Captions on" : "Captions off"
+    }
+
+    public mutating func cancelPendingCaptions() {
+        captionsArmed = false
+    }
+
+    /// Consume the intent once. Later track updates must not undo a menu pick.
+    public mutating func takeArmedCaptionTrack(in tracks: [ApplePlaybackTrack]) -> Int? {
+        guard captionsArmed, let track = tracks.first(where: { $0.id == 99_608 }) else { return nil }
+        captionsArmed = false
+        return track.id
+    }
 
     public init(phase: Phase = .hidden) { self.phase = phase }
 
@@ -221,7 +240,10 @@ public struct AppleTVLiveFooterState: Equatable, Sendable {
     /// state, so the next Menu press shows the row again instead of leaving
     /// playback. Without this the row stayed over the picture after a switch
     /// and the player read as hung (owner 18:55).
-    public mutating func reset() { phase = .hidden }
+    public mutating func reset() {
+        phase = .hidden
+        captionsArmed = false
+    }
 
     /// The card that takes focus when the footer appears: the playing
     /// channel, or the first card when it is not in the row.

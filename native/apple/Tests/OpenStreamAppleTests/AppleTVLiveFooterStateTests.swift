@@ -4,6 +4,36 @@ import Testing
 
 @Suite("Apple TV live footer state")
 struct AppleTVLiveFooterStateTests {
+    @Test func swipeUpWithEmptyTracksArmsLiveCaptions() {
+        var state = AppleTVLiveFooterState()
+        #expect(state.apply(.swipeUp) == .toggleCaptions)
+        #expect(state.togglePendingCaptions() == "Captions on")
+        #expect(state.takeArmedCaptionTrack(in: []) == nil)
+        #expect(state.captionsArmed)
+        #expect(state.phase == .hidden)
+        #expect(state.togglePendingCaptions() == "Captions off")
+        #expect(state.captionsArmed == false)
+    }
+
+    @Test func trackArrivalWhileArmedSelects608Once() {
+        var state = AppleTVLiveFooterState()
+        let track = ApplePlaybackTrack(id: 99_608, title: "Closed Captions", codec: "cea608")
+        _ = state.togglePendingCaptions()
+        #expect(state.takeArmedCaptionTrack(in: [ApplePlaybackTrack(id: 2, title: "Other")]) == nil)
+        #expect(state.captionsArmed)
+        #expect(state.takeArmedCaptionTrack(in: [track]) == track.id)
+        #expect(state.takeArmedCaptionTrack(in: [track]) == nil)
+        _ = state.togglePendingCaptions()
+        state.cancelPendingCaptions()
+        #expect(state.takeArmedCaptionTrack(in: [track]) == nil)
+        _ = state.togglePendingCaptions()
+        _ = state.togglePendingCaptions()
+        #expect(state.takeArmedCaptionTrack(in: [track]) == nil)
+        _ = state.togglePendingCaptions()
+        state.reset()
+        #expect(state.takeArmedCaptionTrack(in: [track]) == nil)
+    }
+
     @Test func freshPlayerStartsHiddenAndMenuDoesNotExit() {
         let state = AppleTVLiveFooterState()
         #expect(state.phase == .hidden)

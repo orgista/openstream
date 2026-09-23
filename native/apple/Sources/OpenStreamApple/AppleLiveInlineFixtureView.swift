@@ -1,21 +1,25 @@
-#if DEBUG && !os(tvOS)
+#if DEBUG
 import SwiftUI
 
 /// Local-only proof of the production inline player, without loading saved
 /// sources or writing a channel/history entry on a review simulator.
 public struct AppleLiveInlineFixtureView: View {
     @State private var coordinator: ApplePlaybackCoordinator
-    private let request: ApplePlaybackRequest?
+    private let channel: AppleIPTVChannel?
+    private var request: ApplePlaybackRequest? { channel?.playbackRequest() }
+    #if os(tvOS)
+    @State private var footer = AppleTVLiveFooterState()
+    #endif
 
     public init() {
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: "OpenStreamVisionPlaybackIsLive"),
            let raw = defaults.string(forKey: "OpenStreamVisionPlaybackURL"),
            let url = URL(string: raw), url.scheme == "http", url.host == "127.0.0.1" {
-            request = AppleIPTVChannel(id: "inline-caption-fixture", sourceID: UUID(),
-                                      name: "Caption fixture", streamURL: url).playbackRequest()
+            channel = AppleIPTVChannel(id: "inline-caption-fixture", sourceID: UUID(),
+                                      name: "Caption fixture", streamURL: url)
         } else {
-            request = nil
+            channel = nil
         }
         let (engine, _) = ApplePlaybackEngineFactory.make(preferred: .openStream)
         let languages = defaults.stringArray(forKey: AppleSubtitleLanguages.defaultsKey)
@@ -27,6 +31,12 @@ public struct AppleLiveInlineFixtureView: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        if let channel {
+            AppleTVLivePlayerScreen(channel: channel, coordinator: coordinator,
+                                    footerChannels: [channel], footer: $footer, onSwitch: { _ in })
+        }
+        #else
         TabView {
             Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
                 NavigationStack {
@@ -46,6 +56,7 @@ public struct AppleLiveInlineFixtureView: View {
             }
         }
         .tint(.primary)
+        #endif
     }
 }
 #endif

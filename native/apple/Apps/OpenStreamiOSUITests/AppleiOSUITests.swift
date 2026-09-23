@@ -1123,6 +1123,73 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertFalse(try cueVisible())
     }
 
+    func testRawTSInlineCaptionSelectionMatchesRendered608() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost 608 fixture")
+        }
+        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "N4 CAPTIONS WORK"
+        let expectedTrack = env["OPENSTREAM_SUBTITLE_FIXTURE_TRACK"] ?? "English"
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.playback.engine", "engine", "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "always",
+            "-openstream.settings.subtitle.languages.v1", "(en)",
+            "-openstream.sources.v1", "", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        app.launchArguments += ["-OpenStreamInlineLiveFixture"]
+        launch(screen: "add-files")
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = name + "-hierarchy"; tree.lifetime = .keepAlways; add(tree)
+        }
+        func cueVisible() throws -> Bool {
+            let image = try XCTUnwrap(XCUIScreen.main.screenshot().image.cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            return text.filter { !$0.isWhitespace }.uppercased()
+                .contains(expectedCue.filter { !$0.isWhitespace }.uppercased())
+        }
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if try cueVisible() { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertTrue(try cueVisible(), "Default-on 608 did not render")
+        func openMenu() {
+            let captions = app.buttons["player.inline.subtitles"].firstMatch
+            if !captions.exists || !captions.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.23)).tap()
+            }
+            XCTAssertTrue(captions.waitForExistence(timeout: 5))
+            captions.tap()
+            XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 5))
+        }
+        openMenu()
+        capture("n7-ios-inline-english")
+        XCTAssertTrue(app.buttons[expectedTrack].firstMatch.isSelected, "Rendered track must be checked at startup")
+        XCTAssertTrue(try cueVisible())
+
+        app.buttons["Off"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(try cueVisible(), "Off left a caption drawn")
+        openMenu()
+        capture("n7-ios-inline-off")
+        XCTAssertTrue(app.buttons["Off"].firstMatch.isSelected)
+        XCTAssertFalse(try cueVisible())
+    }
+
     func testCaptionsMenuOffersAllSubtitleOptions() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],

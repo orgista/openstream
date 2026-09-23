@@ -50,6 +50,37 @@ final class AppleTVFocusUITests: XCTestCase {
 
     // MARK: - The guide
 
+    func testRawTSSwipeUpArmsBeforeCaptionArrival() async throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost raw-TS fixture")
+        }
+        app.launchArguments = [
+            "-OpenStreamInlineLiveFixture", "-OpenStreamVisionPlaybackURL", fixture,
+            "-OpenStreamVisionPlaybackIsLive", "YES", "-OpenStreamTrace", "YES",
+            "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.settings.subtitle.languages.v1", "(en)"
+        ]
+        app.launch()
+        try await Task.sleep(for: .milliseconds(200))
+        remote.press(.up)
+        let notice = app.staticTexts["Captions on"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 3))
+        let armed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        armed.name = "n7-tvos-armed"; armed.lifetime = .keepAlways; add(armed)
+        // The fixture holds its first TS bytes until the real remote command
+        // has armed captions. This proves discovery cannot precede the swipe.
+        let controlURL = try XCTUnwrap(URL(string: fixture)?.deletingLastPathComponent().appendingPathComponent("release"))
+        var release = URLRequest(url: controlURL)
+        release.httpMethod = "POST"
+        _ = try await URLSession.shared.data(for: release)
+        let cue = app.staticTexts["N7 RAW TS CAPTIONS"].firstMatch
+        let appeared = cue.waitForExistence(timeout: 45)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "n7-tvos-first-cue"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(appeared, "Armed raw-TS 608 did not render")
+    }
+
     func testCaptionSelectionMatchesRendered608() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
