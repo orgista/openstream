@@ -85,6 +85,9 @@ struct AppleDiscoverView: View {
     /// Textless hero art, keyed by media id, once TMDB has been asked. Empty
     /// through first paint by design — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
+    /// The iPhone hero's "New Season" / "New Episode" capsule, keyed by media
+    /// id, from the episode dates in the same cached meta as the wordmarks.
+    @State private var heroBadges: [String: AppleHeroBadge] = [:]
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -160,19 +163,25 @@ struct AppleDiscoverView: View {
                             #if DEBUG
                             let _ = AppleLaunchClock.mark("discover.hero")
                             #endif
-                            TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
-                                if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
-                                    #if os(tvOS)
-                                    AppleTVHeroPageGate(pages: heroes.map(heroPageArt), requested: index) { shown, wordmarkFailed in
-                                        featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
-                                                     wordmarkFailed: wordmarkFailed)
+                            Group {
+                                #if !os(tvOS)
+                                if usesPhoneHero {
+                                    // iPhone portrait: the Apple TV app's hero,
+                                    // edge to edge, with a cycle that can be
+                                    // swiped, jumped and held.
+                                    AppleHomePhoneHeroCarousel(pageIDs: heroes.map(\.id)) { index in
+                                        featuredHero(heroes[index], phone: true)
+                                    } preload: { index in
+                                        AppleHomePhoneHeroPreload(item: heroItem(heroes[index].item),
+                                                                  wordmark: heroWordmark(heroes[index], item: heroItem(heroes[index].item)),
+                                                                  width: viewportSize.width)
                                     }
-                                    .padding(.horizontal, heroHorizontalPadding)
-                                    #else
-                                    featuredHero(heroes[index], rotationCount: heroes.count, rotationIndex: index)
-                                        .padding(.horizontal, heroHorizontalPadding)
-                                    #endif
+                                } else {
+                                    rotatingHero(heroes)
                                 }
+                                #else
+                                rotatingHero(heroes)
+                                #endif
                             }
                             .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
                                 // The prefetch lands after the first pass, so
@@ -575,10 +584,31 @@ struct AppleDiscoverView: View {
         )
     }
 
+    /// Every hero but the iPhone portrait one: the page the rotation clock
+    /// picks, with the Apple TV holding a page until its art is ready.
+    @ViewBuilder
+    private func rotatingHero(_ heroes: [IndexedCatalogItem]) -> some View {
+        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
+            if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
+                #if os(tvOS)
+                AppleTVHeroPageGate(pages: heroes.map(heroPageArt), requested: index) { shown, wordmarkFailed in
+                    featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
+                                 wordmarkFailed: wordmarkFailed)
+                }
+                .padding(.horizontal, heroHorizontalPadding)
+                #else
+                featuredHero(heroes[index], rotationCount: heroes.count, rotationIndex: index)
+                    .padding(.horizontal, heroHorizontalPadding)
+                #endif
+            }
+        }
+    }
+
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
     /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(
-        _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false
+        _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
+        phone: Bool = false
     ) -> some View {
         let item = heroItem(value.item)
         return AppleHomeBillboard(
@@ -588,8 +618,44 @@ struct AppleDiscoverView: View {
             viewportSize: viewportSize,
             wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
             rotationCount: rotationCount,
-            rotationIndex: rotationIndex
-        ) { featuredActions(value) }
+            rotationIndex: rotationIndex,
+            phone: phone ? .init(badge: heroBadges[value.item.mediaID],
+                                 onOpenDetails: { selectHero(value, autoPlay: false) }) : nil
+        ) {
+            if phone {
+                AppleHomePhoneHeroActions(
+                    playTitle: AppleBillboardCopy.playTitle(progress: ApplePlaybackStore().progress(for: value.record.id)),
+                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                    onPlay: { selectHero(value, autoPlay: true) },
+                    onToggleList: { toggleHeroInList(value) }
+                )
+            } else {
+                featuredActions(value)
+            }
+        }
+    }
+
+    /// The iPhone hero's My List button: the same favourite the title page's
+    /// My List toggles. A title first seen on the hero has no record yet — the
+    /// title page writes one when it opens — so it is written here first.
+    private func toggleHeroInList(_ value: IndexedCatalogItem) {
+        let isInList = mediaIndex.record(id: value.record.id)?.isFavorite ?? false
+        Task { @MainActor in
+            if mediaIndex.record(id: value.record.id) == nil { try? await mediaIndex.upsert(value.record) }
+            try? await mediaIndex.setFavorite(!isInList, recordID: value.record.id)
+        }
+    }
+
+    /// Discover's hero on an iPhone held upright. The iPad (either way up), a
+    /// phone on its side and every other platform keep the featured hero.
+    private var usesPhoneHero: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+            && horizontalSizeClass == .compact
+            && !AppleDetailMetrics.isLandscapeLayout(viewport: viewportSize)
+        #else
+        false
+        #endif
     }
 
     private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
@@ -647,16 +713,23 @@ struct AppleDiscoverView: View {
     /// looking for a logo it may not have.
     private func resolveHeroWordmarks(_ heroes: [IndexedCatalogItem]) async {
         var found: [String: URL] = [:]
+        var badges: [String: AppleHeroBadge] = [:]
+        let now = Date.now
         for hero in heroes {
             let key = AppleStremioPreviewAssetsCache.key(
                 type: hero.item.type, mediaID: hero.item.mediaID
             )
-            if let logo = await AppleStremioPreviewAssetsCache.shared.entry(for: key)?.assets?.logoURL {
+            guard let assets = await AppleStremioPreviewAssetsCache.shared.entry(for: key)?.assets else { continue }
+            if let logo = assets.logoURL {
                 found[hero.item.mediaID] = logo
             }
+            if let badge = AppleHeroBadge.select(type: hero.item.type, episodes: assets.episodes, now: now) {
+                badges[hero.item.mediaID] = badge
+            }
         }
-        guard !Task.isCancelled, found != heroWordmarks else { return }
-        heroWordmarks = found
+        guard !Task.isCancelled else { return }
+        if found != heroWordmarks { heroWordmarks = found }
+        if badges != heroBadges { heroBadges = badges }
     }
 
     /// The tvOS billboard is 1920 wide inside the safe-area column, so it is

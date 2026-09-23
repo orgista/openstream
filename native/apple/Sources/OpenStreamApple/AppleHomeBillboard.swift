@@ -24,33 +24,59 @@ struct AppleHomeBillboard<Actions: View>: View {
     let wordmark: URL?
     let rotationCount: Int
     let rotationIndex: Int
+    /// Set on an iPhone in portrait: draw the Apple TV app's hero
+    /// (`AppleHomePhoneHero`) over the same stage instead of the featured one.
+    var phone: Phone? = nil
     @ViewBuilder var actions: Actions
+    /// The decoded still, handed to the iPhone hero's trailer so its cover
+    /// paints these pixels the moment it is inserted — the title page does the
+    /// same. Without it the cover loaded its own copy and the hero went black
+    /// for a moment when the trailer started (iPhone sim, 2026-09-22).
+    @State private var stillImage: CGImage?
+
+    struct Phone {
+        let badge: AppleHeroBadge?
+        let onOpenDetails: () -> Void
+    }
 
     var body: some View {
-        AppleFeaturedHero(
-            item: item,
-            viewportSize: viewportSize,
-            wordmark: wordmark,
-            rotationCount: rotationCount,
-            rotationIndex: rotationIndex,
-            stage: AnyView(
-                ZStack {
-                    // The still sits outside the per-title identity below. It
-                    // was inside it, so every page change remounted it empty
-                    // and the hero showed a bare surface under the new copy
-                    // until the backdrop decoded (sim finding c, 2026-09-22).
-                    // On tvOS it keeps the old still until the new one lands;
-                    // `AppleTVHeroPageGate` has already warmed it by then.
-                    AppleCatalogArtwork(
-                        url: item.backgroundURL ?? item.posterURL,
-                        loadingFill: AppleDesignTokens.surface,
-                        keepsImageWhileReloading: Self.keepsStillWhileReloading
-                    )
-                    AppleHomeHeroPreview(item: item, sources: sources, settings: settings)
-                        .id(item.id)
-                }
-            )
-        ) { actions }
+        if let phone {
+            AppleHomePhoneHero(item: item, wordmark: wordmark, badge: phone.badge, stage: stage,
+                               onOpenDetails: phone.onOpenDetails) { actions }
+        } else {
+            AppleFeaturedHero(
+                item: item,
+                viewportSize: viewportSize,
+                wordmark: wordmark,
+                rotationCount: rotationCount,
+                rotationIndex: rotationIndex,
+                stage: stage
+            ) { actions }
+        }
+    }
+
+    private var stage: AnyView {
+        AnyView(
+            ZStack {
+                // The still sits outside the per-title identity below. It
+                // was inside it, so every page change remounted it empty
+                // and the hero showed a bare surface under the new copy
+                // until the backdrop decoded (sim finding c, 2026-09-22).
+                // On tvOS it keeps the old still until the new one lands;
+                // `AppleTVHeroPageGate` has already warmed it by then.
+                AppleRemoteImage(
+                    url: item.backgroundURL ?? item.posterURL,
+                    placeholderSystemImage: "",
+                    onLoad: { stillImage = $0 },
+                    onFailure: { stillImage = nil },
+                    loadingFill: AppleDesignTokens.surface,
+                    keepsImageWhileReloading: Self.keepsStillWhileReloading
+                )
+                AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
+                                     artworkImage: phone != nil ? stillImage : nil)
+                    .id(item.id)
+            }
+        )
     }
 
     /// Only the Apple TV holds a page until its art is ready; elsewhere the new
@@ -113,6 +139,7 @@ private struct AppleHomeHeroPreview: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
+    var artworkImage: CGImage? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
@@ -146,6 +173,7 @@ private struct AppleHomeHeroPreview: View {
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(
                     url: embedURL, artworkURL: item.backgroundURL ?? item.posterURL,
+                    artworkImage: artworkImage,
                     isLandscape: true, isPlaying: $isPlaying, isMuted: $isMuted,
                     replayGeneration: $replayGeneration, showsReplay: !isPlaying,
                     onStateChange: handleState,
@@ -182,6 +210,8 @@ private struct AppleHomeHeroPreview: View {
         .onAppear { isPresented = true }
         .onDisappear { isPresented = false; stop() }
         .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0 }
+        .preference(key: AppleHomeHeroTrailerStateKey.self,
+                    value: .init(isPlaying: shouldPreview && isPlaying, isMuted: isMuted))
         .onChange(of: settings.autoMuteTrailer) { _, muted in isMuted = muted }
         #if os(iOS) || os(visionOS)
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.videoAutoplayStatusDidChangeNotification)) { _ in

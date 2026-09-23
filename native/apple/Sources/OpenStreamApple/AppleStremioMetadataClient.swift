@@ -98,13 +98,18 @@ public struct AppleStremioEpisodeSelection: Equatable, Sendable {
 public struct AppleStremioPreviewAssets: Equatable, Sendable {
     public let trailerYouTubeKeys: [String]
     public let logoURL: URL?
+    /// Every episode the meta lists with a release date, for the iPhone hero's
+    /// "New Season" / "New Episode" badge. Read from the same response as the
+    /// trailers and the wordmark, so it costs no request of its own.
+    public let episodes: [AppleHeroBadge.Episode]
 
     public var trailerYouTubeKey: String? { trailerYouTubeKeys.first }
 
     public init(
         trailerYouTubeKey: String? = nil,
         trailerYouTubeKeys: [String] = [],
-        logoURL: URL? = nil
+        logoURL: URL? = nil,
+        episodes: [AppleHeroBadge.Episode] = []
     ) {
         self.trailerYouTubeKeys = ([trailerYouTubeKey].compactMap { $0 } + trailerYouTubeKeys)
             .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
@@ -112,6 +117,7 @@ public struct AppleStremioPreviewAssets: Equatable, Sendable {
                 if !keys.contains(key) { keys.append(key) }
             }
         self.logoURL = logoURL
+        self.episodes = episodes
     }
 }
 
@@ -636,7 +642,12 @@ public struct AppleStremioMetadataClient: Sendable {
                     .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
             return AppleStremioPreviewAssets(
                 trailerYouTubeKeys: keys,
-                logoURL: Self.safeArtworkURL(envelope.meta.logo)
+                logoURL: Self.safeArtworkURL(envelope.meta.logo),
+                episodes: envelope.meta.videos.compactMap { video in
+                    guard let season = video.season, let episode = video.episode,
+                          let released = AppleHeroBadge.releaseDate(video.released) else { return nil }
+                    return AppleHeroBadge.Episode(season: season, episode: episode, released: released)
+                }
             )
         }
 
@@ -860,9 +871,10 @@ public struct AppleStremioMetadataClient: Sendable {
         let logo: String?
         let trailers: [Trailer]
         let trailerStreams: [TrailerStream]
+        let videos: [PreviewVideo]
 
         private enum CodingKeys: String, CodingKey {
-            case logo, trailers, trailerStreams
+            case logo, trailers, trailerStreams, videos
         }
 
         init(from decoder: Decoder) throws {
@@ -870,6 +882,29 @@ public struct AppleStremioMetadataClient: Sendable {
             logo = try? container.decode(String.self, forKey: .logo)
             trailers = (try? container.decode([Trailer].self, forKey: .trailers)) ?? []
             trailerStreams = (try? container.decode([TrailerStream].self, forKey: .trailerStreams)) ?? []
+            videos = (try? container.decode([PreviewVideo].self, forKey: .videos)) ?? []
+        }
+    }
+
+    /// Only what the hero badge needs. Never throws, so one odd entry cannot
+    /// drop the whole list.
+    private struct PreviewVideo: Decodable {
+        let season: Int?
+        let episode: Int?
+        let released: String?
+
+        private enum CodingKeys: String, CodingKey { case season, episode, released }
+
+        init(from decoder: Decoder) throws {
+            let container = try? decoder.container(keyedBy: CodingKeys.self)
+            season = Self.number(container, .season)
+            episode = Self.number(container, .episode)
+            released = try? container?.decode(String.self, forKey: .released)
+        }
+
+        private static func number(_ container: KeyedDecodingContainer<CodingKeys>?, _ key: CodingKeys) -> Int? {
+            if let value = try? container?.decode(Int.self, forKey: key) { return value }
+            return (try? container?.decode(String.self, forKey: key)).flatMap { Int($0) }
         }
     }
 

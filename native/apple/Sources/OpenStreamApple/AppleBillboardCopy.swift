@@ -26,4 +26,40 @@ public enum AppleBillboardCopy {
         }
         return parts.isEmpty ? nil : parts.joined(separator: separator)
     }
+
+    /// The iPhone hero's "TV Show · Thriller · Drama": what kind of title it
+    /// is, then at most two genres. No year — the Apple TV app's hero has none.
+    public static func phoneMetadataLine(type: String, genres: [String]?) -> String? {
+        var parts: [String] = []
+        switch type.lowercased() {
+        case "series": parts.append("TV Show")
+        case "movie": parts.append("Movie")
+        default: break
+        }
+        if let genres {
+            parts += genres
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .prefix(2)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: separator)
+    }
+
+    /// The outlined rating badge ("TV-MA"), or nil when the add-on sent none.
+    public static func ratingBadge(_ contentRating: String?) -> String? {
+        guard let rating = contentRating?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rating.isEmpty, rating.count <= 10 else { return nil }
+        return rating
+    }
+
+    /// The hero's play button: "Resume S1, E3" when a series is part-way into
+    /// an episode, "Resume" for a part-watched film, "Play" otherwise. Read
+    /// from the saved position, so it never promises a resume that is not there.
+    public static func playTitle(progress: ApplePlaybackProgress?) -> String {
+        guard let progress, progress.resumePosition != nil else { return "Play" }
+        if let part = progress.partID, let episode = AppleStremioMetadataClient.episodeIdentity(part) {
+            return "Resume S\(episode.season), E\(episode.episode)"
+        }
+        return "Resume"
+    }
 }
