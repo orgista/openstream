@@ -1888,6 +1888,8 @@ struct AppleCatalogItemDetailView: View {
     #endif
     #if os(tvOS)
     @FocusState private var tvDetailFocus: AppleTVDetailFocus?
+    /// Set once Play has held focus; see `AppleTVDetailOpeningFocus`.
+    @State private var tvDetailOpeningSettled = false
     /// Native trailer preview on Apple TV: the first playable trailer resolved
     /// to an HLS manifest, shown over the backdrop until it ends.
     @State private var tvTrailerSource: AppleYouTubeStreamResolver.Source?
@@ -2674,11 +2676,15 @@ struct AppleCatalogItemDetailView: View {
         }
         .scrollClipDisabled()
         .ignoresSafeArea()
-        .defaultFocus($tvDetailFocus, .play)
-        .onAppear {
-            // Belt and braces: the 18:30 capture showed Play unfocused on
-            // open, so the page asks for it explicitly as well.
-            if tvDetailFocus == nil { tvDetailFocus = .play }
+        .defaultFocus($tvDetailFocus, .play, priority: .userInitiated)
+        .task { await settleTVOpeningFocus() }
+        .onChange(of: tvDetailFocus) { _, focus in
+            guard !tvDetailOpeningSettled else { return }
+            if AppleTVDetailOpeningFocus.settles(on: focus) {
+                tvDetailOpeningSettled = true
+            } else if let correction = AppleTVDetailOpeningFocus.correction(for: focus, hasHadAnyFocus: true) {
+                tvDetailFocus = correction
+            }
         }
         .onChange(of: rateChoicesExpanded) { _, expanded in
             if !expanded { tvDetailFocus = .rate }
@@ -2692,6 +2698,19 @@ struct AppleCatalogItemDetailView: View {
             if tvTrailerVisible { hideTVTrailerPreview() }
         }
         .onDisappear { hideTVTrailerPreview() }
+    }
+
+    /// Asks for Play until it has held focus once: the first requests land
+    /// while the push is still animating and are dropped.
+    private func settleTVOpeningFocus() async {
+        for _ in 0 ..< AppleTVDetailOpeningFocus.attempts {
+            guard !tvDetailOpeningSettled, !Task.isCancelled else { return }
+            if let correction = AppleTVDetailOpeningFocus.correction(for: tvDetailFocus, hasHadAnyFocus: false) {
+                tvDetailFocus = correction
+            }
+            try? await Task.sleep(for: AppleTVDetailOpeningFocus.interval)
+        }
+        appleTrace("detail focus: Play never took focus on open (focus=\(String(describing: tvDetailFocus)))")
     }
 
     private func startTVTrailerPreview() async {

@@ -41,6 +41,15 @@ final class AppleTVFocusUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
     }
 
+    /// The focused element, if it also matches `predicate`. Waiting on this
+    /// replaces "press, sleep, read the focus": it resolves as soon as focus
+    /// lands and fails with a timeout rather than a guess.
+    private func focused(where predicate: NSPredicate) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "hasFocus == true"), predicate
+        ])).firstMatch
+    }
+
     /// Waits for an element rather than sleeping: the guide loads over the
     /// network and a fixed sleep either flakes or wastes time.
     @discardableResult
@@ -623,45 +632,66 @@ final class AppleTVFocusUITests: XCTestCase {
     func testOtherSourcesIsReachableByLongPressingPlay() {
         launch(screen: "detail")
         XCTAssertTrue(wait(for: element("detail.play"), 40), "the title page never appeared")
-        XCTAssertTrue(focusedElement.waitForExistence(timeout: 10), "nothing holds focus at all")
-        XCTAssertEqual(focusedElement.identifier, "detail.play",
-                       "expected Play to hold focus on appear")
+        let playFocused = focused(where: NSPredicate(format: "identifier == %@", "detail.play"))
+        XCTAssertTrue(playFocused.waitForExistence(timeout: 10),
+                      "expected Play to hold focus on appear, got '\(focusedElement.label)'")
 
         remote.press(.select, forDuration: 2.0)
-        Thread.sleep(forTimeInterval: 2.5)
+
+        let entry = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Other sources")).firstMatch
+        let opened = entry.waitForExistence(timeout: 10)
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "other-sources-context-menu"
         shot.lifetime = .keepAlways
         add(shot)
 
-        let entry = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Other sources")).firstMatch
-        XCTAssertTrue(entry.waitForExistence(timeout: 10),
-                      "long-pressing Play did not reveal the Other sources entry")
+        XCTAssertTrue(opened, "long-pressing Play did not reveal the Other sources entry")
     }
 
     /// Owner B23: the episode list must show which episode is focused.
     ///
-    /// Down from Play lands on the episode rail (the focus-path diagnostic
-    /// established that). This walks two episodes along and attaches the frame,
+    /// Down from Play lands on the episode rail, through the Season picker
+    /// when the show has more than one season. This walks one episode along and attaches the frame,
     /// so the thumbnails and the focused state can be looked at rather than
     /// assumed, and asserts the rail actually moves — a rail that swallows
     /// presses looks identical in a screenshot to one that works.
+    ///
+    /// Every step waits for focus to land instead of sleeping: Down is only
+    /// meaningful once Play holds focus and the episodes have loaded, and the
+    /// page used to open on Rate, from where Down reaches nothing.
     func testEpisodeRailMovesAndShowsTheFocusedEpisode() {
         launch(screen: "detail")
         XCTAssertTrue(wait(for: element("detail.play"), 40), "the title page never appeared")
+        XCTAssertTrue(focused(where: NSPredicate(format: "identifier == %@", "detail.play")).waitForExistence(timeout: 10),
+                      "expected Play to hold focus on appear, got '\(focusedElement.label)'")
+        let isEpisode = NSPredicate(format: "label BEGINSWITH %@", "Play S")
+        XCTAssertTrue(app.descendants(matching: .any).matching(isEpisode).firstMatch.waitForExistence(timeout: 30),
+                      "the episode rail never loaded")
 
+        // A show with more than one season has the Season picker between Play
+        // and the rail, and Down from Play lands on it first, by design.
+        let season = element("detail.season")
+        if season.exists {
+            remote.press(.down)
+            let onSeason = season.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            XCTAssertTrue(season.hasFocus || onSeason.waitForExistence(timeout: 10),
+                          "Down from Play did not reach the Season picker, got '\(focusedElement.label)'")
+        }
         remote.press(.down)
-        Thread.sleep(forTimeInterval: 1.8)
-        let first = focusedElement.label
-        XCTAssertTrue(first.contains("Play S"),
-                      "expected an episode to hold focus, got '\(first)'")
+        let firstEpisode = focused(where: isEpisode)
+        XCTAssertTrue(firstEpisode.waitForExistence(timeout: 10),
+                      "expected an episode to hold focus, got '\(focusedElement.label)'")
+        let first = firstEpisode.label
 
         remote.press(.right)
-        Thread.sleep(forTimeInterval: 1.4)
-        let second = focusedElement.label
-        XCTAssertNotEqual(first, second, "the episode rail did not move on Right")
+        let moved = focused(where: NSCompoundPredicate(andPredicateWithSubpredicates: [
+            isEpisode, NSPredicate(format: "label != %@", first)
+        ]))
+        XCTAssertTrue(moved.waitForExistence(timeout: 10),
+                      "the episode rail did not move on Right; focus is on '\(focusedElement.label)'")
+        let second = moved.label
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "episode-rail-focused"

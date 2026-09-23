@@ -282,14 +282,24 @@ final class AppleiOSConfigurationTransferUITests: XCTestCase {
             return XCTFail("the save sheet had no Save button — tree above")
         }
         save.tap()
-        Thread.sleep(forTimeInterval: 5)
-        attach("04-after-save")
 
-        // A second export over the same filename asks to replace.
-        if app.buttons["Replace"].exists { app.buttons["Replace"].tap(); Thread.sleep(forTimeInterval: 3) }
-
+        // A second export over the same filename (any earlier run leaves one)
+        // asks to replace. That alert is not always in the app's own tree, so
+        // look in SpringBoard too, and wait for whichever comes first.
         let exported = app.staticTexts["Configuration exported"]
-        XCTAssertTrue(exported.waitForExistence(timeout: 30), "the Backup screen never confirmed the export")
+        let replaceButtons = [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")]
+            .map { $0.buttons["Replace"].firstMatch }
+        let deadline = Date().addingTimeInterval(30)
+        var confirmed = false
+        while !confirmed, Date() < deadline {
+            confirmed = exported.waitForExistence(timeout: 1)
+            if !confirmed, let replace = replaceButtons.first(where: { $0.exists && $0.isHittable }) {
+                attach("04-replace-existing")
+                replace.tap()
+            }
+        }
+        attach("04-after-save")
+        XCTAssertTrue(confirmed, "the Backup screen never confirmed the export")
         attach("05-export-confirmed")
 
         // Import the file that was just written.

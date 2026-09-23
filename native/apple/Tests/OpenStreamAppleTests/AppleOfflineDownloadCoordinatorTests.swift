@@ -295,6 +295,22 @@ struct AppleOfflineDownloadCoordinatorTests {
         #expect(await store.record(for: "movie:fixture") != nil)
     }
 
+    @Test func noStreamsFromTheResolverSaysNoDownloadableSource() async throws {
+        let (coordinator, _, root) = try makeContext(data: Data())
+        defer { try? FileManager.default.removeItem(at: root) }
+        coordinator.start(request: request(), resolvePlans: { throw AppleStremioPlaybackResolutionError.noStreams })
+        try await waitForDownloadState { if case .failed = $0 { return true }; return false }
+        #expect(coordinator.state == .failed(item: "Sample Movie", message: AppleOfflineDownloadFailure.noDownloadSource.message))
+    }
+
+    @Test func otherResolverFailuresStillSayPreparationFailed() async throws {
+        let (coordinator, _, root) = try makeContext(data: Data())
+        defer { try? FileManager.default.removeItem(at: root) }
+        coordinator.start(request: request(), resolvePlans: { throw AppleStremioPlaybackResolutionError.gatewayUnavailable })
+        try await waitForDownloadState { if case .failed = $0 { return true }; return false }
+        #expect(coordinator.state == .failed(item: "Sample Movie", message: AppleOfflineDownloadFailure.preparationFailed.message))
+    }
+
     @Test func localDownloadPlatformPolicyRejectsTVAndVision() {
         #expect(AppleLocalDownloadPlatformPolicy.isSupported(.iPhone))
         #expect(AppleLocalDownloadPlatformPolicy.isSupported(.iPad))

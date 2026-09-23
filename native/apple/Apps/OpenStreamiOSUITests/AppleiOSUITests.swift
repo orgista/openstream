@@ -895,8 +895,10 @@ final class AppleiOSUITests: XCTestCase {
 
     func testPlayerCoverRoundTripInLandscapeKeepsTheDiscoverStackAlive() {
         launch(screen: "discover")
-        let details = app.buttons["Details"].firstMatch
-        XCTAssertTrue(details.waitForExistence(timeout: 40), "no billboard Details")
+        // The hero's title block is the way into the title page now; Details is
+        // no longer a button of its own (iPhone hero, 2026-09-23).
+        let details = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 40), "no billboard way into Details")
         details.tap()
         let play = app.buttons["detail.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 30), "detail Play missing")
