@@ -43,6 +43,18 @@ enum AppleTVBillboardMetrics {
     static let pillGlyphSize: CGFloat = 28
     static let pillGlyphSpacing: CGFloat = 12
     static let pillGap: CGFloat = 24
+    /// The invisible paging stops beside the Discover hero's buttons
+    /// (`AppleTVHeroPaging`): wide enough to be a focus target, no wider.
+    static let pagingStopWidth: CGFloat = 2
+
+    // Discover's "New Season" capsule and outlined rating, after the Apple TV
+    // app (N12, same shapes as the iPhone and Mac heroes at tvOS sizes).
+    static let badgeFontSize: CGFloat = 22
+    static let badgeHorizontalPadding: CGFloat = 16
+    static let badgeVerticalPadding: CGFloat = 6
+    static let ratingFontSize: CGFloat = 20
+    static let ratingHorizontalPadding: CGFloat = 9
+    static let ratingVerticalPadding: CGFloat = 2
 
     // Rotation indicator: one segment per billboard, the current one filling
     // over `AppleHeroRotation.interval` so a change is visibly coming

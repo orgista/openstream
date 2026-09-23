@@ -207,7 +207,14 @@ struct AppleDiscoverView: View {
                                     rotatingHero(heroes)
                                 }
                                 #else
-                                rotatingHero(heroes)
+                                // The Apple TV app's hero: Resume/Play, My
+                                // List and Details, pages that cycle, hold
+                                // while focused and turn with the remote.
+                                AppleHomeTVHeroCarousel(pages: heroes.map(heroPageArt), slots: heroPageSlots) { shown, wordmarkFailed, context in
+                                    featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
+                                                 wordmarkFailed: wordmarkFailed, tv: context)
+                                }
+                                .padding(.horizontal, heroHorizontalPadding)
                                 #endif
                             }
                             .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
@@ -745,7 +752,7 @@ struct AppleDiscoverView: View {
         )
     }
 
-    /// Every hero but the iPhone portrait one: the page the rotation clock
+    /// The iPad, a phone on its side and Vision Pro: the page the rotation clock
     /// picks, held until that page's art is ready (`AppleHeroPageGate`).
     private func rotatingHero(_ heroes: [IndexedCatalogItem]) -> some View {
         TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
@@ -783,7 +790,7 @@ struct AppleDiscoverView: View {
     /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(
         _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
-        phone: Bool = false, mac: Bool = false
+        phone: Bool = false, mac: Bool = false, tv: AppleHomeTVHeroContext? = nil
     ) -> some View {
         let item = heroItem(value.item)
         return AppleHomeBillboard(
@@ -797,7 +804,8 @@ struct AppleDiscoverView: View {
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  badge: heroBadges[value.item.mediaID],
                                  onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
-            mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil
+            mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
+            tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
         ) {
             #if os(macOS)
             if mac {
@@ -807,6 +815,21 @@ struct AppleDiscoverView: View {
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onPlay: { selectHero(value, autoPlay: true) },
                     onToggleList: { toggleHeroInList(value) }
+                )
+            } else {
+                featuredActions(value)
+            }
+            #elseif os(tvOS)
+            if let tv {
+                AppleHomeTVHeroActions(
+                    progressID: value.record.id,
+                    type: value.item.type,
+                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                    focus: tv.focus,
+                    pagingEnabled: tv.pagingEnabled,
+                    onPlay: { selectHero(value, autoPlay: true) },
+                    onToggleList: { toggleHeroInList(value) },
+                    onDetails: { selectHero(value, autoPlay: false) }
                 )
             } else {
                 featuredActions(value)

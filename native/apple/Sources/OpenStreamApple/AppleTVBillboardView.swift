@@ -17,6 +17,15 @@ struct AppleTVBillboard<Actions: View>: View {
     /// swap the still for an inline trailer; Library passes nothing and gets
     /// the still. Either way the frame, fade and copy block are the same.
     var stage: AnyView? = nil
+    /// Discover only (N12), after the Apple TV app: the "New Season" capsule
+    /// over the title when the title's episodes earn one…
+    var badge: AppleHeroBadge? = nil
+    /// …"TV Show · Thriller · Drama" with the outlined rating instead of
+    /// genres and year…
+    var usesKindMetadata = false
+    /// …and page dots driven by the carousel's cycle (they hold while it
+    /// does) instead of the clock.
+    var cycle: AppleHeroRotation.Cycle? = nil
     @ViewBuilder var actions: Actions
 
     private typealias M = AppleTVBillboardMetrics
@@ -50,8 +59,23 @@ struct AppleTVBillboard<Actions: View>: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: M.copySpacing) {
+                if let badge {
+                    Text(badge.title)
+                        .font(.system(size: M.badgeFontSize, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, M.badgeHorizontalPadding)
+                        .padding(.vertical, M.badgeVerticalPadding)
+                        .overlay { Capsule().strokeBorder(.white.opacity(0.8), lineWidth: 2) }
+                        // It sits highest, where the fade has barely begun:
+                        // on the brightest art (Dark Matter's sky) the bare
+                        // capsule measured 2.2:1. The same soft shadow the
+                        // other heroes' names carry, not a fill over the art.
+                        .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
+                }
                 titleTreatment
-                if let metadataLine {
+                if usesKindMetadata {
+                    AppleTVBillboardKindMetadata(item: item)
+                } else if let metadataLine {
                     Text(metadataLine)
                         .font(.system(size: M.metadataFontSize, weight: .medium))
                         .foregroundStyle(.white.opacity(0.75))
@@ -66,7 +90,10 @@ struct AppleTVBillboard<Actions: View>: View {
                 }
                 actions
                     .padding(.top, 8)
-                if rotationCount > 1 {
+                if let cycle, cycle.count > 1 {
+                    AppleTVHeroCycleIndicator(cycle: cycle, index: rotationIndex)
+                        .padding(.top, 4)
+                } else if cycle == nil, rotationCount > 1 {
                     AppleTVHeroRotationIndicator(count: rotationCount, index: rotationIndex)
                         .padding(.top, 4)
                 }
@@ -108,6 +135,41 @@ struct AppleTVBillboard<Actions: View>: View {
     /// none, so the block never shows a lonely separator.
     private var metadataLine: String? {
         AppleBillboardCopy.metadataLine(genres: item.genres, year: item.year, releaseInfo: item.releaseInfo)
+    }
+}
+
+/// Discover's "TV Show · Thriller · Drama" and the outlined rating, as the
+/// iPhone and Mac heroes draw them (`AppleBillboardCopy.phoneMetadataLine`).
+private struct AppleTVBillboardKindMetadata: View {
+    let item: AppleCatalogItem
+
+    private typealias M = AppleTVBillboardMetrics
+
+    var body: some View {
+        let line = AppleBillboardCopy.phoneMetadataLine(type: item.type, genres: item.genres)
+        let rating = AppleBillboardCopy.ratingBadge(item.contentRating)
+        if line != nil || rating != nil {
+            HStack(spacing: 14) {
+                if let line {
+                    Text(line)
+                        .font(.system(size: M.metadataFontSize, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+                if let rating {
+                    Text(rating)
+                        .font(.system(size: M.ratingFontSize, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, M.ratingHorizontalPadding)
+                        .padding(.vertical, M.ratingVerticalPadding)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(.white.opacity(0.45), lineWidth: 1.5)
+                        }
+                        .accessibilityLabel("Rated \(rating)")
+                }
+            }
+        }
     }
 }
 

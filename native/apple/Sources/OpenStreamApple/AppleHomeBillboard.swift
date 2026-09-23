@@ -30,6 +30,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// Set on the Mac: draw the Apple TV app's Mac hero (`AppleHomeMacHero`)
     /// over the same stage.
     var mac: Mac? = nil
+    /// Set on the Apple TV's Discover: the Apple TV app's hero details over
+    /// the billboard (badge, kind line and rating, cycle-driven dots).
+    var tv: TV? = nil
     @ViewBuilder var actions: Actions
     /// The decoded still, handed to the iPhone hero's trailer so its cover
     /// paints these pixels the moment it is inserted — the title page does the
@@ -48,6 +51,11 @@ struct AppleHomeBillboard<Actions: View>: View {
         let onOpenDetails: () -> Void
     }
 
+    struct TV {
+        let badge: AppleHeroBadge?
+        let cycle: AppleHeroRotation.Cycle
+    }
+
     var body: some View {
         #if os(macOS)
         if let mac {
@@ -63,6 +71,21 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     @ViewBuilder
     private var standardBody: some View {
+        #if os(tvOS)
+        if let tv {
+            AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
+                             rotationIndex: rotationIndex, stage: stage, badge: tv.badge,
+                             usesKindMetadata: true, cycle: tv.cycle) { actions }
+        } else {
+            featuredBody
+        }
+        #else
+        featuredBody
+        #endif
+    }
+
+    @ViewBuilder
+    private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, wordmark: wordmark, badge: phone.badge,
                                stage: stage, onOpenDetails: phone.onOpenDetails) { actions }
@@ -233,11 +256,18 @@ private struct AppleHomeHeroPreview: View {
             }
             #elseif os(tvOS)
             if shouldPreview, let nativeSource {
-                AppleTVTrailerPlayerView(source: nativeSource, isMuted: isMuted) {
+                AppleTVTrailerPlayerView(source: nativeSource, isMuted: isMuted, onFailure: {
                     // The stream will not play. Drop back to the backdrop
                     // rather than leaving a dead player over the billboard.
                     self.nativeSource = nil
-                }
+                    isPlaying = false
+                }, onEnd: {
+                    // Back to the still, and the Discover cycle, which held
+                    // while it played, moves on. It does not start again for
+                    // this page: the preview task's id has not changed.
+                    self.nativeSource = nil
+                    isPlaying = false
+                })
             }
             #elseif os(macOS)
             if shouldPreview, let embedURL {
@@ -300,7 +330,10 @@ private struct AppleHomeHeroPreview: View {
         guard let stream = try? await AppleYouTubeStreamResolver.shared.resolve(videoID: key),
               !Task.isCancelled, shouldPreview else { return }
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+        appleTrace("hero trailer start \(item.name)")
         nativeSource = stream.source
+        // Holds the Discover cycle for as long as it plays.
+        isPlaying = true
         #else
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
         appleTrace("hero trailer start \(item.name)")

@@ -774,4 +774,105 @@ final class AppleTVFocusUITests: XCTestCase {
         XCTAssertTrue(play.exists, "Discover lost its billboard actions")
     }
 
+    /// N12: the Discover hero after the Apple TV app. Read-only: focus moves
+    /// over the buttons and pages, nothing is selected. Frames: at rest, after
+    /// one cycle, focus on Play/Resume, on My List, and the page `→` turns.
+    func testDiscoverHeroButtonsAndPagingKeepFocus() {
+        launch(screen: "discover")
+        let play = element("home.featured.play")
+        XCTAssertTrue(wait(for: play, 60), "the Discover billboard never appeared")
+        Thread.sleep(forTimeInterval: 6.0)
+        attachScreen("n12-hero-rest")
+        Thread.sleep(forTimeInterval: 13.0)
+        attachScreen("n12-hero-after-cycle")
+
+        // Down from the tab bar goes to the first row (the route as it was
+        // before N12, untouched); up from there lands on the hero's first button.
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        print("N12 HERO down-from-tab-bar focused='\(focusedElement.identifier)'")
+        if !play.hasFocus {
+            remote.press(.up)
+            Thread.sleep(forTimeInterval: 1.5)
+            print("N12 HERO up-from-row focused='\(focusedElement.identifier)'")
+        }
+        // Up lands on the button nearest the card above; walk left to Play.
+        for _ in 0..<2 where !play.hasFocus {
+            remote.press(.left)
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        XCTAssertTrue(play.hasFocus, "the hero's Play/Resume never took focus, got '\(focusedElement.identifier)'")
+        attachScreen("n12-hero-focus-play")
+
+        let myList = element("home.featured.my-list")
+        if myList.exists {
+            remote.press(.right)
+            Thread.sleep(forTimeInterval: 1.5)
+            XCTAssertTrue(myList.hasFocus, "right from Play should focus My List, got '\(focusedElement.identifier)'")
+            attachScreen("n12-hero-focus-mylist")
+        }
+
+        // Right past the last button turns the page and keeps focus in the hero.
+        let pages = element("home.featured.pages")
+        let before = pages.exists ? pages.label : ""
+        for _ in 0..<3 { remote.press(.right); Thread.sleep(forTimeInterval: 0.8) }
+        Thread.sleep(forTimeInterval: 2.0)
+        attachScreen("n12-hero-paged-right")
+        let heroIDs = ["home.featured.play", "home.featured.my-list", "home.featured.details"]
+        XCTAssertTrue(heroIDs.contains(focusedElement.identifier),
+                      "paging moved focus out of the hero, to '\(focusedElement.identifier)'")
+        print("N12 HERO pages before='\(before)' after='\(pages.exists ? pages.label : "")' focused='\(focusedElement.identifier)'")
+
+        // Left past Play turns back a page and keeps focus on Play.
+        for _ in 0..<2 where !play.hasFocus {
+            remote.press(.left)
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        let beforeLeft = pages.exists ? pages.label : ""
+        remote.press(.left)
+        Thread.sleep(forTimeInterval: 2.0)
+        print("N12 HERO left-from-play pages before='\(beforeLeft)' after='\(pages.exists ? pages.label : "")' focused='\(focusedElement.identifier)'")
+        XCTAssertTrue(play.hasFocus, "left past Play should keep focus on Play, got '\(focusedElement.identifier)'")
+        XCTAssertNotEqual(beforeLeft, pages.exists ? pages.label : "", "left past Play should turn the page")
+
+        // Down to the row and back up returns to the hero.
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        print("N12 HERO down-from-hero focused='\(focusedElement.identifier)'")
+        XCTAssertFalse(heroIDs.contains(focusedElement.identifier), "down from the hero should leave it for the rows")
+        remote.press(.up)
+        Thread.sleep(forTimeInterval: 2.0)
+        print("N12 HERO up-from-row-2 focused='\(focusedElement.identifier)'")
+        XCTAssertTrue(heroIDs.contains(focusedElement.identifier), "up from the first row should return to the hero")
+
+        // Up and down leave the hero as before: the paging stops never catch them.
+        remote.press(.up)
+        Thread.sleep(forTimeInterval: 1.5)
+        print("N12 HERO up-from-hero focused='\(focusedElement.identifier)' label='\(focusedElement.label)'")
+        // After a trip to the rows the first up only scrolls the page back to
+        // its top; the second reaches the tab bar. The Library hero, which N12
+        // does not touch, does the same (measured 2026-09-23).
+        if heroIDs.contains(focusedElement.identifier) {
+            remote.press(.up)
+            Thread.sleep(forTimeInterval: 2.0)
+            print("N12 HERO up-from-hero-again focused='\(focusedElement.identifier)' label='\(focusedElement.label)'")
+        }
+        XCTAssertFalse(heroIDs.contains(focusedElement.identifier), "up from the hero should reach the tab bar")
+        attachScreen("n12-hero-up-from-hero")
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        print("N12 HERO down-again focused='\(focusedElement.identifier)' label='\(focusedElement.label)'")
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        print("N12 HERO down-again-2 focused='\(focusedElement.identifier)' label='\(focusedElement.label)'")
+        XCTAssertFalse(heroIDs.contains(focusedElement.identifier), "down from the hero should leave it for the rows")
+    }
+
+    private func attachScreen(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
 }

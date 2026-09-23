@@ -23,10 +23,14 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
     /// as an opaque black rectangle until the hero rotates (owner, 2026-09-20:
     /// "Apple TV regressed ... it looks smaller and off", hero fully black).
     var onFailure: () -> Void = {}
+    /// Called on the main actor when the trailer plays to its end. The title
+    /// page watches the notification itself; the Discover hero uses this.
+    var onEnd: () -> Void = {}
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
         view.onFailure = onFailure
+        view.onEnd = onEnd
         view.isMuted = isMuted
         view.load(source: source)
         return view
@@ -34,6 +38,7 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
 
     func updateUIView(_ uiView: PlayerLayerView, context: Context) {
         uiView.onFailure = onFailure
+        uiView.onEnd = onEnd
         uiView.isMuted = isMuted
         if uiView.currentSource != source { uiView.load(source: source) }
     }
@@ -51,6 +56,8 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
         private var loadTask: Task<Void, Never>?
         /// Set by the representable before `load(source:)`.
         var onFailure: () -> Void = {}
+        var onEnd: () -> Void = {}
+        private var endObserver: NSObjectProtocol?
         /// A source that already failed. Reported failure clears
         /// `currentSource`, and without this the next `updateUIView` would see
         /// a mismatch and start the same dead stream over again.
@@ -120,6 +127,11 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
             playerLayer.videoGravity = .resizeAspectFill
             player.play()
             self.player = player
+            endObserver = NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onEnd() }
+            }
             // A player that never becomes ready draws nothing, so the caller
             // has to hear about it and put the still back. This observation is
             // not DEBUG-only: the release build has the same dead layer.
@@ -185,6 +197,8 @@ struct AppleTVTrailerPlayerView: UIViewRepresentable {
             loadTask?.cancel()
             loadTask = nil
             statusObservation = nil
+            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+            endObserver = nil
             player?.pause()
             playerLayer.player = nil
             player = nil
