@@ -1029,6 +1029,7 @@
 		A6E918D02A7ED9873C6AAA6D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1108,6 +1109,7 @@
 		DD203094A8748A0D620B75AB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1366,6 +1368,7 @@
 		G00000000000000000000009 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Shared/OpenStreamMacOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1397,6 +1400,7 @@
 		G0000000000000000000000A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Shared/OpenStreamMacOS.entitlements;
 				CODE_SIGN_IDENTITY = "3rd Party Mac Developer Application";
