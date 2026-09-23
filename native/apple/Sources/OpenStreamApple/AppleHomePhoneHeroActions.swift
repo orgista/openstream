@@ -47,7 +47,10 @@ struct AppleHomePhoneHeroActions: View {
                 .buttonStyle(.plain)
                 .accessibilityValue(isInList ? "Saved" : "Not saved")
                 .accessibilityIdentifier("home.featured.my-list")
+                #if os(iOS)
+                // The only caller is the iPhone hero; visionOS 2 lacks this API.
                 .sensoryFeedback(.selection, trigger: isInList)
+                #endif
             }
         }
     }
