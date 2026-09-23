@@ -461,18 +461,22 @@ struct AppleDiscoverView: View {
     }
 
     /// What the hero rotates through: what the owner is part-way into first,
-    /// then the recommendations, then the newest catalog items (FEEDBACK X9).
+    /// then the recommendations, then the newest catalog items (FEEDBACK X9) —
+    /// only titles with a backdrop, so no page is a poster or a placeholder
+    /// with no title over it. The first catalog offers more than five so the
+    /// rotation can still fill once the art-less ones are passed over.
     private var featuredCandidates: [IndexedCatalogItem] {
         var values = continueWatching
         values += topPicks
         if let section = visibleSections.first,
            let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-            values += section.items.prefix(AppleHeroRotation.maximumCandidates).map { item in
+            values += section.items.prefix(AppleHeroRotation.maximumCandidates * 4).map { item in
                 IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
                                    item: item, source: source)
             }
         }
-        return AppleHeroRotation.candidates(values, id: \.record.id)
+        return AppleHeroRotation.candidates(values, id: \.record.id,
+                                            hasBackdrop: { AppleHeroRotation.hasBackdrop(heroItem($0.item)) })
     }
 
     /// Most recently watched first, like every other Continue Watching row.
@@ -674,8 +678,8 @@ struct AppleDiscoverView: View {
         ) {
             if phone {
                 AppleHomePhoneHeroActions(
-                    playTitle: AppleBillboardCopy.playTitle(progress: ApplePlaybackStore().progress(for: value.record.id),
-                                                            type: value.item.type),
+                    progressID: value.record.id,
+                    type: value.item.type,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onPlay: { selectHero(value, autoPlay: true) },
                     onToggleList: { toggleHeroInList(value) }
@@ -717,12 +721,9 @@ struct AppleDiscoverView: View {
     /// to warm before the page is shown.
     private func heroPageArt(_ value: IndexedCatalogItem) -> AppleHeroPageArt {
         let item = heroItem(value.item)
-        var wordmark: URL? = switch AppleTVBillboardTitleTreatment.choose(
-            hasBackdrop: item.backgroundURL != nil, wordmark: heroWordmark(value, item: item)
-        ) {
-        case .wordmark(let url): url
-        case .text, .none: nil
-        }
+        // Every hero page draws a title (`AppleHeroTitleLockup`), so its
+        // wordmark is warmed whatever the art.
+        var wordmark = heroWordmark(value, item: item)
         #if !os(tvOS)
         // The accessibility layout draws the name, never the wordmark.
         if dynamicTypeSize.isAccessibilitySize { wordmark = nil }

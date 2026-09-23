@@ -12,9 +12,8 @@ struct AppleHomePhoneHeroPreload: View {
         ZStack {
             AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
                 .frame(width: max(width, 1), height: artHeight)
-            if case .wordmark(let url) = AppleTVBillboardTitleTreatment.choose(
-                hasBackdrop: item.backgroundURL != nil, wordmark: wordmark
-            ) {
+            // The page draws its wordmark whatever the art (`AppleHeroTitlePolicy`).
+            if let url = wordmark {
                 AppleTrimmedTitleLogo(url: url, alignment: .center)
                     .frame(width: 280, height: 96)
             }

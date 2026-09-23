@@ -160,5 +160,6 @@ public final class ApplePlaybackStore {
         cache = entries
         cachedData = try? JSONEncoder().encode(entries)
         defaults.set(cachedData, forKey: key)
+        ApplePlaybackProgressFeed.shared.storeDidChange()
     }
 }

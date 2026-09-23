@@ -19,9 +19,6 @@ struct AppleTVBillboard<Actions: View>: View {
     var stage: AnyView? = nil
     @ViewBuilder var actions: Actions
 
-    /// A wordmark that failed to load; the name is drawn in its place.
-    @State private var failedWordmark: URL?
-
     private typealias M = AppleTVBillboardMetrics
 
     var body: some View {
@@ -85,17 +82,11 @@ struct AppleTVBillboard<Actions: View>: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// The wordmark, the name, or nothing — see `AppleTVBillboardTitleTreatment`.
-    @ViewBuilder
+    /// The wordmark once it has drawn, otherwise the name — never nothing
+    /// (`AppleHeroTitlePolicy`).
     private var titleTreatment: some View {
-        switch AppleTVBillboardTitleTreatment.choose(
-            hasBackdrop: item.backgroundURL != nil,
-            wordmark: wordmark == failedWordmark ? nil : wordmark
-        ) {
-        case .wordmark(let url):
-            AppleTrimmedTitleLogo(url: url, alignment: .leading) { loaded in
-                if !loaded { failedWordmark = url }
-            }
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark) { url, onLoadResult in
+            AppleTrimmedTitleLogo(url: url, alignment: .leading, onLoadResult: onLoadResult)
                 // One view per wordmark: the logo view keeps its image while a
                 // new URL loads, which left the last title's mark over the next
                 // title's copy (sim finding c, 2026-09-22).
@@ -104,15 +95,12 @@ struct AppleTVBillboard<Actions: View>: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)
                 .accessibilityAddTraits(.isHeader)
-        case .text:
+        } name: {
             Text(item.name)
                 .font(.system(size: M.titleFontSize, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(M.titleLineLimit)
                 .accessibilityAddTraits(.isHeader)
-        case .none:
-            // The poster already carries the title; a second copy is noise.
-            EmptyView()
         }
     }
 

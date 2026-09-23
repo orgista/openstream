@@ -77,8 +77,6 @@ struct AppleFeaturedHero<Actions: View>: View {
     @ViewBuilder var actions: Actions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    /// A wordmark that failed to load; the name is drawn in its place.
-    @State private var failedWordmark: URL?
     var body: some View {
         #if os(tvOS)
         AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
@@ -190,19 +188,15 @@ struct AppleFeaturedHero<Actions: View>: View {
         }
     }
 
-    /// The wordmark lockup when the title has one, otherwise its name — the
-    /// same rule the Apple TV billboard follows.
-    @ViewBuilder
+    /// The wordmark lockup when it has drawn, otherwise the name — never
+    /// nothing, as on the Apple TV billboard (`AppleHeroTitlePolicy`).
     private var titleTreatment: some View {
-        switch AppleTVBillboardTitleTreatment.choose(hasBackdrop: item.backgroundURL != nil, wordmark: wordmark) {
-        case .wordmark(let url) where url != failedWordmark:
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark) { url, onLoadResult in
             // A definite height, not `maxHeight`: the wordmark is drawn inside
             // a GeometryReader, and in a scroll view an upper bound leaves the
             // height proposal unresolved, which collapsed the mark to a few
             // illegible points (2026-09-20).
-            AppleTrimmedTitleLogo(url: url, alignment: .leading) { loaded in
-                if !loaded { failedWordmark = url }
-            }
+            AppleTrimmedTitleLogo(url: url, alignment: .leading, onLoadResult: onLoadResult)
                 // One view per wordmark: the logo view keeps its image while a
                 // new URL loads, which left the last title's mark over the next
                 // title's copy (iPad, 2026-09-22) — as on the Apple TV.
@@ -212,15 +206,12 @@ struct AppleFeaturedHero<Actions: View>: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)
                 .accessibilityAddTraits(.isHeader)
-        case .wordmark, .text:
+        } name: {
             Text(item.name)
                 .font(.largeTitle.bold())
                 .lineLimit(2)
                 .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
                 .accessibilityAddTraits(.isHeader)
-        case .none:
-            // The poster already carries the title; a second copy is noise.
-            EmptyView()
         }
     }
 

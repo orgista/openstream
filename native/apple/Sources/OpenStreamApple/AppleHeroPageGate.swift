@@ -5,7 +5,7 @@ import SwiftUI
 struct AppleHeroPageArt: Equatable {
     let id: String
     let backdrop: URL?
-    /// Only when the page will draw it (`AppleTVBillboardTitleTreatment`).
+    /// Nil when the page has none, or at the accessibility sizes, which draw the name.
     let wordmark: URL?
 
     /// Changes when the page's art is upgraded, so upgraded art is warmed again.

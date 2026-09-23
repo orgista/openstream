@@ -5,8 +5,8 @@ import SwiftUI
 /// frame): art edge to edge from the top of the screen, under the large
 /// title, to 73 % of its height (`AppleHomePhoneHeroLayout`), fading to black
 /// at the bottom; then, centred and anchored to the bottom of the art, an
-/// optional "New Season" capsule, the wordmark (or the name in black-weight
-/// capitals), "TV Show · Thriller · Drama" with the rating, and the buttons,
+/// optional "New Season" capsule, the wordmark (or, until and unless it draws,
+/// the name in black-weight capitals), "TV Show · Thriller · Drama" with the rating, and the buttons,
 /// with the carousel's page dots under them. iPad, landscape and every other
 /// platform keep `AppleFeaturedHero`.
 ///
@@ -27,7 +27,6 @@ struct AppleHomePhoneHero<Actions: View>: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 48
-    @State private var failedWordmark: URL?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -73,22 +72,18 @@ struct AppleHomePhoneHero<Actions: View>: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// The wordmark when the title has one, otherwise the name — the rule the
-    /// Apple TV billboard uses (`AppleTVBillboardTitleTreatment`), so a poster
-    /// that already carries its title gets no second copy.
-    @ViewBuilder
+    /// The wordmark when it has drawn, otherwise the name in black-weight
+    /// capitals — while it loads, when it fails, when there is none, and over
+    /// any art (`AppleHeroTitlePolicy`). The page never shows no title.
     private var title: some View {
-        switch AppleTVBillboardTitleTreatment.choose(hasBackdrop: item.backgroundURL != nil, wordmark: wordmark) {
-        case .wordmark(let url) where url != failedWordmark:
-            AppleTrimmedTitleLogo(url: url, alignment: .center) { loaded in
-                if !loaded { failedWordmark = url }
-            }
-            .frame(maxWidth: 280)
-            .frame(height: dynamicTypeSize.isAccessibilitySize ? 120 : 96)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(item.name)
-            .accessibilityAddTraits(.isHeader)
-        case .wordmark, .text:
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .center) { url, onLoadResult in
+            AppleTrimmedTitleLogo(url: url, alignment: .center, onLoadResult: onLoadResult)
+                .frame(maxWidth: 280)
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 120 : 96)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(item.name)
+                .accessibilityAddTraits(.isHeader)
+        } name: {
             Text(item.name.uppercased())
                 .font(.system(size: min(max(titleSize, 42), dynamicTypeSize.isAccessibilitySize ? 64 : 58), weight: .black))
                 .tracking(1)
@@ -99,8 +94,6 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 .shadow(color: .black.opacity(0.8), radius: 12, y: 2)
                 .accessibilityLabel(item.name)
                 .accessibilityAddTraits(.isHeader)
-        case .none:
-            EmptyView()
         }
     }
 }

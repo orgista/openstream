@@ -5,7 +5,9 @@ import SwiftUI
 /// into a check once the title is saved. Side by side, stacked at the
 /// accessibility text sizes so the label wraps instead of clipping.
 struct AppleHomePhoneHeroActions: View {
-    let playTitle: String
+    /// The record whose saved position names the Play button.
+    let progressID: String
+    let type: String?
     /// Nil hides the My List button: the title has nothing to save it against.
     let isInList: Bool?
     let onPlay: () -> Void
@@ -13,6 +15,12 @@ struct AppleHomePhoneHeroActions: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var listButtonSide: CGFloat = 44
+
+    /// Read here, through the observable feed, so the label follows a save
+    /// made while the player was up rather than waiting for the next page.
+    private var playTitle: String {
+        AppleBillboardCopy.playTitle(progress: ApplePlaybackProgressFeed.shared.progress(for: progressID), type: type)
+    }
 
     var body: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
