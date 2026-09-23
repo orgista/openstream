@@ -1007,6 +1007,122 @@ final class AppleiOSUITests: XCTestCase {
     /// The app menu offers every non-forced subtitle. AVKit's iOS
     /// picker cannot be hidden: selecting there must display a cue, and Off
     /// must remove it, including after the app menu was used first.
+    func testCaptionSelectionMatchesRendered608() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost 608 fixture")
+        }
+        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "N4 CAPTIONS WORK"
+        let expectedTrack = env["OPENSTREAM_SUBTITLE_FIXTURE_TRACK"] ?? "English"
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.playback.engine", "engine", "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "always",
+            "-openstream.settings.subtitle.languages.v1", "(en)",
+            "-openstream.sources.v1", "", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        launch(screen: "add-files")
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = name + "-hierarchy"; tree.lifetime = .keepAlways; add(tree)
+        }
+        func cueVisible() throws -> Bool {
+            let image = try XCTUnwrap(XCUIScreen.main.screenshot().image.cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            return text.filter { !$0.isWhitespace }.uppercased()
+                .contains(expectedCue.filter { !$0.isWhitespace }.uppercased())
+        }
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if try cueVisible() { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertTrue(try cueVisible(), "Default-on 608 did not render")
+        func showControls() {
+            let transport = app.buttons["Play/Pause"].firstMatch
+            for _ in 0..<3 {
+                if transport.exists, transport.frame.width > 0 { return }
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+            }
+        }
+        func openMenu() {
+            showControls()
+            let transport = app.buttons["Play/Pause"].firstMatch
+            if transport.label == "Pause" {
+                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 5))
+            }
+            let more = app.buttons["player.more"].firstMatch
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            more.tap()
+            let subtitles = app.descendants(matching: .any).matching(identifier: "player.subtitles").firstMatch
+            XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
+            subtitles.tap()
+            XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 5))
+        }
+        openMenu()
+        capture("n6-ios-english")
+        XCTAssertTrue(app.buttons[expectedTrack].firstMatch.isSelected, "Rendered track must be checked at startup")
+        XCTAssertTrue(try cueVisible())
+        if URL(string: fixture)?.pathExtension == "m3u8" {
+            // Dismiss the app menu without reselecting its already checked row.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+            showControls()
+            let nativeButton = app.buttons.matching(NSPredicate(format:
+                "(label BEGINSWITH 'Subtitles' OR label == 'Show Subtitles' OR identifier == 'Subtitles' OR identifier == 'Legible Options') AND identifier != 'player.subtitles'" )).firstMatch
+            if !nativeButton.exists {
+                let overflow = app.buttons["Overflow Menu"].firstMatch
+                XCTAssertTrue(overflow.waitForExistence(timeout: 5))
+                overflow.tap()
+            }
+            XCTAssertTrue(nativeButton.waitForExistence(timeout: 5))
+            nativeButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let nativeTrack = app.buttons.matching(NSPredicate(format:
+                "label CONTAINS[c] %@ AND NOT label CONTAINS[c] 'Transcribed'", expectedTrack)).firstMatch
+            XCTAssertTrue(nativeTrack.waitForExistence(timeout: 5))
+            capture("n6-ios-native-english")
+            XCTAssertTrue(nativeTrack.isSelected)
+            app.buttons["Off"].firstMatch.tap()
+            Thread.sleep(forTimeInterval: 2)
+            XCTAssertFalse(try cueVisible(), "AVKit Off left a caption drawn")
+            openMenu()
+            XCTAssertTrue(app.buttons["Off"].firstMatch.isSelected, "App menu did not mirror AVKit Off")
+            capture("n6-ios-native-off")
+            app.buttons[expectedTrack].firstMatch.tap()
+            showControls()
+            let transport = app.buttons["Play/Pause"].firstMatch
+            if transport.label == "Play" {
+                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                if try cueVisible() { break }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            XCTAssertTrue(try cueVisible())
+            openMenu()
+        }
+        app.buttons["Off"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(try cueVisible(), "Off left a caption drawn")
+        openMenu()
+        capture("n6-ios-off")
+        XCTAssertTrue(app.buttons["Off"].firstMatch.isSelected)
+        XCTAssertFalse(try cueVisible())
+    }
+
     func testCaptionsMenuOffersAllSubtitleOptions() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],

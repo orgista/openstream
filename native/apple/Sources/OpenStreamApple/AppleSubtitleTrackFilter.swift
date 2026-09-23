@@ -59,7 +59,8 @@ public enum AppleSubtitleTrackFilter: Sendable {
     /// differently titled variants (such as English SDH) remain selectable.
     public static func menu(
         _ tracks: [ApplePlaybackTrack],
-        preferredLanguages: [String]
+        preferredLanguages: [String],
+        activeTrackID: Int? = nil
     ) -> [ApplePlaybackTrack] {
         let wanted = preferredLanguages.map(normalized).filter { !$0.isEmpty }
         let ranked = tracks.filter { !$0.isForced }.sorted { a, b in
@@ -69,10 +70,18 @@ public enum AppleSubtitleTrackFilter: Sendable {
             if a.isDefault != b.isDefault { return a.isDefault }
             return a.id < b.id
         }
+        let active = ranked.first { $0.id == activeTrackID }
         var titlesByLanguage: [String: Set<String>] = [:]
         return ranked.filter { track in
             let language = normalized(track.language ?? "")
             let title = track.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            // Preserve the rendered identity when equivalent menu labels are
+            // coalesced. Otherwise an auto-selected duplicate has no checked row.
+            if let active, track.id != active.id,
+               normalized(active.language ?? "") == language,
+               active.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == title {
+                return false
+            }
             return titlesByLanguage[language, default: []].insert(title).inserted
         }
     }

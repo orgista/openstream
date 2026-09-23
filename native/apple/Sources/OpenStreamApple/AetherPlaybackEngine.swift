@@ -99,10 +99,13 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// group deselected on `.avPlayer`). Not emitted through `events`; readers
     /// re-read it on position ticks.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
-    /// The track `applySubtitleSelection` last put on screen, auto-selection
-    /// included. The overlay's CC key reads it so it starts in the state the
-    /// picture is actually in.
-    public private(set) var activeSubtitleTrackID: Int?
+    /// The rendered selection shared by every menu: Aether's published track,
+    /// or the app-owned sidecar/native selection while that renderer owns cues.
+    public private(set) var activeSubtitleTrackID: Int? {
+        didSet {
+            if activeSubtitleTrackID != oldValue { emit(.tracks) }
+        }
+    }
     /// Container chapters from the engine's probe demuxer (`mediaChapters`),
     /// mapped for `AppleChapterMarkers`. B32: the Skip Intro button used to
     /// read chapters from the native engine only, so it never appeared on the
@@ -346,6 +349,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                 optionLanguages: group.options.map { $0.extendedLanguageTag ?? $0.locale?.identifier },
                 tracks: ApplePlayerSubtitleSelection.renditionOrder(embeddedSubtitleTracks))
         }
+        // Discovery can publish the AV option before the corresponding engine
+        // track. Keep the rendered option intact until the next mapping pass.
+        guard let trackID else { return false }
         subtitleSelectionOverridden = true
         stockPlayerRendersSubtitles = true
         applySubtitleSelection(id: trackID)
@@ -361,7 +367,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                 })
         }
         if let nativeOrdinal { aether.setNativeSubtitleSelected(track: nativeOrdinal) }
-        appleTrace("subtitle mirror: track=\(trackID.map(String.init) ?? "none") native=\(nativeOrdinal.map(String.init) ?? "none")")
+        appleTrace("subtitle mirror: track=\(trackID) native=\(nativeOrdinal.map(String.init) ?? "none")")
         emit(.tracks)
         return nativeOrdinal != nil
     }
@@ -389,7 +395,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         activeExternalSubtitleID = nil
         guard let id else {
             aether.clearSubtitle()
-            if previousExternal != nil { subtitleCues = [] }
+            subtitleCues = []
             return
         }
         let index = id - Self.externalSubtitleTrackIDBase
@@ -398,10 +404,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             aether.selectSubtitleTrack(index: id)
             return
         }
-        // The engine renders one cue stream; an add-on file replaces it.
+        // Establish ownership before clearSubtitle publishes its nil echo.
+        activeExternalSubtitleID = id
         aether.clearSubtitle()
         subtitleCues = []
-        activeExternalSubtitleID = id
         let track = externalSubtitleTracks[index]
         let load = externalSubtitleDataLoader
         externalSubtitleLoad = Task { [weak self] in
@@ -457,11 +463,23 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .sink { [weak self] infos in self?.chapters = infos.map(Self.mapChapter) }
             .store(in: &cancellables)
         aether.$subtitleTracks
-            .sink { [weak self] tracks in self?.applyEmbeddedSubtitleTracks(tracks.map(Self.mapTrack)) }
+            .sink { [weak self] tracks in
+                guard let self else { return }
+                let generation = self.loadGeneration
+                // @Published fires before Aether stores the new tracks. A
+                // synchronous auto-select cannot find a just-discovered 608 ID.
+                Task { @MainActor [weak self] in
+                    guard let self, self.loadGeneration == generation else { return }
+                    self.applyEmbeddedSubtitleTracks(tracks.map(Self.mapTrack))
+                }
+            }
+            .store(in: &cancellables)
+        aether.$activeSubtitleTrackIndex
+            .sink { [weak self] id in self?.applyEngineSubtitleSelection(id) }
             .store(in: &cancellables)
         aether.$subtitleCues
             .sink { [weak self] cues in
-                guard let self, self.activeExternalSubtitleID == nil, !self.stockPlayerRendersSubtitles else { return }
+                guard let self, self.activeSubtitleTrackID != nil, self.activeExternalSubtitleID == nil, !self.stockPlayerRendersSubtitles else { return }
                 self.subtitleCues = cues.map(Self.mapCue)
             }
             .store(in: &cancellables)
@@ -503,6 +521,15 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.clock.$currentTime
             .sink { [weak self] seconds in self?.applyPosition(seconds) }
             .store(in: &cancellables)
+    }
+
+    /// Aether can select at startup or when live 608 is discovered. Its
+    /// publisher is the rendered selection, not just an echo of app commands.
+    func applyEngineSubtitleSelection(_ id: Int?) {
+        activeSubtitleTrackID = AppleSubtitleSelectionState.renderedTrackID(
+            engineTrackID: id, appTrackID: activeSubtitleTrackID,
+            appOwnsRendering: activeExternalSubtitleID != nil || stockPlayerRendersSubtitles)
+        if activeSubtitleTrackID == nil { subtitleCues = [] }
     }
 
     private func applyPhase(_ phase: PlaybackPhase) {

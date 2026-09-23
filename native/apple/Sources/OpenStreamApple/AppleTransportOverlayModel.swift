@@ -170,7 +170,8 @@ public final class AppleTransportOverlayModel {
 
     /// All manual choices, including other languages and SDH variants.
     public var menuSubtitleTracks: [ApplePlaybackTrack] {
-        AppleSubtitleTrackFilter.menu(subtitleTracks, preferredLanguages: preferredSubtitleLanguages)
+        AppleSubtitleTrackFilter.menu(subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
+                                      activeTrackID: selectedSubtitleID)
     }
 
     /// Decoded cues for the active subtitle track, mirrored from the engine for
@@ -375,8 +376,8 @@ public final class AppleTransportOverlayModel {
 
     public func selectSubtitle(_ id: Int?) {
         bumpActivity()
-        selectedSubtitleID = id
         coordinator.engine.selectSubtitleTrack(id: id)
+        selectedSubtitleID = coordinator.engine.activeSubtitleTrackID
     }
 
     /// True when a subtitle track is selected. The CC key reads pressed-in
@@ -562,14 +563,8 @@ public final class AppleTransportOverlayModel {
             if subtitleTracks != subtitles { subtitleTracks = subtitles }
             let cues = coordinator.engine.subtitleCues
             if subtitleCues != cues { subtitleCues = cues }
-            // Tracks arrive after `load`, and that is when the engine runs its
-            // auto-selection — so this is where an engine-chosen track becomes
-            // visible to the CC key. Only adopted when the engine reports one:
-            // an engine that cannot report says nil for "off" too, and the
-            // overlay's own record is the better answer there.
-            if let active = coordinator.engine.activeSubtitleTrackID, selectedSubtitleID != active {
-                selectedSubtitleID = active
-            }
+            // Nil is an authoritative Off too, including a native-menu action.
+            selectedSubtitleID = coordinator.engine.activeSubtitleTrackID
         case .failure:
             break
         }

@@ -1,4 +1,5 @@
 import XCTest
+import Vision
 
 /// Focus behaviour on Apple TV, driven by the Siri Remote.
 ///
@@ -48,6 +49,86 @@ final class AppleTVFocusUITests: XCTestCase {
     }
 
     // MARK: - The guide
+
+    func testCaptionSelectionMatchesRendered608() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost 608 fixture")
+        }
+        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "N4 CAPTIONS WORK"
+        let expectedTrack = env["OPENSTREAM_SUBTITLE_FIXTURE_TRACK"] ?? "English"
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.playback.engine", "engine", "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "always",
+            "-openstream.settings.subtitle.languages.v1", "(en)",
+            "-openstream.sources.v1", "", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        launch(screen: "add-files")
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = name + "-hierarchy"; tree.lifetime = .keepAlways; add(tree)
+        }
+        func cueVisible() throws -> Bool {
+            let image = try XCTUnwrap(XCUIScreen.main.screenshot().image.cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            return text.filter { !$0.isWhitespace }.uppercased()
+                .contains(expectedCue.filter { !$0.isWhitespace }.uppercased())
+        }
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if try cueVisible() { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertTrue(try cueVisible(), "Default-on 608 did not render")
+        func openMenu() {
+            let subtitles = app.cells.matching(NSPredicate(format: "label == 'Subtitles'")).firstMatch
+            for _ in 0..<5 {
+                remote.press(.down)
+                if subtitles.waitForExistence(timeout: 2) { break }
+            }
+            capture("n6-tvos-controls")
+            XCTAssertEqual(app.cells.matching(NSPredicate(format: "label == 'Subtitles'")).count, 1,
+                "tvOS must expose exactly one captions transport control")
+            XCTAssertFalse(app.cells["AVLegibleSettings"].exists, "AVKit captions button returned")
+            remote.press(.up)
+            for _ in 0..<6 {
+                if subtitles.hasFocus || subtitles.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasFocus == true")).count > 0 { break }
+                remote.press(.right)
+            }
+            remote.press(.select)
+            XCTAssertTrue(app.staticTexts["Off"].firstMatch.waitForExistence(timeout: 5))
+        }
+        openMenu()
+        capture("n6-tvos-english")
+        XCTAssertTrue(app.cells.matching(NSPredicate(format: "label CONTAINS 'selected' AND label CONTAINS %@", expectedTrack)).firstMatch.exists)
+        XCTAssertTrue(try cueVisible())
+        for _ in 0..<4 {
+            if focusedElement.label.contains("Off") { break }
+            remote.press(.up)
+        }
+        XCTAssertTrue(focusedElement.label.contains("Off"))
+        remote.press(.select)
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(try cueVisible(), "Off left a caption drawn")
+        openMenu()
+        capture("n6-tvos-off")
+        XCTAssertTrue(app.cells.matching(NSPredicate(format: "label CONTAINS 'selected' AND label CONTAINS 'Off'")).firstMatch.exists)
+        XCTAssertFalse(try cueVisible())
+    }
 
     func testFullSubtitleMenuSelectsSpanish() throws {
         guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],

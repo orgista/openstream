@@ -380,7 +380,6 @@ struct AppleStremioPlayerView: View {
             // One captions control for embedded and add-on tracks. The app's
             // menu drives selection; AVKit draws native embedded tracks and
             // the shared cue layer draws sidecars and Aether cues.
-            host.viewController.allowedSubtitleOptionLanguages = []
             let entries = stockSubtitles.menuEntries
             if !entries.isEmpty {
                 let engine = coordinator.engine

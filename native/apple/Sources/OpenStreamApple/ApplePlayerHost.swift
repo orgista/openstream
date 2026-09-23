@@ -79,6 +79,11 @@ public final class ApplePlayerHost {
         #endif
         #if os(tvOS)
         controller.appliesPreferredDisplayCriteriaAutomatically = false
+        // AVKit treats an empty language array as unrestricted on tvOS 26.
+        // zxx (no linguistic content) excludes spoken-language renditions;
+        // the app owns Off/Auto too, so remove those rows before binding.
+        controller.allowedSubtitleOptionLanguages = ["zxx"]
+        controller.requiresFullSubtitles = true
         #endif
         _viewController = controller
         #endif

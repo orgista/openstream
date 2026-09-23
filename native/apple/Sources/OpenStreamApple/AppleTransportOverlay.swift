@@ -322,6 +322,8 @@ struct AppleTransportOverlay: View {
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.menuSubtitleTracks,
+                        preferredSubtitleLanguages: model.preferredSubtitleLanguages,
+                        selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) }
                     )
@@ -551,6 +553,8 @@ struct AppleTransportOverlay: View {
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.menuSubtitleTracks,
+                        preferredSubtitleLanguages: model.preferredSubtitleLanguages,
+                        selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) }
                     )
@@ -719,6 +723,8 @@ private struct AppleTransportScrubberRow: View {
 struct AppleTransportTrackMenu: View {
     let audioTracks: [ApplePlaybackTrack]
     let subtitleTracks: [ApplePlaybackTrack]
+    let preferredSubtitleLanguages: [String]
+    let selectedSubtitleID: Int?
     let onSelectAudio: (Int) -> Void
     let onSelectSubtitle: (Int?) -> Void
 
@@ -734,12 +740,20 @@ struct AppleTransportTrackMenu: View {
                 }
             }
             Section("Subtitles") {
-                Button("Off") { onSelectSubtitle(nil) }
-                ForEach(subtitleTracks) { track in
-                    Button(track.title) {
-                        onSelectSubtitle(track.id)
+                ForEach(AppleSubtitleCueLayerPolicy.menuEntries(
+                    tracks: subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
+                    languagesAreExplicit: false, activeTrackID: selectedSubtitleID
+                )) { entry in
+                    Button { onSelectSubtitle(entry.trackID) } label: {
+                        if entry.isSelected {
+                            Label(entry.title, systemImage: "checkmark")
+                        } else {
+                            Text(entry.title)
+                        }
                     }
-                    .accessibilityIdentifier("player.subtitle.track.\(track.id)")
+                    .accessibilityLabel(entry.title)
+                    .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
+                    .accessibilityIdentifier("player.subtitle.track.\(entry.id)")
                 }
             }
         } label: {

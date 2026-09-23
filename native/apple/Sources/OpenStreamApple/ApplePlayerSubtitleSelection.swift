@@ -15,11 +15,28 @@ final class ApplePlayerSubtitleSelection {
     private var lastOption: AVMediaSelectionOption?
     private var lastObservedOption: AVMediaSelectionOption?
     private var awaitingNativeSelection = false
+    private var lastMirroredTrackID: Int?
 
     init(engine: any ApplePlaybackEngine) { self.engine = engine }
 
     func bind(to item: AVPlayerItem?) {
-        guard self.item !== item else { return }
+        if self.item === item, let item, let group {
+            // Auto-selection can happen after the group was bound. Mirror it
+            // too, so AVKit cannot keep Off checked over an app-rendered cue.
+            if engine.activeSubtitleTrackID != lastMirroredTrackID {
+                selectFromApp(id: engine.activeSubtitleTrackID)
+            }
+            // The native option can precede the engine's late 608 track list.
+            // Retry its mapping without turning an unmapped option into Off.
+            if lastOption != nil, engine.activeSubtitleTrackID == nil,
+               let option = item.currentMediaSelection.selectedMediaOption(in: group) {
+                changed(option, in: group)
+            }
+            return
+        }
+        // Live TS may have no legible group at the first bind. Retry discovery
+        // on the host's next bind tick until a nonempty group is available.
+        guard self.item !== item || (item != nil && group == nil && loading == nil) else { return }
         observation = nil
         criteriaObservation = nil
         loading?.cancel()
@@ -28,6 +45,7 @@ final class ApplePlayerSubtitleSelection {
         lastOption = nil
         lastObservedOption = nil
         awaitingNativeSelection = false
+        lastMirroredTrackID = nil
         self.item = item
         guard let item else { return }
         if let player = engine.avPlayer {
@@ -46,9 +64,11 @@ final class ApplePlayerSubtitleSelection {
                 }
         }
         loading = Task { [weak self, item] in
-            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
-                  !Task.isCancelled, let self, self.item === item,
+            let loadedGroup = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+            guard !Task.isCancelled, let self, self.item === item,
                   self.engine.avPlayer?.currentItem === item else { return }
+            self.loading = nil
+            guard let group = loadedGroup, !group.options.isEmpty else { return }
             self.group = group
             self.lastOption = nil
             // Capture the immutable selection snapshot before Aether's
@@ -75,7 +95,16 @@ final class ApplePlayerSubtitleSelection {
                         self.changed(option, in: group)
                     }
                 }
-            if let activeID = self.engine.activeSubtitleTrackID {
+            let selected = item.currentMediaSelection.selectedMediaOption(in: group)
+            if let selected {
+                // Include a selection made before observation began. This is
+                // the default-on path; it must not start with Off checked.
+                self.changed(selected, in: group)
+                // An already-selected native option need not send a reselect
+                // echo. Without this snapshot its first Off looks like a
+                // duplicate nil and never reaches the engine/menu.
+                if !self.awaitingNativeSelection { self.lastObservedOption = selected }
+            } else if let activeID = self.engine.activeSubtitleTrackID {
                 self.selectFromApp(id: activeID)
             }
         }
@@ -100,6 +129,7 @@ final class ApplePlayerSubtitleSelection {
         // rendering. That echo must not cancel the newly chosen sidecar.
         lastOption = nil
         engine.selectSubtitleTrack(id: id)
+        lastMirroredTrackID = engine.activeSubtitleTrackID
         if engine is NativePlaybackEngine, let group {
             lastOption = id.flatMap { group.options.indices.contains($0) ? group.options[$0] : nil }
             awaitingNativeSelection = lastOption != nil
@@ -111,7 +141,7 @@ final class ApplePlayerSubtitleSelection {
             if option == nil { return }
             awaitingNativeSelection = false
         }
-        guard option != lastOption else { return }
+        guard option != lastOption || (option != nil && engine.activeSubtitleTrackID == nil) else { return }
         lastOption = option
         if option != nil { engine.avPlayer?.appliesMediaSelectionCriteriaAutomatically = true }
         if let aether = engine as? AetherPlaybackEngine {
@@ -119,6 +149,7 @@ final class ApplePlayerSubtitleSelection {
         } else if let native = engine as? NativePlaybackEngine {
             native.mirrorSubtitleSelection(option)
         }
+        lastMirroredTrackID = engine.activeSubtitleTrackID
     }
 
     /// Match language and occurrence, not the AVKit ordinal: video/audio

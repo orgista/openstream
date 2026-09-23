@@ -230,6 +230,23 @@ import Testing
         #expect(engine.selectedSubtitle == [17, 23, nil])
     }
 
+    @Test func engineOffAfterAutoSelectionClearsTheOverlayCheck() async throws {
+        let engine = FakePlaybackEngine()
+        engine.activeSubtitleTrackID = 99608
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        defer { coordinator.stop() }
+        #expect(model.selectedSubtitleID == 99608)
+        await Task.yield()
+        engine.activeSubtitleTrackID = nil
+        engine.emit(.tracks)
+        for _ in 0..<20 where model.selectedSubtitleID != nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.selectedSubtitleID == nil)
+        #expect(!model.isCCActive)
+    }
+
     @Test func ccStateFlagReflectsSubtitleSelection() {
         let engine = FakePlaybackEngine()
         engine.duration = 100

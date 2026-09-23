@@ -26,6 +26,7 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
     var audioTracks: [ApplePlaybackTrack] = []
     var subtitleTracks: [ApplePlaybackTrack] = []
     var subtitleCues: [AppleSubtitleCue] = []
+    var activeSubtitleTrackID: Int?
     var failure: ApplePlaybackFailure? = nil
     var avPlayer: AVPlayer? { nil }
     /// The real seekable span the transport reads for every live decision.
@@ -82,6 +83,8 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
 
     func selectSubtitleTrack(id: Int?) {
         selectedSubtitle.append(id)
+        activeSubtitleTrackID = id
+        emit(.tracks)
     }
 
     func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {

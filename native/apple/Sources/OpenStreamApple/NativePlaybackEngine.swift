@@ -61,7 +61,11 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// The legible option `applySubtitleSelection` last selected, or nil for
     /// none. The overlay's CC key reads it so it starts in the state the
     /// picture is actually in.
-    public private(set) var activeSubtitleTrackID: Int?
+    public private(set) var activeSubtitleTrackID: Int? {
+        didSet {
+            if activeSubtitleTrackID != oldValue { emit(.tracks) }
+        }
+    }
 
     /// Embedded legible tracks are drawn by AVKit; sidecar cues use the app's
     /// shared cue layer. Publish arrivals even while playback is paused.
