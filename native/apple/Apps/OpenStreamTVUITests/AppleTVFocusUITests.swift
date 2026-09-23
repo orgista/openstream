@@ -905,4 +905,40 @@ final class AppleTVFocusUITests: XCTestCase {
         add(shot)
     }
 
+    // MARK: - Title page fill timing (speed item D2)
+
+    /// Opens the title pages listed in `OPENSTREAM_FILL_IDS` (media-index record
+    /// ids, comma separated) by deep link and holds each one, so the
+    /// interaction trace records its `detail fill` timeline. Opt-in: skipped
+    /// unless the variable is set. It never presses Play: Select is sent only
+    /// while the system's "Open in OpenStream?" prompt has focus on Open.
+    func testDetailFillTimingsByDeepLink() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let ids = (environment["OPENSTREAM_FILL_IDS"] ?? "").split(separator: ",").map(String.init)
+        guard !ids.isEmpty else { throw XCTSkip("Set OPENSTREAM_FILL_IDS to measure title page fill.") }
+        let hold = TimeInterval(environment["OPENSTREAM_FILL_HOLD"] ?? "") ?? 20
+        app.launchArguments += ["-OpenStreamTrace", "YES"]
+        app.launch()
+        Thread.sleep(forTimeInterval: 14)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.PineBoard")
+        for (index, id) in ids.enumerated() {
+            guard let url = URL(string: "openstream://media/\(id)?action=display") else { continue }
+            app.open(url)
+            if board.buttons["Open"].waitForExistence(timeout: 5) {
+                let focusedOpen = board.buttons.matching(
+                    NSPredicate(format: "hasFocus == true AND label == %@", "Open")
+                ).firstMatch
+                guard focusedOpen.waitForExistence(timeout: 3) else {
+                    return XCTFail("the open prompt appeared without focus on Open")
+                }
+                remote.press(.select)
+            }
+            Thread.sleep(forTimeInterval: 3)
+            let early = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            early.name = "fill-\(index + 1)-3s"
+            early.lifetime = .keepAlways
+            add(early)
+            Thread.sleep(forTimeInterval: max(0, hold - 3))
+        }
+    }
 }

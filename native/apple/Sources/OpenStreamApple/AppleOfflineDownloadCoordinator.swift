@@ -268,6 +268,10 @@ final class AppleOfflineDownloadCoordinator {
         await store.record(for: mediaID)
     }
 
+    func downloadedMediaIDs(among mediaIDs: Set<String>) async -> Set<String> {
+        await store.downloadedMediaIDs(among: mediaIDs)
+    }
+
     var partialFileURLForTesting: URL? { partialURL }
 
     private func beginCurrentPlan(operationID activeID: UUID, resumeOffset: Int64) {

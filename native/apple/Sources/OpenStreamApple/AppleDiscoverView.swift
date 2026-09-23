@@ -1275,6 +1275,7 @@ struct AppleSearchView: View {
               let record = mediaIndex.records.first(where: { $0.id == id }),
               let result = searchMatch(for: id) else { return }
         deliveredRouteRevision = revision
+        appleTrace("detail route \"\(result.item.name)\"")
         routedResult = .init(record: record, item: result.item, source: result.source,
                              action: action, revision: revision)
     }
@@ -1401,6 +1402,23 @@ private struct AppleCatalogSectionView: View {
         .accessibilityIdentifier("home.catalog.\(section.id)")
         #if os(tvOS)
         .defaultFocus($focusedItemID, section.items.first?.id)
+        // A poster that keeps focus is the next page the viewer opens, so
+        // its details and episodes are fetched while they decide. Moving on
+        // cancels the wait, so a swipe across a row costs nothing.
+        .task(id: focusedItemID) {
+            guard let focusedItemID,
+                  let item = section.items.first(where: { $0.id == focusedItemID }),
+                  let title = AppleMetadataPrefetcher.detailTarget(type: item.type, mediaID: item.mediaID)
+            else { return }
+            try? await Task.sleep(for: AppleMetadataPrefetcher.focusDwell)
+            guard !Task.isCancelled else { return }
+            await AppleMetadataPrefetcher.warmDetail(
+                title,
+                sources: playbackSources,
+                preferredSourceID: source.id,
+                configuration: metadataConfiguration
+            )
+        }
         #endif
     }
 
@@ -1883,6 +1901,7 @@ struct AppleCatalogItemDetailView: View {
     @State private var downloadActionsPresented = false
     @State private var seasonDownloadActionsPresented = false
     @State private var preparationGeneration = UUID()
+    @State private var fillTimeline = AppleDetailFillTimeline()
     #if os(iOS)
     @State private var systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
     #endif
@@ -2265,6 +2284,9 @@ struct AppleCatalogItemDetailView: View {
             #if DEBUG
             AppleLaunchClock.mark("detail.task")
             #endif
+            fillTimeline.begin(title: item.name)
+            fillTimeline.mark(.paint)
+            markOverviewIfVisible(source: "catalog")
             // Recording that this title was opened is bookkeeping. Awaiting it
             // cost ~294 ms — a disk write plus a rebuild of the whole record
             // array — and the favourite lookup another ~219 ms, all of it
@@ -2279,6 +2301,7 @@ struct AppleCatalogItemDetailView: View {
             AppleLaunchClock.mark("detail.prepare")
             #endif
             await prepare()
+            if !Task.isCancelled { fillTimeline.mark(.done) }
             await refreshOfflineState()
             if initialAutoPlay { playRequest = UUID() }
         }
@@ -2384,6 +2407,7 @@ struct AppleCatalogItemDetailView: View {
             if !isLandscapeLayout, case .valid = titleLogoState, let logoURL = titleLogoURL {
                 AppleTrimmedTitleLogo(url: logoURL) { loaded in
                     titleLogoLoadResult = loaded
+                    if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
                     #endif
@@ -2582,6 +2606,7 @@ struct AppleCatalogItemDetailView: View {
                 ZStack(alignment: .leading) {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
                     titleLogoLoadResult = loaded
+                    if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
                     #endif
@@ -2815,6 +2840,7 @@ struct AppleCatalogItemDetailView: View {
             ZStack(alignment: .leading) {
                 AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
                     titleLogoLoadResult = loaded
+                    if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
                     #endif
@@ -3105,7 +3131,10 @@ struct AppleCatalogItemDetailView: View {
         AppleRemoteImage(
             url: heroArtworkURL,
             placeholderSystemImage: "",
-            onLoad: { heroArtworkImage = $0 },
+            onLoad: { image in
+                heroArtworkImage = image
+                fillTimeline.mark(.artwork)
+            },
             onFailure: { heroArtworkImage = nil },
             keepsImageWhileReloading: true
         )
@@ -4322,14 +4351,9 @@ struct AppleCatalogItemDetailView: View {
             ) else { return nil }
             return (episode.id, "\(recordID):\(selection.mediaID)")
         }
-        var completed = Set<String>()
-        for (episodeID, mediaID) in resolvedIDs {
-            if await downloadCoordinator.record(for: mediaID) != nil {
-                completed.insert(episodeID)
-            }
-        }
+        let downloaded = await downloadCoordinator.downloadedMediaIDs(among: Set(resolvedIDs.map(\.1)))
         guard !Task.isCancelled else { return }
-        downloadedEpisodeIDs = completed
+        downloadedEpisodeIDs = Set(resolvedIDs.filter { downloaded.contains($0.1) }.map(\.0))
     }
 
     private func chooseStreams() async {
@@ -4618,6 +4642,36 @@ struct AppleCatalogItemDetailView: View {
         return title.isEmpty ? episodeNumber(episode) : "\(episodeNumber(episode)) · \(title)"
     }
 
+    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) {
+        let mediaID = resolvedMediaID ?? item.mediaID
+        episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
+            mediaID: mediaID, enriched: fetched) } ?? fetched
+        downloadedEpisodeIDs = []
+        selectedSeason = savedEpisode(in: episodes)?.season
+            ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
+            ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
+        // Play needs an episode: fall back to the first episode of the
+        // first season so the button works the moment the list arrives.
+        selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes)
+            ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes)
+        isLoadingEpisodes = false
+        episodeLoadFinished = true
+        fillTimeline.mark(.episodes, detail: "\(episodes.count)")
+    }
+
+    private func markMetadataArrived() {
+        fillTimeline.mark(.metadata, detail: metadataDetails?.overview?.isEmpty == false ? "overview" : "no-overview")
+        markOverviewIfVisible(source: "enriched")
+    }
+
+    private func markOverviewIfVisible(source: String) {
+        guard AppleMetadataPresentationPolicy.synopsis(
+            catalog: item.summary,
+            enriched: metadataDetails?.overview
+        ) != nil else { return }
+        fillTimeline.mark(.overview, detail: source)
+    }
+
     /// Resolve the item to its IMDB id, then (for series) load episodes keyed
     /// by that id so both metadata and streams resolve against a stream-add-on
     /// friendly identifier.
@@ -4642,6 +4696,8 @@ struct AppleCatalogItemDetailView: View {
                 self.metadataDetails = msLibrary.metadata(from: msDetail)
                 self.resolvedMediaID = item.mediaID
                 self.episodes = msLibrary.episodes(from: msDetail)
+                markMetadataArrived()
+                fillTimeline.mark(.episodes, detail: "\(self.episodes.count)")
                 self.downloadedEpisodeIDs = []
                 self.selectedSeason = AppleStremioEpisodePolicy.initialSeason(in: self.episodes)
                 self.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.selectedSeason, from: self.episodes)
@@ -4676,94 +4732,96 @@ struct AppleCatalogItemDetailView: View {
         if isSeries { isLoadingEpisodes = true }
         rating = ratingStore.rating(for: item.mediaID)
 
-        // Preview art, the canonical id and (when the id is already canonical)
-        // the episode list all load at once; nothing waits on the others.
-        async let loadedPreviewAssets = metadataClient.previewAssets(
-            sources: playbackSources,
-            preferredSourceID: source.id,
-            type: item.type,
-            mediaID: item.mediaID
-        )
-        async let resolvedIdentifier: String? = canonicalID == nil
-            ? await metadataClient.imdbIdentifier(
-                sources: playbackSources,
-                preferredSourceID: source.id,
-                type: item.type,
-                id: item.mediaID
-            )
-            : canonicalID
-        let concurrentEpisodeID: String? = isSeries ? canonicalID : nil
-        async let concurrentEpisodes: [AppleStremioEpisode]? = concurrentEpisodeID == nil
-            ? nil
-            : (try? await metadataClient.episodes(
-                sources: playbackSources,
-                preferredSourceID: source.id,
-                mediaID: concurrentEpisodeID ?? item.mediaID
-            ))
-
-        let resolved = await resolvedIdentifier
-        guard !Task.isCancelled, preparationGeneration == generation else { return }
-        resolvedMediaID = resolved ?? item.mediaID
-        // Play and Download depend on the canonical id (and, for a series, an
-        // episode), not on optional preview art or TMDB enrichment. Make the
-        // actions usable as soon as that identity is ready.
-        isPreparingMetadata = false
-
-        if isSeries {
-            var loadedEpisodes = await concurrentEpisodes
-            if loadedEpisodes == nil {
-                do {
-                    loadedEpisodes = try await metadataClient.episodes(
-                        sources: playbackSources,
-                        preferredSourceID: source.id,
-                        mediaID: resolvedMediaID ?? item.mediaID
-                    )
-                } catch is CancellationError {
-                    isLoadingEpisodes = false
-                    return
-                } catch {
-                    loadedEpisodes = []
+        // Preview art, the canonical id, the episode list and the enriched
+        // details all load at once, and each is drawn the moment it arrives.
+        // The details used to be requested only after the episodes and the
+        // preview art had both come back, so one slow add-on held the
+        // overview back too.
+        let client = metadataClient
+        let resolver = metadataResolver
+        let sources = playbackSources
+        let preferredSourceID = source.id
+        let type = item.type
+        let catalogID = item.mediaID
+        let configuration = metadataConfiguration
+        // The episodes and details requests go out before this task gets
+        // the main actor back: the page is still being built then, and
+        // waiting for it cost ~0.4-0.8 s on the Apple TV.
+        func addLookups(to group: inout TaskGroup<AppleDetailPrepareOutcome>, mediaID: String) {
+            if isSeries {
+                group.addTask {
+                    do {
+                        return .episodes(try await client.episodes(
+                            sources: sources,
+                            preferredSourceID: preferredSourceID,
+                            mediaID: mediaID
+                        ))
+                    } catch is CancellationError {
+                        return .episodes(nil)
+                    } catch {
+                        return .episodes([])
+                    }
                 }
             }
-            guard !Task.isCancelled, preparationGeneration == generation else {
-                isLoadingEpisodes = false
-                return
+            group.addTask {
+                .details(try? await resolver.resolve(
+                    sources: sources,
+                    preferredSourceID: preferredSourceID,
+                    type: type,
+                    mediaID: mediaID,
+                    configuration: configuration
+                ))
             }
-            let fetched = loadedEpisodes ?? []
-            episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
-                mediaID: resolvedMediaID ?? item.mediaID, enriched: fetched) } ?? fetched
-            downloadedEpisodeIDs = []
-            selectedSeason = savedEpisode(in: episodes)?.season
-                ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
-                ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
-            // Play needs an episode: fall back to the first episode of the
-            // first season so the button works the moment the list arrives.
-            selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes)
-                ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes)
-            isLoadingEpisodes = false
-            episodeLoadFinished = true
-            await refreshDownloadedEpisodeIDs()
-            guard !Task.isCancelled, preparationGeneration == generation else { return }
         }
-        let preview = await loadedPreviewAssets
-        guard !Task.isCancelled, preparationGeneration == generation else { return }
-        previewAssets = preview
-        do {
-            let details = try await metadataResolver.resolve(
-                sources: playbackSources,
-                preferredSourceID: source.id,
-                type: item.type,
-                mediaID: resolvedMediaID ?? item.mediaID,
-                configuration: metadataConfiguration
-            )
-            guard !Task.isCancelled, preparationGeneration == generation else { return }
-            metadataDetails = details
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, preparationGeneration == generation else { return }
-            metadataDetails = nil
+        await withTaskGroup(of: AppleDetailPrepareOutcome.self) { group in
+            group.addTask {
+                .preview(await client.previewAssets(
+                    sources: sources,
+                    preferredSourceID: preferredSourceID,
+                    type: type,
+                    mediaID: catalogID
+                ))
+            }
+            if let canonicalID {
+                addLookups(to: &group, mediaID: canonicalID)
+            } else {
+                group.addTask {
+                    .identity(await client.imdbIdentifier(
+                        sources: sources,
+                        preferredSourceID: preferredSourceID,
+                        type: type,
+                        id: catalogID
+                    ))
+                }
+            }
+            while let outcome = await group.next() {
+                guard !Task.isCancelled, preparationGeneration == generation else {
+                    group.cancelAll()
+                    break
+                }
+                switch outcome {
+                case .identity(let resolved):
+                    // Play and Download depend on the canonical id (and, for a
+                    // series, an episode), not on optional preview art or TMDB
+                    // enrichment. Make the actions usable as soon as that
+                    // identity is ready.
+                    let mediaID = resolved ?? catalogID
+                    resolvedMediaID = mediaID
+                    isPreparingMetadata = false
+                    addLookups(to: &group, mediaID: mediaID)
+                case .episodes(let fetched):
+                    guard let fetched else { continue }
+                    applyEpisodes(fetched)
+                    await refreshDownloadedEpisodeIDs()
+                case .preview(let preview):
+                    previewAssets = preview
+                case .details(let details):
+                    metadataDetails = details
+                    if details != nil { markMetadataArrived() }
+                }
+            }
         }
+        if isSeries, preparationGeneration == generation { isLoadingEpisodes = false }
         guard !Task.isCancelled, preparationGeneration == generation else { return }
         await loadWatchProviders()
         guard !Task.isCancelled, preparationGeneration == generation else { return }
@@ -6008,4 +6066,15 @@ extension AppleMediaServerLibraryStore {
         }
         return merged
     }
+}
+
+/// What each of a title page's opening requests came back with, so they can
+/// run side by side and be applied in whatever order they finish.
+private enum AppleDetailPrepareOutcome: Sendable {
+    /// The canonical id, or nil when no add-on could map the catalog id.
+    case identity(String?)
+    /// A series' episodes; nil when the request was cancelled.
+    case episodes([AppleStremioEpisode]?)
+    case preview(AppleStremioPreviewAssets?)
+    case details(AppleTMDBDetails?)
 }

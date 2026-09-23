@@ -43,7 +43,9 @@ struct AppleMetadataResolverTests {
         #expect(details?.genres == ["Drama", "Mystery"])
         #expect(details?.posterURL == URL(string: "https://image.fixture/poster.jpg"))
         #expect(details?.backdropURL == URL(string: "https://image.fixture/backdrop.jpg"))
-        #expect(fixture.hosts == [
+        // Requests go out together, so only which hosts were asked is fixed;
+        // the merge order is asserted by the fields above.
+        #expect(Set(fixture.hosts) == [
             "preferred.fixture", "secondary.fixture", "unauthorized.fixture", "empty.fixture",
             "oversized.fixture", "insecure.fixture", "default.fixture",
         ])
@@ -117,7 +119,7 @@ struct AppleMetadataResolverTests {
         
         #expect(details?.overview == "Preferred description")
         #expect(details?.title == "Preferred Title")
-        #expect(fixture.hosts == ["secondary.fixture", "default.fixture"])
+        #expect(Set(fixture.hosts) == ["secondary.fixture", "default.fixture"])
     }
 
     @Test
@@ -140,7 +142,8 @@ struct AppleMetadataResolverTests {
             mediaID: "tt1234567"
         )
         
-        #expect(fixture.hosts.starts(with: ["empty.fixture", "secondary.fixture"]))
+        #expect(Set(fixture.hosts).isSuperset(of: ["empty.fixture", "secondary.fixture"]))
+        #expect(details?.title == "Preferred Title")
     }
 
     @Test

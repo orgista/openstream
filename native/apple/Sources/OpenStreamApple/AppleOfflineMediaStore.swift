@@ -193,6 +193,18 @@ public actor AppleOfflineMediaStore {
         return record
     }
 
+    /// Which of `mediaIDs` have a finished download, reading the manifest
+    /// once. A title page used to call `record(for:)` per episode, which
+    /// decoded the manifest from disk 433 times for a long series and held
+    /// its details back by ~3 s on the Apple TV.
+    public func downloadedMediaIDs(among mediaIDs: Set<String>) -> Set<String> {
+        let manifest = loadManifest()
+        return mediaIDs.filter { mediaID in
+            guard let record = manifest[mediaID] else { return false }
+            return fileManager.fileExists(atPath: record.localURL.path)
+        }
+    }
+
     public func allRecords() -> [AppleOfflineRecord] {
         loadManifest().values
             .filter { fileManager.fileExists(atPath: $0.localURL.path) }

@@ -244,6 +244,8 @@ public struct AppleStremioMetadataClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let loader: Loader
     private let metadataCache: AppleMetadataDiskCache?
+    /// How long the other add-ons may still add episodes once one has answered.
+    let mergeGrace: Duration
     static let defaultMetadataSource = AppleSource(
         id: UUID(uuidString: "86FE8F74-15D8-4A64-8EE7-B2BE55E22C48") ?? UUID(),
         kind: .stremio,
@@ -257,17 +259,24 @@ public struct AppleStremioMetadataClient: Sendable {
     public init() {
         self.loader = AppleStremioPlaybackClient.liveLoader
         self.metadataCache = .shared
+        self.mergeGrace = .seconds(1)
     }
 
     /// Injected transports remain independent of process-wide persisted data.
     public init(loader: @escaping Loader) {
         self.loader = loader
         self.metadataCache = nil
+        self.mergeGrace = .seconds(1)
     }
 
-    internal init(loader: @escaping Loader, metadataCache: AppleMetadataDiskCache?) {
+    internal init(
+        loader: @escaping Loader,
+        metadataCache: AppleMetadataDiskCache?,
+        mergeGrace: Duration = .seconds(1)
+    ) {
         self.loader = loader
         self.metadataCache = metadataCache
+        self.mergeGrace = mergeGrace
     }
 
     public func details(
@@ -439,20 +448,57 @@ public struct AppleStremioMetadataClient: Sendable {
             candidates.append(Self.defaultMetadataSource)
         }
 
+        // Every add-on is asked at once. They were asked one after another,
+        // each with a 15 s timeout, so a single slow add-on ahead of the one
+        // that answers held the episode list back by its whole timeout. Once
+        // one add-on has returned episodes the others get `mergeGrace` to add
+        // theirs; the answers are still merged in candidate order.
+        let grace = mergeGrace
+        let results = await withTaskGroup(
+            of: (index: Int, result: Result<[AppleStremioEpisode], any Error>)?.self
+        ) { group in
+            for (index, source) in candidates.enumerated() {
+                group.addTask {
+                    do {
+                        return (index, .success(try await episodes(source: source, mediaID: mediaID)))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            var results: [Int: Result<[AppleStremioEpisode], any Error>] = [:]
+            var graceStarted = false
+            while let next = await group.next() {
+                // The grace timer finished before the stragglers did.
+                guard let next else { break }
+                results[next.index] = next.result
+                if results.count == candidates.count { break }
+                if !graceStarted, case .success(let values) = next.result, !values.isEmpty {
+                    graceStarted = true
+                    group.addTask {
+                        try? await Task.sleep(for: grace)
+                        return nil
+                    }
+                }
+            }
+            group.cancelAll()
+            return results
+        }
+        try Task.checkCancellation()
+
         var lastError: (any Error)?
         var merged: [AppleStremioEpisode] = []
         var seen = Set<String>()
-        for source in candidates {
-            try Task.checkCancellation()
-            do {
-                let values = try await episodes(source: source, mediaID: mediaID)
+        for index in candidates.indices {
+            switch results[index] {
+            case .success(let values):
                 for value in values where seen.insert(value.id).inserted {
                     merged.append(value)
                 }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
+            case .failure(let error):
                 lastError = error
+            case nil:
+                continue
             }
         }
         if !merged.isEmpty {

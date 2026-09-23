@@ -552,50 +552,63 @@ public struct AppleMetadataResolver: Sendable {
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard ["movie", "series", "episode"].contains(cleanType), !cleanID.isEmpty else { return nil }
 
-        let clock = ContinuousClock()
-        let end = clock.now.advanced(by: overallDeadline)
-        var merged: AppleTMDBDetails?
-        for source in Self.candidates(
+        // Every source, and TMDB, is asked at once, each within
+        // `requestDeadline`. They were asked one after another, so on the
+        // Apple TV a few slow or failing add-ons ahead of the one that
+        // answers held the overview back 1.2-2.3 s on every opening, even
+        // with the caches warm. Answers are still merged in candidate order,
+        // with TMDB last, so a preferred add-on wins exactly as before.
+        let candidates = Self.candidates(
             sources: sources,
             preferredSourceID: preferredSourceID,
             mediaID: cleanID,
             defaultSource: defaultSource
-        ) {
-            try Task.checkCancellation()
-            let remaining = clock.now.duration(to: end)
-            guard remaining > .zero else { break }
-            do {
-                let value = try await bounded(timeout: min(requestDeadline, remaining)) {
-                    try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID)
-                }
-                merged = Self.merge(merged, value)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                continue
-            }
-        }
-
-        if let configuration,
-           let imdbID = cleanID.split(separator: ":").first.map(String.init),
-           AppleStremioMetadataClient.isIMDBIdentifier(imdbID) {
-            let remaining = clock.now.duration(to: end)
-            if remaining > .zero {
-                do {
-                    let value = try await bounded(timeout: min(requestDeadline, remaining)) {
-                        try await tmdbClient.details(
-                            imdbID: imdbID,
-                            kind: cleanType == "series" ? .series : .movie,
-                            configuration: configuration
-                        )
+        )
+        let timeout = min(requestDeadline, overallDeadline)
+        let tmdbIMDBID = cleanID.split(separator: ":").first.map(String.init)
+            .flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
+        let values = try await withThrowingTaskGroup(of: (index: Int, value: AppleTMDBDetails?).self) { group in
+            for (index, source) in candidates.enumerated() {
+                group.addTask {
+                    do {
+                        return (index, try await bounded(timeout: timeout) {
+                            try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID)
+                        })
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        return (index, nil)
                     }
-                    merged = Self.merge(merged, value)
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    // Source metadata remains usable when enrichment fails.
                 }
             }
+            if let configuration, let tmdbIMDBID {
+                group.addTask {
+                    do {
+                        return (candidates.count, try await bounded(timeout: timeout) {
+                            try await tmdbClient.details(
+                                imdbID: tmdbIMDBID,
+                                kind: cleanType == "series" ? .series : .movie,
+                                configuration: configuration
+                            )
+                        })
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // Source metadata remains usable when enrichment fails.
+                        return (candidates.count, nil)
+                    }
+                }
+            }
+            var values: [Int: AppleTMDBDetails] = [:]
+            for try await result in group {
+                if let value = result.value { values[result.index] = value }
+            }
+            return values
+        }
+        try Task.checkCancellation()
+        var merged: AppleTMDBDetails?
+        for index in values.keys.sorted() {
+            if let value = values[index] { merged = Self.merge(merged, value) }
         }
         return merged
     }
