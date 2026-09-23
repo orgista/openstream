@@ -22,6 +22,10 @@ public struct AppleIPTVGuideGridView: View {
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
     let onVisibleChannels: (Set<String>) async -> Void
+    /// Last health result per channel id, built by the Live tab once per
+    /// lineup or history change. Rows only look their own id up.
+    let health: [String: AppleChannelHealthResult]
+    let onShowHealth: ((AppleIPTVChannel) -> Void)?
     
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     
@@ -36,7 +40,9 @@ public struct AppleIPTVGuideGridView: View {
                 entries: [AppleChannelLineupEntry],
                 favoriteIDs: Set<String>, onSelect: @escaping (AppleIPTVChannel) -> Void,
                 onToggleFavorite: @escaping (String) -> Void,
-                onVisibleChannels: @escaping (Set<String>) async -> Void) {
+                onVisibleChannels: @escaping (Set<String>) async -> Void,
+                health: [String: AppleChannelHealthResult] = [:],
+                onShowHealth: ((AppleIPTVChannel) -> Void)? = nil) {
         self.channels = channels
         self.guide = guide
         self.guideRevision = guideRevision
@@ -45,6 +51,8 @@ public struct AppleIPTVGuideGridView: View {
         self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
         self.onVisibleChannels = onVisibleChannels
+        self.health = health
+        self.onShowHealth = onShowHealth
     }
 
     private let railWidth: CGFloat = 144
@@ -70,8 +78,10 @@ public struct AppleIPTVGuideGridView: View {
                                         ForEach(rows) { row in
                                             HStack(spacing: 0) {
                                                 GuideChannelRail(row: row, isFavorite: favoriteIDs.contains(row.id),
+                                                    health: AppleChannelHealthIndicator(result: health[row.id]),
                                                     scrollState: scrollState, railWidth: railWidth,
-                                                    onSelect: { onSelect(row.channel) }, onToggleFavorite: { onToggleFavorite(row.id) })
+                                                    onSelect: { onSelect(row.channel) }, onToggleFavorite: { onToggleFavorite(row.id) },
+                                                    onShowHealth: health[row.id] == nil ? nil : onShowHealth.map { show in { show(row.channel) } })
                                                     .frame(width: railWidth, height: rowHeight)
                                                     .background(Color.black)
                                                     .zIndex(1)
@@ -173,14 +183,24 @@ public struct AppleIPTVGuideGridView: View {
                 ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .top, spacing: 12) {
+                            let indicator = AppleChannelHealthIndicator(result: health[row.id])
                             Button { onSelect(row.channel) } label: {
-                                Text((row.number.map { "\($0) · " } ?? "") + row.channel.name)
-                                    .font(.headline).multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                    .contentShape(.rect)
+                                HStack(spacing: 8) {
+                                    Text((row.number.map { "\($0) · " } ?? "") + row.channel.name)
+                                        .font(.headline).multilineTextAlignment(.leading)
+                                    if let indicator { AppleChannelHealthDot(indicator: indicator, size: 10) }
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Play \(row.channel.name)")
+                            .accessibilityValue(indicator?.accessibilityLabel ?? "")
+                            .contextMenu {
+                                if health[row.id] != nil, let onShowHealth {
+                                    Button("Channel Health", systemImage: "info.circle") { onShowHealth(row.channel) }
+                                }
+                            }
                             Button { onToggleFavorite(row.id) } label: {
                                 Image(systemName: favoriteIDs.contains(row.id) ? "heart.fill" : "heart")
                                     .frame(minWidth: 44, minHeight: 44)
@@ -225,10 +245,14 @@ private struct GuideProjectionInput: Equatable, Sendable {
 private struct GuideChannelRail: View {
     let row: AppleGuideRowModel
     let isFavorite: Bool
+    let health: AppleChannelHealthIndicator?
     let scrollState: GuideScrollState
     let railWidth: CGFloat
     let onSelect: () -> Void
     let onToggleFavorite: () -> Void
+    /// Nil when the channel has never been checked: the menu then has no
+    /// health item, like the row has no dot.
+    let onShowHealth: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -244,14 +268,29 @@ private struct GuideChannelRail: View {
                                 .font(.caption.monospacedDigit())
                         }
                     }
-                    Text(row.channel.name).font(.caption.bold()).lineLimit(2)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(row.channel.name).font(.caption.bold()).lineLimit(2)
+                        if let health {
+                            AppleChannelHealthDot(indicator: health)
+                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Play \(row.channel.name)")
+            .accessibilityValue(health?.accessibilityLabel ?? "")
             .accessibilityIdentifier("guide.play.\(row.id)")
+            .contextMenu {
+                Button("Play", systemImage: "play.fill", action: onSelect)
+                Button(isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                       systemImage: isFavorite ? "heart.fill" : "heart", action: onToggleFavorite)
+                if let onShowHealth {
+                    Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
+                }
+            }
             Button(action: onToggleFavorite) {
                 Image(systemName: isFavorite ? "heart.fill" : "heart")
                     .frame(width: 44, height: 44)

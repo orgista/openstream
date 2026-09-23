@@ -8,7 +8,10 @@ public enum AppleDesignTokens {
     public static let textPrimary = Color.white
     public static let textSecondary = Color.white.opacity(0.6)
     public static let brandAccent = Color(red: 1.0, green: 0.2, blue: 0.4) // #FF3366
-    
+    /// Channel health dots only: reachable but not playable, and offline.
+    public static let healthAmber = Color(red: 1.0, green: 0.7, blue: 0.0) // #FFB300
+    public static let healthRed = Color(red: 1.0, green: 0.27, blue: 0.23) // #FF453A
+
     #if os(visionOS)
     public static let minimumActionSize: CGFloat = 60
     #else

@@ -125,6 +125,12 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
     let onVisibleChannels: (Set<String>) async -> Void
+    /// Last health result per channel id, built by the Live tab once per
+    /// lineup or history change; `healthRevision` moves with it so the
+    /// equatable grid redraws only then.
+    let health: [String: AppleChannelHealthResult]
+    let healthRevision: Int
+    let onShowHealth: (AppleIPTVChannel) -> Void
 
     @FocusState private var focus: AppleTVGuideFocus?
     @State private var rows: [AppleGuideChannel] = []
@@ -157,7 +163,10 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         @ViewBuilder searchDestination: @escaping () -> Search,
         onSelect: @escaping (AppleIPTVChannel) -> Void,
         onToggleFavorite: @escaping (String) -> Void,
-        onVisibleChannels: @escaping (Set<String>) async -> Void
+        onVisibleChannels: @escaping (Set<String>) async -> Void,
+        health: [String: AppleChannelHealthResult] = [:],
+        healthRevision: Int = 0,
+        onShowHealth: @escaping (AppleIPTVChannel) -> Void = { _ in }
     ) {
         self.metrics = metrics
         self.channels = channels
@@ -178,6 +187,9 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
         self.onVisibleChannels = onVisibleChannels
+        self.health = health
+        self.healthRevision = healthRevision
+        self.onShowHealth = onShowHealth
     }
 
     var body: some View {
@@ -550,7 +562,10 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             visibility: visibility,
             focus: $focus,
             onSelect: onSelect,
-            onToggleFavorite: onToggleFavorite
+            onToggleFavorite: onToggleFavorite,
+            health: health,
+            healthRevision: healthRevision,
+            onShowHealth: onShowHealth
         )
         .equatable()
     }
@@ -581,6 +596,9 @@ private struct AppleTVGuideGrid: View, Equatable {
     let focus: FocusState<AppleTVGuideFocus?>.Binding
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
+    let health: [String: AppleChannelHealthResult]
+    let healthRevision: Int
+    let onShowHealth: (AppleIPTVChannel) -> Void
 
     // `View` infers `@MainActor` for the whole type; the comparison reads only
     // Sendable value properties, so it stays outside that isolation.
@@ -591,6 +609,7 @@ private struct AppleTVGuideGrid: View, Equatable {
             && lhs.now == rhs.now
             && lhs.favoriteIDs == rhs.favoriteIDs
             && lhs.metrics == rhs.metrics
+            && lhs.healthRevision == rhs.healthRevision
     }
 
     var body: some View {
@@ -607,10 +626,12 @@ private struct AppleTVGuideGrid: View, Equatable {
                             AppleTVGuideRailCell(
                                 row: row,
                                 model: AppleTVGuideRailCellModel(row: row, favoriteIDs: favoriteIDs),
+                                health: AppleChannelHealthIndicator(result: health[row.id]),
                                 metrics: metrics,
                                 focus: focus,
                                 onSelect: { onSelect(row.channel) },
-                                onToggleFavorite: { onToggleFavorite(row.id) }
+                                onToggleFavorite: { onToggleFavorite(row.id) },
+                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) }
                             )
                             .frame(width: metrics.railWidth, height: metrics.rowHeight, alignment: .topLeading)
                             .onAppear { visibility.insert(row.id) }
@@ -627,7 +648,8 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 timeline: timeline,
                                 focus: focus,
                                 onSelect: { onSelect(row.channel) },
-                                onToggleFavorite: { onToggleFavorite(row.id) }
+                                onToggleFavorite: { onToggleFavorite(row.id) },
+                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) }
                             )
                             .frame(width: metrics.timelineWidth)
                             .focusSection()
@@ -734,10 +756,15 @@ private struct AppleTVGuideNowLine: View {
 private struct AppleTVGuideRailCell: View {
     let row: AppleGuideChannel
     let model: AppleTVGuideRailCellModel
+    /// Nil for a working or never-checked channel: silence means healthy.
+    let health: AppleChannelHealthIndicator?
     let metrics: AppleTVGuideMetrics
     let focus: FocusState<AppleTVGuideFocus?>.Binding
     let onSelect: () -> Void
     let onToggleFavorite: () -> Void
+    /// The health detail, from the long-press menu, so the row keeps one
+    /// focus stop. Nil when the channel has never been checked.
+    let onShowHealth: (() -> Void)?
 
     var body: some View {
         Button(action: onSelect) {
@@ -767,12 +794,17 @@ private struct AppleTVGuideRailCell: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text(model.name)
-                    .font(.system(size: metrics.railNameFontSize, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 10) {
+                    Text(model.name)
+                        .font(.system(size: metrics.railNameFontSize, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    if let health {
+                        AppleChannelHealthDot(indicator: health, size: metrics.healthDotSize)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
@@ -782,8 +814,12 @@ private struct AppleTVGuideRailCell: View {
         .focused(focus, equals: .channel(row.id))
         .contextMenu {
             Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
+            if let onShowHealth {
+                Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
+            }
         }
         .accessibilityLabel(model.playAccessibilityLabel)
+        .accessibilityValue(health?.accessibilityLabel ?? "")
         .accessibilityIdentifier("guide.play.\(row.id)")
         .frame(width: metrics.railWidth, height: metrics.cellHeight, alignment: .leading)
     }
@@ -849,6 +885,7 @@ private struct AppleTVChannelActions: View {
     let model: AppleTVGuideRailCellModel
     let onPlay: () -> Void
     let onToggleFavorite: () -> Void
+    let onShowHealth: (() -> Void)?
 
     var body: some View {
         ForEach(model.contextActions, id: \.self) { action in
@@ -858,6 +895,9 @@ private struct AppleTVChannelActions: View {
             case .favorite:
                 Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
             }
+        }
+        if let onShowHealth {
+            Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
         }
     }
 }
@@ -879,12 +919,14 @@ private struct AppleTVGuideScheduleRow: View {
     let focus: FocusState<AppleTVGuideFocus?>.Binding
     let onSelect: () -> Void
     let onToggleFavorite: () -> Void
+    let onShowHealth: (() -> Void)?
     @State private var position: ScrollPosition
 
     init(channel: AppleIPTVChannel, cells: [AppleGuideGridCell], window: DateInterval, now: Date,
          metrics: AppleTVGuideMetrics, isFavorite: Bool, timeline: AppleTVGuideTimeline,
          focus: FocusState<AppleTVGuideFocus?>.Binding,
-         onSelect: @escaping () -> Void, onToggleFavorite: @escaping () -> Void) {
+         onSelect: @escaping () -> Void, onToggleFavorite: @escaping () -> Void,
+         onShowHealth: (() -> Void)? = nil) {
         self.channel = channel
         self.cells = cells
         self.window = window
@@ -895,6 +937,7 @@ private struct AppleTVGuideScheduleRow: View {
         self.focus = focus
         self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
+        self.onShowHealth = onShowHealth
         // `untracked`, never `x`: this init runs inside the screen's body, and
         // reading the tracked value here would put the whole screen back on
         // the scroll's invalidation path.
@@ -917,7 +960,8 @@ private struct AppleTVGuideScheduleRow: View {
                     ))
                     .focused(focus, equals: .cell(AppleTVGuideCellFocus(cell: cell)))
                     .contextMenu {
-                        AppleTVChannelActions(model: actions, onPlay: onSelect, onToggleFavorite: onToggleFavorite)
+                        AppleTVChannelActions(model: actions, onPlay: onSelect, onToggleFavorite: onToggleFavorite,
+                            onShowHealth: onShowHealth)
                     }
                     .frame(width: width, height: metrics.cellHeight)
                     .padding(.trailing, metrics.cellGap)

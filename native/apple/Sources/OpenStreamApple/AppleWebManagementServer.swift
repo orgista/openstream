@@ -449,7 +449,8 @@ public final class AppleWebManagementServer {
         for request: AppleWebManagementHTTPRequest,
         session activeSession: AppleWebManagementSession
     ) async -> (response: AppleWebManagementHTTPResponse, stopAfterSending: Bool) {
-        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics" else {
+        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics"
+                || request.path == AppleWorkingM3UExportRoute.path else {
             return (.plain(404, "Not Found", "Not found."), false)
         }
         refreshLifetimes()
@@ -487,6 +488,26 @@ public final class AppleWebManagementServer {
             let log = (try? String(contentsOf: AppleInteractionTrace.fileURL ?? URL(fileURLWithPath: "/dev/null"), encoding: .utf8)) ?? ""
             traceWeb("diagnostics served (\(log.utf8.count) bytes)")
             return (.plain(200, "OK", log.isEmpty ? "No trace recorded yet." : log, cookies: browserToken.map(pairingCookies) ?? []), false)
+        }
+
+        // Apple TV's Export Working M3U: no share sheet there, so the file is
+        // downloaded from the portal. It carries the playlist's own stream
+        // addresses, so it sits behind pairing like everything else; the
+        // address Settings shows includes the pairing code, so one visit on
+        // a computer both pairs and downloads.
+        if request.path == AppleWorkingM3UExportRoute.path {
+            guard request.method == "GET" else {
+                return (.plain(405, "Method Not Allowed", "Use GET.", headers: ["Allow": "GET"]), false)
+            }
+            guard let token = browserToken ?? pair(code: request.query["pair"], headers: request.headers) else {
+                traceWeb("working m3u refused: not paired")
+                return (.plain(401, "Session Ended", "Session ended — scan the code again"), false)
+            }
+            let playlist = AppleChannelHealthStore.shared.workingM3U()
+            traceWeb("working m3u served (\(playlist.utf8.count) bytes)")
+            return (.plain(200, "OK", playlist,
+                headers: ["Content-Disposition": "attachment; filename=\"\(AppleWorkingM3UExportRoute.fileName)\""],
+                cookies: pairingCookies(token)), false)
         }
 
 

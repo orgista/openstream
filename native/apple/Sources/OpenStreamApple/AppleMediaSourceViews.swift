@@ -42,6 +42,13 @@ struct AppleLiveTVView: View {
     @State private var sharedChannelChoices: [AppleIPTVChannel] = []
     @State private var showsSharedChannelChoices = false
     @State private var showsSearch = false
+    @State private var healthStore = AppleChannelHealthStore.shared
+    /// This lineup's health, rebuilt when the snapshot or the history moves —
+    /// never per row render.
+    @State private var channelHealth: [String: AppleChannelHealthResult] = [:]
+    @State private var channelHealthRevision = 0
+    @State private var snapshotRevision = 0
+    @State private var healthDetailChannel: AppleIPTVChannel?
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewportSize: CGSize = .zero
@@ -199,7 +206,9 @@ struct AppleLiveTVView: View {
                         favoriteIDs: settings.favoriteChannelIDs,
                         onSelect: play,
                         onToggleFavorite: toggleFavorite,
-                        onVisibleChannels: refreshGuide
+                        onVisibleChannels: refreshGuide,
+                        health: channelHealth,
+                        onShowHealth: { healthDetailChannel = $0 }
                     )
                     .safeAreaPadding(.bottom, 8)
                 }
@@ -238,7 +247,9 @@ struct AppleLiveTVView: View {
                 favoriteIDs: settings.favoriteChannelIDs,
                 onSelect: play,
                 onToggleFavorite: toggleFavorite,
-                onVisibleChannels: refreshGuide
+                onVisibleChannels: refreshGuide,
+                health: channelHealth,
+                onShowHealth: { healthDetailChannel = $0 }
             )
         })
         #if os(iOS)
@@ -262,6 +273,22 @@ struct AppleLiveTVView: View {
         .task(id: reloadIdentity) { await reload() }
         .task(id: projectionIdentity) {
             await rebuildChannelGroups()
+        }
+        .task { await healthStore.loadIfNeeded() }
+        .task(id: "\(snapshotRevision)|\(healthStore.revision)") {
+            channelHealth = healthStore.map(for: channelSnapshot.channels)
+            channelHealthRevision &+= 1
+            #if DEBUG
+            if healthDetailChannel == nil, let channel = healthStore.takeDebugDetailChannel(from: channelSnapshot.channels) {
+                healthDetailChannel = channel
+            }
+            #endif
+        }
+        .sheet(item: $healthDetailChannel) { channel in
+            AppleChannelHealthDetailView(channel: channel, store: healthStore)
+                #if os(iOS)
+                .presentationDetents([.medium, .large])
+                #endif
         }
         .task(id: "shareplay:\(sharePlay.revision):\(channelsRevision)") {
             resolveSharedChannel()
@@ -504,6 +531,10 @@ struct AppleLiveTVView: View {
         #endif
         channelGroups = updated
         channelSnapshot = snapshot
+        snapshotRevision &+= 1
+        // The health summary, sweep and export follow the All lineup the
+        // guide shows; a category or a search is only a view of it.
+        if category == "All", clean.isEmpty { healthStore.setLineup(snapshot.channels) }
         let availableIDs = Set(snapshot.channelIDs)
         if focusedChannelID == nil || !availableIDs.contains(focusedChannelID ?? "") {
             focusedChannelID = updated.first?.channels.first?.id
@@ -664,7 +695,10 @@ struct AppleLiveTVView: View {
             searchDestination: { AppleTVChannelSearchEditor(query: $query) },
             onSelect: play,
             onToggleFavorite: toggleFavorite,
-            onVisibleChannels: refreshGuide
+            onVisibleChannels: refreshGuide,
+            health: channelHealth,
+            healthRevision: channelHealthRevision,
+            onShowHealth: { healthDetailChannel = $0 }
         )
         // The tab root draws no page title on a television; the tab bar names it.
         .toolbar(.hidden, for: .navigationBar)

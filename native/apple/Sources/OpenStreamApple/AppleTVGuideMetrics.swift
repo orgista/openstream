@@ -57,6 +57,9 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     public var badgeFontSize: CGFloat = 23
     public var pillFontSize: CGFloat = 31
     public var categoryFontSize: CGFloat = 29
+    /// The phone's 6 pt health dot, scaled with the rail name (25 against
+    /// the phone's 12 pt caption) so it still reads across a room.
+    public var healthDotSize: CGFloat = 10
 
     public init() {}
 

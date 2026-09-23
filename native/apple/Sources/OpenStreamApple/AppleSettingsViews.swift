@@ -141,6 +141,7 @@ struct AppleSettingsView: View {
                 Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
                     .disabled(!appleCanToggleTab(.live, settings: settings))
                     .accessibilityIdentifier("settings.live.enabled")
+                AppleChannelHealthSettingsRows(store: .shared, settings: settings, sourceStore: sourceStore)
             }
 
             Section("Services") {
@@ -300,7 +301,7 @@ private struct AppleTVSettingsSplitView: View {
         case .channels:
             AppleChannelManagerView(settings: settings, sourceStore: sourceStore, embeddedInSplit: true)
         case .liveTV:
-            AppleTVLiveTabPane(settings: settings)
+            AppleTVLiveTabPane(settings: settings, sourceStore: sourceStore, webManagement: webManagement)
         case .discover:
             AppleTVDiscoverPane(settings: settings)
         case .services:
@@ -356,6 +357,8 @@ struct AppleTVSettingsRowStyle: ButtonStyle {
 @MainActor
 private struct AppleTVLiveTabPane: View {
     let settings: AppleSettingsStore
+    let sourceStore: AppleSourceStore
+    let webManagement: any AppleWebManagementServing
 
     var body: some View {
         @Bindable var settings = settings
@@ -364,6 +367,10 @@ private struct AppleTVLiveTabPane: View {
             Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
                 .disabled(!appleCanToggleTab(.live, settings: settings))
                 .accessibilityIdentifier("settings.live.enabled")
+            Section {
+                AppleChannelHealthSettingsRows(store: .shared, settings: settings, sourceStore: sourceStore,
+                    webManagement: webManagement)
+            }
         }
         .appleSettingsPane("Live TV", embedded: true)
     }
