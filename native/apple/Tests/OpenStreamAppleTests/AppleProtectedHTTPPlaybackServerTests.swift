@@ -539,6 +539,59 @@ extension Dictionary where Key == String, Value == String {
     }
 }
 
+/// Undeclared CEA-608: the proxy serves a master declaring CC1 whose one
+/// variant is the provider's media playlist, fetched with the channel's headers.
+@Test func protectedPlaybackServerServesACaptionDeclaringMasterInFrontOfTheMediaPlaylist() async throws {
+    let origin = AppleLiveTVUpstreamFixture()
+    let port = try await origin.start()
+    let media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:6.0,\nseg7.ts\n"
+    await origin.addRoute("/live.m3u8", headers: ["Content-Type": "application/vnd.apple.mpegurl"],
+                          body: Data(media.utf8))
+    await origin.addRoute("/seg7.ts", body: Data([0x47]))
+    let server = AppleProtectedHTTPPlaybackServer()
+    let masterURL = try await server.playbackURL(
+        upstreamURL: URL(string: "http://127.0.0.1:\(port)/live.m3u8")!,
+        requestHeaders: ["User-Agent": "FixtureAgent"],
+        declaringCaptions: true)
+    #expect(masterURL.lastPathComponent == AppleProtectedHTTPPlaybackServer.captionMasterPath)
+
+    let (masterBody, masterResponse) = try await URLSession.shared.data(from: masterURL)
+    let http = try #require(masterResponse as? HTTPURLResponse)
+    #expect(http.statusCode == 200)
+    #expect(http.value(forHTTPHeaderField: "Content-Type") == "application/vnd.apple.mpegurl")
+    #expect(String(decoding: masterBody, as: UTF8.self)
+        == AppleHLSCaptionDeclaration.master(wrapping: AppleProtectedHTTPPlaybackServer.captionVariantPath))
+    // The master is synthesized locally; the provider was not asked for it.
+    #expect(await origin.hitCount(for: "/live.m3u8") == 0)
+
+    let variant = try #require(childResourceURLs(inPlaylist: masterBody).first)
+    let variantURL = try #require(URL(string: variant.relativeString, relativeTo: masterURL)?.absoluteURL)
+    let (mediaBody, _) = try await URLSession.shared.data(from: variantURL)
+    #expect(await origin.headers(receivedFor: "/live.m3u8")?.value(for: "User-Agent") == "FixtureAgent")
+    let segment = try #require(childResourceURLs(inPlaylist: mediaBody).first)
+    let (segmentBody, _) = try await URLSession.shared.data(from: segment)
+    #expect(segmentBody == Data([0x47]))
+    await server.revoke(playbackURL: masterURL)
+    #expect(await server.diagnostics().sessionCount == 0)
+}
+
+/// A session opened without the flag never answers with a synthesized master.
+@Test func protectedPlaybackServerDoesNotWrapAnUndeclaredSession() async throws {
+    let origin = AppleLiveTVUpstreamFixture()
+    let port = try await origin.start()
+    let media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg.ts\n"
+    await origin.addRoute("/live.m3u8", headers: ["Content-Type": "application/vnd.apple.mpegurl"],
+                          body: Data(media.utf8))
+    let server = AppleProtectedHTTPPlaybackServer()
+    let playback = try await server.playbackURL(upstreamURL: URL(string: "http://127.0.0.1:\(port)/live.m3u8")!)
+    #expect(playback.lastPathComponent == "stream.m3u8")
+    let probe = playback.deletingLastPathComponent()
+        .appendingPathComponent(AppleProtectedHTTPPlaybackServer.captionMasterPath)
+    let (body, _) = try await URLSession.shared.data(from: probe)
+    #expect(!String(decoding: body, as: UTF8.self).contains("CLOSED-CAPTIONS"))
+    await server.revoke(playbackURL: playback)
+}
+
 /// Pulls every non-comment line (the rewritten child resource URLs) out of a
 /// rewritten playlist body, in playlist order.
 private func childResourceURLs(inPlaylist data: Data) -> [URL] {

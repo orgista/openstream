@@ -137,9 +137,12 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
 
         let headers = request.effectiveHeaders
         var playbackURL = request.url
-        if !headers.isEmpty {
+        // Undeclared CEA-608 in a live media playlist: AVPlayer only finds it
+        // through a master, so the proxy serves one in front of the channel.
+        let declaresCaptions = request.isLive && request.hints.declaresEmbeddedCaptions
+        if !headers.isEmpty || declaresCaptions {
             playbackURL = try await AppleProtectedHTTPPlaybackServer.shared.playbackURL(
-                upstreamURL: request.url, requestHeaders: headers)
+                upstreamURL: request.url, requestHeaders: headers, declaringCaptions: declaresCaptions)
             guard generation == loadGeneration, !Task.isCancelled else {
                 await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: playbackURL)
                 throw CancellationError()

@@ -22,6 +22,10 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// Hand the origin URL to AVPlayer as HLS instead of demuxing it
         /// (`AppleLiveStreamRoutePolicy`). Live channels only.
         public var nativeRemoteHLS: Bool
+        /// Play this live HLS media playlist through the local proxy's
+        /// synthesized master, which declares the CEA-608 the provider's
+        /// manifest left out (`AppleLiveCaptionWrapPolicy`). Live channels only.
+        public var declaresEmbeddedCaptions: Bool
 
         public init(
             notWebReady: Bool = false,
@@ -29,7 +33,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             filename: String? = nil,
             addonMediaID: String? = nil,
             addonMediaType: String? = nil,
-            nativeRemoteHLS: Bool = false
+            nativeRemoteHLS: Bool = false,
+            declaresEmbeddedCaptions: Bool = false
         ) {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
@@ -37,6 +42,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             self.addonMediaID = addonMediaID
             self.addonMediaType = addonMediaType
             self.nativeRemoteHLS = nativeRemoteHLS
+            self.declaresEmbeddedCaptions = declaresEmbeddedCaptions
         }
     }
 

@@ -599,10 +599,15 @@ struct AppleLiveTVView: View {
 
     private func startChannelNow(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
         if shareSelection { sharePlay.selected(channel) }
+        // What an earlier start's probe found decides this start: a channel
+        // whose media playlist carries undeclared CEA-608 plays through the
+        // proxy's caption-declaring master. Read once, here, so an answer that
+        // lands while this start plays waits for the next one.
+        let channel = channel.withCaptionMaster(
+            AppleLiveCaptionProbe.shared.wrapsInCaptionMaster(channelID: channel.id))
         // Alongside playback, never in front of it: one bounded read of this
         // channel's first segment, looking for CEA-608 captions the provider
-        // never declared in its manifest. The answer only reaches the trace for
-        // now — see `AppleLiveCaptionProbe` for why nothing acts on it yet.
+        // never declared in its manifest. Cached per channel per run.
         let probed = channel
         Task.detached(priority: .utility) {
             await AppleLiveCaptionProbe.shared.probe(

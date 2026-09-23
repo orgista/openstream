@@ -161,6 +161,73 @@ struct AppleHLSCaptionDeclarationTests {
     }
 }
 
+/// When a live channel plays through the proxy's caption-declaring master.
+@Suite("Live caption master wrap")
+struct AppleLiveCaptionWrapTests {
+    /// Probe × manifest × shape: only undeclared 608 in a media playlist wraps.
+    @Test(arguments: [
+        (true, false, true, true),
+        (true, true, true, false),
+        (false, false, true, false),
+        (false, true, true, false),
+        (true, false, false, false),
+    ])
+    func wrapsOnlyUndeclaredCaptionsInAMediaPlaylist(
+        carries: Bool, declares: Bool, isMediaPlaylist: Bool, wraps: Bool
+    ) {
+        #expect(AppleLiveCaptionWrapPolicy.shouldWrap(
+            carriesEmbeddedCaptions: carries, manifestDeclaresCaptions: declares,
+            isMediaPlaylist: isMediaPlaylist) == wraps)
+    }
+
+    @Test func aProbeResultWrapsOnlyForAnUndeclaredMediaPlaylist() {
+        typealias Result = AppleLiveCaptionProbe.Result
+        #expect(Result(carriesUndeclaredCaptions: true, manifestAlreadyDeclares: false,
+                       isMediaPlaylist: true).wrapsInCaptionMaster)
+        // A raw transport stream carrying 608 is the engine's to decode.
+        #expect(!Result(carriesUndeclaredCaptions: true, manifestAlreadyDeclares: false,
+                        isMediaPlaylist: false).wrapsInCaptionMaster)
+        #expect(!Result(carriesUndeclaredCaptions: false, manifestAlreadyDeclares: true,
+                        isMediaPlaylist: true).wrapsInCaptionMaster)
+    }
+
+    @Test func theSynthesizedMasterIsExactly() {
+        let expected = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:4",
+            "#EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"openstream-cc\",NAME=\"CC1\","
+                + "LANGUAGE=\"en\",INSTREAM-ID=\"CC1\",DEFAULT=NO,AUTOSELECT=YES",
+            "#EXT-X-STREAM-INF:BANDWIDTH=2000000,CLOSED-CAPTIONS=\"openstream-cc\"",
+            "stream.m3u8",
+        ].joined(separator: "\n")
+        #expect(AppleHLSCaptionDeclaration.master(
+            wrapping: AppleProtectedHTTPPlaybackServer.captionVariantPath) == expected)
+    }
+
+    private func channel(_ path: String) -> AppleIPTVChannel {
+        AppleIPTVChannel(id: path, sourceID: UUID(), name: "Fixture",
+                         streamURL: URL(string: "https://fixture.example/\(path)")!, userAgent: "FixtureAgent")
+    }
+
+    @Test func aStampedHLSChannelAsksForTheMasterAndKeepsItsHeaders() {
+        let request = channel("live.m3u8").withCaptionMaster(true).playbackRequest()
+        #expect(request.hints.declaresEmbeddedCaptions)
+        #expect(request.hints.nativeRemoteHLS)
+        #expect(request.url == URL(string: "https://fixture.example/live.m3u8"))
+        #expect(request.effectiveHeaders == ["User-Agent": "FixtureAgent"])
+    }
+
+    @Test func unstampedAndNonHLSChannelsPlayAsServed() {
+        #expect(!channel("live.m3u8").playbackRequest().hints.declaresEmbeddedCaptions)
+        #expect(!channel("live.m3u8").withCaptionMaster(false).playbackRequest().hints.declaresEmbeddedCaptions)
+        #expect(!channel("live.ts").withCaptionMaster(true).playbackRequest().hints.declaresEmbeddedCaptions)
+    }
+
+    @Test func noProbeAnswerMeansNoWrap() {
+        #expect(!AppleLiveCaptionProbe().wrapsInCaptionMaster(channelID: "never-probed"))
+    }
+}
+
 /// Which shape the channel picker takes, and what one channel row says.
 @Suite("Live channel picker")
 struct AppleLiveChannelPickerTests {

@@ -20,6 +20,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// True once playback has actually rolled for this session; an error after
     /// this point is a mid-playback failure rather than a load failure.
     private var hasReachedPlaying = false
+    /// The proxy's caption-declaring master for this load, revoked on the next
+    /// load or stop (`ApplePlaybackRequest.Hints.declaresEmbeddedCaptions`).
+    private var captionMasterURL: URL?
     private var subtitleSelectionOverridden = false
     private var lastPositionUpdate = Date.distantPast
     /// Latest values published by `aether.$duration` / `aether.$isLive`. Used by
@@ -200,8 +203,25 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         activeSubtitleTrackID = nil
         clearExternalSubtitles()
         failure = nil
+        revokeCaptionMaster()
+        var sourceURL = request.url
+        var headers = request.effectiveHeaders
+        // Undeclared CEA-608 in a live HLS media playlist: AVPlayer (the
+        // remote-HLS route) only finds it through a master, so the proxy serves
+        // one in front of the channel and carries the provider headers itself.
+        if request.isLive, request.hints.nativeRemoteHLS, request.hints.declaresEmbeddedCaptions {
+            let master = try await AppleProtectedHTTPPlaybackServer.shared.playbackURL(
+                upstreamURL: request.url, requestHeaders: headers, declaringCaptions: true)
+            guard !Task.isCancelled else {
+                await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: master)
+                throw CancellationError()
+            }
+            captionMasterURL = master
+            sourceURL = master
+            headers = [:]
+        }
         var options = LoadOptions(
-            httpHeaders: request.effectiveHeaders,
+            httpHeaders: headers,
             isLive: request.isLive,
             dvrWindowSeconds: request.effectiveDVRWindowSeconds
         )
@@ -224,7 +244,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             ? captionsPreference.preferredSubtitleLanguages
             : preferredSubtitleLanguages
         _ = try await aether.load(
-            url: request.url,
+            url: sourceURL,
             startPosition: request.resumePosition,
             options: options
         )
@@ -237,6 +257,12 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
 
+    private func revokeCaptionMaster() {
+        guard let url = captionMasterURL else { return }
+        captionMasterURL = nil
+        Task { await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: url) }
+    }
+
     public func play() { aether.play() }
     public func pause() { aether.pause() }
     public var maximumPlaybackRate: Float { aether.maxSupportedRate }
@@ -247,6 +273,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public func stop() {
         aether.stop()
+        revokeCaptionMaster()
         activeSubtitleTrackID = nil
         clearExternalSubtitles()
         hasReachedPlaying = false

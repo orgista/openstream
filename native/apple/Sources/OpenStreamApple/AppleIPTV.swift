@@ -16,9 +16,20 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// Optional so cached channels written before it decode unchanged.
     public var probedMediaKind: AppleIPTVStreamProbeResult.MediaKind? = nil
 
+    /// Set when the channel starts, from `AppleLiveCaptionProbe`: play it
+    /// through a master that declares its undeclared CEA-608. Stamped once per
+    /// start so a probe answer landing mid-stream never changes the request.
+    public var wrapsInCaptionMaster: Bool? = nil
+
     public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {
         var copy = self
         copy.probedMediaKind = kind
+        return copy
+    }
+
+    public func withCaptionMaster(_ wraps: Bool) -> AppleIPTVChannel {
+        var copy = self
+        copy.wrapsInCaptionMaster = wraps ? true : nil
         return copy
     }
 
