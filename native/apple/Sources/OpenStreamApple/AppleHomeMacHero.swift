@@ -1,0 +1,255 @@
+#if os(macOS)
+import SwiftUI
+
+/// Discover's hero on the Mac, after the Apple TV app on the Mac and the Figma
+/// "MacOS-OpenStream" frame (owner 2026-09-23): the art or trailer edge to edge
+/// across the content from the top of the Discover area, under the toolbar
+/// (`AppleMacHeroLayout`); the Figma's two fades; and bottom-left in a 480 pt
+/// column the wordmark (or the name in black weight), "TV Show · Comedy" with
+/// the rating, the synopsis when there is room, and Resume/Play with a round
+/// My List button. The carousel draws the page dots over it.
+struct AppleHomeMacHero<Actions: View>: View {
+    let item: AppleCatalogItem
+    let layout: AppleMacHeroLayout
+    let wordmark: URL?
+    /// The still and the inline trailer, from `AppleHomeBillboard`.
+    let stage: AnyView
+    let onOpenDetails: () -> Void
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            stage
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .clipped()
+                .overlay { AppleMacHeroFadeView().allowsHitTesting(false) }
+            copy
+                .frame(maxWidth: AppleMacHeroLayout.copyMaxWidth, alignment: .leading)
+                .padding(.leading, layout.horizontalPadding)
+                .padding(.trailing, layout.horizontalPadding)
+                .padding(.bottom, AppleMacHeroLayout.bottomPadding)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: layout.height)
+        .clipped()
+        .background(Color.black)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var copy: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // The title block is the way into the title page, as clicking the
+            // hero is in the Apple TV app.
+            Button(action: onOpenDetails) {
+                VStack(alignment: .leading, spacing: 0) {
+                    title
+                        .padding(.bottom, 8)
+                    AppleMacHeroMetadata(item: item)
+                        .padding(.bottom, 12)
+                    if layout.showsDescription, let summary = item.summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(3)
+                            .frame(maxWidth: AppleMacHeroLayout.descriptionMaxWidth, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the title page")
+            .accessibilityIdentifier("home.featured.details")
+            actions
+                .padding(.top, 20)
+        }
+    }
+
+    /// The wordmark when it has drawn, otherwise the name in black weight —
+    /// never nothing (`AppleHeroTitlePolicy`).
+    private var title: some View {
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .leading) { url, onLoadResult in
+            AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading, onLoadResult: onLoadResult)
+                .frame(width: AppleMacHeroLayout.wordmarkSize.width, height: AppleMacHeroLayout.wordmarkSize.height, alignment: .bottomLeading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(item.name)
+                .accessibilityAddTraits(.isHeader)
+        } name: {
+            Text(item.name)
+                .font(.system(size: layout.titleFontSize, weight: .black))
+                .tracking(-0.02 * layout.titleFontSize)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.6), radius: 10, y: 2)
+                .accessibilityLabel(item.name)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
+/// "TV Show · Comedy" and the outlined rating, left-aligned under the title.
+private struct AppleMacHeroMetadata: View {
+    let item: AppleCatalogItem
+
+    var body: some View {
+        let line = AppleBillboardCopy.phoneMetadataLine(type: item.type, genres: item.genres)
+        let rating = AppleBillboardCopy.ratingBadge(item.contentRating)
+        if line != nil || rating != nil {
+            HStack(spacing: 8) {
+                if let line {
+                    Text(line)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+                if let rating {
+                    Text(rating)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                        }
+                        .accessibilityLabel("Rated \(rating)")
+                }
+            }
+        }
+    }
+}
+
+/// The Figma's two fades over the Mac hero's art (`AppleMacHeroFade`).
+struct AppleMacHeroFadeView: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(stops: Self.stops(AppleMacHeroFade.leading), startPoint: .leading, endPoint: .trailing)
+            LinearGradient(stops: Self.stops(AppleMacHeroFade.bottom), startPoint: .bottom, endPoint: .top)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private static func stops(_ stops: [AppleMacHeroFade.Stop]) -> [Gradient.Stop] {
+        stops.map { Gradient.Stop(color: .black.opacity($0.opacity), location: $0.location) }
+    }
+}
+
+/// The Mac hero's buttons, after the Apple TV app on the Mac: a white capsule
+/// "▶ Resume S1, E3" / "▶ Play" and a 40 pt round My List button that turns
+/// into a check once the title is saved. Same label logic and actions as the
+/// iPhone hero's (`AppleHomePhoneHeroActions`).
+struct AppleHomeMacHeroActions: View {
+    /// The record whose saved position names the Play button.
+    let progressID: String
+    let type: String?
+    /// Nil hides the My List button: the title has nothing to save it against.
+    let isInList: Bool?
+    let onPlay: () -> Void
+    let onToggleList: () -> Void
+
+    /// Read here, through the observable feed, so the label follows a save
+    /// made while the player was up rather than waiting for the next page.
+    private var playTitle: String {
+        AppleBillboardCopy.playTitle(progress: ApplePlaybackProgressFeed.shared.progress(for: progressID), type: type)
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onPlay) {
+                Label(playTitle, systemImage: "play.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
+            .accessibilityIdentifier("home.featured.play")
+
+            if let isInList {
+                Button(action: onToggleList) {
+                    Label(isInList ? "In My List" : "Add to My List",
+                          systemImage: isInList ? "checkmark" : "plus")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: AppleMacHeroLayout.listButtonSide, height: AppleMacHeroLayout.listButtonSide)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
+                .help(isInList ? "Remove from My List" : "Add to My List")
+                .accessibilityValue(isInList ? "Saved" : "Not saved")
+                .accessibilityIdentifier("home.featured.my-list")
+            }
+        }
+    }
+}
+
+/// The round mute button top-right of the Mac hero while its trailer plays.
+struct AppleMacHeroMuteButton: View {
+    let isMuted: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(AppleTrailerSoundBridge.accessibilityLabel(isMuted: isMuted),
+                  systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .labelStyle(.iconOnly)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: AppleMacHeroLayout.muteSide, height: AppleMacHeroLayout.muteSide)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(AppleMacHeroButtonStyle(kind: .translucentRound))
+        .help(AppleTrailerSoundBridge.accessibilityLabel(isMuted: isMuted))
+        .accessibilityValue(AppleTrailerSoundBridge.accessibilityValue(isMuted: isMuted))
+        .accessibilityIdentifier("home.featured.mute")
+    }
+}
+
+/// The Mac hero's button surfaces, with the Mac's hover and pressed states:
+/// a touch brighter under the pointer, a touch darker while held.
+struct AppleMacHeroButtonStyle: ButtonStyle {
+    enum Kind { case primary, round, translucentRound }
+    let kind: Kind
+
+    func makeBody(configuration: Configuration) -> some View {
+        Surface(kind: kind, configuration: configuration)
+    }
+
+    private struct Surface: View {
+        let kind: Kind
+        let configuration: Configuration
+        @State private var isHovered = false
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(kind == .primary ? Color(white: 0.07) : .white)
+                .background { background }
+                .contentShape(.capsule)
+                .opacity(isEnabled ? 1 : 0.5)
+                .onHover { isHovered = $0 }
+                .animation(.easeOut(duration: 0.12), value: isHovered)
+                .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+        }
+
+        @ViewBuilder
+        private var background: some View {
+            switch kind {
+            case .primary:
+                Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.72 : (isHovered ? 0.88 : 1)))
+            case .round:
+                Circle()
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.28 : (isHovered ? 0.2 : 0.1)))
+                    .overlay { Circle().strokeBorder(.white.opacity(0.45), lineWidth: 1.5) }
+            case .translucentRound:
+                Circle()
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.32 : (isHovered ? 0.24 : 0.15)))
+                    .overlay { Circle().strokeBorder(.white.opacity(0.2), lineWidth: 1) }
+            }
+        }
+    }
+}
+#endif

@@ -58,6 +58,8 @@ struct AppleDiscoverView: View {
     /// The scroll view's height and bar insets, which size the iPhone
     /// portrait hero and pull it up under the navigation bar.
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
+    /// The Mac hero's size, off the window and the toolbar's inset.
+    @State private var macHeroLayout = AppleMacHeroLayout()
     /// Held up for `AppleProgressVisibility.minimum` even when the catalogues
     /// come back at once, so a press on Refresh is visible as a refresh.
     @State private var isRefreshing = false
@@ -170,7 +172,18 @@ struct AppleDiscoverView: View {
                             let _ = AppleLaunchClock.mark("discover.hero")
                             #endif
                             Group {
-                                #if !os(tvOS)
+                                #if os(macOS)
+                                // The Apple TV app's Mac hero: edge to edge
+                                // from under the toolbar, copy bottom-left.
+                                AppleHomeMacHeroCarousel(pageIDs: heroes.map(\.id), layout: macHeroLayout) { index in
+                                    featuredHero(heroes[index], mac: true)
+                                } preload: { index in
+                                    AppleHomeMacHeroPreload(item: heroItem(heroes[index].item),
+                                                            wordmark: heroWordmark(heroes[index], item: heroItem(heroes[index].item)),
+                                                            layout: macHeroLayout)
+                                }
+                                .padding(.top, -macHeroLayout.topOverlap)
+                                #elseif !os(tvOS)
                                 if usesPhoneHero {
                                     // iPhone portrait: the Apple TV app's hero,
                                     // edge to edge, with a cycle that can be
@@ -285,6 +298,15 @@ struct AppleDiscoverView: View {
                 } action: { _, layout in
                     phoneHeroLayout = layout
                     appleTrace("discover phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
+                }
+                #elseif os(macOS)
+                .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
+                    AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
+                                       windowHeight: geometry.containerSize.height
+                                           + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                                       topInset: geometry.contentInsets.top)
+                } action: { _, layout in
+                    macHeroLayout = layout
                 }
                 #endif
                 #if os(tvOS)
@@ -661,7 +683,7 @@ struct AppleDiscoverView: View {
     /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(
         _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
-        phone: Bool = false
+        phone: Bool = false, mac: Bool = false
     ) -> some View {
         let item = heroItem(value.item)
         return AppleHomeBillboard(
@@ -674,8 +696,22 @@ struct AppleDiscoverView: View {
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  badge: heroBadges[value.item.mediaID],
-                                 onOpenDetails: { selectHero(value, autoPlay: false) }) : nil
+                                 onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
+            mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil
         ) {
+            #if os(macOS)
+            if mac {
+                AppleHomeMacHeroActions(
+                    progressID: value.record.id,
+                    type: value.item.type,
+                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                    onPlay: { selectHero(value, autoPlay: true) },
+                    onToggleList: { toggleHeroInList(value) }
+                )
+            } else {
+                featuredActions(value)
+            }
+            #else
             if phone {
                 AppleHomePhoneHeroActions(
                     progressID: value.record.id,
@@ -687,6 +723,7 @@ struct AppleDiscoverView: View {
             } else {
                 featuredActions(value)
             }
+            #endif
         }
     }
 

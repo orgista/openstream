@@ -40,6 +40,11 @@ struct AppleRemoteImage: View {
     /// its backdrop upgrades mid-view, and clearing first painted the hero
     /// black between the two stills (sim finding f, 2026-09-22).
     var keepsImageWhileReloading = false
+    /// Decodes once at this pixel budget, whatever size the view is drawn at,
+    /// so resizing a window never reloads the image. The Mac hero opts in: a
+    /// live resize otherwise asked for a new decode at every size it passed
+    /// through. Nil decodes near the rendered size.
+    var fixedPixelDimension: Int? = nil
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
@@ -128,11 +133,13 @@ struct AppleRemoteImage: View {
     }
 
     private func maximumPixelDimension(for size: CGSize) -> Int {
-        min(max(64, Int(max(size.width, size.height) * displayScale)), 2_560)
+        if let fixedPixelDimension { return fixedPixelDimension }
+        return min(max(64, Int(max(size.width, size.height) * displayScale)), 2_560)
     }
 
     private func loadIdentity(url: URL?, size: CGSize) -> String {
-        "\(url?.absoluteString ?? "")|\(Int(size.width))x\(Int(size.height))@\(displayScale)"
+        if let fixedPixelDimension { return "\(url?.absoluteString ?? "")|fixed\(fixedPixelDimension)" }
+        return "\(url?.absoluteString ?? "")|\(Int(size.width))x\(Int(size.height))@\(displayScale)"
     }
 }
 

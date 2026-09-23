@@ -27,6 +27,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// Set on an iPhone in portrait: draw the Apple TV app's hero
     /// (`AppleHomePhoneHero`) over the same stage instead of the featured one.
     var phone: Phone? = nil
+    /// Set on the Mac: draw the Apple TV app's Mac hero (`AppleHomeMacHero`)
+    /// over the same stage.
+    var mac: Mac? = nil
     @ViewBuilder var actions: Actions
     /// The decoded still, handed to the iPhone hero's trailer so its cover
     /// paints these pixels the moment it is inserted — the title page does the
@@ -40,7 +43,26 @@ struct AppleHomeBillboard<Actions: View>: View {
         let onOpenDetails: () -> Void
     }
 
+    struct Mac {
+        let layout: AppleMacHeroLayout
+        let onOpenDetails: () -> Void
+    }
+
     var body: some View {
+        #if os(macOS)
+        if let mac {
+            AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark, stage: stage,
+                             onOpenDetails: mac.onOpenDetails) { actions }
+        } else {
+            standardBody
+        }
+        #else
+        standardBody
+        #endif
+    }
+
+    @ViewBuilder
+    private var standardBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, wordmark: wordmark, badge: phone.badge,
                                stage: stage, onOpenDetails: phone.onOpenDetails) { actions }
@@ -76,10 +98,13 @@ struct AppleHomeBillboard<Actions: View>: View {
                     },
                     onFailure: { stillImage = nil; appleTrace("hero still failed \(item.name)") },
                     loadingFill: AppleDesignTokens.surface,
-                    keepsImageWhileReloading: true
+                    keepsImageWhileReloading: true,
+                    // The Mac window resizes live; decode the still once.
+                    fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil
                 )
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
-                                     artworkImage: phone != nil ? stillImage : nil)
+                                     artworkImage: phone != nil || mac != nil ? stillImage : nil,
+                                     muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset })
                     .id(item.id)
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
@@ -139,6 +164,9 @@ private struct AppleHomeHeroPreview: View {
     let sources: [AppleSource]
     let settings: AppleSettingsStore
     var artworkImage: CGImage? = nil
+    /// The Mac hero's round mute button sits this far from the top of the
+    /// art (below the toolbar); nil on every other hero.
+    var muteTopInset: CGFloat? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
@@ -211,6 +239,23 @@ private struct AppleHomeHeroPreview: View {
                     self.nativeSource = nil
                 }
             }
+            #elseif os(macOS)
+            if shouldPreview, let embedURL {
+                AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: artworkImage,
+                                           isPlaying: isPlaying, isMuted: isMuted, onStateChange: handleState)
+                    // Report only the frame offered, never the web view's own
+                    // size: a child that widens the stage widens the hero and
+                    // reloads the still (the zero-minimum lesson, 2026-09-22).
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+                    .accessibilityHidden(true)
+                if isPlaying, let muteTopInset {
+                    AppleMacHeroMuteButton(isMuted: isMuted) { isMuted.toggle() }
+                        .padding(.top, muteTopInset)
+                        .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+            }
             #endif
         }
         .onAppear { isPresented = true }
@@ -232,7 +277,19 @@ private struct AppleHomeHeroPreview: View {
     private func startPreview() async {
         stop()
         guard shouldPreview else { return }
-        #if os(iOS) || os(tvOS) || os(visionOS)
+        #if os(macOS)
+        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
+        guard !Task.isCancelled, shouldPreview,
+              let key = assets?.trailerYouTubeKeys.first,
+              let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
+        // Always starts muted, as it does on the iPhone; the round button
+        // top-right turns the sound on (the Mac has no audio session to lose).
+        isMuted = true
+        appleTrace("mac hero trailer start \(item.name)")
+        embedURL = url
+        isPlaying = true
+        #elseif os(iOS) || os(tvOS) || os(visionOS)
         do { try await Task.sleep(for: .seconds(2)) } catch { return }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         guard !Task.isCancelled, shouldPreview,

@@ -30,20 +30,30 @@ public enum AppleMacWindowShot {
         public let filename: String
         public let size: CGSize
         public let delay: TimeInterval
+        /// Set by `-OpenStreamSnapshotWindow`: an absolute path to write the
+        /// PNG to instead, for an unsandboxed debug build a script launched.
+        public var destination: URL? = nil
     }
 
     /// `-OpenStreamWindowShot <name.png> [-OpenStreamWindowShotSize 1280x860]
-    ///  [-OpenStreamWindowShotDelay 11]`
+    ///  [-OpenStreamWindowShotDelay 11]`, or
+    /// `-OpenStreamSnapshotWindow </absolute/path.png>` (12 s by default, the
+    /// same size and delay flags).
     public static func request(
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> Request? {
-        guard let name = value(of: "-OpenStreamWindowShot", in: arguments),
-              !name.isEmpty, !name.contains("/") else { return nil }
         let size = value(of: "-OpenStreamWindowShotSize", in: arguments)
             .flatMap(parseSize) ?? CGSize(width: 1280, height: 860)
-        let delay = value(of: "-OpenStreamWindowShotDelay", in: arguments)
-            .flatMap(Double.init) ?? 11
-        return Request(filename: name, size: size, delay: delay)
+        let delay = value(of: "-OpenStreamWindowShotDelay", in: arguments).flatMap(Double.init)
+        if let path = value(of: "-OpenStreamSnapshotWindow", in: arguments),
+           path.hasPrefix("/"), path.lowercased().hasSuffix(".png") {
+            let destination = URL(fileURLWithPath: path)
+            return Request(filename: destination.lastPathComponent, size: size, delay: delay ?? 12,
+                           destination: destination)
+        }
+        guard let name = value(of: "-OpenStreamWindowShot", in: arguments),
+              !name.isEmpty, !name.contains("/") else { return nil }
+        return Request(filename: name, size: size, delay: delay ?? 11)
     }
 
     private static func value(of flag: String, in arguments: [String]) -> String? {
@@ -116,7 +126,7 @@ public enum AppleMacWindowShot {
             emit(lines + ["OPENSTREAM-SHOT verdict: PNG encoding failed"])
             return
         }
-        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+        let url = request.destination ?? URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: request.filename)
         do {
             try data.write(to: url, options: .atomic)

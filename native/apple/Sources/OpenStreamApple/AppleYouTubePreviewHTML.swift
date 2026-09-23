@@ -19,8 +19,13 @@ enum AppleTrailerSoundBridge {
 }
 
 enum AppleYouTubePreviewHTML {
-    static func document(embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true) -> String {
-        let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback
+    /// `allowsSound` lifts the muted-only rule for a host whose web view does
+    /// not take over the device's audio session — the Mac hero, whose mute
+    /// button is how a viewer asks to hear it. Every other caller stays muted.
+    static func document(
+        embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true, allowsSound: Bool = false
+    ) -> String {
+        let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !allowsSound
         let effectiveMuted = requiresMutedPlayback || startsMuted
         var components = URLComponents(url: embedURL, resolvingAgainstBaseURL: false)
         let existingItems = components?.queryItems ?? []
