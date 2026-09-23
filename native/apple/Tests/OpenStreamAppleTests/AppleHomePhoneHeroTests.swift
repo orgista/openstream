@@ -182,3 +182,46 @@ struct AppleHeroBadgeTests {
         #expect(AppleHeroBadge.releaseDate(nil) == nil)
     }
 }
+
+@Suite("iPhone hero size")
+struct AppleHomePhoneHeroLayoutTests {
+    /// The owner's reference screen: an iPhone 16 Pro, 874 pt tall.
+    private let iPhone16Pro = AppleHomePhoneHeroLayout(containerHeight: 874, topInset: 116, bottomInset: 83)
+
+    private func rowPeek(_ layout: AppleHomePhoneHeroLayout) -> CGFloat {
+        layout.containerHeight - layout.bottomInset - (layout.artHeight + AppleHomePhoneHeroLayout.firstRowLead)
+    }
+
+    @Test func theArtRunsToSeventyThreePercentOfTheScreen() {
+        #expect(abs(iPhone16Pro.artHeight - 874 * 0.73) < 0.5)
+        #expect(rowPeek(iPhone16Pro) >= AppleHomePhoneHeroLayout.minimumRowPeek)
+    }
+
+    @Test func theArtStartsAtTheTopEdge() {
+        #expect(iPhone16Pro.topOverlap == 116 + AppleHomePhoneHeroLayout.stackTopPadding)
+    }
+
+    @Test func theButtonsAndDotsSitWhereTheAppleTVAppsDo() {
+        let art = iPhone16Pro.artHeight
+        let dots = (art - AppleHomePhoneHeroLayout.dotsCentreInset) / 874
+        let button = (art - AppleHomePhoneHeroLayout.copyBottomInset - 25) / 874
+        #expect(abs(dots - 0.70) < 0.01)
+        #expect(abs(button - 0.64) < 0.01)
+    }
+
+    @Test(arguments: [
+        // iPhone SE, 15 Pro Max, 16 Pro Max
+        AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 72, bottomInset: 49),
+        AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 118, bottomInset: 83),
+        AppleHomePhoneHeroLayout(containerHeight: 956, topInset: 118, bottomInset: 83),
+    ])
+    func theFirstRowAlwaysPeeks(_ layout: AppleHomePhoneHeroLayout) {
+        #expect(rowPeek(layout) >= AppleHomePhoneHeroLayout.minimumRowPeek)
+        #expect(layout.artHeight <= layout.containerHeight * AppleHomePhoneHeroLayout.artFraction)
+        #expect(layout.artHeight >= AppleHomePhoneHeroLayout.minimumArtHeight)
+    }
+
+    @Test func anUnmeasuredScrollViewGetsTheFloor() {
+        #expect(AppleHomePhoneHeroLayout().artHeight == AppleHomePhoneHeroLayout.minimumArtHeight)
+    }
+}

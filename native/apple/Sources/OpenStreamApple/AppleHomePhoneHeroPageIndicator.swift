@@ -11,6 +11,9 @@ struct AppleHomePhoneHeroPageIndicator: View {
     let cycle: AppleHeroRotation.Cycle
     let onSelect: (Int) -> Void
 
+    /// The strip each dot can be hit in, taller than the dot.
+    static let height: CGFloat = 28
+
     var body: some View {
         HStack(spacing: AppleHeroPageDots.spacing) {
             ForEach(0 ..< cycle.count, id: \.self) { position in
@@ -31,8 +34,7 @@ struct AppleHomePhoneHeroPageIndicator: View {
                         }
                         .clipShape(.capsule)
                         .frame(width: size.width, height: size.height)
-                        // A taller strip than the dot, so it can be hit.
-                        .frame(height: 28)
+                        .frame(height: Self.height)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)

@@ -6,11 +6,12 @@ struct AppleHomePhoneHeroPreload: View {
     let item: AppleCatalogItem
     let wordmark: URL?
     let width: CGFloat
+    let artHeight: CGFloat
 
     var body: some View {
         ZStack {
             AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
-                .frame(width: max(width, 1), height: AppleHomePhoneHero<EmptyView>.artHeight)
+                .frame(width: max(width, 1), height: artHeight)
             if case .wordmark(let url) = AppleTVBillboardTitleTreatment.choose(
                 hasBackdrop: item.backgroundURL != nil, wordmark: wordmark
             ) {
@@ -18,7 +19,7 @@ struct AppleHomePhoneHeroPreload: View {
                     .frame(width: 280, height: 96)
             }
         }
-        .frame(width: max(width, 1), height: AppleHomePhoneHero<EmptyView>.artHeight)
+        .frame(width: max(width, 1), height: artHeight)
         .clipped()
     }
 }

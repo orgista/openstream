@@ -35,14 +35,15 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var stillImage: CGImage?
 
     struct Phone {
+        let artHeight: CGFloat
         let badge: AppleHeroBadge?
         let onOpenDetails: () -> Void
     }
 
     var body: some View {
         if let phone {
-            AppleHomePhoneHero(item: item, wordmark: wordmark, badge: phone.badge, stage: stage,
-                               onOpenDetails: phone.onOpenDetails) { actions }
+            AppleHomePhoneHero(item: item, artHeight: phone.artHeight, wordmark: wordmark, badge: phone.badge,
+                               stage: stage, onOpenDetails: phone.onOpenDetails) { actions }
         } else {
             AppleFeaturedHero(
                 item: item,

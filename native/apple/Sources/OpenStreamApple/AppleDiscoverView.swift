@@ -55,6 +55,9 @@ struct AppleDiscoverView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
+    /// The scroll view's height and bar insets, which size the iPhone
+    /// portrait hero and pull it up under the navigation bar.
+    @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
     /// Held up for `AppleProgressVisibility.minimum` even when the catalogues
     /// come back at once, so a press on Refresh is visible as a refresh.
     @State private var isRefreshing = false
@@ -72,6 +75,9 @@ struct AppleDiscoverView: View {
     #if DEBUG
     @State private var visionReviewDetail = false
     @State private var visionReviewAutoPlay = false
+    /// Moved by `OpenStreamDiscoverScrollY`, so a headless sweep can capture
+    /// the page scrolled (the collapsed navigation bar over the hero).
+    @State private var reviewScrollPosition = ScrollPosition(edge: .top)
     #endif
     @State private var catalogLookup = AppleCatalogSearchLookup()
     @State private var top10Week: AppleNetflixTop10Week?
@@ -174,8 +180,16 @@ struct AppleDiscoverView: View {
                                     } preload: { index in
                                         AppleHomePhoneHeroPreload(item: heroItem(heroes[index].item),
                                                                   wordmark: heroWordmark(heroes[index], item: heroItem(heroes[index].item)),
-                                                                  width: viewportSize.width)
+                                                                  width: viewportSize.width,
+                                                                  artHeight: phoneHeroLayout.artHeight)
                                     }
+                                    // The art starts at the top edge of the
+                                    // screen, under the status bar and the
+                                    // title, as the Apple TV app's does; the
+                                    // bar stays transparent until the page
+                                    // scrolls, then takes its usual material.
+                                    .padding(.top, -phoneHeroLayout.topOverlap)
+                                    .padding(.bottom, -AppleHomePhoneHeroLayout.trailingOverlap)
                                 } else {
                                     rotatingHero(heroes)
                                 }
@@ -258,6 +272,21 @@ struct AppleDiscoverView: View {
                     #endif
                 }
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+                #if DEBUG
+                .scrollPosition($reviewScrollPosition)
+                #endif
+                #if os(iOS)
+                .onScrollGeometryChange(for: AppleHomePhoneHeroLayout.self) { geometry in
+                    // The container is the part between the bars.
+                    AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height
+                                                 + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                                             topInset: geometry.contentInsets.top,
+                                             bottomInset: geometry.contentInsets.bottom)
+                } action: { _, layout in
+                    phoneHeroLayout = layout
+                    appleTrace("discover phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
+                }
+                #endif
                 #if os(tvOS)
                 // The billboard runs under the top safe area and bleeds past the
                 // horizontal one; rows keep the stock 80 pt inset. Black ground so
@@ -337,6 +366,12 @@ struct AppleDiscoverView: View {
             // reason. Pushing it here is the same one-line hook every other
             // screen already has.
             if screen == "search" { showsSearch = true }
+            let scrollY = UserDefaults.standard.double(forKey: "OpenStreamDiscoverScrollY")
+            if scrollY > 0, visibleSections.count > 0 {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                reviewScrollPosition.scrollTo(y: scrollY)
+            }
             // "play" opens the same title page and starts its first stream, so
             // the player can be captured headlessly on the TV simulator.
             if (screen == "detail" || screen == "episodes" || screen == "play"), visionReviewItem != nil {
@@ -633,7 +668,8 @@ struct AppleDiscoverView: View {
             wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
-            phone: phone ? .init(badge: heroBadges[value.item.mediaID],
+            phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
+                                 badge: heroBadges[value.item.mediaID],
                                  onOpenDetails: { selectHero(value, autoPlay: false) }) : nil
         ) {
             if phone {

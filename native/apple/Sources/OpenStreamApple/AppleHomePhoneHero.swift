@@ -2,23 +2,22 @@ import SwiftUI
 
 /// Discover's hero on an iPhone in portrait, after the Apple TV app's (owner
 /// 2026-09-22 with two reference screenshots, and the Figma "iOS-OpenStream"
-/// frame): art edge to edge, 500 pt tall, fading to black by 65 %; then,
-/// centred, an optional "New Season" capsule, the wordmark (or the name in
-/// black-weight capitals), "TV Show · Thriller · Drama" with the rating, and
-/// the buttons. iPad, landscape and every other platform keep
-/// `AppleFeaturedHero`.
+/// frame): art edge to edge from the top of the screen, under the large
+/// title, to 73 % of its height (`AppleHomePhoneHeroLayout`), fading to black
+/// at the bottom; then, centred and anchored to the bottom of the art, an
+/// optional "New Season" capsule, the wordmark (or the name in black-weight
+/// capitals), "TV Show · Thriller · Drama" with the rating, and the buttons,
+/// with the carousel's page dots under them. iPad, landscape and every other
+/// platform keep `AppleFeaturedHero`.
 ///
 /// The copy is laid out in the flow, not overlaid: at the accessibility text
 /// sizes it grows the hero downwards past the art rather than clipping the
 /// buttons, and the fade has already reached black by then.
 struct AppleHomePhoneHero<Actions: View>: View {
-    /// 500, not the Figma's 540: at 540 the Continue Watching tiles began
-    /// exactly at the tab bar's top edge on an iPhone 16 Pro, so only the
-    /// header peeked; the owner's inspiration asks for the first row to show
-    /// above the fold (INSPO §1). Never under 480.
-    static var artHeight: CGFloat { 500 }
-
     let item: AppleCatalogItem
+    /// From the top edge of the screen: the hero is drawn pulled up under the
+    /// navigation bar by `AppleHomePhoneHeroLayout.topOverlap`.
+    let artHeight: CGFloat
     let wordmark: URL?
     let badge: AppleHeroBadge?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
@@ -59,13 +58,14 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 .padding(.top, 4)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        // Room for the carousel's page dots, which sit over the art.
+        .padding(.bottom, AppleHomePhoneHeroLayout.copyBottomInset)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: Self.artHeight, alignment: .bottom)
+        .frame(minHeight: artHeight, alignment: .bottom)
         .background(alignment: .top) {
             stage
                 .frame(maxWidth: .infinity)
-                .frame(height: Self.artHeight)
+                .frame(height: artHeight)
                 .clipped()
                 .overlay { AppleHomePhoneHeroFade().allowsHitTesting(false) }
         }

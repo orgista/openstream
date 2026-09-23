@@ -22,7 +22,10 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     @State private var incomingEdge: Edge = .trailing
 
     var body: some View {
-        VStack(spacing: 10) {
+        // The dots sit over the bottom of the art, as the Apple TV app's do,
+        // in the room the page leaves under its buttons; they stay put while
+        // the pages slide.
+        ZStack(alignment: .bottom) {
             ZStack {
                 if cycle.count > 0, cycle.index < pageIDs.count {
                     page(cycle.index)
@@ -49,6 +52,8 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
 
             if cycle.count > 1 {
                 AppleHomePhoneHeroPageIndicator(cycle: cycle, onSelect: select)
+                    .padding(.bottom, AppleHomePhoneHeroLayout.dotsCentreInset
+                        - AppleHomePhoneHeroPageIndicator.height / 2)
             }
         }
         .onAppear {
