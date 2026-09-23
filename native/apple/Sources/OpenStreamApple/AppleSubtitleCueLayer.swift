@@ -28,12 +28,13 @@ enum AppleSubtitleCueLayerPolicy {
     /// deselected on purpose (the WebVTT rendition exists for PiP and AirPlay
     /// only, Sodalite#38) and expects the host to draw; nothing did, so every
     /// MKV/TS subtitle and every live-TS caption played blank on a device
-    /// (Q4a8 paths 1 and 2). The native engine's tracks are AVKit's to draw.
+    /// (Q4a8 paths 1 and 2). Native embedded tracks remain AVKit's to draw;
+    /// native add-on tracks publish cues to this same layer.
     static func mountsOverStockPlayer(
         engine: ApplePlaybackEngineKind,
         route: ApplePlaybackPresentationRoute
     ) -> Bool {
-        engine == .openStream && route == .avPlayer
+        route == .avPlayer
     }
 
     /// Every cue overlapping `position`, in the engine's order. Plural because

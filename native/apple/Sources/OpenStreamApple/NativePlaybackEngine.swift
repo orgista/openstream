@@ -61,13 +61,18 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// picture is actually in.
     public private(set) var activeSubtitleTrackID: Int?
 
-    /// Always empty on the native route: AVFoundation draws the selected
-    /// legible track itself, so the host overlay has no cues to render.
-    // TODO: add-on subtitle files still need a side-load (an `AVMutableComposition`
-    // carrying the fetched track, or parsing them into cues) before
-    // `addExternalSubtitleTracks` can do anything on this engine. Tracks muxed
-    // into the stream are handled below and need neither.
-    public var subtitleCues: [AppleSubtitleCue] = []
+    /// Embedded legible tracks are drawn by AVKit; sidecar cues use the app's
+    /// shared cue layer. Publish arrivals even while playback is paused.
+    public private(set) var subtitleCues: [AppleSubtitleCue] = [] {
+        didSet { emit(.tracks) }
+    }
+    private var embeddedSubtitleTracks: [ApplePlaybackTrack] = []
+    private var externalSubtitleTracks: [AppleExternalSubtitleTrack] = []
+    /// Internal read access lets tests await the actual load, without sleeps.
+    private(set) var externalSubtitleLoad: Task<Void, Never>?
+    static let externalSubtitleTrackIDBase = 1_000_000
+    public var externalSubtitleDataLoader: @Sendable (URL) async throws -> Data
+        = AppleExternalSubtitleService.liveDataLoader
 
     /// The asset's legible media selection group, and the option behind each
     /// entry in `subtitleTracks`.
@@ -291,15 +296,54 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         applySubtitleSelection(id: id)
     }
 
-    private func applySubtitleSelection(id: Int?) {
-        guard let item, let legibleGroup else { return }
-        guard let id, let option = legibleOptions[id] else {
-            item.select(nil, in: legibleGroup)
-            activeSubtitleTrackID = nil
-            return
+    public func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {
+        var merged = externalSubtitleTracks
+        for track in tracks where !merged.contains(where: { $0.id == track.id }) {
+            merged.append(track)
         }
-        item.select(option, in: legibleGroup)
-        activeSubtitleTrackID = id
+        guard merged.count != externalSubtitleTracks.count else { return }
+        externalSubtitleTracks = merged
+        rebuildSubtitleTracks()
+        autoSelectSubtitleIfPreferred()
+    }
+
+    private func rebuildSubtitleTracks() {
+        subtitleTracks = embeddedSubtitleTracks + externalSubtitleTracks.enumerated().map { index, track in
+            track.playbackTrack(id: Self.externalSubtitleTrackIDBase + index)
+        }
+    }
+
+    private func applySubtitleSelection(id: Int?) {
+        // A repeat track-discovery callback must not restart the same download.
+        if let id, id >= Self.externalSubtitleTrackIDBase, id == activeSubtitleTrackID { return }
+        externalSubtitleLoad?.cancel()
+        externalSubtitleLoad = nil
+        activeSubtitleTrackID = nil
+        subtitleCues = []
+        if let item, let legibleGroup {
+            item.select(nil, in: legibleGroup)
+        }
+        guard let id else { return }
+        if id >= Self.externalSubtitleTrackIDBase {
+            let index = id - Self.externalSubtitleTrackIDBase
+            guard externalSubtitleTracks.indices.contains(index) else { return }
+            activeSubtitleTrackID = id
+            let track = externalSubtitleTracks[index]
+            let load = externalSubtitleDataLoader
+            externalSubtitleLoad = Task { [weak self] in
+                let data = try? await load(track.url)
+                guard self != nil, !Task.isCancelled, let data else { return }
+                // Match Aether's path: inflate/parse off the main actor.
+                let cues = await Task.detached(priority: .userInitiated) {
+                    AppleSubtitleTextParser.cues(from: data)
+                }.value
+                guard let self, !Task.isCancelled, self.activeSubtitleTrackID == id else { return }
+                self.subtitleCues = cues
+            }
+        } else if let item, let legibleGroup, let option = legibleOptions[id] {
+            item.select(option, in: legibleGroup)
+            activeSubtitleTrackID = id
+        }
     }
 
     /// Keep the legible-group index as the track ID, even when forced options
@@ -337,7 +381,13 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             tracks.append(track)
         }
         legibleOptions = options
-        subtitleTracks = tracks
+        embeddedSubtitleTracks = tracks
+        rebuildSubtitleTracks()
+        // A group can arrive after the user has selected a sidecar. Keep
+        // AVKit from drawing its automatic legible selection on top of it.
+        if let id = activeSubtitleTrackID, id >= Self.externalSubtitleTrackIDBase {
+            item.select(nil, in: group)
+        }
         appleTrace("native engine subtitles: \(tracks.count) embedded track(s) — \(tracks.map(\.title).joined(separator: ", "))")
         autoSelectSubtitleIfPreferred()
     }
@@ -482,6 +532,17 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     }
 
     private func teardown() {
+        externalSubtitleLoad?.cancel()
+        externalSubtitleLoad = nil
+        externalSubtitleTracks = []
+        embeddedSubtitleTracks = []
+        legibleGroup = nil
+        legibleOptions = [:]
+        activeSubtitleTrackID = nil
+        subtitleSelectionOverridden = false
+        readyToPlayTracksLoaded = false
+        subtitleTracks = []
+        subtitleCues = []
         if let url = protectedPlaybackURL {
             protectedPlaybackURL = nil
             Task { await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: url) }

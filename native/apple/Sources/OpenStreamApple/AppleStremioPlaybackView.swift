@@ -80,9 +80,7 @@ struct AppleStremioPlayerView: View {
     @State private var hasRouted = false
     @State private var showsFallbackNotice = false
     @State private var securityAccess: AppleSecurityScopedAccess?
-    /// Cues and the subtitle menu for the stock player on the OpenStream
-    /// engine, which leaves drawing them to the app (see
-    /// `AppleSubtitleCueLayerPolicy`).
+    /// Cues and the app subtitle menu for both engines on the stock player.
     @State private var stockSubtitles = AppleStockPlayerSubtitles()
 
     private let request: ApplePlaybackRequest
@@ -353,8 +351,7 @@ struct AppleStremioPlayerView: View {
     }
     #endif
 
-    /// The OpenStream engine on the stock player: the app draws the cues and
-    /// owns the subtitle choice.
+    /// Both engines publish sidecar cues and use the app's subtitle menu.
     private var drawsStockPlayerCues: Bool {
         AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route)
     }
@@ -373,11 +370,10 @@ struct AppleStremioPlayerView: View {
         var items: [UIMenuElement] = [UIAction(title: "Other sources", image: UIImage(systemName: "list.bullet")) { _ in
             showsOtherSources = true
         }]
-        if coordinator.engine.kind == .openStream {
-            // One captions control. AVKit lists the engine's loopback WebVTT
-            // rendition, but the engine deselects it within a second (it is for
-            // PiP/AirPlay only), so picking it there did nothing. The app's
-            // menu drives the engine and the cue layer draws the result.
+        if drawsStockPlayerCues {
+            // One captions control for embedded and add-on tracks. The app's
+            // menu drives selection; AVKit draws native embedded tracks and
+            // the shared cue layer draws sidecars and Aether cues.
             host.viewController.allowedSubtitleOptionLanguages = []
             let entries = stockSubtitles.menuEntries
             if !entries.isEmpty {

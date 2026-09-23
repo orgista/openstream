@@ -354,10 +354,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     private func rebuildSubtitleTracks() {
         subtitleTracks = embeddedSubtitleTracks + externalSubtitleTracks.enumerated().map { index, track in
-            ApplePlaybackTrack(
-                id: Self.externalSubtitleTrackIDBase + index,
-                title: track.displayName
-            )
+            track.playbackTrack(id: Self.externalSubtitleTrackIDBase + index)
         }
     }
 
@@ -491,13 +488,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
 
-    /// Auto-selects the first subtitle track when `captionsPreference` is
-    /// `.always` and nothing is active yet. `.english` / `.deviceLanguage` are
-    /// served at load by `LoadOptions.preferredSubtitleLanguages`; `.off` selects
-    /// nothing. Idempotent: a selected track (`activeSubtitleTrackIndex != nil`)
-    /// stops the auto-select, so the user's explicit "Off" survives.
+    /// Auto-selects when tracks arrive. `.always` takes the best visible track; language preferences require a
+    /// match, including add-on tracks that arrive after the embedded selection.
+    /// A manual choice (including "Off") always survives track discovery.
     private func autoSelectSubtitleIfPreferred() {
-        guard !subtitleSelectionOverridden, captionsPreference.autoSelectsAnyTrack,
+        guard !subtitleSelectionOverridden, captionsPreference != .off,
               !subtitleTracks.isEmpty,
               aether.activeSubtitleTrackIndex == nil,
               activeExternalSubtitleID == nil,
@@ -506,6 +501,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                   preferredLanguages: preferredSubtitleLanguages,
                   isExplicitChoice: subtitleLanguagesAreExplicit
               ).first else { return }
+        if !captionsPreference.autoSelectsAnyTrack {
+            let wanted = preferredSubtitleLanguages.map(AppleSubtitleTrackFilter.normalized)
+            guard wanted.contains(AppleSubtitleTrackFilter.normalized(first.language ?? "")) else { return }
+        }
         applySubtitleSelection(id: first.id)
     }
 

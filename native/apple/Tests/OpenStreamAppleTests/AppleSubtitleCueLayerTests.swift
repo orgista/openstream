@@ -11,12 +11,12 @@ import Testing
 struct AppleSubtitleCueLayerTests {
     // MARK: - Route → mounted
 
-    @Test("Mounted over the stock player only for the OpenStream engine", arguments: [
+    @Test("Mounted over the stock player for either engine", arguments: [
         (ApplePlaybackEngineKind.openStream, ApplePlaybackPresentationRoute.avPlayer, true),
         (.openStream, .surface, false),
         (.openStream, .none, false),
         (.openStream, .audioOnly, false),
-        (.native, .avPlayer, false),
+        (.native, .avPlayer, true),
         (.native, .surface, false),
     ])
     func mountDecision(engine: ApplePlaybackEngineKind, route: ApplePlaybackPresentationRoute, mounted: Bool) {

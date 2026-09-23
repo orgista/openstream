@@ -28,6 +28,14 @@ public struct AppleExternalSubtitleTrack: Identifiable, Equatable, Sendable {
         )
     }
 
+    /// Use the same language vocabulary as embedded tracks in the app menu.
+    func playbackTrack(id: Int) -> ApplePlaybackTrack {
+        let language = AppleSubtitleTrackFilter.normalized(languageCode)
+        return ApplePlaybackTrack(
+            id: id, title: displayName,
+            language: language.isEmpty || language == "und" ? nil : language)
+    }
+
     static func normalizedLanguageCode(_ value: String) -> String {
         String(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(20))
     }

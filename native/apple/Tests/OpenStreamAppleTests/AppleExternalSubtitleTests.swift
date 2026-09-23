@@ -285,3 +285,135 @@ private func subtitleSource(
     #expect(engine.externalSubtitleTracks.isEmpty)
     coordinator.stop()
 }
+
+// MARK: - Add-on language and native cue regression coverage
+
+@MainActor
+@Test(arguments: [("eng", "en" as String?), ("en-US", "en"), ("", nil), ("und", nil)])
+func addOnTracksUseEmbeddedLanguageNormalization(code: String, expected: String?) throws {
+    let track = AppleExternalSubtitleTrack(
+        id: "fixture", languageCode: code, displayName: "Fixture subtitles",
+        url: URL(fileURLWithPath: "/unused.srt"))
+    let native = NativePlaybackEngine()
+    let aether = try AetherPlaybackEngine()
+    for engine: any ApplePlaybackEngine in [native, aether] {
+        engine.addExternalSubtitleTracks([track])
+        let appended = try #require(engine.subtitleTracks.first)
+        #expect(appended.language == expected)
+        engine.stop()
+    }
+}
+
+@MainActor
+@Test(arguments: [AppleCaptionsPreference.always, .english, .deviceLanguage])
+func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreference) throws {
+    let native = NativePlaybackEngine()
+    let aether = try AetherPlaybackEngine()
+    native.externalSubtitleDataLoader = { _ in Data() }
+    aether.externalSubtitleDataLoader = { _ in Data() }
+    for engine: any ApplePlaybackEngine in [native, aether] {
+        engine.applyCaptionPreferences(preference: preference, languages: ["eng"], languagesAreExplicit: true)
+        engine.addExternalSubtitleTracks([
+            AppleExternalSubtitleTrack(id: "french", languageCode: "fra", displayName: "French",
+                                       url: URL(fileURLWithPath: "/unused-fr.srt")),
+            AppleExternalSubtitleTrack(id: "english", languageCode: "eng", displayName: "English",
+                                       url: URL(fileURLWithPath: "/unused-en.srt")),
+        ])
+        let english = try #require(engine.subtitleTracks.first { $0.language == "en" })
+        #expect(engine.activeSubtitleTrackID == english.id)
+        engine.selectSubtitleTrack(id: nil)
+        engine.addExternalSubtitleTracks([
+            AppleExternalSubtitleTrack(id: "another", languageCode: "eng", displayName: "Another",
+                                       url: URL(fileURLWithPath: "/unused-other.srt"))
+        ])
+        #expect(engine.activeSubtitleTrackID == nil)
+        engine.stop()
+    }
+}
+
+@MainActor
+@Test func languageAutoSelectionDoesNotFallBackToAnUnmatchedAddOn() throws {
+    let native = NativePlaybackEngine()
+    let aether = try AetherPlaybackEngine()
+    for engine: any ApplePlaybackEngine in [native, aether] {
+        engine.applyCaptionPreferences(preference: .english, languages: ["eng"], languagesAreExplicit: false)
+        engine.addExternalSubtitleTracks([
+            AppleExternalSubtitleTrack(id: "french", languageCode: "fra", displayName: "French",
+                                       url: URL(fileURLWithPath: "/unused.srt"))
+        ])
+        #expect(engine.activeSubtitleTrackID == nil)
+        engine.stop()
+    }
+}
+
+private var nativeSubtitleFixture: AppleExternalSubtitleTrack {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().appending(path: "Fixtures/addon-subtitles.srt")
+    return AppleExternalSubtitleTrack(
+        id: "local-srt", languageCode: "eng", displayName: "English fixture", url: url)
+}
+
+@concurrent
+private func readSubtitleFixture(_ url: URL) async throws -> Data {
+    #expect(url.isFileURL)
+    return try Data(contentsOf: url)
+}
+
+@MainActor
+@Test func nativeEnginePublishesParsedLocalSRTCuesThroughTheAppMenu() async throws {
+    let engine = NativePlaybackEngine()
+    defer { engine.stop() }
+    engine.externalSubtitleDataLoader = readSubtitleFixture
+    engine.addExternalSubtitleTracks([nativeSubtitleFixture, nativeSubtitleFixture])
+    #expect(engine.subtitleTracks.count == 1)
+    let track = try #require(engine.subtitleTracks.first)
+    let entries = AppleSubtitleCueLayerPolicy.menuEntries(
+        tracks: engine.subtitleTracks, preferredLanguages: ["en"],
+        languagesAreExplicit: true, activeTrackID: nil)
+    let selected = try #require(entries.last?.trackID)
+    let menu = AppleStockPlayerSubtitles()
+    menu.select(selected, on: engine)
+    let load = try #require(engine.externalSubtitleLoad)
+    await load.value
+    #expect(engine.activeSubtitleTrackID == track.id)
+    #expect(engine.subtitleCues.map(\.text) == ["From the add-on", "Second line"])
+    #expect(engine.subtitleCues.map(\.startTime) == [0, 4])
+    #expect(engine.subtitleCues.map(\.endTime) == [3, 6])
+    menu.refresh(from: engine)
+    #expect(menu.cues.map(\.text) == ["From the add-on"])
+    #expect(AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: 3).isEmpty)
+    #expect(AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: 5).first?.text == "Second line")
+    menu.select(nil, on: engine)
+    #expect(engine.subtitleCues.isEmpty)
+    #expect(menu.cues.isEmpty)
+}
+
+@MainActor
+@Test func nativeStopCancelsPendingSidecarAndClearsTracks() async throws {
+    let engine = NativePlaybackEngine()
+    engine.externalSubtitleDataLoader = readSubtitleFixture
+    engine.addExternalSubtitleTracks([nativeSubtitleFixture])
+    engine.selectSubtitleTrack(id: try #require(engine.subtitleTracks.first?.id))
+    let load = try #require(engine.externalSubtitleLoad)
+    engine.stop()
+    await load.value
+    #expect(engine.subtitleCues.isEmpty)
+    #expect(engine.subtitleTracks.isEmpty)
+    #expect(engine.activeSubtitleTrackID == nil)
+    #expect(engine.externalSubtitleLoad == nil)
+}
+
+@MainActor
+@Test func addOnWithMissingStremioLanguageBecomesANilLanguageTrack() throws {
+    let data = Data(#"{"subtitles":[{"id":"missing-lang","url":"https://fixture.example/subtitles.srt"}]}"#.utf8)
+    let parsed = try #require(AppleStremioPlaybackClient.parseSubtitles(data).first)
+    let track = AppleExternalSubtitleTrack(
+        id: parsed.id, languageCode: parsed.language, sourceName: "Fixture", url: parsed.url)
+    let native = NativePlaybackEngine()
+    let aether = try AetherPlaybackEngine()
+    for engine: any ApplePlaybackEngine in [native, aether] {
+        engine.addExternalSubtitleTracks([track])
+        #expect(try #require(engine.subtitleTracks.first).language == nil)
+        engine.stop()
+    }
+}
