@@ -8,6 +8,7 @@ struct AppleMediaShelf<Content: View>: View {
     var onOpen: (() -> Void)? = nil
     var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
+    @Environment(\.applePhoneDiscoverRows) private var phoneRows
     var body: some View {
         VStack(alignment: .leading, spacing: titleSpacing) {
             HStack(alignment: .center) {
@@ -16,7 +17,8 @@ struct AppleMediaShelf<Content: View>: View {
                         HStack(spacing: 8) {
                             Text(title).font(titleFont)
                             Image(systemName: "chevron.right")
-                                .font(.headline.bold())
+                                .font(phoneRows ? .body.weight(.bold) : .headline.bold())
+                                .foregroundStyle(phoneRows ? .secondary : .primary)
                         }
                         .multilineTextAlignment(.leading)
                         .frame(minHeight: 44, alignment: .leading)
@@ -51,10 +53,12 @@ struct AppleMediaShelf<Content: View>: View {
     private var cardGap: CGFloat { AppleTVBillboardMetrics.cardGap }
     private var verticalBleed: CGFloat { AppleTVBillboardMetrics.rowVerticalBleed }
     #else
-    private var titleFont: Font { .title.bold() }
-    private var titleSpacing: CGFloat { 12 }
+    // iPhone Discover (N11): a 20 pt header over a 12 pt card gap, per the
+    // Figma; rails are not snapped, so the trailing tile stays clipped (A11).
+    private var titleFont: Font { phoneRows ? .title3.bold() : .title.bold() }
+    private var titleSpacing: CGFloat { phoneRows ? 10 : 12 }
     private var horizontalInset: CGFloat { 16 }
-    private var cardGap: CGFloat { 8 }
+    private var cardGap: CGFloat { phoneRows ? AppleDiscoverPhoneRowMetrics.cardGap : 8 }
     private var verticalBleed: CGFloat { 4 }
     #endif
 }

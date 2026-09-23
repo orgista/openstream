@@ -414,6 +414,7 @@ struct AppleLocalTitleShelf: View {
             ForEach(groups) { group in
                 NavigationLink {
                     AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
+                        .environment(\.applePhoneDiscoverRows, false)
                 } label: {
                     VStack(alignment: .leading, spacing: 8) {
                         AppleCatalogCard(item: library.catalogItem(for: group))

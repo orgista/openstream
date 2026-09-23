@@ -223,59 +223,13 @@ struct AppleDiscoverView: View {
                             }
                         }
 
-                        let mergedCW = self.mergedContinueWatching
-                        if !mergedCW.isEmpty {
-                            indexedShelf(
-                                title: "Continue Watching",
-                                identifier: "continue",
-                                values: mergedCW,
-                                showsProgress: true
-                            )
-                        }
-
-                        let libraryGroups = library.resolvedGroups
-                        if !libraryGroups.isEmpty {
-                            AppleLocalTitleShelf(title: "Your Library", groups: libraryGroups,
-                                sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
-                                .accessibilityIdentifier("home.your-library")
-                        }
-
-                        ForEach(mediaServerLibrary.shelves) { shelf in
-                            AppleMediaShelf(title: shelf.title) {
-                                ForEach(shelf.items, id: \.mediaID) { item in
-                                    if let ref = AppleMediaServerItemReference.parse(item.mediaID),
-                                       let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) {
-                                        let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-                                        let value = IndexedCatalogItem(record: record, item: item, source: source)
-                                        NavigationLink { detail(value) } label: {
-                                            AppleCatalogCard(item: item)
-                                        }
-                                        .accessibilityIdentifier("home.ms.\(shelf.id).\(item.mediaID)")
-                                    }
-                                }
-                            }
-                        }
-
+                        // One list of rails. The iPhone held upright orders
+                        // it by the A4 rhythm (stills, then posters, then
+                        // stills); everywhere else it is the list as built.
+                        let continueShelf = continueWatchingShelf
                         let picks = topPicks
-                        if !picks.isEmpty {
-                            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: picks, showsProgress: false)
-                        }
-
-                        if settings.top10ListsEnabled {
-                            top10Shelf(title: "Top 10 Movies in the US", entries: top10Week?.films ?? [], type: "movie")
-                            top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series")
-                            if top10Week?.isStale == true {
-                                Text("Top 10 lists are stale because the latest update could not be downloaded.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 16)
-                            }
-                        }
-
-                        ForEach(visibleSections) { section in
-                            if let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-                                catalogSection(section, source: source)
-                            }
+                        ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
+                            railView(rail, continueWatching: continueShelf, picks: picks)
                         }
                     }
                     #if os(tvOS)
@@ -283,6 +237,7 @@ struct AppleDiscoverView: View {
                     #else
                     .padding(.vertical)
                     #endif
+                    .environment(\.applePhoneDiscoverRows, usesPhoneHero)
                 }
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
                 #if DEBUG
@@ -589,6 +544,151 @@ struct AppleDiscoverView: View {
             values.values.first { ApplePlaybackIdentity.digest(for: $0.item.mediaID) == rankedTitle.id }
         }
     }
+
+    /// A row on the home screen, in the order it is drawn.
+    private enum DiscoverRail: Hashable, Identifiable {
+        case continueWatching
+        case library
+        case mediaServer(String)
+        case topPicks
+        case top10(String)
+        case top10StaleNote
+        case catalog(String)
+        var id: Self { self }
+    }
+
+    /// Continue Watching as the shelf shows it. Review builds can stand in an
+    /// in-memory fixture (`-OpenStreamDebugContinueWatching YES`) when the
+    /// simulator has no progress; it is never written anywhere.
+    private var continueWatchingShelf: (values: [IndexedCatalogItem], isFixture: Bool) {
+        let merged = mergedContinueWatching
+        #if DEBUG
+        if merged.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
+        #endif
+        return (merged, false)
+    }
+
+    private func discoverRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DiscoverRail] {
+        var rails: [(DiscoverRail, AppleDiscoverRailRhythm.Shape)] = []
+        if !continueWatching.isEmpty { rails.append((.continueWatching, .still)) }
+        if !library.resolvedGroups.isEmpty { rails.append((.library, .poster)) }
+        rails += mediaServerLibrary.shelves.map { (.mediaServer($0.id), .poster) }
+        if !picks.isEmpty { rails.append((.topPicks, .still)) }
+        if settings.top10ListsEnabled {
+            if !(top10Week?.films ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
+            if !(top10Week?.tv ?? []).isEmpty { rails.append((.top10("series"), .still)) }
+        }
+        for section in visibleSections where sourceStore.sources.contains(where: { $0.id == section.sourceID }) {
+            let isRanked = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
+            rails.append((.catalog(section.id), isRanked ? .still : .poster))
+        }
+        var ordered = usesPhoneHero
+            ? AppleDiscoverRailRhythm.order(rails.map(\.1)).map { rails[$0].0 }
+            : rails.map(\.0)
+        if settings.top10ListsEnabled, top10Week?.isStale == true {
+            let lastTop10 = ordered.lastIndex { if case .top10 = $0 { true } else { false } }
+            ordered.insert(.top10StaleNote, at: lastTop10.map { $0 + 1 } ?? ordered.count)
+        }
+        return ordered
+    }
+
+    @ViewBuilder
+    private func railView(_ rail: DiscoverRail, continueWatching: (values: [IndexedCatalogItem], isFixture: Bool),
+                          picks: [IndexedCatalogItem]) -> some View {
+        switch rail {
+        case .continueWatching:
+            if usesPhoneHero {
+                continueWatchingPhoneShelf(continueWatching.values, isFixture: continueWatching.isFixture)
+            } else {
+                indexedShelf(title: "Continue Watching", identifier: "continue", values: continueWatching.values,
+                             showsProgress: true)
+            }
+        case .library:
+            AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
+                sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
+                .accessibilityIdentifier("home.your-library")
+        case .mediaServer(let id):
+            if let shelf = mediaServerLibrary.shelves.first(where: { $0.id == id }) {
+                AppleMediaShelf(title: shelf.title) {
+                    ForEach(shelf.items, id: \.mediaID) { item in
+                        if let ref = AppleMediaServerItemReference.parse(item.mediaID),
+                           let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) {
+                            let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+                            let value = IndexedCatalogItem(record: record, item: item, source: source)
+                            NavigationLink { detail(value) } label: {
+                                AppleCatalogCard(item: item)
+                            }
+                            .accessibilityIdentifier("home.ms.\(shelf.id).\(item.mediaID)")
+                        }
+                    }
+                }
+            }
+        case .topPicks:
+            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: picks, showsProgress: false)
+        case .top10(let type):
+            if type == "movie" {
+                top10Shelf(title: "Top 10 Movies in the US", entries: top10Week?.films ?? [], type: "movie")
+            } else {
+                top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series")
+            }
+        case .top10StaleNote:
+            Text("Top 10 lists are stale because the latest update could not be downloaded.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+        case .catalog(let id):
+            if let section = visibleSections.first(where: { $0.id == id }),
+               let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
+                catalogSection(section, source: source)
+            }
+        }
+    }
+
+    /// A2 on the iPhone: stills with the time left, the accent bar, and a
+    /// caption row carrying a ⋯ menu.
+    private func continueWatchingPhoneShelf(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+        let store = ApplePlaybackStore()
+        return AppleMediaShelf(title: "Continue Watching") {
+            ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
+                AppleContinueWatchingPhoneTile(
+                    item: value.item,
+                    info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
+                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                    onOpenTitle: { selectHero(value, autoPlay: false) },
+                    onToggleList: { toggleHeroInList(value) }
+                ) {
+                    detail(value)
+                }
+                .accessibilityIdentifier("home.continue.\(value.id)")
+            }
+        }
+    }
+
+    private func continueWatchingInfo(_ value: IndexedCatalogItem, index: Int, isFixture: Bool,
+                                      store: ApplePlaybackStore) -> AppleContinueWatchingTileInfo {
+        #if DEBUG
+        if isFixture { return AppleContinueWatchingFixture.info(index: index, type: value.item.type) }
+        #endif
+        return .live(type: value.item.type, recordID: value.record.id, recordProgress: value.record.progress,
+                     store: store)
+    }
+
+    #if DEBUG
+    /// Real catalogue titles with backdrops standing in as Continue Watching.
+    private var continueWatchingFixture: [IndexedCatalogItem] {
+        var values: [IndexedCatalogItem] = []
+        for section in visibleSections {
+            guard let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) else { continue }
+            for item in section.items where item.backgroundURL != nil
+                && !values.contains(where: { $0.item.mediaID == item.mediaID }) {
+                let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+                values.append(IndexedCatalogItem(record: record, item: item, source: source))
+                if values.count == AppleContinueWatchingFixture.count { return values }
+            }
+        }
+        return values
+    }
+    #endif
 
     private func loadTop10() {
         Task {
@@ -901,6 +1001,7 @@ struct AppleDiscoverView: View {
             initialAutoPlay: initialAutoPlay,
             mediaServerLibrary: mediaServerLibrary
         )
+        .environment(\.applePhoneDiscoverRows, false)
     }
 
     private var catalogLookupIdentity: String {
@@ -1310,6 +1411,7 @@ private struct AppleCatalogSectionView: View {
             settings: settings,
             openSettings: openSettings
         )
+        .environment(\.applePhoneDiscoverRows, false)
     }
 
 }
@@ -1317,6 +1419,7 @@ private struct AppleCatalogSectionView: View {
 private struct AppleTop10Card: View {
     let item: AppleCatalogItem
     let rank: Int
+    @Environment(\.applePhoneDiscoverRows) private var phoneRows
 
     private var cardWidth: CGFloat {
         #if os(tvOS)
@@ -1329,28 +1432,36 @@ private struct AppleTop10Card: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             AppleCatalogCard(item: item, sizing: .ranked)
-            HStack(alignment: .center, spacing: 12) {
-                AppleTop10RankNumeral(rank: rank)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.gray)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 0)
+            if phoneRows {
+                AppleTop10PhoneCaption(item: item, rank: rank)
+            } else {
+                standardCaption
             }
-            .frame(width: cardWidth, alignment: .leading)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(rank), \(item.name)")
         .accessibilityValue(AppleCatalogShelfPolicy.rankedSubtitle(for: item))
+    }
+
+    private var standardCaption: some View {
+        HStack(alignment: .center, spacing: 12) {
+            AppleTop10RankNumeral(rank: rank)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.gray)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(width: cardWidth, alignment: .leading)
     }
 }
 
@@ -1428,18 +1539,29 @@ struct AppleCatalogCard: View {
     let sizing: AppleCatalogCardSizing
     let viewportWidth: CGFloat?
     let progress: Double?
+    /// "57 MIN LEFT" on an iPhone Discover Continue Watching still.
+    let remainingLabel: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
+    @Environment(\.applePhoneDiscoverRows) private var phoneRows
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var artworkFailed = false
 
-    init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil, progress: Double? = nil) {
+    init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
+         progress: Double? = nil, remainingLabel: String? = nil) {
         self.item = item
         self.sizing = sizing
         self.viewportWidth = viewportWidth
         self.progress = progress
+        self.remainingLabel = remainingLabel
+    }
+
+    /// The iPhone Discover style applies to the home rails only, never to a
+    /// detail page's suggestions or the full-width promo card.
+    private var usesPhoneRowStyle: Bool {
+        phoneRows && [.catalog, .featured, .continueWatching, .ranked].contains(sizing)
     }
 
     private var resolvedPosterURL: URL? {
@@ -1469,9 +1591,25 @@ struct AppleCatalogCard: View {
                                 onLoad: { artworkFailed = false })
                 .frame(width: cardWidth, height: cardHeight)
                 .overlay { if artworkFailed || resolvedPosterURL == nil { artworkPlaceholder } }
+                .overlay {
+                    // Figma's diagonal on the Top 10 tile (owner: follow the
+                    // Figma for card gradients, these rows only).
+                    if usesPhoneRowStyle && sizing == .ranked {
+                        LinearGradient(colors: [.black.opacity(0.45), .clear],
+                                       startPoint: .bottomLeading, endPoint: .topTrailing)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if usesPhoneRowStyle, let remainingLabel { AppleRemainingTimePill(label: remainingLabel) }
+                }
+                .overlay(alignment: .bottom) {
+                    if usesPhoneRowStyle, let progress { AppleStillProgressBar(progress: progress, width: cardWidth) }
+                }
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay(alignment: .bottom) {
-                    if let progress {
+                    if !usesPhoneRowStyle, let progress {
                         GeometryReader { geometry in
                             Capsule()
                                 .fill(.white.opacity(0.3))
@@ -1488,24 +1626,36 @@ struct AppleCatalogCard: View {
                 }
                 .onChange(of: resolvedPosterURL) { _, _ in artworkFailed = false }
                 .task(id: item.id) {
-                    guard item.posterURL == nil else { return }
+                    // An iPhone Discover still wants the backdrop: a title
+                    // that arrives with a poster only (a Top 10 match found by
+                    // search) asks TMDB for one rather than cropping the poster
+                    // into 16:9. Other platforms keep their behaviour.
+                    let wantsBackdrop = usesPhoneRowStyle && isLandscapeCard && item.backgroundURL == nil
+                    guard item.posterURL == nil || wantsBackdrop else { return }
                     fallbackArtwork = await AppleArtworkResolver.shared.resolve(
                         mediaID: item.mediaID,
                         type: item.type,
-                        existingPosterURL: item.posterURL,
+                        existingPosterURL: wantsBackdrop ? nil : item.posterURL,
                         existingBackgroundURL: item.backgroundURL,
                         configuration: metadataConfiguration
                     )
                 }
 
-            if showsTitle {
+            if showsTitle && usesPhoneRowStyle {
+                // Figma: 12 pt medium at 70 % white, clamped at a word.
+                AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 4 : 2,
+                                     reservesSpace: true)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: cardWidth, alignment: .leading)
+            } else if showsTitle {
                 Text(item.name)
                     .font(.caption)
                     .lineLimit(2, reservesSpace: true)
                     .truncationMode(.tail)
                     .frame(width: cardWidth, alignment: .leading)
             }
-            if progress == nil, showsTitle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
+            if progress == nil, showsTitle, !usesPhoneRowStyle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
                 Text(releaseInfo)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1525,6 +1675,8 @@ struct AppleCatalogCard: View {
 
     private var showsTitle: Bool {
         if sizing == .ranked || sizing == .portraitPromo { return false }
+        // The Continue Watching tile draws its own caption row, with the menu.
+        if usesPhoneRowStyle && sizing == .continueWatching { return false }
         #if os(tvOS)
         return isLandscapeCard
         #else
@@ -1533,6 +1685,13 @@ struct AppleCatalogCard: View {
     }
 
     private var cardWidth: CGFloat {
+        if usesPhoneRowStyle {
+            switch sizing {
+            case .ranked: return AppleDiscoverPhoneRowMetrics.rankedWidth
+            case .continueWatching, .featured: return AppleDiscoverPhoneRowMetrics.stillWidth
+            default: return AppleDiscoverPhoneRowMetrics.posterWidth
+            }
+        }
         if sizing == .portraitPromo {
             #if os(tvOS)
             return 400

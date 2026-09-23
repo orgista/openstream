@@ -1,0 +1,246 @@
+import SwiftUI
+
+extension EnvironmentValues {
+    /// True inside Discover on an iPhone held upright: shelves, cards and
+    /// captions take the Apple TV app's row style (N11). Every other screen
+    /// and platform leaves it false and keeps its own look; pages pushed from
+    /// Discover set it back to false.
+    @Entry var applePhoneDiscoverRows = false
+}
+
+/// Text clamped to a line budget at a word boundary (A4 note: never
+/// mid-word). The budget is in lines, so it grows with Dynamic Type; the text
+/// takes only the lines it needs, up to that budget, unless `reservesSpace`.
+struct AppleWordClampedText: View {
+    let text: String
+    let lines: Int
+    /// Take the whole budget however short the text. Poster rails need it:
+    /// the lazy row sizes every card off the first one, so a two-line title
+    /// after a one-line one was cut to its first line (trace, 2026-09-23).
+    var reservesSpace = false
+
+    var body: some View {
+        let candidates = AppleWordClamp.candidates(text)
+        AppleWordClampLayout(reservesSpace: reservesSpace) {
+            // The probe: `lines` lines of the current font, never shown. A
+            // glyph on every line: Text drops a trailing blank line, which
+            // made "\n " measure one line short.
+            Text(verbatim: Array(repeating: "X", count: max(lines, 1)).joined(separator: "\n"))
+            ForEach(candidates.indices, id: \.self) { index in
+                Text(verbatim: candidates[index])
+            }
+            // One word longer than the tile: the only case a word can be
+            // cut, and the last line still ends in an ellipsis.
+            Text(verbatim: candidates.last ?? text).lineLimit(lines)
+        }
+        // Left-aligned as in the Figma; a link label centres multi-line text.
+        .multilineTextAlignment(.leading)
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+}
+
+/// Measures the probe (first subview) for the line budget, then shows the
+/// first candidate that fits it at the offered width. `ViewThatFits` was
+/// tried first; inside a horizontal rail its height proposal is not the
+/// budget, and it fell back to one-word captions at AX sizes.
+struct AppleWordClampLayout: Layout {
+    var reservesSpace = false
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let (_, size) = choice(width: proposal.width, subviews: subviews) else { return .zero }
+        let budget = subviews[subviews.startIndex].sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(width: proposal.width ?? size.width,
+                      height: reservesSpace ? max(size.height, budget.height) : size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let chosen = choice(width: bounds.width, subviews: subviews)?.index
+        for index in subviews.indices {
+            if index == chosen {
+                subviews[index].place(at: bounds.origin, anchor: .topLeading,
+                                      proposal: ProposedViewSize(width: bounds.width, height: nil))
+            } else {
+                subviews[index].place(at: CGPoint(x: bounds.minX - 100_000, y: bounds.minY),
+                                      anchor: .topLeading, proposal: .zero)
+            }
+        }
+    }
+
+    private func choice(width: CGFloat?, subviews: Subviews) -> (index: Int, size: CGSize)? {
+        guard subviews.count > 1 else { return nil }
+        let proposal = ProposedViewSize(width: width, height: nil)
+        let budget = subviews[subviews.startIndex].sizeThatFits(proposal).height
+        for index in subviews.indices.dropFirst() {
+            let size = subviews[index].sizeThatFits(proposal)
+            if size.height <= budget + 0.5 { return (index, size) }
+        }
+        let last = subviews.index(before: subviews.endIndex)
+        return (last, subviews[last].sizeThatFits(proposal))
+    }
+}
+
+/// What a Continue Watching still says: the progress bar, the "MIN LEFT"
+/// pill and the line under the title.
+struct AppleContinueWatchingTileInfo: Equatable {
+    var progress: Double
+    var remainingLabel: String?
+    var subtitle: String
+
+    @MainActor
+    static func live(type: String, recordID: String, recordProgress: Double?,
+                     store: ApplePlaybackStore) -> Self {
+        let saved = store.progress(for: recordID)
+        let fraction = saved.map { AppleWatchProgress.fraction(position: $0.position, duration: $0.duration) }
+            ?? recordProgress ?? 0
+        return Self(
+            progress: fraction,
+            remainingLabel: saved.flatMap {
+                AppleContinueWatchingCaption.remainingLabel(position: $0.position, duration: $0.duration)
+            },
+            subtitle: AppleContinueWatchingCaption.subtitle(type: type, partID: saved?.partID)
+        )
+    }
+}
+
+/// A2: a 16:9 still with the pill and bar on it, and under it the title, the
+/// "Continue · S1, E3" line and a ⋯ menu of the actions the app already has.
+struct AppleContinueWatchingPhoneTile<Destination: View>: View {
+    let item: AppleCatalogItem
+    let info: AppleContinueWatchingTileInfo
+    let isInList: Bool
+    let onOpenTitle: () -> Void
+    let onToggleList: () -> Void
+    @ViewBuilder let destination: () -> Destination
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            NavigationLink(destination: destination) {
+                AppleCatalogCard(item: item, sizing: .continueWatching, progress: info.progress,
+                                 remainingLabel: info.remainingLabel)
+            }
+            .accessibilityValue([info.remainingLabel?.capitalized, info.subtitle].compactMap { $0 }.joined(separator: ", "))
+            HStack(alignment: .top, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
+                    AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                        .font(.footnote.weight(.semibold))
+                    Text(info.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                }
+                Menu {
+                    Button(item.type == "movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle",
+                           action: onOpenTitle)
+                    Button(isInList ? "Remove from My List" : "Add to My List",
+                           systemImage: isInList ? "checkmark" : "plus", action: onToggleList)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .frame(width: 44, height: 32)
+                        .contentShape(.rect)
+                }
+                .accessibilityLabel("More for \(item.name)")
+                .padding(.trailing, -12)
+            }
+            .frame(width: AppleDiscoverPhoneRowMetrics.stillWidth, alignment: .leading)
+        }
+    }
+}
+
+/// A3: the rank sits outside the art, beside the caption under the tile.
+struct AppleTop10PhoneCaption: View {
+    let item: AppleCatalogItem
+    let rank: Int
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        // At AX sizes the numeral goes above the caption, so the title keeps
+        // the tile's full width and wraps at words, not inside them.
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        layout {
+            AppleTop10RankNumeral(rank: rank, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 3 : 1,
+                                     reservesSpace: true)
+                    .font(.footnote.weight(.semibold))
+                let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                }
+            }
+        }
+        .frame(width: AppleDiscoverPhoneRowMetrics.rankedWidth, alignment: .leading)
+    }
+}
+
+/// "57 MIN LEFT" on the top-left of a Continue Watching still.
+struct AppleRemainingTimePill: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 10, weight: .bold))
+            .tracking(0.3)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.7), in: .rect(cornerRadius: 6))
+            .background(.ultraThinMaterial, in: .rect(cornerRadius: 6))
+            .padding(8)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The 3 pt bar along the bottom of a still, in the app accent.
+struct AppleStillProgressBar: View {
+    let progress: Double
+    let width: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(.white.opacity(0.15))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(AppleDesignTokens.brandAccent)
+                    .frame(width: width * min(max(progress, 0), 1))
+            }
+            .frame(height: AppleDiscoverPhoneRowMetrics.progressHeight)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+#if DEBUG
+/// Review builds only: Continue Watching tiles for a simulator that has no
+/// progress, so the row can be photographed without playing anything. The
+/// tiles are real catalogue titles; the progress lives in memory and is never
+/// written to the playback store or the media index.
+enum AppleContinueWatchingFixture {
+    static let launchKey = "OpenStreamDebugContinueWatching"
+    static let count = 4
+
+    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: launchKey) }
+
+    static func info(index: Int, type: String) -> AppleContinueWatchingTileInfo {
+        // (fraction watched, minutes left or nil for an unknown length, S, E)
+        let pattern: [(Double, Double?, Int, Int)] = [(0.40, 57, 1, 3), (0.72, 8, 2, 5), (0.20, 81, 3, 1), (0.55, nil, 1, 7)]
+        let (fraction, minutesLeft, season, episode) = pattern[index % pattern.count]
+        let partID = type == "movie" ? nil : "fixture:\(season):\(episode)"
+        let label = minutesLeft.flatMap { left -> String? in
+            let duration = left * 60 / (1 - fraction)
+            return AppleContinueWatchingCaption.remainingLabel(position: duration * fraction, duration: duration)
+        }
+        return AppleContinueWatchingTileInfo(progress: fraction, remainingLabel: label,
+                                             subtitle: AppleContinueWatchingCaption.subtitle(type: type, partID: partID))
+    }
+}
+#endif
