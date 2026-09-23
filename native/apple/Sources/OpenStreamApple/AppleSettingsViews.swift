@@ -955,7 +955,7 @@ private struct ApplePlaybackSettingsView: View {
                 // and the actual language list is the row underneath it. That
                 // pair is what left the owner thinking subtitles were chosen
                 // when captions were still off (review 2026-09-14).
-                Picker("Show Captions", selection: $settings.captionsPreference) {
+                Picker("Show Captions", selection: $settings.storedCaptionsPreference) {
                     Text("Off").tag(AppleCaptionsPreference.off)
                     Text("English").tag(AppleCaptionsPreference.english)
                     Text("Device Language").tag(AppleCaptionsPreference.deviceLanguage)

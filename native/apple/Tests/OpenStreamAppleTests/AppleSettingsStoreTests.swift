@@ -1,5 +1,11 @@
 import Foundation
+import MediaAccessibility
+import Observation
+import SwiftUI
 import Testing
+#if os(iOS) || os(tvOS)
+import UIKit
+#endif
 @testable import OpenStreamApple
 
 /// A no-op credential store so settings-store tests never touch the keychain.
@@ -147,6 +153,93 @@ func systemCaptionsEnableWithoutOverwritingTheSavedAppChoice() throws {
     store.captionsPreference = .english
     #expect(store.captionsPreference == .english)
     #expect(defaults.string(forKey: captionsPreferenceKey) == "english")
+}
+
+/// Exercise the same projected binding used by the Settings picker, including
+/// choosing Off while the system continues to enable captions for playback.
+@MainActor
+@Test(arguments: AppleCaptionsPreference.allCases)
+func captionsPickerKeepsTheStoredChoiceWithSystemCaptionsOn(choice: AppleCaptionsPreference) throws {
+    let name = "openstream.tests.caption-picker.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    @Bindable var store = AppleSettingsStore(
+        defaults: defaults, keychain: StubCredentialStore(),
+        systemCaptionsEnabled: { true }, captionNotificationCenter: NotificationCenter()
+    )
+    let selection = $store.storedCaptionsPreference
+    selection.wrappedValue = choice
+
+    #expect(selection.wrappedValue == choice)
+    #expect(store.captionsPreference == (choice == .off ? .always : choice))
+    #expect(defaults.string(forKey: captionsPreferenceKey) == choice.rawValue)
+    let reread = AppleSettingsStore(
+        defaults: defaults, keychain: StubCredentialStore(),
+        systemCaptionsEnabled: { true }, captionNotificationCenter: NotificationCenter()
+    )
+    #expect(reread.storedCaptionsPreference == choice)
+}
+
+private var systemCaptionNotificationNames: [Notification.Name] {
+    var names = [Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String)]
+    #if os(iOS) || os(tvOS)
+    names.append(UIAccessibility.closedCaptioningStatusDidChangeNotification)
+    #endif
+    return names
+}
+
+@MainActor
+@Test(arguments: systemCaptionNotificationNames)
+func systemCaptionNotificationInvalidatesEffectivePreference(notification: Notification.Name) async throws {
+    let name = "openstream.tests.caption-observation.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    defaults.set("off", forKey: captionsPreferenceKey)
+    let center = NotificationCenter()
+    var systemOn = false
+    let store = AppleSettingsStore(
+        defaults: defaults, keychain: StubCredentialStore(),
+        systemCaptionsEnabled: { systemOn }, captionNotificationCenter: center
+    )
+
+    await confirmation("system changes leave the stored choice alone", expectedCount: 0) { storedChanged in
+        withObservationTracking {
+            _ = store.storedCaptionsPreference
+        } onChange: {
+            storedChanged()
+        }
+        for enabled in [true, false] {
+            await confirmation("effective preference reader is invalidated") { changed in
+                let before = withObservationTracking {
+                    store.captionsPreference
+                } onChange: {
+                    changed()
+                }
+                #expect(before == (enabled ? .off : .always))
+                systemOn = enabled
+                center.post(name: notification, object: nil)
+                #expect(store.captionsPreference == (enabled ? .always : .off))
+                #expect(store.storedCaptionsPreference == .off)
+                #expect(defaults.string(forKey: captionsPreferenceKey) == "off")
+            }
+        }
+    }
+}
+
+@MainActor
+@Test
+func captionNotificationsDoNotRetainSettingsStore() {
+    let center = NotificationCenter()
+    var store: AppleSettingsStore? = AppleSettingsStore(
+        defaults: makeIsolatedDefaults(), keychain: StubCredentialStore(),
+        systemCaptionsEnabled: { false }, captionNotificationCenter: center
+    )
+    weak let releasedStore = store
+    store = nil
+    #expect(releasedStore == nil)
+    for name in systemCaptionNotificationNames {
+        center.post(name: name, object: nil)
+    }
 }
 
 @MainActor

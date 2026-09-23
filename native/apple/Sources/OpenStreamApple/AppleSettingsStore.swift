@@ -2,6 +2,9 @@ import Foundation
 import MediaAccessibility
 import Observation
 import Security
+#if os(iOS) || os(tvOS)
+import UIKit
+#endif
 
 public enum AppleKeychainStoreError: LocalizedError, Sendable {
     case unexpectedStatus(OSStatus)
@@ -181,7 +184,7 @@ public enum AppleZIPCodePolicy {
     public static func isValid(_ value: String) -> Bool { normalize(value) != nil }
 }
 
-/// Preferred caption behaviour, stored in `AppleSettingsStore.captionsPreference`
+/// Preferred caption behaviour, stored in `AppleSettingsStore.storedCaptionsPreference`
 /// and surfaced under Settings → Playback → Captions. `.off` shows nothing; the
 /// other values auto-select a subtitle track on load when one is available —
 /// `.english` and `.deviceLanguage` only when a track's language matches,
@@ -309,14 +312,22 @@ public final class AppleSettingsStore {
 
     /// Saved app choice. The system CC + SDH switch can additionally enable
     /// captions, without changing this value or its persisted representation.
-    private var storedCaptionsPreference: AppleCaptionsPreference {
+    public var storedCaptionsPreference: AppleCaptionsPreference {
         didSet { defaults.set(storedCaptionsPreference.rawValue, forKey: DefaultsKey.captionsPreference) }
     }
+    /// Playback preference, including the system CC + SDH switch. Settings
+    /// binds to `storedCaptionsPreference` so the saved choice remains editable.
     public var captionsPreference: AppleCaptionsPreference {
-        get { .effective(storedCaptionsPreference, systemCaptionsEnabled: systemCaptionsEnabled()) }
+        get {
+            _ = systemCaptionsRevision
+            return .effective(storedCaptionsPreference, systemCaptionsEnabled: systemCaptionsEnabled())
+        }
         set { storedCaptionsPreference = newValue }
     }
+    private var systemCaptionsRevision = 0
     @ObservationIgnored private let systemCaptionsEnabled: () -> Bool
+    @ObservationIgnored private let captionNotificationCenter: NotificationCenter
+    @ObservationIgnored private var captionObservers: [NSObjectProtocol] = []
 
     /// Compatibility shim for the former "Captions Auto-On" toggle, now folded
     /// into `captionsPreference`: `true` ↔ `.always`, `false` ↔ `.off`. Kept so
@@ -485,11 +496,13 @@ public final class AppleSettingsStore {
         keychain: any AppleCredentialStoring = AppleKeychainStore(),
         systemCaptionsEnabled: @escaping () -> Bool = {
             MACaptionAppearanceGetDisplayType(.user) == .alwaysOn
-        }
+        },
+        captionNotificationCenter: NotificationCenter = .default
     ) {
         self.defaults = defaults
         self.keychain = keychain
         self.systemCaptionsEnabled = systemCaptionsEnabled
+        self.captionNotificationCenter = captionNotificationCenter
 
         metadataEnabled = defaults.object(forKey: DefaultsKey.metadataEnabled) as? Bool ?? false
         radarrURL = defaults.string(forKey: DefaultsKey.radarrURL) ?? ""
@@ -562,6 +575,27 @@ public final class AppleSettingsStore {
         traktClientSecret = load(SecretKey.traktClientSecret)
         unreadableSecretAccounts = unreadable
         persistenceError = firstReadError
+        observeSystemCaptions()
+    }
+
+    private func observeSystemCaptions() {
+        var names = [Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String)]
+        #if os(iOS) || os(tvOS)
+        names.append(UIAccessibility.closedCaptioningStatusDidChangeNotification)
+        #endif
+        captionObservers = names.map { name in
+            captionNotificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // NotificationCenter delivers on the main queue, including
+                // when the system posts the change from a background thread.
+                MainActor.assumeIsolated { self?.systemCaptionsRevision &+= 1 }
+            }
+        }
+    }
+
+    isolated deinit {
+        for observer in captionObservers {
+            captionNotificationCenter.removeObserver(observer)
+        }
     }
 
     public func clearPersistenceError() {
