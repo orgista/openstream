@@ -256,13 +256,34 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertTrue(metadata.waitForExistence(timeout: 30), "no Metadata row in Settings")
         metadata.tap()
 
-        let fields = app.secureTextFields
-        XCTAssertTrue(fields.firstMatch.waitForExistence(timeout: 20), "the Metadata fields never appeared")
-        XCTAssertGreaterThanOrEqual(fields.count, 2, "expected TMDB and OMDb fields")
+        // Metadata is off on a clean install, which disables both fields.
+        // Exercise the real toggle and restore it even if a keyboard check fails.
+        let enabled = app.switches["Use Metadata APIs"].firstMatch
+        XCTAssertTrue(enabled.waitForExistence(timeout: 10))
+        if enabled.value as? String == "0" {
+            addTeardownBlock { [self] in
+                app.terminate()
+                app.launchArguments = []
+                launch(screen: "metadata")
+                let toggle = app.switches["Use Metadata APIs"].firstMatch
+                XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+                if toggle.value as? String == "1" { toggle.switches.firstMatch.tap() }
+                XCTAssertEqual(toggle.value as? String, "0", "Metadata setting was not restored")
+            }
+            // iOS 27 exposes the labelled row and its actual switch separately.
+            // The row's centre is the label, which doesn't toggle the control.
+            enabled.switches.firstMatch.tap()
+        }
+
+        let first = app.secureTextFields["API key or read token"]
+        let last = app.secureTextFields["API key"]
+        XCTAssertTrue(first.waitForExistence(timeout: 20), "the TMDB field never appeared")
+        XCTAssertTrue(last.exists, "the OMDb field never appeared")
+        XCTAssertTrue(first.isEnabled && last.isEnabled, "Metadata fields must be enabled to test the keyboard")
 
         // First field: another one follows, so the return key should offer to
         // go there rather than just dismiss.
-        fields.element(boundBy: 0).tap()
+        first.tap()
         let next = app.keyboards.buttons["next"]
         let hasNext = next.waitForExistence(timeout: 10)
         // Attach *after* the key is found: capturing on a fixed sleep caught the
@@ -270,16 +291,20 @@ final class AppleiOSUITests: XCTestCase {
         // keyboard at all while the assertion was passing.
         attach("ios-return-key-first-field")
         print("RETURNKEY first field: next=\(hasNext)")
+        XCTAssertTrue(hasNext, "the first field's return key does not offer the next field")
 
-        // Last field: nothing follows it.
-        fields.element(boundBy: 1).tap()
+        // Follow the actual submit chain; tapping the last field directly
+        // would let a broken onSubmit handler pass.
+        next.tap()
         let done = app.keyboards.buttons["done"]
         let hasDone = done.waitForExistence(timeout: 10)
         attach("ios-return-key-last-field")
         print("RETURNKEY last field: done=\(hasDone)")
 
-        XCTAssertTrue(hasNext, "the first field's return key does not offer the next field")
         XCTAssertTrue(hasDone, "the last field's return key does not read done")
+        done.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5),
+            "the last field's return key did not dismiss the keyboard")
     }
 
     /// Owner F2, and the complaint that started it: "I search for Jury duty

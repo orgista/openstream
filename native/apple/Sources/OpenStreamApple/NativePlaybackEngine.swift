@@ -408,6 +408,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         var options: [Int: AVMediaSelectionOption] = [:]
         var tracks: [ApplePlaybackTrack] = []
         for (index, option) in group.options.enumerated() {
+            appleTrace("native legible option \(index): title=\(option.displayName), language=\(option.extendedLanguageTag ?? option.locale?.identifier ?? "und"), type=\(option.mediaType.rawValue), subtypes=\(option.mediaSubTypes), playable=\(option.isPlayable), forced=\(option.hasMediaCharacteristic(.containsOnlyForcedSubtitles))")
             // Forced tracks are for untranslated foreign dialogue and are
             // applied by the system, not chosen from a captions menu.
             guard let track = Self.subtitleTrack(

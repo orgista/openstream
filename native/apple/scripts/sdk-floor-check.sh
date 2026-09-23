@@ -7,6 +7,8 @@
 #
 # Every Mach-O inside is checked (app, extensions, frameworks, watch app):
 # its LC_BUILD_VERSION minos must not exceed the floor for its platform.
+# macOS executables under Contents/MacOS must also be arm64-only; embedded
+# frameworks may retain their prebuilt Intel slices.
 # FLOOR_OVERRIDE=99.0 forces every floor to 99.0 (to check the script itself
 # still passes); FLOOR_OVERRIDE=1.0 must make it fail.
 set -uo pipefail
@@ -47,6 +49,12 @@ while IFS= read -r -d '' file; do
         arch_args=(); [[ "$arch" != unknown ]] && arch_args=(-arch "$arch")
         while read -r platform minos; do
             [[ -z "$platform" ]] && continue
+            if [[ "$platform" == MACOS && "$arch" == x86_64 \
+                  && "$file" == */Contents/MacOS/* && "$rel" != *.framework/* \
+                  && "$rel" != */Frameworks/* ]] \
+                  && otool -arch "$arch" -hv "$file" 2>/dev/null | grep -qw EXECUTE; then
+                fail "$rel [$arch]: macOS executable contains x86_64 (arm64-only)"
+            fi
             floor="$(floor_for "$platform")"
             # Xcode 27 adds an arm64 slice to watch binaries for the watches that run
             # watchOS 26+; Apple gives that slice minos 26.0. Older watches load the
