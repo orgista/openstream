@@ -171,8 +171,7 @@ public final class AppleTransportOverlayModel {
     }
 
     /// Decoded cues for the active subtitle track, mirrored from the engine for
-    /// the overlay to render on `.surface`. Empty on `.avPlayer` routes where the
-    /// system player's captions menu renders the track.
+    /// the overlay to render on `.surface`.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
 
     /// The subtitle track the user selected through the overlay, tracked locally
@@ -401,12 +400,10 @@ public final class AppleTransportOverlayModel {
     }
 
     /// The cue active at the current position, for the overlay to render on
-    /// `.surface`. nil when no track is selected, no cue overlaps the position,
-    /// or the route is `.avPlayer` (cues are empty there — the system captions
-    /// menu renders the track).
+    /// `.surface`. nil when no track is selected or no cue overlaps the
+    /// position. The stock player has its own `AppleStockPlayerSubtitles`.
     public var activeSubtitleCue: AppleSubtitleCue? {
-        guard !subtitleCues.isEmpty else { return nil }
-        return subtitleCues.first { position >= $0.startTime && position < $0.endTime }
+        AppleSubtitleCueLayerPolicy.activeCue(in: subtitleCues, at: position)
     }
 
     // MARK: - Route-derived secondary actions

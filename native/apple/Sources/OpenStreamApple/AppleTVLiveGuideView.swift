@@ -1274,6 +1274,8 @@ struct AppleTVLivePlayerScreen: View {
     /// "Captions on" / "off" / "none", shown briefly after a swipe up.
     @State private var captionsNotice: String?
     @State private var captionsNoticeTask: Task<Void, Never>?
+    /// The captions the OpenStream engine leaves to the app on this route.
+    @State private var stockSubtitles = AppleStockPlayerSubtitles()
     @Binding var footer: AppleTVLiveFooterState
 
     let channel: AppleIPTVChannel
@@ -1435,6 +1437,14 @@ struct AppleTVLivePlayerScreen: View {
         ZStack {
             AppleTVLivePlayerControllerRepresentable(viewController: host.viewController)
                 .ignoresSafeArea()
+
+            // Below the invisible focus button so it can never be a focus or
+            // press target; the strip lifts it rather than covering it.
+            if AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route) {
+                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles)
+                    .padding(.bottom, footer.isVisible ? metrics.footerHeight : 0)
+                    .ignoresSafeArea()
+            }
 
             if !footer.isVisible {
                 Button {
@@ -1604,7 +1614,9 @@ struct AppleTVLivePlayerScreen: View {
         if tracks.isEmpty {
             notice = "No captions on this channel"
         } else {
-            engine.selectSubtitleTrack(id: next)
+            // Through the cue layer's object so a pick while paused shows (or
+            // clears) the cue at once rather than on the next position tick.
+            stockSubtitles.select(next, on: engine)
             notice = next == nil ? "Captions off" : "Captions on"
         }
         #if DEBUG

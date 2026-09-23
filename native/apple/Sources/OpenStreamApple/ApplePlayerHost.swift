@@ -61,8 +61,9 @@ public final class ApplePlayerHost {
         #else
         let controller = AVPlayerViewController()
         // Owner decision (plan Task 7e): the stock Apple transport UI on every
-        // AVKit route. Subtitles reach the system captions menu through the
-        // loopback HLS renditions; the only thing removed is Live Text
+        // AVKit route. The OpenStream engine's subtitles are drawn by the app
+        // (`AppleStockPlayerCueLayer`): its loopback renditions exist for PiP
+        // and AirPlay only. The only thing removed is Live Text
         // (`allowsVideoFrameAnalysis = false` below).
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true

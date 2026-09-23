@@ -79,9 +79,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     /// Decoded cues for the active subtitle track, mirrored from the engine for
-    /// the `.surface` overlay to render. Not emitted through `events`; the model
-    /// re-reads it on position ticks. Empty on `.avPlayer` routes where the
-    /// system player's own captions menu renders the track.
+    /// the app to draw on both routes (the engine keeps AVPlayer's legible
+    /// group deselected on `.avPlayer`). Not emitted through `events`; readers
+    /// re-read it on position ticks.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
     /// The track `applySubtitleSelection` last put on screen, auto-selection
     /// included. The overlay's CC key reads it so it starts in the state the

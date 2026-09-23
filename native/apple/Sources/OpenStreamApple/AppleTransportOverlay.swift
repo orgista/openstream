@@ -216,29 +216,10 @@ struct AppleTransportOverlay: View {
             .padding(.bottom, bottomBarHeight + AppleDesignTokens.spacingMedium)
 
             if model.showsWaitingIndicator { waitingIndicator }
-            // Cues sit against the **picture**, not the screen. On Apple TV the
-            // video is full-bleed so this adds nothing and the layout is
-            // unchanged; on a phone in portrait the video letterboxes into a
-            // band and the caption used to float ~450 pt below it, in the black
-            // (2026-09-16). See `AppleVideoFitting`.
-            GeometryReader { proxy in
-                VStack {
-                    Spacer()
-                    subtitleCueView
-                        // Inside the frame, not outside it. Padding applied
-                        // *after* `.frame` expands the view instead of lifting
-                        // the cue within it — which is why the first attempt
-                        // built, passed its geometry tests and changed nothing
-                        // on screen (2026-09-16).
-                        .padding(.bottom, AppleVideoFitting.captionBottomInset(
-                            container: proxy.size,
-                            videoSize: coordinator.engine.videoSize
-                        ))
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
-            }
-            .padding(.bottom, model.controlsVisible ? 100 : 24)
-            .allowsHitTesting(false)
+            // Cues sit against the **picture**, not the screen; the same
+            // layer is mounted over the stock player on `.avPlayer`.
+            AppleSubtitleCueLayer(cue: model.activeSubtitleCue, videoSize: coordinator.engine.videoSize)
+                .padding(.bottom, model.controlsVisible ? 100 : 24)
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -643,40 +624,6 @@ struct AppleTransportOverlay: View {
         #if os(tvOS)
         .focusable()
         #endif
-    }
-
-    /// The active subtitle cue rendered at the bottom of the surface. Text and
-    /// rich-text cues render as a centred label; `.image` cues (PGS/DVB) render
-    /// as the decoded bitmap. Hidden when no cue overlaps the current position.
-    @ViewBuilder
-    private var subtitleCueView: some View {
-        if let cue = model.activeSubtitleCue {
-            subtitleCueLabel(for: cue)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .shadow(color: .black, radius: 2)
-        }
-    }
-
-    @ViewBuilder
-    private func subtitleCueLabel(for cue: AppleSubtitleCue) -> some View {
-        switch cue.body {
-        case .text(let s):
-            Text(s)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-        case .richText(let runs):
-            Text(runs.map(\.text).joined())
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-        case .image(let cgImage):
-            Image(decorative: cgImage, scale: 1)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxHeight: 120)
-        }
     }
 
     // MARK: - Helpers

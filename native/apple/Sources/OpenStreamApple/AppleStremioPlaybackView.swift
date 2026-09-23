@@ -80,6 +80,10 @@ struct AppleStremioPlayerView: View {
     @State private var hasRouted = false
     @State private var showsFallbackNotice = false
     @State private var securityAccess: AppleSecurityScopedAccess?
+    /// Cues and the subtitle menu for the stock player on the OpenStream
+    /// engine, which leaves drawing them to the app (see
+    /// `AppleSubtitleCueLayerPolicy`).
+    @State private var stockSubtitles = AppleStockPlayerSubtitles()
 
     private let request: ApplePlaybackRequest
     private let fallbackCandidates: [ApplePlaybackRequest]
@@ -116,6 +120,10 @@ struct AppleStremioPlayerView: View {
                 platformPlayer
                     .ignoresSafeArea()
             }
+            if drawsStockPlayerCues {
+                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles)
+                    .ignoresSafeArea()
+            }
             if coordinator.route == .surface {
                 #if os(visionOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
@@ -147,6 +155,7 @@ struct AppleStremioPlayerView: View {
                     .accessibilityIdentifier("player.connecting")
             }
         }
+        .onChange(of: stockSubtitles.menuEntries) { installSourceMenu() }
         .onChange(of: coordinator.route) { _, route in
             if route != .none {
                 hasRouted = true
@@ -162,6 +171,14 @@ struct AppleStremioPlayerView: View {
             if coordinator.route == .avPlayer && nativeMenuVisible {
                 Menu {
                     Button("Other sources", systemImage: "list.bullet") { showsOtherSources = true }
+                    if drawsStockPlayerCues, !stockSubtitles.menuEntries.isEmpty {
+                        Picker("Subtitles", systemImage: "captions.bubble", selection: stockSubtitleSelection) {
+                            ForEach(stockSubtitles.menuEntries) { entry in
+                                Text(entry.title).tag(entry.trackID)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
                 } label: {
                     Image(systemName: "ellipsis").foregroundStyle(.white)
                         .frame(minWidth: 44, minHeight: 44)
@@ -336,11 +353,49 @@ struct AppleStremioPlayerView: View {
     }
     #endif
 
+    /// The OpenStream engine on the stock player: the app draws the cues and
+    /// owns the subtitle choice.
+    private var drawsStockPlayerCues: Bool {
+        AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route)
+    }
+
+    #if os(iOS)
+    private var stockSubtitleSelection: Binding<Int?> {
+        Binding(
+            get: { stockSubtitles.menuEntries.first(where: \.isSelected)?.trackID },
+            set: { stockSubtitles.select($0, on: coordinator.engine) }
+        )
+    }
+    #endif
+
     private func installSourceMenu() {
         #if os(tvOS)
-        host.viewController.transportBarCustomMenuItems = [UIAction(title: "Other sources", image: UIImage(systemName: "list.bullet")) { _ in
+        var items: [UIMenuElement] = [UIAction(title: "Other sources", image: UIImage(systemName: "list.bullet")) { _ in
             showsOtherSources = true
         }]
+        if coordinator.engine.kind == .openStream {
+            // One captions control. AVKit lists the engine's loopback WebVTT
+            // rendition, but the engine deselects it within a second (it is for
+            // PiP/AirPlay only), so picking it there did nothing. The app's
+            // menu drives the engine and the cue layer draws the result.
+            host.viewController.allowedSubtitleOptionLanguages = []
+            let entries = stockSubtitles.menuEntries
+            if !entries.isEmpty {
+                let engine = coordinator.engine
+                let subtitles = stockSubtitles
+                items.append(UIMenu(
+                    title: "Subtitles",
+                    image: UIImage(systemName: "captions.bubble"),
+                    options: .singleSelection,
+                    children: entries.map { entry in
+                        UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in
+                            subtitles.select(entry.trackID, on: engine)
+                        }
+                    }
+                ))
+            }
+        }
+        host.viewController.transportBarCustomMenuItems = items
         #endif
     }
 

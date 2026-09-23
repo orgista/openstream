@@ -83,9 +83,8 @@ extension AppleSubtitleCueBody: Equatable {
 }
 
 /// One decoded subtitle cue bridged from the engine. `startTime`/`endTime` are
-/// source-PTS seconds; the overlay renders the cue active at the current
-/// position. On `.avPlayer` routes the system player's own captions menu
-/// renders the track, so `subtitleCues` stays empty there.
+/// source-PTS seconds; the app draws the cue active at the current position
+/// (`AppleSubtitleCueLayer`).
 public struct AppleSubtitleCue: Identifiable, Equatable {
     public let id: Int
     public let startTime: Double
@@ -144,9 +143,10 @@ public protocol ApplePlaybackEngine: AnyObject {
     /// all. Nil while unknown, and on routes that cannot report it; callers
     /// fall back to `AppleVideoFitting.assumedAspect`.
     var videoSize: CGSize? { get }
-    /// Decoded cues for the active subtitle track, for the overlay to render on
-    /// `.surface` routes. Empty on `.avPlayer` routes where the system player's
-    /// own captions menu renders the track.
+    /// Decoded cues for the active subtitle track, for the app to draw: the
+    /// transport overlay on `.surface`, `AppleStockPlayerCueLayer` over the
+    /// stock player on `.avPlayer`. The native engine leaves it empty; AVKit
+    /// renders its tracks.
     var subtitleCues: [AppleSubtitleCue] { get }
     /// The stream's own chapter markers (Matroska chapters, MPEG-4 chapter
     /// tracks), for Skip Intro. Empty when the file carries none.
