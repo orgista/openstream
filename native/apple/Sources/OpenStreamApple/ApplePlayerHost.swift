@@ -27,6 +27,10 @@ public final class ApplePlayerHost {
     private let _viewController: AVPlayerViewController
     #endif
 
+    #if os(iOS)
+    private lazy var subtitleSelection = ApplePlayerSubtitleSelection(engine: coordinator.engine)
+    private var mirrorsSubtitleSelection = false
+    #endif
     private var boundPlayer: AVPlayer?
     private var bindTimer: Timer?
     private var resumeAfterInterruption = false
@@ -61,9 +65,9 @@ public final class ApplePlayerHost {
         #else
         let controller = AVPlayerViewController()
         // Owner decision (plan Task 7e): the stock Apple transport UI on every
-        // AVKit route. The OpenStream engine's subtitles are drawn by the app
-        // (`AppleStockPlayerCueLayer`): its loopback renditions exist for PiP
-        // and AirPlay only. The only thing removed is Live Text
+        // AVKit route. The app draws overlay subtitles; the iOS full-screen
+        // bridge can hand a chosen legible rendition to AVKit, as PiP and
+        // AirPlay do. The only thing removed is Live Text
         // (`allowsVideoFrameAnalysis = false` below).
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
@@ -138,6 +142,10 @@ public final class ApplePlayerHost {
         #else
         _viewController.player = nil
         #endif
+        #if os(iOS)
+        if mirrorsSubtitleSelection { subtitleSelection.bind(to: nil) }
+        mirrorsSubtitleSelection = false
+        #endif
         boundPlayer = nil
         audioSession.deactivate()
     }
@@ -184,6 +192,19 @@ public final class ApplePlayerHost {
     /// same run loop instead of up to a quarter second later.
     public func rebind() { refreshBinding() }
 
+    #if os(iOS)
+    func enableSubtitleSelectionMirroring() {
+        mirrorsSubtitleSelection = true
+        appleTrace("subtitle mirror: engine=\(coordinator.engine.kind.rawValue)")
+        subtitleSelection.bind(to: coordinator.engine.avPlayer?.currentItem)
+    }
+
+    func selectSubtitleTrack(id: Int?) {
+        appleTrace("subtitle mirror: app=\(id.map(String.init) ?? "off")")
+        subtitleSelection.selectFromApp(id: id)
+    }
+    #endif
+
     /// Rebinds the AVKit controller to `engine.avPlayer` when it changes.
     private func refreshBinding() {
         #if canImport(WatchConnectivity) && os(iOS)
@@ -203,6 +224,10 @@ public final class ApplePlayerHost {
             AppleSharePlaySessionStore.shared.refreshPlayback(coordinator, channel: channel)
         }
         if let player { coordinator.configureExternalPlayback(on: player) }
+        #if os(iOS)
+        // The item can change without replacing the AVPlayer (recovery/seek).
+        if mirrorsSubtitleSelection { subtitleSelection.bind(to: player?.currentItem) }
+        #endif
         guard player !== boundPlayer else { return }
         boundPlayer = player
         #if os(macOS)

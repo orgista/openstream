@@ -170,12 +170,23 @@ struct AppleStremioPlayerView: View {
                 Menu {
                     Button("Other sources", systemImage: "list.bullet") { showsOtherSources = true }
                     if drawsStockPlayerCues, !stockSubtitles.menuEntries.isEmpty {
-                        Picker("Subtitles", systemImage: "captions.bubble", selection: stockSubtitleSelection) {
+                        Menu("Subtitles", systemImage: "captions.bubble") {
                             ForEach(stockSubtitles.menuEntries) { entry in
-                                Text(entry.title).tag(entry.trackID)
+                                Button {
+                                    host.selectSubtitleTrack(id: entry.trackID)
+                                    stockSubtitles.refresh(from: coordinator.engine)
+                                } label: {
+                                    if entry.isSelected {
+                                        Label(entry.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(entry.title)
+                                    }
+                                }
+                                .accessibilityLabel(entry.title)
+                                .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
                             }
                         }
-                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("player.subtitles")
                     }
                 } label: {
                     Image(systemName: "ellipsis").foregroundStyle(.white)
@@ -184,6 +195,7 @@ struct AppleStremioPlayerView: View {
                 }
                 .padding(.trailing, 16)
                 .accessibilityLabel("More")
+                .accessibilityIdentifier("player.more")
             }
         }
         .simultaneousGesture(TapGesture().onEnded {
@@ -236,6 +248,9 @@ struct AppleStremioPlayerView: View {
             visionHost?.attachRemoteCommands(title: request.title, isLive: request.isLive)
             #else
             host.activate()
+            #if os(iOS)
+            host.enableSubtitleSelectionMirroring()
+            #endif
             // The AirPods stem, Control Centre and the lock screen. Bound here
             // rather than in `init` because the Now Playing entry needs the
             // title and whether this is live.
@@ -355,15 +370,6 @@ struct AppleStremioPlayerView: View {
     private var drawsStockPlayerCues: Bool {
         AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route)
     }
-
-    #if os(iOS)
-    private var stockSubtitleSelection: Binding<Int?> {
-        Binding(
-            get: { stockSubtitles.menuEntries.first(where: \.isSelected)?.trackID },
-            set: { stockSubtitles.select($0, on: coordinator.engine) }
-        )
-    }
-    #endif
 
     private func installSourceMenu() {
         #if os(tvOS)

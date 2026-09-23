@@ -319,6 +319,19 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         applySubtitleSelection(id: id)
     }
 
+    /// AVKit already applied this selection. Update the app without issuing a
+    /// second select(nil)/select(option) pair or leaving a sidecar on screen.
+    func mirrorSubtitleSelection(_ option: AVMediaSelectionOption?) {
+        subtitleSelectionOverridden = true
+        externalSubtitleLoad?.cancel()
+        externalSubtitleLoad = nil
+        subtitleCues = []
+        activeSubtitleTrackID = option.flatMap { selected in
+            legibleOptions.first(where: { $0.value == selected })?.key
+        }
+        emit(.tracks)
+    }
+
     public func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {
         var merged = externalSubtitleTracks
         for track in tracks where !merged.contains(where: { $0.id == track.id }) {

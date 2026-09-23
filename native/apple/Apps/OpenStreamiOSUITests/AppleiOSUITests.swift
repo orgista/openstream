@@ -1,4 +1,5 @@
 import XCTest
+import Vision
 
 /// iPhone and iPad behaviour that needs a touch or a rotation.
 ///
@@ -1003,49 +1004,139 @@ final class AppleiOSUITests: XCTestCase {
         }
     }
 
-    /// Owner (2026-09-17 23:50): the captions menu offers Off plus ONE subtitle
-    /// entry — the preferred language — never "English 1" and "English 2".
-    /// Plays a fixture carrying two English tracks and a French one.
+    /// The app menu stays filtered to one preferred subtitle. AVKit's iOS
+    /// picker cannot be hidden: selecting there must display a cue, and Off
+    /// must remove it, including after the app menu was used first.
     func testCaptionsMenuOffersOneSubtitleOption() throws {
-        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
-              !fixture.isEmpty else {
-            throw XCTSkip("OPENSTREAM_SUBTITLE_FIXTURE_URL not set")
+        let env = ProcessInfo.processInfo.environment
+        guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires OPENSTREAM_SUBTITLE_FIXTURE_URL on 127.0.0.1")
         }
+        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "N4 CAPTIONS WORK"
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture,
+            "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.playback.engine", "engine",
+            "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.settings.subtitle.languages.v1", "(en)"
+        ]
         launch(screen: "add-files")
-        let directURL = app.buttons["Direct URL"].firstMatch
-        XCTAssertTrue(directURL.waitForExistence(timeout: 30), "Direct URL row missing")
-        directURL.tap()
-        let dialog = app.alerts["Direct URL"]
-        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "Direct URL dialog missing")
-        let field = dialog.textFields.firstMatch
-        field.tap()
-        field.typeText(fixture)
-        dialog.buttons["Play"].tap()
-        let any = app.descendants(matching: .any)
-        let menu = any.matching(NSPredicate(format: "label == %@", "Audio & Subtitles")).firstMatch
-        if !menu.waitForExistence(timeout: 30) {
-            any.matching(identifier: "player.controls.show").firstMatch.tap()
+        let more = app.buttons["player.more"].firstMatch
+        XCTAssertTrue(app.otherElements["player.stockCueLayer"].firstMatch.waitForExistence(timeout: 45), "stock player did not appear")
+        func showControls() {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
         }
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), "captions menu button missing")
-        // The controls auto-hide after a few seconds: bring them back and tap at once.
-        let off = any.matching(NSPredicate(format: "label == %@", "Off")).firstMatch
-        var opened = false
-        for attempt in 0..<3 where !opened {
-            if !menu.isHittable { any.matching(identifier: "player.controls.show").firstMatch.tap(); Thread.sleep(forTimeInterval: 0.5) }
-            if attempt == 0 { menu.tap() } else { menu.press(forDuration: 0.3) }
-            opened = off.waitForExistence(timeout: 6)
+        // More appears before the demuxer has published its tracks. Give the
+        // local fixture time to start, then reset the controls' hide timer.
+        Thread.sleep(forTimeInterval: 8)
+        showControls()
+        attach("captions-initial-controls")
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "captions-initial-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        func ensureControlsVisible() {
+            let transport = app.buttons["Play/Pause"].firstMatch
+            for _ in 0..<3 {
+                if transport.exists, transport.frame.width > 0 { return }
+                showControls()
+            }
+            XCTAssertTrue(transport.exists, "stock transport controls are missing")
         }
-        Thread.sleep(forTimeInterval: 1)
-        attach("captions-menu")
-        XCTAssertTrue(opened, "menu did not open (no Off)")
-        let rows = app.menuItems.count > 0 ? app.menuItems : app.buttons
-        let items = rows.allElementsBoundByIndex
-            .map(\.label)
-            .filter { !$0.isEmpty && $0 != "Off" && $0 != "Audio & Subtitles" }
-            .filter { $0.range(of: "^(English|French|Français|Subtitle)", options: .regularExpression) != nil }
-        XCTAssertEqual(items.count, 1, "expected exactly one subtitle entry besides Off, got \(items)")
-        XCTAssertFalse(items.contains { $0.range(of: "\\d$", options: .regularExpression) != nil },
-                       "a numbered entry leaked into the menu: \(items)")
+        func pausePlayback() {
+            ensureControlsVisible()
+            let transport = app.buttons["Play/Pause"].firstMatch
+            if transport.label == "Pause" {
+                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 5), "Pause did not change the transport state")
+            }
+        }
+        func resumePlayback() {
+            ensureControlsVisible()
+            let transport = app.buttons["Play/Pause"].firstMatch
+            if transport.label == "Play" {
+                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                XCTAssertTrue(app.buttons["Pause"].firstMatch.waitForExistence(timeout: 5), "Play did not change the transport state")
+            }
+        }
+        func openAppSubtitles() {
+            pausePlayback()
+            if !more.exists { showControls() }
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            more.tap()
+            let subtitles = app.descendants(matching: .any).matching(identifier: "player.subtitles").firstMatch
+            XCTAssertTrue(subtitles.waitForExistence(timeout: 5), "Subtitles row missing: " + app.debugDescription)
+            subtitles.tap()
+        }
+        openAppSubtitles()
+        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES %@ AND label != %@", "^(English|French|Français|Subtitle|Closed Captions).*", "Subtitles"))
+        XCTAssertEqual(rows.count, 1, "app picker must offer one preferred subtitle besides Off: \(rows.allElementsBoundByIndex.map(\.label))")
+        let preferredLabel = rows.firstMatch.label
+        attach("captions-app-menu")
+        rows.firstMatch.tap()
+        // Menu actions dismiss on selection; restore the stock transport.
+        resumePlayback()
+        // AVKit's caption layer is not consistently exposed as static text.
+        // Count rendered cues so native and app layers cannot silently double up.
+        func visibleCueCount() throws -> Int {
+            guard let image = XCUIScreen.main.screenshot().image.cgImage else { return 0 }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = ["en-US"]
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            return text.filter { !$0.isWhitespace }.uppercased()
+                .components(separatedBy: expectedCue.filter { !$0.isWhitespace }.uppercased()).count - 1
+        }
+        func waitForCue(_ visible: Bool) throws -> Bool {
+            let deadline = Date().addingTimeInterval(20)
+            var matches = 0
+            while Date() < deadline {
+                matches = try visibleCueCount() == (visible ? 1 : 0) ? matches + 1 : 0
+                if matches == 2 { return true }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            return false
+        }
+        XCTAssertTrue(try waitForCue(true), "app picker did not draw the fixture cue")
+        attach("captions-app-cue")
+        openAppSubtitles()
+        app.buttons["Off"].firstMatch.tap()
+        XCTAssertTrue(try waitForCue(false), "app Off left a cue visible")
+
+        // Exercise the actual AVKit control, not a debug selection shortcut.
+        func openNativeSubtitles() {
+            pausePlayback()
+            let button = app.buttons.matching(NSPredicate(format:
+                "(label BEGINSWITH 'Subtitles' OR label == 'Show Subtitles' OR identifier == 'Subtitles') AND identifier != 'player.subtitles'" )).firstMatch
+            if !button.exists || !button.isHittable {
+                let overflow = app.buttons["Overflow Menu"].firstMatch
+                ensureControlsVisible()
+                XCTAssertTrue(overflow.exists, "AVKit More Controls missing")
+                overflow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            XCTAssertTrue(button.waitForExistence(timeout: 10), "AVKit subtitles control missing: " + app.debugDescription)
+            button.tap()
+        }
+        openNativeSubtitles()
+        attach("captions-avkit-menu")
+        let nativeTrack = app.buttons.matching(NSPredicate(format:
+            "(label CONTAINS[c] %@ OR label CONTAINS[c] 'Closed Captions') AND NOT label CONTAINS[c] 'Transcribed'", preferredLabel)).firstMatch
+        XCTAssertTrue(nativeTrack.waitForExistence(timeout: 5), "AVKit fixture track missing")
+        nativeTrack.tap()
+        resumePlayback()
+        XCTAssertTrue(try waitForCue(true), "AVKit selection did not display the fixture cue")
+        attach("captions-avkit-cue")
+        pausePlayback()
+        attach("captions-controls-and-cue")
+        openNativeSubtitles()
+        attach("captions-avkit-before-off")
+        app.buttons["Off"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        resumePlayback()
+        XCTAssertTrue(try waitForCue(false), "AVKit Off left a cue visible")
+        attach("captions-avkit-off")
     }
 
     /// Media servers (owner, 2026-09-17): signs in to the Emby test server on the

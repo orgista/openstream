@@ -26,6 +26,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var captionObservation: Task<Void, Never>?
     private var loadGeneration = 0
     private var subtitleSelectionOverridden = false
+    private var stockPlayerRendersSubtitles = false
     private var lastPositionUpdate = Date.distantPast
     /// Latest values published by `aether.$duration` / `aether.$isLive`. Used by
     /// `refreshDuration` because `@Published` sinks fire on `willSet`, when the
@@ -206,6 +207,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         captionObservation = nil
         hasReachedPlaying = false
         subtitleSelectionOverridden = false
+        stockPlayerRendersSubtitles = false
         activeSubtitleTrackID = nil
         clearExternalSubtitles()
         failure = nil
@@ -302,6 +304,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.stop()
         revokeCaptionMaster()
         activeSubtitleTrackID = nil
+        stockPlayerRendersSubtitles = false
         clearExternalSubtitles()
         hasReachedPlaying = false
         position = 0
@@ -318,7 +321,49 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public func selectSubtitleTrack(id: Int?) {
         subtitleSelectionOverridden = true
+        if stockPlayerRendersSubtitles {
+            stockPlayerRendersSubtitles = false
+            aether.setNativeSubtitleRendering(false)
+        }
         applySubtitleSelection(id: id)
+        emit(.tracks)
+    }
+
+    /// AVKit has no public iOS subtitle-button hiding API. A selection there
+    /// takes ownership of its rendition, releasing Aether's deselection pin.
+    /// AVKit draws that rendition; the app continues to draw sidecars/bitmaps
+    /// selected from its own menu, so only one cue renderer is active.
+    func mirrorSubtitleSelection(_ option: AVMediaSelectionOption?, in group: AVMediaSelectionGroup) -> Bool {
+        guard let option else {
+            appleTrace("subtitle mirror: track=off native=off")
+            selectSubtitleTrack(id: nil)
+            return false
+        }
+        let index = group.options.firstIndex(of: option)
+        let trackID = index.flatMap {
+            ApplePlayerSubtitleSelection.trackID(
+                optionIndex: $0,
+                optionLanguages: group.options.map { $0.extendedLanguageTag ?? $0.locale?.identifier },
+                tracks: ApplePlayerSubtitleSelection.renditionOrder(embeddedSubtitleTracks))
+        }
+        subtitleSelectionOverridden = true
+        stockPlayerRendersSubtitles = true
+        applySubtitleSelection(id: trackID)
+        subtitleCues = []
+        // Remote HLS selects through AVMediaSelection already. Loopback text
+        // renditions need the public native API to release the engine's pin.
+        let nativeOrdinal = index.flatMap {
+            ApplePlayerSubtitleSelection.trackID(
+                optionIndex: $0,
+                optionLanguages: group.options.map { $0.extendedLanguageTag ?? $0.locale?.identifier },
+                tracks: aether.nativeSubtitleTracks.map {
+                    ApplePlaybackTrack(id: $0.ordinal, title: $0.displayName, language: $0.language)
+                })
+        }
+        if let nativeOrdinal { aether.setNativeSubtitleSelected(track: nativeOrdinal) }
+        appleTrace("subtitle mirror: track=\(trackID.map(String.init) ?? "none") native=\(nativeOrdinal.map(String.init) ?? "none")")
+        emit(.tracks)
+        return nativeOrdinal != nil
     }
 
     /// Appends add-on subtitle files after the embedded tracks. Ids already
@@ -416,7 +461,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .store(in: &cancellables)
         aether.$subtitleCues
             .sink { [weak self] cues in
-                guard let self, self.activeExternalSubtitleID == nil else { return }
+                guard let self, self.activeExternalSubtitleID == nil, !self.stockPlayerRendersSubtitles else { return }
                 self.subtitleCues = cues.map(Self.mapCue)
             }
             .store(in: &cancellables)
