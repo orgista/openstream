@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 
 public enum AppleSavedSourceDiagnosticProbeKind: String, Codable, CaseIterable, Sendable {
@@ -36,6 +35,7 @@ public enum AppleSavedSourceDiagnosticStage: String, Codable, CaseIterable, Send
     case playButton
 }
 
+#if DEBUG
 public enum AppleSavedSourceDiagnosticStatus: String, Codable, Sendable {
     case pass = "PASS"
     case fail = "FAIL"

@@ -12,6 +12,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     public let origin: String?
     public let guideID: String?
     public let guideURL: URL?
+    /// Exact playlist metadata, retained for working-channel export. Not health history.
+    public var originalEXTINF: String? = nil
     /// What a play-time probe found the stream to be; nil until probed.
     /// Optional so cached channels written before it decode unchanged.
     public var probedMediaKind: AppleIPTVStreamProbeResult.MediaKind? = nil
@@ -44,7 +46,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         referer: String? = nil,
         origin: String? = nil,
         guideID: String? = nil,
-        guideURL: URL? = nil
+        guideURL: URL? = nil,
+        originalEXTINF: String? = nil
     ) {
         self.id = id
         self.sourceID = sourceID
@@ -57,6 +60,7 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         self.origin = origin
         self.guideID = guideID
         self.guideURL = guideURL
+        self.originalEXTINF = originalEXTINF
     }
 
     /// HTTP headers to attach to the media request, from the playlist's
@@ -82,7 +86,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
             referer: referer,
             origin: origin,
             guideID: guideID,
-            guideURL: guideURL
+            guideURL: guideURL,
+            originalEXTINF: originalEXTINF
         )
     }
 }
@@ -703,7 +708,7 @@ public struct AppleIPTVClient: Sendable {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
             if line.uppercased().hasPrefix("#EXTINF:") {
-                pending = PendingChannel(extinf: line)
+                pending = PendingChannel(extinf: rawLine)
                 userAgent = nil
                 referer = nil
                 origin = nil
@@ -761,7 +766,8 @@ public struct AppleIPTVClient: Sendable {
                 referer: referer,
                 origin: origin,
                 guideID: providerID.isEmpty ? nil : providerID,
-                guideURL: guideURL
+                guideURL: guideURL,
+                originalEXTINF: details.extinf
             ))
             if channels.count == maximumChannels {
                 // Never silently. The viewer sees a guide missing its tail and
@@ -867,10 +873,12 @@ public struct AppleIPTVClient: Sendable {
     }
 
     private struct PendingChannel {
+        let extinf: String
         let name: String
         let attributes: [String: String]
 
         init(extinf: String) {
+            self.extinf = extinf
             let metadataEnd = extinf.lastIndex(of: "\"")
                 .map { extinf.index(after: $0) }
                 ?? extinf.startIndex
