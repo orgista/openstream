@@ -1,34 +1,15 @@
 import Foundation
 
-/// Which subtitle tracks the captions menu lists.
+/// Subtitle auto-selection and the full manual track menu.
 ///
-/// A remux routinely carries fifteen or twenty subtitle tracks. The menu
-/// listed every one of them even when the viewer had chosen a single language
-/// in Settings — the preference was only ever handed to the engine for
-/// auto-selection at load, never used to shorten the list (owner 2026-09-14:
-/// "subtitles have too many tracks since I only selected one language").
-///
-/// Matching is on the language code, in the viewer's order of preference, and
-/// tolerant about the form it takes: MKVs carry `eng`, `en`, `en-US` and
-/// occasionally `English` for the same thing.
+/// Language matching tolerates MKV codes such as `eng`, `en`, `en-US`, and
+/// `English`. Explicit Settings choices constrain auto-selection only; the
+/// manual menu always offers every distinct non-forced track.
 public enum AppleSubtitleTrackFilter: Sendable {
-    /// The tracks to offer.
-    ///
-    /// `isExplicitChoice` is the difference between a language the viewer
-    /// *picked* and one the app *guessed* from the device:
-    ///
-    /// - **Picked** (Settings → Playback → Subtitle Languages): that language
-    ///   is the whole menu. Nil-language captions and add-on tracks remain
-    ///   eligible when no language matches. Otherwise the menu is empty, and
-    ///   that is the honest answer — the owner asked for "English can be
-    ///   default, only option as well" (2026-09-15), and quietly listing
-    ///   fifteen other languages is what made the menu unusable in the first
-    ///   place. Also owner 2026-09-17: "subtitles picker has one option which is
-    ///   the preferred language from settings — no English 1 or 2".
-    /// - **Guessed** (device defaults, before the viewer has been to that
-    ///   screen): fall back to the single best track of all tracks when nothing
-    ///   matches, because an empty menu is worse than a long one when nobody
-    ///   asked for anything.
+    /// The single auto-select candidate, preserving the owner's Settings rule.
+    /// Explicit languages never fall back to another known language; unlabelled
+    /// captions and add-ons remain eligible when no language matches. Guessed
+    /// device preferences may fall back to the best available track.
     public static func visible(
         _ tracks: [ApplePlaybackTrack],
         preferredLanguages: [String],
@@ -71,6 +52,29 @@ public enum AppleSubtitleTrackFilter: Sendable {
         }) else { return [] }
         
         return [best]
+    }
+
+    /// All non-forced choices, ordered by language preference, default, then ID.
+    /// Duplicate language/title pairs keep the highest-ranked track, while
+    /// differently titled variants (such as English SDH) remain selectable.
+    public static func menu(
+        _ tracks: [ApplePlaybackTrack],
+        preferredLanguages: [String]
+    ) -> [ApplePlaybackTrack] {
+        let wanted = preferredLanguages.map(normalized).filter { !$0.isEmpty }
+        let ranked = tracks.filter { !$0.isForced }.sorted { a, b in
+            let aRank = wanted.firstIndex(of: normalized(a.language ?? "")) ?? wanted.count
+            let bRank = wanted.firstIndex(of: normalized(b.language ?? "")) ?? wanted.count
+            if aRank != bRank { return aRank < bRank }
+            if a.isDefault != b.isDefault { return a.isDefault }
+            return a.id < b.id
+        }
+        var titlesByLanguage: [String: Set<String>] = [:]
+        return ranked.filter { track in
+            let language = normalized(track.language ?? "")
+            let title = track.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return titlesByLanguage[language, default: []].insert(title).inserted
+        }
     }
 
     /// `eng`, `en`, `en-US`, `en_US` and `English` all reduce to `en`.

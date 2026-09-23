@@ -321,7 +321,7 @@ struct AppleTransportOverlay: View {
                     captionsToggle
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
-                        subtitleTracks: model.visibleSubtitleTracks,
+                        subtitleTracks: model.menuSubtitleTracks,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) }
                     )
@@ -550,7 +550,7 @@ struct AppleTransportOverlay: View {
                     captionsToggle
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
-                        subtitleTracks: model.visibleSubtitleTracks,
+                        subtitleTracks: model.menuSubtitleTracks,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) }
                     )
@@ -736,7 +736,7 @@ struct AppleTransportTrackMenu: View {
             Section("Subtitles") {
                 Button("Off") { onSelectSubtitle(nil) }
                 ForEach(subtitleTracks) { track in
-                    Button(AppleSubtitleTrackFilter.menuLabel(for: track)) {
+                    Button(track.title) {
                         onSelectSubtitle(track.id)
                     }
                     .accessibilityIdentifier("player.subtitle.track.\(track.id)")

@@ -93,6 +93,44 @@ struct AppleSubtitleTrackFilterTests {
         #expect(visible.map(\.id) == [1])
     }
 
+    @Test func menuOrdersPreferredLanguagesThenDefaultThenID() {
+        let tracks = [
+            track(9, "de", "German"),
+            track(8, "en", "English SDH"),
+            track(7, "fr", "French", isDefault: true),
+            track(6, "eng", "English", isDefault: true),
+            track(5, "spa", "Spanish"),
+            track(4, "it", "Italian"),
+        ]
+        let menu = AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["English", "es-MX"])
+        #expect(menu.map(\.id) == [6, 8, 5, 7, 4, 9])
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: []).map(\.id) == [6, 7, 4, 5, 8, 9])
+        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"], isExplicitChoice: true).map(\.id) == [6])
+        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["ja"], isExplicitChoice: true).isEmpty)
+    }
+
+    @Test func menuExcludesForcedTracksEvenWhenPreferredAndDefault() {
+        let forced = ApplePlaybackTrack(id: 0, title: "English", language: "en", isDefault: true, isForced: true)
+        let tracks = [forced, track(1, "es", "Spanish"), track(2, "en", "English SDH")]
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [2, 1])
+        #expect(AppleSubtitleTrackFilter.menu([forced], preferredLanguages: []).isEmpty)
+        #expect(AppleSubtitleTrackFilter.menu([], preferredLanguages: []).isEmpty)
+    }
+
+    @Test func menuDeduplicatesLanguageAndTitleWhileKeepingVariants() {
+        let tracks = [
+            track(0, "eng", "English"),
+            track(4, "EN-us", " english ", isDefault: true),
+            track(2, "en", "English SDH"),
+            track(3, "es", "English"),
+            track(5, "English", "English SDH"),
+            track(6, nil, "Unlabelled"),
+            track(7, nil, "Unlabelled"),
+        ]
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [4, 2, 3, 6])
+        #expect(AppleSubtitleTrackFilter.menu(tracks.reversed(), preferredLanguages: ["en"]).map(\.id) == [4, 2, 3, 6])
+    }
+
     @Test func menuLabelLanguageFormatting() {
         // menuLabel for language "eng" -> "English"
         #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, "eng")) == "English")

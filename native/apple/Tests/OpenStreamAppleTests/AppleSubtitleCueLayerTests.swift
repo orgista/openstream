@@ -37,15 +37,15 @@ struct AppleSubtitleCueLayerTests {
         }
     }
 
-    @Test func inlineMenuUsesThePreferredLanguageAndOffersOff() {
+    @Test func inlineMenuRanksThePreferredLanguageAndOffersAllTracksAndOff() {
         let tracks = [
             ApplePlaybackTrack(id: 1, title: "English", language: "en"),
             ApplePlaybackTrack(id: 2, title: "French", language: "fr"),
         ]
         let entries = AppleSubtitleCueLayerPolicy.menuEntries(
             tracks: tracks, preferredLanguages: ["fr"], languagesAreExplicit: true, activeTrackID: 2)
-        #expect(entries.map(\.trackID) == [nil, 2])
-        #expect(entries.map(\.isSelected) == [false, true])
+        #expect(entries.map(\.trackID) == [nil, 2, 1])
+        #expect(entries.map(\.isSelected) == [false, true, false])
     }
 
     // MARK: - Cue → content

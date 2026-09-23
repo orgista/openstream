@@ -1004,16 +1004,16 @@ final class AppleiOSUITests: XCTestCase {
         }
     }
 
-    /// The app menu stays filtered to one preferred subtitle. AVKit's iOS
+    /// The app menu offers every non-forced subtitle. AVKit's iOS
     /// picker cannot be hidden: selecting there must display a cue, and Off
     /// must remove it, including after the app menu was used first.
-    func testCaptionsMenuOffersOneSubtitleOption() throws {
+    func testCaptionsMenuOffersAllSubtitleOptions() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
               URL(string: fixture)?.host == "127.0.0.1" else {
             throw XCTSkip("Requires OPENSTREAM_SUBTITLE_FIXTURE_URL on 127.0.0.1")
         }
-        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "N4 CAPTIONS WORK"
+        let expectedCue = env["OPENSTREAM_SUBTITLE_FIXTURE_CUE"] ?? "HOLA DESDE ESPANA"
         app.launchArguments += [
             "-OpenStreamVisionPlaybackURL", fixture,
             "-OpenStreamVisionPlaybackIsLive", "YES",
@@ -1023,7 +1023,7 @@ final class AppleiOSUITests: XCTestCase {
         ]
         launch(screen: "add-files")
         let more = app.buttons["player.more"].firstMatch
-        XCTAssertTrue(app.otherElements["player.stockCueLayer"].firstMatch.waitForExistence(timeout: 45), "stock player did not appear")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "player.stockCueLayer").firstMatch.waitForExistence(timeout: 45), "stock player did not appear")
         func showControls() {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
         }
@@ -1070,11 +1070,11 @@ final class AppleiOSUITests: XCTestCase {
             subtitles.tap()
         }
         openAppSubtitles()
-        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES %@ AND label != %@", "^(English|French|Français|Subtitle|Closed Captions).*", "Subtitles"))
-        XCTAssertEqual(rows.count, 1, "app picker must offer one preferred subtitle besides Off: \(rows.allElementsBoundByIndex.map(\.label))")
-        let preferredLabel = rows.firstMatch.label
-        attach("captions-app-menu")
-        rows.firstMatch.tap()
+        let rows = app.buttons.matching(NSPredicate(format: "label IN %@", ["Off", "English", "Spanish", "English SDH"]))
+        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.label)), Set(["Off", "English", "Spanish", "English SDH"]))
+        let preferredLabel = "Spanish"
+        attach("n5-ios-full-menu")
+        app.buttons[preferredLabel].firstMatch.tap()
         // Menu actions dismiss on selection; restore the stock transport.
         resumePlayback()
         // AVKit's caption layer is not consistently exposed as static text.
@@ -1101,7 +1101,7 @@ final class AppleiOSUITests: XCTestCase {
             return false
         }
         XCTAssertTrue(try waitForCue(true), "app picker did not draw the fixture cue")
-        attach("captions-app-cue")
+        attach("n5-ios-spanish-cue")
         openAppSubtitles()
         app.buttons["Off"].firstMatch.tap()
         XCTAssertTrue(try waitForCue(false), "app Off left a cue visible")

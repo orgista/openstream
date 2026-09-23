@@ -150,24 +150,27 @@ public final class AppleTransportOverlayModel {
     public private(set) var position: Double = 0
     public private(set) var duration: Double? = nil
     public private(set) var audioTracks: [ApplePlaybackTrack] = []
-    /// Every embedded track, unfiltered. `visibleSubtitleTracks` is what the
+    /// Every embedded track, unfiltered. `menuSubtitleTracks` is what the
     /// captions menu lists.
     public private(set) var subtitleTracks: [ApplePlaybackTrack] = []
 
-    /// The viewer's chosen subtitle languages, used to shorten the menu.
+    /// The viewer's chosen subtitle languages, used to rank the menu.
     /// Empty means "no preference", which lists every track.
     public var preferredSubtitleLanguages: [String] = []
     /// See `AetherPlaybackEngine.subtitleLanguagesAreExplicit`.
     public var subtitleLanguagesAreExplicit = false
 
-    /// The captions menu's list: the tracks in the viewer's languages. Falls
-    /// back to every track only when the languages were inferred from the
-    /// device rather than picked.
+    /// The candidate used when the captions toggle turns subtitles on.
     public var visibleSubtitleTracks: [ApplePlaybackTrack] {
         AppleSubtitleTrackFilter.visible(
             subtitleTracks,
             preferredLanguages: preferredSubtitleLanguages,
             isExplicitChoice: subtitleLanguagesAreExplicit)
+    }
+
+    /// All manual choices, including other languages and SDH variants.
+    public var menuSubtitleTracks: [ApplePlaybackTrack] {
+        AppleSubtitleTrackFilter.menu(subtitleTracks, preferredLanguages: preferredSubtitleLanguages)
     }
 
     /// Decoded cues for the active subtitle track, mirrored from the engine for

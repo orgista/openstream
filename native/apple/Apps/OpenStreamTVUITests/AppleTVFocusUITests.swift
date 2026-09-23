@@ -49,6 +49,58 @@ final class AppleTVFocusUITests: XCTestCase {
 
     // MARK: - The guide
 
+    func testFullSubtitleMenuSelectsSpanish() throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires a localhost three-track MKV fixture")
+        }
+        app.launchArguments += [
+            "-OpenStreamVisionPlaybackURL", fixture, "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-openstream.playback.engine", "engine",
+            "-openstream.firstRunGuidanceSeen", "YES",
+            "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.settings.subtitle.languages.v1", "(en)",
+            "-openstream.sources.v1", "", "-openstream.sources.v1.pending-keychain-removals", "()",
+            "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.settings.discover.enabled.v1", "NO",
+            "-openstream.settings.live.enabled.v1", "NO",
+            "-openstream.settings.library.enabled.v1", "NO",
+            "-openstream.settings.metadata.enabled.v1", "NO"
+        ]
+        launch(screen: "add-files")
+        let subtitles = element("Subtitles")
+        for _ in 0..<15 {
+            remote.press(.down)
+            if subtitles.waitForExistence(timeout: 2) { break }
+        }
+        XCTAssertTrue(subtitles.exists)
+        remote.press(.up)
+        for _ in 0..<6 {
+            if subtitles.hasFocus || subtitles.descendants(matching: .any)
+                .matching(NSPredicate(format: "hasFocus == true")).count > 0 { break }
+            remote.press(.right)
+        }
+        remote.press(.select)
+        for title in ["Off", "English", "Spanish", "English SDH"] {
+            XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 5), "Missing " + title)
+        }
+        func attach(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        attach("n5-tvos-full-menu")
+        for _ in 0..<5 {
+            if focusedElement.label == "Spanish" { break }
+            remote.press(.down)
+        }
+        XCTAssertEqual(focusedElement.label, "Spanish")
+        remote.press(.select)
+        XCTAssertTrue(app.staticTexts["HOLA DESDE ESPANA"].firstMatch.waitForExistence(timeout: 20))
+        attach("n5-tvos-spanish-cue")
+    }
+
     func testFirstLiveHLSPlayOffersCaptions() throws {
         guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_CAPTION_FIXTURE_URL"],
               URL(string: fixture)?.host == "127.0.0.1" else {

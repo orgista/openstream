@@ -61,11 +61,11 @@ enum AppleSubtitleCueLayerPolicy {
         languagesAreExplicit: Bool,
         activeTrackID: Int?
     ) -> [MenuEntry] {
-        let visible = AppleSubtitleTrackFilter.visible(
-            tracks, preferredLanguages: preferredLanguages, isExplicitChoice: languagesAreExplicit)
-        guard !visible.isEmpty else { return [] }
+        let choices = AppleSubtitleTrackFilter.menu(
+            tracks, preferredLanguages: preferredLanguages)
+        guard !choices.isEmpty else { return [] }
         return [MenuEntry(trackID: nil, title: "Off", isSelected: activeTrackID == nil)]
-            + visible.map { MenuEntry(trackID: $0.id, title: $0.title, isSelected: $0.id == activeTrackID) }
+            + choices.map { MenuEntry(trackID: $0.id, title: $0.title, isSelected: $0.id == activeTrackID) }
     }
 }
 
