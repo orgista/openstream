@@ -5,9 +5,7 @@ import SwiftUI
 /// into a check once the title is saved. Side by side, stacked at the
 /// accessibility text sizes so the label wraps instead of clipping.
 struct AppleHomePhoneHeroActions: View {
-    let action: AppleTitlePagePolicy.PrimaryAction
-    var isDownloaded = false
-    let canPerform: Bool
+    let button: AppleTitlePagePolicy.HeroButton
     /// Nil hides the My List button: the title has nothing to save it against.
     let isInList: Bool?
     let onPlay: () -> Void
@@ -22,7 +20,7 @@ struct AppleHomePhoneHeroActions: View {
             : AnyLayout(HStackLayout(spacing: 12))
         layout {
             Button(action: onPlay) {
-                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
+                AppleHeroPrimaryButtonLabel(button: button)
                     .font(.body.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -33,8 +31,8 @@ struct AppleHomePhoneHeroActions: View {
                     .contentShape(.rect(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+            .appleHeroPrimaryButtonState(button)
             .accessibilityIdentifier("home.featured.play")
-            .disabled(!canPerform)
 
             if let isInList {
                 Button(action: onToggleList) {

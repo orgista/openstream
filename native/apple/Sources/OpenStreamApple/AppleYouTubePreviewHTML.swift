@@ -70,7 +70,9 @@ enum AppleYouTubePreviewHTML {
         var previewCapDeadlineTimer = null;
         var previewEnding = false;
         var previewCapSeconds = 45;
-        var previewHideLeadSeconds = 0.5;
+        // Ends early enough for the 0.6 s crossfade back to the art to finish
+        // over live frames, before YouTube can paint its end screen.
+        var previewHideLeadSeconds = 0.8;
         var api = document.createElement('script');
         api.src = 'https://www.youtube.com/iframe_api';
         document.head.appendChild(api);

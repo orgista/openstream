@@ -109,7 +109,7 @@ import Testing
     #expect(html.contains("player.seekTo(0, true)"))
     #expect(html.contains("notifyNative('ended')"))
     #expect(html.contains("previewCapSeconds = 45"))
-    #expect(html.contains("previewHideLeadSeconds = 0.5"))
+    #expect(html.contains("previewHideLeadSeconds = 0.8"))
     #expect(html.contains("function finishPreview()"))
     #expect(html.contains("setTimeout(finishPreview, (previewCapSeconds - previewHideLeadSeconds) * 1000)"))
     #expect(html.contains("function clearPreviewCapTimers()"))

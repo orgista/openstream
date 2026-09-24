@@ -83,6 +83,17 @@ struct AppleHeroRotationCycleTests {
             isTouching: rule.touching, trailerIsPlaying: rule.playing, trailerIsMuted: rule.muted
         ) == rule.paused)
     }
+
+    /// Art-first: a pressed Play Trailer loads behind the art, so the page
+    /// holds for it even muted; an autoplaying muted one does not.
+    @Test func aRequestedTrailerHoldsThePageEvenMuted() {
+        #expect(AppleHeroRotation.cycleIsPaused(
+            isTouching: false, trailerIsPlaying: true, trailerIsMuted: true, trailerWasRequested: true))
+        #expect(!AppleHeroRotation.cycleIsPaused(
+            isTouching: false, trailerIsPlaying: true, trailerIsMuted: true, trailerWasRequested: false))
+        #expect(!AppleHeroRotation.cycleIsPaused(
+            isTouching: false, trailerIsPlaying: false, trailerIsMuted: true, trailerWasRequested: true))
+    }
 }
 
 @Suite("iPhone hero page dots")

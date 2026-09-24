@@ -48,6 +48,50 @@ struct AppleTitlePagePolicyTests {
             type: "series", progress: nil, selectedEpisode: nil, isPlayable: false, hasTrailer: false) == .play)
     }
 
+    // MARK: Hero button
+
+    @Test func heroWithNothingToPlayAndNoTrailerOpensDetails() {
+        let action = AppleTitlePagePolicy.heroPrimaryAction(
+            type: "series", progress: nil, selectedEpisode: nil, isPlayable: false, trailer: .none)
+        #expect(action == .details)
+        let button = AppleTitlePagePolicy.HeroButton(action: action)
+        #expect(button.title == "Details")
+        #expect(button.systemImage == "info.circle")
+        #expect(button.isHidden == false)
+    }
+
+    @Test func heroWithNothingToPlayOffersTheTrailerOnceFound() {
+        let action = AppleTitlePagePolicy.heroPrimaryAction(
+            type: "movie", progress: nil, selectedEpisode: nil, isPlayable: false, trailer: .available)
+        #expect(action == .playTrailer)
+        // Art-first: the button reads Play Trailer and nothing else, at
+        // rest and after the press alike — there is no loading state.
+        let button = AppleTitlePagePolicy.HeroButton(action: action)
+        #expect(button.title == "Play Trailer")
+        #expect(button.systemImage == "play.fill")
+    }
+
+    @Test func heroHoldsItsButtonBackWhileTheTrailerLookupIsOut() {
+        let action = AppleTitlePagePolicy.heroPrimaryAction(
+            type: "movie", progress: nil, selectedEpisode: nil, isPlayable: false, trailer: .pending)
+        #expect(action == nil)
+        #expect(AppleTitlePagePolicy.HeroButton(action: action).isHidden)
+    }
+
+    @Test(arguments: [AppleTitlePagePolicy.TrailerAvailability.none, .pending, .available])
+    func heroThatCanPlayAlwaysPlays(trailer: AppleTitlePagePolicy.TrailerAvailability) {
+        let partWay = ApplePlaybackProgress(position: 1_200, duration: 6_000)
+        #expect(AppleTitlePagePolicy.heroPrimaryAction(
+            type: "movie", progress: nil, selectedEpisode: nil, isPlayable: true, trailer: trailer) == .play)
+        #expect(AppleTitlePagePolicy.heroPrimaryAction(
+            type: "movie", progress: partWay, selectedEpisode: nil, isPlayable: true, trailer: trailer) == .resume(episode: nil))
+    }
+
+    @Test func heroPlayKeepsTheOfflineWording() {
+        #expect(AppleTitlePagePolicy.HeroButton(action: .play, isDownloaded: true).title == "Play Offline")
+        #expect(AppleTitlePagePolicy.HeroButton(action: .details, isDownloaded: true).title == "Details")
+    }
+
     @Test func nextEpisodeHeadingUsesTheAppleSpelling() {
         #expect(AppleTitlePagePolicy.nextEpisodeHeading(episode(4, 8, title: "Follow the Anger")) == "S4, E8 · Follow the Anger")
         #expect(AppleTitlePagePolicy.nextEpisodeHeading(episode(1, 2)) == "S1, E2")

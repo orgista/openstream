@@ -480,6 +480,21 @@ struct AppleDiscoverView: View {
                                    item: item, source: source)
             }
         }
+        #if DEBUG
+        // `OpenStreamHeroTitle` leads the rotation with a title picked by
+        // name, so a headless sweep can photograph one particular hero.
+        if let wanted = UserDefaults.standard.string(forKey: "OpenStreamHeroTitle"), !wanted.isEmpty,
+           let pinned = visibleSections.lazy.compactMap({ section in
+               section.items.first { $0.name.localizedCaseInsensitiveContains(wanted) }.flatMap { item in
+                   self.sourceStore.sources.first { $0.id == section.sourceID }.map { source in
+                       IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+                                          item: item, source: source)
+                   }
+               }
+           }).first {
+            values.insert(pinned, at: 0)
+        }
+        #endif
         return AppleHeroRotation.candidates(values, id: \.record.id,
                                             hasBackdrop: { AppleHeroRotation.hasBackdrop(heroItem($0.item)) })
     }
@@ -831,6 +846,7 @@ struct AppleDiscoverView: View {
             progressID: value.record.id,
             preferredSourceID: value.source.id,
             onPlay: { selectHero(value, autoPlay: true) },
+            onOpenDetails: { selectHero(value, autoPlay: false) },
             settings: settings,
             viewportSize: viewportSize,
             wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
@@ -838,30 +854,25 @@ struct AppleDiscoverView: View {
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  copyFadeLine: phoneHeroLayout.topInset,
-                                 badge: heroBadges[value.item.mediaID],
-                                 onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
-            mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
+                                 badge: heroBadges[value.item.mediaID]) : nil,
+            mac: mac ? .init(layout: macHeroLayout) : nil,
             tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
-        ) { action, isDownloaded, canPerform, perform in
+        ) { button, perform in
             #if os(macOS)
             if mac {
                 AppleHomeMacHeroActions(
-                    action: action,
-                    isDownloaded: isDownloaded,
-                    canPerform: canPerform,
+                    button: button,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onPlay: perform,
                     onToggleList: { toggleHeroInList(value) }
                 )
             } else {
-                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
+                featuredActions(value, button: button, onPlay: perform)
             }
             #elseif os(tvOS)
             if let tv {
                 AppleHomeTVHeroActions(
-                    action: action,
-                    isDownloaded: isDownloaded,
-                    canPerform: canPerform,
+                    button: button,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     focus: tv.focus,
                     pagingEnabled: tv.pagingEnabled,
@@ -870,20 +881,18 @@ struct AppleDiscoverView: View {
                     onDetails: { selectHero(value, autoPlay: false) }
                 )
             } else {
-                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
+                featuredActions(value, button: button, onPlay: perform)
             }
             #else
             if phone {
                 AppleHomePhoneHeroActions(
-                    action: action,
-                    isDownloaded: isDownloaded,
-                    canPerform: canPerform,
+                    button: button,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onPlay: perform,
                     onToggleList: { toggleHeroInList(value) }
                 )
             } else {
-                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
+                featuredActions(value, button: button, onPlay: perform)
             }
             #endif
         }
@@ -1033,13 +1042,11 @@ struct AppleDiscoverView: View {
         #endif
     }
 
-    private func featuredActions(_ value: IndexedCatalogItem, action: AppleTitlePagePolicy.PrimaryAction,
-                                 isDownloaded: Bool, canPerform: Bool, onPlay: @escaping () -> Void) -> some View {
+    private func featuredActions(_ value: IndexedCatalogItem, button: AppleTitlePagePolicy.HeroButton,
+                                 onPlay: @escaping () -> Void) -> some View {
         AppleFeaturedActions(
             viewportSize: viewportSize,
-            action: action,
-            isDownloaded: isDownloaded,
-            canPerform: canPerform,
+            button: button,
             onPlay: onPlay,
             onDetails: { selectHero(value, autoPlay: false) }
         )
@@ -1979,6 +1986,8 @@ struct AppleCatalogItemDetailView: View {
     @State private var detailSafeAreaInsets = EdgeInsets()
     @State private var trailerHasStarted = false
     @State private var heroArtworkImage: CGImage?
+    /// The hero still's load; the trailer waits on it (art-first).
+    @State private var heroArt = AppleTrailerArtFirstPolicy.Art.loading
     @State private var trailerMuted = false
     @State private var trailerCandidateIndex = 0
     @State private var trailerPortraitKeys: Set<String> = []
@@ -2348,14 +2357,20 @@ struct AppleCatalogItemDetailView: View {
             guard playRequest != nil else { return }
             await resolvePlayback()
         }
-        .task(id: "trailer-delay:\(item.id):\(allowsTrailerAutoplay)") {
+        .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
             trailerIsActive = false
             trailerIsPlaying = false
             trailerHasStarted = false
             trailerMuted = settings.autoMuteTrailer
-            guard allowsTrailerAutoplay else { return }
+        }
+        // Art-first: the autoplaying trailer is not even looked for until the
+        // hero still is on screen, and at low priority behind the page.
+        .task(id: "trailer-autoplay:\(item.id):\(allowsTrailerAutoplay):\(heroArt == .loaded)", priority: .low) {
+            guard allowsTrailerAutoplay,
+                  AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroArt, pressed: false) else { return }
             try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
+            // A pressed Play Trailer got there first.
+            guard !Task.isCancelled, !trailerHasStarted else { return }
             guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: trailerCandidateIndex) else { return }
             guard !Task.isCancelled else { return }
             trailerCandidateIndex = playableIndex
@@ -2596,6 +2611,7 @@ struct AppleCatalogItemDetailView: View {
             )
                 .frame(maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
+                .transition(.opacity)
         }
     }
     #endif
@@ -3205,9 +3221,13 @@ struct AppleCatalogItemDetailView: View {
             placeholderSystemImage: "",
             onLoad: { image in
                 heroArtworkImage = image
+                heroArt = heroArt.settling(with: .loaded)
                 fillTimeline.mark(.artwork)
             },
-            onFailure: { heroArtworkImage = nil },
+            onFailure: {
+                heroArtworkImage = nil
+                heroArt = heroArt.settling(with: .failed)
+            },
             keepsImageWhileReloading: true
         )
     }
@@ -3258,11 +3278,11 @@ struct AppleCatalogItemDetailView: View {
     /// TV (no YouTube embed) the press did nothing at all while the still
     /// still read as a "Play preview" button (ui-smoke 20260923-2209). Once
     /// the trailer's own layer is up it covers the still, and its touch
-    /// shield (`detail.trailer.toggle`, "Loading" until the first frame)
-    /// takes the presses and speaks for them instead.
+    /// shield (`detail.trailer.toggle`, silent until the video is on
+    /// screen — trailers are art-first) takes the presses instead.
     private var heroTrailerCanPlay: Bool {
         #if os(iOS) || os(visionOS)
-        trailerEmbedURL != nil && !trailerPreviewIsShown
+        trailerEmbedURL != nil && !trailerHasStarted
         #else
         false
         #endif
@@ -3285,8 +3305,11 @@ struct AppleCatalogItemDetailView: View {
     }
 
     /// The same test `trailerPreview` draws by.
+    /// The trailer's web view — its request — only goes in once the hero
+    /// still has settled; until then a started trailer waits, unseen.
     private var trailerPreviewIsShown: Bool {
         trailerHasStarted && trailerEmbedURL != nil
+            && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroArt, pressed: true)
             && !playbackCoordinator.phase.isBusy && playerPresentation == nil
     }
 
@@ -3471,9 +3494,13 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    /// Back to the art, crossfading over whatever the player showed, and
+    /// nothing said: a trailer that cannot play simply is not there.
     private func showTrailerArtworkOnly() {
-        trailerHasStarted = false
-        trailerIsActive = false
+        withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
+            trailerHasStarted = false
+            trailerIsActive = false
+        }
         trailerIsPlaying = false
         trailerInteractionGeneration &+= 1
         trailerInteractionGlyph = nil
@@ -5249,6 +5276,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     @Binding var isMuted: Bool
     @Binding var replayGeneration: Int
     let showsReplay: Bool
+    /// The frame the caller's still fills, when this view is laid out
+    /// larger than it (the hero's 16:9 box over a taller frame). The cover
+    /// is cropped to it, so it paints exactly the pixels the still does —
+    /// otherwise a tall still, aspect-filled into the wider box, showed a
+    /// different part of the picture the moment the trailer went in.
+    var coverSize: CGSize? = nil
     let onStateChange: (String, Bool, Int?) -> Void
     let onTap: () -> Void
     let onMute: () -> Void
@@ -5282,16 +5315,18 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func prepareForPlayback() {
             playbackIntent = true
             revealGeneration += 1
-            container?.setPreviewVisible(false)
+            container?.setPreviewVisible(false, animated: false)
             webView?.layer.removeAllAnimations()
             webView?.alpha = 1
         }
 
-        func hidePreview() {
+        /// `animated` crossfades back to the art (a trailer that ends or
+        /// fails); `completion` runs once the art is fully up.
+        func hidePreview(animated: Bool = false, completion: (() -> Void)? = nil) {
             playbackIntent = false
             revealGeneration += 1
             lastPlaying = false
-            container?.setPreviewVisible(false)
+            container?.setPreviewVisible(false, animated: animated, completion: completion)
             webView?.layer.removeAllAnimations()
             webView?.alpha = 1
         }
@@ -5378,15 +5413,20 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 reveal(muted: muted)
                 return
             } else if state == "ended" {
-                // Acknowledge only after native pixels are hidden. The page
-                // pauses the player on this acknowledgement, never before it.
-                hidePreview()
-                webView?.evaluateJavaScript("window.completeTrailerEnd();", completionHandler: nil)
-            } else if state == "paused" || state == "error" {
+                // Acknowledge only after the art is back over the video. The
+                // page pauses the player on this acknowledgement, never
+                // before it, so the crossfade runs over live frames.
+                hidePreview(animated: true) { [weak self] in
+                    self?.webView?.evaluateJavaScript("window.completeTrailerEnd();", completionHandler: nil)
+                }
+            } else if state == "error" {
+                hidePreview(animated: true)
+            } else if state == "paused" {
+                // At once: a paused YouTube player can paint related videos.
                 hidePreview()
             } else if state == "concealed" {
                 revealGeneration += 1
-                container?.setPreviewVisible(false)
+                container?.setPreviewVisible(false, animated: false)
                 webView?.layer.removeAllAnimations()
                 webView?.alpha = 1
             }
@@ -5410,9 +5450,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var onReplay: (() -> Void)?
         var isLandscape = false { didSet { setNeedsLayout() } }
         var controlTopInset: CGFloat? = nil { didSet { if oldValue != controlTopInset { setNeedsLayout() } } }
+        var coverSize: CGSize? = nil { didSet { if oldValue != coverSize { setNeedsLayout() } } }
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
         private var isPlaying = true
+        private var showsReplay = false
         private var previewVisible = false
 
         init(frame: CGRect, messageHandler: WKScriptMessageHandler, artworkURL: URL?) {
@@ -5507,7 +5549,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             if viewport.width > 0, viewport.height > 0 {
                 webView.transform = CGAffineTransform(scaleX: picture.width / viewport.width, y: picture.height / viewport.height)
             }
-            cover.frame = bounds
+            if let coverSize, coverSize.width > 0, coverSize.height > 0 {
+                cover.frame = CGRect(x: bounds.midX - coverSize.width / 2, y: bounds.midY - coverSize.height / 2,
+                                     width: coverSize.width, height: coverSize.height)
+            } else {
+                cover.frame = bounds
+            }
             artworkStill.frame = cover.bounds
             artworkCover.frame = cover.bounds
             touchShield.frame = bounds
@@ -5527,10 +5574,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 
         func updateControls(isPlaying: Bool, isMuted: Bool, showsReplay: Bool) {
             self.isPlaying = isPlaying
+            self.showsReplay = showsReplay
             updatePlaybackValue()
-            // Web previews stay silent to avoid WebKit's automatic Now Playing
-            // session. Keep replay available without offering an inert unmute.
-            muteButton.isHidden = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !showsReplay
             touchShield.accessibilityLabel = isPlaying ? "Pause trailer preview" : "Play trailer preview"
             muteButton.setImage(
                 UIImage(systemName: showsReplay
@@ -5558,28 +5603,42 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             artworkStill.image = image.map { UIImage(cgImage: $0) }
         }
 
-        /// Reveal cross-fades the cover away over the live frames; anything
-        /// that hides the preview puts the cover back at once, because the
-        /// page acts on "ended" only after the video pixels are gone.
-        func setPreviewVisible(_ visible: Bool) {
+        /// Reveal cross-fades the cover away over the live frames. Hiding
+        /// crossfades it back when `animated` (the page acts on "ended" only
+        /// in `completion`, once the video pixels are covered), and puts it
+        /// back at once otherwise. Reduce Motion swaps instantly both ways.
+        func setPreviewVisible(_ visible: Bool, animated: Bool = true, completion: (() -> Void)? = nil) {
             let wasVisible = previewVisible
             if visible != wasVisible { appleTrace("trailer cover \(visible ? "fading out" : "up")") }
             previewVisible = visible
             cover.layer.removeAllAnimations()
-            if visible, !wasVisible, !UIAccessibility.isReduceMotionEnabled {
+            let duration = AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: UIAccessibility.isReduceMotionEnabled)
+            if visible != wasVisible, animated, duration > 0 {
                 UIView.animate(
-                    withDuration: AppleDetailMetrics.trailerCrossfadeDuration,
+                    withDuration: duration,
                     delay: 0,
-                    options: [.curveEaseInOut, .beginFromCurrentState]
-                ) { self.cover.alpha = 0 }
+                    options: [.curveEaseInOut, .beginFromCurrentState],
+                    animations: { self.cover.alpha = visible ? 0 : 1 },
+                    completion: { _ in completion?() }
+                )
             } else {
                 cover.alpha = visible ? 0 : 1
+                completion?()
             }
             updatePlaybackValue()
         }
 
+        /// Art-first: until the video is on screen nothing is added over the
+        /// art and VoiceOver hears nothing about it — no "Loading", no
+        /// control. Once it plays, the shield pauses it and speaks for it.
         private func updatePlaybackValue() {
-            touchShield.accessibilityValue = isPlaying ? (previewVisible ? "Playing" : "Loading") : "Paused"
+            let loading = isPlaying && !previewVisible
+            touchShield.isAccessibilityElement = !loading
+            touchShield.accessibilityValue = isPlaying ? "Playing" : "Paused"
+            // Web previews stay silent to avoid WebKit's automatic Now Playing
+            // session. Keep replay available without offering an inert unmute.
+            muteButton.isHidden = !showsReplay
+                && (ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback || loading)
         }
 
         @objc private func tapPreview() {
@@ -5612,10 +5671,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         appleTrace("trailer view inserted, still=\(artworkImage.map { "\($0.width)px" } ?? "none")")
         container.isLandscape = isLandscape
         container.controlTopInset = controlTopInset
+        container.coverSize = coverSize
         container.onTap = onTap
         container.onMute = onMute
         container.onReplay = onReplay
-        container.onPause = context.coordinator.hidePreview
+        container.onPause = { [coordinator = context.coordinator] in coordinator.hidePreview() }
         context.coordinator.attach(to: container)
         container.updateControls(
             isPlaying: isPlaying,
@@ -5631,9 +5691,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.onTap = onTap
         view.onMute = onMute
         view.onReplay = onReplay
-        view.onPause = context.coordinator.hidePreview
+        view.onPause = { [coordinator = context.coordinator] in coordinator.hidePreview() }
         view.isLandscape = isLandscape
         view.controlTopInset = controlTopInset
+        view.coverSize = coverSize
         view.updateArtwork(artworkURL)
         view.updateStill(artworkImage)
         view.updateControls(
@@ -5960,7 +6021,7 @@ struct AppleDetailMetrics {
     static let titleLogoBottomBuffer: CGFloat = 24
     static let wideEpisodeThreshold: CGFloat = 1_000
     static let bottomGradientHeight: CGFloat = 24
-    static let trailerCrossfadeDuration: Double = 0.6
+    static let trailerCrossfadeDuration = AppleTrailerArtFirstPolicy.crossfadeDuration
 
     static let portraitTitleFontSize: CGFloat = 17
 
@@ -7134,9 +7195,13 @@ extension AppleCatalogItemDetailView {
                     placeholderSystemImage: "",
                     onLoad: { image in
                         heroArtworkImage = image
+                        heroArt = heroArt.settling(with: .loaded)
                         fillTimeline.mark(.artwork)
                     },
-                    onFailure: { heroArtworkImage = nil },
+                    onFailure: {
+                        heroArtworkImage = nil
+                        heroArt = heroArt.settling(with: .failed)
+                    },
                     keepsImageWhileReloading: true,
                     fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension
                 )
@@ -7149,8 +7214,7 @@ extension AppleCatalogItemDetailView {
             .focusable(trailerHasStarted)
             .accessibilityLabel(trailerIsActive ? "Pause trailer" : "Play trailer")
             .accessibilityHidden(!trailerHasStarted && titlePageTrailerKeys.isEmpty)
-            if trailerHasStarted, let embedURL = trailerEmbedURL,
-               !playbackCoordinator.phase.isBusy, playerPresentation == nil {
+            if trailerPreviewIsShown, let embedURL = trailerEmbedURL {
                 AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: heroArtworkImage,
                                            isPlaying: trailerIsActive, isMuted: trailerMuted,
                                            onStateChange: handleTrailerState)
@@ -7160,11 +7224,13 @@ extension AppleCatalogItemDetailView {
                     .clipped()
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                    .transition(.opacity)
             }
         }
         .overlay { AppleMacHeroFadeView().allowsHitTesting(false) }
         .overlay(alignment: .topTrailing) {
-            if trailerHasStarted, trailerIsActive {
+            // Nothing over the art until the video is really on screen.
+            if trailerHasStarted, trailerIsPlaying {
                 AppleMacHeroMuteButton(isMuted: trailerMuted) { trailerMuted.toggle() }
                     .padding(.top, detailSafeAreaInsets.top + AppleMacHeroLayout.muteTopInset)
                     .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)

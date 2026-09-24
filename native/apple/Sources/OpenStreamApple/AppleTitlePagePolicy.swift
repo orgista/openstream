@@ -42,12 +42,19 @@ public enum AppleTitlePagePolicy {
         case playEpisode(String)
         /// Nothing on the page can play, but a trailer can.
         case playTrailer
+        /// A hero whose title has nothing to play and no trailer: the button
+        /// opens the title page instead of sitting there greyed out (N17d).
+        case details
 
         public func displayTitle(hasCompletedDownload: Bool) -> String {
             switch self {
             case .play, .playEpisode: hasCompletedDownload ? "Play Offline" : title
-            case .resume, .playTrailer: title
+            case .resume, .playTrailer, .details: title
             }
+        }
+
+        public var systemImage: String {
+            self == .details ? "info.circle" : "play.fill"
         }
 
         public var title: String {
@@ -57,6 +64,7 @@ public enum AppleTitlePagePolicy {
             case .play: "Play"
             case .playEpisode(let episode): "Play \(episode)"
             case .playTrailer: "Play Trailer"
+            case .details: "Details"
             }
         }
     }
@@ -134,6 +142,54 @@ public enum AppleTitlePagePolicy {
     /// Mac"): no trailer on its heroes or title pages, and no lookups for one.
     public static func offersTrailers(on platform: AppleUIPlatform = .current) -> Bool {
         platform != .tvOS
+    }
+
+    // MARK: - The hero's button
+
+    /// Where a hero's trailer lookup stands: a title with nothing to play
+    /// waits for it before choosing between Play Trailer and Details.
+    public enum TrailerAvailability: Equatable, Sendable {
+        case none, pending, available
+    }
+
+    /// The hero's one button (every Discover hero). Never a disabled Play:
+    /// nothing to play and no trailer is Details, and while the trailer
+    /// lookup that decides between the two is still out the answer is nil —
+    /// the button is held back until its label is final.
+    public static func heroPrimaryAction(
+        type: String,
+        progress: ApplePlaybackProgress?,
+        selectedEpisode: AppleStremioEpisode?,
+        isPlayable: Bool,
+        trailer: TrailerAvailability
+    ) -> PrimaryAction? {
+        if isPlayable {
+            return primaryAction(type: type, progress: progress, selectedEpisode: selectedEpisode,
+                                 isPlayable: true, hasTrailer: false)
+        }
+        switch trailer {
+        case .available: return .playTrailer
+        case .pending: return nil
+        case .none: return .details
+        }
+    }
+
+    /// What the hero's button shows: its words and glyph. `action == nil`
+    /// keeps the button's place without showing it. A pressed Play Trailer
+    /// keeps its label: trailers are art-first and have no loading state
+    /// (`AppleTrailerArtFirstPolicy`).
+    public struct HeroButton: Equatable, Sendable {
+        public let action: PrimaryAction?
+        public let title: String
+        public let systemImage: String
+
+        public var isHidden: Bool { action == nil }
+
+        public init(action: PrimaryAction?, isDownloaded: Bool = false) {
+            self.action = action
+            title = (action ?? .play).displayTitle(hasCompletedDownload: isDownloaded)
+            systemImage = (action ?? .play).systemImage
+        }
     }
 
     /// "S4, E8" — the Apple TV app's spelling. Nil without a season and number.

@@ -101,7 +101,7 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
 
     private var isPaused: Bool {
         AppleHeroRotation.cycleIsPaused(isTouching: isHovering, trailerIsPlaying: trailer.isPlaying,
-                                        trailerIsMuted: trailer.isMuted)
+                                        trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested)
     }
 
     private func select(_ position: Int) {

@@ -143,9 +143,7 @@ struct AppleMacHeroFadeView: View {
 /// into a check once the title is saved. Same label logic and actions as the
 /// iPhone hero's (`AppleHomePhoneHeroActions`).
 struct AppleHomeMacHeroActions: View {
-    let action: AppleTitlePagePolicy.PrimaryAction
-    var isDownloaded = false
-    let canPerform: Bool
+    let button: AppleTitlePagePolicy.HeroButton
     /// Nil hides the My List button: the title has nothing to save it against.
     let isInList: Bool?
     let onPlay: () -> Void
@@ -154,15 +152,15 @@ struct AppleHomeMacHeroActions: View {
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
-                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
+                AppleHeroPrimaryButtonLabel(button: button)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
             }
             .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
+            .appleHeroPrimaryButtonState(button)
             .accessibilityIdentifier("home.featured.play")
-            .disabled(!canPerform)
 
             if let isInList {
                 Button(action: onToggleList) {

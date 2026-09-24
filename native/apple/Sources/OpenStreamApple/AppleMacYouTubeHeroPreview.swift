@@ -64,10 +64,14 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             case "revealed":
                 reveal()
             case "ended":
-                // The page pauses only once the cover is back up.
-                conceal()
-                container?.webView.evaluateJavaScript("window.completeTrailerEnd();", completionHandler: nil)
-            case "paused", "error", "concealed":
+                // The page pauses only once the art has crossfaded back up,
+                // so the fade runs over live frames.
+                conceal(animated: true) { [weak self] in
+                    self?.container?.webView.evaluateJavaScript("window.completeTrailerEnd();", completionHandler: nil)
+                }
+            case "error":
+                conceal(animated: true)
+            case "paused", "concealed":
                 conceal()
             default:
                 break
@@ -75,9 +79,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             onStateChange?(state, muted, errorCode)
         }
 
-        func conceal() {
+        func conceal(animated: Bool = false, completion: (@MainActor @Sendable () -> Void)? = nil) {
             revealGeneration += 1
-            container?.setPreviewVisible(false)
+            container?.setPreviewVisible(false, animated: animated, completion: completion)
         }
 
         /// Measures the picture band first, so a letterboxed trailer is
@@ -163,17 +167,25 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             cover.image = image
         }
 
-        /// Reveal cross-fades the cover away over the live frames; anything
-        /// that hides the preview puts it back at once.
-        func setPreviewVisible(_ visible: Bool) {
+        /// Reveal cross-fades the cover away over the live frames. Hiding
+        /// crossfades it back when `animated` (a trailer that ends or fails)
+        /// and puts it back at once otherwise; `completion` runs once the
+        /// art is fully up. Reduce Motion swaps instantly both ways.
+        func setPreviewVisible(_ visible: Bool, animated: Bool = true,
+                               completion: (@MainActor @Sendable () -> Void)? = nil) {
             let wasVisible = previewVisible
             previewVisible = visible
             if visible != wasVisible { appleTrace("mac hero trailer cover \(visible ? "fading out" : "up")") }
-            let animates = visible && !wasVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let duration = AppleTrailerArtFirstPolicy.crossfadeDuration(
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            let animates = visible != wasVisible && animated && duration > 0
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = animates ? AppleDetailMetrics.trailerCrossfadeDuration : 0
+                context.duration = animates ? duration : 0
                 context.allowsImplicitAnimation = animates
                 cover.animator().alphaValue = visible ? 0 : 1
+            } completionHandler: {
+                // AppKit runs it on the main thread.
+                MainActor.assumeIsolated { completion?() }
             }
         }
     }

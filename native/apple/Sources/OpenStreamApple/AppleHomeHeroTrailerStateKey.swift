@@ -7,6 +7,8 @@ struct AppleHomeHeroTrailerStateKey: PreferenceKey {
     struct Value: Equatable {
         var isPlaying = false
         var isMuted = true
+        /// Started by the Play Trailer button rather than autoplay.
+        var isRequested = false
     }
 
     static let defaultValue = Value()

@@ -949,6 +949,85 @@ final class AppleiOSUITests: XCTestCase {
         if !hasTrailer { throw XCTSkip("Featured title had no playable trailer; detail framing and Back were captured") }
     }
 
+    /// The hero's one button is never dead (N17d): a title with nothing to
+    /// play and no trailer says Details and opens the title page. Play
+    /// Trailer is art-first (owner, 2026-09-24, N17d2): the press changes
+    /// nothing on screen — no spinner, no "Loading", no message — the art
+    /// stays, and the video crossfades in over it only once it plays. The
+    /// burst of pictures after the press shows that, or the art staying.
+    /// `OPENSTREAM_TEST_HERO_TITLE` names the title to lead the rotation with.
+    func testHeroPrimaryButtonAnswersThePress() throws {
+        guard let title = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_HERO_TITLE"], !title.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_HERO_TITLE not set")
+        }
+        app.launchArguments += ["-OpenStreamHeroTitle", title]
+        launch(screen: "discover")
+        let play = app.buttons["home.featured.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 60), "Discover never loaded its billboard")
+        // The label settles once the hero's trailer lookup has answered.
+        Thread.sleep(forTimeInterval: 4)
+        // `OPENSTREAM_TEST_HERO_LABEL` pages through the carousel to a hero
+        // whose button says it ("Play Trailer"), when the name matched none.
+        if let wanted = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_HERO_LABEL"], !wanted.isEmpty {
+            var pages = 0
+            // A page's button is out of the tree until its lookup answers.
+            // Across the art, above the title block, which is a button.
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.3))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.3))
+            while !(play.waitForExistence(timeout: 10) && play.label == wanted), pages < 8 {
+                from.press(forDuration: 0.05, thenDragTo: to)
+                pages += 1
+                Thread.sleep(forTimeInterval: 4)
+            }
+            XCTAssertTrue(play.waitForExistence(timeout: 10))
+        }
+        let label = play.label
+        attach("hero-at-rest-\(label)")
+        XCTAssertTrue(play.isEnabled, "The hero showed a disabled \(label)")
+        switch label {
+        case "Details":
+            play.tap()
+            XCTAssertTrue(app.buttons["detail.back"].firstMatch.waitForExistence(timeout: 10),
+                          "Details did not open the title page")
+            attach("hero-details-opened")
+        case "Play Trailer":
+            play.tap()
+            for frame in 0..<12 {
+                Thread.sleep(forTimeInterval: 0.5)
+                // A muted trailer does not hold the rotation, so the page may
+                // move on; whatever the button says, it is never a loading
+                // or failure state.
+                let button = app.buttons["home.featured.play"].firstMatch
+                XCTAssertFalse(["Loading", "Loading trailer", "Trailer unavailable"].contains(button.label),
+                               "The hero's button showed a trailer loading state: \(button.label)")
+                XCTAssertTrue(button.isEnabled, "The hero's button was disabled after the press")
+                // Only the hero counts: shelves below may still be loading.
+                let heroBottom = button.frame.maxY
+                let heroSpinners = app.activityIndicators.allElementsBoundByIndex.filter {
+                    $0.exists && !$0.frame.isEmpty && $0.frame.minY < heroBottom
+                }
+                XCTAssertTrue(heroSpinners.isEmpty, "A spinner appeared on the hero for the trailer")
+                attach(String(format: "hero-trailer-burst-%02d", frame))
+            }
+            // The title page's Play Trailer is the same background action.
+            let details = app.buttons["home.featured.details"].firstMatch
+            guard details.waitForExistence(timeout: 5) else { break }
+            details.tap()
+            let pagePlay = app.buttons["detail.play"].firstMatch
+            guard pagePlay.waitForExistence(timeout: 20), pagePlay.label == "Play Trailer" else { break }
+            attach("detail-trailer-at-rest")
+            pagePlay.tap()
+            for frame in 0..<16 {
+                Thread.sleep(forTimeInterval: 0.75)
+                XCTAssertEqual(pagePlay.label, "Play Trailer", "The title page's Play Trailer changed its label")
+                XCTAssertTrue(pagePlay.isEnabled, "The title page's Play Trailer was disabled after the press")
+                attach(String(format: "detail-trailer-burst-%02d", frame))
+            }
+        default:
+            break
+        }
+    }
+
     func testLivePlaylistShowsChannelFailureAndRecovers() throws {
         guard let playlist = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"], !playlist.isEmpty else {
             throw XCTSkip("OPENSTREAM_TEST_M3U not set")
@@ -2151,6 +2230,16 @@ final class AppleiOSUITests: XCTestCase {
         var controlHash = 0
     }
 
+    /// Play Trailer is a background action, not a silent button. Owner rule
+    /// (2026-09-24, N17d2): trailers are art-first — no loading screen, no
+    /// spinner, no "Loading" text; the art stays up while the video loads
+    /// behind it and fades to video only once it really plays, which can take
+    /// longer than the crawl's 3 s, or never happen. So a press that leaves
+    /// the screen unchanged is the correct answer here.
+    private func crawlIsBackgroundAction(_ target: CrawlTarget) -> Bool {
+        ["Play Trailer", "Play preview"].contains(target.label)
+    }
+
     private struct CrawlTarget {
         let typeName: String
         let type: XCUIElement.ElementType
@@ -2722,6 +2811,8 @@ final class AppleiOSUITests: XCTestCase {
             result.pressed += 1
             if answered {
                 crawlNote("   ✓ \(target.name) — responded")
+            } else if crawlIsBackgroundAction(target) {
+                crawlNote("   ✓ \(target.name) — background action: the art stays until the video can play")
             } else if node.isSelected {
                 // An option that was already the chosen one is meant to stay
                 // chosen; it is pressed for the sake of pressing everything,
@@ -2821,6 +2912,8 @@ final class AppleiOSUITests: XCTestCase {
             result.pressed += 1
             if answered {
                 crawlNote("   ✓ \(target.name) — responded")
+            } else if crawlIsBackgroundAction(target) {
+                crawlNote("   ✓ \(target.name) — background action: the art stays until the video can play")
             } else {
                 result.silent += 1
                 crawlNote("   ✗ \(target.name) — NO VISIBLE RESPONSE")

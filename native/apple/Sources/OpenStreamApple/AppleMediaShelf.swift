@@ -283,9 +283,7 @@ struct AppleFeaturedHero<Actions: View>: View {
 
 struct AppleFeaturedActions: View {
     let viewportSize: CGSize
-    let action: AppleTitlePagePolicy.PrimaryAction
-    var isDownloaded = false
-    let canPerform: Bool
+    let button: AppleTitlePagePolicy.HeroButton
     /// Landscape on any device, so the phone keeps the fixed-size pills too.
     private var isLandscapeLayout: Bool {
         #if os(visionOS) || os(iOS)
@@ -299,28 +297,35 @@ struct AppleFeaturedActions: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         #if os(tvOS)
-        AppleTVBillboardActions(action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: onPlay, onDetails: onDetails)
+        AppleTVBillboardActions(button: button, onPlay: onPlay, onDetails: onDetails)
         #else
         legacyBody
         #endif
     }
 
     #if !os(tvOS)
+    /// The primary button already is Details when nothing plays.
+    private var showsDetailsButton: Bool { button.action != .details }
+
     @ViewBuilder
     private var legacyBody: some View {
         if isLandscapeLayout {
             HStack(spacing: AppleDetailMetrics.actionButtonGap) {
                 Button(action: onPlay) {
-                    AppleDetailActionButtonLabel(title: action.displayTitle(hasCompletedDownload: isDownloaded), glyph: .systemImage("play.fill"), kind: .play,
+                    AppleDetailActionButtonLabel(title: button.title,
+                                                glyph: .systemImage(button.systemImage),
+                                                kind: .play,
                                                 width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
                 }
+                .appleHeroPrimaryButtonState(button)
                 .accessibilityIdentifier("home.featured.play")
-                .disabled(!canPerform)
-                Button(action: onDetails) {
-                    AppleDetailActionButtonLabel(title: "Details", glyph: .systemImage("info.circle"), kind: .download,
-                                                width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
+                if showsDetailsButton {
+                    Button(action: onDetails) {
+                        AppleDetailActionButtonLabel(title: "Details", glyph: .systemImage("info.circle"), kind: .download,
+                                                    width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
+                    }
+                    .accessibilityIdentifier("home.featured.details")
                 }
-                .accessibilityIdentifier("home.featured.details")
             }
             .buttonStyle(.plain)
         } else {
@@ -333,19 +338,21 @@ struct AppleFeaturedActions: View {
             .featuredActionButtonWidth(portraitViewportWidth: viewportSize.width) ?? .infinity
         layout {
             Button(action: onPlay) {
-                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
+                AppleHeroPrimaryButtonLabel(button: button)
                     .frame(maxWidth: buttonWidth)
             }
             .buttonStyle(.brandPrimary)
+            .appleHeroPrimaryButtonState(button)
             .accessibilityIdentifier("home.featured.play")
-                .disabled(!canPerform)
 
-            Button(action: onDetails) {
-                Label("Details", systemImage: "info.circle")
-                    .frame(maxWidth: buttonWidth)
+            if showsDetailsButton {
+                Button(action: onDetails) {
+                    Label("Details", systemImage: "info.circle")
+                        .frame(maxWidth: buttonWidth)
+                }
+                .buttonStyle(.brandSecondary)
+                .accessibilityIdentifier("home.featured.details")
             }
-            .buttonStyle(.brandSecondary)
-            .accessibilityIdentifier("home.featured.details")
         }
         .controlSize(.large)
         .frame(maxWidth: .infinity, alignment: .leading)

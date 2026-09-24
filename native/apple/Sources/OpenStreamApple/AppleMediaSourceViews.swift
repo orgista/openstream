@@ -1878,14 +1878,13 @@ struct AppleLibraryView: View {
                 ) {
                     AppleFeaturedActions(
                         viewportSize: viewportSize,
-                        action: AppleTitlePagePolicy.primaryAction(
+                        button: AppleTitlePagePolicy.HeroButton(action: AppleTitlePagePolicy.heroPrimaryAction(
                             type: item.type, progress: library.progress[featured.id],
                             selectedEpisode: library.resumeEpisode(for: item, group: featured,
                                 episodes: AppleLocalLibraryStore.episodes(group: featured, mediaID: item.mediaID, enriched: [])),
                             isPlayable: AppleTitlePagePolicy.hasPlaybackRoute(
                                 item: item, sources: sourceStore.sources, hasLocalGroup: true),
-                            hasTrailer: false),
-                        canPerform: true,
+                            trailer: .none)),
                         onPlay: { selectHero(featured, autoPlay: true) },
                         onDetails: { selectHero(featured, autoPlay: false) }
                     )
