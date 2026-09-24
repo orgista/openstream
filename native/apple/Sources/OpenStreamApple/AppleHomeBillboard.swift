@@ -42,7 +42,6 @@ struct AppleHomeBillboard<Actions: View>: View {
     var tv: TV? = nil
     @ViewBuilder var actions: (AppleTitlePagePolicy.HeroButton, @escaping () -> Void) -> Actions
     @State private var episodes: [AppleStremioEpisode] = []
-    @State private var episodesLoaded = false
     /// Every lookup that can find a trailer has answered.
     @State private var actionMetadataLoaded = false
     /// A trailer's video — pressed or autoplaying — is on screen; a press
@@ -67,10 +66,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     private var hasPlaybackRoute: Bool {
-        AppleTitlePagePolicy.hasPlaybackRoute(
+        AppleTitlePagePolicy.heroHasPlaybackRoute(
             item: item, sources: sources,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted,
-            episodesUnavailable: episodesLoaded && episodes.isEmpty
+            hasCompletedDownload: downloadCoordinator.state.isCompleted
         )
     }
 
@@ -120,7 +118,6 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// a catalog's private id may need resolving before it can list episodes.
     private func loadActionMetadata() async {
         episodes = []
-        episodesLoaded = false
         actionMetadataLoaded = false
         previewTrailerKeys = []
         detailTrailerKeys = []
@@ -170,7 +167,6 @@ struct AppleHomeBillboard<Actions: View>: View {
                 case .identity(let id): addLookups(to: &group, mediaID: id ?? item.mediaID)
                 case .episodes(let loaded):
                     episodes = loaded
-                    episodesLoaded = true
                 }
             }
         }
@@ -554,7 +550,7 @@ private struct AppleHomeHeroPreview: View {
             isRevealed = change == .reveal
             onTrailerOnScreen(isRevealed)
         }
-        if state == "error" || state == "autoplay-blocked" {
+        if AppleTrailerArtFirstPolicy.dropsVideoLayer(forPlayerState: state) {
             // Nothing to say: the art crossfades back over whatever the
             // player showed, and stays.
             withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {

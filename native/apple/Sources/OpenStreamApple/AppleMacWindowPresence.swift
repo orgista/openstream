@@ -23,10 +23,21 @@ struct AppleMacWindowPresence: NSViewRepresentable {
 
     final class ProbeView: NSView {
         var onChange: (Bool) -> Void = { _ in }
+        private var reports = AppleWindowPresenceReports()
 
+        /// AppKit calls this in the middle of a SwiftUI update (a push takes
+        /// the covered page out of the window), where writing the caller's
+        /// state is undefined behaviour. The report waits for the next turn
+        /// of the main actor and is dropped if the view has moved again by
+        /// then or nothing changed.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            onChange(window != nil)
+            let present = window != nil
+            Task { [weak self] in
+                guard let self,
+                      let report = self.reports.report(present, stillPresent: self.window != nil) else { return }
+                self.onChange(report)
+            }
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }

@@ -21,7 +21,7 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
     let isMuted: Bool
     let onStateChange: (String, Bool, Int?) -> Void
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var loadedURL: URL?
         var lastMuted = true
         var lastPlaying = true
@@ -77,6 +77,16 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
                 break
             }
             onStateChange?(state, muted, errorCode)
+        }
+
+        /// WebKit's content process died under the trailer: the dead page
+        /// draws nothing, so the still crossfades back over it and the
+        /// caller drops the video layer. Nothing reloads here: a page that
+        /// crashed once is not retried.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            appleTrace("mac hero trailer web content process terminated")
+            conceal(animated: true)
+            onStateChange?(AppleTrailerArtFirstPolicy.webContentTerminatedState, lastMuted, nil)
         }
 
         func conceal(animated: Bool = false, completion: (@MainActor @Sendable () -> Void)? = nil) {
@@ -224,6 +234,7 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         coordinator.lastMuted = isMuted
         coordinator.lastPlaying = isPlaying
         let container = PlayerContainer(messageHandler: coordinator)
+        container.webView.navigationDelegate = coordinator
         coordinator.container = container
         container.updateStill(artworkImage)
         load(url, in: container, context: context)

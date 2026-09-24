@@ -49,6 +49,50 @@ struct ApplePlaybackRouteTests {
         #expect(AppleTitlePagePolicy.hasPlaybackRoute(item: series, sources: [source(resources: ["stream"])], episodesUnavailable: true) == false)
     }
 
+    /// N17e: the hero's own episode lookup came back empty for a series whose
+    /// title page offered Play and Download Season. The hero treats the list
+    /// as unknown and falls back to the source check, so both say Play.
+    @Test func heroWithAnEmptyEpisodeLookupStillPlaysFromAStreamingSource() {
+        let sources = [source(resources: ["stream"])]
+        let heroPlayable = AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: sources)
+        let titlePagePlayable = AppleTitlePagePolicy.hasPlaybackRoute(item: series, sources: sources)
+        #expect(heroPlayable)
+        #expect(heroPlayable == titlePagePlayable)
+        let heroAction = AppleTitlePagePolicy.heroPrimaryAction(
+            type: series.type, progress: nil,
+            selectedEpisode: AppleTitlePagePolicy.heroEpisode(item: series, progress: nil, episodes: []),
+            isPlayable: heroPlayable, trailer: .none)
+        #expect(heroAction == .play)
+    }
+
+    @Test func heroStillSaysDetailsWithNoWayToPlay() {
+        let metadataOnly = [source(resources: ["catalog", "meta"])]
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: metadataOnly) == false)
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: [source(resources: ["stream"], enabled: false)]) == false)
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: [], hasCompletedDownload: true))
+    }
+
+    /// N17e on the iPhone sim: a metadata-only add-on. The hero says Details;
+    /// the title page must not offer an enabled Play that can only fail.
+    @Test func withOnlyAMetadataAddOnHeroAndTitlePageAgreeNothingPlays() {
+        let metadataOnly = [source(resources: ["catalog", "meta"])]
+        let route = AppleTitlePagePolicy.hasPlaybackRoute(item: series, sources: metadataOnly)
+        #expect(AppleTitlePagePolicy.heroPrimaryAction(
+            type: series.type, progress: nil, selectedEpisode: nil,
+            isPlayable: AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: metadataOnly),
+            trailer: .none) == .details)
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: series.type, hasPlaybackRoute: route,
+                                                     isPreparing: false, hasSelectedEpisode: true) == false)
+    }
+
+    @Test func titlePagePlayNeedsARouteAnEpisodeAndNoWork() {
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: "series", hasPlaybackRoute: true, isPreparing: false, hasSelectedEpisode: true))
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: "series", hasPlaybackRoute: true, isPreparing: false, hasSelectedEpisode: false) == false)
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: "series", hasPlaybackRoute: true, isPreparing: true, hasSelectedEpisode: true) == false)
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: "movie", hasPlaybackRoute: true, isPreparing: false, hasSelectedEpisode: false))
+        #expect(AppleTitlePagePolicy.canStartPlayback(type: "movie", hasPlaybackRoute: false, isPreparing: false, hasSelectedEpisode: false) == false)
+    }
+
     @Test func heroResumesExactSavedEpisode() throws {
         let first = AppleStremioEpisode(id: "tt1234567:1:1", title: "First", season: 1, episode: 1, releaseInfo: nil)
         let saved = AppleStremioEpisode(id: "tt1234567:2:3", title: "Saved", season: 2, episode: 3, releaseInfo: nil)

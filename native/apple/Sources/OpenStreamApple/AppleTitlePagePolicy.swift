@@ -88,6 +88,25 @@ public enum AppleTitlePagePolicy {
         }
     }
 
+    /// The hero's route: `hasPlaybackRoute` with the episode list treated as
+    /// unknown. The hero's own lookup coming back empty (or not back yet) is
+    /// no evidence the title page's will — JEOPARDY!'s came back empty while
+    /// its title page offered Play and Download Season (N17e) — so the hero
+    /// falls back to the source check instead of saying Details.
+    public static func heroHasPlaybackRoute(item: AppleCatalogItem, sources: [AppleSource],
+                                             hasCompletedDownload: Bool = false) -> Bool {
+        hasPlaybackRoute(item: item, sources: sources, hasCompletedDownload: hasCompletedDownload)
+    }
+
+    /// Whether the title page's Play is enabled. It needs a playback route
+    /// as well as an episode: with only a metadata add-on, JEOPARDY!'s title
+    /// page offered an enabled Play that could only fail, while its hero —
+    /// reading the same route — rightly said Details (N17e, iPhone sim).
+    public static func canStartPlayback(type: String, hasPlaybackRoute: Bool,
+                                        isPreparing: Bool, hasSelectedEpisode: Bool) -> Bool {
+        hasPlaybackRoute && !isPreparing && (type != "series" || hasSelectedEpisode)
+    }
+
     /// The hero has no episode picker: resume the saved episode, otherwise
     /// use the title page's default. Media servers own their episode list and
     /// resume routing; retain their opaque saved part id for the same label.

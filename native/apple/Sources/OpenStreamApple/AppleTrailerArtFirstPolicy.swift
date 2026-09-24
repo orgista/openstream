@@ -41,16 +41,28 @@ public enum AppleTrailerArtFirstPolicy {
         case returnToArt
     }
 
+    /// Not from the page: the trailer's web view reports it when WebKit's
+    /// content process dies under it, so the video layer is dropped and the
+    /// art stays — never a blank frame.
+    public static let webContentTerminatedState = "web-content-terminated"
+
     /// The video stays hidden under the art until the page reports
     /// "revealed" — it has played real frames for a moment — and goes back
-    /// under the art when it ends, pauses, errors or is blocked. Everything
-    /// else ("ready", "playing", buffering) leaves the art up.
+    /// under the art when it ends, pauses, errors or is blocked, or its web
+    /// content process dies. Everything else ("ready", "playing", buffering)
+    /// leaves the art up.
     public static func videoLayerChange(forPlayerState state: String) -> VideoLayerChange? {
         switch state {
         case "revealed": .reveal
-        case "ended", "paused", "error", "autoplay-blocked", "concealed": .returnToArt
+        case "ended", "paused", "error", "autoplay-blocked", "concealed", webContentTerminatedState: .returnToArt
         default: nil
         }
+    }
+
+    /// Whether the state ends this trailer for good: the video layer is
+    /// removed and the art stays, with no retry and nothing said.
+    public static func dropsVideoLayer(forPlayerState state: String) -> Bool {
+        state == "error" || state == "autoplay-blocked" || state == webContentTerminatedState
     }
 
     public static let crossfadeDuration: Double = 0.6

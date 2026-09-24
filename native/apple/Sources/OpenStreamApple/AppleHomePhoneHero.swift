@@ -30,6 +30,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 48
+    @State private var copyHidden = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -58,6 +59,19 @@ struct AppleHomePhoneHero<Actions: View>: View {
             .accessibilityIdentifier("home.featured.details")
             actions
                 .padding(.top, 4)
+        }
+        // Faded out is gone: no taps and no VoiceOver on buttons nobody can
+        // see. The action runs only when the copy crosses the fade line, so
+        // scrolling still costs no per-frame state change.
+        .allowsHitTesting(!copyHidden)
+        .accessibilityHidden(copyHidden)
+        .onGeometryChange(for: Bool.self) { [copyFadeLine] proxy in
+            AppleHomePhoneHeroLayout.copyIsHidden(
+                copyTop: proxy.frame(in: .scrollView).minY,
+                restingTop: proxy.frame(in: .named(Self.coordinateSpaceName)).minY,
+                fadeLine: copyFadeLine)
+        } action: { hidden in
+            copyHidden = hidden
         }
         // Read from the copy's own place in the scroll view, so scrolling
         // costs no state change and no body pass. The hero starts at the top

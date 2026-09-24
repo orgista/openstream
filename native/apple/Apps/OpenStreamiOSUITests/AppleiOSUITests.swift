@@ -956,6 +956,48 @@ final class AppleiOSUITests: XCTestCase {
     /// stays, and the video crossfades in over it only once it plays. The
     /// burst of pictures after the press shows that, or the art staying.
     /// `OPENSTREAM_TEST_HERO_TITLE` names the title to lead the rotation with.
+    /// N17e: a hero and its title page agree on whether the title plays.
+    /// JEOPARDY!'s hero said Details while its title page offered Play and
+    /// Download Season. Navigation only — Play is never pressed.
+    /// `OPENSTREAM_TEST_HERO_TITLE` names the title to lead the rotation with.
+    func testHeroLabelAgreesWithItsTitlePage() throws {
+        guard let title = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_HERO_TITLE"], !title.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_HERO_TITLE not set")
+        }
+        app.launchArguments += ["-OpenStreamHeroTitle", title]
+        launch(screen: "discover")
+        let heroButton = app.buttons["home.featured.play"].firstMatch
+        XCTAssertTrue(heroButton.waitForExistence(timeout: 60), "Discover never loaded its billboard")
+        // The label settles once the hero's lookups answer — well inside the
+        // 12 s rotation, so the pinned title is still the one on screen.
+        Thread.sleep(forTimeInterval: 4)
+        let details = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+        XCTAssertTrue(details.exists)
+        let heroName = details.label
+        let heroLabel = heroButton.label
+        let heroPlays = heroButton.isEnabled && Self.labelPlays(heroLabel)
+        attach("hero-label-\(heroLabel)")
+        XCTAssertTrue(heroName.localizedCaseInsensitiveContains(title), "The pinned title was not on the hero: \(heroName)")
+        details.tap()
+        let pageButton = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(pageButton.waitForExistence(timeout: 30), "The title page has no primary button")
+        // Its episode list and canonical id settle the button.
+        Thread.sleep(forTimeInterval: 8)
+        let pageLabel = pageButton.label
+        // A title page may draw a greyed-out Play; only an enabled one plays.
+        let pagePlays = pageButton.isEnabled && Self.labelPlays(pageLabel)
+        let pageTitle = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", title)).firstMatch.exists
+        attach("title-page-label-\(pageLabel)-enabled-\(pageButton.isEnabled)")
+        print("[N17e] hero=\(heroName) heroLabel=\(heroLabel) heroPlays=\(heroPlays) pageLabel=\(pageLabel) pageEnabled=\(pageButton.isEnabled) pageIsTitle=\(pageTitle)")
+        XCTAssertTrue(pageTitle, "The title page that opened is not \(title)")
+        XCTAssertEqual(heroPlays, pagePlays, "The hero said \(heroLabel) while its title page said \(pageLabel) (enabled: \(pageButton.isEnabled))")
+    }
+
+    private static func labelPlays(_ label: String) -> Bool {
+        (label.hasPrefix("Play") && label != "Play Trailer") || label.hasPrefix("Resume")
+    }
+
     func testHeroPrimaryButtonAnswersThePress() throws {
         guard let title = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_HERO_TITLE"], !title.isEmpty else {
             throw XCTSkip("OPENSTREAM_TEST_HERO_TITLE not set")

@@ -36,9 +36,25 @@ import Testing
         #expect(Policy.videoLayerChange(forPlayerState: "revealed") == .reveal)
     }
 
-    @Test(arguments: ["ended", "paused", "error", "autoplay-blocked", "concealed"])
+    @Test(arguments: ["ended", "paused", "error", "autoplay-blocked", "concealed", Policy.webContentTerminatedState])
     func anEndedOrFailedVideoGoesBackToTheArt(state: String) {
         #expect(Policy.videoLayerChange(forPlayerState: state) == .returnToArt)
+    }
+
+    /// N22b: a crashed WebContent process (iPad sim, 2026-09-23) drops the
+    /// video layer for good, as an error does — never a blank frame.
+    @Test(arguments: ["error", "autoplay-blocked", Policy.webContentTerminatedState])
+    func aDeadTrailerDropsItsVideoLayer(state: String) {
+        #expect(Policy.dropsVideoLayer(forPlayerState: state))
+    }
+
+    @Test(arguments: ["ready", "revealed", "ended", "paused", "concealed"])
+    func aLiveOrEndedTrailerKeepsItsVideoLayer(state: String) {
+        #expect(Policy.dropsVideoLayer(forPlayerState: state) == false)
+    }
+
+    @Test func theTerminationStateIsNotOneThePageSends() {
+        #expect(Policy.webContentTerminatedState == "web-content-terminated")
     }
 
     @Test func theCrossfadeIsSixTenthsOfASecondAndInstantWithReduceMotion() {

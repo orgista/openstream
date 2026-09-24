@@ -72,4 +72,11 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
         guard fadeStart > fadeLine else { return copyTop >= restingTop ? 1 : 0 }
         return min(max((copyTop - fadeLine) / (fadeStart - fadeLine), 0), 1)
     }
+
+    /// Whether the copy has faded all the way out (`copyOpacity` is zero):
+    /// its buttons then take no taps and leave the accessibility tree, as
+    /// they would once scrolled under the bar.
+    public static func copyIsHidden(copyTop: CGFloat, restingTop: CGFloat, fadeLine: CGFloat) -> Bool {
+        copyOpacity(copyTop: copyTop, restingTop: restingTop, fadeLine: fadeLine) == 0
+    }
 }

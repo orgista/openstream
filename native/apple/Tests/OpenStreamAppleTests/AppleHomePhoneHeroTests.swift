@@ -257,4 +257,33 @@ struct AppleHomePhoneHeroLayoutTests {
         #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 140, restingTop: 140, fadeLine: 150) == 1)
         #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 139, restingTop: 140, fadeLine: 150) == 0)
     }
+
+    /// N22b: faded-out buttons take no taps and leave VoiceOver. The flag
+    /// flips exactly where the fade reaches zero, and not before.
+    @Test(arguments: [
+        (400.0, false),
+        (151.0, false),
+        (150.5, false),
+        (150.0, true),
+        (20.0, true),
+        (-300.0, true),
+    ])
+    func theCopyIsHiddenOnlyOnceItHasFadedOut(copyTop: Double, hidden: Bool) {
+        #expect(AppleHomePhoneHeroLayout.copyIsHidden(copyTop: copyTop, restingTop: 400, fadeLine: 150) == hidden)
+    }
+
+    @Test func copyRestingAboveTheLineIsShownAtRestAndHiddenOnceScrolled() {
+        #expect(AppleHomePhoneHeroLayout.copyIsHidden(copyTop: 140, restingTop: 140, fadeLine: 150) == false)
+        #expect(AppleHomePhoneHeroLayout.copyIsHidden(copyTop: 139, restingTop: 140, fadeLine: 150))
+    }
+
+    /// Scrolling back down shows it again: the flag is a pure function of
+    /// where the copy is, so it cannot stick hidden.
+    @Test func theCopyComesBackWhenScrolledDown() {
+        let positions: [CGFloat] = [400, 200, 150, 100, 150, 151, 400]
+        let flags = positions.map {
+            AppleHomePhoneHeroLayout.copyIsHidden(copyTop: $0, restingTop: 400, fadeLine: 150)
+        }
+        #expect(flags == [false, false, true, true, true, false, false])
+    }
 }

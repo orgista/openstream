@@ -3454,6 +3454,12 @@ struct AppleCatalogItemDetailView: View {
             logTrailerFailure("autoplay was blocked by the video provider")
             return
         }
+        if state == AppleTrailerArtFirstPolicy.webContentTerminatedState {
+            // No next candidate: the web view itself died, not the video.
+            showTrailerArtworkOnly()
+            logTrailerFailure("the trailer's web content process stopped")
+            return
+        }
         if state == "error" {
             trailerIsActive = false
             trailerIsPlaying = false
@@ -4382,9 +4388,11 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var canStartPlayback: Bool {
-        !isPreparingMetadata
-            && !playbackCoordinator.phase.isBusy
-            && (item.type != "series" || selectedEpisodeID != nil)
+        AppleTitlePagePolicy.canStartPlayback(
+            type: item.type, hasPlaybackRoute: hasPlaybackRoute,
+            isPreparing: isPreparingMetadata || playbackCoordinator.phase.isBusy,
+            hasSelectedEpisode: selectedEpisodeID != nil
+        )
     }
 
     private var recordID: String {
@@ -5290,7 +5298,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     /// bottom right (the iPhone title page draws its buttons over the bottom).
     var controlTopInset: CGFloat? = nil
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var loadedURL: URL?
         var loadedLandscape: Bool?
         var lastMuted = true
@@ -5431,6 +5439,16 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 webView?.alpha = 1
             }
             onStateChange?(state, muted, errorCode)
+        }
+
+        /// WebKit's content process died under a trailer (the iPad sim's
+        /// JIT trap, 2026-09-23): the dead page draws nothing, so the art
+        /// crossfades back over it and the caller drops the video layer.
+        /// Nothing reloads here: a page that crashed once is not retried.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            appleTrace("trailer web content process terminated")
+            hidePreview(animated: true)
+            onStateChange?(AppleTrailerArtFirstPolicy.webContentTerminatedState, lastMuted, nil)
         }
     }
 
@@ -5667,6 +5685,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         context.coordinator.lastReplayGeneration = replayGeneration
         context.coordinator.setPlaybackIntent(isPlaying)
         let container = PlayerContainer(frame: .zero, messageHandler: context.coordinator, artworkURL: artworkURL)
+        container.webView.navigationDelegate = context.coordinator
         container.updateStill(artworkImage)
         appleTrace("trailer view inserted, still=\(artworkImage.map { "\($0.width)px" } ?? "none")")
         container.isLandscape = isLandscape
