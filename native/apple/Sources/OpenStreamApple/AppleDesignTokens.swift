@@ -249,11 +249,16 @@ public extension View {
 /// content. It contains one title and one action, with no explanatory copy.
 public struct AppleSourceEmptyState: View {
     public let title: String
+    /// The tab's own symbol over the title, as Search's empty state has its
+    /// magnifying glass; without it Library and Live read as a bare line of
+    /// text in the middle of a black page.
+    public let systemImage: String?
     public let actionTitle: String?
     public let action: (() -> Void)?
 
-    public init(title: String, actionTitle: String, action: @escaping () -> Void) {
+    public init(title: String, systemImage: String? = nil, actionTitle: String, action: @escaping () -> Void) {
         self.title = title
+        self.systemImage = systemImage
         self.actionTitle = actionTitle
         self.action = action
     }
@@ -262,12 +267,20 @@ public struct AppleSourceEmptyState: View {
     /// leaves the screen exactly as it was reads as a broken button.
     public init(title: String) {
         self.title = title
+        self.systemImage = nil
         self.actionTitle = nil
         self.action = nil
     }
 
     public var body: some View {
         VStack(spacing: 16) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.largeTitle)
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
             Text(title)
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)

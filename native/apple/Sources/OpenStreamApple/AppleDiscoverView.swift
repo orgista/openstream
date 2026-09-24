@@ -158,6 +158,7 @@ struct AppleDiscoverView: View {
             if visibleSections.isEmpty && library.groups.isEmpty {
                 AppleSourceEmptyState(
                     title: sourceStore.sources.isEmpty ? "No Sources" : "Nothing to Show",
+                    systemImage: OpenStreamTab.home.systemImage,
                     actionTitle: "Open Settings",
                     action: openSettings
                 )
@@ -1588,6 +1589,8 @@ private struct AppleTop10Card: View {
                         .lineLimit(2)
                 }
             }
+            // The card is a link label, which centres a two-line title.
+            .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
         .frame(width: cardWidth, alignment: .leading)
@@ -1607,10 +1610,10 @@ private struct AppleTop10SearchCard<Destination: View>: View {
             if let match {
                 NavigationLink { destination(match) } label: { AppleTop10Card(item: match.item, rank: entry.rank) }
             } else {
+                // No spinner: it sat against the caption, beside the title,
+                // and read as part of the name. The title tile is the
+                // placeholder, as on every other card still waiting for art.
                 AppleTop10UnresolvedCard(title: entry.title, rank: entry.rank)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isLoading { ProgressView().padding(8) }
-                    }
                     .accessibilityValue(isLoading ? "Finding artwork" : "Unavailable from connected catalogs")
             }
         }
@@ -1717,6 +1720,31 @@ struct AppleCatalogCard: View {
         }
     }
 
+    /// "2013–2018" under the title; none on a card that shows progress.
+    private var captionYear: String? {
+        guard progress == nil, let releaseInfo = item.releaseInfo else { return nil }
+        let year = AppleReleaseYearText.display(releaseInfo)
+        return year.isEmpty ? nil : year
+    }
+
+    /// Title and year, left-aligned: the card is a link label, and a link
+    /// label centres a two-line title.
+    private func captionLines(reservingTitleLines: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.name)
+                .font(.caption)
+                .lineLimit(2, reservesSpace: reservingTitleLines)
+                .truncationMode(.tail)
+            if let captionYear {
+                Text(captionYear)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            }
+        }
+        .multilineTextAlignment(.leading)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             AppleCatalogArtwork(url: resolvedPosterURL, onFailure: artworkDidFail)
@@ -1799,17 +1827,12 @@ struct AppleCatalogCard: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(width: cardWidth, alignment: .leading)
             } else if showsTitle {
-                Text(item.name)
-                    .font(.caption)
-                    .lineLimit(2, reservesSpace: true)
-                    .truncationMode(.tail)
-                    .frame(width: cardWidth, alignment: .leading)
-            }
-            if progress == nil, showsTitle, !usesRowStyle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
-                Text(releaseInfo)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                // The two title lines stay reserved (a lazy rail sizes every
+                // card off the first) but below the year, so a one-line title
+                // no longer leaves a blank line above it.
+                captionLines(reservingTitleLines: true)
+                    .hidden()
+                    .overlay(alignment: .topLeading) { captionLines(reservingTitleLines: false) }
                     .frame(width: cardWidth, alignment: .leading)
             }
         }
@@ -3296,6 +3319,12 @@ struct AppleCatalogItemDetailView: View {
             },
             keepsImageWhileReloading: true
         )
+    }
+
+    /// Landscape art only: a poster cropped to 16:9 reads worse than the
+    /// placeholder it replaces.
+    private var episodeFallbackStillURL: URL? {
+        metadataDetails?.backdropURL ?? item.backgroundURL ?? fallbackArtwork?.backgroundURL
     }
 
     private var heroArtworkURL: URL? {
@@ -6351,7 +6380,9 @@ enum AppleTitleMetadataPresentation {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: day), formatter.string(from: date) == day else { return cleanValue }
+        guard let date = formatter.date(from: day), formatter.string(from: date) == day else {
+            return AppleReleaseYearText.display(cleanValue)
+        }
         formatter.dateFormat = "MMM d, yyyy"
         return formatter.string(from: date)
     }
@@ -7010,7 +7041,8 @@ extension AppleCatalogItemDetailView {
                             isWatched: watched.contains(episode.id),
                             isSelected: selectedEpisodeID == episode.id,
                             progress: Self.progressFraction(saved, for: episode),
-                            width: phoneCardWidth
+                            width: phoneCardWidth,
+                            seriesBackdropURL: episodeFallbackStillURL
                         ) {
                             selectedEpisodeID = episode.id
                             playRequest = UUID()
@@ -7594,7 +7626,8 @@ extension AppleCatalogItemDetailView {
                         isWatched: watched.contains(episode.id),
                         isSelected: selectedEpisodeID == episode.id,
                         progress: Self.progressFraction(saved, for: episode),
-                        width: style.stillWidth
+                        width: style.stillWidth,
+                        seriesBackdropURL: episodeFallbackStillURL
                     ) {
                         selectedEpisodeID = episode.id
                         playRequest = UUID()

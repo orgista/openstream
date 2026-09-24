@@ -92,6 +92,7 @@ struct AppleLiveTVView: View {
             } else if channels.isEmpty {
                 AppleSourceEmptyState(
                     title: errorMessage ?? "No Live Channels",
+                    systemImage: OpenStreamTab.live.systemImage,
                     actionTitle: "Open Settings",
                     action: openSettings
                 )
@@ -1899,7 +1900,8 @@ struct AppleLibraryView: View {
     var body: some View {
         Group {
             if hasNothingToShow {
-                AppleSourceEmptyState(title: "No Videos", actionTitle: "Open Settings", action: openSettings)
+                AppleSourceEmptyState(title: "No Videos", systemImage: OpenStreamTab.library.systemImage,
+                                      actionTitle: "Open Settings", action: openSettings)
             } else {
                 libraryScroll
             }

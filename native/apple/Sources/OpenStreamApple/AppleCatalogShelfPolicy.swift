@@ -15,7 +15,7 @@ enum AppleCatalogShelfPolicy {
     }
 
     static func rankedSubtitle(for item: AppleCatalogItem) -> String {
-        [item.year.map { String($0) } ?? item.releaseInfo, item.genres?.first]
+        [item.year.map { String($0) } ?? item.releaseInfo.map(AppleReleaseYearText.display), item.genres?.first]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")

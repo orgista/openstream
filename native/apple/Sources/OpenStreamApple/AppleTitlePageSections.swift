@@ -354,12 +354,15 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
     /// 0…1 through the episode the saved position names; nil otherwise.
     let progress: Double?
     let width: CGFloat
+    /// The show's backdrop, for an episode with no still of its own.
+    var seriesBackdropURL: URL? = nil
     let onPlay: () -> Void
     @ViewBuilder let accessory: Accessory
 
     @ScaledMetric(relativeTo: .caption2) private var accessoryInset: CGFloat = 44
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.appleDiscoverRows) private var rowStyle
+    @State private var stillFailed = false
 
     private var synopsisLines: Int { dynamicTypeSize.isAccessibilitySize ? 5 : 3 }
 
@@ -414,7 +417,11 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
     }
 
     private var still: some View {
-        AppleRemoteImage(url: episode.thumbnailURL, placeholderSystemImage: "play.fill")
+        AppleRemoteImage(url: AppleEpisodeStillPolicy.url(still: episode.thumbnailURL, stillFailed: stillFailed,
+                                                          seriesBackdrop: seriesBackdropURL),
+                         placeholderSystemImage: "play.fill",
+                         onFailure: { stillFailed = true })
+            .onChange(of: episode.id) { stillFailed = false }
             .frame(width: width, height: stillHeight)
             .background(.white.opacity(0.09))
             .overlay(alignment: .bottom) {
