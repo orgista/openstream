@@ -58,8 +58,22 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     static let isBypassedForReview = false
     #endif
 
+    #if DEBUG
+    /// Under a test runner every read and write stays in this process. The
+    /// suites built sources on the default store, so each `swift test` on the
+    /// Mac added items to the owner's login keychain — 5,486 by 2026-09-24,
+    /// each tied to the one test binary that wrote it — and the app then
+    /// asked for the keychain password again and again.
+    static let testMemory: AppleKeychainTestMemory? =
+        NSClassFromString("XCTestCase") != nil || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            ? AppleKeychainTestMemory() : nil
+    #else
+    static let testMemory: AppleKeychainTestMemory? = nil
+    #endif
+
     public func string(for account: String) throws -> String? {
         if Self.isBypassedForReview { return nil }
+        if let memory = Self.testMemory { return memory.value(service: service, account: account) }
         var query = baseQuery(for: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -79,6 +93,7 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
 
     public func set(_ value: String, for account: String) throws {
         if Self.isBypassedForReview { return }
+        if let memory = Self.testMemory { memory.set(value, service: service, account: account); return }
         let data = Data(value.utf8)
         let query = baseQuery(for: account)
         let update: [String: Any] = [
@@ -105,6 +120,7 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
 
     public func remove(_ account: String) throws {
         if Self.isBypassedForReview { return }
+        if let memory = Self.testMemory { memory.set(nil, service: service, account: account); return }
         let status = SecItemDelete(baseQuery(for: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw AppleKeychainStoreError.unexpectedStatus(status)
@@ -116,6 +132,8 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     static func setSynchronizationEnabled(_ enabled: Bool) throws {
         let previous = UserDefaults.standard.bool(forKey: syncPreferenceKey)
         guard previous != enabled, !isBypassedForReview else { return }
+        // Tests keep items in memory, which has no sync attribute to migrate.
+        if testMemory != nil { UserDefaults.standard.set(enabled, forKey: syncPreferenceKey); return }
         var changed: [String] = []
         do {
             for service in ["com.orgista.openstream.settings", "com.orgista.openstream.instances"] {
@@ -152,6 +170,21 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
             kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: synchronizable,
         ]
+    }
+}
+
+/// A test run's keychain: one dictionary per process, keyed by service and
+/// account (see `AppleKeychainStore.testMemory`).
+final class AppleKeychainTestMemory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String: String] = [:]
+
+    func value(service: String, account: String) -> String? {
+        lock.withLock { items[service + "\u{0}" + account] }
+    }
+
+    func set(_ value: String?, service: String, account: String) {
+        lock.withLock { items[service + "\u{0}" + account] = value }
     }
 }
 
