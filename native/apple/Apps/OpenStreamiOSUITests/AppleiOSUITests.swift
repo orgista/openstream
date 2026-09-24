@@ -992,6 +992,57 @@ final class AppleiOSUITests: XCTestCase {
     /// Owner (2026-09-17 23:50): "make AIOMetadata work". Opens the first title of
     /// an AIOMetadata catalog shelf and photographs the detail page so the
     /// driver can see what the add-on's metadata looks like in the app.
+    /// Photographs a series and a film title page from the hero to the last
+    /// section, and the season menu open. Opens pages only — it never presses
+    /// Play, so nothing is written to Continue Watching. Set
+    /// OPENSTREAM_TITLE_PAGE_AX=1 to run it at accessibility size AX3.
+    func testTitlePageSectionsArePhotographed() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_TITLE_PAGE_PROOF"] == "1" else {
+            throw XCTSkip("OPENSTREAM_TITLE_PAGE_PROOF not set")
+        }
+        let accessibilitySize = env["OPENSTREAM_TITLE_PAGE_AX"] == "1"
+        let prefix = accessibilitySize ? "ax3" : "std"
+        for route in ["detail", "detail-movie"] {
+            app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+            if accessibilitySize {
+                app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+            }
+            if let title = env[route == "detail" ? "OPENSTREAM_TITLE_PAGE_SERIES" : "OPENSTREAM_TITLE_PAGE_MOVIE"] {
+                app.launchArguments += ["-OpenStreamDetailTitle", title]
+            }
+            launch(screen: route)
+            let screen = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+            XCTAssertTrue(screen.waitForExistence(timeout: 60), "the \(route) title page never opened")
+            Thread.sleep(forTimeInterval: 10)
+            attach("\(prefix)-\(route)-0-top")
+            let steps = accessibilitySize ? 6 : 9
+            for step in 1 ... steps {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+                Thread.sleep(forTimeInterval: 1.5)
+                attach("\(prefix)-\(route)-\(step)")
+            }
+            let season = app.buttons["detail.season"].firstMatch
+            if route == "detail", !accessibilitySize, season.exists {
+                for _ in 0 ..< 12 where !isSafelyHittable(season) {
+                    let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+                    let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
+                    start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+                    Thread.sleep(forTimeInterval: 0.8)
+                }
+                if isSafelyHittable(season) {
+                    season.tap()
+                    Thread.sleep(forTimeInterval: 1.5)
+                    attach("\(prefix)-\(route)-season-menu")
+                }
+            }
+            app.terminate()
+        }
+    }
+
     func testAIOMetadataCatalogItemOpensADetailWithInformation() {
         launch(screen: "discover")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))

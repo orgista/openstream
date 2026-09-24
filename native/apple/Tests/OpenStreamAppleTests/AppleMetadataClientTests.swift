@@ -411,3 +411,56 @@ private func makeLogoPNG(edgeAlpha: UInt8) throws -> Data {
     #expect(ep.thumbnailURL?.absoluteString == "https://artworks.thetvdb.com/banners/episodes/81189/3859781.jpg")
     #expect(ep.releaseInfo == "2009-02-18T02:00:00.000Z")
 }
+
+@Test func tmdbClientReadsCreditsCountriesAndLanguagesForTheTitlePage() async throws {
+    let configuration = try AppleTMDBConfiguration(credential: "eyJheader.payload.signature")
+    let client = AppleTMDBClient { request in
+        let body: Data
+        if request.url?.path == "/3/find/tt0903747" {
+            body = Data(#"{"movie_results":[],"tv_results":[{"id":1396}]}"#.utf8)
+        } else {
+            #expect(request.url?.path == "/3/tv/1396")
+            body = Data(#"""
+            {
+              "genres":[{"name":"Drama"}],
+              "origin_country":["US"],
+              "original_language":"en",
+              "spoken_languages":[{"iso_639_1":"en","english_name":"English"},{"iso_639_1":"es","english_name":"Spanish"}],
+              "created_by":[{"name":"Vince Gilligan","profile_path":"/vince.jpg"}],
+              "credits":{
+                "cast":[{"name":"Bryan Cranston","character":"Walter White","profile_path":"/bryan.jpg"},
+                        {"name":"Aaron Paul","character":"Jesse Pinkman"}],
+                "crew":[]
+              }
+            }
+            """#.utf8)
+        }
+        return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+
+    let details = try await client.details(imdbID: "tt0903747", kind: .series, configuration: configuration)
+
+    #expect(details.cast == ["Bryan Cranston", "Aaron Paul"])
+    #expect(details.castMembers == [
+        AppleCreditPerson(name: "Bryan Cranston", role: "Walter White",
+                          portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/bryan.jpg")),
+        AppleCreditPerson(name: "Aaron Paul", role: "Jesse Pinkman"),
+        AppleCreditPerson(name: "Vince Gilligan", role: "Creator",
+                          portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/vince.jpg")),
+    ])
+    #expect(details.countries == [AppleTitlePagePolicy.regionName("US")])
+    #expect(details.originalLanguage == AppleTitlePagePolicy.languageName("en"))
+    #expect(details.spokenLanguages == ["en", "es"].compactMap { AppleTitlePagePolicy.languageName($0) })
+}
+
+@Test func stremioMetaCountryListBecomesTheRegionOfOrigin() async throws {
+    let client = AppleStremioMetadataClient { request in
+        (Data(#"{"meta":{"id":"tt0903747","type":"series","name":"Breaking Bad","country":"usa, Mexico"}}"#.utf8),
+         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    let source = AppleSource(id: UUID(), kind: .stremio, name: "test",
+                             url: URL(string: "https://fixture.example/manifest.json")!,
+                             manifestID: "test", resources: ["meta"])
+    let details = try await client.details(source: source, type: "series", mediaID: "tt0903747")
+    #expect(details.countries == ["United States", "Mexico"])
+}

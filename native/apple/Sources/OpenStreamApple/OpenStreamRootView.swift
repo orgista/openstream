@@ -340,7 +340,7 @@ public struct OpenStreamRootView: View {
             else if screen == "live" { selectedTab = .live }
             // "search" stays on Discover: Search is a page pushed from there
             // off Apple TV, and Discover's own debug hook pushes it.
-            else if !["discover", "detail", "episodes", "play", "search"].contains(screen) {
+            else if !["discover", "detail", "detail-movie", "episodes", "play", "search"].contains(screen) {
                 selectedTab = .settings
                 // Every platform binds its Settings tab to the same
                 // `navigationPaths[.settings]` and declares the same

@@ -364,7 +364,7 @@ struct AppleDiscoverView: View {
             }
             // "play" opens the same title page and starts its first stream, so
             // the player can be captured headlessly on the TV simulator.
-            if (screen == "detail" || screen == "episodes" || screen == "play"), visionReviewItem != nil {
+            if (screen == "detail" || screen == "detail-movie" || screen == "episodes" || screen == "play"), visionReviewItem != nil {
                 // `OpenStreamDetailDelaySeconds` waits on the home screen
                 // before pushing the content page, so the metadata prefetch
                 // has the head start a real viewer gives it. Without it this
@@ -978,9 +978,19 @@ struct AppleDiscoverView: View {
 
     #if DEBUG
     private var visionReviewItem: IndexedCatalogItem? {
-        guard let section = visibleSections.first(where: { $0.catalog.type == "series" }),
-              let item = section.items.first,
-              let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) else { return nil }
+        // "detail-movie" is "detail" for the first film instead of the first
+        // series, so a sweep can photograph both kinds of title page.
+        // `OpenStreamDetailTitle` picks a title by name, so before and after
+        // shots can photograph the same page.
+        let type = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "detail-movie" ? "movie" : "series"
+        let wanted = UserDefaults.standard.string(forKey: "OpenStreamDetailTitle") ?? ""
+        let sections = visibleSections.filter { $0.catalog.type == type }
+        let named = wanted.isEmpty ? nil : sections.lazy.compactMap { section in
+            section.items.first { $0.name.localizedCaseInsensitiveContains(wanted) }.map { (section, $0) }
+        }.first
+        guard let pick = named ?? sections.first.flatMap({ section in section.items.first.map { (section, $0) } }),
+              let source = sourceStore.sources.first(where: { $0.id == pick.0.sourceID }) else { return nil }
+        let item = pick.1
         return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source)
     }
     #endif
@@ -1945,6 +1955,12 @@ struct AppleCatalogItemDetailView: View {
     @State private var arrFeedback: String?
     @State private var rating: AppleTitleRating?
     @State private var rankedSuggestions: [AppleCatalogItem] = []
+    /// The iPhone title page's schedule badge, worked out once per episode
+    /// list rather than on every redraw.
+    @State private var phoneScheduleBadge: String?
+    /// Scrolls the page back to the hero when a trailer is chosen below it.
+    @State private var detailScrollPosition = ScrollPosition(edge: .top)
+    @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
     @State private var rateChoicesExpanded = false
     @State private var ratingSelectionGeneration = 0
     private let playbackStore = ApplePlaybackStore()
@@ -2033,6 +2049,9 @@ struct AppleCatalogItemDetailView: View {
             #else
             ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if usesPhoneTitlePage {
+                    phoneTitlePage
+                } else {
                 detailHero
                     #if os(iOS)
                     // With the navigation bar hidden, extend the hero through
@@ -2105,12 +2124,14 @@ struct AppleCatalogItemDetailView: View {
                 // rendering fault rather than "there is more to the right"
                 // (measured 2026-09-17). It carries its own leading inset.
                 if !suggestedItems.isEmpty {
-                    moreLikeThisSection
+                    moreLikeThisSection(title: "More Like This")
                         .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+                }
                 }
             }
             .padding(.bottom)
             }
+            .scrollPosition($detailScrollPosition)
             // The navigation bar is hidden here so the hero can bleed to the top
             // of the screen. With no bar there is nothing behind the status bar
             // once the page scrolls, and the synopsis was drawn through the
@@ -2402,26 +2423,7 @@ struct AppleCatalogItemDetailView: View {
             .accessibilityLabel(trailerIsPlaying ? "Pause preview" : "Play preview")
 
             #if os(iOS) || os(visionOS)
-            if trailerHasStarted, let embedURL = trailerEmbedURL,
-               !playbackCoordinator.phase.isBusy,
-               playerPresentation == nil {
-                AppleYouTubeAutoPreview(
-                    url: embedURL,
-                    artworkURL: heroArtworkURL,
-                    artworkImage: heroArtworkImage,
-                    isLandscape: viewportSize.width > viewportSize.height,
-                    isPlaying: $trailerIsActive,
-                    isMuted: $trailerMuted,
-                    replayGeneration: $trailerReplayGeneration,
-                    showsReplay: !trailerIsActive,
-                    onStateChange: handleTrailerState,
-                    onTap: toggleTrailerPlayback,
-                    onMute: { trailerMuted.toggle() },
-                    onReplay: restartTrailer
-                )
-                    .frame(maxWidth: .infinity)
-                    .frame(maxHeight: .infinity)
-            }
+            trailerPreview()
             #endif
 
             if !isLandscapeLayout, case .valid = titleLogoState, let logoURL = titleLogoURL {
@@ -2468,25 +2470,7 @@ struct AppleCatalogItemDetailView: View {
             // titlebar and this drew a second one over the artwork two points
             // below it (macOS sweep, 2026-09-21).
             #if !os(visionOS) && !os(macOS)
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back")
-            .accessibilityIdentifier("detail.back")
-            .padding(.leading, isLandscapeLayout ? 12 + detailSafeAreaInsets.leading : 12)
-            #if os(iOS)
-            .padding(.top, 10 + detailSafeAreaInsets.top)
-            #else
-            .padding(.top, 10)
-            #endif
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            detailBackButton
             #endif
         }
         }
@@ -2504,6 +2488,60 @@ struct AppleCatalogItemDetailView: View {
         }
         .accessibilityElement(children: .contain)
     }
+
+    #if os(iOS) || os(visionOS)
+    /// The inline trailer over the hero still, once it has been started.
+    /// `controlTopInset` moves its mute/replay control to the top right, for
+    /// the iPhone title page whose copy covers the bottom of the art.
+    @ViewBuilder
+    private func trailerPreview(controlTopInset: CGFloat? = nil) -> some View {
+        if trailerHasStarted, let embedURL = trailerEmbedURL,
+           !playbackCoordinator.phase.isBusy,
+           playerPresentation == nil {
+            AppleYouTubeAutoPreview(
+                url: embedURL,
+                artworkURL: heroArtworkURL,
+                artworkImage: heroArtworkImage,
+                isLandscape: viewportSize.width > viewportSize.height,
+                isPlaying: $trailerIsActive,
+                isMuted: $trailerMuted,
+                replayGeneration: $trailerReplayGeneration,
+                showsReplay: !trailerIsActive,
+                onStateChange: handleTrailerState,
+                onTap: toggleTrailerPlayback,
+                onMute: { trailerMuted.toggle() },
+                onReplay: restartTrailer,
+                controlTopInset: controlTopInset
+            )
+                .frame(maxWidth: .infinity)
+                .frame(maxHeight: .infinity)
+        }
+    }
+    #endif
+
+    #if !os(visionOS) && !os(macOS)
+    private var detailBackButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
+        .accessibilityIdentifier("detail.back")
+        .padding(.leading, isLandscapeLayout ? 12 + detailSafeAreaInsets.leading : 12)
+        #if os(iOS)
+        .padding(.top, 10 + detailSafeAreaInsets.top)
+        #else
+        .padding(.top, 10)
+        #endif
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+    #endif
 
     private var heroHeight: CGFloat {
         #if os(tvOS)
@@ -3759,29 +3797,34 @@ struct AppleCatalogItemDetailView: View {
             title: downloadButtonLabel,
             glyph: downloadGlyph,
             kind: .download,
-            width: actionButtonWidth
-        ) {
-            if item.type == "series", !visibleEpisodes.isEmpty {
-                if seasonDownloads.isRunning {
-                    seasonDownloadActionsPresented = true
-                } else {
-                    startSeasonDownload()
-                }
-            } else {
-                switch downloadCoordinator.state {
-                case .resolving, .downloading, .resuming, .paused:
-                    downloadActionsPresented = true
-                case .idle, .failed, .cancelled:
-                    startDownload()
-                default:
-                    break
-                }
-            }
-        }
+            width: actionButtonWidth,
+            action: performDownloadAction
+        )
         .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
         .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
         .accessibilityLabel(downloadButtonLabel)
         .accessibilityValue(offlineAccessibilityValue)
+    }
+
+    /// Download, or its options while one runs: the season for a series, the
+    /// title otherwise.
+    private func performDownloadAction() {
+        if item.type == "series", !visibleEpisodes.isEmpty {
+            if seasonDownloads.isRunning {
+                seasonDownloadActionsPresented = true
+            } else {
+                startSeasonDownload()
+            }
+        } else {
+            switch downloadCoordinator.state {
+            case .resolving, .downloading, .resuming, .paused:
+                downloadActionsPresented = true
+            case .idle, .failed, .cancelled:
+                startDownload()
+            default:
+                break
+            }
+        }
     }
 
     private var downloadButtonLabel: String {
@@ -4080,8 +4123,17 @@ struct AppleCatalogItemDetailView: View {
             .accessibilityLabel("Play \(episode.displayTitle)")
             .accessibilityValue(selectedEpisodeID == episode.id ? "\(episodeNumber(episode)), selected" : episodeNumber(episode))
             .accessibilityAddTraits(selectedEpisodeID == episode.id ? .isSelected : [])
-            #if os(iOS) || os(macOS)
-            if localGroup == nil {
+            episodeDownloadButton(episode)
+                .padding(.trailing, 8)
+        }
+    }
+
+    /// The per-episode download control; none for a library title or where
+    /// downloads are not offered.
+    @ViewBuilder
+    private func episodeDownloadButton(_ episode: AppleStremioEpisode) -> some View {
+        #if os(iOS) || os(macOS)
+        if localGroup == nil {
             Button {
                 if seasonDownloads.isRunning {
                     seasonDownloadActionsPresented = true
@@ -4097,13 +4149,11 @@ struct AppleCatalogItemDetailView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.borderless)
-            .padding(.trailing, 8)
             .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
             .accessibilityLabel(episodeDownloadIndicator(for: episode).accessibilityLabel(episodeTitle: episodeDownloadTitle(episode)))
             .accessibilityIdentifier("detail.episode.download")
-            }
-            #endif
         }
+        #endif
     }
 
     private var episodePlaceholderRow: some View {
@@ -4121,9 +4171,9 @@ struct AppleCatalogItemDetailView: View {
         .frame(minHeight: 72)
     }
 
-    private var moreLikeThisSection: some View {
+    private func moreLikeThisSection(title: String) -> some View {
         VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
-            Text("More Like This")
+            Text(title)
                 .font(.title2.bold())
                 .padding(.leading, detailHorizontalInset)
                 .accessibilityAddTraits(.isHeader)
@@ -4667,6 +4717,7 @@ struct AppleCatalogItemDetailView: View {
         episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
         downloadedEpisodeIDs = []
+        phoneScheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodes)
         selectedSeason = savedEpisode(in: episodes)?.season
             ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
             ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
@@ -4702,6 +4753,7 @@ struct AppleCatalogItemDetailView: View {
         previewAssets = nil
         fallbackArtwork = nil
         episodes = []
+        phoneScheduleBadge = nil
         episodeLoadFinished = false
         selectedSeason = nil
         selectedEpisodeID = nil
@@ -5064,6 +5116,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let onTap: () -> Void
     let onMute: () -> Void
     let onReplay: () -> Void
+    /// Puts the mute/replay control this far from the top instead of at the
+    /// bottom right (the iPhone title page draws its buttons over the bottom).
+    var controlTopInset: CGFloat? = nil
 
     final class Coordinator: NSObject, WKScriptMessageHandler {
         var loadedURL: URL?
@@ -5217,6 +5272,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var onPause: (() -> Void)?
         var onReplay: (() -> Void)?
         var isLandscape = false { didSet { setNeedsLayout() } }
+        var controlTopInset: CGFloat? = nil { didSet { if oldValue != controlTopInset { setNeedsLayout() } } }
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
         private var isPlaying = true
@@ -5326,7 +5382,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             muteButton.layer.cornerRadius = controlSide / 2
             muteButton.frame = CGRect(
                 x: bounds.maxX - 12 - controlSide,
-                y: bounds.maxY - 12 - controlSide,
+                y: controlTopInset ?? (bounds.maxY - 12 - controlSide),
                 width: controlSide, height: controlSide
             )
             bringSubviewToFront(muteButton)
@@ -5418,6 +5474,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         container.updateStill(artworkImage)
         appleTrace("trailer view inserted, still=\(artworkImage.map { "\($0.width)px" } ?? "none")")
         container.isLandscape = isLandscape
+        container.controlTopInset = controlTopInset
         container.onTap = onTap
         container.onMute = onMute
         container.onReplay = onReplay
@@ -5439,6 +5496,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.onReplay = onReplay
         view.onPause = context.coordinator.hidePreview
         view.isLandscape = isLandscape
+        view.controlTopInset = controlTopInset
         view.updateArtwork(artworkURL)
         view.updateStill(artworkImage)
         view.updateControls(
@@ -5883,6 +5941,12 @@ enum AppleFormatBadgeKind: Equatable, Sendable {
 }
 
 enum AppleTitleMetadataPresentation {
+    /// "TV-MA", "PG-13": a rating, not a capability.
+    static func isContentRating(_ value: String) -> Bool {
+        ["G", "PG", "PG-13", "R", "NC-17", "NR", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA"]
+            .contains(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
+    }
+
     static func textValues(genres: [String], releaseInfo: String?, runtimeMinutes: Int?) -> [String] {
         var values: [String] = []
         if let genre = genres.map(clean).first(where: { !$0.isEmpty }) { values.append(genre) }
@@ -6097,4 +6161,674 @@ private enum AppleDetailPrepareOutcome: Sendable {
     case episodes([AppleStremioEpisode]?)
     case preview(AppleStremioPreviewAssets?)
     case details(AppleTMDBDetails?)
+}
+
+// MARK: - iPhone title page
+
+/// The iPhone title page in portrait, after the Apple TV app's (N17;
+/// INSPO-TEARDOWN §7, PDF pages 11–16): art from the top edge with the
+/// wordmark, meta line and one state-derived button over it; the next episode
+/// and the capability chips; the season menu and 16:9 episode cards; then
+/// Trailers, Related, Cast & Crew, About, Information, Languages and
+/// Accessibility — each only when there is real data for it. The back button
+/// and navigation stay as they were. iPad, landscape and every other platform
+/// keep the layout above.
+extension AppleCatalogItemDetailView {
+    private static let phoneSectionSpacing: CGFloat = 32
+    private static let phoneInset: CGFloat = AppleDetailMetrics.portraitColumnInset
+
+    var usesPhoneTitlePage: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact && !isLandscapeLayout
+        #else
+        false
+        #endif
+    }
+
+    var phoneTitlePage: some View {
+        let chips = phoneCapabilityChips
+        let credits = phoneCredits
+        let information = phoneInformation
+        let languages = phoneLanguages
+        let glossary = AppleTitlePagePolicy.accessibilityGlossary(chips: chips)
+        return VStack(alignment: .leading, spacing: 0) {
+            phoneHero
+            phoneHeroFooter(chips: chips)
+                .padding(.horizontal, Self.phoneInset)
+            if item.type == "series" {
+                phoneEpisodesSection
+                    .id("vision-episodes")
+                    .padding(.top, Self.phoneSectionSpacing - 8)
+            }
+            if !phoneTrailerKeys.isEmpty {
+                phoneTrailersSection
+                    .padding(.top, Self.phoneSectionSpacing)
+            }
+            if !suggestedItems.isEmpty {
+                moreLikeThisSection(title: "Related")
+                    .padding(.top, Self.phoneSectionSpacing - 8)
+            }
+            if !credits.isEmpty {
+                phoneCastSection(credits)
+                    .padding(.top, Self.phoneSectionSpacing - 8)
+            }
+            if let summary = phoneSynopsis {
+                phoneAboutSection(summary)
+                    .padding(.top, Self.phoneSectionSpacing)
+            }
+            if !information.isEmpty {
+                phoneFactSection("Information", facts: information, identifier: "detail.information")
+                    .padding(.top, Self.phoneSectionSpacing)
+            }
+            if !languages.isEmpty {
+                phoneFactSection("Languages", facts: languages, identifier: "detail.languages")
+                    .padding(.top, Self.phoneSectionSpacing)
+            }
+            if !glossary.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    AppleTitlePageSectionTitle("Accessibility")
+                    AppleTitlePageAccessibilityGlossary(entries: glossary)
+                }
+                .padding(.horizontal, Self.phoneInset)
+                .padding(.top, Self.phoneSectionSpacing)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("detail.accessibility")
+            }
+        }
+        .padding(.bottom, 24)
+    }
+
+    // MARK: Hero
+
+    /// From the top edge of the screen: 70 % of it, as the Apple TV app's
+    /// title page, never less than the home hero's floor.
+    private var phoneHeroArtHeight: CGFloat {
+        max(AppleHomePhoneHeroLayout.minimumArtHeight, viewportSize.height * 0.70)
+    }
+
+    private var phoneHero: some View {
+        VStack(spacing: 12) {
+            if let phoneScheduleBadge {
+                Text(phoneScheduleBadge)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .overlay { Capsule().strokeBorder(.white.opacity(0.6), lineWidth: 1) }
+                    .accessibilityIdentifier("detail.schedule")
+            }
+            phoneTitleLockup
+            phoneMetadataLine
+            phoneActionRow
+                .padding(.top, 4)
+        }
+        .padding(.horizontal, Self.phoneInset)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
+        // The copy is laid out in the flow, anchored to the bottom of the art:
+        // at the accessibility sizes it grows the hero downwards rather than
+        // clipping the buttons, and the fade is solid black by then.
+        .frame(minHeight: phoneHeroArtHeight, alignment: .bottom)
+        .background(alignment: .top) {
+            phoneHeroStage
+                .frame(maxWidth: .infinity)
+                .frame(height: phoneHeroArtHeight)
+                .clipped()
+        }
+        #if !os(visionOS) && !os(macOS)
+        .overlay(alignment: .topLeading) { detailBackButton }
+        #endif
+        .background(.black)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: AppleDetailHeroFramePreferenceKey.self,
+                    value: proxy.frame(in: .named("detail-scroll"))
+                )
+            }
+        }
+        // With the navigation bar hidden, the art runs up under the status bar.
+        .padding(.top, -detailSafeAreaInsets.top)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// The still, the inline trailer over it once started (art until its
+    /// first frame, 3ea0ef0), and the one approved billboard fade.
+    private var phoneHeroStage: some View {
+        ZStack {
+            Button(action: toggleTrailerPlayback) {
+                heroArtwork
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(trailerIsPlaying ? "Pause preview" : "Play preview")
+            #if os(iOS) || os(visionOS)
+            trailerPreview(controlTopInset: detailSafeAreaInsets.top + 10)
+            #endif
+        }
+        .overlay {
+            AppleHomePhoneHeroFade()
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// The wordmark once it has drawn, otherwise the name in black-weight
+    /// capitals; the space is held while the wordmark resolves.
+    @ViewBuilder
+    private var phoneTitleLockup: some View {
+        let logoHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 120 : AppleDetailMetrics.titleLogoMaxHeight
+        switch titleLogoPresentation {
+        case .text:
+            Text(displayTitle.uppercased())
+                .font(.system(size: min(max(phoneTitleSize, 34), dynamicTypeSize.isAccessibilitySize ? 58 : 48), weight: .black))
+                .tracking(1)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.8), radius: 12, y: 2)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(displayTitle)
+                .accessibilityAddTraits(.isHeader)
+        case .logo, .hidden:
+            ZStack {
+                if case .valid = titleLogoState, let logoURL = titleLogoURL {
+                    AppleTrimmedTitleLogo(url: logoURL, alignment: .center) { loaded in
+                        titleLogoLoadResult = loaded
+                        if loaded { fillTimeline.mark(.wordmark) }
+                    }
+                    .opacity(titleLogoPresentation == .logo ? 1 : 0)
+                }
+            }
+            .frame(maxWidth: 280)
+            .frame(height: logoHeight)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(displayTitle)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHidden(titleLogoPresentation != .logo)
+        }
+    }
+
+    /// "Comedy · 2026 · 51 min": the first genre, the year for a film or the
+    /// run for a series, and the running time.
+    private var phoneMetadataValues: [String] {
+        var values: [String] = []
+        let genres = metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? []
+        if let genre = genres.first(where: { !$0.isEmpty }) { values.append(genre) }
+        let year = metadataDetails?.year ?? item.year
+        if item.type != "series", let year {
+            values.append(String(year))
+        } else if let release = AppleTitleMetadataPresentation.formattedReleaseInfo(displayReleaseInfo) {
+            values.append(release)
+        } else if let year {
+            values.append(String(year))
+        }
+        if let minutes = metadataDetails?.runtimeMinutes, (1 ... 24 * 60).contains(minutes) {
+            values.append(AppleTitleMetadataPresentation.formattedRuntime(minutes))
+        }
+        return values
+    }
+
+    @ViewBuilder
+    private var phoneMetadataLine: some View {
+        let values = phoneMetadataValues
+        let rating = AppleBillboardCopy.ratingBadge(metadataDetails?.contentRating ?? item.contentRating)
+        if !values.isEmpty || rating != nil {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                if !values.isEmpty {
+                    Text(values.joined(separator: AppleBillboardCopy.separator))
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                }
+                if let rating {
+                    Text(rating)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .strokeBorder(.white.opacity(0.4), lineWidth: 1)
+                        }
+                        .accessibilityLabel("Rated \(rating)")
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var selectedEpisode: AppleStremioEpisode? {
+        guard let selectedEpisodeID else { return nil }
+        return episodes.first { $0.id == selectedEpisodeID }
+    }
+
+    /// Whether anything on this page can start: a media-server or library
+    /// title, a finished download, or an enabled source that serves streams —
+    /// and, for a series, an episode list to play from.
+    private var hasPlaybackRoute: Bool {
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil || localGroup != nil { return true }
+        if downloadCoordinator.state.isCompleted { return true }
+        if item.type == "series", episodeListPresentation == .unavailable { return false }
+        return playbackSources.contains { source in
+            source.isEnabled && (source.kind != .stremio
+                || source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame })
+        }
+    }
+
+    private var phonePrimaryAction: AppleTitlePagePolicy.PrimaryAction {
+        AppleTitlePagePolicy.primaryAction(
+            type: item.type,
+            progress: playbackStore.progress(for: recordID),
+            selectedEpisode: selectedEpisode,
+            isPlayable: hasPlaybackRoute,
+            hasTrailer: trailerEmbedURL != nil
+        )
+    }
+
+    private var phoneActionRow: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            phonePrimaryButton
+            HStack(spacing: 12) {
+                Button(action: toggleFavorite) {
+                    AppleTitlePageRoundButtonLabel(
+                        title: isFavorite ? "Remove from My List" : "Add to My List",
+                        systemImage: isFavorite ? "checkmark" : "plus"
+                    )
+                    .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+                .accessibilityIdentifier("detail.my-list")
+                #if os(iOS)
+                .sensoryFeedback(.selection, trigger: isFavorite)
+                #endif
+                if showsDownloadAction {
+                    phoneDownloadButton
+                }
+                phoneRateMenu
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("detail.icon-row")
+        }
+    }
+
+    private var phonePrimaryButton: some View {
+        let action = phonePrimaryAction
+        let isTrailer = action == .playTrailer
+        let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || isPreparingMetadata)
+        let title: String = if isBusy {
+            playbackCoordinator.phase.isBusy ? "Preparing" : "Loading"
+        } else if action == .play, downloadCoordinator.state.isCompleted {
+            "Play Offline"
+        } else {
+            action.title
+        }
+        return Button {
+            if isTrailer {
+                playTrailerInHero(at: trailerCandidateIndex)
+            } else {
+                playRequest = UUID()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                if isBusy {
+                    ProgressView().tint(.black)
+                } else {
+                    Image(systemName: "play.fill")
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.8)
+            }
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(.white, in: .rect(cornerRadius: 12, style: .continuous))
+            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isTrailer && !canStartPlayback)
+        .accessibilityLabel(isBusy ? "Preparing playback" : title)
+        .accessibilityIdentifier("detail.play")
+        .contextMenu {
+            Button("Other sources", systemImage: "list.bullet") {
+                Task { await chooseStreams() }
+            }
+        }
+    }
+
+    private var phoneDownloadButton: some View {
+        Button(action: performDownloadAction) {
+            switch downloadGlyph {
+            case .progress:
+                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
+            case .systemImage(let name):
+                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: name)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+        .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
+        .accessibilityLabel(downloadButtonLabel)
+        .accessibilityValue(offlineAccessibilityValue)
+    }
+
+    private var phoneRateMenu: some View {
+        Menu {
+            ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
+                Button {
+                    selectRating(value)
+                } label: {
+                    Label(value.title, systemImage: ratingGlyph(for: value, selected: rating == value))
+                }
+            }
+        } label: {
+            AppleTitlePageRoundButtonLabel(title: "Rate", systemImage: ratingGlyph(for: rating, selected: rating != nil))
+        }
+        .appleBareMenu()
+        .accessibilityLabel("Rate")
+        .accessibilityValue(rating?.title ?? "Not rated")
+    }
+
+    /// Under the hero, on black: the episode Play starts ("S4, E8 · Title"
+    /// and its synopsis) — or, for a film, the synopsis — then the chips and
+    /// any download status.
+    private func phoneHeroFooter(chips: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if item.type == "series", let episode = selectedEpisode,
+               let heading = AppleTitlePagePolicy.nextEpisodeHeading(episode) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(heading)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
+                    if let overview = episode.overview {
+                        AppleWordClampedText(text: overview, lines: dynamicTypeSize.isAccessibilitySize ? 5 : 3)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("detail.next-episode")
+            } else if let summary = phoneSynopsis {
+                AppleWordClampedText(text: summary, lines: dynamicTypeSize.isAccessibilitySize ? 5 : 3)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            if !chips.isEmpty {
+                AppleTitlePageChipRow(chips: chips)
+            }
+            if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
+                Text(downloadButtonLabel)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("detail.download.progress")
+            }
+            downloadFailureNotice
+            seasonDownloadStatus
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var phoneSynopsis: String? {
+        AppleMetadataPresentationPolicy.synopsis(catalog: item.summary, enriched: metadataDetails?.overview)
+    }
+
+    private var phoneCapabilityChips: [String] {
+        let badges = metadataDetails?.formatBadges.isEmpty == false
+            ? metadataDetails?.formatBadges ?? []
+            : item.formatBadges ?? []
+        return AppleTitlePagePolicy.capabilityChips(formatBadges: badges)
+    }
+
+    static func scheduleBadge(type: String, episodes: [AppleStremioEpisode]) -> String? {
+        let dated = episodes.compactMap { episode -> AppleHeroBadge.Episode? in
+            guard let season = episode.season, let number = episode.episode,
+                  let released = AppleHeroBadge.releaseDate(episode.releaseInfo) else { return nil }
+            return AppleHeroBadge.Episode(season: season, episode: number, released: released)
+        }
+        return AppleTitlePagePolicy.scheduleBadge(type: type, episodes: dated, now: .now)
+    }
+
+    // MARK: Episodes
+
+    private var phoneCardWidth: CGFloat {
+        let available = max(0, viewportSize.width - Self.phoneInset)
+        return min(360, available * (dynamicTypeSize.isAccessibilitySize ? 0.86 : 0.74))
+    }
+
+    private var phoneEpisodesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $selectedSeason, name: seasonName)
+                .padding(.horizontal, Self.phoneInset)
+            switch episodeListPresentation {
+            case .loading:
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        AppleTitlePageEpisodePlaceholder(width: phoneCardWidth)
+                        AppleTitlePageEpisodePlaceholder(width: phoneCardWidth)
+                    }
+                }
+                .contentMargins(.horizontal, Self.phoneInset, for: .scrollContent)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(true)
+            case .unavailable:
+                Text("Episodes aren’t available from the connected metadata sources.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Self.phoneInset)
+            case .episodes:
+                phoneEpisodeRail
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.episodes")
+    }
+
+    private var phoneEpisodeRail: some View {
+        let saved = playbackStore.progress(for: recordID)
+        let now = Date.now
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(visibleEpisodes) { episode in
+                        AppleTitlePageEpisodeCard(
+                            episode: episode,
+                            eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
+                            isWatched: playbackStore.progress(for: episode.id)?.isComplete == true,
+                            isSelected: selectedEpisodeID == episode.id,
+                            progress: Self.progressFraction(saved, for: episode),
+                            width: phoneCardWidth
+                        ) {
+                            selectedEpisodeID = episode.id
+                            playRequest = UUID()
+                        } accessory: {
+                            episodeDownloadButton(episode)
+                                .font(.body)
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .id(episode.id)
+                    }
+                }
+            }
+            .contentMargins(.horizontal, Self.phoneInset, for: .scrollContent)
+            .scrollIndicators(.hidden)
+            // Lands on the episode Play starts, as the Apple TV app does.
+            .task(id: "\(selectedSeason ?? -1):\(visibleEpisodes.count)") {
+                guard let target = selectedEpisodeID, target != visibleEpisodes.first?.id,
+                      visibleEpisodes.contains(where: { $0.id == target }) else { return }
+                proxy.scrollTo(target, anchor: .leading)
+            }
+        }
+    }
+
+    private static func progressFraction(_ saved: ApplePlaybackProgress?, for episode: AppleStremioEpisode) -> Double? {
+        guard let saved, saved.partID == episode.id, saved.resumePosition != nil, saved.duration > 0 else { return nil }
+        return saved.position / saved.duration
+    }
+
+    // MARK: Trailers
+
+    /// The trailers the hero could play; ones already found to be portrait
+    /// clips are left out, as the hero skips them.
+    private var phoneTrailerKeys: [String] {
+        #if os(iOS)
+        trailerCandidates.filter { !trailerPortraitKeys.contains($0) }
+        #else
+        []
+        #endif
+    }
+
+    private var phoneTrailersSection: some View {
+        let keys = phoneTrailerKeys
+        return VStack(alignment: .leading, spacing: 10) {
+            AppleTitlePageSectionTitle("Trailers")
+                .padding(.horizontal, Self.phoneInset)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(keys, id: \.self) { key in
+                        let number = (keys.firstIndex(of: key) ?? 0) + 1
+                        AppleTitlePageTrailerCard(
+                            key: key,
+                            caption: number == 1 ? "Trailer" : "Trailer \(number)",
+                            width: phoneCardWidth
+                        ) {
+                            if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
+                        }
+                    }
+                }
+            }
+            .contentMargins(.horizontal, Self.phoneInset, for: .scrollContent)
+            .scrollIndicators(.hidden)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.trailers")
+    }
+
+    /// Plays trailer `index` in the hero, scrolling back up to it first.
+    private func playTrailerInHero(at index: Int) {
+        #if os(iOS) || os(visionOS)
+        guard trailerCandidates.indices.contains(index) else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
+            detailScrollPosition.scrollTo(edge: .top)
+        }
+        Task { @MainActor in
+            // Started after the scroll, or the hero's off-screen pause
+            // (the frame preference) would stop it straight away.
+            try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
+            if index == trailerCandidateIndex, trailerHasStarted {
+                restartTrailer()
+                return
+            }
+            guard prepareTrailerAudio() else { return }
+            trailerCandidateIndex = index
+            trailerHasStarted = true
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
+                trailerIsActive = true
+                trailerIsPlaying = false
+            }
+        }
+        #endif
+    }
+
+    // MARK: Cast, About, Information, Languages
+
+    private var phoneCredits: [AppleCreditPerson] {
+        let details = metadataDetails
+        let cast = details?.cast.isEmpty == false ? details?.cast ?? [] : item.cast ?? []
+        let writers = details?.writers.isEmpty == false ? details?.writers ?? [] : item.writers ?? []
+        return AppleTitlePagePolicy.credits(
+            detailed: details?.castMembers ?? [],
+            cast: cast,
+            director: details?.director ?? item.director,
+            writers: writers
+        )
+    }
+
+    private func phoneCastSection(_ people: [AppleCreditPerson]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppleTitlePageSectionTitle("Cast & Crew")
+                .padding(.horizontal, Self.phoneInset)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 4) {
+                    ForEach(people) { person in
+                        AppleTitlePageCreditPortrait(person: person)
+                    }
+                }
+            }
+            // The portraits carry 8 pt either side, so the first lines up.
+            .contentMargins(.horizontal, Self.phoneInset - 8, for: .scrollContent)
+            .scrollIndicators(.hidden)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.cast")
+    }
+
+    private func phoneAboutSection(_ summary: String) -> some View {
+        let genres = (metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? [])
+            .prefix(2).joined(separator: AppleBillboardCopy.separator)
+        return VStack(alignment: .leading, spacing: 12) {
+            AppleTitlePageSectionTitle("About")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if !genres.isEmpty {
+                    Text(genres.uppercased())
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                AppleMoreText(text: summary, lineLimit: 4)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.top, 8)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
+        }
+        .padding(.horizontal, Self.phoneInset)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.about")
+    }
+
+    private var phoneInformation: [AppleTitlePagePolicy.Fact] {
+        AppleTitlePagePolicy.information(
+            year: metadataDetails?.year ?? item.year,
+            releaseInfo: displayReleaseInfo,
+            contentRating: metadataDetails?.contentRating ?? item.contentRating,
+            countries: metadataDetails?.countries ?? []
+        )
+    }
+
+    private var phoneLanguages: [AppleTitlePagePolicy.Fact] {
+        AppleTitlePagePolicy.languages(
+            originalLanguage: metadataDetails?.originalLanguage,
+            spokenLanguages: metadataDetails?.spokenLanguages ?? []
+        )
+    }
+
+    private func phoneFactSection(_ title: String, facts: [AppleTitlePagePolicy.Fact], identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            AppleTitlePageSectionTitle(title)
+            AppleTitlePageFactList(facts: facts)
+        }
+        .padding(.horizontal, Self.phoneInset)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+    }
 }

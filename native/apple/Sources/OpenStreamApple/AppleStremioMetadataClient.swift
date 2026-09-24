@@ -337,7 +337,9 @@ public struct AppleStremioMetadataClient: Sendable {
                         .reduce(into: []) { keys, key in
                             if !keys.contains(key) { keys.append(key) }
                         }
-                }()
+                }(),
+                // Cinemeta sends "United States, United Kingdom".
+                countries: (value.country ?? "").split(separator: ",").compactMap { AppleTitlePagePolicy.regionName(String($0)) }
             )
         }
 
@@ -836,10 +838,11 @@ public struct AppleStremioMetadataClient: Sendable {
         let logo: String?
         let trailers: [Trailer]?
         let trailerStreams: [TrailerStream]?
+        let country: String?
 
         private enum CodingKeys: String, CodingKey {
             case id, type, name, description, releaseInfo, released, runtime, genre, genres, poster, background, landscapePoster, logo, contentRating, certification, badges, formats
-            case cast, director, writer, imdbRating, year, trailers, trailerStreams
+            case cast, director, writer, imdbRating, year, trailers, trailerStreams, country
         }
 
         init(from decoder: Decoder) throws {
@@ -888,6 +891,7 @@ public struct AppleStremioMetadataClient: Sendable {
             logo = try? container.decode(String.self, forKey: .logo)
             trailers = try? container.decode([Trailer].self, forKey: .trailers)
             trailerStreams = try? container.decode([TrailerStream].self, forKey: .trailerStreams)
+            country = try? container.decode(String.self, forKey: .country)
         }
 
         /// Cinemeta returns `cast`/`director`/`writer` as an array of names, but

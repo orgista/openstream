@@ -46,6 +46,14 @@ public struct AppleTMDBDetails: Equatable, Sendable {
     public let textlessBackdropURL: URL?
     public let logoURL: URL?
     public let trailerYouTubeKeys: [String]
+    /// Cast and crew with their roles and portraits, when the source has them
+    /// (TMDB). `cast` stays the plain name list the similarity ranking uses.
+    public let castMembers: [AppleCreditPerson]
+    /// Where the title comes from, as display names ("United Kingdom").
+    public let countries: [String]
+    /// The original language's code or name ("en"), and the spoken ones.
+    public let originalLanguage: String?
+    public let spokenLanguages: [String]
 
     public var trailerYouTubeKey: String? { trailerYouTubeKeys.first }
 
@@ -70,7 +78,11 @@ public struct AppleTMDBDetails: Equatable, Sendable {
         logoURL: URL? = nil,
         trailerYouTubeKey: String? = nil,
         trailerYouTubeKeys: [String] = [],
-        textlessBackdropURL: URL? = nil
+        textlessBackdropURL: URL? = nil,
+        castMembers: [AppleCreditPerson] = [],
+        countries: [String] = [],
+        originalLanguage: String? = nil,
+        spokenLanguages: [String] = []
     ) {
         self.mediaID = mediaID
         self.mediaType = mediaType
@@ -96,6 +108,18 @@ public struct AppleTMDBDetails: Equatable, Sendable {
             .reduce(into: []) { keys, key in
                 if !keys.contains(key) { keys.append(key) }
             }
+        self.castMembers = Array(castMembers.filter { !$0.name.isEmpty }.prefix(30))
+        self.countries = Self.bounded(countries, limit: 12)
+        let language = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.originalLanguage = language.isEmpty ? nil : String(language.prefix(60))
+        self.spokenLanguages = Self.bounded(spokenLanguages, limit: 30)
+    }
+
+    private static func bounded(_ values: [String], limit: Int) -> [String] {
+        var seen = Set<String>()
+        return values.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            .prefix(limit).map { $0 }
     }
 }
 
@@ -356,6 +380,29 @@ public struct AppleTMDBClient: Sendable {
         let cast = value.credits?.cast.prefix(10).compactMap { bounded($0.name, limit: 100) } ?? []
         let director = value.credits?.crew.first { $0.job == "Director" }
             .flatMap { bounded($0.name, limit: 100) }
+        // Actors with their characters, then the creators (a series) or the
+        // director (a film), each with a portrait when TMDB has one.
+        let actors = (value.credits?.cast ?? []).prefix(15).compactMap { member -> AppleCreditPerson? in
+            guard let name = bounded(member.name, limit: 100) else { return nil }
+            return AppleCreditPerson(name: name, role: bounded(member.character, limit: 100),
+                                     portraitURL: imageURL(path: member.profilePath, width: "w185"))
+        }
+        let creators = (value.createdBy ?? []).prefix(4).compactMap { member -> AppleCreditPerson? in
+            guard let name = bounded(member.name, limit: 100) else { return nil }
+            return AppleCreditPerson(name: name, role: "Creator",
+                                     portraitURL: imageURL(path: member.profilePath, width: "w185"))
+        }
+        let directors = (value.credits?.crew ?? []).filter { $0.job == "Director" }.prefix(2)
+            .compactMap { member -> AppleCreditPerson? in
+                guard let name = bounded(member.name, limit: 100) else { return nil }
+                return AppleCreditPerson(name: name, role: "Director",
+                                         portraitURL: imageURL(path: member.profilePath, width: "w185"))
+            }
+        let countryCodes = (value.originCountry ?? []) + (value.productionCountries ?? []).compactMap(\.code)
+        let countries = countryCodes.compactMap { AppleTitlePagePolicy.regionName($0) }
+        let spoken = (value.spokenLanguages ?? []).compactMap { language in
+            AppleTitlePagePolicy.languageName(language.code) ?? bounded(language.englishName, limit: 60)
+        }
         let logoPath = value.images?.logos
             .sorted { lhs, rhs in
                 let lhsEnglish = lhs.language?.caseInsensitiveCompare("en") == .orderedSame
@@ -392,7 +439,11 @@ public struct AppleTMDBClient: Sendable {
             backdropURL: imageURL(path: backdropPath, width: "w1280"),
             logoURL: imageURL(path: logoPath, width: "w500"),
             trailerYouTubeKeys: trailers,
-            textlessBackdropURL: imageURL(path: textlessPath, width: "w1280")
+            textlessBackdropURL: imageURL(path: textlessPath, width: "w1280"),
+            castMembers: actors + creators + directors,
+            countries: countries,
+            originalLanguage: AppleTitlePagePolicy.languageName(value.originalLanguage),
+            spokenLanguages: spoken
         )
     }
 
@@ -429,12 +480,22 @@ public struct AppleTMDBClient: Sendable {
         let overview: String?
         let posterPath: String?
         let backdropPath: String?
+        let createdBy: [PersonValue]?
+        let originCountry: [String]?
+        let productionCountries: [CountryValue]?
+        let spokenLanguages: [LanguageValue]?
+        let originalLanguage: String?
 
         enum CodingKeys: String, CodingKey {
             case runtime, genres, credits, videos, images, tagline, overview
             case episodeRunTime = "episode_run_time"
             case posterPath = "poster_path"
             case backdropPath = "backdrop_path"
+            case createdBy = "created_by"
+            case originCountry = "origin_country"
+            case productionCountries = "production_countries"
+            case spokenLanguages = "spoken_languages"
+            case originalLanguage = "original_language"
         }
 
         init(from decoder: Decoder) throws {
@@ -449,15 +510,57 @@ public struct AppleTMDBClient: Sendable {
             overview = try? container.decode(String.self, forKey: .overview)
             posterPath = try? container.decode(String.self, forKey: .posterPath)
             backdropPath = try? container.decode(String.self, forKey: .backdropPath)
+            createdBy = try? container.decode([PersonValue].self, forKey: .createdBy)
+            originCountry = try? container.decode([String].self, forKey: .originCountry)
+            productionCountries = try? container.decode([CountryValue].self, forKey: .productionCountries)
+            spokenLanguages = try? container.decode([LanguageValue].self, forKey: .spokenLanguages)
+            originalLanguage = try? container.decode(String.self, forKey: .originalLanguage)
         }
     }
 
     private struct NamedValue: Decodable, Sendable { let name: String? }
     private struct Credits: Decodable, Sendable {
-        let cast: [NamedValue]
+        let cast: [CastValue]
         let crew: [CrewValue]
     }
-    private struct CrewValue: Decodable, Sendable { let name: String?; let job: String? }
+    private struct CastValue: Decodable, Sendable {
+        let name: String?
+        let character: String?
+        let profilePath: String?
+        enum CodingKeys: String, CodingKey {
+            case name, character
+            case profilePath = "profile_path"
+        }
+    }
+    private struct CrewValue: Decodable, Sendable {
+        let name: String?
+        let job: String?
+        let profilePath: String?
+        enum CodingKeys: String, CodingKey {
+            case name, job
+            case profilePath = "profile_path"
+        }
+    }
+    private struct PersonValue: Decodable, Sendable {
+        let name: String?
+        let profilePath: String?
+        enum CodingKeys: String, CodingKey {
+            case name
+            case profilePath = "profile_path"
+        }
+    }
+    private struct CountryValue: Decodable, Sendable {
+        let code: String?
+        enum CodingKeys: String, CodingKey { case code = "iso_3166_1" }
+    }
+    private struct LanguageValue: Decodable, Sendable {
+        let code: String?
+        let englishName: String?
+        enum CodingKeys: String, CodingKey {
+            case code = "iso_639_1"
+            case englishName = "english_name"
+        }
+    }
     private struct Videos: Decodable, Sendable { let results: [Video] }
 
     /// Both lists default to empty rather than being required. `images` is
@@ -666,6 +769,7 @@ public struct AppleMetadataResolver: Sendable {
             genres: lhs.genres.isEmpty ? rhs.genres : lhs.genres,
             cast: lhs.cast.isEmpty ? rhs.cast : lhs.cast,
             director: nonEmpty(lhs.director) ?? nonEmpty(rhs.director),
+            writers: lhs.writers.isEmpty ? rhs.writers : lhs.writers,
             tagline: nonEmpty(lhs.tagline) ?? nonEmpty(rhs.tagline),
             overview: nonEmpty(lhs.overview) ?? nonEmpty(rhs.overview),
             posterURL: lhs.posterURL ?? rhs.posterURL,
@@ -674,7 +778,11 @@ public struct AppleMetadataResolver: Sendable {
             trailerYouTubeKeys: (lhs.trailerYouTubeKeys + rhs.trailerYouTubeKeys).reduce(into: []) { keys, key in
                 if !keys.contains(key) { keys.append(key) }
             },
-            textlessBackdropURL: lhs.textlessBackdropURL ?? rhs.textlessBackdropURL
+            textlessBackdropURL: lhs.textlessBackdropURL ?? rhs.textlessBackdropURL,
+            castMembers: lhs.castMembers.isEmpty ? rhs.castMembers : lhs.castMembers,
+            countries: lhs.countries.isEmpty ? rhs.countries : lhs.countries,
+            originalLanguage: nonEmpty(lhs.originalLanguage) ?? nonEmpty(rhs.originalLanguage),
+            spokenLanguages: lhs.spokenLanguages.isEmpty ? rhs.spokenLanguages : lhs.spokenLanguages
         )
     }
 
