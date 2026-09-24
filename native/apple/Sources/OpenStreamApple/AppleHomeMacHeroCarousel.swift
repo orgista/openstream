@@ -55,6 +55,20 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
                         - (AppleMacHeroPageDots.hitSize - AppleMacHeroPageDots.dotSize) / 2)
             }
         }
+        .overlay {
+            // The Apple TV app's ‹ › at the hero's edges, under the pointer
+            // only. Vertically centred on the art below the toolbar.
+            if cycle.count > 1, isHovering {
+                HStack {
+                    AppleMacHeroPageChevron(direction: -1) { move(by: -1) }
+                    Spacer(minLength: 0)
+                    AppleMacHeroPageChevron(direction: 1) { move(by: 1) }
+                }
+                .padding(.top, layout.topInset)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: isHovering)
         .onHover { isHovering = $0 }
         .background {
             AppleMacHeroSwipeMonitor(isActive: isHovering && cycle.count > 1) { move(by: $0) }
@@ -167,6 +181,32 @@ private struct AppleMacHeroPageIndicator: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.featured.pages")
+    }
+}
+
+/// A page chevron at the hero's edge: a bare white glyph with a shadow for
+/// legibility over bright art, brighter under the pointer.
+private struct AppleMacHeroPageChevron: View {
+    /// -1 for the previous page, +1 for the next.
+    let direction: Int
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: direction < 0 ? "chevron.left" : "chevron.right")
+                .font(.system(size: AppleMacHeroLayout.chevronGlyphSize, weight: .semibold))
+                .foregroundStyle(.white.opacity(isHovered ? 1 : 0.8))
+                .shadow(color: .black.opacity(0.5), radius: 6)
+                .frame(width: AppleMacHeroLayout.chevronHitWidth, height: AppleMacHeroLayout.chevronHitHeight)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(direction < 0 ? "Previous" : "Next")
+        .help(direction < 0 ? "Previous" : "Next")
+        .accessibilityIdentifier(direction < 0 ? "home.featured.previous" : "home.featured.next")
     }
 }
 

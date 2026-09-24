@@ -6,6 +6,14 @@ import SwiftUI
 @MainActor @Observable
 final class AppleLocalLibraryStore {
     static let shared = AppleLocalLibraryStore()
+    #if DEBUG
+    /// False under the Library titles fixture (`AppleLibraryTitlesDebugView`):
+    /// a fixture scan must never replace the real library's snapshot or its
+    /// last-scan stamp, which live in the same container.
+    static var persistsScanResults = true
+    #else
+    static let persistsScanResults = true
+    #endif
     static let downloadsID = UUID(uuidString: "EB7EF704-5724-4CEB-88B9-2860E474BD70")!
     private(set) var groups: [AppleLibrarySeries] = []
     private(set) var sources: [AppleSource] = []
@@ -306,6 +314,7 @@ final class AppleLocalLibraryStore {
                 items: group.items.map { AppleLibraryGroupSnapshot.Item(id: $0.id, sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
             )
         }
+        guard Self.persistsScanResults else { return }
         if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             let dir = caches.appendingPathComponent("OpenStream")
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
@@ -439,6 +448,10 @@ struct AppleLocalTitleShelf: View {
                 .task(id: group.id) { await library.resolve(group, sourceStore: sourceStore, settings: settings) }
             }
         }
+        // The shelf brings its own artwork lookup, so a Library shelf and
+        // Discover's Your Library row resolve a missing poster the same way
+        // wherever they are drawn.
+        .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
     }
 }
 

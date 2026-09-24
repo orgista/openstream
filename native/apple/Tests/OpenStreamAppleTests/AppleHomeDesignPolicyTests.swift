@@ -91,8 +91,9 @@ import JavaScriptCore
         let visible = AppleCatalogShelfPolicy.visibleSections(sections + sections, activeSourceIDs: [source.id])
         #expect(visible.count == 3)
         #expect(Set(visible.map(\.id)).count == 3)
-        #expect(visible.map { AppleCatalogShelfPolicy.title(for: $0.catalog) }
-            == ["Popular Movies", "Popular Movies", "Top 10 Disney+"])
+        // One name over a movie and a series catalog reads by type, so no two
+        // rows share a heading (owner, 2026-09-24).
+        #expect(visible.map(\.shelfTitle) == ["Popular Movies", "Popular Shows", "Top 10 Disney+"])
         #expect(visible.map { AppleCatalogShelfPolicy.style(for: $0.catalog) }
             == [.poster, .poster, .ranked])
         #expect(AppleCatalogShelfPolicy.visibleSections(sections, activeSourceIDs: []).isEmpty)

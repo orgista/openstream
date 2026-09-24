@@ -586,6 +586,7 @@ public struct OpenStreamRootView: View {
             .appleAlignedTabTitle(tab.title)
         case .library:
             AppleLibraryView(
+                catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 settings: settingsStore,

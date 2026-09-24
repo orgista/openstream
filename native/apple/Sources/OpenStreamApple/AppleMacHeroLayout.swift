@@ -44,6 +44,10 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
     public static let muteTopInset: CGFloat = 16
     public static let muteTrailingInset: CGFloat = 24
     public static let listButtonSide: CGFloat = 40
+    /// The ‹ › page chevrons shown at the hero's edges under the pointer.
+    public static let chevronGlyphSize: CGFloat = 30
+    public static let chevronHitWidth: CGFloat = 56
+    public static let chevronHitHeight: CGFloat = 120
     /// One decode of the still at this size serves every window size, so a
     /// live resize never reloads it.
     public static let stillPixelDimension = 2_560
@@ -100,6 +104,25 @@ public enum AppleMacHeroFade {
         Stop(location: 0, opacity: 0.9),
         Stop(location: 0.4, opacity: 0),
     ]
+
+    /// While the trailer is on screen: only a narrow fade behind the copy,
+    /// so the centre and right of the picture are the video untouched, as in
+    /// the Apple TV app (owner, 2026-09-24: the playing trailer "looks
+    /// muddy"). Clear by 40 % of the width — the copy column's edge in a
+    /// 1440 pt window — and by 28 % of the height.
+    public static let videoLeading: [Stop] = [
+        Stop(location: 0, opacity: 0.7),
+        Stop(location: 0.18, opacity: 0.45),
+        Stop(location: 0.4, opacity: 0),
+    ]
+
+    public static let videoBottom: [Stop] = [
+        Stop(location: 0, opacity: 0.85),
+        Stop(location: 0.28, opacity: 0),
+    ]
+
+    public static func leading(videoIsShowing: Bool) -> [Stop] { videoIsShowing ? videoLeading : leading }
+    public static func bottom(videoIsShowing: Bool) -> [Stop] { videoIsShowing ? videoBottom : bottom }
 }
 
 /// The Mac hero's page dots, as the Figma draws them: 7 pt dots 8 pt apart,

@@ -59,7 +59,8 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             let muted = payload["muted"] as? Bool ?? lastMuted
             lastMuted = muted
             let errorCode = payload["errorCode"] as? Int
-            appleTrace("mac hero trailer state=\(state) muted=\(muted) error=\(errorCode.map(String.init) ?? "none")")
+            let quality = (payload["quality"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+            appleTrace("mac hero trailer state=\(state) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             switch state {
             case "revealed":
                 reveal()

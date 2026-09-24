@@ -277,6 +277,7 @@ struct AppleDiscoverView: View {
                 } action: { _, layout in
                     macHeroLayout = layout
                 }
+                .appleMacHeroUnderToolbar()
                 #endif
                 #if os(tvOS)
                 // The billboard runs under the top safe area and bleeds past the
@@ -316,33 +317,8 @@ struct AppleDiscoverView: View {
         // refreshes on appear, so nothing floats over the billboard (X4).
         #if !os(tvOS)
         .toolbar {
-            ToolbarItem(placement: discoverActionPlacement) {
-                Button {
-                    showsSearch = true
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .accessibilityLabel("Search")
-                .appleVisionActionTarget()
-            }
-            ToolbarItem(placement: discoverActionPlacement) {
-                Button {
-                    refresh()
-                } label: {
-                    // The spinner takes the glyph's place while the shelves
-                    // reload. Dimming was the only answer the button gave, and
-                    // against cached catalogues that is over in a frame
-                    // (button crawl, 2026-09-19).
-                    if isRefreshing || catalogStore.isLoading {
-                        ProgressView()
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                }
-                .accessibilityLabel("Refresh")
-                .appleVisionActionTarget()
-                .disabled(isRefreshing || catalogStore.isLoading)
-            }
+            AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
+                            onSearch: { showsSearch = true }, onRefresh: refresh)
         }
         #endif
         #if DEBUG
@@ -1039,14 +1015,6 @@ struct AppleDiscoverView: View {
     }
     #endif
 
-    private var discoverActionPlacement: ToolbarItemPlacement {
-        #if os(visionOS)
-        .bottomOrnament
-        #else
-        .primaryAction
-        #endif
-    }
-
     private func featuredActions(_ value: IndexedCatalogItem, button: AppleTitlePagePolicy.HeroButton,
                                  onPlay: @escaping () -> Void) -> some View {
         AppleFeaturedActions(
@@ -1158,10 +1126,7 @@ struct AppleDiscoverView: View {
         nil
     }
 
-    private var metadataConfiguration: AppleTMDBConfiguration? {
-        guard settings.metadataEnabled else { return nil }
-        return try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey)
-    }
+    private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 
     private func refresh() {
         Task { @MainActor in
@@ -1429,10 +1394,7 @@ struct AppleSearchView: View {
     }
 
 
-    private var metadataConfiguration: AppleTMDBConfiguration? {
-        guard settings.metadataEnabled else { return nil }
-        return try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey)
-    }
+    private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 }
 
 private struct AppleCatalogSectionView: View {
@@ -1452,7 +1414,7 @@ private struct AppleCatalogSectionView: View {
     @FocusState private var focusedItemID: String?
 
     private var title: String {
-        AppleCatalogShelfPolicy.title(for: section.catalog)
+        section.shelfTitle ?? AppleCatalogShelfPolicy.title(for: section.catalog)
     }
 
     private var displayedItems: [AppleCatalogItem] {
@@ -1670,6 +1632,7 @@ struct AppleCatalogCard: View {
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var failedArtworkURLs: Set<URL> = []
+    @State private var artworkRetries = 0
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
          progress: Double? = nil, remainingLabel: String? = nil) {
@@ -1750,7 +1713,17 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
-                .onChange(of: item.id) { _, _ in failedArtworkURLs = []; fallbackArtwork = nil }
+                .onChange(of: item.id) { _, _ in failedArtworkURLs = []; fallbackArtwork = nil; artworkRetries = 0 }
+                .task(id: failedArtworkURLs.count) {
+                    // Out of art after a failure: try the candidates again
+                    // shortly, twice, rather than keep the title tile.
+                    guard resolvedPosterURL == nil, !failedArtworkURLs.isEmpty,
+                          let delay = AppleCatalogArtworkPolicy.retryDelay(afterRetries: artworkRetries) else { return }
+                    try? await Task.sleep(for: delay)
+                    guard !Task.isCancelled else { return }
+                    artworkRetries += 1
+                    failedArtworkURLs = []
+                }
                 .task(id: item.id) {
                     #if DEBUG
                     if sizing == .ranked {
@@ -2636,8 +2609,20 @@ struct AppleCatalogItemDetailView: View {
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
+                #if os(iOS)
+                // The Apple TV app's back button: a small dark translucent
+                // circle, so the chevron reads over white art too (owner,
+                // 2026-09-24: a bare white glyph vanished over bright art).
+                // Apple TV keeps the bare glyph — no boxed icons there.
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: AppleDesignTokens.backButtonCircleSide, height: AppleDesignTokens.backButtonCircleSide)
+                .background(.ultraThinMaterial, in: .circle)
+                .environment(\.colorScheme, .dark)
+                #else
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
+                #endif
                 .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                 .contentShape(Rectangle())
         }
@@ -7298,7 +7283,11 @@ extension AppleCatalogItemDetailView {
                     .transition(.opacity)
             }
         }
-        .overlay { AppleMacHeroFadeView().allowsHitTesting(false) }
+        .overlay {
+            AppleMacHeroFadeView(videoIsShowing: trailerHasStarted && trailerIsPlaying)
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: 0.6), value: trailerHasStarted && trailerIsPlaying)
+        }
         .overlay(alignment: .topTrailing) {
             // Nothing over the art until the video is really on screen.
             if trailerHasStarted, trailerIsPlaying {

@@ -1853,7 +1853,20 @@ struct AppleLibraryView: View {
     /// Textless hero art, keyed by media id, once TMDB has been asked for it.
     /// Empty is the normal state on first paint — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
+    #if os(macOS)
+    /// The same hero geometry as Discover's (`AppleMacHeroLayout`).
+    @State private var macHeroLayout = AppleMacHeroLayout()
+    #endif
+    #if os(tvOS)
     @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
+    #else
+    /// Newest first, fixed. The Sort menu went from every toolbar (owner,
+    /// 2026-09-24: "don't need it"); Apple TV keeps its glyph on the first
+    /// shelf's header line.
+    private let sort = AppleLibrarySort.added
+    @State private var showsSearch = false
+    #endif
+    let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
@@ -1896,6 +1909,23 @@ struct AppleLibraryView: View {
                 detail(selectedHero, autoPlay: selectedHeroAutoPlay)
             }
         }
+        #if !os(tvOS)
+        // The same Search and Refresh as Discover, in the empty state too.
+        .toolbar {
+            AppleTabToolbar(tab: .library, isRefreshing: library.isLoading,
+                            onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
+        }
+        .navigationDestination(isPresented: $showsSearch) {
+            // Its own router: deep links belong to Discover's Search, and two
+            // views answering one route would push it twice.
+            AppleSearchView(catalogStore: catalogStore, sourceStore: sourceStore, mediaIndex: mediaIndex,
+                            router: AppleAppRouter(), settings: settings, openSettings: openSettings)
+                .navigationTitle("Search")
+                .appleTraceScreen("search")
+        }
+        #endif
+        // Discover's artwork lookup for the hero and title pages too.
+        .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
         .appleTraceScreen("library", detail: "\(groups.count) titles, loading=\(library.isLoading)")
     }
 
@@ -1924,13 +1954,7 @@ struct AppleLibraryView: View {
                 ) {
                     AppleFeaturedActions(
                         viewportSize: viewportSize,
-                        button: AppleTitlePagePolicy.HeroButton(action: AppleTitlePagePolicy.heroPrimaryAction(
-                            type: item.type, progress: library.progress[featured.id],
-                            selectedEpisode: library.resumeEpisode(for: item, group: featured,
-                                episodes: AppleLocalLibraryStore.episodes(group: featured, mediaID: item.mediaID, enriched: [])),
-                            isPlayable: AppleTitlePagePolicy.hasPlaybackRoute(
-                                item: item, sources: sourceStore.sources, hasLocalGroup: true),
-                            trailer: .none)),
+                        button: heroButton(featured, item: item),
                         onPlay: { selectHero(featured, autoPlay: true) },
                         onDetails: { selectHero(featured, autoPlay: false) }
                     )
@@ -1940,6 +1964,61 @@ struct AppleLibraryView: View {
         }
         .task(id: heroUpgradeIdentity(heroes)) { await upgradeHeroArtwork(heroes) }
     }
+
+    /// Play or Resume from the file on disk, whatever the catalog sources say.
+    private func heroButton(_ featured: AppleLibrarySeries, item: AppleCatalogItem) -> AppleTitlePagePolicy.HeroButton {
+        AppleTitlePagePolicy.HeroButton(action: AppleTitlePagePolicy.heroPrimaryAction(
+            type: item.type, progress: library.progress[featured.id],
+            selectedEpisode: library.resumeEpisode(for: item, group: featured,
+                episodes: AppleLocalLibraryStore.episodes(group: featured, mediaID: item.mediaID, enriched: [])),
+            isPlayable: AppleTitlePagePolicy.hasPlaybackRoute(
+                item: item, sources: sourceStore.sources, hasLocalGroup: true),
+            trailer: .none))
+    }
+
+    #if os(macOS)
+    /// Discover's Mac hero, page for page: the same carousel, billboard,
+    /// geometry and trailer (owner, 2026-09-24: Library's was an inset
+    /// rounded card with margins). Runs under the toolbar to the window's
+    /// top edge.
+    private func macHero(_ heroes: [AppleLibrarySeries]) -> some View {
+        AppleHomeMacHeroCarousel(pageIDs: heroes.map(\.id), layout: macHeroLayout) { index in
+            macHeroPage(heroes[index], index: index, count: heroes.count)
+        } preload: { index in
+            let item = heroItem(heroes[index])
+            AppleHomeMacHeroPreload(item: item, wordmark: item.logoURL, layout: macHeroLayout)
+        }
+        .padding(.top, -macHeroLayout.topOverlap)
+        .task(id: heroUpgradeIdentity(heroes)) { await upgradeHeroArtwork(heroes) }
+    }
+
+    private func macHeroPage(_ featured: AppleLibrarySeries, index: Int, count: Int) -> some View {
+        let item = heroItem(featured)
+        // The file's own record: what its title page resumes and saves.
+        let recordID = featured.items.first.map(library.playbackID)
+        let isInList = recordID.flatMap { mediaIndex.record(id: $0) }.map(\.isFavorite)
+        return AppleHomeBillboard(
+            item: item,
+            sources: sourceStore.sources,
+            progressID: recordID ?? featured.id,
+            preferredSourceID: featured.items.first?.sourceID ?? AppleSource.ID(),
+            onPlay: { selectHero(featured, autoPlay: true) },
+            onOpenDetails: { selectHero(featured, autoPlay: false) },
+            settings: settings,
+            viewportSize: viewportSize,
+            wordmark: item.logoURL,
+            rotationCount: count,
+            rotationIndex: index,
+            mac: .init(layout: macHeroLayout),
+            libraryButton: heroButton(featured, item: item)
+        ) { button, perform in
+            AppleHomeMacHeroActions(button: button, isInList: isInList, onPlay: perform) {
+                guard let recordID, let isInList else { return }
+                Task { try? await mediaIndex.setFavorite(!isInList, recordID: recordID) }
+            }
+        }
+    }
+    #endif
 
     /// The hero's own record, with any textless art that has since arrived.
     private func heroItem(_ group: AppleLibrarySeries) -> AppleCatalogItem {
@@ -2015,7 +2094,11 @@ struct AppleLibraryView: View {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 let heroes = library.featuredCandidates
                 if !heroes.isEmpty {
+                    #if os(macOS)
+                    macHero(heroes)
+                    #else
                     rotatingHero(heroes)
+                    #endif
                 }
                 if let error = library.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle").padding(.horizontal, 16)
@@ -2036,6 +2119,17 @@ struct AppleLibraryView: View {
             #endif
         }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
+        #if os(macOS)
+        .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
+            AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
+                               windowHeight: geometry.containerSize.height
+                                   + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                               topInset: geometry.contentInsets.top)
+        } action: { _, layout in
+            macHeroLayout = layout
+        }
+        .appleMacHeroUnderToolbar()
+        #endif
         #if os(tvOS)
         // The billboard runs under the top safe area (see Discover). No
         // Refresh on a TV home (X4); Sort sits on the first shelf's header
@@ -2043,36 +2137,10 @@ struct AppleLibraryView: View {
         .ignoresSafeArea(edges: .top)
         .scrollClipDisabled()
         .background(Color.black.ignoresSafeArea())
-        #else
-        .toolbar {
-            ToolbarItem(placement: libraryActionPlacement) {
-                Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(AppleLibrarySort.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                } label: { Label("Sort library", systemImage: "arrow.up.arrow.down") }
-                #if os(visionOS)
-                .buttonStyle(.borderless)
-                .appleVisionActionTarget()
-                #endif
-            }
-            ToolbarItem(placement: libraryActionPlacement) {
-                Button { Task { await reload() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .appleVisionActionTarget()
-                    .disabled(library.isLoading)
-            }
-        }
         #endif
         .refreshable { await reload() }
         .task { library.refreshProgress(); if library.groups.isEmpty { await reload() } }
         .onAppear { library.refreshProgress() }
-    }
-    private var libraryActionPlacement: ToolbarItemPlacement {
-        #if os(visionOS)
-        .bottomOrnament
-        #else
-        .primaryAction
-        #endif
     }
     private func reload() async { await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings) }
     private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil) -> some View {

@@ -36,6 +36,21 @@ enum AppleCatalogArtworkPolicy {
         return values.filter { seen.insert($0).inserted }
     }
 
+    /// How long a card that has run out of art waits before trying its
+    /// candidates again, by how many times it already has; nil stops.
+    ///
+    /// A load that fails once — a timeout while a Library shelf asks for a
+    /// hundred posters at once — used to latch the card to its title tile for
+    /// as long as it stayed on screen: the grey tiles in Library › Movies
+    /// for titles Discover showed posters for (owner, 2026-09-24).
+    static func retryDelay(afterRetries retries: Int) -> Duration? {
+        switch retries {
+        case 0: .seconds(3)
+        case 1: .seconds(10)
+        default: nil
+        }
+    }
+
     static func next(in candidates: [URL], failed: Set<URL>) -> URL? {
         candidates.first { !failed.contains($0) }
     }

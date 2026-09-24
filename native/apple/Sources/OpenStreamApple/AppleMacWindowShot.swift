@@ -1,6 +1,7 @@
 #if DEBUG && os(macOS)
 import AppKit
 import AVKit
+import WebKit
 
 /// Renders the app's own window to a PNG, and dumps the menu bar, on request
 /// from a launch argument.
@@ -130,7 +131,13 @@ public enum AppleMacWindowShot {
             emit(lines + ["OPENSTREAM-SHOT verdict: could not make a bitmap rep"])
             return
         }
+        // A web view (the hero's trailer) draws out of process and comes out
+        // black in `cacheDisplay`; its own snapshot stands in for it, in its
+        // place under whatever SwiftUI draws over it, for the one frame.
+        let (standIns, webLines) = await standInsForWebViews(in: frameView)
+        lines.append(contentsOf: webLines)
         frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        standIns.forEach { $0.removeFromSuperview() }
         lines.append(contentsOf: drawPopovers(over: target, into: rep))
         guard let data = rep.representation(using: .png, properties: [:]) else {
             emit(lines + ["OPENSTREAM-SHOT verdict: PNG encoding failed"])
@@ -252,6 +259,28 @@ public enum AppleMacWindowShot {
             lines.append("OPENSTREAM-SHOT after path: \(after.path)")
         }
         return lines
+    }
+
+    @MainActor
+    private static func standInsForWebViews(in root: NSView) async -> ([NSView], [String]) {
+        var webViews = [WKWebView]()
+        var pending = [root]
+        while let view = pending.popLast() {
+            if let webView = view as? WKWebView { webViews.append(webView) } else { pending.append(contentsOf: view.subviews) }
+        }
+        var added = [NSView]()
+        var lines = [String]()
+        for webView in webViews where !webView.isHiddenOrHasHiddenAncestor {
+            guard let image = try? await webView.takeSnapshot(configuration: nil),
+                  let superview = webView.superview else { continue }
+            let standIn = NSImageView(frame: webView.frame)
+            standIn.image = image
+            standIn.imageScaling = .scaleAxesIndependently
+            superview.addSubview(standIn, positioned: .above, relativeTo: webView)
+            added.append(standIn)
+            lines.append("OPENSTREAM-SHOT web view stand-in: \(NSStringFromRect(webView.frame))")
+        }
+        return (added, lines)
     }
 
     /// A popover (the title page's season list) is a window of its own over

@@ -40,6 +40,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// Set on the Apple TV's Discover: the Apple TV app's hero details over
     /// the billboard (badge, kind line and rating, cycle-driven dots).
     var tv: TV? = nil
+    /// Library's hero: the button its own policy chose, which knows the title
+    /// plays from a file on disk. Nil lets the catalog policy below decide.
+    var libraryButton: AppleTitlePagePolicy.HeroButton? = nil
     @ViewBuilder var actions: (AppleTitlePagePolicy.HeroButton, @escaping () -> Void) -> Actions
     @State private var episodes: [AppleStremioEpisode] = []
     /// Every lookup that can find a trailer has answered.
@@ -82,15 +85,16 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     private var primaryAction: AppleTitlePagePolicy.PrimaryAction? {
-        AppleTitlePagePolicy.heroPrimaryAction(
+        if let libraryButton { return libraryButton.action }
+        return AppleTitlePagePolicy.heroPrimaryAction(
             type: item.type, progress: ApplePlaybackProgressFeed.shared.progress(for: progressID),
             selectedEpisode: selectedEpisode, isPlayable: hasPlaybackRoute, trailer: trailerAvailability
         )
     }
 
     private var actionButtons: Actions {
-        actions(AppleTitlePagePolicy.HeroButton(action: primaryAction,
-                                                isDownloaded: downloadCoordinator.state.isCompleted),
+        actions(libraryButton ?? AppleTitlePagePolicy.HeroButton(action: primaryAction,
+                                                                 isDownloaded: downloadCoordinator.state.isCompleted),
                 performPrimaryAction)
     }
 
@@ -396,6 +400,7 @@ private struct AppleHomeHeroPreview: View {
     #if os(macOS)
     /// False while a pushed page covers Discover (`AppleMacWindowPresence`).
     @State private var isInWindow = false
+    @Environment(\.displayScale) private var displayScale
     #endif
 
     private var shouldPreview: Bool {
@@ -513,12 +518,19 @@ private struct AppleHomeHeroPreview: View {
         }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         guard !Task.isCancelled, shouldPreview,
-              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first,
-              let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
+              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first else { return }
+        // The best stream the hero can show pixel for pixel, never a default:
+        // measured on the 16:9 player the video is drawn at (it overhangs
+        // the hero and is cropped), in device pixels.
+        let frame = artFrameSize ?? CGSize(width: 0, height: AppleMacHeroLayout.minimumHeight)
+        let pixelHeight = Double(AppleTrailerPreviewLayout.playerFrame(in: frame, isLandscape: true).height)
+            * Double(displayScale)
+        let quality = AppleTrailerPreviewPolicy.quality(forPixelHeight: pixelHeight)
+        guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality) else { return }
         // Always starts muted, as it does on the iPhone; the round button
         // top-right turns the sound on (the Mac has no audio session to lose).
         isMuted = trailerRequest == nil
-        appleTrace("mac hero trailer start \(item.name)")
+        appleTrace("mac hero trailer start \(item.name) frame=\(Int(pixelHeight))px vq=\(quality)")
         embedURL = url
         isPlaying = true
         #else

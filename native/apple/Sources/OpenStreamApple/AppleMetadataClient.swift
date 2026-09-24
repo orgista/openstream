@@ -173,7 +173,20 @@ public enum AppleTrailerPreviewPolicy {
         return URL(string: "https://i.ytimg.com/vi/\(key)/hqdefault.jpg")
     }
 
-    public static func embedURL(for key: String?) -> URL? {
+    /// YouTube's quality names, highest first, with the picture height each
+    /// one is.
+    public static let qualityLadder: [(name: String, height: Int)] = [
+        ("hd2160", 2_160), ("hd1440", 1_440), ("hd1080", 1_080), ("hd720", 720), ("large", 480), ("medium", 360),
+    ]
+
+    /// The highest quality whose picture is no taller than the frame it fills,
+    /// in device pixels: a 680 pt Mac hero on a Retina screen is 1,360 px tall,
+    /// which asks for 1080p rather than a 4K stream it would scale down.
+    public static func quality(forPixelHeight height: Double) -> String {
+        qualityLadder.first { Double($0.height) <= height }?.name ?? "medium"
+    }
+
+    public static func embedURL(for key: String?, quality: String = "hd2160") -> URL? {
         guard let key = validYouTubeKey(key),
               var components = URLComponents(string: "https://www.youtube-nocookie.com/embed/\(key)") else {
             return nil
@@ -190,7 +203,7 @@ public enum AppleTrailerPreviewPolicy {
             URLQueryItem(name: "rel", value: "0"),
             URLQueryItem(name: "fs", value: "0"),
             URLQueryItem(name: "showinfo", value: "0"),
-            URLQueryItem(name: "vq", value: "hd2160"),
+            URLQueryItem(name: "vq", value: quality),
             URLQueryItem(name: "origin", value: "https://openstream.app"),
         ]
         return components.url

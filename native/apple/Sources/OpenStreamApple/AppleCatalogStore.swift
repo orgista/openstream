@@ -244,6 +244,9 @@ public struct AppleCatalogSection: Identifiable, Codable, Equatable, Sendable {
     public let sourceConfigurationID: String
     public let catalog: AppleStremioCatalog
     public let items: [AppleCatalogItem]
+    /// The heading Discover draws, once `AppleCatalogShelfPolicy.visibleSections`
+    /// has made it unique among the rows shown. Not persisted.
+    public internal(set) var shelfTitle: String?
 
     public init(source: AppleSource, catalog: AppleStremioCatalog, items: [AppleCatalogItem]) {
         id = "\(source.id.uuidString):\(catalog.type):\(catalog.id)"

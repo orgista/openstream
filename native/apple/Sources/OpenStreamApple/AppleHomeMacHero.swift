@@ -16,13 +16,22 @@ struct AppleHomeMacHero<Actions: View>: View {
     let stage: AnyView
     let onOpenDetails: () -> Void
     @ViewBuilder var actions: Actions
+    /// The trailer is up over the still: the fade narrows to the copy.
+    @State private var videoIsShowing = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             stage
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()
-                .overlay { AppleMacHeroFadeView().allowsHitTesting(false) }
+                .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
+                    videoIsShowing = state.isPlaying
+                }
+                .overlay {
+                    AppleMacHeroFadeView(videoIsShowing: videoIsShowing)
+                        .allowsHitTesting(false)
+                        .animation(.easeInOut(duration: 0.6), value: videoIsShowing)
+                }
             copy
                 .frame(maxWidth: AppleMacHeroLayout.copyMaxWidth, alignment: .leading)
                 .padding(.leading, layout.horizontalPadding)
@@ -91,6 +100,30 @@ struct AppleHomeMacHero<Actions: View>: View {
     }
 }
 
+extension View {
+    /// Discover's and Library's scroll views on the Mac: the hero runs under
+    /// the toolbar to the window's top edge with nothing drawn over it — no
+    /// toolbar backing and no scroll-edge dimming (the black strip the owner
+    /// saw above the hero, 2026-09-24). The tab picker and the toolbar
+    /// buttons keep their own glass, which is what keeps them readable.
+    func appleMacHeroUnderToolbar() -> some View {
+        modifier(AppleMacHeroUnderToolbar())
+    }
+}
+
+private struct AppleMacHeroUnderToolbar: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .scrollEdgeEffectHidden(true, for: .top)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            content
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        }
+    }
+}
+
 /// "TV Show · Comedy" and the outlined rating, left-aligned under the title.
 private struct AppleMacHeroMetadata: View {
     let item: AppleCatalogItem
@@ -123,12 +156,17 @@ private struct AppleMacHeroMetadata: View {
     }
 }
 
-/// The Figma's two fades over the Mac hero's art (`AppleMacHeroFade`).
+/// The Figma's two fades over the Mac hero's art (`AppleMacHeroFade`), and
+/// the narrower pair while a trailer plays.
 struct AppleMacHeroFadeView: View {
+    var videoIsShowing = false
+
     var body: some View {
         ZStack {
-            LinearGradient(stops: Self.stops(AppleMacHeroFade.leading), startPoint: .leading, endPoint: .trailing)
-            LinearGradient(stops: Self.stops(AppleMacHeroFade.bottom), startPoint: .bottom, endPoint: .top)
+            LinearGradient(stops: Self.stops(AppleMacHeroFade.leading(videoIsShowing: videoIsShowing)),
+                           startPoint: .leading, endPoint: .trailing)
+            LinearGradient(stops: Self.stops(AppleMacHeroFade.bottom(videoIsShowing: videoIsShowing)),
+                           startPoint: .bottom, endPoint: .top)
         }
         .accessibilityHidden(true)
     }

@@ -65,3 +65,15 @@ extension EnvironmentValues {
         set { self[AppleTMDBConfigurationEnvironmentKey.self] = newValue }
     }
 }
+
+extension AppleSettingsStore {
+    /// The TMDB configuration every artwork lookup uses, nil when Settings >
+    /// Metadata is off or there is no key. One definition, so Discover and
+    /// Library ask TMDB for a missing poster in the same way: Library had no
+    /// configuration at all, and drew grey title tiles for the titles
+    /// Discover's Your Library row showed posters for (owner, 2026-09-24).
+    var tmdbConfiguration: AppleTMDBConfiguration? {
+        guard metadataEnabled else { return nil }
+        return try? AppleTMDBConfiguration(credential: tmdbAPIKey)
+    }
+}
