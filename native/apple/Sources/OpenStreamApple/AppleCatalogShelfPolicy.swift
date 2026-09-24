@@ -27,8 +27,10 @@ enum AppleCatalogShelfPolicy {
     ///
     /// When one name covers catalogs of different types — Cinemeta's
     /// "Popular" movies and "Popular" series — each reads "<name> Movies" /
-    /// "<name> Shows". When it covers the same type twice, two add-ons list
-    /// the same thing and the first by id is kept.
+    /// "<name> Shows". When two rows still share a heading, the later one is
+    /// dropped only if it mostly repeats the first (two add-ons listing the
+    /// same service); different titles under one heading keep both rows, the
+    /// later one named after its add-on so no catalog silently disappears.
     static func visibleSections(
         _ sections: [AppleCatalogSection], activeSourceIDs: Set<AppleSource.ID>
     ) -> [AppleCatalogSection] {
@@ -39,7 +41,7 @@ enum AppleCatalogShelfPolicy {
             typesByTitle[title.lowercased(), default: []].insert(section.catalog.type.lowercased())
         }
         var seenIDs = Set<String>()
-        var seenTitles = Set<String>()
+        var itemsByTitle = [String: Set<String>]()
         return zip(shown, titles).map { section, title -> AppleCatalogSection in
             var section = section
             section.shelfTitle = (typesByTitle[title.lowercased()]?.count ?? 0) > 1
@@ -48,9 +50,26 @@ enum AppleCatalogShelfPolicy {
         }.sorted {
             let order = ($0.shelfTitle ?? "").localizedCaseInsensitiveCompare($1.shelfTitle ?? "")
             return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
-        }.filter {
-            seenIDs.insert($0.id).inserted && seenTitles.insert(($0.shelfTitle ?? "").lowercased()).inserted
+        }.compactMap { section -> AppleCatalogSection? in
+            guard seenIDs.insert(section.id).inserted else { return nil }
+            var section = section
+            let key = (section.shelfTitle ?? "").lowercased()
+            let items = Set(section.items.prefix(20).map(\.id))
+            if let kept = itemsByTitle[key] {
+                guard !mostlyRepeats(items, kept) else { return nil }
+                section.shelfTitle = "\(section.shelfTitle ?? "") · \(section.sourceName)"
+            } else {
+                itemsByTitle[key] = items
+            }
+            return section
         }
+    }
+
+    /// Half or more of a row's leading titles already shown under the same
+    /// heading means it is the same list from another add-on.
+    static func mostlyRepeats(_ items: Set<String>, _ kept: Set<String>) -> Bool {
+        guard !items.isEmpty else { return true }
+        return Double(items.intersection(kept).count) / Double(items.count) >= 0.5
     }
 
     /// "Popular" → "Popular Movies" / "Popular Shows"; a name that already

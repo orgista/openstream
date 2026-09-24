@@ -69,6 +69,20 @@ struct AppleCatalogRowTitleTests {
         #expect(titles == ["Popular Movies", "Popular Shows", "Prime Movies", "Prime Shows"])
     }
 
+    /// gpt-6-luna review of d605c9f: a heading collision must not hide a
+    /// catalog whose titles are different — only a repeated list is dropped.
+    @Test func sameHeadingWithDifferentTitlesKeepsBothRows() {
+        let other = AppleSource(kind: .stremio, name: "TMDB", url: URL(string: "https://fixture.example/tmdb/manifest.json")!)
+        let first = AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "a", name: "Popular"),
+                                        items: [AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "One")])
+        let different = AppleCatalogSection(source: other, catalog: AppleStremioCatalog(type: "series", id: "b", name: "Popular"),
+                                            items: [AppleCatalogItem(mediaID: "tt0000002", type: "series", name: "Two")])
+        let visible = AppleCatalogShelfPolicy.visibleSections([first, different], activeSourceIDs: [source.id, other.id])
+        #expect(visible.count == 2)
+        #expect(Set(visible.compactMap { $0.shelfTitle?.lowercased() }).count == 2)
+        #expect(visible.contains { $0.shelfTitle == "Popular · TMDB" })
+    }
+
     @Test func typedTitleSwapsAnExistingTypeWord() {
         #expect(AppleCatalogShelfPolicy.typedTitle("Popular Movies", type: "series") == "Popular Shows")
         #expect(AppleCatalogShelfPolicy.typedTitle("Trending", type: "movie") == "Trending Movies")
