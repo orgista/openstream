@@ -425,6 +425,7 @@ public struct OpenStreamRootView: View {
             if sharePlay.channel != nil { selectedTab = .live }
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }
         }
+        .environment(\.appleOpenSourcesSettings) { openSourcesSettings() }
         .preferredColorScheme(.dark)
         #if !os(tvOS)
         // On Apple TV the global white tint made every tinted control a trap
@@ -452,13 +453,10 @@ public struct OpenStreamRootView: View {
         )) {
             AppleFirstRunGuidanceContainer {
                 AppleFirstRunGuidanceView {
-                    selectedTab = .settings
                     // The button says Open Sources. Off visionOS it only
                     // switched tabs and left the viewer on the Settings root,
                     // one row short of the thing they asked for (2026-09-19).
-                    var path = NavigationPath()
-                    path.append(AppleSettingsRoute.sources)
-                    navigationPaths[.settings] = path
+                    openSourcesSettings()
                     firstRunGuidanceSeen = true
                     #if DEBUG
                     // The debug route forces the card; without this the card
@@ -530,6 +528,14 @@ public struct OpenStreamRootView: View {
             active.insert(id)
         }
         try? await mediaIndex.retainAvailability(for: active)
+    }
+
+    /// Settings › Sources, in place of whatever the Settings tab had open.
+    private func openSourcesSettings() {
+        selectedTab = .settings
+        var path = NavigationPath()
+        path.append(AppleSettingsRoute.sources)
+        navigationPaths[.settings] = path
     }
 
     @ViewBuilder

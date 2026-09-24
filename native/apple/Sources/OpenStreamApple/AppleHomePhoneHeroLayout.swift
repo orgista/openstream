@@ -54,4 +54,22 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
 
     /// How far the hero is pulled up so its art starts at the top edge.
     public var topOverlap: CGFloat { topInset + Self.stackTopPadding }
+
+    /// Over how many points the copy fades as it rises towards the bars.
+    public static let copyFadeDistance: CGFloat = 120
+
+    /// The copy's opacity (wordmark, genres, buttons) when its top edge is
+    /// `copyTop` points below the top of the screen, and `restingTop` before
+    /// any scroll. It reaches zero at `fadeLine` — the bottom of the
+    /// navigation bar with its large title (the top content inset), below
+    /// where the inline title settles — so no Play button is left showing
+    /// through the bar once it has collapsed (N17b, ios-top10-rank-02.png).
+    /// The fade never starts below where the copy rests, so a short screen or
+    /// a large text size, where the copy already sits close to the bar, still
+    /// opens at full strength.
+    public static func copyOpacity(copyTop: CGFloat, restingTop: CGFloat, fadeLine: CGFloat) -> CGFloat {
+        let fadeStart = min(restingTop, fadeLine + copyFadeDistance)
+        guard fadeStart > fadeLine else { return copyTop >= restingTop ? 1 : 0 }
+        return min(max((copyTop - fadeLine) / (fadeStart - fadeLine), 0), 1)
+    }
 }

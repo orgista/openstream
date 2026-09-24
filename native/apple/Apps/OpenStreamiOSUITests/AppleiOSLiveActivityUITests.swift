@@ -89,7 +89,7 @@ final class AppleiOSLiveActivityUITests: XCTestCase {
             format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Preparing ", "Downloading ")).firstMatch
         if after.waitForExistence(timeout: 10), after.isHittable {
             after.tap()
-            let cancel = app.buttons["Cancel"].firstMatch
+            let cancel = app.buttons["Cancel Download"].firstMatch
             if cancel.waitForExistence(timeout: 10) {
                 cancel.tap()
                 _ = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "exists == false"),

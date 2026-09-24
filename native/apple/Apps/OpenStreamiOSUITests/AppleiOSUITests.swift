@@ -22,6 +22,7 @@ final class AppleiOSUITests: XCTestCase {
             "testChannelManagerListsSelectedAndAddsThroughAPicker",
             "testLivePlaylistShowsChannelFailureAndRecovers",
             "testZRemoveUITestPlaylistSource",
+            "testDownloadCanBeCancelledFromItsOptionsWhilePreparingAndDownloading",
         ]
         if ProcessInfo.processInfo.environment["OPENSTREAM_ALLOW_MUTATING_UI_TESTS"] != "1",
            isolatedTests.contains(where: { name.contains($0) }) {
@@ -494,11 +495,192 @@ final class AppleiOSUITests: XCTestCase {
         if started, !busy.label.hasPrefix("Downloaded ") {
             // Cancel through the app's own dialog so no file is kept on the sim.
             busy.tap()
-            let cancel = app.buttons["Cancel"].firstMatch
+            let cancel = app.buttons["Cancel Download"].firstMatch
             if cancel.waitForExistence(timeout: 10) { cancel.tap() }
             Thread.sleep(forTimeInterval: 1.0)
             attach("download-cancelled")
         }
+    }
+
+    /// ui-smoke 20260923-2209 reported "the download the crawl started could
+    /// not be cancelled from its own options". This starts a real download —
+    /// from a localhost add-on (`OPENSTREAM_TEST_DOWNLOAD_ADDON`, a manifest
+    /// URL on 127.0.0.1 that serves one slow MP4) — and opens the options
+    /// twice: while the source is still being prepared, and while bytes
+    /// arrive. Both times Cancel Download must be there. The download, the
+    /// add-on and anything stored are removed again at the end.
+    func testDownloadCanBeCancelledFromItsOptionsWhilePreparingAndDownloading() throws {
+        guard let manifest = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_DOWNLOAD_ADDON"], !manifest.isEmpty else {
+            throw XCTSkip("OPENSTREAM_TEST_DOWNLOAD_ADDON not set")
+        }
+        // A teardown block, not `defer`: a failed assertion ends the test
+        // without running a `defer`, and left the add-on and a half-finished
+        // download on the simulator the first time.
+        addTeardownBlock { [self] in removeDownloadFixture() }
+        addFixtureAddon(manifest)
+
+        app.terminate()
+        launch(screen: "detail")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let download = app.buttons.matching(identifier: "detail.episode.download").firstMatch
+        XCTAssertTrue(download.waitForExistence(timeout: 60), "no per-episode Download control")
+        _ = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"),
+                                               evaluatedWith: download)], timeout: 60)
+        for _ in 0..<8 where !isSafelyHittable(download) {
+            if download.frame.midY > app.frame.height - 100 { app.swipeUp(velocity: .slow) }
+            else if download.frame.minY < 70 { app.swipeDown(velocity: .slow) }
+            else { Thread.sleep(forTimeInterval: 1) }
+        }
+        XCTAssertTrue(isSafelyHittable(download), "the Download control never became tappable")
+        let episodeLabel = download.label
+        download.tap()
+
+        let options = app.buttons["Cancel Download"].firstMatch
+        let running = NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Preparing ", "Downloading ")
+        let busy = app.buttons.matching(identifier: "detail.episode.download").matching(running).firstMatch
+        XCTAssertTrue(busy.waitForExistence(timeout: 20),
+                      "tapping \(episodeLabel) never showed a running download: "
+                      + (app.staticTexts["detail.download.status"].exists ? app.staticTexts["detail.download.status"].label : "no status"))
+        print("DOWNLOADCANCEL first state: \(busy.label)")
+        let sawPreparing = busy.label.hasPrefix("Preparing ")
+
+        // First look: whatever state it is in right after the tap (usually
+        // Preparing, the queued phase). The iPhone's options sheet has no
+        // Cancel of its own; a press outside it closes it.
+        busy.tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 10),
+                      "no Cancel Download while the download was \(sawPreparing ? "preparing" : "running")")
+        attach(sawPreparing ? "download-options-while-preparing" : "download-options-while-downloading")
+        if !tapIfPossible(app.buttons["Cancel"].firstMatch) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        }
+        XCTAssertTrue(options.waitForNonExistence(timeout: 5))
+
+        // Second look, once bytes are arriving.
+        let downloading = app.buttons.matching(identifier: "detail.episode.download")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Downloading ")).firstMatch
+        XCTAssertTrue(downloading.waitForExistence(timeout: 60), "the download never reached Downloading")
+        print("DOWNLOADCANCEL second state: \(downloading.label)")
+        downloading.tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 10), "no Cancel Download while bytes were arriving")
+        attach("download-options-while-downloading-bytes")
+        options.tap()
+
+        let idle = app.buttons.matching(identifier: "detail.episode.download")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Download ")).firstMatch
+        XCTAssertTrue(idle.waitForExistence(timeout: 15), "the row did not return to Download after Cancel Download")
+        attach("download-cancelled")
+    }
+
+    /// The "Playback Unavailable" alert (ui-smoke 20260923-2209: 180 presses
+    /// of a Retry that failed again at once and put the identical alert back).
+    /// With no stream source a retry cannot end differently, so the alert
+    /// offers Sources… instead. With `OPENSTREAM_TEST_FAILING_ADDON` — a
+    /// localhost add-on that answers every stream request with HTTP 503, a
+    /// failure another try can get past — Retry is offered, takes the alert
+    /// down and shows the page preparing before the failure comes back.
+    func testPlaybackFailureOffersRetryOnlyWhenAnotherTryCanEndDifferently() throws {
+        let failing = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_FAILING_ADDON"].flatMap { $0.isEmpty ? nil : $0 }
+        if let failing {
+            addTeardownBlock { [self] in removeDownloadFixture() }
+            addFixtureAddon(failing)
+            app.terminate()
+        }
+        launch(screen: "detail")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 60), "no Play on the title page")
+        _ = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"),
+                                               evaluatedWith: play)], timeout: 60)
+        play.tap()
+        let alert = app.alerts["Playback Unavailable"].firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 60), "Play raised no Playback Unavailable alert")
+        let buttons = alert.buttons.allElementsBoundByIndex.map(\.label)
+        print("PLAYBACKALERT buttons=\(buttons) message=\(alert.staticTexts.allElementsBoundByIndex.map(\.label))")
+        if failing != nil {
+            attach("playback-unavailable-retryable")
+            XCTAssertTrue(alert.buttons["Retry"].exists, "a retryable failure offered no Retry: \(buttons)")
+            XCTAssertFalse(alert.buttons["Sources…"].exists)
+            alert.buttons["Retry"].tap()
+            // Read at once: a query on this simulator takes most of a second,
+            // and the loading state lasts `retryFeedbackMinimum` when the
+            // failure comes straight back.
+            let labelAfterRetry = play.label
+            attach("playback-retry-loading")
+            print("PLAYBACKALERT after Retry play label=\(labelAfterRetry)")
+            XCTAssertTrue(labelAfterRetry.hasPrefix("Preparing"), "Retry did not put the page into its loading state")
+            XCTAssertTrue(alert.waitForNonExistence(timeout: 2), "Retry left the alert up")
+            XCTAssertTrue(alert.waitForExistence(timeout: 60), "the retried failure never came back")
+            attach("playback-retry-failed-again")
+            alert.buttons["Close"].tap()
+        } else {
+            attach("playback-unavailable-no-source")
+            XCTAssertFalse(alert.buttons["Retry"].exists, "Retry offered for a failure that cannot change: \(buttons)")
+            XCTAssertTrue(alert.buttons["Sources…"].exists, "no Sources… for a missing stream source: \(buttons)")
+            alert.buttons["Sources…"].tap()
+            XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+            let settings = app.tabBars.buttons["Settings"].firstMatch
+            XCTAssertTrue(settings.waitForExistence(timeout: 5) && settings.isSelected, "Sources… did not open Settings")
+            XCTAssertTrue(app.buttons["Add Catalog"].firstMatch.waitForExistence(timeout: 10)
+                          || app.staticTexts["Add Catalog"].firstMatch.waitForExistence(timeout: 2),
+                          "Sources… did not land on Sources")
+            attach("playback-sources-opened")
+        }
+    }
+
+    /// On its own so a run that died half-way can be cleaned up by name.
+    func testZRemoveTheDownloadFixture() {
+        removeDownloadFixture()
+    }
+
+    /// Adds a localhost add-on through Settings › Sources › Add Catalog.
+    private func addFixtureAddon(_ manifest: String) {
+        launch(screen: "add-catalog")
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        let field = app.textFields["Manifest URL"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "no Manifest URL field on Add Catalog")
+        field.tap(); field.typeText(manifest)
+        if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+        let add = app.buttons["Add Catalog"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); add.tap()
+        // Adding returns to Sources; an error keeps the form up and says why.
+        if !field.waitForNonExistence(timeout: 30) { attach("fixture-addon-not-added") }
+        XCTAssertFalse(field.exists, "the add-on was not added")
+    }
+
+    /// Removes what the tests above added: the fixture add-on, and any download.
+    private func removeDownloadFixture() {
+        app.terminate()
+        launch(screen: "storage")
+        let deleteAll = app.buttons["Delete All Downloads"].firstMatch
+        if deleteAll.waitForExistence(timeout: 20), deleteAll.isEnabled {
+            deleteAll.tap()
+            let confirm = app.buttons["Delete"].firstMatch
+            if confirm.waitForExistence(timeout: 10) { confirm.tap() }
+            Thread.sleep(forTimeInterval: 2)
+        }
+        app.terminate()
+        launch(screen: "settings")
+        let sources = app.buttons["Sources"].firstMatch
+        guard sources.waitForExistence(timeout: 20) else { XCTFail("Sources row not found"); return }
+        sources.tap()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Local Download Fixture")).firstMatch
+        var swipes = 0
+        while !row.waitForExistence(timeout: 3), swipes < 6 { app.swipeUp(); swipes += 1 }
+        guard row.exists else { attach("no-download-fixture-source"); return }
+        row.tap()
+        let delete = app.buttons["Delete Source"].firstMatch
+        var deleteSwipes = 0
+        while !delete.waitForExistence(timeout: 3), deleteSwipes < 4 { app.swipeUp(); deleteSwipes += 1 }
+        XCTAssertTrue(delete.exists, "no Delete Source on the add-on page")
+        delete.tap()
+        let confirm = app.alerts.buttons["Delete"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "no Delete confirmation")
+        confirm.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Local Download Fixture")).firstMatch.exists,
+                       "the fixture add-on is still listed")
+        attach("download-fixture-removed")
     }
 
     /// M3U sources use a URL or a file; the deprecated text editor stays removed.
@@ -2057,6 +2239,13 @@ final class AppleiOSUITests: XCTestCase {
     private var crawlDownloadsPressed = 0
     private var crawlDownloadsAreOff = false
 
+    /// "Sources…" on a playback failure leaves the title page for Settings,
+    /// and the walk has to relaunch the screen to get back. Every Play on a
+    /// simulator with no stream source raises it, so it is pressed once per
+    /// screen to prove it answers, and not again.
+    private var crawlSourcesPressed = 0
+    private static let crawlSourcesLabel = "Sources…"
+
     /// How many lists the screen holds before anything is pressed. A SwiftUI
     /// menu is neither a `menuItem` nor a `popover` on the phone — it arrives
     /// as one more collection view, narrower than the screen — so an open one
@@ -2381,6 +2570,7 @@ final class AppleiOSUITests: XCTestCase {
         crawlBarRect = isPlayer ? .null : tabBarRectForCrawl()
         crawlPressesPerCollection = [:]
         crawlDownloadsPressed = 0
+        crawlSourcesPressed = 0
         let homeTab = selectedTabLabel()
         var scene = crawlScene()
         crawlBaselineLists = scene.lists.count
@@ -2722,6 +2912,26 @@ final class AppleiOSUITests: XCTestCase {
         for _ in 0..<8 {
             var scene = crawlScene()
             if scene.sheets == 0, scene.alerts == 0 {
+                // A download that failed before it began — no source on the
+                // simulator can serve a file — leaves nothing to take back,
+                // and pressing ↓ again then starts a fresh attempt instead of
+                // opening the options. That is how the walk once reported a
+                // download it "could not cancel" after restarting eight
+                // attempts that never wrote a byte (ui-smoke 20260923-2209).
+                switch crawlDownloadState(scene, control: control) {
+                case .running:
+                    break
+                case .finished:
+                    crawlDownloadsAreOff = true
+                    crawlNote("   ! the download the walk started finished before it could be cancelled — CHECK THE SIMULATOR")
+                    result.defects.append("[\(screen.name)] the download the crawl started finished before it could be cancelled")
+                    return
+                case .notRunning:
+                    let status = app.staticTexts["detail.download.status"].firstMatch
+                    crawlNote("   ↩ the download never started, so there is nothing to cancel"
+                              + (status.exists ? ": \(status.label)" : ""))
+                    return
+                }
                 // The control that started it is the control that offers to
                 // stop it.
                 if !tapIfPossible(control),
@@ -2747,6 +2957,23 @@ final class AppleiOSUITests: XCTestCase {
         crawlDownloadsAreOff = true
         crawlNote("   ! a download the walk started could not be cancelled from the UI — CHECK THE SIMULATOR")
         result.defects.append("[\(screen.name)] the download the crawl started could not be cancelled from its own options")
+    }
+
+    private enum CrawlDownloadState { case running, finished, notRunning }
+
+    /// Read from the download controls' own labels: "Preparing …",
+    /// "Downloading …", "Paused …" and "Resum…" on any of them while the
+    /// coordinator holds a download (it holds one at a time, so it is the
+    /// walk's), "Downloaded …" on the pressed one once it is stored, the plain
+    /// "Download …" or "Retry …" otherwise.
+    private func crawlDownloadState(_ scene: CrawlScene, control: XCUIElement) -> CrawlDownloadState {
+        let running = scene.nodes.contains { node in
+            node.type == .button && node.identifier.lowercased().contains("download")
+                && ["Preparing", "Downloading", "Paused", "Resum"].contains { node.label.hasPrefix($0) }
+        }
+        if running { return .running }
+        if (try? control.snapshot())?.label.hasPrefix("Downloaded") == true { return .finished }
+        return .notRunning
     }
 
     /// Presses the menu's every item, then puts the menu's own selection back.
@@ -2909,6 +3136,7 @@ final class AppleiOSUITests: XCTestCase {
                 continue
             }
             let before = crawlStateString(scene, target: target)
+            if name == Self.crawlSourcesLabel { crawlSourcesPressed += 1 }
             element.tap()
             let (answered, after) = waitForCrawlResponse(from: before, target: target)
             scene = after
@@ -2952,6 +3180,9 @@ final class AppleiOSUITests: XCTestCase {
         }
         if name.contains("download"), crawlDownloadsAreOff {
             return "a download the walk started earlier outran its cancel, so no more are started (policy)"
+        }
+        if target.label == Self.crawlSourcesLabel, crawlSourcesPressed >= 1 {
+            return "opens Settings › Sources, and it was pressed once on this screen already (policy)"
         }
         if name.contains("download"), crawlDownloadsPressed >= 1 {
             return "one download is pressed and cancelled per screen; the rest are the same control (policy)"
@@ -3248,7 +3479,11 @@ final class AppleiOSUITests: XCTestCase {
             }
             if scene.sheets > 0 {
                 let sheet = app.sheets.firstMatch
-                if !Self.crawlExitLabels.contains(where: { tapIfPossible(sheet.buttons[$0].firstMatch) }) {
+                // Asked again before the drag: a sheet that closes on its own
+                // between the look and the drag failed the whole crawl
+                // ("No matches found … Sheet", N22 rerun).
+                if !Self.crawlExitLabels.contains(where: { tapIfPossible(sheet.buttons[$0].firstMatch) }),
+                   sheet.exists {
                     sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
                         .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
                 }

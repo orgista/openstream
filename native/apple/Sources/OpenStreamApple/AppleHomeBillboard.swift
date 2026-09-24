@@ -148,6 +148,7 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     struct Phone {
         let artHeight: CGFloat
+        let copyFadeLine: CGFloat
         let badge: AppleHeroBadge?
         let onOpenDetails: () -> Void
     }
@@ -202,7 +203,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder
     private var featuredBody: some View {
         if let phone {
-            AppleHomePhoneHero(item: item, artHeight: phone.artHeight, wordmark: wordmark, badge: phone.badge,
+            AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
+                               wordmark: wordmark, badge: phone.badge,
                                stage: stage, onOpenDetails: phone.onOpenDetails) { actionButtons }
         } else {
             AppleFeaturedHero(

@@ -18,6 +18,9 @@ struct AppleHomePhoneHero<Actions: View>: View {
     /// From the top edge of the screen: the hero is drawn pulled up under the
     /// navigation bar by `AppleHomePhoneHeroLayout.topOverlap`.
     let artHeight: CGFloat
+    /// Where the copy has faded out, from the top of the screen:
+    /// `AppleHomePhoneHeroLayout.topInset`.
+    let copyFadeLine: CGFloat
     let wordmark: URL?
     let badge: AppleHeroBadge?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
@@ -56,6 +59,16 @@ struct AppleHomePhoneHero<Actions: View>: View {
             actions
                 .padding(.top, 4)
         }
+        // Read from the copy's own place in the scroll view, so scrolling
+        // costs no state change and no body pass. The hero starts at the top
+        // edge of the screen, so where the copy sits inside it is where it
+        // rests on screen before any scroll.
+        .visualEffect { [copyFadeLine] content, proxy in
+            content.opacity(AppleHomePhoneHeroLayout.copyOpacity(
+                copyTop: proxy.frame(in: .scrollView).minY,
+                restingTop: proxy.frame(in: .named(Self.coordinateSpaceName)).minY,
+                fadeLine: copyFadeLine))
+        }
         .padding(.horizontal, 20)
         // Room for the carousel's page dots, which sit over the art.
         .padding(.bottom, AppleHomePhoneHeroLayout.copyBottomInset)
@@ -69,8 +82,11 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 .overlay { AppleHomePhoneHeroFade().allowsHitTesting(false) }
         }
         .background(Color.black)
+        .coordinateSpace(.named(Self.coordinateSpaceName))
         .accessibilityElement(children: .contain)
     }
+
+    private static var coordinateSpaceName: String { "AppleHomePhoneHero" }
 
     /// The wordmark when it has drawn, otherwise the name in black-weight
     /// capitals — while it loads, when it fails, when there is none, and over

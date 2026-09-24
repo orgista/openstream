@@ -91,6 +91,12 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
             }
         }
 
+        // Every source for the title was ruled out; asking again rules them
+        // out again, so this is not a player fault worth a retry.
+        if let library = error as? AppleLibrarySourceError, library == .noMedia {
+            return .init(kind: .unavailable, message: library.localizedDescription)
+        }
+
         if let stremio = error as? AppleStremioPlaybackError {
             switch stremio {
             case .requestFailed(let status) where status == 401 || status == 403:

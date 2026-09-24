@@ -837,6 +837,7 @@ struct AppleDiscoverView: View {
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
+                                 copyFadeLine: phoneHeroLayout.topInset,
                                  badge: heroBadges[value.item.mediaID],
                                  onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
             mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
@@ -1914,6 +1915,7 @@ struct AppleCatalogItemDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.appleOpenSourcesSettings) private var openSourcesSettings
     // The secondary row (My List, Rate) was missed when the primary buttons were
     // taught to scale: at the largest size its glyphs and 11 pt labels stayed
     // tiny beside buttons that had grown (measured on the iPad, 2026-09-17).
@@ -1951,6 +1953,9 @@ struct AppleCatalogItemDetailView: View {
 
     @State private var playbackCoordinator = ApplePlaybackCoordinator()
     @State private var playRequest: UUID?
+    /// When Retry was pressed, so a failure that comes straight back still
+    /// shows the loading state first (`ApplePlaybackFailureRecovery`).
+    @State private var playbackRetryStartedAt: ContinuousClock.Instant?
     @State private var playerPresentation: AppleStremioPlayerPresentation?
     @State private var episodes: [AppleStremioEpisode] = []
     @State private var selectedSeason: Int?
@@ -2462,20 +2467,27 @@ struct AppleCatalogItemDetailView: View {
         #endif
         .modifier(AppleStremioPlayerPresentationModifier(presentation: $playerPresentation))
         .alert("Playback Unavailable", isPresented: Binding(
-            get: {
-                if case .failed = playbackCoordinator.phase { return true }
-                return false
-            },
-            set: { if !$0 { playbackCoordinator.reset() } }
+            get: { playbackFailure != nil },
+            // The alert reports itself dismissed after its animation, by
+            // which time Retry has already put the page into Preparing;
+            // resetting then dropped that state and the page sat on Play.
+            set: { if !$0, playbackFailure != nil { playbackCoordinator.reset() } }
         )) {
-            Button("Retry") {
-                playbackCoordinator.reset()
-                playRequest = UUID()
+            // Retry only where another attempt can end differently; a missing
+            // or unusable source fails the same way every time, and there
+            // the way on is Sources.
+            switch playbackFailure.map(ApplePlaybackFailureRecovery.init) {
+            case .retry:
+                Button("Retry", action: retryPlayback)
+            case .sources:
+                Button("Sources…", action: openSourcesAfterPlaybackFailure)
+            case .closeOnly, nil:
+                EmptyView()
             }
             Button("Close", role: .cancel) { playbackCoordinator.reset() }
         } message: {
-            if case .failed(let failure) = playbackCoordinator.phase {
-                Text(failure.message)
+            if let playbackFailure {
+                Text(playbackFailure.message)
             }
         }
     }
@@ -2490,15 +2502,12 @@ struct AppleCatalogItemDetailView: View {
     private var detailHeroContent: some View {
         GeometryReader { proxy in
             ZStack {
-            Button(action: toggleTrailerPlayback) {
-                heroArtwork
-                    .frame(maxWidth: .infinity)
-                    .frame(height: heroHeight)
-                    .clipped()
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(trailerIsPlaying ? "Pause preview" : "Play preview")
+            heroArtwork
+                .frame(maxWidth: .infinity)
+                .frame(height: heroHeight)
+                .clipped()
+                .accessibilityHidden(true)
+            heroTrailerStartButton
 
             #if os(iOS) || os(visionOS)
             trailerPreview()
@@ -2573,9 +2582,7 @@ struct AppleCatalogItemDetailView: View {
     /// the iPhone title page whose copy covers the bottom of the art.
     @ViewBuilder
     private func trailerPreview(controlTopInset: CGFloat? = nil) -> some View {
-        if trailerHasStarted, let embedURL = trailerEmbedURL,
-           !playbackCoordinator.phase.isBusy,
-           playerPresentation == nil {
+        if trailerPreviewIsShown, let embedURL = trailerEmbedURL {
             AppleYouTubeAutoPreview(
                 url: embedURL,
                 artworkURL: heroArtworkURL,
@@ -3318,6 +3325,43 @@ struct AppleCatalogItemDetailView: View {
             + (previewAssets?.trailerYouTubeKeys ?? [])
         var seen = Set<String>()
         return keys.filter { seen.insert($0).inserted }
+    }
+
+    /// Whether pressing the hero still can start a trailer. Until the
+    /// metadata has named one, after every candidate has failed, and on Apple
+    /// TV (no YouTube embed) the press did nothing at all while the still
+    /// still read as a "Play preview" button (ui-smoke 20260923-2209). Once
+    /// the trailer's own layer is up it covers the still, and its touch
+    /// shield (`detail.trailer.toggle`, "Loading" until the first frame)
+    /// takes the presses and speaks for them instead.
+    private var heroTrailerCanPlay: Bool {
+        #if os(iOS) || os(visionOS)
+        trailerEmbedURL != nil && !trailerPreviewIsShown
+        #else
+        false
+        #endif
+    }
+
+    /// A press on the hero still starts the trailer — present only while
+    /// one can start. It sits over the still rather than wrapping it, so the
+    /// still keeps its identity (and its decoded image) as the button comes
+    /// and goes; toggling `accessibilityHidden` on a wrapping button left a
+    /// "Play preview" that refused touches in the accessibility tree.
+    @ViewBuilder
+    private var heroTrailerStartButton: some View {
+        if heroTrailerCanPlay {
+            Button(action: toggleTrailerPlayback) {
+                Color.clear.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play preview")
+        }
+    }
+
+    /// The same test `trailerPreview` draws by.
+    private var trailerPreviewIsShown: Bool {
+        trailerHasStarted && trailerEmbedURL != nil
+            && !playbackCoordinator.phase.isBusy && playerPresentation == nil
     }
 
     private var allowsTrailerAutoplay: Bool {
@@ -4619,7 +4663,28 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    private var playbackFailure: ApplePlaybackFailure? {
+        if case .failed(let failure) = playbackCoordinator.phase { return failure }
+        return nil
+    }
+
+    /// Takes the alert down and puts the page into its loading state before
+    /// anything is asked again, so the press is seen to do something even when
+    /// the answer comes back at once.
+    private func retryPlayback() {
+        playbackRetryStartedAt = .now
+        playbackCoordinator.beginResolving()
+        playRequest = UUID()
+    }
+
+    private func openSourcesAfterPlaybackFailure() {
+        playbackCoordinator.reset()
+        if let openSourcesSettings { openSourcesSettings() } else { openSettings() }
+    }
+
     private func resolvePlayback() async {
+        let retryStartedAt = playbackRetryStartedAt
+        playbackRetryStartedAt = nil
         playbackCoordinator.beginResolving()
         do {
             if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
@@ -4728,6 +4793,14 @@ struct AppleCatalogItemDetailView: View {
         } catch is CancellationError {
             playbackCoordinator.reset()
         } catch {
+            if let retryStartedAt {
+                let hold = ApplePlaybackFailureRecovery.remainingRetryFeedback(elapsed: .now - retryStartedAt)
+                if hold > .zero { try? await Task.sleep(for: hold) }
+                guard !Task.isCancelled else {
+                    playbackCoordinator.reset()
+                    return
+                }
+            }
             playbackCoordinator.fail(error)
         }
     }
@@ -6442,14 +6515,11 @@ extension AppleCatalogItemDetailView {
     /// first frame, 3ea0ef0), and the one approved billboard fade.
     private var phoneHeroStage: some View {
         ZStack {
-            Button(action: toggleTrailerPlayback) {
-                heroArtwork
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(trailerIsPlaying ? "Pause preview" : "Play preview")
+            heroArtwork
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .accessibilityHidden(true)
+            heroTrailerStartButton
             #if os(iOS) || os(visionOS)
             trailerPreview(controlTopInset: detailSafeAreaInsets.top + 10)
             #endif

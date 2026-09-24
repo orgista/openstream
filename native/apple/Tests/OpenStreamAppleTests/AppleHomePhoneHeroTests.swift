@@ -224,4 +224,26 @@ struct AppleHomePhoneHeroLayoutTests {
     @Test func anUnmeasuredScrollViewGetsTheFloor() {
         #expect(AppleHomePhoneHeroLayout().artHeight == AppleHomePhoneHeroLayout.minimumArtHeight)
     }
+
+    /// N17c: the Play button showed through the collapsed "Discover" bar.
+    @Test func theCopyIsGoneBeforeItReachesTheBar() {
+        let fade = AppleHomePhoneHeroLayout.copyFadeDistance
+        // Resting well below the bar: full strength until the fade band.
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 400, restingTop: 400, fadeLine: 150) == 1)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 150 + fade, restingTop: 400, fadeLine: 150) == 1)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 150 + fade / 2, restingTop: 400, fadeLine: 150) == 0.5)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 150, restingTop: 400, fadeLine: 150) == 0)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 20, restingTop: 400, fadeLine: 150) == 0)
+    }
+
+    /// A short screen or a large text size puts the copy close to the bar
+    /// before any scroll; it must still open at full strength.
+    @Test func copyRestingCloseToTheBarStartsAtFullStrength() {
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 190, restingTop: 190, fadeLine: 150) == 1)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 170, restingTop: 190, fadeLine: 150) == 0.5)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 150, restingTop: 190, fadeLine: 150) == 0)
+        // Resting at or above the line: shown at rest, gone once scrolled.
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 140, restingTop: 140, fadeLine: 150) == 1)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: 139, restingTop: 140, fadeLine: 150) == 0)
+    }
 }
