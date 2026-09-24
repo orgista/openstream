@@ -421,7 +421,7 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
                                                           seriesBackdrop: seriesBackdropURL),
                          placeholderSystemImage: "play.fill",
                          onFailure: { stillFailed = true })
-            .onChange(of: episode.id) { stillFailed = false }
+            .onChange(of: episode.thumbnailURL) { stillFailed = false } // a new still gets its own try (review of 6ad1031)
             .frame(width: width, height: stillHeight)
             .background(.white.opacity(0.09))
             .overlay(alignment: .bottom) {
