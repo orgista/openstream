@@ -164,7 +164,11 @@ struct AppleSourcesSettingsView: View {
             case .addMediaServer:
                 AppleAddMediaServerView(sourceStore: sourceStore)
             case .addNetworkShare:
-                AppleAddNetworkShareView(sourceStore: sourceStore)
+                AppleNetworkShareConnectView(start: .add(nil), flow: .shared, sourceStore: sourceStore)
+            case .networkShareServer(let server):
+                AppleNetworkShareConnectView(start: .add(server), flow: .shared, sourceStore: sourceStore)
+            case .editNetworkShare(let id, let part):
+                AppleNetworkShareConnectView(start: .edit(id, part), flow: .shared, sourceStore: sourceStore)
             case .addARR:
                 AppleServerDownloadsSettingsView(settings: settings)
             case .webManagement:
@@ -172,6 +176,9 @@ struct AppleSourcesSettingsView: View {
             case .detail(let sourceID):
                 AppleSourceDetailView(sourceID: sourceID, sourceStore: sourceStore, settings: settings)
             }
+        }
+        .navigationDestination(for: AppleNetworkShareRoute.self) { route in
+            AppleNetworkShareStepView(route: route, flow: .shared, sourceStore: sourceStore)
         }
         #if DEBUG
         // Simulator-only: opens a real saved source's detail page so it can be
@@ -236,6 +243,9 @@ enum AppleSourceRoute: Hashable {
     case addLiveTV
     case addMediaServer
     case addNetworkShare
+    /// A server found on the network: Connect with its address filled in.
+    case networkShareServer(AppleNetworkShareServer)
+    case editNetworkShare(AppleSource.ID, AppleNetworkShareEditPart)
     case addARR
     case webManagement
     case detail(AppleSource.ID)
@@ -292,9 +302,7 @@ private struct AppleAddFilesView: View {
                 }
                 #endif
                 ForEach(discovered) { server in
-                    NavigationLink {
-                        AppleAddNetworkShareView(sourceStore: sourceStore, initialServer: server)
-                    } label: {
+                    NavigationLink(value: AppleSourceRoute.networkShareServer(AppleNetworkShareServer(server))) {
                         LabeledContent(server.name, value: endpointLabel(for: server))
                     }
                     .appleTVReadableFocus()
@@ -593,7 +601,10 @@ private struct AppleSourceDetailView: View {
                 Form {
                     Section {
                         LabeledContent("Type", value: source.kind.title)
-                        AppleTruncatingValue(locationLabel(source), value: sourceLocation(source))
+                        if source.kind != .nas {
+                            // A share's server and folder are rows of their own below.
+                            AppleTruncatingValue(locationLabel(source), value: sourceLocation(source))
+                        }
                         LabeledContent("Health", value: healthLabel(source))
                         if let lastValidatedAt = source.lastValidatedAt {
                             LabeledContent(
@@ -622,6 +633,10 @@ private struct AppleSourceDetailView: View {
                             }
                         }
                         Toggle("Enabled", isOn: enabled)
+                    }
+
+                    if source.kind == .nas {
+                        AppleNetworkShareEditRows(source: source, sourceStore: sourceStore)
                     }
 
                     if AppleSubtitleLanguages.declaresSubtitles(resources: source.resources) {
@@ -1395,521 +1410,6 @@ private struct AppleAddLiveTVSourceView: View {
             isError = true
             message = error.localizedDescription
         }
-    }
-}
-
-@MainActor
-private struct AppleAddNetworkShareView: View {
-    /// Port and Domain sit inside DisclosureGroups, so they are not chain
-    /// stops: sending focus to a collapsed field is a dead end. Password is
-    /// out for the same reason as the Live TV form — it is a field plus a
-    /// reveal button, so focus would land on the wrapper.
-    private enum SubmitField: Hashable { case name, address, folder, username }
-    private static let chain: [SubmitField] = [.name, .address, .folder, .username]
-    @FocusState private var shareFocus: SubmitField?
-
-    @Environment(\.dismiss) private var dismiss
-    private let initialServer: AppleSMBServer?
-    @State private var name = ""
-    @State private var host = ""
-    @State private var port = "445"
-    @State private var address = ""
-    @State private var share = ""
-    @State private var path = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var isPasswordRevealed = false
-    @State private var domain = ""
-    @State private var selectedDisplayHost: String?
-    @State private var shares: [AppleSMBShare] = []
-    @State private var isWorking = false
-    @State private var message: String?
-    @State private var isError = false
-    @State private var connectionAction: AppleInstanceConnectionAction?
-    @State private var showingAdvanced = false
-
-    let sourceStore: AppleSourceStore
-    private let client = AppleSMBClient()
-    private let discovery = AppleSMBDiscovery()
-
-    /// Which pill should show the spinner. Derived from the action already in
-    /// flight so there is no second piece of state to keep in step.
-    private var isSavingAction: Bool {
-        if case .save = connectionAction { return true }
-        return false
-    }
-
-    init(sourceStore: AppleSourceStore, initialServer: AppleSMBServer? = nil) {
-        self.sourceStore = sourceStore
-        self.initialServer = initialServer
-        _name = State(initialValue: initialServer?.name ?? "")
-        _host = State(initialValue: initialServer?.host ?? "")
-        _port = State(initialValue: String(initialServer?.port ?? 445))
-        _address = State(initialValue: initialServer.map { Self.addressLabel(host: $0.host, port: $0.port) } ?? "")
-        _selectedDisplayHost = State(initialValue: initialServer?.displayHost)
-    }
-
-    var body: some View {
-        #if os(tvOS)
-        tvOSBody
-        #else
-        standardBody
-        #endif
-    }
-
-    // MARK: Fields shared by every platform
-
-    private var nameField: some View {
-        TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
-            .textContentType(.name)
-    }
-
-    private var addressField: some View {
-        TextField("Server URL", text: addressBinding, prompt: appleSecondaryFieldPrompt("Server URL"))
-            .textContentType(.URL)
-            #if os(iOS) || os(tvOS) || os(visionOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-    }
-
-    private var portField: some View {
-        TextField("Port", text: $port, prompt: appleSecondaryFieldPrompt("Port"))
-            #if os(iOS) || os(visionOS)
-            .keyboardType(.numberPad)
-            #endif
-    }
-
-    private var folderField: some View {
-        TextField("Folder", text: $path, prompt: appleSecondaryFieldPrompt("Folder"))
-            .autocorrectionDisabled()
-    }
-
-    private var usernameField: some View {
-        TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
-            .textContentType(.username)
-            #if os(iOS) || os(tvOS) || os(visionOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-    }
-
-    private var passwordField: some View {
-        AppleRevealableSecureField(
-            "Password",
-            text: $password,
-            isRevealed: $isPasswordRevealed
-        )
-    }
-
-    private var domainField: some View {
-        TextField("Domain", text: $domain, prompt: appleSecondaryFieldPrompt("Domain"))
-            #if os(iOS) || os(tvOS) || os(visionOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-    }
-
-    #if os(tvOS)
-    private enum Field: Hashable {
-        case name, address, port, folder, username, domain
-    }
-
-    @FocusState private var focusedField: Field?
-
-    /// Apple TV: Server, Share and Account groups with Caption 1 labels above
-    /// stock fields; the server's shares as pills once loaded; Save and Test
-    /// Connection as pills in their own focus section; the exact SMB reason
-    /// (authentication, access denied, unreachable) under them (owner W4).
-    private var tvOSBody: some View {
-        let metrics = AppleTVSettingsMetrics.standard
-        return ScrollView {
-            VStack(alignment: .leading, spacing: metrics.groupSpacing) {
-                VStack(alignment: .leading, spacing: metrics.groupSpacing) {
-                    AppleTVFormGroup("Server") {
-                        AppleTVFormField("Name") {
-                            nameField
-                                .focused($focusedField, equals: .name)
-                                .accessibilityIdentifier("sources.smb.name")
-                        }
-                        AppleTVFormField("Server URL") {
-                            addressField
-                                .focused($focusedField, equals: .address)
-                                .accessibilityIdentifier("sources.smb.address")
-                        }
-                        AppleTVFormField("Port") {
-                            portField
-                                .focused($focusedField, equals: .port)
-                                .accessibilityIdentifier("sources.smb.port")
-                        }
-                    }
-
-                    AppleTVFormGroup("Share") {
-                        if shares.isEmpty {
-                            Button("Load Shares") { loadShares() }
-                                .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
-                                .disabled(isWorking)
-                                .accessibilityIdentifier("sources.smb.loadShares")
-                        } else {
-                            AppleTVFormField("Share") {
-                                LazyVGrid(
-                                    columns: [GridItem(.adaptive(minimum: 280), spacing: metrics.iconSpacing, alignment: .leading)],
-                                    alignment: .leading,
-                                    spacing: metrics.iconSpacing
-                                ) {
-                                    ForEach(shares) { value in
-                                        AppleTVChoicePill(title: shareLabel(value), isSelected: share == value.name) {
-                                            share = value.name
-                                        }
-                                        .accessibilityIdentifier("sources.smb.share.\(value.name)")
-                                    }
-                                }
-                            }
-                        }
-                        AppleTVFormField("Folder") {
-                            folderField
-                                .focused($focusedField, equals: .folder)
-                                .accessibilityIdentifier("sources.smb.folder")
-                        }
-                    }
-
-                    AppleTVFormGroup("Account") {
-                        AppleTVFormField("Username") {
-                            usernameField
-                                .focused($focusedField, equals: .username)
-                                .accessibilityIdentifier("sources.smb.username")
-                        }
-                        AppleTVFormField("Password") {
-                            passwordField
-                                .accessibilityIdentifier("sources.smb.password")
-                        }
-                        AppleTVFormField("Domain") {
-                            domainField
-                                .focused($focusedField, equals: .domain)
-                                .accessibilityIdentifier("sources.smb.domain")
-                        }
-                    }
-                }
-                .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
-                .focusSection()
-
-                // Neither button disables while work is in flight. Disabling
-                // the button the viewer just pressed takes focus off it, and
-                // tvOS then has nowhere obvious to put focus — which is why
-                // testing a share looked like the screen had locked up (owner
-                // 2026-09-15). Re-entry is guarded in the action instead, so
-                // focus stays put and the pill shows its own progress.
-                HStack(spacing: metrics.pillSpacing) {
-                    Button {
-                        guard !isWorking else { return }
-                        connectionAction = .save(UUID())
-                    } label: {
-                        if isWorking, isSavingAction { ProgressView() } else { Text("Save") }
-                    }
-                    .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
-                    .accessibilityIdentifier("sources.smb.save")
-                    Button {
-                        guard !isWorking else { return }
-                        connectionAction = .test(UUID())
-                    } label: {
-                        if isWorking, !isSavingAction { ProgressView() } else { Text("Test Connection") }
-                    }
-                    .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
-                    .accessibilityIdentifier("sources.smb.test")
-                }
-                .focusSection()
-
-                if let message {
-                    AppleTVFormMessage(text: message, isError: isError)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, AppleTVChromeMetrics.verticalSafeInset)
-        }
-        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        .defaultFocus($focusedField, .name)
-        .appleSettingsPageTitle("Add Network Share")
-        .task(id: connectionAction) {
-            guard let connectionAction else { return }
-            await perform(connectionAction)
-        }
-        .onChange(of: host) { _, value in
-            address = Self.addressLabel(host: value, port: selectedPort ?? 445)
-        }
-        .onChange(of: port) { _, value in
-            address = Self.addressLabel(host: host, port: Int(value) ?? 445)
-        }
-    }
-    #else
-    private var standardBody: some View {
-        Form {
-            serverSection
-            shareSection
-            accountSection
-            Section {
-                Button("Test Connection") {
-                    connectionAction = .test(UUID())
-                }
-                .buttonStyle(SecondaryPillButtonStyle())
-                .disabled(isWorking)
-            }
-            if let message {
-                Section {
-                    Label(message, systemImage: isError ? "exclamationmark.circle" : "checkmark.circle")
-                        .foregroundStyle(isError ? .red : .primary)
-                }
-            }
-        }
-        .appleSettingsPage("Add Network Share")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { connectionAction = .save(UUID()) }
-                    .disabled(isWorking)
-                    #if os(visionOS)
-                    .buttonStyle(.brandPrimary)
-                    #endif
-                    .accessibilityIdentifier("sources.smb.save")
-            }
-        }
-        .task(id: connectionAction) {
-            guard let connectionAction else { return }
-            await perform(connectionAction)
-        }
-        .onChange(of: host) { _, value in
-            address = Self.addressLabel(host: value, port: selectedPort ?? 445)
-        }
-        .onChange(of: port) { _, value in
-            address = Self.addressLabel(host: host, port: Int(value) ?? 445)
-        }
-    }
-
-    @ViewBuilder
-    private var serverSection: some View {
-        Section("Server") {
-            nameField.appleFormSubmit(.name, chain: Self.chain, focus: $shareFocus)
-            addressField.appleFormSubmit(.address, chain: Self.chain, focus: $shareFocus)
-            DisclosureGroup("Advanced", isExpanded: $showingAdvanced) {
-                portField
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var shareSection: some View {
-        Section("Share") {
-            if shares.isEmpty {
-                Button("Load Shares") { loadShares() }
-                    .disabled(!hasServer || isWorking)
-                    .appleTVReadableFocus()
-            } else {
-                Picker("Share", selection: $share) {
-                    Text("Share").tag("")
-                    ForEach(shares) { value in
-                        Text(shareLabel(value)).tag(value.name)
-                    }
-                }
-            }
-            folderField.appleFormSubmit(.folder, chain: Self.chain, focus: $shareFocus)
-        }
-    }
-
-    @ViewBuilder
-    private var accountSection: some View {
-        Section("Account") {
-            usernameField.appleFormSubmit(.username, chain: Self.chain, focus: $shareFocus)
-            passwordField
-            DisclosureGroup("Advanced") {
-                domainField
-            }
-        }
-    }
-    #endif
-
-    private func shareLabel(_ value: AppleSMBShare) -> String {
-        value.comment.isEmpty ? value.name : "\(value.name) · \(value.comment)"
-    }
-
-    private var selectedPort: Int? { Int(port) }
-    private var addressBinding: Binding<String> {
-        Binding(
-            get: { address },
-            set: { value in
-                address = value
-                if let parsed = Self.parseAddress(value) {
-                    host = parsed.host
-                    port = String(parsed.port)
-                } else {
-                    host = value
-                }
-            }
-        )
-    }
-
-    private var hasServer: Bool {
-        serverInput != nil
-    }
-    private var endpointInput: AppleSMBEndpointInput? {
-        let parsed = Self.parseAddress(address)
-        return try? AppleSMBEndpointPolicy.parseInput(
-            host: parsed?.host ?? host,
-            port: parsed?.port ?? selectedPort ?? 0,
-            share: share,
-            path: path
-        )
-    }
-    private var serverInput: AppleSMBEndpointInput? {
-        let parsed = Self.parseAddress(address)
-        return try? AppleSMBEndpointPolicy.parseInput(
-            host: parsed?.host ?? host,
-            port: parsed?.port ?? selectedPort ?? 0,
-            share: "",
-            path: "",
-            requiresShare: false
-        )
-    }
-    private var credentials: AppleSMBCredentials {
-        AppleSMBCredentials(username: username, password: password, domain: domain)
-    }
-
-    private func loadShares() {
-        guard serverInput != nil else {
-            isError = true
-            message = "Enter a valid server address and port."
-            return
-        }
-        let parsed = Self.parseAddress(address)
-        guard let listingInput = try? AppleSMBEndpointPolicy.parseInput(
-            host: parsed?.host ?? host,
-            port: parsed?.port ?? selectedPort ?? 0,
-            share: "IPC$",
-            path: ""
-        ) else { return }
-        let submittedCredentials = credentials
-        isWorking = true
-        message = nil
-        Task { @MainActor in
-            defer { isWorking = false }
-            do {
-                let resolved = try await resolvedEndpoint(listingInput)
-                shares = try await client.listShares(
-                    host: resolved.host,
-                    port: resolved.port,
-                    credentials: submittedCredentials
-                )
-                isError = false
-                message = shares.isEmpty ? "The server returned no visible shares." : nil
-            } catch {
-                isError = true
-                message = error.localizedDescription
-            }
-        }
-    }
-
-    private func perform(_ action: AppleInstanceConnectionAction) async {
-        guard let endpointInput else {
-            isError = true
-            message = "Enter a valid server address, port, and share."
-            return
-        }
-        guard !share.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            isError = true
-            message = "Choose a share before saving."
-            return
-        }
-        let submittedName = name
-        let submittedUsername = username
-        let submittedPassword = password
-        let submittedDomain = domain
-        let submittedDisplayHost = selectedDisplayHost ?? endpointInput.host
-        let submittedCredentials = credentials
-        isWorking = true
-        message = nil
-        defer { isWorking = false }
-        do {
-            let resolved = try await resolvedEndpoint(endpointInput)
-            let url = try AppleSMBEndpointPolicy.makeURL(
-                host: resolved.host,
-                port: resolved.port,
-                share: resolved.share,
-                path: resolved.path
-            )
-            let items = try await client.listDirectory(
-                url: url,
-                credentials: submittedCredentials,
-                recursive: true
-            )
-            try Task.checkCancellation()
-            let summary = "Connected · \(items.count) item\(items.count == 1 ? "" : "s")"
-            if action.shouldSave {
-                try sourceStore.addNetworkShare(
-                    name: submittedName,
-                    host: resolved.host,
-                    port: resolved.port,
-                    share: resolved.share,
-                    path: resolved.path,
-                    username: submittedUsername,
-                    password: submittedPassword,
-                    domain: submittedDomain,
-                    displayHost: submittedDisplayHost,
-                    lastValidatedAt: .now,
-                    validationSummary: summary,
-                    discoveredItemCount: items.count,
-                    capabilities: ["Browse", "Playback", "Seeking"]
-                )
-                dismiss()
-                return
-            }
-            isError = false
-            message = summary
-        } catch is CancellationError {
-            return
-        } catch {
-            isError = true
-            message = error.localizedDescription
-        }
-    }
-
-    private func resolvedEndpoint(_ input: AppleSMBEndpointInput) async throws -> AppleSMBEndpointInput {
-        guard let service = AppleSMBEndpointPolicy.bonjourService(from: input.host) else { return input }
-        guard let server = await discovery.resolve(service: service) else {
-            throw AppleSMBError.connectionFailed
-        }
-        return AppleSMBEndpointInput(
-            host: server.host,
-            port: server.port,
-            share: input.share,
-            path: input.path
-        )
-    }
-
-    private static func addressLabel(host: String, port: Int) -> String {
-        let value = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-        return "\(value):\(port)"
-    }
-
-    private static func parseAddress(_ value: String) -> (host: String, port: Int)? {
-        var clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if clean.lowercased().hasPrefix("smb://"), let url = URL(string: clean) {
-            guard let host = url.host, !host.isEmpty else { return nil }
-            return (host, url.port ?? 445)
-        }
-        clean = clean.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if clean.hasPrefix("["), let close = clean.firstIndex(of: "]") {
-            let host = String(clean[clean.index(after: clean.startIndex)..<close])
-            let suffix = String(clean[clean.index(after: close)...])
-            let port = suffix.hasPrefix(":") ? Int(suffix.dropFirst()) : 445
-            guard !host.isEmpty, let port, (1 ... 65_535).contains(port) else { return nil }
-            return (host, port)
-        }
-        if let separator = clean.lastIndex(of: ":"),
-           clean[clean.index(after: separator)...].allSatisfy(\.isNumber),
-           let port = Int(clean[clean.index(after: separator)...]) {
-            let host = String(clean[..<separator])
-            guard !host.isEmpty, (1 ... 65_535).contains(port) else { return nil }
-            return (host, port)
-        }
-        guard !clean.isEmpty, !clean.contains(":") else { return nil }
-        return (clean, 445)
     }
 }
 

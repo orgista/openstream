@@ -426,6 +426,7 @@ public struct OpenStreamRootView: View {
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }
         }
         .environment(\.appleOpenSourcesSettings) { openSourcesSettings() }
+        .environment(\.appleSettingsNavigator, settingsNavigator)
         .preferredColorScheme(.dark)
         #if !os(tvOS)
         // On Apple TV the global white tint made every tinted control a trap
@@ -528,6 +529,22 @@ public struct OpenStreamRootView: View {
             active.insert(id)
         }
         try? await mediaIndex.retainAvailability(for: active)
+    }
+
+    private var settingsNavigator: AppleSettingsNavigator {
+        AppleSettingsNavigator(
+            depth: { navigationPaths[.settings]?.count ?? 0 },
+            push: { route in
+                var path = navigationPaths[.settings] ?? NavigationPath()
+                path.append(route)
+                navigationPaths[.settings] = path
+            },
+            pop: { depth in
+                guard var path = navigationPaths[.settings], path.count > depth else { return }
+                path.removeLast(path.count - max(depth, 0))
+                navigationPaths[.settings] = path
+            }
+        )
     }
 
     /// Settings › Sources, in place of whatever the Settings tab had open.

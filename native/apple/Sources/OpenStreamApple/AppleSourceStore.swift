@@ -1312,6 +1312,49 @@ public final class AppleSourceStore {
         return source
     }
 
+    /// Points an existing network share at a new server, folder or account,
+    /// keeping its identity (and so its library and watch history).
+    @discardableResult
+    func updateNetworkShare(
+        id: AppleSource.ID,
+        name: String,
+        host: String,
+        port: Int,
+        share: String,
+        path: String,
+        credentials: AppleSMBCredentials,
+        displayHost: String?,
+        validationSummary: String?
+    ) throws -> AppleSource {
+        guard let index = sources.firstIndex(where: { $0.id == id && $0.kind == .nas }) else {
+            throw AppleSMBError.invalidShare
+        }
+        let url = try AppleSMBEndpointPolicy.makeURL(host: host, port: port, share: share, path: path)
+        let cleanName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        let cleanDisplayHost = (displayHost ?? host)
+            .components(separatedBy: .controlCharacters)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let reference = sources[index].credentialReference ?? sources[index].id.uuidString.lowercased()
+        try updateNetworkCredentials(AppleSMBCredentials(
+            username: String(credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).prefix(512)),
+            password: String(credentials.password.prefix(512)),
+            domain: String(credentials.domain.trimmingCharacters(in: .whitespacesAndNewlines).prefix(256))
+        ), reference: reference)
+        sources[index].name = cleanName.isEmpty ? share : cleanName
+        sources[index].url = url
+        sources[index].isEnabled = true
+        sources[index].credentialReference = reference
+        sources[index].networkDisplayHost = cleanDisplayHost.isEmpty ? nil : String(cleanDisplayHost.prefix(256))
+        sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
+        sources[index].lastValidatedAt = .now
+        sources[index].validationSummary = validationSummary.flatMap(boundedStatus)
+        persist()
+        // Open playback sessions still carry the old address or account.
+        Task { await AppleSMBRangeServer.shared.removeAllSessions() }
+        return sources[index]
+    }
+
     public func recordValidationSuccess(
         id: AppleSource.ID,
         summary: String,
