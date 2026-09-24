@@ -24,3 +24,28 @@ struct AppleTVDetailOpeningFocusTests {
         #expect(AppleTVDetailOpeningFocus.correction(for: .play, hasHadAnyFocus: true) == nil)
     }
 }
+
+/// N22c: a title page with nothing to play has no Play, so the opening
+/// focus goes to My List.
+@Suite("Apple TV title page opening focus without Play")
+struct AppleTVDetailOpeningFocusWithoutPlayTests {
+    @Test func theTargetIsMyListWithoutPlay() {
+        #expect(AppleTVDetailOpeningFocus.target(showsPlay: true) == .play)
+        #expect(AppleTVDetailOpeningFocus.target(showsPlay: false) == .myList)
+    }
+
+    @Test func myListSettlesTheOpening() {
+        #expect(AppleTVDetailOpeningFocus.settles(on: .myList, target: .myList))
+        #expect(!AppleTVDetailOpeningFocus.settles(on: .rate, target: .myList))
+    }
+
+    @Test(arguments: [AppleTVDetailFocus.play, .rate, .rateChoice(0)])
+    func otherTitleRowFocusGoesToMyList(_ focus: AppleTVDetailFocus) {
+        #expect(AppleTVDetailOpeningFocus.correction(for: focus, hasHadAnyFocus: true, target: .myList) == .myList)
+    }
+
+    @Test func nothingFocusedAsksForMyList() {
+        #expect(AppleTVDetailOpeningFocus.correction(for: nil, hasHadAnyFocus: false, target: .myList) == .myList)
+        #expect(AppleTVDetailOpeningFocus.correction(for: .myList, hasHadAnyFocus: true, target: .myList) == nil)
+    }
+}

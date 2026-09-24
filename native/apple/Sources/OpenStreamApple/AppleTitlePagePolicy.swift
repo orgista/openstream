@@ -107,6 +107,44 @@ public enum AppleTitlePagePolicy {
         hasPlaybackRoute && !isPreparing && (type != "series" || hasSelectedEpisode)
     }
 
+    /// The title page's one button, or nil when the page has none: nothing
+    /// can play and there is no trailer, so the row keeps only My List and
+    /// Rate rather than a Play that is greyed out at rest (owner, N22c —
+    /// JEOPARDY! with only a metadata add-on). The Apple TV has no trailers,
+    /// so there nothing to play is always no button.
+    public static func titlePagePrimaryAction(
+        type: String,
+        progress: ApplePlaybackProgress?,
+        selectedEpisode: AppleStremioEpisode?,
+        isPlayable: Bool,
+        hasTrailer: Bool,
+        namesEpisode: Bool = false,
+        platform: AppleUIPlatform = .current
+    ) -> PrimaryAction? {
+        guard isPlayable || (hasTrailer && offersTrailers(on: platform)) else { return nil }
+        return primaryAction(type: type, progress: progress, selectedEpisode: selectedEpisode,
+                             isPlayable: isPlayable, hasTrailer: hasTrailer,
+                             namesEpisode: namesEpisode, platform: platform)
+    }
+
+    /// Whether the title page offers Download Season / Download at all: only
+    /// when one can start, which is the same route Play needs — a source
+    /// that serves streams (a metadata-only add-on cannot) or a media-server
+    /// title — or when the title is already downloaded, so its state stays
+    /// visible. Otherwise the button is not drawn (N22c).
+    public static func offersDownload(item: AppleCatalogItem, sources: [AppleSource],
+                                      hasCompletedDownload: Bool = false,
+                                      episodesUnavailable: Bool = false) -> Bool {
+        hasPlaybackRoute(item: item, sources: sources, hasCompletedDownload: hasCompletedDownload,
+                         episodesUnavailable: episodesUnavailable)
+    }
+
+    /// An episode row's download control: where a download can start, or on
+    /// an episode that is already downloaded (its checkmark stays).
+    public static func showsEpisodeDownload(offersDownload: Bool, isDownloaded: Bool) -> Bool {
+        offersDownload || isDownloaded
+    }
+
     /// The hero has no episode picker: resume the saved episode, otherwise
     /// use the title page's default. Media servers own their episode list and
     /// resume routing; retain their opaque saved part id for the same label.

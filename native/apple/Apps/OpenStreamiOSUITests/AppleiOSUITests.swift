@@ -979,19 +979,48 @@ final class AppleiOSUITests: XCTestCase {
         attach("hero-label-\(heroLabel)")
         XCTAssertTrue(heroName.localizedCaseInsensitiveContains(title), "The pinned title was not on the hero: \(heroName)")
         details.tap()
-        let pageButton = app.buttons["detail.play"].firstMatch
-        XCTAssertTrue(pageButton.waitForExistence(timeout: 30), "The title page has no primary button")
+        XCTAssertTrue(app.descendants(matching: .any)["detail.icon-row"].firstMatch.waitForExistence(timeout: 30), "The title page never opened")
         // Its episode list and canonical id settle the button.
         Thread.sleep(forTimeInterval: 8)
-        let pageLabel = pageButton.label
-        // A title page may draw a greyed-out Play; only an enabled one plays.
-        let pagePlays = pageButton.isEnabled && Self.labelPlays(pageLabel)
+        // With nothing to play the page has no primary button (N22c).
+        let pageButton = app.buttons["detail.play"].firstMatch
+        let pageLabel = pageButton.exists ? pageButton.label : "none"
+        let pagePlays = pageButton.exists && pageButton.isEnabled && Self.labelPlays(pageLabel)
         let pageTitle = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] %@", title)).firstMatch.exists
-        attach("title-page-label-\(pageLabel)-enabled-\(pageButton.isEnabled)")
-        print("[N17e] hero=\(heroName) heroLabel=\(heroLabel) heroPlays=\(heroPlays) pageLabel=\(pageLabel) pageEnabled=\(pageButton.isEnabled) pageIsTitle=\(pageTitle)")
+        attach("title-page-label-\(pageLabel)")
+        print("[N17e] hero=\(heroName) heroLabel=\(heroLabel) heroPlays=\(heroPlays) pageLabel=\(pageLabel) pageIsTitle=\(pageTitle)")
         XCTAssertTrue(pageTitle, "The title page that opened is not \(title)")
-        XCTAssertEqual(heroPlays, pagePlays, "The hero said \(heroLabel) while its title page said \(pageLabel) (enabled: \(pageButton.isEnabled))")
+        XCTAssertEqual(heroPlays, pagePlays, "The hero said \(heroLabel) while its title page said \(pageLabel)")
+    }
+
+    /// N22c: a title page draws no dead buttons — no greyed-out Play and no
+    /// Download that cannot start. Opens the hero's title (pinned with
+    /// `OPENSTREAM_TEST_HERO_TITLE` when set) and photographs its button row.
+    /// Navigation only — nothing is pressed on the title page.
+    func testTitlePageHasNoDeadButtons() throws {
+        if let title = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_HERO_TITLE"], !title.isEmpty {
+            app.launchArguments += ["-OpenStreamHeroTitle", title]
+        }
+        launch(screen: "discover")
+        let details = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 60), "Discover never loaded its billboard")
+        Thread.sleep(forTimeInterval: 4)
+        let heroName = details.label
+        details.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["detail.icon-row"].firstMatch.waitForExistence(timeout: 30), "The title page never opened")
+        // The episode list, canonical id and trailer lookup settle the row.
+        Thread.sleep(forTimeInterval: 10)
+        let play = app.buttons["detail.play"].firstMatch
+        let downloads = ["detail.download", "detail.download.season", "detail.episode.download"]
+            .map { app.buttons[$0].firstMatch }
+        let found = downloads.filter(\.exists).map(\.identifier)
+        print("[N22c] title=\(heroName) play=\(play.exists ? play.label : "none") playEnabled=\(play.exists && play.isEnabled) downloads=\(found)")
+        attach("title-page-\(play.exists ? play.label : "no-play")-downloads-\(found.count)")
+        if play.exists { XCTAssertTrue(play.isEnabled, "\(heroName): Play is drawn but dead") }
+        if !play.exists || play.label == "Play Trailer" {
+            XCTAssertTrue(found.isEmpty, "\(heroName): nothing plays, yet \(found) are drawn")
+        }
     }
 
     private static func labelPlays(_ label: String) -> Bool {

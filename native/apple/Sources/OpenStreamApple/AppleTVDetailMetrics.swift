@@ -41,28 +41,36 @@ enum AppleTVDetailFocus: Hashable, Sendable {
 /// `defaultFocus` alone was not enough (UI tests, 2026-09-23): a focus request
 /// made while the push is still animating is dropped, so the page could open
 /// with nothing focused, and on another run focus carried over from the page
-/// underneath and landed on Rate — from where Down reaches nothing. Until Play
-/// has held focus once, the page keeps asking for it and sends any other
-/// title-row focus back to it. After that the remote is the user's.
+/// underneath and landed on Rate — from where Down reaches nothing. Until the
+/// opening target has held focus once, the page keeps asking for it and sends
+/// any other title-row focus back to it. After that the remote is the user's.
+/// The target is Play, or My List on a page with nothing to play, which has
+/// no Play button (N22c).
 enum AppleTVDetailOpeningFocus {
     /// How long the page keeps asking before it gives up and leaves focus to
     /// the engine, and how often it asks.
     static let attempts = 30
     static let interval: Duration = .milliseconds(100)
 
-    /// Whether `focus` means Play has taken focus, so the opening is over.
-    static func settles(on focus: AppleTVDetailFocus?) -> Bool {
-        focus == .play
+    /// The first control on the title row: Play, or My List without it.
+    static func target(showsPlay: Bool) -> AppleTVDetailFocus {
+        showsPlay ? .play : .myList
     }
 
-    /// The focus to request while the opening is not over yet: Play, unless
-    /// focus has already moved below the title row (`nil` there means an
-    /// episode or a shelf holds it), which only a user can do.
-    static func correction(for focus: AppleTVDetailFocus?, hasHadAnyFocus: Bool) -> AppleTVDetailFocus? {
+    /// Whether `focus` means the target has taken focus, so the opening is over.
+    static func settles(on focus: AppleTVDetailFocus?, target: AppleTVDetailFocus = .play) -> Bool {
+        focus == target
+    }
+
+    /// The focus to request while the opening is not over yet: the target,
+    /// unless focus has already moved below the title row (`nil` there means
+    /// an episode or a shelf holds it), which only a user can do.
+    static func correction(for focus: AppleTVDetailFocus?, hasHadAnyFocus: Bool,
+                           target: AppleTVDetailFocus = .play) -> AppleTVDetailFocus? {
         switch focus {
-        case .play: nil
-        case .myList, .rate, .rateChoice: .play
-        case nil: hasHadAnyFocus ? nil : .play
+        case let focus? where focus == target: nil
+        case .play, .myList, .rate, .rateChoice: target
+        case nil: hasHadAnyFocus ? nil : target
         }
     }
 }

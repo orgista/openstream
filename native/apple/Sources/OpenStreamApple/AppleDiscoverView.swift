@@ -2813,7 +2813,9 @@ struct AppleCatalogItemDetailView: View {
 
             titleMetadata
                 .frame(width: actionColumnWidth, alignment: .leading)
-            primaryActionButtons
+            if hasPrimaryActionRow {
+                primaryActionButtons
+            }
             seasonDownloadStatus
             secondaryActionRow
         }
@@ -2863,15 +2865,21 @@ struct AppleCatalogItemDetailView: View {
         }
         .scrollClipDisabled()
         .ignoresSafeArea()
-        .defaultFocus($tvDetailFocus, .play, priority: .userInitiated)
+        .defaultFocus($tvDetailFocus, tvOpeningFocusTarget, priority: .userInitiated)
         .task { await settleTVOpeningFocus() }
         .onChange(of: tvDetailFocus) { _, focus in
             guard !tvDetailOpeningSettled else { return }
-            if AppleTVDetailOpeningFocus.settles(on: focus) {
+            if AppleTVDetailOpeningFocus.settles(on: focus, target: tvOpeningFocusTarget) {
                 tvDetailOpeningSettled = true
-            } else if let correction = AppleTVDetailOpeningFocus.correction(for: focus, hasHadAnyFocus: true) {
+            } else if let correction = AppleTVDetailOpeningFocus.correction(
+                for: focus, hasHadAnyFocus: true, target: tvOpeningFocusTarget
+            ) {
                 tvDetailFocus = correction
             }
+        }
+        .onChange(of: tvOSShowsPlay) { _, showsPlay in
+            // Play went away under focus (the episode list came back empty).
+            if !showsPlay, tvDetailFocus == .play { tvDetailFocus = .myList }
         }
         .onChange(of: rateChoicesExpanded) { _, expanded in
             if !expanded { tvDetailFocus = .rate }
@@ -2883,12 +2891,14 @@ struct AppleCatalogItemDetailView: View {
     private func settleTVOpeningFocus() async {
         for _ in 0 ..< AppleTVDetailOpeningFocus.attempts {
             guard !tvDetailOpeningSettled, !Task.isCancelled else { return }
-            if let correction = AppleTVDetailOpeningFocus.correction(for: tvDetailFocus, hasHadAnyFocus: false) {
+            if let correction = AppleTVDetailOpeningFocus.correction(
+                for: tvDetailFocus, hasHadAnyFocus: false, target: tvOpeningFocusTarget
+            ) {
                 tvDetailFocus = correction
             }
             try? await Task.sleep(for: AppleTVDetailOpeningFocus.interval)
         }
-        appleTrace("detail focus: Play never took focus on open (focus=\(String(describing: tvDetailFocus)))")
+        appleTrace("detail focus: the title row never took focus on open (focus=\(String(describing: tvDetailFocus)))")
     }
 
     private var tvOSHero: some View {
@@ -2920,7 +2930,9 @@ struct AppleCatalogItemDetailView: View {
             titleMetadata
                 .frame(width: AppleTVDetailMetrics.overlayColumnWidth, alignment: .leading)
             HStack(alignment: .appleTVControlCenter, spacing: AppleTVDetailMetrics.pillToIconSpacing) {
-                tvOSPlayButton
+                if tvOSShowsPlay {
+                    tvOSPlayButton
+                }
                 tvOSIconRow
             }
         }
@@ -2969,6 +2981,16 @@ struct AppleCatalogItemDetailView: View {
             .frame(maxWidth: AppleTVDetailMetrics.overlayColumnWidth, alignment: .leading)
             .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
             .accessibilityAddTraits(.isHeader)
+    }
+
+    /// No Play at all when nothing here can play (no trailers on the Apple
+    /// TV), rather than one that is dead at rest (N22c).
+    private var tvOSShowsPlay: Bool {
+        titlePagePrimaryAction != nil
+    }
+
+    private var tvOpeningFocusTarget: AppleTVDetailFocus {
+        AppleTVDetailOpeningFocus.target(showsPlay: tvOSShowsPlay)
     }
 
     private var tvOSPlayIsBusy: Bool {
@@ -3723,8 +3745,25 @@ struct AppleCatalogItemDetailView: View {
         selectedEpisodeSelection?.mediaID ?? resolvedMediaID ?? item.mediaID
     }
 
+    /// Play, Play Trailer, or nothing (`titlePagePrimaryAction`); the row
+    /// closes up around a missing one.
     @ViewBuilder
     private var primaryPlayButton: some View {
+        switch titlePagePrimaryAction {
+        case nil:
+            EmptyView()
+        case .playTrailer?:
+            AppleDetailActionButton(title: "Play Trailer", glyph: .systemImage("play.fill"),
+                                    kind: .play, width: actionButtonWidth) {
+                playTrailerInHero(at: trailerCandidateIndex)
+            }
+            .accessibilityIdentifier("detail.play")
+        default:
+            regularPlayButton
+        }
+    }
+
+    private var regularPlayButton: some View {
         AppleDetailActionButton(
             title: playbackCoordinator.phase.isBusy || isPreparingMetadata
                 ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading")
@@ -3752,10 +3791,12 @@ struct AppleCatalogItemDetailView: View {
     @ViewBuilder
     private var secondaryActionButtons: some View {
         VStack(alignment: .leading, spacing: 0) {
-            primaryActionButtons
+            if hasPrimaryActionRow {
+                primaryActionButtons
+            }
             seasonDownloadStatus
             secondaryActionRow
-                .padding(.top, AppleDetailMetrics.buttonsToIconRowSpacing)
+                .padding(.top, hasPrimaryActionRow ? AppleDetailMetrics.buttonsToIconRowSpacing : 0)
         }
         .controlSize(.large)
     }
@@ -3790,8 +3831,13 @@ struct AppleCatalogItemDetailView: View {
         actionColumnWidth
     }
 
+    /// Whether the Play / Download row has anything in it.
+    private var hasPrimaryActionRow: Bool {
+        titlePagePrimaryAction != nil || showsDownloadAction
+    }
+
     private var actionButtonWidth: CGFloat {
-        showsDownloadAction
+        showsDownloadAction && titlePagePrimaryAction != nil
             ? AppleDetailMetrics.actionButtonWidth(for: detailLayout, screenWidth: viewportSize.width)
             : actionColumnWidth
     }
@@ -4245,7 +4291,9 @@ struct AppleCatalogItemDetailView: View {
     @ViewBuilder
     private func episodeDownloadButton(_ episode: AppleStremioEpisode) -> some View {
         #if os(iOS) || os(macOS)
-        if localGroup == nil {
+        if localGroup == nil,
+           AppleTitlePagePolicy.showsEpisodeDownload(offersDownload: offersDownload,
+                                                     isDownloaded: downloadedEpisodeIDs.contains(episode.id)) {
             Button {
                 if seasonDownloads.isRunning {
                     seasonDownloadActionsPresented = true
@@ -4416,6 +4464,7 @@ struct AppleCatalogItemDetailView: View {
         guard AppleMediaServerItemReference.parse(item.mediaID) == nil else { return false }
         guard localGroup == nil else { return false }
         guard AppleLocalDownloadPlatformPolicy.isSupportedOnCurrentPlatform else { return false }
+        guard offersDownload else { return false }
         #if os(tvOS) || os(visionOS)
         return false
         #else
@@ -4435,6 +4484,16 @@ struct AppleCatalogItemDetailView: View {
             hasLiveAvailability: hasLiveAvailability
         )
         #endif
+    }
+
+    /// Whether a download could start here at all (a stream-capable source
+    /// or a media-server title), or one already finished.
+    private var offersDownload: Bool {
+        AppleTitlePagePolicy.offersDownload(
+            item: item, sources: playbackSources,
+            hasCompletedDownload: downloadCoordinator.state.isCompleted,
+            episodesUnavailable: episodeListPresentation == .unavailable
+        )
     }
 
     private var canStartDownload: Bool {
@@ -6652,8 +6711,8 @@ extension AppleCatalogItemDetailView {
         )
     }
 
-    private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction {
-        AppleTitlePagePolicy.primaryAction(
+    private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction? {
+        AppleTitlePagePolicy.titlePagePrimaryAction(
             type: item.type,
             progress: playbackStore.progress(for: recordID),
             selectedEpisode: selectedEpisode,
@@ -6668,7 +6727,9 @@ extension AppleCatalogItemDetailView {
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
         return layout {
-            phonePrimaryButton
+            if let state = titlePagePrimaryButtonState {
+                phonePrimaryButton(state)
+            }
             HStack(spacing: 12) {
                 Button(action: toggleFavorite) {
                     AppleTitlePageRoundButtonLabel(
@@ -6701,8 +6762,9 @@ extension AppleCatalogItemDetailView {
         let isEnabled: Bool
     }
 
-    fileprivate var titlePagePrimaryButtonState: TitlePagePrimaryButtonState {
-        let action = titlePagePrimaryAction
+    /// Nil when the page has no primary button (`titlePagePrimaryAction`).
+    fileprivate var titlePagePrimaryButtonState: TitlePagePrimaryButtonState? {
+        guard let action = titlePagePrimaryAction else { return nil }
         let isTrailer = action == .playTrailer
         let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || isPreparingMetadata)
         let title: String = if isBusy {
@@ -6716,15 +6778,14 @@ extension AppleCatalogItemDetailView {
 
     /// Play (or resume), or the trailer when nothing here can play.
     fileprivate func performTitlePagePrimaryAction() {
-        if titlePagePrimaryButtonState.isTrailer {
+        if titlePagePrimaryButtonState?.isTrailer == true {
             playTrailerInHero(at: trailerCandidateIndex)
         } else {
             playRequest = UUID()
         }
     }
 
-    private var phonePrimaryButton: some View {
-        let state = titlePagePrimaryButtonState
+    private func phonePrimaryButton(_ state: TitlePagePrimaryButtonState) -> some View {
         let isBusy = state.isBusy
         let title = state.title
         return Button(action: performTitlePagePrimaryAction) {
@@ -7330,33 +7391,34 @@ extension AppleCatalogItemDetailView {
     /// The one white button and the round ones, with the Mac hero's hover
     /// and pressed states and a tooltip on each round one.
     private var macActionRow: some View {
-        let state = titlePagePrimaryButtonState
-        return HStack(spacing: 12) {
-            Button(action: performTitlePagePrimaryAction) {
-                HStack(spacing: 8) {
-                    if state.isBusy {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(Color(white: 0.07))
-                    } else {
-                        Image(systemName: "play.fill")
-                            .accessibilityHidden(true)
+        HStack(spacing: 12) {
+            if let state = titlePagePrimaryButtonState {
+                Button(action: performTitlePagePrimaryAction) {
+                    HStack(spacing: 8) {
+                        if state.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color(white: 0.07))
+                        } else {
+                            Image(systemName: "play.fill")
+                                .accessibilityHidden(true)
+                        }
+                        Text(state.title)
+                            .lineLimit(1)
                     }
-                    Text(state.title)
-                        .lineLimit(1)
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .frame(minWidth: 180)
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .padding(.horizontal, 24)
-                .padding(.vertical, 10)
-                .frame(minWidth: 180)
-            }
-            .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
-            .disabled(!state.isEnabled)
-            .accessibilityLabel(state.isBusy ? "Preparing playback" : state.title)
-            .accessibilityIdentifier("detail.play")
-            .contextMenu {
-                Button("Other sources", systemImage: "list.bullet") {
-                    Task { await chooseStreams() }
+                .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
+                .disabled(!state.isEnabled)
+                .accessibilityLabel(state.isBusy ? "Preparing playback" : state.title)
+                .accessibilityIdentifier("detail.play")
+                .contextMenu {
+                    Button("Other sources", systemImage: "list.bullet") {
+                        Task { await chooseStreams() }
+                    }
                 }
             }
 
