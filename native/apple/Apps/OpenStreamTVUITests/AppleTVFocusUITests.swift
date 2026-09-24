@@ -24,8 +24,19 @@ final class AppleTVFocusUITests: XCTestCase {
     /// Launches on `screen` using the same DEBUG hook the headless captures
     /// use, with the interaction trace on so a failure leaves a timeline.
     private func launch(screen: String) {
-        app.launchArguments += ["-OpenStreamVisionScreen", screen,
-                                "-OpenStreamTrace", "YES"]
+        if screen == "live", let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"],
+           let url = URL(string: fixture), url.scheme == "http", url.host == "127.0.0.1" {
+            app.launchArguments += ["-OpenStreamDebugLiveFixture", fixture,
+                                    url.deletingLastPathComponent().appendingPathComponent("guide.xml").absoluteString,
+                                    "-OpenStreamTrace", "YES",
+                                    "-openstream.settings.trailer.autoplay.v1", "NO"]
+            if let date = ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_DATE"] {
+                app.launchArguments += ["-OpenStreamDebugGuideDate", date]
+            }
+        } else {
+            app.launchArguments += ["-OpenStreamVisionScreen", screen,
+                                    "-OpenStreamTrace", "YES"]
+        }
         app.launch()
     }
 
@@ -58,6 +69,90 @@ final class AppleTVFocusUITests: XCTestCase {
     }
 
     // MARK: - The guide
+
+    /// Repeatable guide-only navigation, with no selection or playback.
+    func testLocalGuideFocusLatency() async throws {
+        guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"],
+              URL(string: fixture)?.host == "127.0.0.1" else {
+            throw XCTSkip("Requires the local 300-channel guide fixture")
+        }
+        let guide = URL(string: fixture)!.deletingLastPathComponent().appendingPathComponent("guide.xml").absoluteString
+        app.launchArguments = ["-OpenStreamDebugLiveFixture", fixture, guide,
+                               "-OpenStreamTrace", "YES", "-OpenStreamTiming", "YES",
+                               "-openstream.settings.trailer.autoplay.v1", "NO"]
+        if let date = ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_DATE"] {
+            app.launchArguments += ["-OpenStreamDebugGuideDate", date]
+        }
+        app.launch()
+        XCTAssertTrue(element("live.tv.info").waitForExistence(timeout: 30))
+        try await Task.sleep(for: .seconds(3))
+        // Give the external Instruments recorder a stable attach point.
+        let ready = URL(string: fixture)!.deletingLastPathComponent().appendingPathComponent("ready")
+        _ = try await URLSession.shared.data(from: ready)
+        try await Task.sleep(for: .seconds(8))
+        if !focusedElement.identifier.hasPrefix("guide.play.") { remote.press(.down) }
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."))
+        let first = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        first.name = "guide-first-row"; first.lifetime = .keepAlways; add(first)
+        // 100 real Down transitions and 100 Right transitions. Left moves
+        // reset the horizontal route and are excluded from reported metrics.
+        for _ in 0..<100 {
+            remote.press(.down)
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."))
+        XCTAssertTrue(focusedElement.label.contains("101"), focusedElement.label)
+        let rows = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        rows.name = "d4c-row-101"; rows.lifetime = .keepAlways; add(rows)
+        let passes = max(1, Int(ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_PASSES"] ?? "10") ?? 10)
+        for pass in 0..<passes {
+            for _ in 0..<10 {
+                remote.press(.right)
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            XCTAssertTrue(focusedElement.exists)
+            let title = focusedElement.label.components(separatedBy: ", ").last ?? ""
+            XCTAssertTrue(title.hasPrefix("Programme 101-"), focusedElement.label)
+            XCTAssertTrue(element("live.tv.info").label.contains(title))
+            if pass == 0 {
+                let screenshot = XCUIScreen.main.screenshot()
+                // The old shared-offset feedback could leave the focused cell
+                // off screen. Enable this regression check for the fixed build;
+                // baseline timing captures deliberately retain the old behavior.
+                if ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_REQUIRE_VISIBLE"] == "1" {
+                    let frame = focusedElement.frame
+                    XCTAssertTrue(focusedElement.isHittable)
+                    XCTAssertGreaterThan(app.frame.intersection(frame).width, frame.width * 0.9)
+                    // Check the rendered info panel as well as its
+                    // accessibility value and the focused cell’s geometry.
+                    let image = try XCTUnwrap(screenshot.image.cgImage)
+                    let request = VNRecognizeTextRequest()
+                    request.recognitionLevel = .accurate
+                    request.usesLanguageCorrection = false
+                    request.regionOfInterest = CGRect(x: 0, y: 0.5, width: 1, height: 0.5)
+                    try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+                    let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+                    let rendered = text.filter { $0.isLetter || $0.isNumber }.lowercased()
+                    let expected = title.filter { $0.isLetter || $0.isNumber }.lowercased()
+                    XCTAssertTrue(rendered.contains(expected), "The focused programme title was not drawn in the info panel")
+                }
+                let columns = XCTAttachment(screenshot: screenshot)
+                columns.name = "d4c-column-10"; columns.lifetime = .keepAlways; add(columns)
+                let capture = URL(string: fixture)!.deletingLastPathComponent().appendingPathComponent("capture")
+                _ = try await URLSession.shared.data(from: capture)
+            }
+            for _ in 0..<10 {
+                remote.press(.left)
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            XCTAssertTrue(focusedElement.exists)
+        }
+        print("Guide completed 100 Down and \(passes * 10) Right transitions")
+        try await Task.sleep(for: .seconds(2))
+        let capture = URL(string: fixture)!.deletingLastPathComponent().appendingPathComponent("capture")
+        _ = try await URLSession.shared.data(from: capture)
+    }
+
 
     func testRawTSSwipeUpArmsBeforeCaptionArrival() async throws {
         guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_SUBTITLE_FIXTURE_URL"],

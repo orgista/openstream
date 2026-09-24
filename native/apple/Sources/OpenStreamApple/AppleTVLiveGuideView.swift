@@ -101,6 +101,7 @@ struct AppleTVLivePlayerPresentation: Identifiable {
 struct AppleTVLiveGuideScreen<Search: View>: View {
     let metrics: AppleTVGuideMetrics
     let channels: [AppleIPTVChannel]
+    let channelIndex: AppleIPTVChannelIndex
     let categories: [String]
     /// Channels the 300 cap kept off the guide; drawn as one line under the
     /// category row when non-zero. `var` with a default so the memberwise
@@ -147,6 +148,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     init(
         metrics: AppleTVGuideMetrics = .standard,
         channels: [AppleIPTVChannel],
+        channelIndex: AppleIPTVChannelIndex,
         categories: [String],
         hiddenCount: Int = 0,
         selectedCategory: Binding<String>,
@@ -170,6 +172,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     ) {
         self.metrics = metrics
         self.channels = channels
+        self.channelIndex = channelIndex
         self.categories = categories
         self.hiddenCount = hiddenCount
         _selectedCategory = selectedCategory
@@ -194,7 +197,11 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
+            #if DEBUG
+            let now = AppleTVGuideLatencyProbe.shared.fixtureDate ?? context.date
+            #else
             let now = context.date
+            #endif
             let window = metrics.window(now: now)
             VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                 nowPlayingStrip(now: now)
@@ -266,6 +273,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             rowsRevision &+= 1
             #if DEBUG
             if !projected.isEmpty { AppleLaunchClock.mark("live.rows") }
+            AppleTVGuideLatencyProbe.shared.rowsReady(count: projected.count)
             #endif
         }
         // The guide opens on the first channel, like the TV app's guide, and
@@ -283,6 +291,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         }
         .onChange(of: focus) { _, value in
             #if DEBUG
+            AppleTVGuideLatencyProbe.shared.focusChanged()
             AppleInteractionTrace.record(.focus, "guide \(value.map(String.init(describing:)) ?? "none")")
             #endif
         }
@@ -430,6 +439,10 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     /// The focused cell wins; a focused rail cell or anything else falls back
     /// to that channel's current programme, then to the playing channel.
     private func stripInfo(now: Date) -> AppleTVGuideStripInfo? {
+        #if DEBUG
+        let infoStart = CACurrentMediaTime()
+        defer { AppleTVGuideLatencyProbe.shared.infoResolved(since: infoStart) }
+        #endif
         if let focus {
             switch focus {
             case .cell(let cell):
@@ -466,8 +479,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     }
 
     private func channel(id: String) -> AppleIPTVChannel? {
-        if let row = rows.first(where: { $0.id == id }) { return row.channel }
-        return channels.first { $0.id == id }
+        channelIndex[id]
     }
 
     // MARK: Categories
@@ -944,6 +956,11 @@ private struct AppleTVGuideScheduleRow: View {
         _position = State(initialValue: ScrollPosition(point: CGPoint(x: timeline.untracked, y: 0)))
     }
 
+    private var ownsTimeline: Bool {
+        guard case .cell(let cell) = focus.wrappedValue else { return false }
+        return cell.channelID == channel.id
+    }
+
     var body: some View {
         let actions = AppleTVGuideRailCellModel(channelID: channel.id, name: channel.name, number: nil, isFavorite: isFavorite)
         ScrollView(.horizontal) {
@@ -974,9 +991,16 @@ private struct AppleTVGuideScheduleRow: View {
         .scrollPosition($position)
         .scrollIndicators(.hidden)
         .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.x) } action: { _, x in
+            // Only the focused row drives the shared position. Followers
+            // report intermediate offsets while catching up; feeding those
+            // back can undo the focus engine’s reveal and hide its target.
+            guard ownsTimeline else { return }
             if abs(x - timeline.untracked) > 0.5 { timeline.update(x) }
         }
-        .onChange(of: timeline.x) { _, x in position.scrollTo(x: x) }
+        .onChange(of: timeline.x) { _, x in
+            // Let the focus engine finish revealing its own target.
+            if !ownsTimeline { position.scrollTo(x: x) }
+        }
         .onAppear { position.scrollTo(x: timeline.untracked) }
         .frame(height: metrics.rowHeight)
         .focusSection()
@@ -1051,6 +1075,11 @@ struct AppleTVGuideCellStyle: ButtonStyle {
                 .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .opacity(configuration.isPressed ? 0.85 : 1)
                 .animation(.easeOut(duration: 0.12), value: isFocused)
+                #if DEBUG
+                .onChange(of: isFocused) { _, focused in
+                    if focused { AppleTVGuideLatencyProbe.shared.highlightChanged() }
+                }
+                #endif
         }
 
         private var fill: Color {
@@ -1079,6 +1108,11 @@ struct AppleTVGuideRailStyle: ButtonStyle {
                 .background(Color.white.opacity(isFocused ? 0.22 : 0), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .opacity(configuration.isPressed ? 0.85 : 1)
                 .animation(.easeOut(duration: 0.12), value: isFocused)
+                #if DEBUG
+                .onChange(of: isFocused) { _, focused in
+                    if focused { AppleTVGuideLatencyProbe.shared.highlightChanged() }
+                }
+                #endif
         }
     }
 }

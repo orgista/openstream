@@ -26,6 +26,9 @@ public struct AppleIPTVProgramme: Identifiable, Sendable, Equatable {
 
 public struct AppleIPTVGuide: Sendable {
     private let programmesByChannel: [String: [AppleIPTVProgramme]]
+    /// Prefix maxima let a lookup stop once no earlier programme can still
+    /// be on air. This preserves overlapping XMLTV entries and schedule gaps.
+    private let maximumEndsByChannel: [String: [Date]]
 
     public init(programmes: [AppleIPTVProgramme]) {
         var grouped = [String: [AppleIPTVProgramme]]()
@@ -36,26 +39,37 @@ public struct AppleIPTVGuide: Sendable {
             grouped[key] = value.sorted { $0.start < $1.start }
         }
         self.programmesByChannel = grouped
+        maximumEndsByChannel = grouped.mapValues { programmes in
+            var maximum = programmes.first?.end ?? .distantPast
+            return programmes.map { programme in
+                maximum = max(maximum, programme.end)
+                return maximum
+            }
+        }
     }
 
     public func nowAndNext(channelID: String, at time: Date = Date()) -> (now: AppleIPTVProgramme?, next: AppleIPTVProgramme?) {
-        guard let channelProgrammes = programmesByChannel[channelID] else { return (nil, nil) }
-        
-        var now: AppleIPTVProgramme? = nil
-        var next: AppleIPTVProgramme? = nil
-        
-        for p in channelProgrammes {
-            if p.start <= time && p.end > time {
-                now = p
-            } else if p.start > time {
-                if next == nil || p.start < next!.start {
-                    next = p
-                    break
-                }
-            }
+        guard let programmes = programmesByChannel[channelID],
+              let maximumEnds = maximumEndsByChannel[channelID] else { return (nil, nil) }
+
+        // First start strictly after time: no scan of every earlier programme
+        // when a focus move asks for the current show. The guide is immutable,
+        // so the index is rebuilt only when programme data changes.
+        var lower = 0
+        var upper = programmes.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if programmes[middle].start <= time { lower = middle + 1 }
+            else { upper = middle }
         }
-        
-        return (now, next)
+        let next = lower < programmes.count ? programmes[lower] : nil
+        var index = lower
+        while index > 0 {
+            index -= 1
+            guard maximumEnds[index] > time else { break }
+            if programmes[index].end > time { return (programmes[index], next) }
+        }
+        return (nil, next)
     }
 
     public func programmes(channelID: String, in interval: DateInterval) -> [AppleIPTVProgramme] {

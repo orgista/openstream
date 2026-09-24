@@ -19,7 +19,9 @@ struct OpenStreamPlatformApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG && os(tvOS)
-            if ProcessInfo.processInfo.arguments.contains("-OpenStreamInlineLiveFixture") {
+            if ProcessInfo.processInfo.arguments.contains("-OpenStreamDebugLiveFixture") {
+                AppleLiveGuideFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-OpenStreamInlineLiveFixture") {
                 AppleLiveInlineFixtureView()
             } else {
                 platformRoot

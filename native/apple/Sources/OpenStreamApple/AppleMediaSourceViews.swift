@@ -19,7 +19,8 @@ final class AppleReloadGate {
 
 @MainActor
 struct AppleLiveTVView: View {
-    @State private var channels: [AppleIPTVChannel] = []
+    @State private var channelIndex = AppleIPTVChannelIndex([])
+    private var channels: [AppleIPTVChannel] { channelIndex.channels }
     @State private var channelGroups: [AppleIPTVChannelGroup] = []
     @State private var channelSnapshot = AppleLiveChannelSnapshot(channels: [], channelIDs: [], categories: ["All", "Favorites"])
     @State private var channelsRevision = 0
@@ -355,7 +356,7 @@ struct AppleLiveTVView: View {
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         await AppleIPTVChannelCache.shared.retain(Set(sources.map(\.id)))
         guard !sources.isEmpty else {
-            channels = []
+            channelIndex = AppleIPTVChannelIndex([])
             channelGroups = []
             channelsRevision &+= 1
             errorMessage = nil
@@ -376,7 +377,7 @@ struct AppleLiveTVView: View {
                 }
             }
             if !cached.isEmpty, !Task.isCancelled {
-                channels = cached
+                channelIndex = AppleIPTVChannelIndex(cached)
                 channelsRevision &+= 1
                 #if DEBUG
                 AppleLaunchClock.mark("live.cached(\(cached.count))")
@@ -411,7 +412,7 @@ struct AppleLiveTVView: View {
                 errors.append("\(source.name): \(error.localizedDescription)")
             }
         }
-        channels = loaded
+        channelIndex = AppleIPTVChannelIndex(loaded)
         channelsRevision &+= 1
         #if DEBUG
         AppleLaunchClock.mark("live.channels(\(loaded.count))")
@@ -666,6 +667,7 @@ struct AppleLiveTVView: View {
     private var tvGuide: some View {
         AppleTVLiveGuideScreen(
             channels: channelSnapshot.channels,
+            channelIndex: channelIndex,
             categories: channelSnapshot.categories,
             hiddenCount: channelSnapshot.hiddenCount,
             selectedCategory: $selectedCategory,
@@ -771,7 +773,7 @@ struct AppleLiveTVView: View {
 
     private var lastWatchedChannel: AppleIPTVChannel? {
         guard !lastWatchedChannelID.isEmpty else { return nil }
-        return channels.first { $0.id == lastWatchedChannelID }
+        return channelIndex[lastWatchedChannelID]
     }
 
     private func toggleFavorite(_ id: String) {
