@@ -969,10 +969,17 @@ private struct ApplePlaybackSettingsView: View {
 
             Section("Playback") {
                 Toggle("Auto Play Next Episode", isOn: $settings.autoPlayNextEpisode)
+                #if os(tvOS)
+                // Apple TV has no trailers (47aebf1); the same stored switch now
+                // only starts the Live guide's channel previews, which are always
+                // silent, so there is nothing for Auto-Mute to do here.
+                Toggle("Auto Play Live Previews", isOn: $settings.autoPlayTrailer)
+                #else
                 Toggle("Auto Play Trailer", isOn: $settings.autoPlayTrailer)
                 if settings.autoPlayTrailer {
                     Toggle("Auto-Mute", isOn: $settings.autoMuteTrailer)
                 }
+                #endif
                 Toggle("Delete After Watching", isOn: $settings.deleteAfterWatching)
                 NavigationLink(value: AppleSettingsRoute.playbackInfo) {
                     AppleTVNavigationLabel("Playback Info")

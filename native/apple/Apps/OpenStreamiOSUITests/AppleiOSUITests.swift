@@ -2485,7 +2485,25 @@ final class AppleiOSUITests: XCTestCase {
     }
 
     func testCrawlDetailAndEpisodes() {
-        runCrawlGroup("detail", [CrawlScreen(route: "detail"), CrawlScreen(route: "episodes")])
+        let screens = [CrawlScreen(route: "detail"), CrawlScreen(route: "episodes")]
+        // A full title-page walk exceeds one simulator call; filter by route for
+        // bounded proof runs, while the default still crawls both pages.
+        let route = ProcessInfo.processInfo.environment["OPENSTREAM_CRAWL_ROUTE"]
+        runCrawlGroup("detail", route.map { selected in screens.filter { $0.route == selected } } ?? screens)
+    }
+
+    /// N22: Back was drawn on the hero art, so once the page scrolled it sat
+    /// under the status bar and refused a touch. It is pinned now.
+    func testDetailBackAfterScrolling() {
+        launch(screen: "detail")
+        let back = app.buttons["detail.back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 40))
+        crawlScrollDown()
+        crawlScrollDown()
+        XCTAssertTrue(back.isHittable, "Back must remain reachable after scrolling the title page")
+        back.tap()
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: back)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "Back must dismiss the title page")
     }
 
     /// Both players, both ways up. The transport is the one surface whose

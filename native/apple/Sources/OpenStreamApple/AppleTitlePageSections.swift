@@ -163,8 +163,13 @@ struct AppleMoreText: View {
                     clampedText(clamp)
                 }
                 .buttonStyle(.plain)
+                // VoiceOver reads the whole paragraph, not the clamped one.
+                .accessibilityLabel(text)
                 .accessibilityHint("Shows the full text")
             } else {
+                // Plain text when it all fits: a short fact such as "1999" is
+                // not a control, and an always-on action made it read and crawl
+                // as a silent button (N22).
                 clampedText(clamp)
             }
         }
@@ -172,13 +177,6 @@ struct AppleMoreText: View {
             proxy.size.width
         } action: { newWidth in
             width = newWidth
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text)
-        .accessibilityAddTraits(clamp.isTruncated ? .isButton : [])
-        .accessibilityAction {
-            // The combined element drops the button's own action.
-            if clamp.isTruncated { isExpanded = true }
         }
     }
 

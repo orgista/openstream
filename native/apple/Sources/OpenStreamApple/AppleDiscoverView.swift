@@ -77,6 +77,7 @@ struct AppleDiscoverView: View {
     #if DEBUG
     @State private var visionReviewDetail = false
     @State private var visionReviewAutoPlay = false
+    @State private var visionReviewDetailOpened = false
     /// Moved by `OpenStreamDiscoverScrollY`, so a headless sweep can capture
     /// the page scrolled (the collapsed navigation bar over the hero).
     @State private var reviewScrollPosition = ScrollPosition(edge: .top)
@@ -364,7 +365,10 @@ struct AppleDiscoverView: View {
             }
             // "play" opens the same title page and starts its first stream, so
             // the player can be captured headlessly on the TV simulator.
-            if (screen == "detail" || screen == "detail-movie" || screen == "episodes" || screen == "play"), visionReviewItem != nil {
+            // Once only: this task runs again when Discover reappears, and
+            // re-pushing the page there made its Back button look dead (N24).
+            if (screen == "detail" || screen == "detail-movie" || screen == "episodes" || screen == "play"),
+               visionReviewItem != nil, !visionReviewDetailOpened {
                 // `OpenStreamDetailDelaySeconds` waits on the home screen
                 // before pushing the content page, so the metadata prefetch
                 // has the head start a real viewer gives it. Without it this
@@ -375,6 +379,7 @@ struct AppleDiscoverView: View {
                     guard !Task.isCancelled else { return }
                 }
                 visionReviewAutoPlay = screen == "play"
+                visionReviewDetailOpened = true
                 visionReviewDetail = true
             }
         }
@@ -2106,6 +2111,13 @@ struct AppleCatalogItemDetailView: View {
         }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
         .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
+        #if os(iOS)
+        // Pinned over the page, not drawn on the hero: on the art it scrolled
+        // up under the status bar and could no longer be tapped (N22). Outside
+        // the screen identifier, which would otherwise replace `detail.back`.
+        // The overlay sits inside the safe area, so no inset arithmetic.
+        .overlay(alignment: .topLeading) { detailBackButton }
+        #endif
     }
 
     private func applyDetailViewport(_ viewport: AppleDetailViewport) {
@@ -2567,8 +2579,10 @@ struct AppleCatalogItemDetailView: View {
             // visionOS, so a Mac window already has a back chevron in its
             // titlebar and this drew a second one over the artwork two points
             // below it (macOS sweep, 2026-09-21).
-            #if !os(visionOS) && !os(macOS)
+            #if os(tvOS)
             detailBackButton
+                .padding(.leading, isLandscapeLayout ? detailSafeAreaInsets.leading : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             #endif
         }
         }
@@ -2630,13 +2644,8 @@ struct AppleCatalogItemDetailView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Back")
         .accessibilityIdentifier("detail.back")
-        .padding(.leading, isLandscapeLayout ? 12 + detailSafeAreaInsets.leading : 12)
-        #if os(iOS)
-        .padding(.top, 10 + detailSafeAreaInsets.top)
-        #else
+        .padding(.leading, 12)
         .padding(.top, 10)
-        #endif
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
     #endif
 
@@ -6503,9 +6512,6 @@ extension AppleCatalogItemDetailView {
                 .frame(height: phoneHeroArtHeight)
                 .clipped()
         }
-        #if !os(visionOS) && !os(macOS)
-        .overlay(alignment: .topLeading) { detailBackButton }
-        #endif
         .background(.black)
         .background {
             GeometryReader { proxy in
