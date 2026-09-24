@@ -126,6 +126,19 @@ final class AppleLocalLibraryStore {
             id: \.id
         )
     }
+    /// One card per film. Files whose names differ ("Tony.2026.1080p",
+    /// "Tony 4K") land in separate groups but resolve to one IMDb title —
+    /// N32 #13 drew "Tony" twice. The first in display order stays; the rest
+    /// are still found by `matchingGroups`, so the title page lists every
+    /// file under Other Sources.
+    nonisolated static func collapsingVersions(_ decorated: [(group: AppleLibrarySeries, item: AppleCatalogItem)]) -> [AppleLibrarySeries] {
+        var seen = Set<String>()
+        return decorated.compactMap { group, item in
+            guard group.parsed.kind == .movie, item.mediaID.hasPrefix("tt"),
+                  let sourceID = group.items.first?.sourceID else { return group }
+            return seen.insert("\(sourceID):\(item.mediaID)").inserted ? group : nil
+        }
+    }
     /// Decorate once, sort, undecorate — and remember the answer until the
     /// content changes.
     ///
@@ -146,7 +159,7 @@ final class AppleLocalLibraryStore {
         _ = metadata
         if let cached = sortedCache[sort], cached.revision == contentRevision { return cached.value }
         let decorated = groups.map { (group: $0, item: catalogItem(for: $0)) }
-        let value = decorated.sorted {
+        let ordered = decorated.sorted {
             if sort == .added, $0.group.addedAt != $1.group.addedAt { return $0.group.addedAt > $1.group.addedAt }
             if sort == .year, $0.item.releaseInfo != $1.item.releaseInfo {
                 return ($0.item.releaseInfo ?? "") > ($1.item.releaseInfo ?? "")
@@ -154,7 +167,8 @@ final class AppleLocalLibraryStore {
             return $0.item.name == $1.item.name
                 ? $0.group.id < $1.group.id
                 : $0.item.name.localizedStandardCompare($1.item.name) == .orderedAscending
-        }.map(\.group)
+        }
+        let value = Self.collapsingVersions(ordered)
         sortedCache[sort] = (contentRevision, value)
         return value
     }

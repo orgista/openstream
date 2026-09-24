@@ -85,6 +85,27 @@ struct AppleCatalogRowTitleTests {
         #expect(visible.contains { $0.shelfTitle == "Popular" })
     }
 
+    /// N32 #12: "TMDB Popular Movies" named the add-on in the heading.
+    @Test("A leading provider name is dropped from the heading", arguments: [
+        ("TMDB Popular Movies", "Popular Movies"),
+        ("TMDB Top Rated Shows", "Top Rated Shows"),
+        ("Trakt - Trending", "Trending"),
+        ("Cinemeta: Popular", "Popular"),
+        ("tmdb  Top  Rated", "Top Rated"),
+        ("TMDB", "TMDB"),
+        ("Netflix Top 10 US", "Netflix Top 10 US"),
+        ("TMDBX Picks", "TMDBX Picks"),
+    ])
+    func providerPrefixIsStripped(name: String, expected: String) {
+        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "movie", id: "x", name: name)) == expected)
+    }
+
+    @Test func strippedHeadingsStillMergeByType() {
+        let sections = [section("pop", "movie", "TMDB Popular"), section("pop", "series", "Cinemeta Popular")]
+        let visible = AppleCatalogShelfPolicy.visibleSections(sections, activeSourceIDs: [source.id])
+        #expect(visible.map(\.shelfTitle) == ["Popular Movies", "Popular Shows"])
+    }
+
     @Test func typedTitleSwapsAnExistingTypeWord() {
         #expect(AppleCatalogShelfPolicy.typedTitle("Popular Movies", type: "series") == "Popular Shows")
         #expect(AppleCatalogShelfPolicy.typedTitle("Trending", type: "movie") == "Trending Movies")

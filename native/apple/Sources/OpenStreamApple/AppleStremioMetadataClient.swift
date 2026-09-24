@@ -179,6 +179,13 @@ public enum AppleStremioEpisodePolicy {
         return values.filter(isSafe).sorted { lhs, rhs in
             if lhs.season != rhs.season { return (lhs.season ?? Int.max) < (rhs.season ?? Int.max) }
             if lhs.episode != rhs.episode { return (lhs.episode ?? Int.max) < (rhs.episode ?? Int.max) }
+            // Same number (or none): earlier air date first, undated last.
+            let lhsAired = lhs.releaseInfo.map { String($0.prefix(10)) } ?? ""
+            let rhsAired = rhs.releaseInfo.map { String($0.prefix(10)) } ?? ""
+            if lhsAired != rhsAired {
+                if lhsAired.isEmpty || rhsAired.isEmpty { return rhsAired.isEmpty }
+                return lhsAired < rhsAired
+            }
             let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
             if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
             return lhs.id < rhs.id

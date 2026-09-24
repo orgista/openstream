@@ -6,6 +6,22 @@ import Foundation
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
         deadline: Duration = .seconds(4), retryDeadline: Duration = .seconds(12)
     ) async -> AppleCatalogSearchMatch? {
+        if let match = await search(title: title, type: type, seasonTitle: seasonTitle, sources: sources,
+                                    client: client, budgets: [deadline, retryDeadline]) {
+            return match
+        }
+        // Netflix files stand-up and one-off specials under TV ("Jo Koy: Blue
+        // in the Face"); the metadata catalogs list them as films. One film
+        // search before the tile settles for its title (N32 extra).
+        guard type.caseInsensitiveCompare("series") == .orderedSame, !Task.isCancelled else { return nil }
+        return await search(title: title, type: "movie", seasonTitle: nil, sources: sources,
+                            client: client, budgets: [deadline, retryDeadline])
+    }
+
+    private static func search(
+        title: String, type: String, seasonTitle: String?, sources: [AppleSource],
+        client: AppleStremioCatalogClient, budgets: [Duration]
+    ) async -> AppleCatalogSearchMatch? {
         // Configured metadata catalogs are asked first. Four catalogs and two
         // concurrent requests bound the work for each lazily visible card.
         let eligible = sources.compactMap { source -> AppleSource? in
@@ -15,15 +31,18 @@ import Foundation
             return value.catalogs.isEmpty ? nil : value
         }
         let searchable = searchSources(eligible, type: type)
-        for (attempt, budget) in [deadline, retryDeadline].enumerated() {
+        for (attempt, budget) in budgets.enumerated() {
             let store = AppleCatalogSearchStore(client: client, debounce: .zero, deadline: budget, maximumConcurrentRequests: 2)
             await store.search(query: title, sources: searchable, baseSections: []) { _ in [] }
             guard !Task.isCancelled else { return nil }
             let match = store.lookup.match(title: title, type: type, seasonTitle: seasonTitle, ignoringLeadingArticle: true)
+                ?? anthologySeries(of: title, type: type).flatMap {
+                    store.lookup.match(title: $0, type: type, ignoringLeadingArticle: true)
+                }
             let candidates = searchable.flatMap { store.lookup.relatedItems(for: $0.id) }
             #if DEBUG
             AppleInteractionTrace.record(.network,
-                "Top10 lookup title=\(title) attempt=\(attempt + 1) matched=\(match != nil) candidates=\(candidates.prefix(20).map(\.name).joined(separator: " | "))")
+                "Top10 lookup title=\(title) type=\(type) attempt=\(attempt + 1) matched=\(match != nil) candidates=\(candidates.prefix(20).map(\.name).joined(separator: " | "))")
             #endif
             if let match { return match }
             // A cold metadata search can outlive the interactive search budget.
@@ -32,6 +51,16 @@ import Foundation
                   metrics.fetchDuration >= budget else { return nil }
         }
         return nil
+    }
+
+    /// "Monster: The Lizzie Borden Story" → "Monster": Netflix names an
+    /// anthology's season after its subtitle, the catalogs list the series.
+    /// Series only — a film's subtitle is part of its own name.
+    static func anthologySeries(of title: String, type: String) -> String? {
+        guard type.caseInsensitiveCompare("series") == .orderedSame,
+              let colon = title.firstIndex(of: ":") else { return nil }
+        let name = title[..<colon].trimmingCharacters(in: .whitespaces)
+        return name.isEmpty || name.count == title.count ? nil : name
     }
 
     /// The configured search catalogs, then Cinemeta's — the same fallback the

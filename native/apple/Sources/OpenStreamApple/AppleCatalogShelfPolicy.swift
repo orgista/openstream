@@ -107,7 +107,8 @@ enum AppleCatalogShelfPolicy {
 /// Prime movies "Prime  Video".
 func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogName: String? = nil,
                             catalogID: String? = nil) -> String {
-    let name = (catalogName ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    let name = appleCatalogNameWithoutProviderPrefix(
+        (catalogName ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " "))
     if let service = AppleCatalogServiceName.streamingService(catalogID: catalogID, name: name) {
         switch catalogType.lowercased() {
         case "movie": return "\(service) Movies"
@@ -122,4 +123,21 @@ func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogNa
     case "series": return "Shows"
     default: return "Catalog"
     }
+}
+
+/// Metadata add-ons that prefix every catalog with their own name.
+private let appleCatalogProviderPrefixes = ["tmdb", "cinemeta", "trakt", "imdb", "mdblist", "letterboxd", "stremio"]
+
+/// "TMDB Popular Movies" → "Popular Movies", "Trakt - Trending" → "Trending":
+/// a row names what it lists, not the add-on it came from (the Apple TV app
+/// never shows a provider in a shelf title). A name that is only the provider
+/// ("TMDB") is kept, so no row loses its heading.
+func appleCatalogNameWithoutProviderPrefix(_ name: String) -> String {
+    let words = name.split(separator: " ", omittingEmptySubsequences: true)
+    guard let first = words.first,
+          appleCatalogProviderPrefixes.contains(first.trimmingCharacters(in: CharacterSet(charactersIn: ":|-·")).lowercased())
+    else { return name }
+    let separators: Set<Substring> = ["-", "–", "—", ":", "|", "·"]
+    let rest = words.dropFirst().drop { separators.contains($0) }
+    return rest.isEmpty ? name : rest.joined(separator: " ")
 }

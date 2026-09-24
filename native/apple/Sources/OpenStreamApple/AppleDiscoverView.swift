@@ -1681,6 +1681,8 @@ struct AppleCatalogCard: View {
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var failedArtworkURLs: Set<URL> = []
     @State private var artworkRetries = 0
+    /// The loaded art is a logo on a plate (`AppleCatalogArtworkPolicy.plate`).
+    @State private var artworkPlate = AppleCatalogArtworkPolicy.Plate.none
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
          progress: Double? = nil, remainingLabel: String? = nil) {
@@ -1747,8 +1749,14 @@ struct AppleCatalogCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AppleCatalogArtwork(url: resolvedPosterURL, onFailure: artworkDidFail)
+            AppleCatalogArtwork(url: resolvedPosterURL, onFailure: artworkDidFail, onImageLoad: { image in
+                artworkPlate = AppleCatalogArtworkPolicy.plate(of: image)
+            })
+                // A black plate lets the tile through where it is black; the
+                // logo itself is brighter than the tile and draws unchanged.
+                .blendMode(artworkPlate == .black ? .lighten : .normal)
                 .frame(width: cardWidth, height: cardHeight)
+                .background { if artworkPlate != .none { Color(white: 0.12) } }
                 .overlay { if resolvedPosterURL == nil { artworkPlaceholder } }
                 .overlay {
                     // Figma's diagonal on the Top 10 tile (owner: follow the
@@ -1786,7 +1794,9 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
-                .onChange(of: item.id) { _, _ in failedArtworkURLs = []; fallbackArtwork = nil; artworkRetries = 0 }
+                .onChange(of: item.id) { _, _ in
+                    failedArtworkURLs = []; fallbackArtwork = nil; artworkRetries = 0; artworkPlate = .none
+                }
                 .task(id: failedArtworkURLs.count) {
                     // Out of art after a failure: try the candidates again
                     // shortly, twice, rather than keep the title tile.
@@ -2212,7 +2222,10 @@ struct AppleCatalogItemDetailView: View {
                     if isLandscapeLayout {
                         EmptyView()
                     } else {
-                        if titleLogoPresentation != .text {
+                        if usesPadPortraitTitleLockup {
+                            padPortraitTitleLockup
+                                .padding(.top, AppleDetailMetrics.padTitleLockupTopSpacing)
+                        } else if titleLogoPresentation != .text {
                             portraitTrailerTitle
                                 .padding(.top, trailerIsPlaying ? AppleDetailMetrics.heroToTitleSpacing : 0)
                         } else {
@@ -2250,16 +2263,27 @@ struct AppleCatalogItemDetailView: View {
                             .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
                     }
 
+                    #if !os(iOS)
                     if item.type == "series" {
                         episodeSection
                             .id("vision-episodes")
                             .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
                     }
+                    #endif
 
                 }
                 .frame(maxWidth: detailContentWidth, alignment: .leading)
                 .padding(.horizontal, detailHorizontalInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                #if os(iOS)
+                // A rail, outside the column for the same reason as More Like This.
+                if item.type == "series" {
+                    padEpisodesSection
+                        .id("vision-episodes")
+                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+                }
+                #endif
 
                 // Outside the column on purpose. Prose belongs in a readable
                 // width; a poster rail does not — every other rail in the app
@@ -2582,7 +2606,7 @@ struct AppleCatalogItemDetailView: View {
             trailerPreview()
             #endif
 
-            if !isLandscapeLayout, case .valid = titleLogoState, let logoURL = titleLogoURL {
+            if !isLandscapeLayout, !usesPadPortraitTitleLockup, case .valid = titleLogoState, let logoURL = titleLogoURL {
                 AppleTrimmedTitleLogo(url: logoURL) { loaded in
                     titleLogoLoadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
@@ -2891,6 +2915,52 @@ struct AppleCatalogItemDetailView: View {
             reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration),
                 value: trailerIsPlaying
             )
+    }
+
+    /// The iPad held upright (N32 #9): the title sat in 17 pt body text
+    /// under the hero whenever a trailer hid the wordmark. The iPhone and
+    /// the Mac give the title its own slot; the iPad now does too, leading
+    /// under the hero where a playing trailer never covers it — the wordmark
+    /// once drawn, otherwise the name as a large title.
+    private var usesPadPortraitTitleLockup: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .regular && !isLandscapeLayout
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder
+    private var padPortraitTitleLockup: some View {
+        switch titleLogoPresentation {
+        case .text:
+            Text(displayTitle)
+                .font(.system(size: AppleDetailMetrics.padTitleFontSize, weight: .bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+        case .logo, .hidden:
+            ZStack(alignment: .leading) {
+                if case .valid = titleLogoState, let logoURL = titleLogoURL {
+                    AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
+                        titleLogoLoadResult = loaded
+                        if loaded { fillTimeline.mark(.wordmark) }
+                        #if DEBUG
+                        AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
+                        #endif
+                    }
+                    .opacity(titleLogoPresentation == .logo ? 1 : 0)
+                }
+            }
+            .frame(width: AppleDetailMetrics.padTitleLogoMaxSize.width,
+                   height: AppleDetailMetrics.padTitleLogoMaxSize.height, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(displayTitle)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHidden(titleLogoPresentation != .logo)
+        }
     }
 
     private var portraitTrailerTitle: some View {
@@ -6199,6 +6269,18 @@ struct AppleDetailMetrics {
     static let trailerCrossfadeDuration = AppleTrailerArtFirstPolicy.crossfadeDuration
 
     static let portraitTitleFontSize: CGFloat = 17
+    /// iPad portrait's title slot under the hero: the Mac hero's wordmark
+    /// box, and a large title when there is no wordmark.
+    static let padTitleLogoMaxSize = CGSize(width: 360, height: 110)
+    static let padTitleFontSize: CGFloat = 40
+    static let padTitleLockupTopSpacing: CGFloat = 20
+
+    /// An iPad episode card: about two and a half across upright, three and
+    /// a half on its side, as the Apple TV app's iPad rail shows them.
+    static func padEpisodeCardWidth(viewportWidth: CGFloat, isLandscape: Bool) -> CGFloat {
+        guard viewportWidth > 0 else { return 300 }
+        return min(360, max(260, viewportWidth / (isLandscape ? 3.6 : 2.6)))
+    }
 
     /// Landscape in any size class, so the phone gets the same full-screen hero
     /// as the iPad instead of the portrait 4:3 crop.
@@ -7027,7 +7109,47 @@ extension AppleCatalogItemDetailView {
         .accessibilityIdentifier("detail.episodes")
     }
 
+    /// The iPad's episodes: the heading and season menu across the page,
+    /// the rail running to its edge like More Like This below it.
+    private var padEpisodesSection: some View {
+        let cardWidth = AppleDetailMetrics.padEpisodeCardWidth(viewportWidth: viewportSize.width,
+                                                               isLandscape: isLandscapeLayout)
+        return VStack(alignment: .leading, spacing: AppleDetailMetrics.sectionHeaderBottomSpacing) {
+            episodeSectionHeader
+                .padding(.horizontal, detailHorizontalInset)
+            switch episodeListPresentation {
+            case .loading:
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        AppleTitlePageEpisodePlaceholder(width: cardWidth)
+                        AppleTitlePageEpisodePlaceholder(width: cardWidth)
+                        AppleTitlePageEpisodePlaceholder(width: cardWidth)
+                    }
+                }
+                .contentMargins(.horizontal, detailHorizontalInset, for: .scrollContent)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(true)
+            case .unavailable:
+                Text("Episodes aren’t available from the connected metadata sources.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, detailHorizontalInset)
+            case .episodes:
+                episodeRail(cardWidth: cardWidth, inset: detailHorizontalInset)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.episodes")
+    }
+
     private var phoneEpisodeRail: some View {
+        episodeRail(cardWidth: phoneCardWidth, inset: Self.phoneInset)
+    }
+
+    /// The Apple TV app's episode rail — the iPhone's, and the iPad's since
+    /// N32 #10 (its list stopped at 83 % of the page beside a full-width
+    /// More Like This).
+    private func episodeRail(cardWidth: CGFloat, inset: CGFloat) -> some View {
         let saved = playbackStore.progress(for: recordID)
         let watched = watchedEpisodeIDs
         let now = Date.now
@@ -7041,7 +7163,7 @@ extension AppleCatalogItemDetailView {
                             isWatched: watched.contains(episode.id),
                             isSelected: selectedEpisodeID == episode.id,
                             progress: Self.progressFraction(saved, for: episode),
-                            width: phoneCardWidth,
+                            width: cardWidth,
                             seriesBackdropURL: episodeFallbackStillURL
                         ) {
                             selectedEpisodeID = episode.id
@@ -7056,7 +7178,7 @@ extension AppleCatalogItemDetailView {
                     }
                 }
             }
-            .contentMargins(.horizontal, Self.phoneInset, for: .scrollContent)
+            .contentMargins(.horizontal, inset, for: .scrollContent)
             .scrollIndicators(.hidden)
             // Lands on the episode Play starts, as the Apple TV app does.
             .task(id: "\(selectedSeason ?? -1):\(visibleEpisodes.count)") {

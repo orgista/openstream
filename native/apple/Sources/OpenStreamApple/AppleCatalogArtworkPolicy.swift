@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 #if DEBUG
 import CryptoKit
@@ -43,6 +44,41 @@ enum AppleCatalogArtworkPolicy {
     /// hundred posters at once — used to latch the card to its title tile for
     /// as long as it stayed on screen: the grey tiles in Library › Movies
     /// for titles Discover showed posters for (owner, 2026-09-24).
+    /// What a poster is printed on. Some "posters" are a logo on a plate —
+    /// transparent, or pure black ("Law & Order", "The Chosen", N32 #16) —
+    /// and on the black page the card's edge vanishes, so the logo floats.
+    /// Those draw on the card's dark rounded tile, as the Apple TV app does.
+    enum Plate: Equatable, Sendable { case none, transparent, black }
+
+    /// Reads the image's border at a 12 × 18 sample. A plate is at least 85 %
+    /// of the border clear or true black (a JPEG plate decodes to 0–3); a
+    /// band of colour reaching the edge, as Law & Order's does, still counts.
+    static func plate(of image: CGImage) -> Plate {
+        let width = 12, height = 18
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return .none }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var border: [(UInt8, UInt8, UInt8, UInt8)] = []
+        for y in 0 ..< height {
+            for x in 0 ..< width where x == 0 || y == 0 || x == width - 1 || y == height - 1 {
+                let i = (y * width + x) * 4
+                border.append((data[i], data[i + 1], data[i + 2], data[i + 3]))
+            }
+        }
+        return plate(border: border)
+    }
+
+    static func plate(border: [(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)]) -> Plate {
+        guard !border.isEmpty else { return .none }
+        let needed = Double(border.count) * 0.85
+        let clear = border.filter { $0.alpha < 250 }.count
+        if Double(clear) >= needed { return .transparent }
+        let black = border.filter { $0.alpha < 250 || max($0.red, $0.green, $0.blue) <= 8 }.count
+        return Double(black) >= needed ? .black : .none
+    }
+
     static func retryDelay(afterRetries retries: Int) -> Duration? {
         switch retries {
         case 0: .seconds(3)
