@@ -13,8 +13,9 @@ import WebKit
 /// still does — aspect-fill, centre crop (`AppleTrailerPreviewLayout.coverFrame`)
 /// — sized to the trailer's measured picture before the cover fades, and
 /// never re-sized while the video is on screen, so the picture keeps the
-/// art's frame (N30). It reports only that frame to SwiftUI: a window
-/// resize moves it in place and never reloads the page.
+/// art's frame (N30). The cover fades only once YouTube has re-laid its
+/// video out at that size and held it (N31). It reports only that frame to
+/// SwiftUI: a window resize moves it in place and never reloads the page.
 @MainActor
 struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
     let url: URL
@@ -36,11 +37,25 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         var onStateChange: ((String, Bool, Int?) -> Void)?
         weak var container: PlayerContainer?
         private var revealGeneration = 0
+        /// What YouTube's player page last reported, and when it changed.
+        private(set) var geometry: AppleMacTrailerGeometry?
+        private var geometryChangedAt = Date.distantPast
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "trailerState",
                   let payload = message.body as? [String: Any],
                   let state = payload["state"] as? String else { return }
+            if state == "geometry" {
+                let reported = AppleMacTrailerGeometry(payload: payload)
+                if reported != geometry {
+                    geometry = reported
+                    geometryChangedAt = Date()
+                }
+                return
+            }
+            #if DEBUG
+            if state == "playing" { container?.probe?.begin() }
+            #endif
             if state == "ready" {
                 // The title page starts its trailer a moment after the view
                 // is made; without this the page stayed on `ready` with the
@@ -96,6 +111,12 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             onStateChange?(AppleTrailerArtFirstPolicy.webContentTerminatedState, lastMuted, nil)
         }
 
+        /// A new page reports afresh; the old one's size must not settle it.
+        func forgetGeometry() {
+            geometry = nil
+            geometryChangedAt = .distantPast
+        }
+
         func conceal(animated: Bool = false, completion: (@MainActor @Sendable () -> Void)? = nil) {
             revealGeneration += 1
             container?.setPreviewVisible(false, animated: animated, completion: completion)
@@ -104,16 +125,52 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         /// Measures the picture band first, so a letterboxed trailer is
         /// cropped to its picture before the cover fades. A frame that
         /// measures as nothing (a fade-in, a title card) is looked at again
-        /// a second later, up to three times, with the art still up; the
-        /// geometry is settled before the video is seen and never changes
-        /// under it.
+        /// a second later, up to three times, with the art still up. Then it
+        /// waits for YouTube to lay its video out at the web view's final
+        /// size and hold it, so the geometry is settled before the video is
+        /// seen and never changes under it.
         private func reveal(then revealed: @escaping () -> Void) {
             guard let container else { return }
             revealGeneration += 1
             let generation = revealGeneration
-            measure(container, generation: generation, remaining: 3) { container in
-                container.setPreviewVisible(true)
-                revealed()
+            measure(container, generation: generation, remaining: 3) { [weak self] container in
+                self?.settle(container, generation: generation, since: Date()) { container in
+                    container.setPreviewVisible(true)
+                    revealed()
+                }
+            }
+        }
+
+        /// Resizing a web view is asynchronous twice over: WebKit lays the
+        /// page out again, then YouTube's player re-sizes its `<video>` a few
+        /// frames later. Faded over that, the picture showed at its old size
+        /// and then grew (owner, N31). Polls until the player page reports
+        /// the web view's size with its video fitted to it, unchanged for
+        /// `AppleMacTrailerSettlePolicy.stableInterval`; gives up and reveals
+        /// after `timeout` rather than never show the trailer.
+        private func settle(_ container: PlayerContainer, generation: Int, since start: Date,
+                            then: @escaping (PlayerContainer) -> Void) {
+            guard revealGeneration == generation else { return }
+            let expected = CGSize(width: container.webView.frame.width * CGFloat(container.layoutScale),
+                                  height: container.webView.frame.height * CGFloat(container.layoutScale))
+            let now = Date()
+            let settled = AppleMacTrailerSettlePolicy.isSettled(geometry, expected: expected)
+                && now.timeIntervalSince(geometryChangedAt) >= AppleMacTrailerSettlePolicy.stableInterval
+            #if DEBUG
+            let skips = UserDefaults.standard.bool(forKey: "OpenStreamHeroNoSettle")
+            #else
+            let skips = false
+            #endif
+            let timedOut = now.timeIntervalSince(start) >= AppleMacTrailerSettlePolicy.timeout
+            if settled || timedOut || skips {
+                let verdict = settled ? "settled" : skips ? "not awaited" : "unsettled"
+                appleTrace("mac hero trailer geometry \(verdict) after \(Int(now.timeIntervalSince(start) * 1000))ms expected=\(Int(expected.width))x\(Int(expected.height)) \(geometry?.description ?? "none")")
+                then(container)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak container] in
+                guard let self, let container else { return }
+                self.settle(container, generation: generation, since: start, then: then)
             }
         }
 
@@ -149,7 +206,15 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         private let cover = CoverView()
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { needsLayout = true } }
         var hasMeasuredPicture = false
+        /// How many times the web view's size the page lays YouTube out at.
+        var layoutScale = 1
         private var previewVisible = false
+        #if DEBUG
+        let probe = AppleMacHeroTrailerProbe.fromArguments()
+        /// Read by the probe each tick.
+        var geometry: () -> AppleMacTrailerGeometry? = { nil }
+        var coverOpacity: Float { cover.layer?.presentation()?.opacity ?? cover.layer?.opacity ?? -1 }
+        #endif
 
         init(messageHandler: WKScriptMessageHandler) {
             let configuration = WKWebViewConfiguration()
@@ -157,6 +222,11 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             configuration.websiteDataStore = .nonPersistent()
             configuration.userContentController.addUserScript(WKUserScript(
                 source: ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: AppleYouTubePreviewHTML.macPlayerFrameScript,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false
             ))
@@ -168,6 +238,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             webView.setAccessibilityElement(false)
             addSubview(webView)
             addSubview(cover)
+            #if DEBUG
+            probe?.container = self
+            #endif
         }
 
         @available(*, unavailable)
@@ -198,6 +271,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             let wasVisible = previewVisible
             previewVisible = visible
             if visible != wasVisible { appleTrace("mac hero trailer cover \(visible ? "fading out" : "up")") }
+            #if DEBUG
+            if visible, !wasVisible { probe?.markFade() }
+            #endif
             let duration = AppleTrailerArtFirstPolicy.crossfadeDuration(
                 reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
             let animates = visible != wasVisible && animated && duration > 0
@@ -248,6 +324,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         let container = PlayerContainer(messageHandler: coordinator)
         container.webView.navigationDelegate = coordinator
         coordinator.container = container
+        #if DEBUG
+        container.geometry = { [weak coordinator] in coordinator?.geometry }
+        #endif
         container.updateStill(artworkImage)
         load(url, in: container, context: context)
         return container
@@ -288,11 +367,72 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         context.coordinator.loadedURL = url
         context.coordinator.documentPlaying = isPlaying
         context.coordinator.documentMuted = isMuted
-        appleTrace("mac hero trailer load playing=\(isPlaying) muted=\(isMuted)")
+        context.coordinator.forgetGeometry()
+        view.layoutScale = Self.layoutScale(displayScale: context.environment.displayScale)
+        appleTrace("mac hero trailer load playing=\(isPlaying) muted=\(isMuted) layoutScale=\(view.layoutScale)")
         let html = AppleYouTubePreviewHTML.document(
-            embedURL: url, startsPlaying: isPlaying, isLandscape: true, startsMuted: isMuted, allowsSound: true
+            embedURL: url, startsPlaying: isPlaying, isLandscape: true, startsMuted: isMuted, allowsSound: true,
+            layoutScale: view.layoutScale
         )
         view.webView.loadHTMLString(html, baseURL: URL(string: "https://openstream.app"))
+    }
+
+    /// `AppleTrailerPreviewPolicy.macLayoutScale`; a DEBUG build takes
+    /// `-OpenStreamHeroLayoutScale 1` to compare against the unscaled page.
+    static func layoutScale(displayScale: CGFloat) -> Int {
+        #if DEBUG
+        let forced = UserDefaults.standard.integer(forKey: "OpenStreamHeroLayoutScale")
+        if forced > 0 { return forced }
+        #endif
+        return AppleTrailerPreviewPolicy.macLayoutScale(displayScale: Double(displayScale))
+    }
+}
+
+/// Where YouTube's player page draws, as its injected script reports it
+/// (`AppleYouTubePreviewHTML.macPlayerFrameScript`), in the page's CSS px.
+struct AppleMacTrailerGeometry: Equatable, CustomStringConvertible {
+    var frame: CGSize
+    var video: CGRect?
+
+    init(frame: CGSize, video: CGRect?) {
+        self.frame = frame
+        self.video = video
+    }
+
+    init?(payload: [String: Any]) {
+        guard let frame = payload["frame"] as? [Double], frame.count == 2 else { return nil }
+        self.frame = CGSize(width: frame[0], height: frame[1])
+        if let video = payload["video"] as? [Double], video.count == 4 {
+            self.video = CGRect(x: video[0], y: video[1], width: video[2], height: video[3])
+        }
+    }
+
+    var description: String {
+        let box = video.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "none"
+        return "frame=\(Int(frame.width))x\(Int(frame.height)) video=\(box)"
+    }
+}
+
+enum AppleMacTrailerSettlePolicy {
+    /// The picture must hold its final place this long before the art fades.
+    static let stableInterval: TimeInterval = 0.3
+    /// Reveals anyway after this, rather than never show the trailer.
+    static let timeout: TimeInterval = 3
+    /// CSS px of rounding between the web view's points and the page.
+    static let tolerance: CGFloat = 3
+
+    /// The player page is `expected` (the web view's size in the page's CSS
+    /// px) and its video is fitted to it — filling one axis, centred, inside
+    /// it. A video still at the old size while the page has grown fits no
+    /// axis, which is the moment the art must not fade over.
+    static func isSettled(_ geometry: AppleMacTrailerGeometry?, expected: CGSize) -> Bool {
+        guard let geometry, let video = geometry.video, video.width > 0, video.height > 0 else { return false }
+        let frame = geometry.frame
+        func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= tolerance }
+        return near(frame.width, expected.width) && near(frame.height, expected.height)
+            && (near(video.width, frame.width) || near(video.height, frame.height))
+            && video.width <= frame.width + tolerance && video.height <= frame.height + tolerance
+            && near(video.midX, frame.width / 2) && near(video.midY, frame.height / 2)
     }
 }
 #endif

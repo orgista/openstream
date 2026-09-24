@@ -22,8 +22,15 @@ enum AppleYouTubePreviewHTML {
     /// `allowsSound` lifts the muted-only rule for a host whose web view does
     /// not take over the device's audio session — the Mac hero, whose mute
     /// button is how a viewer asks to hear it. Every other caller stays muted.
+    ///
+    /// `layoutScale` lays the player out that many times larger in CSS pixels
+    /// and scales it back down from its top-left corner, so it draws in
+    /// exactly the same place and size while YouTube, which picks its stream
+    /// from the player's own size, picks a sharper one
+    /// (`AppleTrailerPreviewPolicy.macLayoutScale`).
     static func document(
-        embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true, allowsSound: Bool = false
+        embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true, allowsSound: Bool = false,
+        layoutScale: Int = 1
     ) -> String {
         let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !allowsSound
         let effectiveMuted = requiresMutedPlayback || startsMuted
@@ -36,6 +43,11 @@ enum AppleYouTubePreviewHTML {
         let safeSource = htmlEscaped((components?.url ?? embedURL).absoluteString)
         let safeAutoplay = startsPlaying ? 1 : 0
         let safeDesiredPlaying = startsPlaying ? "true" : "false"
+        let scale = min(max(layoutScale, 1), 3)
+        let scaledLayout = scale == 1 ? "" : """
+
+        iframe{width:\(scale * 100)%;height:\(scale * 100)%;transform:scale(\(1 / Double(scale)));transform-origin:0 0}
+        """
         return """
         <!doctype html>
         <html><head>
@@ -45,7 +57,7 @@ enum AppleYouTubePreviewHTML {
         html,body{position:relative;margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
         iframe{position:absolute;inset:0;margin:0;width:100%;height:100%;background:#000;border:0;opacity:1;pointer-events:none}
         body.ready iframe{opacity:1;transition:opacity .12s linear}
-        @media(prefers-reduced-motion:reduce){iframe{transition:none}}
+        @media(prefers-reduced-motion:reduce){iframe{transition:none}}\(scaledLayout)
         </style>
         </head><body>
         <iframe id="player" src="\(safeSource)" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe>
@@ -54,6 +66,7 @@ enum AppleYouTubePreviewHTML {
         const requiresMutedPlayback = \(requiresMutedPlayback ? "true" : "false");
         var desiredMuted = \(effectiveMuted ? "true" : "false");
         var lastPlayerWidth = 0, lastPlayerHeight = 0;
+        var layoutScale = \(scale);
         var desiredPlaying = \(safeDesiredPlaying);
         var playerReady = false;
         var actualPlayerState = null;
@@ -139,10 +152,10 @@ enum AppleYouTubePreviewHTML {
 
         function resizePlayer() {
           if (!player || !playerReady || typeof player.setSize !== 'function') return;
-          var width = Math.round(window.innerWidth), height = Math.round(window.innerHeight);
+          var width = Math.round(window.innerWidth * layoutScale), height = Math.round(window.innerHeight * layoutScale);
           if (width === lastPlayerWidth && height === lastPlayerHeight) return;
           lastPlayerWidth = width; lastPlayerHeight = height;
-          player.setSize(Math.round(window.innerWidth), Math.round(window.innerHeight));
+          player.setSize(width, height);
         }
 
         function revealPlayer(reason) {
@@ -369,6 +382,39 @@ enum AppleYouTubePreviewHTML {
         </body></html>
         """
     }
+
+    /// Injected into every frame of the Mac hero's web view, it acts only in
+    /// YouTube's own player page, which the host page cannot reach across
+    /// origins (macOS WebKit runs user scripts there):
+    /// - the play/pause glyph YouTube flashes in the middle of the picture
+    ///   (it showed at the crossfade, N31) and its caption window never draw;
+    /// - it reports the player page's size and where its `<video>` is drawn
+    ///   whenever either changes (`geometry`). YouTube re-lays its video out
+    ///   a few frames after the page is resized, so the host waits for this
+    ///   to settle at the web view's new size before the art fades (N31: the
+    ///   picture came in at the art's size, then grew once the cover was going).
+    static let macPlayerFrameScript = """
+    (function() {
+      if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
+      var style = document.createElement('style');
+      style.textContent = '[class^="player-controls"],[class*=" player-controls"],.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}';
+      (document.head || document.documentElement).appendChild(style);
+      var last = '';
+      function report() {
+        var video = document.querySelector('video');
+        var box = video ? video.getBoundingClientRect() : null;
+        var geometry = {state: 'geometry', frame: [innerWidth, innerHeight],
+          video: box ? [box.left, box.top, box.width, box.height] : null,
+          source: video ? [video.videoWidth, video.videoHeight] : null};
+        var key = JSON.stringify(geometry);
+        if (key === last) return;
+        last = key;
+        try { window.webkit.messageHandlers.trailerState.postMessage(geometry); } catch (_) {}
+      }
+      addEventListener('resize', report);
+      setInterval(report, 50);
+    })();
+    """
 
     private static func htmlEscaped(_ value: String) -> String {
         value

@@ -558,10 +558,12 @@ private struct AppleHomeHeroPreview: View {
               let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first else { return }
         // The best stream the hero can show pixel for pixel, never a default:
         // measured on the 16:9 player the video is drawn at (it overhangs
-        // the hero and is cropped), in device pixels.
+        // the hero and is cropped), in device pixels, at the size the page
+        // lays the player out before scaling it back down.
         let frame = artFrameSize ?? CGSize(width: 0, height: AppleMacHeroLayout.minimumHeight)
         let pixelHeight = Double(AppleTrailerPreviewLayout.coverFrame(in: frame).height)
             * Double(displayScale)
+            * Double(AppleMacYouTubeHeroPreview.layoutScale(displayScale: displayScale))
         let quality = AppleTrailerPreviewPolicy.quality(forPixelHeight: pixelHeight)
         guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality) else { return }
         // Always starts muted, as it does on the iPhone; the round button

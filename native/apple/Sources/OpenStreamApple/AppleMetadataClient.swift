@@ -186,6 +186,15 @@ public enum AppleTrailerPreviewPolicy {
         qualityLadder.first { Double($0.height) <= height }?.name ?? "medium"
     }
 
+    /// How many times its size the Mac lays the YouTube player out, then
+    /// scales it back down. YouTube picks its stream from the player's size
+    /// in CSS pixels times the screen's pixel ratio and treats `vq` as a
+    /// hint: a 1,440 pt hero on a 1x display played 720p (N27). A Retina
+    /// screen already doubles it; doubling again would only fetch 4K.
+    public static func macLayoutScale(displayScale: Double) -> Int {
+        displayScale < 2 ? 2 : 1
+    }
+
     public static func embedURL(for key: String?, quality: String = "hd2160") -> URL? {
         guard let key = validYouTubeKey(key),
               var components = URLComponents(string: "https://www.youtube-nocookie.com/embed/\(key)") else {

@@ -91,7 +91,10 @@ import Testing
     #expect(!html.contains("id=\"sound\""))
     #expect(!html.contains("id=\"captionGuard\""))
     #expect(html.contains("trailerState"))
-    #expect(html.contains("player.setSize(Math.round(window.innerWidth), Math.round(window.innerHeight))"))
+    // Sized to the page, times the layout scale (1 on every host but the Mac hero).
+    #expect(html.contains("var layoutScale = 1;"))
+    #expect(html.contains("var width = Math.round(window.innerWidth * layoutScale), height = Math.round(window.innerHeight * layoutScale);"))
+    #expect(html.contains("player.setSize(width, height)"))
     #expect(html.contains("body.ready iframe"))
     #expect(html.contains("revealAfterPlaybackStarts"))
     #expect(html.contains("}, 900);"))
