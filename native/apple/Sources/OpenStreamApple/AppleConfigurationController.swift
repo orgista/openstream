@@ -163,6 +163,7 @@ final class AppleConfigurationController {
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
             sources: sources.sources, settings: values,
             playbackProgress: ApplePlaybackStore(defaults: defaults).configurationProgress(),
+            watchedHistory: ApplePlaybackStore(defaults: defaults).configurationWatchedHistory(),
             watchlist: mediaIndex.records.filter(\.isFavorite),
             ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue))
     }
@@ -191,6 +192,7 @@ final class AppleConfigurationController {
         try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
         if let secrets { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
         ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(snapshot.watchedHistory)
         AppleTitleRatingStore(defaults: defaults).restoreConfigurationRatings(snapshot.ratings)
         try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist)
     }

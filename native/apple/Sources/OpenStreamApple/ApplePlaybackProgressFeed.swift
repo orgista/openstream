@@ -25,6 +25,13 @@ public final class ApplePlaybackProgressFeed {
         return store.progress(for: mediaID)
     }
 
+    /// The finished titles among `mediaIDs`, read so the caller is
+    /// invalidated when one is finished, marked or unmarked.
+    public func completedMediaIDs(among mediaIDs: [String], in store: ApplePlaybackStore = ApplePlaybackStore()) -> Set<String> {
+        _ = revision
+        return store.completedMediaIDs(among: mediaIDs)
+    }
+
     func storeDidChange() {
         revision &+= 1
     }

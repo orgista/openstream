@@ -38,11 +38,16 @@ public enum AppleTitlePagePolicy {
         /// "Resume S4, E8", or "Resume" for a film.
         case resume(episode: String?)
         case play
+        /// "Play S1, E3": a series title page names the episode Play starts.
+        case playEpisode(String)
         /// Nothing on the page can play, but a trailer can.
         case playTrailer
 
         public func displayTitle(hasCompletedDownload: Bool) -> String {
-            self == .play && hasCompletedDownload ? "Play Offline" : title
+            switch self {
+            case .play, .playEpisode: hasCompletedDownload ? "Play Offline" : title
+            case .resume, .playTrailer: title
+            }
         }
 
         public var title: String {
@@ -50,6 +55,7 @@ public enum AppleTitlePagePolicy {
             case .resume(let episode?): "Resume \(episode)"
             case .resume(nil): "Resume"
             case .play: "Play"
+            case .playEpisode(let episode): "Play \(episode)"
             case .playTrailer: "Play Trailer"
             }
         }
@@ -88,9 +94,7 @@ public enum AppleTitlePagePolicy {
                                        episode: identity?.episode, releaseInfo: nil)
         }
         if let localResumeEpisode { return localResumeEpisode }
-        return AppleStremioEpisodePolicy.nextUnwatched(
-            in: AppleStremioEpisodePolicy.initialSeason(in: episodes), from: episodes, completedIDs: completedIDs
-        )
+        return AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: completedIDs)
     }
 
     /// The button's verb, derived from state rather than an error after the
@@ -98,17 +102,25 @@ public enum AppleTitlePagePolicy {
     /// `selectedEpisodeID` the episode Play would start. A series only says
     /// Resume when the saved position belongs to that episode, so choosing
     /// another season never leaves the button promising the old one.
+    /// `namesEpisode` makes Play say which episode it starts ("Play S1, E3"),
+    /// as the Apple TV app's title page does; the heroes keep "Play".
     public static func primaryAction(
         type: String,
         progress: ApplePlaybackProgress?,
         selectedEpisode: AppleStremioEpisode?,
         isPlayable: Bool,
-        hasTrailer: Bool
+        hasTrailer: Bool,
+        namesEpisode: Bool = false
     ) -> PrimaryAction {
         guard isPlayable else { return hasTrailer ? .playTrailer : .play }
-        guard let progress, progress.resumePosition != nil else { return .play }
+        let play: PrimaryAction = if namesEpisode, type == "series", let code = selectedEpisode.flatMap(episodeCode) {
+            .playEpisode(code)
+        } else {
+            .play
+        }
+        guard let progress, progress.resumePosition != nil else { return play }
         if type == "series" {
-            guard let selectedEpisode, progress.partID == selectedEpisode.id else { return .play }
+            guard let selectedEpisode, progress.partID == selectedEpisode.id else { return play }
             return .resume(episode: episodeCode(selectedEpisode))
         }
         return .resume(episode: nil)

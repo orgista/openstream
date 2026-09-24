@@ -1043,6 +1043,71 @@ final class AppleiOSUITests: XCTestCase {
         }
     }
 
+    /// Photographs watched history on a series title page: S1 E1–E2 ticked
+    /// and Play naming S1, E3, the episode menu's Mark as Watched / Mark as
+    /// Unwatched, and the page after un-watching E2. The history is the
+    /// in-memory review fixture, so nothing is stored; nothing is played.
+    /// The page also gets the localhost stream fixture, so Play has a route
+    /// on a simulator with only metadata sources; it is never pressed.
+    func testWatchedEpisodesArePhotographed() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_WATCHED_PROOF"] == "1" else {
+            throw XCTSkip("OPENSTREAM_WATCHED_PROOF not set")
+        }
+        app.launchArguments += ["-OpenStreamDebugWatchedFixture", "1:1,1:2", "-OpenStreamDebugStreamFixture", "YES",
+                                "-OpenStreamDetailTitle", env["OPENSTREAM_WATCHED_TITLE"] ?? "Breaking Bad"]
+        launch(screen: "detail")
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 60), "the title page never opened")
+        let next = NSPredicate(format: "label BEGINSWITH %@", "Play S1, E3")
+        expectation(for: next, evaluatedWith: play)
+        waitForExpectations(timeout: 60)
+        Thread.sleep(forTimeInterval: 3)
+        attach("watched-1-cta")
+
+        let card: (Int) -> XCUIElement = { number in
+            self.app.otherElements.matching(NSPredicate(format: "value BEGINSWITH %@", "Episode \(number)")).firstMatch
+        }
+        for _ in 0 ..< 8 where !isSafelyHittable(card(3)) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+            Thread.sleep(forTimeInterval: 1)
+        }
+        // The rail opens on Up Next (E3); bring E1 and E2 back into view.
+        let rail = card(3).frame
+        let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 60, dy: rail.midY))
+        let to = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width - 20, dy: rail.midY))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.3)
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue((card(2).value as? String)?.contains("Watched") == true, "E2 is not shown as watched")
+        attach("watched-2-ticks")
+
+        card(3).press(forDuration: 1.2)
+        let markWatched = app.buttons["Mark as Watched"].firstMatch
+        XCTAssertTrue(markWatched.waitForExistence(timeout: 5), "no Mark as Watched on an unwatched episode")
+        attach("watched-3-menu-mark-watched")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        Thread.sleep(forTimeInterval: 1)
+
+        card(2).press(forDuration: 1.2)
+        let markUnwatched = app.buttons["Mark as Unwatched"].firstMatch
+        XCTAssertTrue(markUnwatched.waitForExistence(timeout: 5), "no Mark as Unwatched on a watched episode")
+        attach("watched-4-menu-mark-unwatched")
+        markUnwatched.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse((card(2).value as? String)?.contains("Watched") == true, "E2 still shows as watched")
+        attach("watched-5-after-unwatch")
+        for _ in 0 ..< 8 where !isSafelyHittable(play) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTAssertTrue(play.label.hasPrefix("Play S1, E2"), "Play did not move back to S1, E2: \(play.label)")
+        attach("watched-6-cta-after-unwatch")
+    }
+
     func testAIOMetadataCatalogItemOpensADetailWithInformation() {
         launch(screen: "discover")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))

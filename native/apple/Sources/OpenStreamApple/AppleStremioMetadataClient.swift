@@ -197,6 +197,38 @@ public enum AppleStremioEpisodePolicy {
         return ordered.first { !completedIDs.contains($0.id) } ?? ordered.first
     }
 
+    /// The Apple TV app's Up Next: the first unfinished episode after the
+    /// last finished one, across seasons. Nothing finished yet is the first
+    /// episode; a show finished to the end starts over at its first episode
+    /// rather than offering nothing. Specials (season 0) are left out unless
+    /// the show has nothing else.
+    public static func upNext(
+        from allEpisodes: [AppleStremioEpisode],
+        completedIDs: Set<String>
+    ) -> AppleStremioEpisode? {
+        let ordered = episodes(in: nil, from: allEpisodes)
+        let regular = ordered.filter { $0.season != 0 }
+        let candidates = regular.isEmpty ? ordered : regular
+        guard let last = candidates.lastIndex(where: { completedIDs.contains($0.id) }) else {
+            return candidates.first
+        }
+        return candidates[candidates.index(after: last)...].first { !completedIDs.contains($0.id) }
+            ?? candidates.first
+    }
+
+    /// The episode the title page selects in `season`: Up Next when it is in
+    /// that season, otherwise the season's first unfinished episode.
+    public static func defaultEpisode(
+        in season: Int?,
+        from allEpisodes: [AppleStremioEpisode],
+        completedIDs: Set<String>
+    ) -> AppleStremioEpisode? {
+        if let next = upNext(from: allEpisodes, completedIDs: completedIDs), season == nil || next.season == season {
+            return next
+        }
+        return nextUnwatched(in: season, from: allEpisodes, completedIDs: completedIDs)
+    }
+
     /// The episode a show's saved position belongs to, while that position is
     /// still a resume point.
     ///

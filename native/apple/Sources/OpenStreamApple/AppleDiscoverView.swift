@@ -555,6 +555,7 @@ struct AppleDiscoverView: View {
         // candidate again for every ranked title — twenty passes over the
         // whole catalog.
         var byDigest: [String: IndexedCatalogItem] = [:]
+        let finished = ApplePlaybackStore().completedMediaIDs(among: Array(values.keys))
         let rankable = values.values.map { value in
             let digest = ApplePlaybackIdentity.digest(for: value.item.mediaID)
             if byDigest[digest] == nil { byDigest[digest] = value }
@@ -570,6 +571,7 @@ struct AppleDiscoverView: View {
                 ].filter { $0 }.count) / 4,
                 isResumable: (value.record.progress ?? 0) > 0 && (value.record.progress ?? 1) < ApplePlaybackProgress.completionFraction,
                 isCompleted: (value.record.progress ?? 0) >= ApplePlaybackProgress.completionFraction
+                    || finished.contains(value.record.id)
             )
         }
         let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: .now, limit: 20)
@@ -2049,7 +2051,11 @@ struct AppleCatalogItemDetailView: View {
         self.source = source
         self.relatedItems = relatedItems
         self.mediaIndex = mediaIndex
+        #if DEBUG
+        self.playbackSources = playbackSources + AppleTitlePageStreamFixture.sources
+        #else
         self.playbackSources = playbackSources
+        #endif
         self.metadataConfiguration = metadataConfiguration
         self.gatewayConfig = gatewayConfig
         self.streamingServerConfiguration = streamingServerConfiguration
@@ -3143,17 +3149,20 @@ struct AppleCatalogItemDetailView: View {
                     .foregroundStyle(AppleDesignTokens.textSecondary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             case .episodes:
+                let watched = watchedEpisodeIDs
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: AppleTVDetailMetrics.episodeCardGap) {
                         ForEach(visibleEpisodes) { episode in
                             AppleTVEpisodeCard(
                                 episode: episode,
                                 subtitle: episodeMetadata(episode),
-                                isSelected: selectedEpisodeID == episode.id
+                                isSelected: selectedEpisodeID == episode.id,
+                                isWatched: watched.contains(episode.id)
                             ) {
                                 selectedEpisodeID = episode.id
                                 playRequest = UUID()
                             }
+                            .contextMenu { watchedMenuButton(episode, isWatched: watched.contains(episode.id)) }
                         }
                     }
                     .padding(.vertical, AppleTVDetailMetrics.shelfVerticalBleed)
@@ -4092,14 +4101,16 @@ struct AppleCatalogItemDetailView: View {
                     ],
                     spacing: 0
                 ) {
+                    let watched = watchedEpisodeIDs
                     ForEach(visibleEpisodes) { episode in
-                        episodeRow(episode)
+                        episodeRow(episode, isWatched: watched.contains(episode.id))
                     }
                 }
             } else {
+                let watched = watchedEpisodeIDs
                 LazyVStack(spacing: 0) {
                     ForEach(visibleEpisodes) { episode in
-                        episodeRow(episode)
+                        episodeRow(episode, isWatched: watched.contains(episode.id))
 
                         if episode.id != visibleEpisodes.last?.id {
                             Divider().overlay(.white.opacity(0.12))
@@ -4162,7 +4173,7 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private func episodeRow(_ episode: AppleStremioEpisode) -> some View {
+    private func episodeRow(_ episode: AppleStremioEpisode, isWatched: Bool) -> some View {
         HStack(spacing: 0) {
             Button {
                 selectedEpisodeID = episode.id
@@ -4177,6 +4188,15 @@ struct AppleCatalogItemDetailView: View {
                         }
                     }
                     .frame(width: 104, height: 64)
+                    .overlay(alignment: .bottomTrailing) {
+                        if isWatched {
+                            Image(systemName: "checkmark.circle.fill")
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.black, .white)
+                                .font(.footnote)
+                                .padding(4)
+                        }
+                    }
                     .background(.white.opacity(0.09))
                     .clipShape(.rect(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 4) {
@@ -4196,8 +4216,10 @@ struct AppleCatalogItemDetailView: View {
             .buttonStyle(AppleDetailRowButtonStyle())
             .appleHoverAffordance()
             .accessibilityLabel("Play \(episode.displayTitle)")
-            .accessibilityValue(selectedEpisodeID == episode.id ? "\(episodeNumber(episode)), selected" : episodeNumber(episode))
+            .accessibilityValue([episodeNumber(episode), isWatched ? "Watched" : nil,
+                                 selectedEpisodeID == episode.id ? "selected" : nil].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(selectedEpisodeID == episode.id ? .isSelected : [])
+            .contextMenu { watchedMenuButton(episode, isWatched: isWatched) }
             episodeDownloadButton(episode)
                 .padding(.trailing, 8)
         }
@@ -4797,6 +4819,7 @@ struct AppleCatalogItemDetailView: View {
         titlePageScheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodes)
         selectedSeason = savedEpisode(in: episodes)?.season
             ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
+            ?? upNextEpisode(in: episodes)?.season
             ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
         // Play needs an episode: fall back to the first episode of the
         // first season so the button works the moment the list arrives.
@@ -4848,7 +4871,8 @@ struct AppleCatalogItemDetailView: View {
                 markMetadataArrived()
                 fillTimeline.mark(.episodes, detail: "\(self.episodes.count)")
                 self.downloadedEpisodeIDs = []
-                self.selectedSeason = AppleStremioEpisodePolicy.initialSeason(in: self.episodes)
+                self.selectedSeason = upNextEpisode(in: self.episodes)?.season
+                    ?? AppleStremioEpisodePolicy.initialSeason(in: self.episodes)
                 self.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.selectedSeason, from: self.episodes)
                     ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodes)
                 self.isPreparingMetadata = false
@@ -5025,13 +5049,47 @@ struct AppleCatalogItemDetailView: View {
         if let saved = savedEpisode(in: loadedEpisodes.filter { $0.season == season }) { return saved.id }
         if let resumed = library.resumeEpisode(for: item, group: localGroup,
             episodes: loadedEpisodes.filter { $0.season == season }) { return resumed.id }
-        let completedIDs = Set(
-            loadedEpisodes.compactMap { episode in
-                playbackStore.progress(for: episode.id)?.isComplete == true ? episode.id : nil
+        return AppleStremioEpisodePolicy.defaultEpisode(in: season, from: loadedEpisodes,
+            completedIDs: playbackStore.completedMediaIDs(among: loadedEpisodes.map(\.id)))?.id
+    }
+
+    /// The Apple TV app's Up Next across the whole show — the season the page
+    /// opens on when nothing is part-watched.
+    private func upNextEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
+        AppleStremioEpisodePolicy.upNext(from: loaded,
+            completedIDs: playbackStore.completedMediaIDs(among: loaded.map(\.id)))
+    }
+
+    /// Mark as Watched / Mark as Unwatched on an episode (the Apple TV app's
+    /// episode menu). Marking the episode Continue Watching names as watched
+    /// also takes it off Continue Watching. Play then moves to the new Up Next.
+    private func setWatched(_ watched: Bool, episode: AppleStremioEpisode) {
+        if watched {
+            playbackStore.markWatched(mediaID: episode.id)
+            if playbackStore.progress(for: recordID)?.partID == episode.id {
+                playbackStore.clear(mediaID: recordID)
             }
-        )
-        return AppleStremioEpisodePolicy
-            .nextUnwatched(in: season, from: loadedEpisodes, completedIDs: completedIDs)?.id
+        } else {
+            playbackStore.markUnwatched(mediaID: episode.id)
+        }
+        selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes) ?? selectedEpisodeID
+    }
+
+    @ViewBuilder
+    private func watchedMenuButton(_ episode: AppleStremioEpisode, isWatched: Bool) -> some View {
+        if isWatched {
+            Button("Mark as Unwatched", systemImage: "minus.circle") { setWatched(false, episode: episode) }
+                .accessibilityIdentifier("detail.episode.markUnwatched")
+        } else {
+            Button("Mark as Watched", systemImage: "checkmark.circle") { setWatched(true, episode: episode) }
+                .accessibilityIdentifier("detail.episode.markWatched")
+        }
+    }
+
+    /// Finished episodes on the visible list, read through the feed so a
+    /// finish, mark or unmark redraws the ticks.
+    private var watchedEpisodeIDs: Set<String> {
+        ApplePlaybackProgressFeed.shared.completedMediaIDs(among: visibleEpisodes.map(\.id), in: playbackStore)
     }
 }
 
@@ -6515,7 +6573,8 @@ extension AppleCatalogItemDetailView {
             progress: playbackStore.progress(for: recordID),
             selectedEpisode: selectedEpisode,
             isPlayable: hasPlaybackRoute,
-            hasTrailer: trailerEmbedURL != nil
+            hasTrailer: trailerEmbedURL != nil,
+            namesEpisode: true
         )
     }
 
@@ -6749,6 +6808,7 @@ extension AppleCatalogItemDetailView {
 
     private var phoneEpisodeRail: some View {
         let saved = playbackStore.progress(for: recordID)
+        let watched = watchedEpisodeIDs
         let now = Date.now
         return ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -6757,7 +6817,7 @@ extension AppleCatalogItemDetailView {
                         AppleTitlePageEpisodeCard(
                             episode: episode,
                             eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
-                            isWatched: playbackStore.progress(for: episode.id)?.isComplete == true,
+                            isWatched: watched.contains(episode.id),
                             isSelected: selectedEpisodeID == episode.id,
                             progress: Self.progressFraction(saved, for: episode),
                             width: phoneCardWidth
@@ -6769,6 +6829,7 @@ extension AppleCatalogItemDetailView {
                                 .font(.body)
                                 .foregroundStyle(.white.opacity(0.8))
                         }
+                        .contextMenu { watchedMenuButton(episode, isWatched: watched.contains(episode.id)) }
                         .id(episode.id)
                     }
                 }
@@ -7322,6 +7383,7 @@ extension AppleCatalogItemDetailView {
 
     private func macEpisodeRail(style: AppleDiscoverRowStyle) -> some View {
         let saved = playbackStore.progress(for: recordID)
+        let watched = watchedEpisodeIDs
         let now = Date.now
         return AppleMacRail {
             LazyHStack(alignment: .top, spacing: style.cardGap) {
@@ -7329,7 +7391,7 @@ extension AppleCatalogItemDetailView {
                     AppleTitlePageEpisodeCard(
                         episode: episode,
                         eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
-                        isWatched: playbackStore.progress(for: episode.id)?.isComplete == true,
+                        isWatched: watched.contains(episode.id),
                         isSelected: selectedEpisodeID == episode.id,
                         progress: Self.progressFraction(saved, for: episode),
                         width: style.stillWidth
@@ -7341,6 +7403,7 @@ extension AppleCatalogItemDetailView {
                             .font(.body)
                             .foregroundStyle(.white.opacity(0.8))
                     }
+                    .contextMenu { watchedMenuButton(episode, isWatched: watched.contains(episode.id)) }
                     .id(episode.id)
                 }
             }
@@ -7422,6 +7485,22 @@ extension AppleCatalogItemDetailView {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
+    }
+}
+#endif
+
+#if DEBUG
+/// Review builds only: `-OpenStreamDebugStreamFixture YES` gives each title
+/// page a stream add-on on 127.0.0.1:8765, so a simulator with only metadata
+/// sources can photograph a playable page (Play naming its episode). It lives
+/// in the page's own source list — never in the source store, a backup or
+/// iCloud.
+enum AppleTitlePageStreamFixture {
+    static var sources: [AppleSource] {
+        guard UserDefaults.standard.bool(forKey: "OpenStreamDebugStreamFixture"),
+              let url = URL(string: "http://127.0.0.1:8765/manifest.json") else { return [] }
+        return [AppleSource(id: UUID(uuidString: "5E1F1C1E-0000-4000-8000-000000000019") ?? UUID(),
+                            kind: .stremio, name: "Fixture Streams", url: url, resources: ["stream"])]
     }
 }
 #endif

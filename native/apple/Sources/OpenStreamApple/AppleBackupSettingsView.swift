@@ -125,6 +125,7 @@ private struct AppleBackupImportView: View {
             Form {
                 Section("Merge") {
                     LabeledContent("Sources", value: file.snapshot.sources.count.formatted())
+                    LabeledContent("Watched", value: file.snapshot.watchedHistory.count.formatted())
                 }
                 Section("Replace") {
                     Text("Settings and channel selections")

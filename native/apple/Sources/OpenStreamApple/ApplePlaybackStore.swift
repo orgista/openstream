@@ -77,6 +77,17 @@ public final class ApplePlaybackStore {
     private var cache: [String: ApplePlaybackProgress]?
     private var cachedData: Data?
 
+    /// What has been finished, keyed like the progress map, valued by when.
+    /// A finished title leaves the progress map (that is how it leaves
+    /// Continue Watching), so without this nothing remembered it: no episode
+    /// ever showed its tick and "next episode" always meant the first one.
+    /// Watching a finished episode again does not take it off this list.
+    private let watchedKey = "openstream.playback.watched.v1"
+    private var watchedCache: [String: Date]?
+    private var watchedCachedData: Data?
+    /// The newest this many finished titles are kept.
+    nonisolated public static let watchedHistoryLimit = 5_000
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
@@ -86,13 +97,56 @@ public final class ApplePlaybackStore {
         return entries()[storageKey]
     }
 
-    /// The finished titles among `mediaIDs`, from one read of the store:
-    /// callers that check a whole episode list during a redraw stay O(1) reads.
+    /// The finished titles among `mediaIDs`, from one read of the watched
+    /// history: callers that check a whole episode list during a redraw stay
+    /// O(1) reads. A progress entry that is itself complete (one restored
+    /// from an older backup) counts too.
     public func completedMediaIDs(among mediaIDs: [String]) -> Set<String> {
+        let watched = watchedEntries()
         let all = entries()
         return Set(mediaIDs.filter { mediaID in
-            ApplePlaybackIdentity.storageKey(for: mediaID).flatMap { all[$0] }?.isComplete == true
+            guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
+            #if DEBUG
+            if AppleWatchedHistoryFixture.isSeeded(mediaID: mediaID, storageKey: storageKey) { return true }
+            #endif
+            return watched[storageKey] != nil || all[storageKey]?.isComplete == true
         })
+    }
+
+    public func isWatched(mediaID: String) -> Bool {
+        !completedMediaIDs(among: [mediaID]).isEmpty
+    }
+
+    /// "Mark as Watched": records `mediaID` as finished now.
+    public func markWatched(mediaID: String, at date: Date = .now) {
+        guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        var current = watchedEntries()
+        current[storageKey] = date
+        #if DEBUG
+        AppleWatchedHistoryFixture.unwatched.remove(storageKey)
+        #endif
+        persistWatched(current)
+    }
+
+    /// "Mark as Unwatched": forgets that `mediaID` was finished. A resumable
+    /// position for it, if any, stays.
+    public func markUnwatched(mediaID: String) {
+        guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        var watched = watchedEntries()
+        #if DEBUG
+        if AppleWatchedHistoryFixture.isEnabled {
+            AppleWatchedHistoryFixture.unwatched.insert(storageKey)
+            watched.removeValue(forKey: storageKey)
+            persistWatched(watched)
+            return
+        }
+        #endif
+        if watched.removeValue(forKey: storageKey) != nil { persistWatched(watched) }
+        var progress = entries()
+        if progress[storageKey]?.isComplete == true {
+            progress.removeValue(forKey: storageKey)
+            persist(progress)
+        }
     }
 
     public func progress(for url: URL) -> ApplePlaybackProgress? {
@@ -123,6 +177,16 @@ public final class ApplePlaybackStore {
         let progress = ApplePlaybackProgress(position: min(position, duration), duration: duration, partID: partID)
         if progress.isComplete {
             current.removeValue(forKey: storageKey)
+            // A series keeps its entry under the show and names the episode
+            // in `partID`; the episode is what was finished, not the show.
+            let finishedKey = partID.flatMap(ApplePlaybackIdentity.storageKey(for:)) ?? storageKey
+            var watched = watchedEntries()
+            // The last half-minute saves "complete" several times; one
+            // record per viewing is enough.
+            if watched[finishedKey].map({ progress.updatedAt.timeIntervalSince($0) > 600 }) ?? true {
+                watched[finishedKey] = progress.updatedAt
+                persistWatched(watched, notify: false)
+            }
         } else {
             current[storageKey] = progress
         }
@@ -159,10 +223,73 @@ public final class ApplePlaybackStore {
         return loaded
     }
 
+    private func watchedEntries() -> [String: Date] {
+        #if DEBUG
+        if AppleWatchedHistoryFixture.isEnabled { return AppleWatchedHistoryFixture.memory }
+        #endif
+        return storedWatchedEntries()
+    }
+
+    private func persistWatched(_ entries: [String: Date], notify: Bool = true) {
+        #if DEBUG
+        if AppleWatchedHistoryFixture.isEnabled {
+            AppleWatchedHistoryFixture.memory = Self.boundedWatchedHistory(entries)
+            if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
+            return
+        }
+        #endif
+        persistStoredWatched(entries, notify: notify)
+    }
+
+    private func storedWatchedEntries() -> [String: Date] {
+        let storedData = defaults.data(forKey: watchedKey)
+        if let watchedCache, watchedCachedData == storedData { return watchedCache }
+        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        watchedCache = decoded
+        watchedCachedData = storedData
+        return decoded
+    }
+
+    private func persistStoredWatched(_ entries: [String: Date], notify: Bool) {
+        let bounded = Self.boundedWatchedHistory(entries)
+        watchedCache = bounded
+        watchedCachedData = try? JSONEncoder().encode(bounded)
+        defaults.set(watchedCachedData, forKey: watchedKey)
+        if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
+    }
+
+    /// The newest `watchedHistoryLimit` entries; ties keep the lower key so
+    /// the trim is stable.
+    nonisolated static func boundedWatchedHistory(_ entries: [String: Date], limit: Int = watchedHistoryLimit) -> [String: Date] {
+        guard entries.count > limit else { return entries }
+        let newest = entries.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(limit)
+        return Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+    }
+
     func configurationProgress() -> [String: ApplePlaybackProgress] { entries() }
 
     func restoreConfigurationProgress(_ entries: [String: ApplePlaybackProgress]) {
         persist(entries)
+    }
+
+    /// Backups and iCloud always read and write the stored history, never a
+    /// review build's in-memory fixture.
+    func configurationWatchedHistory() -> [String: Date] { storedWatchedEntries() }
+
+    /// Merges a backup's or another device's watched history into this one:
+    /// the union, and where both know a title the later finish wins. Nothing
+    /// local is dropped, so an older backup never un-watches anything.
+    func restoreConfigurationWatchedHistory(_ incoming: [String: Date]) {
+        guard !incoming.isEmpty else { return }
+        let current = storedWatchedEntries()
+        var merged = current
+        for (key, date) in incoming {
+            guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            if let existing = merged[storageKey], existing >= date { continue }
+            merged[storageKey] = date
+        }
+        guard merged != current else { return }
+        persistStoredWatched(merged, notify: true)
     }
 
     private func persist(_ entries: [String: ApplePlaybackProgress]) {
@@ -172,3 +299,32 @@ public final class ApplePlaybackStore {
         ApplePlaybackProgressFeed.shared.storeDidChange()
     }
 }
+
+#if DEBUG
+/// Review builds only: `-OpenStreamDebugWatchedFixture 1:1,1:2` marks those
+/// season:episode numbers watched on whichever show is open, so a simulator
+/// with no history can photograph the ticks, the Up Next button and the
+/// episode menu without playing anything. While it is on, the watched
+/// history lives in memory — nothing is read from or written to the store,
+/// backups or iCloud.
+@MainActor
+enum AppleWatchedHistoryFixture {
+    static let launchKey = "OpenStreamDebugWatchedFixture"
+    static var memory: [String: Date] = [:]
+    /// Seeded episodes the viewer has since marked as unwatched.
+    static var unwatched: Set<String> = []
+
+    private static let seeds: Set<String> = Set(
+        (UserDefaults.standard.string(forKey: launchKey) ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    )
+
+    static var isEnabled: Bool { !seeds.isEmpty }
+
+    static func isSeeded(mediaID: String, storageKey: String) -> Bool {
+        guard isEnabled, !unwatched.contains(storageKey),
+              let identity = AppleStremioMetadataClient.episodeIdentity(mediaID) else { return false }
+        return seeds.contains("\(identity.season):\(identity.episode)")
+    }
+}
+#endif

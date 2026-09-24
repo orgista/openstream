@@ -108,11 +108,13 @@ private struct AppleTVDetailFocusRing: ViewModifier {
 }
 
 /// A 16:9 episode card, 400x225, with the title (Body 29) and the episode's
-/// number, date and runtime (Caption 1 25) under it.
+/// number, date and runtime (Caption 1 25) under it, and a tick on the still
+/// once watched.
 struct AppleTVEpisodeCard: View {
     let episode: AppleStremioEpisode
     let subtitle: String
     let isSelected: Bool
+    let isWatched: Bool
     let action: () -> Void
 
     var body: some View {
@@ -124,6 +126,15 @@ struct AppleTVEpisodeCard: View {
                         height: AppleTVDetailMetrics.episodeCardSize.height
                     )
                     .background(Color.white.opacity(0.09))
+                    .overlay(alignment: .bottomTrailing) {
+                        if isWatched {
+                            Image(systemName: "checkmark.circle.fill")
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.black, .white)
+                                .font(.system(size: 36))
+                                .padding(14)
+                        }
+                    }
                     .modifier(AppleTVDetailFocusRing())
                 Text(episode.title.isEmpty ? episode.displayTitle : episode.title)
                     .font(.system(size: AppleTVDetailMetrics.episodeTitleFontSize, weight: .semibold))
@@ -139,6 +150,7 @@ struct AppleTVEpisodeCard: View {
         }
         .buttonStyle(AppleTVDetailCardStyle())
         .accessibilityLabel("Play \(episode.displayTitle)")
+        .accessibilityValue(isWatched ? "Watched" : "")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

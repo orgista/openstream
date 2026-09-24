@@ -25,7 +25,8 @@ struct AppleHeroResumeTests {
     }
 
     /// The hero asks this for every episode on each redraw; one store read
-    /// must answer exactly what per-episode lookups would.
+    /// must answer exactly what per-episode lookups would. Finished episodes
+    /// leave the progress map, so the answer comes from the watched history.
     @MainActor
     @Test func completedEpisodesMatchPerEpisodeLookups() throws {
         let (store, defaults, suiteName) = try makeStore()
@@ -37,7 +38,8 @@ struct AppleHeroResumeTests {
 
         let batch = store.completedMediaIDs(among: ids)
 
-        #expect(batch == Set(ids.filter { store.progress(for: $0)?.isComplete == true }))
+        #expect(batch == ["tt1234567:1:1", "tt1234567:2:1"])
+        #expect(batch == Set(ids.filter { store.isWatched(mediaID: $0) }))
     }
 
     @MainActor
