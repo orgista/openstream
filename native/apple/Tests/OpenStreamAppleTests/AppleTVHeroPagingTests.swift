@@ -34,10 +34,20 @@ struct AppleTVHeroPagingTests {
         #expect(!AppleTVHeroPaging.stopsAreFocusable(focused: .play, pageCount: 0))
     }
 
-    @Test func theCycleHoldsWhileTheHeroHasFocusOrItsTrailerPlays() {
-        #expect(!AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false, trailerIsPlaying: false))
-        #expect(AppleTVHeroPaging.cycleIsPaused(heroHasFocus: true, trailerIsPlaying: false))
-        #expect(AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false, trailerIsPlaying: true))
+    @Test func theCycleHoldsOnlyWhileTheHeroHasFocus() {
+        #expect(!AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false))
+        #expect(AppleTVHeroPaging.cycleIsPaused(heroHasFocus: true))
+    }
+
+    @Test func anUnfocusedHeroKeepsCyclingOnItsNormalTimer() throws {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        if AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false) { cycle.pause(at: start) }
+        let due = try #require(cycle.dueDate)
+        #expect(due == start.addingTimeInterval(cycle.interval))
+        let moved = cycle.advanceIfDue(at: due)
+        #expect(moved)
+        #expect(cycle.index == 1)
     }
 
     @Test func turningWhilePausedKeepsTheCycleHeldWithAFreshTimer() throws {

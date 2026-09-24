@@ -316,7 +316,10 @@ public struct AppleTMDBClient: Sendable {
         let envelope = try await load(
             path: mediaKind == .series ? "/3/tv/\(tmdbID)" : "/3/movie/\(tmdbID)",
             queryItems: [
-                URLQueryItem(name: "append_to_response", value: "credits,videos,images"),
+                // `videos` is only ever read for trailers, which the Apple TV
+                // does not play (`AppleTitlePagePolicy.offersTrailers`).
+                URLQueryItem(name: "append_to_response",
+                             value: AppleTitlePagePolicy.offersTrailers() ? "credits,videos,images" : "credits,images"),
                 URLQueryItem(name: "include_image_language", value: "en,null"),
             ],
             configuration: configuration,

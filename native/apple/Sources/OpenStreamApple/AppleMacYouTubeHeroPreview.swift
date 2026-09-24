@@ -25,6 +25,11 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         var loadedURL: URL?
         var lastMuted = true
         var lastPlaying = true
+        /// What the loaded document was told to start with. A change that
+        /// arrives before the page has loaded is evaluated against the old
+        /// document and lost, so `ready` sends whatever differs again.
+        var documentPlaying = true
+        var documentMuted = true
         var onStateChange: ((String, Bool, Int?) -> Void)?
         weak var container: PlayerContainer?
         private var revealGeneration = 0
@@ -33,6 +38,24 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             guard message.name == "trailerState",
                   let payload = message.body as? [String: Any],
                   let state = payload["state"] as? String else { return }
+            if state == "ready" {
+                // The title page starts its trailer a moment after the view
+                // is made; without this the page stayed on `ready` with the
+                // still up (Mac trace, 2026-09-24).
+                if lastPlaying != documentPlaying {
+                    documentPlaying = lastPlaying
+                    container?.webView.evaluateJavaScript(
+                        "window.setTrailerPlaying(\(lastPlaying ? "true" : "false"));", completionHandler: nil)
+                }
+                if lastMuted != documentMuted {
+                    documentMuted = lastMuted
+                    container?.webView.evaluateJavaScript(
+                        AppleTrailerSoundBridge.javascriptCommand(isMuted: lastMuted), completionHandler: nil)
+                    appleTrace("mac hero trailer state=ready muted=\(lastMuted) error=none (re-sent)")
+                    onStateChange?(state, lastMuted, nil)
+                    return
+                }
+            }
             let muted = payload["muted"] as? Bool ?? lastMuted
             lastMuted = muted
             let errorCode = payload["errorCode"] as? Int
@@ -228,6 +251,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
 
     private func load(_ url: URL, in view: PlayerContainer, context: Context) {
         context.coordinator.loadedURL = url
+        context.coordinator.documentPlaying = isPlaying
+        context.coordinator.documentMuted = isMuted
+        appleTrace("mac hero trailer load playing=\(isPlaying) muted=\(isMuted)")
         let html = AppleYouTubePreviewHTML.document(
             embedURL: url, startsPlaying: isPlaying, isLandscape: true, startsMuted: isMuted, allowsSound: true
         )

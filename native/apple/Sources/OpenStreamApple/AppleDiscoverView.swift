@@ -2004,10 +2004,6 @@ struct AppleCatalogItemDetailView: View {
     @FocusState private var tvDetailFocus: AppleTVDetailFocus?
     /// Set once Play has held focus; see `AppleTVDetailOpeningFocus`.
     @State private var tvDetailOpeningSettled = false
-    /// Native trailer preview on Apple TV: the first playable trailer resolved
-    /// to an HLS manifest, shown over the backdrop until it ends.
-    @State private var tvTrailerSource: AppleYouTubeStreamResolver.Source?
-    @State private var tvTrailerVisible = false
     #endif
     // The item's canonical IMDB id, resolved via a meta add-on. Catalog add-ons
     // (RT, Streaming Catalogs) key items by non-IMDB ids that stream add-ons
@@ -2830,11 +2826,9 @@ struct AppleCatalogItemDetailView: View {
     /// Full-screen backdrop with the title block anchored bottom-leading at
     /// (80, bottom 60); scrolling down reveals the synopsis, Episodes and
     /// More Like This. There is no back control (Menu pops the page) and no
-    /// Download action. tvOS has no WebKit, so the trailer is a native HLS
-    /// preview (`AppleYouTubeStreamResolver` + `AppleTVTrailerPlayerView`)
-    /// that fades in over the backdrop about two seconds after the page
-    /// settles and fades out when it ends; failures stay silent. Every number
-    /// comes from `AppleTVDetailMetrics`.
+    /// Download action. The backdrop stays a still: the Apple TV plays no
+    /// trailer (`AppleTitlePagePolicy.offersTrailers`), so there is no trailer
+    /// button, rail or preview. Every number comes from `AppleTVDetailMetrics`.
     private var tvOSDetailLayout: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
@@ -2857,15 +2851,6 @@ struct AppleCatalogItemDetailView: View {
         .onChange(of: rateChoicesExpanded) { _, expanded in
             if !expanded { tvDetailFocus = .rate }
         }
-        .task(id: trailerCandidates) { await startTVTrailerPreview() }
-        .onChange(of: playerPresentation == nil) { _, closed in
-            // Never play the preview under the full-screen player.
-            if !closed { hideTVTrailerPreview() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { _ in
-            if tvTrailerVisible { hideTVTrailerPreview() }
-        }
-        .onDisappear { hideTVTrailerPreview() }
     }
 
     /// Asks for Play until it has held focus once: the first requests land
@@ -2881,55 +2866,6 @@ struct AppleCatalogItemDetailView: View {
         appleTrace("detail focus: Play never took focus on open (focus=\(String(describing: tvDetailFocus)))")
     }
 
-    private func startTVTrailerPreview() async {
-        hideTVTrailerPreview()
-        tvTrailerSource = nil
-        let candidates = trailerCandidates
-        // Six separate silent exits used to sit between here and a playing
-        // trailer, so "trailers still aren't working" could mean any of them.
-        // Each one now says so.
-        guard allowsTrailerAutoplay else {
-            appleTraceFailure("trailer \"\(item.name)\": autoplay off (setting=\(settings.autoPlayTrailer) reduceMotion=\(reduceMotion))")
-            return
-        }
-        guard !candidates.isEmpty else {
-            appleTraceFailure("trailer \"\(item.name)\": no candidates (metadata=\(metadataDetails?.trailerYouTubeKeys.count ?? -1) preview=\(previewAssets?.trailerYouTubeKeys.count ?? -1))")
-            return
-        }
-        appleTrace("trailer \"\(item.name)\": \(candidates.count) candidate(s) \(candidates.joined(separator: ","))")
-        try? await Task.sleep(for: .seconds(2))
-        guard !Task.isCancelled else { return }
-        guard let index = await resolvePlayableTrailerCandidateIndex(startingAt: 0),
-              !Task.isCancelled else {
-            appleTraceFailure("trailer \"\(item.name)\": every candidate rejected by the aspect probe (portrait=\(trailerPortraitKeys.count) landscape=\(trailerLandscapeKeys.count))")
-            return
-        }
-        let key = candidates[index]
-        do {
-            let stream = try await AppleYouTubeStreamResolver.shared.resolve(videoID: key)
-            guard !Task.isCancelled, playerPresentation == nil else {
-                appleTraceFailure("trailer \"\(item.name)\": resolved but discarded (cancelled=\(Task.isCancelled) playerOpen=\(playerPresentation != nil))")
-                return
-            }
-            guard prepareTrailerAudio() else { return }
-            let kind = if case .hls = stream.source { "hls" } else { "adaptive" }
-            appleTrace("trailer \"\(item.name)\" candidate \(index) resolved as \(kind)")
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-                tvTrailerSource = stream.source
-                tvTrailerVisible = true
-            }
-        } catch {
-            appleTraceFailure("trailer \"\(item.name)\" candidate \(index) failed: \(error)")
-        }
-    }
-
-    private func hideTVTrailerPreview() {
-        guard tvTrailerVisible else { return }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-            tvTrailerVisible = false
-        }
-    }
-
     private var tvOSHero: some View {
         ZStack(alignment: .bottomLeading) {
             heroArtwork
@@ -2939,16 +2875,6 @@ struct AppleCatalogItemDetailView: View {
                 )
                 .clipped()
                 .accessibilityHidden(true)
-            if let tvTrailerSource, tvTrailerVisible {
-                AppleTVTrailerPlayerView(source: tvTrailerSource, isMuted: trailerMuted)
-                    .frame(
-                        width: AppleTVDetailMetrics.screenSize.width,
-                        height: AppleTVDetailMetrics.screenSize.height
-                    )
-                    .clipped()
-                    .transition(.opacity)
-                    .accessibilityHidden(true)
-            }
             tvOSHeroOverlay
                 .padding(.leading, AppleTVDetailMetrics.overlayLeadingInset)
                 .padding(.bottom, AppleTVDetailMetrics.overlayBottomInset)
@@ -3364,8 +3290,11 @@ struct AppleCatalogItemDetailView: View {
             && !playbackCoordinator.phase.isBusy && playerPresentation == nil
     }
 
+    /// Never on the Apple TV, which plays no trailer — so its title page
+    /// never probes or resolves one either. Nor on the Mac, whose title page
+    /// plays a trailer only when one is chosen.
     private var allowsTrailerAutoplay: Bool {
-        #if os(visionOS) || os(tvOS)
+        #if os(visionOS)
         settings.autoPlayTrailer && !reduceMotion
         #elseif os(iOS)
         settings.autoPlayTrailer && AppleTrailerPreviewPolicy.shouldAutoplay(
@@ -3485,7 +3414,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func prepareTrailerAudio() -> Bool {
-        #if os(iOS) || os(tvOS) || os(visionOS)
+        #if os(iOS) || os(visionOS)
         ApplePlaybackSessionPolicy.prepareTrailerAudio()
         #elseif os(macOS)
         // No audio session to set up; the Mac title page's hero plays it.
@@ -7499,6 +7428,18 @@ extension AppleCatalogItemDetailView {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("detail.trailers")
+        #if DEBUG
+        // `-OpenStreamDebugPlayTrailer YES` presses the first card once the
+        // page has filled, so a headless sweep can photograph a trailer
+        // playing in the hero.
+        .task {
+            guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPlayTrailer") else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled, let key = titlePageTrailerKeys.first,
+                  let index = trailerCandidates.firstIndex(of: key) else { return }
+            playTrailerInHero(at: index)
+        }
+        #endif
     }
 
     // MARK: About and reference

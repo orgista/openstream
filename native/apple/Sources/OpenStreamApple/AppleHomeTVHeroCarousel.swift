@@ -13,9 +13,10 @@ struct AppleHomeTVHeroContext {
 /// Holds the Apple TV Discover hero's page and its cycle, as the iPhone and
 /// Mac carousels do (same `AppleHeroRotation.Cycle`), and hands the requested
 /// page to `AppleHeroPageGate`, which keeps the old page up until the new
-/// page's art is decoded. The active dot fills over the cycle; the cycle holds
-/// while the hero has focus and while its trailer plays; left past the first
-/// button and right past the last turn the page (`AppleTVHeroPaging`).
+/// page's art is decoded. The hero is backdrop art only — no trailer on the
+/// Apple TV. The active dot fills over the cycle; the cycle holds while the
+/// hero has focus; left past the first button and right past the last turn the
+/// page (`AppleTVHeroPaging`).
 ///
 /// Only the hero is involved: up to the tab bar and down to the rows are the
 /// focus engine's own moves, untouched.
@@ -25,7 +26,6 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     @ViewBuilder let page: (_ index: Int, _ wordmarkFailed: Bool, _ context: AppleHomeTVHeroContext) -> Page
 
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
-    @State private var trailerIsPlaying = false
     @FocusState private var focus: AppleTVHeroPaging.Target?
 
     var body: some View {
@@ -36,9 +36,6 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
                 focus: $focus,
                 pagingEnabled: AppleTVHeroPaging.stopsAreFocusable(focused: focus, pageCount: cycle.count)
             ))
-        }
-        .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
-            trailerIsPlaying = state.isPlaying
         }
         .onChange(of: focus) { _, target in
             guard let turn = AppleTVHeroPaging.turn(for: target) else { return }
@@ -64,7 +61,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     }
 
     private var isPaused: Bool {
-        AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil, trailerIsPlaying: trailerIsPlaying)
+        AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
     }
 
     /// A new set of pages keeps the one on screen when it is still there,

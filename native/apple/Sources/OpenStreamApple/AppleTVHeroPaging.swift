@@ -41,10 +41,11 @@ public enum AppleTVHeroPaging {
         focused != nil && pageCount > 1
     }
 
-    /// Whether the hero's cycle holds still: while anything in the hero has
-    /// focus (the person is reading it or about to press), and while its
-    /// trailer plays, so a trailer is never swapped out mid-scene.
-    public static func cycleIsPaused(heroHasFocus: Bool, trailerIsPlaying: Bool) -> Bool {
-        heroHasFocus || trailerIsPlaying
+    /// Whether the hero's cycle holds still: only while anything in the hero
+    /// has focus (the person is reading it or about to press). The Apple TV
+    /// hero is a still with no trailer (`AppleTitlePagePolicy.offersTrailers`),
+    /// so nothing else holds it.
+    public static func cycleIsPaused(heroHasFocus: Bool) -> Bool {
+        heroHasFocus
     }
 }

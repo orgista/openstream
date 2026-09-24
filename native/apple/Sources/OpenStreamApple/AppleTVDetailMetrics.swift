@@ -3,13 +3,13 @@ import Foundation
 
 /// The platform a layout decision is made for. Kept as data so tests on the
 /// Mac can assert the tvOS branch without compiling for tvOS.
-enum AppleUIPlatform: Sendable, Equatable {
+public enum AppleUIPlatform: Sendable, Equatable {
     case iOS
     case tvOS
     case visionOS
     case macOS
 
-    static var current: AppleUIPlatform {
+    public static var current: AppleUIPlatform {
         #if os(tvOS)
         .tvOS
         #elseif os(visionOS)

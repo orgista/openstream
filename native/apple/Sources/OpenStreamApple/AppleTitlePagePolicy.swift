@@ -104,15 +104,18 @@ public enum AppleTitlePagePolicy {
     /// another season never leaves the button promising the old one.
     /// `namesEpisode` makes Play say which episode it starts ("Play S1, E3"),
     /// as the Apple TV app's title page does; the heroes keep "Play".
+    /// `platform` is where the button is drawn: the Apple TV never offers a
+    /// trailer (`offersTrailers(on:)`), so there it says Play.
     public static func primaryAction(
         type: String,
         progress: ApplePlaybackProgress?,
         selectedEpisode: AppleStremioEpisode?,
         isPlayable: Bool,
         hasTrailer: Bool,
-        namesEpisode: Bool = false
+        namesEpisode: Bool = false,
+        platform: AppleUIPlatform = .current
     ) -> PrimaryAction {
-        guard isPlayable else { return hasTrailer ? .playTrailer : .play }
+        guard isPlayable else { return hasTrailer && offersTrailers(on: platform) ? .playTrailer : .play }
         let play: PrimaryAction = if namesEpisode, type == "series", let code = selectedEpisode.flatMap(episodeCode) {
             .playEpisode(code)
         } else {
@@ -124,6 +127,13 @@ public enum AppleTitlePagePolicy {
             return .resume(episode: episodeCode(selectedEpisode))
         }
         return .resume(episode: nil)
+    }
+
+    /// Whether a platform plays trailers at all. Everywhere but the Apple TV
+    /// (owner 2026-09-23: "remove trailers from Apple TV and add them to
+    /// Mac"): no trailer on its heroes or title pages, and no lookups for one.
+    public static func offersTrailers(on platform: AppleUIPlatform = .current) -> Bool {
+        platform != .tvOS
     }
 
     /// "S4, E8" — the Apple TV app's spelling. Nil without a season and number.

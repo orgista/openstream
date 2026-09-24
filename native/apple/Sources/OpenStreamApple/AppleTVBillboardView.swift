@@ -13,9 +13,10 @@ struct AppleTVBillboard<Actions: View>: View {
     /// One (or fewer) draws no indicator: there is nothing to cycle to.
     var rotationCount: Int = 0
     var rotationIndex: Int = 0
-    /// What fills the billboard's art frame. Discover passes a stage that can
-    /// swap the still for an inline trailer; Library passes nothing and gets
-    /// the still. Either way the frame, fade and copy block are the same.
+    /// What fills the billboard's art frame. Discover passes its hero stage
+    /// (the still alone: the Apple TV plays no trailer); Library passes
+    /// nothing and gets the still. Either way the frame, fade and copy block
+    /// are the same.
     var stage: AnyView? = nil
     /// Discover only (N12), after the Apple TV app: the "New Season" capsule
     /// over the title when the title's episodes earn one…

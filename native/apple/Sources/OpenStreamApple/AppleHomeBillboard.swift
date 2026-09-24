@@ -12,6 +12,8 @@ import Combine
 ///
 /// This view supplies the inline trailer stage and the shared title-page
 /// primary action, so every hero layout agrees on what its button will do.
+/// The Apple TV's stage is the still alone: it plays no trailer and looks
+/// none up (`AppleTitlePagePolicy.offersTrailers`).
 /// A stacked card lived here between 2026-09-18
 /// and 2026-09-20 and was the iPad landscape regression the owner reported: the
 /// art was capped at a flat 600 pt, the wordmark sat below it at a flat 90 pt,
@@ -108,15 +110,20 @@ struct AppleHomeBillboard<Actions: View>: View {
                                                           mediaID: mediaID)) ?? [])
                 }
             }
+            // The details and preview lookups only feed the trailer key, so
+            // the Apple TV, which plays no trailer, skips them.
+            guard AppleTitlePagePolicy.offersTrailers() else { return }
             group.addTask {
                 .details(try? await resolver.resolve(sources: sources, preferredSourceID: preferred,
                     type: item.type, mediaID: mediaID, configuration: configuration))
             }
         }
         await withTaskGroup(of: AppleHeroMetadataOutcome.self) { group in
-            group.addTask {
-                .preview(await client.previewAssets(sources: sources, preferredSourceID: preferred,
-                                                     type: item.type, mediaID: item.mediaID))
+            if AppleTitlePagePolicy.offersTrailers() {
+                group.addTask {
+                    .preview(await client.previewAssets(sources: sources, preferredSourceID: preferred,
+                                                         type: item.type, mediaID: item.mediaID))
+                }
             }
             if let canonicalID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) {
                 addLookups(to: &group, mediaID: canonicalID)
@@ -247,11 +254,13 @@ struct AppleHomeBillboard<Actions: View>: View {
                     // The Mac window resizes live; decode the still once.
                     fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil
                 )
+                #if !os(tvOS)
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
                                      trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
                                      artworkImage: phone != nil || mac != nil ? stillImage : nil,
                                      muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset })
                     .id(item.id)
+                #endif
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 appleTrace("hero stage \(item.name) \(Int(size.width))x\(Int(size.height))")
@@ -304,6 +313,7 @@ struct AppleHomeHeroPageIndicator: View {
     }
 }
 
+#if !os(tvOS)
 @MainActor
 private struct AppleHomeHeroPreview: View {
     let item: AppleCatalogItem
@@ -326,12 +336,17 @@ private struct AppleHomeHeroPreview: View {
     #if os(iOS) || os(visionOS)
     @State private var systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
     #endif
-    #if os(tvOS)
-    @State private var nativeSource: AppleYouTubeStreamResolver.Source?
+    #if os(macOS)
+    /// False while a pushed page covers Discover (`AppleMacWindowPresence`).
+    @State private var isInWindow = false
     #endif
 
     private var shouldPreview: Bool {
+        #if os(macOS)
+        let active = isVisible && isPresented && isInWindow && scenePhase == .active
+        #else
         let active = isVisible && isPresented && scenePhase == .active
+        #endif
         if trailerRequest != nil { return active }
         let autoplay = active && settings.autoPlayTrailer && !reduceMotion
         #if os(iOS) || os(visionOS)
@@ -346,6 +361,10 @@ private struct AppleHomeHeroPreview: View {
             // Holds the art frame so scroll visibility is measured even with
             // no trailer up; the still itself is drawn by `AppleHomeBillboard`.
             Color.clear
+            #if os(macOS)
+            AppleMacWindowPresence { isInWindow = $0 }
+                .accessibilityHidden(true)
+            #endif
             #if os(iOS) || os(visionOS)
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(
@@ -380,21 +399,6 @@ private struct AppleHomeHeroPreview: View {
                 // every few seconds (traced on the iPhone sim, 2026-09-22).
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()
-            }
-            #elseif os(tvOS)
-            if shouldPreview, let nativeSource {
-                AppleTVTrailerPlayerView(source: nativeSource, isMuted: isMuted, onFailure: {
-                    // The stream will not play. Drop back to the backdrop
-                    // rather than leaving a dead player over the billboard.
-                    self.nativeSource = nil
-                    isPlaying = false
-                }, onEnd: {
-                    // Back to the still, and the Discover cycle, which held
-                    // while it played, moves on. It does not start again for
-                    // this page: the preview task's id has not changed.
-                    self.nativeSource = nil
-                    isPlaying = false
-                })
             }
             #elseif os(macOS)
             if shouldPreview, let embedURL {
@@ -448,7 +452,7 @@ private struct AppleHomeHeroPreview: View {
         appleTrace("mac hero trailer start \(item.name)")
         embedURL = url
         isPlaying = true
-        #elseif os(iOS) || os(tvOS) || os(visionOS)
+        #else
         if trailerRequest == nil {
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
@@ -457,29 +461,16 @@ private struct AppleHomeHeroPreview: View {
               let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
         isMuted = trailerRequest == nil && settings.autoMuteTrailer
-        #if os(tvOS)
-        guard let stream = try? await AppleYouTubeStreamResolver.shared.resolve(videoID: key),
-              !Task.isCancelled, shouldPreview else { return }
-        guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
-        appleTrace("hero trailer start \(item.name)")
-        nativeSource = stream.source
-        // Holds the Discover cycle for as long as it plays.
-        isPlaying = true
-        #else
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
         appleTrace("hero trailer start \(item.name)")
         embedURL = url
         isPlaying = true
-        #endif
         #endif
     }
 
     private func stop() {
         isPlaying = false
         embedURL = nil
-        #if os(tvOS)
-        nativeSource = nil
-        #endif
     }
 
     private func handleState(_ state: String, muted: Bool, errorCode: Int?) {
@@ -488,3 +479,4 @@ private struct AppleHomeHeroPreview: View {
         if state == "ended" || state == "paused" { isPlaying = false }
     }
 }
+#endif
