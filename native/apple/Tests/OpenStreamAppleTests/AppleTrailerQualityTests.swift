@@ -4,7 +4,7 @@ import Testing
 
 /// The Mac hero asks for the best trailer stream it can show pixel for pixel
 /// (owner, 2026-09-24: the playing trailer looked muddy next to the Apple TV
-/// app's), and a narrow fade while the video is up.
+/// app's), and a fade that leaves the centre and right of the video alone.
 @Suite("Trailer quality and fade")
 struct AppleTrailerQualityTests {
     @Test("Highest quality no taller than the frame", arguments: [
@@ -22,15 +22,10 @@ struct AppleTrailerQualityTests {
     }
 
     @Test func videoFadeLeavesTheCentreAndRightUntouched() {
-        let leading = AppleMacHeroFade.leading(videoIsShowing: true)
-        let bottom = AppleMacHeroFade.bottom(videoIsShowing: true)
-        #expect(leading.last?.opacity == 0)
-        #expect((leading.last?.location ?? 1) <= 0.4)
-        #expect(bottom.last?.opacity == 0)
-        #expect((bottom.last?.location ?? 1) <= 0.3)
-        // Narrower than the still's fade, never darker.
-        #expect((leading.last?.location ?? 1) < (AppleMacHeroFade.leading.last?.location ?? 0))
-        #expect((leading.first?.opacity ?? 1) <= (AppleMacHeroFade.leading.first?.opacity ?? 0))
-        #expect(AppleMacHeroFade.leading(videoIsShowing: false) == AppleMacHeroFade.leading)
+        let scrim = AppleHeroScrim.wide(tone: .unknown, videoIsShowing: true, copyTrailing: 0.37)
+        #expect(scrim.leading.last?.opacity == 0)
+        #expect((scrim.leading.last?.location ?? 1) <= 0.5)
+        #expect(scrim.bottom.last?.opacity == 0)
+        #expect((scrim.bottom.last?.location ?? 1) <= 0.35)
     }
 }

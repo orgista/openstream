@@ -5919,6 +5919,30 @@ enum AppleTrailerPreviewLayout {
         return CGRect(x: (size.width - width) / 2, y: y, width: width, height: height)
     }
 
+    /// The Mac hero's trailer frame: the 16:9 player sized and centred so its
+    /// picture fills `size` exactly as the hero's still does — aspect-fill,
+    /// centre crop, no extra zoom (N30: the frame "jumped" when the video
+    /// came in 1.3× larger than the art). `pictureWindow` is the measured
+    /// picture band inside the raster; a letterboxed trailer's band is what
+    /// covers, so its mattes stay outside the hero.
+    static func coverFrame(in size: CGSize, pictureWindow: ClosedRange<CGFloat> = 0...1) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let pictureFraction = max(pictureWindow.upperBound - pictureWindow.lowerBound, 0.01)
+        let height = max(size.width * 9 / 16, size.height / pictureFraction)
+        let width = height * 16 / 9
+        let pictureCentre = height * (pictureWindow.lowerBound + pictureFraction / 2)
+        return CGRect(x: (size.width - width) / 2, y: size.height / 2 - pictureCentre, width: width, height: height)
+    }
+
+    /// The same aspect-fill rect for a still of `imageSize` — what the hero's
+    /// art occupies, for the gate to compare the two.
+    static func aspectFillFrame(of imageSize: CGSize, in size: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let scale = max(size.width / imageSize.width, size.height / imageSize.height)
+        let width = imageSize.width * scale, height = imageSize.height * scale
+        return CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)
+    }
+
     // Raster fraction (top...bottom) of the 16:9 iframe that ends up visible
     // on screen for a given hero size. Used by tests to assert a measured
     // picture band never lets its own mattes show.

@@ -110,44 +110,30 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
     public var topOverlap: CGFloat { topInset + Self.stackTopPadding }
 }
 
-/// The Mac hero's two fades, as the Figma draws them: black 85 % on the left
-/// to clear at 70 % of the width, and black 90 % at the bottom to clear at
-/// 40 % of the height (owner: "Follow the Figma" for gradients).
-/// Over bright art the scrim deepens (`AppleHeroScrim.wide`).
+/// The Mac hero's two fades, after the Apple TV app on the Mac: a gentle
+/// leading fade only as dark as the copy needs — black 58 % at the edge,
+/// clear by 48 % of the width — and a bottom fade into the page's black,
+/// with a soft shadow under the copy doing the rest (owner 2026-09-24: the
+/// left side "is still very dark"; it was 85 % to 30 % of the width).
+/// The art and the trailer draw the same pair, so nothing darkens or
+/// lightens when the video crossfades in. Over bright art the scrim
+/// deepens (`AppleHeroScrim.wide`).
 public enum AppleMacHeroFade {
     public typealias Stop = AppleHeroScrim.Stop
 
     /// Leading edge to trailing edge.
     public static let leading: [Stop] = [
-        Stop(location: 0, opacity: 0.85),
-        Stop(location: 0.3, opacity: 0.85),
-        Stop(location: 0.7, opacity: 0),
+        Stop(location: 0, opacity: 0.58),
+        Stop(location: 0.2, opacity: 0.38),
+        Stop(location: 0.48, opacity: 0),
     ]
 
-    /// Bottom edge upwards.
+    /// Bottom edge upwards: the page's black at the edge, clear by a third.
     public static let bottom: [Stop] = [
-        Stop(location: 0, opacity: 0.9),
-        Stop(location: 0.4, opacity: 0),
+        Stop(location: 0, opacity: 1),
+        Stop(location: 0.1, opacity: 0.7),
+        Stop(location: 0.34, opacity: 0),
     ]
-
-    /// While the trailer is on screen: only a narrow fade behind the copy,
-    /// so the centre and right of the picture are the video untouched, as in
-    /// the Apple TV app (owner, 2026-09-24: the playing trailer "looks
-    /// muddy"). Clear by 40 % of the width — the copy column's edge in a
-    /// 1440 pt window — and by 28 % of the height.
-    public static let videoLeading: [Stop] = [
-        Stop(location: 0, opacity: 0.7),
-        Stop(location: 0.18, opacity: 0.45),
-        Stop(location: 0.4, opacity: 0),
-    ]
-
-    public static let videoBottom: [Stop] = [
-        Stop(location: 0, opacity: 0.85),
-        Stop(location: 0.28, opacity: 0),
-    ]
-
-    public static func leading(videoIsShowing: Bool) -> [Stop] { videoIsShowing ? videoLeading : leading }
-    public static func bottom(videoIsShowing: Bool) -> [Stop] { videoIsShowing ? videoBottom : bottom }
 }
 
 /// The Mac hero's page dots, as the Figma draws them: 7 pt dots 8 pt apart,

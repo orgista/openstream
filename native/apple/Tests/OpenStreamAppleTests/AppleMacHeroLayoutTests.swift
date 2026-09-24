@@ -60,15 +60,14 @@ struct AppleMacHeroLayoutTests {
         #expect(AppleMacHeroLayout(contentWidth: 1200, windowHeight: 800, topInset: 52).topOverlap == 68)
     }
 
-    @Test("Both Figma fades are present: left 85 % to clear at 70 %, bottom 90 % to clear at 40 %")
+    @Test("Both fades are present: left 58 % to clear at 48 %, bottom from the page's black to clear at 34 %")
     func fades() throws {
         let leading = AppleMacHeroFade.leading
-        #expect(try #require(leading.first).opacity == 0.85)
-        #expect(leading.contains { $0.location == 0.3 && $0.opacity == 0.85 })
-        #expect(try #require(leading.last) == .init(location: 0.7, opacity: 0))
+        #expect(try #require(leading.first) == .init(location: 0, opacity: 0.58))
+        #expect(try #require(leading.last) == .init(location: 0.48, opacity: 0))
         let bottom = AppleMacHeroFade.bottom
-        #expect(try #require(bottom.first) == .init(location: 0, opacity: 0.9))
-        #expect(try #require(bottom.last) == .init(location: 0.4, opacity: 0))
+        #expect(try #require(bottom.first) == .init(location: 0, opacity: 1))
+        #expect(try #require(bottom.last) == .init(location: 0.34, opacity: 0))
         // Stops run in order, so the gradients draw as specified.
         #expect(leading.map(\.location) == leading.map(\.location).sorted())
         #expect(bottom.map(\.location) == bottom.map(\.location).sorted())

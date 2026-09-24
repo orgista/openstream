@@ -141,13 +141,13 @@ struct AppleHeroScrimTests {
         }
     }
 
-    @Test("Dark and unmeasured art keep exactly today's fades, with no shadow",
+    @Test("Dark and unmeasured art keep the standard fades; the wide hero's copy has its light shadow",
           arguments: [AppleHeroArtTone.dark, .unknown])
     func darkIsUnchanged(tone: AppleHeroArtTone) {
         let wide = AppleHeroScrim.wide(tone: tone, videoIsShowing: false, copyTrailing: 0.4)
         #expect(wide.leading == AppleMacHeroFade.leading)
         #expect(wide.bottom == AppleMacHeroFade.bottom)
-        #expect(wide.copyShadow == nil)
+        #expect(wide.copyShadow == AppleHeroScrim.wideCopyShadow)
         #expect(AppleHeroScrim.phone(tone: tone) == AppleHeroScrim(bottom: AppleHeroScrim.phoneBottom))
         #expect(AppleHeroScrim.tv(tone: tone, copyTrailing: 0.4) == AppleHeroScrim(bottom: AppleHeroScrim.tvBottom))
         #expect(AppleHeroScrim.featured(tone: tone, copyTrailing: 0.4)
@@ -199,13 +199,11 @@ struct AppleHeroScrimTests {
         }
     }
 
-    @Test("While a Mac trailer plays only the narrow video fade stays, whatever the still was (N27)",
+    @Test("While a Mac trailer plays the standard fade stays, whatever the still was (N27, N30)",
           arguments: [AppleHeroArtTone.bright, .dark, .unknown])
-    func videoKeepsTheNarrowFade(tone: AppleHeroArtTone) {
+    func videoKeepsTheStandardFade(tone: AppleHeroArtTone) {
         let scrim = AppleHeroScrim.wide(tone: tone, videoIsShowing: true, copyTrailing: 0.37)
-        #expect(scrim.leading == AppleMacHeroFade.videoLeading)
-        #expect(scrim.bottom == AppleMacHeroFade.videoBottom)
-        #expect(scrim.copyShadow == nil)
+        #expect(scrim == AppleHeroScrim.wide(tone: .unknown, videoIsShowing: false, copyTrailing: 0.37))
     }
 
     @Test("Every scrim's stops run in order")

@@ -6,8 +6,9 @@ import SwiftUI
 /// fade it always has. Over bright art it follows the Apple TV app: a
 /// leading-to-trailing fade sized to the copy block as well as a deeper
 /// bottom one, and a soft shadow under the wordmark and text (N20). While a
-/// trailer is on screen the still's tone no longer applies, and the Mac's
-/// narrow video fade stays as it is (N27: no muddy frame).
+/// trailer is on screen the still's tone no longer applies: the Mac and iPad
+/// hero draws its one gentle fade over art and video alike (N30), so the
+/// trailer starting never changes the darkness.
 ///
 /// Pure, so the gate can check it without a window.
 public struct AppleHeroScrim: Equatable, Sendable {
@@ -41,6 +42,10 @@ public struct AppleHeroScrim: Equatable, Sendable {
 
     /// The soft shadow the Apple TV app puts under its hero copy over bright art.
     public static let brightCopyShadow = Shadow(opacity: 0.55, radius: 12)
+    /// The lighter shadow under the Mac and iPad hero's copy over any other
+    /// art or the trailer: with the gentle fade, it is what keeps the text
+    /// readable where the picture is not dark.
+    public static let wideCopyShadow = Shadow(opacity: 0.35, radius: 8)
 
     /// A fade's opacity at `location`, as `LinearGradient` draws it: held
     /// flat before the first stop and after the last.
@@ -70,15 +75,13 @@ public struct AppleHeroScrim: Equatable, Sendable {
     /// `copyTrailing`: the copy column's trailing edge as a fraction of the
     /// hero's width.
     public static func wide(tone: AppleHeroArtTone, videoIsShowing: Bool, copyTrailing: CGFloat) -> Self {
-        if videoIsShowing {
-            return Self(leading: AppleMacHeroFade.videoLeading, bottom: AppleMacHeroFade.videoBottom)
-        }
-        guard tone.isBright else {
-            return Self(leading: AppleMacHeroFade.leading, bottom: AppleMacHeroFade.bottom)
+        guard tone.isBright, !videoIsShowing else {
+            return Self(leading: AppleMacHeroFade.leading, bottom: AppleMacHeroFade.bottom,
+                        copyShadow: wideCopyShadow)
         }
         return Self(
             leading: leadingFade(copyTrailing: copyTrailing, edge: 0.92, body: 0.9, holdsUntil: 0.3, tail: 0.4),
-            bottom: [Stop(location: 0, opacity: 0.95), Stop(location: 0.25, opacity: 0.7), Stop(location: 0.5, opacity: 0)],
+            bottom: [Stop(location: 0, opacity: 1), Stop(location: 0.25, opacity: 0.7), Stop(location: 0.5, opacity: 0)],
             copyShadow: brightCopyShadow)
     }
 

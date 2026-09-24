@@ -114,7 +114,12 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
     }
 
     private var isPaused: Bool {
-        AppleHeroRotation.cycleIsPaused(isTouching: isHovering, trailerIsPlaying: trailer.isPlaying,
+        #if DEBUG
+        // `-OpenStreamMacHeroHold YES` holds the page, so a headless shot can
+        // show one page's art and then its trailer.
+        if UserDefaults.standard.bool(forKey: "OpenStreamMacHeroHold") { return true }
+        #endif
+        return AppleHeroRotation.cycleIsPaused(isTouching: isHovering, trailerIsPlaying: trailer.isPlaying,
                                         trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested)
     }
 

@@ -6,6 +6,10 @@ import SwiftUI
 struct AppleHomeHeroTrailerStateKey: PreferenceKey {
     struct Value: Equatable {
         var isPlaying = false
+        /// The video has crossfaded in over the art (it plays behind the
+        /// still for a few seconds first). What the scrims follow, so their
+        /// change runs with the crossfade and never while the art is up.
+        var isOnScreen = false
         var isMuted = true
         /// Started by the Play Trailer button rather than autoplay.
         var isRequested = false

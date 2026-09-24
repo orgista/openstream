@@ -41,6 +41,10 @@ public enum AppleMacWindowShot {
         /// first (`….after.png`). How the Mac player's Esc and ⌘W are proven
         /// without driving the screen.
         public var thenKey: String? = nil
+        /// `-OpenStreamWindowShotAgainAfter <seconds>`: a second shot that
+        /// much later in the same launch (`….later.png`), untouched — how
+        /// the hero's art and then its trailer are shown on the same page.
+        public var againAfter: TimeInterval? = nil
     }
 
     /// `-OpenStreamWindowShot <name.png> [-OpenStreamWindowShotSize 1280x860]
@@ -58,11 +62,13 @@ public enum AppleMacWindowShot {
             let destination = URL(fileURLWithPath: path)
             return Request(filename: destination.lastPathComponent, size: size, delay: delay ?? 12,
                            destination: destination,
-                           thenKey: value(of: "-OpenStreamWindowShotThenKey", in: arguments))
+                           thenKey: value(of: "-OpenStreamWindowShotThenKey", in: arguments),
+                           againAfter: value(of: "-OpenStreamWindowShotAgainAfter", in: arguments).flatMap(Double.init))
         }
         guard let name = value(of: "-OpenStreamWindowShot", in: arguments),
               !name.isEmpty, !name.contains("/") else { return nil }
-        return Request(filename: name, size: size, delay: delay ?? 11)
+        return Request(filename: name, size: size, delay: delay ?? 11,
+                       againAfter: value(of: "-OpenStreamWindowShotAgainAfter", in: arguments).flatMap(Double.init))
     }
 
     private static func value(of flag: String, in arguments: [String]) -> String? {
@@ -156,6 +162,20 @@ public enum AppleMacWindowShot {
             return
         }
         lines.append(contentsOf: menuDump())
+        if let againAfter = request.againAfter {
+            try? await Task.sleep(for: .seconds(againAfter))
+            let later = url.deletingPathExtension().appendingPathExtension("later.png")
+            let (laterStandIns, laterWebLines) = await standInsForWebViews(in: frameView)
+            lines.append(contentsOf: laterWebLines)
+            if let laterRep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) {
+                frameView.cacheDisplay(in: frameView.bounds, to: laterRep)
+                if let data = laterRep.representation(using: .png, properties: [:]),
+                   (try? data.write(to: later, options: .atomic)) != nil {
+                    lines.append("OPENSTREAM-SHOT later path: \(later.path)")
+                }
+            }
+            laterStandIns.forEach { $0.removeFromSuperview() }
+        }
         if let thenKeys = request.thenKey {
             // Comma-separated: every key but the last is pressed and reported;
             // the last one is followed by the second shot.

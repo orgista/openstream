@@ -209,6 +209,21 @@ public enum AppleTitlePagePolicy {
         case none, pending, available
     }
 
+    /// How long a hero holds its button back for the trailer lookups. Past
+    /// it, a title with nothing to play and no trailer found yet says
+    /// Details (N30: a hero whose lookups never answered showed only the
+    /// My List "+"); a trailer that turns up later still makes it Play Trailer.
+    public static let heroTrailerLookupPatience: Duration = .seconds(4)
+
+    /// Where the hero's trailer lookup stands. `lookupsAnswered`: every
+    /// lookup that can find a trailer has answered; `patienceElapsed`: the
+    /// hero has waited `heroTrailerLookupPatience` for them.
+    public static func trailerAvailability(hasTrailer: Bool, lookupsAnswered: Bool,
+                                           patienceElapsed: Bool) -> TrailerAvailability {
+        if hasTrailer { return .available }
+        return lookupsAnswered || patienceElapsed ? .none : .pending
+    }
+
     /// The hero's one button (every Discover hero). Never a disabled Play:
     /// nothing to play and no trailer is Details, and while the trailer
     /// lookup that decides between the two is still out the answer is nil —

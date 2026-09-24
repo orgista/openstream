@@ -107,7 +107,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 .frame(height: artHeight)
                 .clipped()
                 .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
-                    videoIsShowing = state.isPlaying
+                    videoIsShowing = state.isOnScreen
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { artWidth = $0 }
                 .overlay {

@@ -47,6 +47,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var episodes: [AppleStremioEpisode] = []
     /// Every lookup that can find a trailer has answered.
     @State private var actionMetadataLoaded = false
+    /// The hero has waited long enough for them (`heroTrailerLookupPatience`).
+    @State private var trailerLookupPatienceElapsed = false
     /// A trailer's video — pressed or autoplaying — is on screen; a press
     /// would only cut it back to the art and restart it. A press while one
     /// is still loading behind the art starts the load again, so a stalled
@@ -80,7 +82,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         #if os(tvOS)
         .none
         #else
-        trailerKey != nil ? .available : (actionMetadataLoaded ? .none : .pending)
+        AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
+                                                 patienceElapsed: trailerLookupPatienceElapsed)
         #endif
     }
 
@@ -225,6 +228,12 @@ struct AppleHomeBillboard<Actions: View>: View {
         heroBody
             .appleMeasuresHeroArt(loadedStill) { artMeasurement = $0 }
             .task(id: "\(item.id):\(catalogConfigurationIdentity(sources))") { await loadActionMetadata() }
+            .task(id: item.id) {
+                trailerLookupPatienceElapsed = false
+                try? await Task.sleep(for: AppleTitlePagePolicy.heroTrailerLookupPatience)
+                guard !Task.isCancelled else { return }
+                trailerLookupPatienceElapsed = true
+            }
             // A pressed trailer holds the hero's page while it loads behind
             // the art; one that never plays lets go after 30 s, silently, and
             // the art simply stays (art-first, owner 2026-09-24).
@@ -234,6 +243,18 @@ struct AppleHomeBillboard<Actions: View>: View {
                 guard !Task.isCancelled, !trailerIsOnScreen else { return }
                 trailerRequest = nil
             }
+            #if DEBUG
+            // `-OpenStreamDebugPlayTrailer YES` presses Play Trailer once the
+            // hero's lookups have found one, as on the title page, so a
+            // headless shot can show the art and then the trailer.
+            .task(id: "\(item.id):\(primaryAction == .playTrailer)") {
+                guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPlayTrailer"),
+                      primaryAction == .playTrailer else { return }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled, primaryAction == .playTrailer, trailerRequest == nil else { return }
+                performPrimaryAction()
+            }
+            #endif
             .task(id: "\(progressID):\(selectedEpisode?.id ?? "")") {
                 let offlineID = selectedEpisode.map { "\(progressID):\($0.id)" } ?? progressID
                 await downloadCoordinator.loadExisting(mediaID: offlineID, itemTitle: item.name)
@@ -508,7 +529,8 @@ private struct AppleHomeHeroPreview: View {
         .onDisappear { isPresented = false; stop() }
         .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0 }
         .preference(key: AppleHomeHeroTrailerStateKey.self,
-                    value: .init(isPlaying: shouldPreview && isPlaying, isMuted: isMuted,
+                    value: .init(isPlaying: shouldPreview && isPlaying,
+                                 isOnScreen: shouldPreview && isPlaying && isRevealed, isMuted: isMuted,
                                  isRequested: trailerRequest != nil))
         .onChange(of: settings.autoMuteTrailer) { _, muted in isMuted = muted }
         #if os(iOS) || os(visionOS)
@@ -538,7 +560,7 @@ private struct AppleHomeHeroPreview: View {
         // measured on the 16:9 player the video is drawn at (it overhangs
         // the hero and is cropped), in device pixels.
         let frame = artFrameSize ?? CGSize(width: 0, height: AppleMacHeroLayout.minimumHeight)
-        let pixelHeight = Double(AppleTrailerPreviewLayout.playerFrame(in: frame, isLandscape: true).height)
+        let pixelHeight = Double(AppleTrailerPreviewLayout.coverFrame(in: frame).height)
             * Double(displayScale)
         let quality = AppleTrailerPreviewPolicy.quality(forPixelHeight: pixelHeight)
         guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality) else { return }

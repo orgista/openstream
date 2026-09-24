@@ -4,7 +4,7 @@ import SwiftUI
 /// Discover's hero on the Mac, after the Apple TV app on the Mac and the Figma
 /// "MacOS-OpenStream" frame (owner 2026-09-23): the art or trailer edge to edge
 /// across the content from the top of the Discover area, under the toolbar
-/// (`AppleMacHeroLayout`); the Figma's two fades; and bottom-left in a 480 pt
+/// (`AppleMacHeroLayout`); the gentle fades (`AppleMacHeroFade`); and bottom-left in a 480 pt
 /// column the wordmark (or the name in black weight), "TV Show · Comedy" with
 /// the rating, the synopsis when there is room, and Resume/Play with a round
 /// My List button. The carousel draws the page dots over it.
@@ -21,11 +21,12 @@ struct AppleHomeMacHero<Actions: View>: View {
     var artLuminance: AppleHeroLuminanceMap? = nil
     let onOpenDetails: () -> Void
     @ViewBuilder var actions: Actions
-    /// The trailer is up over the still: the fade narrows to the copy.
+    /// The trailer has crossfaded in over the still: a bright still's tone
+    /// no longer applies.
     @State private var videoIsShowing = false
 
     /// Bright art under the copy deepens the fades and shadows the copy; a
-    /// trailer on screen is not the still, so it keeps the narrow video fade.
+    /// trailer on screen is not the still, so it draws the default fade.
     private var scrim: AppleHeroScrim {
         let region = AppleHeroCopyRegion.wide(layout)
         let frame = CGSize(width: layout.contentWidth, height: layout.height)
@@ -40,11 +41,13 @@ struct AppleHomeMacHero<Actions: View>: View {
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()
                 .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
-                    videoIsShowing = state.isPlaying
+                    videoIsShowing = state.isOnScreen
                 }
                 .overlay {
+                    // Over the art-to-video crossfade's own 0.6 s, so a
+                    // bright still's deeper fade lifts with it, not before.
                     AppleHeroScrimView(scrim: scrim)
-                        .animation(.easeInOut(duration: 0.6), value: scrim)
+                        .animation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration), value: scrim)
                 }
             copy
                 .frame(maxWidth: AppleMacHeroLayout.copyMaxWidth, alignment: .leading)
@@ -211,8 +214,8 @@ struct AppleHomeMacHeroPreload: View {
 }
 
 #if os(macOS)
-/// The Figma's two fades over the Mac hero's art (`AppleMacHeroFade`), and
-/// the narrower pair while a trailer plays.
+/// The Mac hero's two fades (`AppleMacHeroFade`), the same over the art and
+/// the trailer.
 struct AppleMacHeroFadeView: View {
     var videoIsShowing = false
 

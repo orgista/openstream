@@ -9,9 +9,12 @@ import WebKit
 /// once the video has frames — so the hero shows its art, never a black
 /// iframe, until the trailer is really playing.
 ///
-/// The web view is laid out over the frame it is offered and cropped to it
-/// (`AppleTrailerPreviewLayout`), and reports only that frame to SwiftUI: a
-/// window resize moves it in place and never reloads the page.
+/// The web view is laid out to cover the frame it is offered exactly as the
+/// still does — aspect-fill, centre crop (`AppleTrailerPreviewLayout.coverFrame`)
+/// — sized to the trailer's measured picture before the cover fades, and
+/// never re-sized while the video is on screen, so the picture keeps the
+/// art's frame (N30). It reports only that frame to SwiftUI: a window
+/// resize moves it in place and never reloads the page.
 @MainActor
 struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
     let url: URL
@@ -63,7 +66,10 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             appleTrace("mac hero trailer state=\(state) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             switch state {
             case "revealed":
-                reveal()
+                // Said once the cover starts to fade, so the hero's fade and
+                // mute button change with the crossfade, not before it.
+                reveal { [weak self] in self?.onStateChange?(state, muted, errorCode) }
+                return
             case "ended":
                 // The page pauses only once the art has crossfaded back up,
                 // so the fade runs over live frames.
@@ -96,18 +102,23 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         }
 
         /// Measures the picture band first, so a letterboxed trailer is
-        /// cropped to its picture before the cover fades.
-        private func reveal() {
+        /// cropped to its picture before the cover fades. A frame that
+        /// measures as nothing (a fade-in, a title card) is looked at again
+        /// a second later, up to three times, with the art still up; the
+        /// geometry is settled before the video is seen and never changes
+        /// under it.
+        private func reveal(then revealed: @escaping () -> Void) {
             guard let container else { return }
             revealGeneration += 1
             let generation = revealGeneration
             measure(container, generation: generation, remaining: 3) { container in
                 container.setPreviewVisible(true)
+                revealed()
             }
         }
 
         private func measure(_ container: PlayerContainer, generation: Int, remaining: Int,
-                             then: ((PlayerContainer) -> Void)? = nil) {
+                             then: @escaping (PlayerContainer) -> Void) {
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = false
             configuration.snapshotWidth = NSNumber(value: 256)
@@ -119,13 +130,15 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
                     container.pictureWindow = window
                     container.hasMeasuredPicture = true
                 }
-                then?(container)
-                // A fade-in or a title card measures as nothing; look again
-                // while it plays so a wide trailer settles into its band.
-                guard !container.hasMeasuredPicture, remaining > 0 else { return }
+                guard !container.hasMeasuredPicture, remaining > 0 else {
+                    // Laid out at the measured band before the cover fades.
+                    container.layoutSubtreeIfNeeded()
+                    then(container)
+                    return
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak container] in
-                    guard let self, let container else { return }
-                    self.measure(container, generation: generation, remaining: remaining - 1)
+                    guard let self, let container, self.revealGeneration == generation else { return }
+                    self.measure(container, generation: generation, remaining: remaining - 1, then: then)
                 }
             }
         }
@@ -168,9 +181,7 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            webView.frame = AppleTrailerPreviewLayout.playerFrame(
-                in: bounds.size, isLandscape: true, pictureWindow: pictureWindow
-            )
+            webView.frame = AppleTrailerPreviewLayout.coverFrame(in: bounds.size, pictureWindow: pictureWindow)
             cover.frame = bounds
         }
 
