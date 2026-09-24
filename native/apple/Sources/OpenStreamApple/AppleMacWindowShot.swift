@@ -1,5 +1,6 @@
 #if DEBUG && os(macOS)
 import AppKit
+import AVKit
 
 /// Renders the app's own window to a PNG, and dumps the menu bar, on request
 /// from a launch argument.
@@ -33,6 +34,12 @@ public enum AppleMacWindowShot {
         /// Set by `-OpenStreamSnapshotWindow`: an absolute path to write the
         /// PNG to instead, for an unsandboxed debug build a script launched.
         public var destination: URL? = nil
+        /// `-OpenStreamWindowShotThenKey escape|commandW|space|zoomFlag[,…]`:
+        /// after the shot, post those keys to the window through the app's own
+        /// event queue, reporting each, and take a second shot beside the
+        /// first (`….after.png`). How the Mac player's Esc and ⌘W are proven
+        /// without driving the screen.
+        public var thenKey: String? = nil
     }
 
     /// `-OpenStreamWindowShot <name.png> [-OpenStreamWindowShotSize 1280x860]
@@ -49,7 +56,8 @@ public enum AppleMacWindowShot {
            path.hasPrefix("/"), path.lowercased().hasSuffix(".png") {
             let destination = URL(fileURLWithPath: path)
             return Request(filename: destination.lastPathComponent, size: size, delay: delay ?? 12,
-                           destination: destination)
+                           destination: destination,
+                           thenKey: value(of: "-OpenStreamWindowShotThenKey", in: arguments))
         }
         guard let name = value(of: "-OpenStreamWindowShot", in: arguments),
               !name.isEmpty, !name.contains("/") else { return nil }
@@ -102,6 +110,7 @@ public enum AppleMacWindowShot {
         lines.append("OPENSTREAM-SHOT window: \(window.className) frame=\(NSStringFromRect(window.frame))")
         lines.append("OPENSTREAM-SHOT styleMask resizable=\(window.styleMask.contains(.resizable)) fullScreenPrimary=\(window.collectionBehavior.contains(.fullScreenPrimary))")
         lines.append("OPENSTREAM-SHOT subviews: \(window.contentView?.subviews.count ?? -1)")
+        lines.append(titlebarState(window))
 
         // A sheet is its own `NSWindow`, so a player or an importer presented
         // over the main window is not in the main window's layer tree at all —
@@ -140,8 +149,109 @@ public enum AppleMacWindowShot {
             return
         }
         lines.append(contentsOf: menuDump())
+        if let thenKeys = request.thenKey {
+            // Comma-separated: every key but the last is pressed and reported;
+            // the last one is followed by the second shot.
+            let keys = thenKeys.split(separator: ",").map(String.init)
+            for key in keys.dropLast() {
+                lines.append(contentsOf: await press(key, in: window))
+            }
+            if let last = keys.last {
+                lines.append(contentsOf: await pressThenCapture(last, in: window, besides: url))
+            }
+        }
         lines.append("OPENSTREAM-SHOT verdict: PASS")
         emit(lines)
+    }
+
+    /// What the title bar is doing: whether the toolbar is up and the
+    /// traffic lights are there to click.
+    @MainActor
+    private static func titlebarState(_ window: NSWindow) -> String {
+        let close = window.standardWindowButton(.closeButton)
+        return "OPENSTREAM-SHOT titlebar: titled=\(window.styleMask.contains(.titled)) "
+            + "fullSizeContent=\(window.styleMask.contains(.fullSizeContentView)) "
+            + "toolbarVisible=\(window.toolbar?.isVisible.description ?? "none") "
+            + "closeButton=\(close == nil ? "none" : "hidden=\(close!.isHidden) alpha=\(close!.alphaValue) inWindow=\(close!.window != nil)") "
+            + "titlebarAppearsTransparent=\(window.titlebarAppearsTransparent)"
+            + chain(from: close)
+    }
+
+    @MainActor
+    private static func chain(from view: NSView?) -> String {
+        var parts: [String] = []
+        var current = view?.superview
+        while let view = current {
+            parts.append("\(type(of: view))(hidden=\(view.isHidden) alpha=\(view.alphaValue) layerOpacity=\(view.layer?.opacity ?? -1))")
+            current = view.superview
+        }
+        return " chain=" + parts.joined(separator: " < ")
+    }
+
+    /// Posts `key` to `window` as a real key-down event — it goes through
+    /// `sendEvent`, the local monitors and the menu bar exactly as a key press
+    /// does — then renders the window again.
+    @MainActor
+    private static func press(_ key: String, in window: NSWindow) async -> [String] {
+        // A key equivalent posted to an app in the background never reaches
+        // the menu bar, and bringing it forward would take the owner's focus.
+        // `zoomFlag` flips what View ▸ Zoom to Fill flips, directly.
+        if key == "zoomFlag" {
+            AppleMacCommandCenter.shared.zoomToFill.toggle()
+            try? await Task.sleep(for: .seconds(1))
+            return [report(key, in: window)]
+        }
+        let (characters, keyCode, modifiers): (String, UInt16, NSEvent.ModifierFlags) = switch key {
+        case "commandW": ("w", 13, .command)
+        case "space": (" ", 49, [])
+        default: ("\u{1b}", 53, [])
+        }
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil,
+                                           characters: characters, charactersIgnoringModifiers: characters,
+                                           isARepeat: false, keyCode: keyCode) else {
+            return ["OPENSTREAM-SHOT press: could not make the \(key) event"]
+        }
+        NSApp.postEvent(event, atStart: false)
+        try? await Task.sleep(for: .seconds(2))
+        return [report(key, in: window)]
+    }
+
+    @MainActor
+    private static func report(_ key: String, in window: NSWindow) -> String {
+        let gravity = playerViews(in: window.contentView).map(\.videoGravity.rawValue)
+        let rates = playerViews(in: window.contentView).map {
+            "\($0.player?.rate ?? -1)@\(Int($0.player?.currentTime().seconds ?? -1))s"
+        }
+        let centre = AppleMacCommandCenter.shared
+        return "OPENSTREAM-SHOT pressed \(key): zoomToFill=\(centre.zoomToFill) playerGravity=\(gravity) "
+            + "rate=\(rates) canControlPlayback=\(centre.canControlPlayback) onStage=\(centre.isPlayerOnStage) "
+            + "firstResponder=\(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")"
+    }
+
+    @MainActor
+    private static func playerViews(in view: NSView?) -> [AVPlayerView] {
+        guard let view else { return [] }
+        if let player = view as? AVPlayerView { return [player] }
+        return view.subviews.flatMap { playerViews(in: $0) }
+    }
+
+    @MainActor
+    private static func pressThenCapture(_ key: String, in window: NSWindow, besides url: URL) async -> [String] {
+        let pressed = await press(key, in: window)
+        var lines = pressed + ["OPENSTREAM-SHOT after \(key): window visible=\(window.isVisible) windows=\(NSApp.windows.filter(\.isVisible).count)",
+                     titlebarState(window)]
+        guard let frameView = window.contentView?.superview,
+              let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else {
+            return lines + ["OPENSTREAM-SHOT after: could not make a bitmap rep"]
+        }
+        frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        let after = url.deletingPathExtension().appendingPathExtension("after.png")
+        if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: after, options: .atomic)) != nil {
+            lines.append("OPENSTREAM-SHOT after path: \(after.path)")
+        }
+        return lines
     }
 
     /// A popover (the title page's season list) is a window of its own over

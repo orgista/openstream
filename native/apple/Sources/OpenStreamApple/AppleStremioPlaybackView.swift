@@ -58,6 +58,13 @@ struct AppleStremioPlayerView: View {
     #if os(visionOS)
     @Environment(\.dismissWindow) private var dismissWindow
     #endif
+    #if os(macOS)
+    /// The window's player stage; nil only in a window that has none.
+    @Environment(AppleMacPlayerStage.self) private var macStage: AppleMacPlayerStage?
+    @State private var macCloseVisible = true
+    @State private var macPointerActivity = 0
+    private let macCommands = AppleMacCommandCenter.shared
+    #endif
     #if os(visionOS)
     @State private var visionHost: ApplePlayerHost?
     #else
@@ -89,8 +96,10 @@ struct AppleStremioPlayerView: View {
     private let sourceOptionsLoader: (() async throws -> ApplePlaybackSourceOptions)?
     private let securityScopedURL: URL?
     private let nextEpisode: AppleNextEpisodeContext?
+    private let presentationID: UUID
 
     init(presentation: AppleStremioPlayerPresentation) {
+        presentationID = presentation.id
         nextEpisode = presentation.nextEpisode
         sourceID = presentation.sourceID ?? presentation.request.url
         sourceOptionsLoader = presentation.sourceOptionsLoader
@@ -131,12 +140,37 @@ struct AppleStremioPlayerView: View {
                 AppleTransportOverlay(coordinator: coordinator, request: request,
                     otherSources: { showsOtherSources = true }, onClose: closeFromRemote,
                     nextEpisode: nextEpisode)
+                #elseif os(macOS)
+                // Its top bar keeps to the safe area, under the traffic lights.
+                AppleTransportOverlay(coordinator: coordinator, request: request,
+                    otherSources: { showsOtherSources = true }, onClose: closePlayer,
+                    nextEpisode: nextEpisode)
                 #else
                 AppleTransportOverlay(coordinator: coordinator, request: request,
                     otherSources: { showsOtherSources = true }, nextEpisode: nextEpisode)
                 #endif
             }
         }
+        #if os(macOS)
+        .overlay(alignment: .topLeading) {
+            if coordinator.route == .avPlayer, macCloseVisible {
+                AppleMacPlayerCloseButton(action: closePlayer)
+                    .transition(.opacity)
+            }
+        }
+        .onContinuousHover { phase in
+            if case .active = phase { macPointerActivity &+= 1 }
+        }
+        // AVKit's floating controls hide on their own when the pointer
+        // rests; the close button goes with them.
+        .task(id: "\(macPointerActivity):\(coordinator.phase)") {
+            withAnimation(.easeOut(duration: 0.2)) { macCloseVisible = true }
+            guard case .playing = coordinator.phase else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { macCloseVisible = false }
+        }
+        #endif
         #if os(tvOS)
         // Task 9: black with a centred spinner and nothing else until the
         // engine reports a route. After that the stock player and the surface
@@ -248,7 +282,7 @@ struct AppleStremioPlayerView: View {
             visionHost?.attachRemoteCommands(title: request.title, isLive: request.isLive)
             #else
             host.activate()
-            #if os(iOS)
+            #if os(iOS) || os(macOS)
             host.enableSubtitleSelectionMirroring()
             #endif
             // The AirPods stem, Control Centre and the lock screen. Bound here
@@ -326,6 +360,8 @@ struct AppleStremioPlayerView: View {
     private func closePlayer() {
         #if os(visionOS)
         dismissWindow(id: AppleVisionPlaybackWindow.sceneID)
+        #elseif os(macOS)
+        if let macStage { macStage.dismiss(id: presentationID) } else { dismiss() }
         #else
         dismiss()
         #endif
@@ -460,7 +496,19 @@ struct AppleStremioPlayerView: View {
     @ViewBuilder
     private var platformPlayer: some View {
         #if os(macOS)
-        AppleStremioMacPlayerRepresentable(playerView: host.playerView)
+        AppleMacPlayerViewRepresentable(
+            playerView: host.playerView,
+            zoomToFill: macCommands.zoomToFill,
+            takesKeyboardFocus: true,
+            subtitleEntries: stockSubtitles.menuEntries,
+            showsSubtitleMenu: AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: coordinator.engine.subtitleTracks),
+            onSelectSubtitle: { id in
+                // Through the host, so AVKit's CC menu and this one agree.
+                host.selectSubtitleTrack(id: id)
+                stockSubtitles.refresh(from: coordinator.engine)
+            },
+            onOtherSources: { showsOtherSources = true }
+        )
         #elseif os(visionOS)
         if let visionHost {
             AppleStremioPlayerControllerRepresentable(viewController: visionHost.viewController)
@@ -485,11 +533,27 @@ struct AppleStremioPlayerView: View {
 }
 
 #if os(macOS)
-private struct AppleStremioMacPlayerRepresentable: NSViewRepresentable {
-    let playerView: AVPlayerView
+/// The Mac player's way out on the AVKit route, whose floating controls have
+/// none: the transport overlay's close button, below the traffic lights.
+private struct AppleMacPlayerCloseButton: View {
+    let action: () -> Void
 
-    func makeNSView(context: Context) -> AVPlayerView { playerView }
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {}
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
+                .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .appleHoverAffordance()
+        .padding()
+        .accessibilityLabel("Close player")
+        .accessibilityIdentifier("player.close")
+    }
 }
 #else
 private struct AppleStremioPlayerControllerRepresentable: UIViewControllerRepresentable {

@@ -50,6 +50,10 @@ struct AppleLiveTVView: View {
     @State private var channelHealthRevision = 0
     @State private var snapshotRevision = 0
     @State private var healthDetailChannel: AppleIPTVChannel?
+    #if os(macOS)
+    /// The channel in the window's full player, while it is up.
+    @State private var fullWindowPlayer: AppleStremioPlayerPresentation?
+    #endif
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var viewportSize: CGSize = .zero
@@ -126,7 +130,8 @@ struct AppleLiveTVView: View {
                                 liveChannel: selectedChannel,
                                 channels: channelSnapshot.channels,
                                 guide: guideStore.guide(for: channelSnapshot.channelIDs),
-                                onSwitchChannel: { startChannel($0, shareSelection: true, present: false) }
+                                onSwitchChannel: { startChannel($0, shareSelection: true, present: false) },
+                                onRequestFullWindow: fullWindowAction
                             )
                             .id(ObjectIdentifier(playbackCoordinator))
                             
@@ -291,6 +296,14 @@ struct AppleLiveTVView: View {
                 .presentationDetents([.medium, .large])
                 #endif
         }
+        #if os(macOS)
+        .modifier(AppleStremioPlayerPresentationModifier(presentation: $fullWindowPlayer))
+        .onChange(of: fullWindowPlayer == nil) { _, closed in
+            // Back from the full player: the pinned player picks the channel
+            // up again (live, so there is no position to lose).
+            if closed { playbackRevision &+= 1 }
+        }
+        #endif
         .task(id: "shareplay:\(sharePlay.revision):\(channelsRevision)") {
             resolveSharedChannel()
         }
@@ -324,6 +337,21 @@ struct AppleLiveTVView: View {
         // The full-screen player owns the failure alert (Retry/Close). A second
         // alert here, bound to the same coordinator phase, collided with the
         // fullScreenCover and dismissed the player silently (2026-09-03).
+    }
+
+    /// macOS: hands the channel to the window's full player and stops the
+    /// pinned one, so one stream plays at a time. Nil elsewhere: iOS and
+    /// visionOS present their own full-screen container.
+    private var fullWindowAction: (() -> Void)? {
+        #if os(macOS)
+        return {
+            guard let channel = selectedChannel else { return }
+            playbackCoordinator.stop()
+            fullWindowPlayer = AppleStremioPlayerPresentation(request: channel.playbackRequest(), settings: settings)
+        }
+        #else
+        return nil
+        #endif
     }
 
     private var reloadIdentity: String {
@@ -869,8 +897,17 @@ struct AppleLiveInlinePlayer: View {
     let channels: [AppleIPTVChannel]
     let guide: AppleIPTVGuide
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
+    /// macOS: the channel goes to the window's full player
+    /// (`AppleMacPlayerStage`), the same one every other title plays in.
+    let onRequestFullWindow: (() -> Void)?
+    #if os(macOS)
+    @State private var fullWindowButtonVisible = true
+    @State private var pointerActivity = 0
+    private let macCommands = AppleMacCommandCenter.shared
+    #endif
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil) {
+        self.onRequestFullWindow = onRequestFullWindow
         self.request = request
         self.coordinator = coordinator
         self.playbackRevision = playbackRevision
@@ -894,19 +931,32 @@ struct AppleLiveInlinePlayer: View {
         ZStack {
             #if os(macOS)
             if coordinator.route == .surface {
-                if !isFullScreen { ApplePlaybackSurfaceView(engine: coordinator.engine) }
+                ApplePlaybackSurfaceView(engine: coordinator.engine)
+                // Its full-screen button used to hide the surface and show
+                // nothing in its place: a black pane. It opens the full player.
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    onRequestFullScreen: {
-                        lifetime.isFullScreen = true
-                        isFullScreen = true
-                    }, sharePlayMenu: sharePlayMenu)
+                    onRequestFullScreen: onRequestFullWindow, sharePlayMenu: sharePlayMenu)
             } else {
-                AppleLiveMacPlayerRepresentable(playerView: host.playerView,
-                    engine: coordinator.engine, subtitles: inlineSubtitles,
-                    entries: inlineSubtitles.menuEntries)
+                AppleMacPlayerViewRepresentable(
+                    playerView: host.playerView,
+                    zoomToFill: macCommands.zoomToFill,
+                    showsAVKitFullScreenButton: onRequestFullWindow == nil,
+                    subtitleEntries: inlineSubtitles.menuEntries,
+                    showsSubtitleMenu: AppleMacSubtitleMenuPolicy.showsAppMenu(
+                        tracks: coordinator.engine.subtitleTracks),
+                    onSelectSubtitle: { id in
+                        host.selectSubtitleTrack(id: id)
+                        inlineSubtitles.refresh(from: coordinator.engine)
+                    }
+                )
                 if AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(
                     engine: coordinator.engine.kind, route: coordinator.route) {
                     AppleLiveInlineCueLayer(engine: coordinator.engine, subtitles: inlineSubtitles)
+                }
+                if let onRequestFullWindow, fullWindowButtonVisible {
+                    AppleLiveFullWindowButton(action: onRequestFullWindow)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .transition(.opacity)
                 }
             }
             #else
@@ -934,6 +984,18 @@ struct AppleLiveInlinePlayer: View {
             }
         }
         .background(.black)
+        #if os(macOS)
+        .onContinuousHover { phase in
+            if case .active = phase { pointerActivity &+= 1 }
+        }
+        .task(id: "\(pointerActivity):\(coordinator.phase)") {
+            withAnimation(.easeOut(duration: 0.2)) { fullWindowButtonVisible = true }
+            guard case .playing = coordinator.phase else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { fullWindowButtonVisible = false }
+        }
+        #endif
         .onChange(of: isFullScreen) { _, isFullScreen in
             #if !os(macOS)
             host.viewController.requiresLinearPlayback = !isFullScreen
@@ -960,6 +1022,10 @@ struct AppleLiveInlinePlayer: View {
             coordinator.stop()
             host.activate()
             host.configureLivePlaybackControls()
+            #if os(macOS)
+            // AVPlayerView's own CC menu, the same as the full player's.
+            host.enableSubtitleSelectionMirroring()
+            #endif
             #if !os(macOS)
             host.viewController.requiresLinearPlayback = !lifetime.isFullScreen
             host.viewController.allowsPictureInPicturePlayback = lifetime.isFullScreen
@@ -1023,47 +1089,27 @@ struct AppleLiveInlinePlayer: View {
 }
 
 #if os(macOS)
-private struct AppleLiveMacPlayerRepresentable: NSViewRepresentable {
-    let playerView: AVPlayerView
-    let engine: any ApplePlaybackEngine
-    let subtitles: AppleStockPlayerSubtitles
-    let entries: [AppleSubtitleCueLayerPolicy.MenuEntry]
+/// Live's way to the full player on the AVKit route, whose floating controls
+/// no longer carry AVKit's own full-screen button. The same glyph and ring as
+/// the transport overlay's, in the same corner.
+private struct AppleLiveFullWindowButton: View {
+    let action: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> AVPlayerView { playerView }
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        context.coordinator.engine = engine
-        context.coordinator.subtitles = subtitles
-        // Native embedded captions already have AVKit's picker. Engine-drawn
-        // captions and sidecars need the same app selection path as full screen.
-        guard !entries.isEmpty,
-              engine.kind == .openStream || engine.subtitleTracks.contains(where: { $0.id >= 1_000_000 }) else {
-            nsView.actionPopUpButtonMenu = nil
-            return
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
+                .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .contentShape(.rect)
         }
-        let menu = NSMenu(title: "Subtitles")
-        let tracks = NSMenu(title: "Subtitles")
-        for entry in entries {
-            let item = NSMenuItem(title: entry.title, action: #selector(Coordinator.selectSubtitle(_:)), keyEquivalent: "")
-            item.target = context.coordinator
-            item.representedObject = entry.trackID
-            item.state = entry.isSelected ? .on : .off
-            tracks.addItem(item)
-        }
-        let item = NSMenuItem(title: "Subtitles", action: nil, keyEquivalent: "")
-        item.submenu = tracks
-        menu.addItem(item)
-        nsView.actionPopUpButtonMenu = menu
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var engine: (any ApplePlaybackEngine)?
-        var subtitles: AppleStockPlayerSubtitles?
-
-        @objc func selectSubtitle(_ sender: NSMenuItem) {
-            guard let engine else { return }
-            subtitles?.select(sender.representedObject as? Int, on: engine)
-        }
+        .buttonStyle(.plain)
+        .appleHoverAffordance()
+        .padding()
+        .accessibilityLabel("Full Screen")
+        .accessibilityIdentifier("player.fullscreen")
     }
 }
 #else

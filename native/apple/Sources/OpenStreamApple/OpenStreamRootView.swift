@@ -130,6 +130,8 @@ public struct OpenStreamRootView: View {
     /// The menu bar's end of the wire. Not `@State`: the menu bar outlives
     /// every view and owns this, so the root view only observes it.
     private let macCommands = AppleMacCommandCenter.shared
+    /// This window's player, drawn over everything while something plays.
+    @State private var macPlayerStage = AppleMacPlayerStage()
     #endif
     @State private var intentHandoff = AppleAppIntentHandoff.shared
     @State private var sharePlay = AppleSharePlaySessionStore.shared
@@ -303,6 +305,9 @@ public struct OpenStreamRootView: View {
         // boxes, because their own scroll background is hidden
         // (`AppleSettingsContentModifier`).
         .background(Color.black.ignoresSafeArea())
+        #endif
+        #if os(macOS)
+        .appleMacPlayerStage(macPlayerStage)
         #endif
         .appleTraceSelection("tab", value: selectedTab)
         .modifier(AppleConfigurationSync(

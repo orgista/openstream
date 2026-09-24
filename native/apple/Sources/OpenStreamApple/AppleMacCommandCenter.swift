@@ -101,6 +101,16 @@ public final class AppleMacCommandCenter {
     /// not available.
     public var availableTabs: Set<AppleMacTabTarget> = Set(AppleMacTabTarget.allCases)
 
+    /// View ▸ Zoom to Fill: the picture fills the window and its edges are
+    /// cropped, for 16:9 films on an ultrawide display. Off by default and
+    /// kept for the session, not saved — the next film may be 2.39:1.
+    public var zoomToFill = false
+
+    /// True while a player covers a window. The tab bar is hidden then, so
+    /// the View menu's tab items step aside rather than switch the page under
+    /// the picture.
+    public internal(set) var isPlayerOnStage = false
+
     public init() {}
 
     /// Whether the Controls menu is live. The menu reads this directly.

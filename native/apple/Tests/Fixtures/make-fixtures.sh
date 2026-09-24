@@ -74,6 +74,18 @@ make "$OUT/mp4-h264-aac.mp4" ffmpeg -y -hide_banner -loglevel error \
   -c:v h264_videotoolbox -c:a aac -ac 2 -movflags +faststart \
   "$OUT/mp4-h264-aac.mp4"
 
+# --- mp4-h264-aac-subtitles.mp4 (two mov_text legible tracks, en + fr) -----
+# The Mac captions tests select AVKit's legible options on a local asset.
+printf '1\n00:00:00,000 --> 00:00:10,000\nEnglish fixture cue\n' > "$TMP/fixture-en.srt"
+printf '1\n00:00:00,000 --> 00:00:10,000\nFrench fixture cue\n' > "$TMP/fixture-fr.srt"
+make "$OUT/mp4-h264-aac-subtitles.mp4" ffmpeg -y -hide_banner -loglevel error \
+  -f lavfi -i "testsrc2=size=320x180:rate=24:duration=6" -f lavfi -i "sine=frequency=440:duration=6" \
+  -i "$TMP/fixture-en.srt" -i "$TMP/fixture-fr.srt" \
+  -map 0:v -map 1:a -map 2:0 -map 3:0 \
+  -c:v h264_videotoolbox -b:v 150k -c:a aac -b:a 48k -ac 1 -c:s mov_text \
+  -metadata:s:s:0 language=eng -metadata:s:s:1 language=fra -movflags +faststart \
+  "$OUT/mp4-h264-aac-subtitles.mp4"
+
 # --- ts-h264-aac.ts ---------------------------------------------------------
 make "$OUT/ts-h264-aac.ts" ffmpeg -y -hide_banner -loglevel error \
   -f lavfi -i "$VIDEO" -f lavfi -i "$SINE" \

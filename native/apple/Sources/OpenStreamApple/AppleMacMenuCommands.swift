@@ -29,6 +29,7 @@ public struct AppleMacMenuCommands: Commands {
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { commands.send(.selectTab(.settings)) }
                 .keyboardShortcut(",", modifiers: .command)
+                .disabled(commands.isPlayerOnStage)
         }
 
         // The View menu. `replacing:` rather than `after:` on purpose: the
@@ -41,9 +42,17 @@ public struct AppleMacMenuCommands: Commands {
                         KeyEquivalent(target.shortcutCharacter),
                         modifiers: .command
                     )
-                    .disabled(!commands.availableTabs.contains(target))
+                    .disabled(!commands.availableTabs.contains(target) || commands.isPlayerOnStage)
             }
             Divider()
+            // 16:9 on an ultrawide display leaves bars at the sides; this
+            // crops to fill instead. Only while something is playing.
+            Toggle("Zoom to Fill", isOn: Binding(
+                get: { commands.zoomToFill },
+                set: { commands.zoomToFill = $0 }
+            ))
+            .keyboardShortcut("z", modifiers: [.option, .command])
+            .disabled(!commands.canControlPlayback)
             Button("Toggle Full Screen", action: toggleFullScreen)
                 .keyboardShortcut("f", modifiers: [.control, .command])
         }
@@ -61,6 +70,7 @@ public struct AppleMacMenuCommands: Commands {
         CommandGroup(after: .textEditing) {
             Button("Search") { commands.send(.openSearch) }
                 .keyboardShortcut("f", modifiers: .command)
+                .disabled(commands.isPlayerOnStage)
         }
 
         // Named for the menu the Apple TV app on the Mac uses, because that

@@ -6386,27 +6386,12 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         #if os(visionOS)
         content.modifier(AppleVisionPlayerPresentationModifier(presentation: $presentation))
         #elseif os(macOS)
-        content.sheet(item: $presentation) {
-            AppleStremioPlayerView(presentation: $0)
-                // A macOS sheet sizes to its content, and an `AVPlayerView`
-                // wrapped in an `NSViewRepresentable` has no intrinsic size to
-                // give it — so playing anything on the Mac opened a **470 x 80
-                // black sliver** while the engine decoded happily behind it
-                // (measured on a local file: the trace logged "first frame,
-                // route=avPlayer" into a sheet window 80 points tall,
-                // 2026-09-21). The previous sweep never saw this because
-                // playback was the row it could not test.
-                //
-                // A floor only, and 16:9. With an `idealWidth` as well SwiftUI
-                // took the *minimum* width and the *ideal* height and drew a
-                // portrait 640 x 720 sheet for a landscape video (measured),
-                // because the player has no intrinsic size to break the tie
-                // with. One pair of numbers is unambiguous. 1024 x 576 fits
-                // inside the 1280 x 860 default window with room for the
-                // sheet's own inset; the sheet is resizable from there and
-                // ⌃⌘F (View ▸ Toggle Full Screen) takes it to the display.
-                .frame(minWidth: 1024, minHeight: 576)
-        }
+        // The player takes over the window it was opened from — edge to
+        // edge, over the toolbar and the tab bar — rather than a sheet. The
+        // sheet was a 1024 x 576 card floating over the page (owner,
+        // 2026-09-24); the Apple TV app's separate player window is the other
+        // thing the owner did not want. See `AppleMacPlayerStage`.
+        content.modifier(AppleMacPlayerStagePresenter(presentation: $presentation))
         #else
         content.fullScreenCover(item: $presentation) {
             AppleStremioPlayerView(presentation: $0)

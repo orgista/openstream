@@ -19,6 +19,10 @@ final class ApplePlayerSubtitleSelection {
 
     init(engine: any ApplePlaybackEngine) { self.engine = engine }
 
+    /// True once the item's legible group has loaded and its selection is
+    /// being watched. Tests wait on it instead of sleeping.
+    var isObserving: Bool { observation != nil }
+
     func bind(to item: AVPlayerItem?) {
         if self.item === item, let item, let group {
             // Auto-selection can happen after the group was bound. Mirror it
@@ -185,7 +189,7 @@ final class ApplePlayerSubtitleSelection {
         }.map(\.element)
     }
 
-    private static func isBitmap(_ track: ApplePlaybackTrack) -> Bool {
+    static func isBitmap(_ track: ApplePlaybackTrack) -> Bool {
         let codec = track.codec?.lowercased() ?? ""
         return ["pgs", "hdmv", "dvb_sub", "dvbsub", "dvd_sub", "dvdsub", "vobsub", "xsub"]
             .contains { codec.contains($0) }

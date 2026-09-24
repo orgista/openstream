@@ -27,7 +27,7 @@ public final class ApplePlayerHost {
     private let _viewController: AVPlayerViewController
     #endif
 
-    #if os(iOS)
+    #if os(iOS) || os(macOS)
     private lazy var subtitleSelection = ApplePlayerSubtitleSelection(engine: coordinator.engine)
     private var mirrorsSubtitleSelection = false
     #endif
@@ -57,7 +57,9 @@ public final class ApplePlayerHost {
         let view = AVPlayerView()
         // The system player UI: floating controls (no custom overlay).
         view.controlsStyle = .floating
-        view.showsFullScreenToggleButton = true
+        // No AVKit full-screen button: the app's player takes over the window
+        // instead (`AppleMacPlayerViewRepresentable`).
+        view.showsFullScreenToggleButton = false
         view.allowsPictureInPicturePlayback = true
         // Disable Live Text / "Show Text" frame analysis.
         view.allowsVideoFrameAnalysis = false
@@ -147,7 +149,7 @@ public final class ApplePlayerHost {
         #else
         _viewController.player = nil
         #endif
-        #if os(iOS)
+        #if os(iOS) || os(macOS)
         if mirrorsSubtitleSelection { subtitleSelection.bind(to: nil) }
         mirrorsSubtitleSelection = false
         #endif
@@ -197,7 +199,25 @@ public final class ApplePlayerHost {
     /// same run loop instead of up to a quarter second later.
     public func rebind() { refreshBinding() }
 
-    #if os(iOS)
+    /// Whether this platform's stock player shows its own captions menu, so
+    /// a choice made there has to reach the engine (`ApplePlayerSubtitleSelection`).
+    ///
+    /// The Mac was left out, and its CC menu did nothing (owner, 2026-09-24).
+    /// On the default engine the legible group is pinned deselected while the
+    /// app owns captions, so AVKit's select was undone the moment it landed;
+    /// on the AVPlayer engine the choice held only until the next add-on batch
+    /// re-applied the captions setting over it. The mirror is what tells the
+    /// engine the viewer chose, on iPhone and on the Mac alike. Apple TV hides
+    /// the stock rows and drives selection from its own menu instead.
+    static var mirrorsStockSubtitleSelection: Bool {
+        #if os(iOS) || os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    #if os(iOS) || os(macOS)
     func enableSubtitleSelectionMirroring() {
         mirrorsSubtitleSelection = true
         appleTrace("subtitle mirror: engine=\(coordinator.engine.kind.rawValue)")
@@ -229,7 +249,7 @@ public final class ApplePlayerHost {
             AppleSharePlaySessionStore.shared.refreshPlayback(coordinator, channel: channel)
         }
         if let player { coordinator.configureExternalPlayback(on: player) }
-        #if os(iOS)
+        #if os(iOS) || os(macOS)
         // The item can change without replacing the AVPlayer (recovery/seek).
         if mirrorsSubtitleSelection { subtitleSelection.bind(to: player?.currentItem) }
         #endif
