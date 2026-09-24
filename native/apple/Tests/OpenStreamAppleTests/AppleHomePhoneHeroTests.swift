@@ -74,7 +74,7 @@ struct AppleHeroRotationCycleTests {
     @Test(arguments: [
         (touching: false, playing: false, muted: true, paused: false),
         (touching: true, playing: false, muted: true, paused: true),
-        (touching: false, playing: true, muted: true, paused: false),
+        (touching: false, playing: true, muted: true, paused: true),
         (touching: false, playing: true, muted: false, paused: true),
         (touching: false, playing: false, muted: false, paused: false),
     ])
@@ -84,13 +84,13 @@ struct AppleHeroRotationCycleTests {
         ) == rule.paused)
     }
 
-    /// Art-first: a pressed Play Trailer loads behind the art, so the page
-    /// holds for it even muted; an autoplaying muted one does not.
-    @Test func aRequestedTrailerHoldsThePageEvenMuted() {
+    /// Owner 2026-09-24: a playing trailer holds the page until it ends, muted
+    /// autoplay included; nothing holds it before the trailer starts.
+    @Test func aPlayingTrailerHoldsThePageUntilItEnds() {
+        #expect(AppleHeroRotation.cycleIsPaused(
+            isTouching: false, trailerIsPlaying: true, trailerIsMuted: true, trailerWasRequested: false))
         #expect(AppleHeroRotation.cycleIsPaused(
             isTouching: false, trailerIsPlaying: true, trailerIsMuted: true, trailerWasRequested: true))
-        #expect(!AppleHeroRotation.cycleIsPaused(
-            isTouching: false, trailerIsPlaying: true, trailerIsMuted: true, trailerWasRequested: false))
         #expect(!AppleHeroRotation.cycleIsPaused(
             isTouching: false, trailerIsPlaying: false, trailerIsMuted: true, trailerWasRequested: true))
     }

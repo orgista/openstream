@@ -4,7 +4,7 @@ import SwiftUI
 /// Holds the iPhone portrait hero's page and its cycle: the page changes when
 /// its dot has filled, a horizontal swipe moves a page either way, a dot jumps
 /// straight to its page, and the timer holds while a finger is on the hero or
-/// its trailer is playing with the sound on (`AppleHeroRotation.cycleIsPaused`).
+/// its trailer is playing (`AppleHeroRotation.cycleIsPaused`).
 /// With Reduce Motion the pages cross-fade instead of sliding.
 struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// One id per page, in order.

@@ -75,14 +75,15 @@ extension AppleHeroRotation {
         }
     }
 
-    /// Whether the iPhone hero's timer holds still: while a finger is on the
-    /// hero, while its trailer is playing with the sound on — nobody wants
-    /// a trailer they chose to listen to swapped out from under them — and
-    /// while a trailer asked for with Play Trailer loads or plays: it loads
-    /// behind the art with nothing on screen (art-first), and moving on
-    /// before it can fade in would drop what was asked for.
-    public static func cycleIsPaused(isTouching: Bool, trailerIsPlaying: Bool, trailerIsMuted: Bool,
-                                     trailerWasRequested: Bool = false) -> Bool {
-        isTouching || (trailerIsPlaying && (!trailerIsMuted || trailerWasRequested))
+    /// Whether a hero's timer holds still: while a finger (or the pointer) is
+    /// on the hero, and while its trailer plays — muted or not. The page moves
+    /// on only once the trailer ends (the player reports "ended"/"paused" and
+    /// `isPlaying` drops), then after what is left of its art interval (owner,
+    /// 2026-09-24: "the trailer loads and it cycles too fast … give it more
+    /// time, depending how long the trailer is"). Mute and Play Trailer no
+    /// longer change this; the parameters stay for the callers.
+    public static func cycleIsPaused(isTouching: Bool, trailerIsPlaying: Bool, trailerIsMuted _: Bool,
+                                     trailerWasRequested _: Bool = false) -> Bool {
+        isTouching || trailerIsPlaying
     }
 }

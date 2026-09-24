@@ -31,6 +31,9 @@ struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
                 mark(url) { loaded in
                     if loaded { loadedWordmark = url } else { failedWordmark = url }
                 }
+                // While the name stands in, the mark keeps loading unseen: the
+                // two never draw over each other, even if a load result is late.
+                .opacity(presentation.showsName ? 0 : 1)
                 // Only one of the two is the title for VoiceOver.
                 .accessibilityHidden(presentation.showsName)
             }

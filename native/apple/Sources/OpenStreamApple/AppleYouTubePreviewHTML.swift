@@ -69,7 +69,7 @@ enum AppleYouTubePreviewHTML {
         var previewCapTimer = null;
         var previewCapDeadlineTimer = null;
         var previewEnding = false;
-        var previewCapSeconds = 45;
+        var previewCapSeconds = 60; // owner 2026-09-24: give each hero page about a minute of trailer
         // Ends early enough for the 0.6 s crossfade back to the art to finish
         // over live frames, before YouTube can paint its end screen.
         var previewHideLeadSeconds = 0.8;

@@ -164,7 +164,15 @@ struct AppleTrimmedTitleLogo: View {
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
-    @State private var reportedResult: Bool?
+    /// The result last reported, and for which wordmark. Keyed by URL: the
+    /// hero carousel reuses this view for the next page, and a bare flag
+    /// swallowed the new page's `true` as a repeat, so its lockup drew the
+    /// text title over a wordmark that was on screen (owner, 2026-09-24:
+    /// "Dark Matter (2024)" over the DARK MATTER mark on the Mac).
+    @State private var reported: (url: URL, loaded: Bool)?
+    /// Which wordmark `image` is, so a reused view never shows the last
+    /// page's mark while the new one loads.
+    @State private var imageURL: URL?
 
     var body: some View {
         GeometryReader { geometry in
@@ -181,12 +189,14 @@ struct AppleTrimmedTitleLogo: View {
             }
             .task(id: "\(url.absoluteString)|\(Int(geometry.size.width))x\(Int(geometry.size.height))@\(displayScale)") {
                 guard !Task.isCancelled else { return }
+                if imageURL != url { image = nil }
                 do {
                     if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "logo-trimmed"),
                        let source = CGImageSourceCreateWithData(cachedData as CFData, nil),
                        let cachedImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
                         guard !Task.isCancelled else { return }
                         image = cachedImage
+                        imageURL = url
                         report(true)
                         return
                     }
@@ -197,6 +207,7 @@ struct AppleTrimmedTitleLogo: View {
                     )
                     guard !Task.isCancelled else { return }
                     image = AppleRemoteImageDecoder.trimmedToAlphaBounds(decoded)
+                    imageURL = url
 
                     if let finalImage = image {
                         #if canImport(AppKit)
@@ -228,8 +239,8 @@ struct AppleTrimmedTitleLogo: View {
     }
 
     private func report(_ loaded: Bool) {
-        guard reportedResult != loaded else { return }
-        reportedResult = loaded
+        if let reported, reported.url == url, reported.loaded == loaded { return }
+        reported = (url, loaded)
         onLoadResult(loaded)
     }
 }
