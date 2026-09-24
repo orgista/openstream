@@ -912,6 +912,28 @@ final class AppleiOSUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Username and password are required."].exists)
     }
 
+    /// N20 proof: the iPad's full-bleed Discover hero on its side, two pages.
+    /// Navigation only — it turns the iPad and photographs, nothing else —
+    /// and only when `OPENSTREAM_HERO_SHOT_DIR` asks for it (passed as
+    /// `TEST_RUNNER_OPENSTREAM_HERO_SHOT_DIR`), since a headless iPadOS 26
+    /// simulator cannot otherwise be rotated.
+    func testIPadDiscoverHeroLandscapeShots() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "iPad hero")
+        let directory = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENSTREAM_HERO_SHOT_DIR"].flatMap {
+            $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true)
+        }, "Set TEST_RUNNER_OPENSTREAM_HERO_SHOT_DIR to take the hero shots")
+        app.launchArguments += ["-OpenStreamDebugNoKeychain", "YES"]
+        launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.buttons["home.featured.play"].firstMatch.waitForExistence(timeout: 40))
+        for page in 0 ..< 2 {
+            Thread.sleep(forTimeInterval: page == 0 ? 6 : 13)
+            let png = XCUIScreen.main.screenshot().pngRepresentation
+            try png.write(to: directory.appendingPathComponent("ipad-landscape-\(page).png"))
+            attach("ipad-discover-hero-landscape-\(page)")
+        }
+    }
+
     func testFeaturedTrailerKeepsBackAndFillsLandscape() throws {
         launch(screen: "discover")
         let details = app.buttons["home.featured.details"].firstMatch

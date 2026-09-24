@@ -9,6 +9,9 @@ import SwiftUI
 struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// One id per page, in order.
     let pageIDs: [String]
+    /// The bottom of the art to the centre of the page dots. The iPad's
+    /// full-bleed hero (N20) sets its own.
+    var dotsCentreInset: CGFloat = AppleHomePhoneHeroLayout.dotsCentreInset
     @ViewBuilder let page: (Int) -> Page
     /// Draws a page's art invisibly, so the next page is already decoded when
     /// it slides in rather than arriving as a bare surface under its copy.
@@ -52,8 +55,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
 
             if cycle.count > 1 {
                 AppleHomePhoneHeroPageIndicator(cycle: cycle, onSelect: select)
-                    .padding(.bottom, AppleHomePhoneHeroLayout.dotsCentreInset
-                        - AppleHomePhoneHeroPageIndicator.height / 2)
+                    .padding(.bottom, dotsCentreInset - AppleHomePhoneHeroPageIndicator.height / 2)
             }
         }
         .onAppear {

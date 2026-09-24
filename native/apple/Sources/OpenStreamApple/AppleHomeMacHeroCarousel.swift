@@ -278,26 +278,4 @@ private struct AppleMacHeroSwipeMonitor: NSViewRepresentable {
         coordinator.setActive(false)
     }
 }
-
-/// One Mac hero page's still and wordmark at the sizes the page decodes them,
-/// for the carousel to warm the image caches with. Never shown.
-struct AppleHomeMacHeroPreload: View {
-    let item: AppleCatalogItem
-    let wordmark: URL?
-    let layout: AppleMacHeroLayout
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            AppleRemoteImage(url: item.backgroundURL ?? item.posterURL, placeholderSystemImage: "",
-                             fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension)
-            if let url = wordmark {
-                AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading)
-                    .frame(width: AppleMacHeroLayout.wordmarkSize.width,
-                           height: AppleMacHeroLayout.wordmarkSize.height)
-            }
-        }
-        .frame(width: max(layout.contentWidth, 1), height: layout.height)
-        .clipped()
-    }
-}
 #endif

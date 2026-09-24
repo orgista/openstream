@@ -9,20 +9,15 @@ import SwiftUI
 /// A light shade (black at 35 %, gone by 140 pt) sits under the status bar and
 /// the large title only: over bright art — a sunlit street, a pale sky — the
 /// clock and "Discover" were white on near-white (iPhone sim, 2026-09-23).
+///
+/// Over bright art under the copy the bottom fade climbs higher and deepens
+/// (`AppleHeroScrim.phone`, N20).
 struct AppleHomePhoneHeroFade: View {
     static let topShadeHeight: CGFloat = 140
+    var scrim = AppleHeroScrim.phone(tone: .unknown)
 
     var body: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .clear, location: 0.32),
-                .init(color: .black.opacity(0.55), location: 0.62),
-                .init(color: .black, location: 0.86),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        AppleHeroScrimView(scrim: scrim)
         .overlay(alignment: .top) {
             LinearGradient(
                 stops: [

@@ -18,6 +18,9 @@ struct AppleTVBillboard<Actions: View>: View {
     /// nothing and gets the still. Either way the frame, fade and copy block
     /// are the same.
     var stage: AnyView? = nil
+    /// The stage's still, measured by `AppleHomeBillboard`. With no stage
+    /// (Library) the billboard measures the still it draws itself.
+    var artLuminance: AppleHeroLuminanceMap? = nil
     /// Discover only (N12), after the Apple TV app: the "New Season" capsule
     /// over the title when the title's episodes earn one…
     var badge: AppleHeroBadge? = nil
@@ -28,8 +31,23 @@ struct AppleTVBillboard<Actions: View>: View {
     /// does) instead of the clock.
     var cycle: AppleHeroRotation.Cycle? = nil
     @ViewBuilder var actions: Actions
+    @State private var loadedStill: AppleHeroLoadedStill?
+    @State private var artMeasurement: AppleHeroArtMeasurement?
 
     private typealias M = AppleTVBillboardMetrics
+
+    private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
+
+    /// Over bright art under the copy, the Apple TV app's fade from the
+    /// leading edge sized to the copy, a deeper bottom one and a soft shadow
+    /// under the text (N20). Dark art keeps the one fade.
+    private var scrim: AppleHeroScrim {
+        let map = artLuminance ?? AppleHeroArtMeasurement.map(artMeasurement, for: stillURL)
+        let frame = CGSize(width: M.screenSize.width, height: M.artHeight)
+        let region = AppleHeroCopyRegion.tv
+        return .tv(tone: AppleHeroArtTone(reading: map?.reading(region: region, in: frame)),
+                   copyTrailing: AppleHeroCopyRegion.trailingFraction(region, in: frame))
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -38,8 +56,11 @@ struct AppleTVBillboard<Actions: View>: View {
                     stage
                 } else {
                     AppleCatalogArtwork(
-                        url: item.backgroundURL ?? item.posterURL,
-                        loadingFill: AppleDesignTokens.surface
+                        url: stillURL,
+                        loadingFill: AppleDesignTokens.surface,
+                        onImageLoad: { [stillURL] image in
+                            if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
+                        }
                     )
                 }
             }
@@ -47,48 +68,45 @@ struct AppleTVBillboard<Actions: View>: View {
                 .clipped()
                 .overlay {
                     if M.usesFade {
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: M.fadeStartFraction),
-                                .init(color: .black, location: 1)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+                        AppleHeroScrimView(scrim: scrim)
+                            .animation(.easeInOut(duration: 0.4), value: scrim)
                     }
                 }
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: M.copySpacing) {
-                if let badge {
-                    Text(badge.title)
-                        .font(.system(size: M.badgeFontSize, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, M.badgeHorizontalPadding)
-                        .padding(.vertical, M.badgeVerticalPadding)
-                        .overlay { Capsule().strokeBorder(.white.opacity(0.8), lineWidth: 2) }
-                        // It sits highest, where the fade has barely begun:
-                        // on the brightest art (Dark Matter's sky) the bare
-                        // capsule measured 2.2:1. The same soft shadow the
-                        // other heroes' names carry, not a fill over the art.
-                        .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
+                VStack(alignment: .leading, spacing: M.copySpacing) {
+                    if let badge {
+                        Text(badge.title)
+                            .font(.system(size: M.badgeFontSize, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, M.badgeHorizontalPadding)
+                            .padding(.vertical, M.badgeVerticalPadding)
+                            .overlay { Capsule().strokeBorder(.white.opacity(0.8), lineWidth: 2) }
+                            // It sits highest, where the fade has barely begun:
+                            // on the brightest art (Dark Matter's sky) the bare
+                            // capsule measured 2.2:1. The same soft shadow the
+                            // other heroes' names carry, not a fill over the art.
+                            .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
+                    }
+                    titleTreatment
+                    if usesKindMetadata {
+                        AppleTVBillboardKindMetadata(item: item)
+                    } else if let metadataLine {
+                        Text(metadataLine)
+                            .font(.system(size: M.metadataFontSize, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
+                    if let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: M.synopsisFontSize))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(M.synopsisLineLimit)
+                            .truncationMode(.tail)
+                    }
                 }
-                titleTreatment
-                if usesKindMetadata {
-                    AppleTVBillboardKindMetadata(item: item)
-                } else if let metadataLine {
-                    Text(metadataLine)
-                        .font(.system(size: M.metadataFontSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
-                }
-                if let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-                    Text(summary)
-                        .font(.system(size: M.synopsisFontSize))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(M.synopsisLineLimit)
-                        .truncationMode(.tail)
-                }
+                .appleHeroCopyShadow(scrim.copyShadow)
                 actions
                     .padding(.top, 8)
                 if let cycle, cycle.count > 1 {
@@ -106,6 +124,7 @@ struct AppleTVBillboard<Actions: View>: View {
         .frame(width: M.screenSize.width, height: M.artHeight, alignment: .bottomLeading)
         .background(Color.black)
         .padding(.bottom, -M.rowOverlap)
+        .appleMeasuresHeroArt(stage == nil ? loadedStill : nil) { artMeasurement = $0 }
         .focusSection()
         .accessibilityElement(children: .contain)
     }

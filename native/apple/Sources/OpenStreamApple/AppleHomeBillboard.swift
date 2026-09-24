@@ -34,8 +34,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// Set on an iPhone in portrait: draw the Apple TV app's hero
     /// (`AppleHomePhoneHero`) over the same stage instead of the featured one.
     var phone: Phone? = nil
-    /// Set on the Mac: draw the Apple TV app's Mac hero (`AppleHomeMacHero`)
-    /// over the same stage.
+    /// Set on the Mac and on the iPad's Discover: draw the Apple TV app's
+    /// full-bleed hero (`AppleHomeMacHero`) over the same stage.
     var mac: Mac? = nil
     /// Set on the Apple TV's Discover: the Apple TV app's hero details over
     /// the billboard (badge, kind line and rating, cycle-driven dots).
@@ -185,6 +185,17 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var stillImage: CGImage?
     /// Whose still has loaded or failed; the trailer waits on it.
     @State private var stillOutcome: (itemID: String, art: AppleTrailerArtFirstPolicy.Art)?
+    /// The still that has decoded, with its URL, for the luminance reading
+    /// that picks each hero's scrim (`AppleHeroScrim`).
+    @State private var loadedStill: AppleHeroLoadedStill?
+    @State private var artMeasurement: AppleHeroArtMeasurement?
+
+    private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
+
+    /// The measured still for this page's art, or nil until it has been.
+    private var artLuminance: AppleHeroLuminanceMap? {
+        AppleHeroArtMeasurement.map(artMeasurement, for: stillURL)
+    }
 
     private var stillArt: AppleTrailerArtFirstPolicy.Art {
         stillOutcome?.itemID == item.id ? stillOutcome?.art ?? .loading : .loading
@@ -212,6 +223,7 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     var body: some View {
         heroBody
+            .appleMeasuresHeroArt(loadedStill) { artMeasurement = $0 }
             .task(id: "\(item.id):\(catalogConfigurationIdentity(sources))") { await loadActionMetadata() }
             // A pressed trailer holds the hero's page while it loads behind
             // the art; one that never plays lets go after 30 s, silently, and
@@ -229,10 +241,10 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     @ViewBuilder private var heroBody: some View {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         if let mac {
             AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark, stage: stage,
-                             onOpenDetails: onOpenDetails) { actionButtons }
+                             artLuminance: artLuminance, onOpenDetails: onOpenDetails) { actionButtons }
         } else {
             standardBody
         }
@@ -246,8 +258,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         #if os(tvOS)
         if let tv {
             AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
-                             rotationIndex: rotationIndex, stage: stage, badge: tv.badge,
-                             usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
+                             rotationIndex: rotationIndex, stage: stage, artLuminance: artLuminance,
+                             badge: tv.badge, usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
         } else {
             featuredBody
         }
@@ -261,7 +273,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
                                wordmark: wordmark, badge: phone.badge,
-                               stage: stage, onOpenDetails: onOpenDetails) { actionButtons }
+                               stage: stage, artLuminance: artLuminance,
+                               onOpenDetails: onOpenDetails) { actionButtons }
         } else {
             AppleFeaturedHero(
                 item: item,
@@ -269,7 +282,8 @@ struct AppleHomeBillboard<Actions: View>: View {
                 wordmark: wordmark,
                 rotationCount: rotationCount,
                 rotationIndex: rotationIndex,
-                stage: stage
+                stage: stage,
+                artLuminance: artLuminance
             ) { actionButtons }
         }
     }
@@ -286,10 +300,11 @@ struct AppleHomeBillboard<Actions: View>: View {
                 // iPhone portrait pages are separate views), and a resize
                 // must never paint the loading surface over the hero.
                 AppleRemoteImage(
-                    url: item.backgroundURL ?? item.posterURL,
+                    url: stillURL,
                     placeholderSystemImage: "",
-                    onLoad: { image in
+                    onLoad: { [stillURL] image in
                         stillImage = image
+                        if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
                         recordStill(.loaded)
                         appleTrace("hero still loaded \(item.name) \(image.width)px")
                         AppleLaunchReadiness.shared.markFirstScreenReady()

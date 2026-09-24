@@ -25,12 +25,23 @@ struct AppleHomePhoneHero<Actions: View>: View {
     let badge: AppleHeroBadge?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
     let stage: AnyView
+    /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
+    var artLuminance: AppleHeroLuminanceMap? = nil
     let onOpenDetails: () -> Void
     @ViewBuilder var actions: Actions
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 48
     @State private var copyHidden = false
+    @State private var artWidth: CGFloat = 0
+    /// A trailer is on screen over the still, whose tone then no longer applies.
+    @State private var videoIsShowing = false
+
+    private var scrim: AppleHeroScrim {
+        let region = AppleHeroCopyRegion.phone(width: artWidth, artHeight: artHeight)
+        let reading = artLuminance?.reading(region: region, in: CGSize(width: artWidth, height: artHeight))
+        return .phone(tone: videoIsShowing ? .unknown : AppleHeroArtTone(reading: reading))
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -50,6 +61,8 @@ struct AppleHomePhoneHero<Actions: View>: View {
                     title
                     AppleHomePhoneHeroMetadata(item: item)
                 }
+                .appleHeroCopyShadow(scrim.copyShadow)
+                .animation(.easeInOut(duration: 0.3), value: scrim.copyShadow)
                 .frame(maxWidth: .infinity)
                 .contentShape(.rect)
             }
@@ -93,7 +106,15 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: artHeight)
                 .clipped()
-                .overlay { AppleHomePhoneHeroFade().allowsHitTesting(false) }
+                .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
+                    videoIsShowing = state.isPlaying
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { artWidth = $0 }
+                .overlay {
+                    AppleHomePhoneHeroFade(scrim: scrim)
+                        .allowsHitTesting(false)
+                        .animation(.easeInOut(duration: 0.4), value: scrim)
+                }
         }
         .background(Color.black)
         .coordinateSpace(.named(Self.coordinateSpaceName))

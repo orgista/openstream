@@ -8,18 +8,33 @@ import CoreGraphics
 /// so the first row still peeks; the copy bottom-left in a 480 pt column; the
 /// page dots bottom-centre; a round mute button top-right.
 ///
+/// The iPad's Discover hero is the same hero (N20, after the Apple TV app on
+/// the iPad): edge to edge from the top of the screen, under the status bar,
+/// the navigation bar and the floating tab bar, taller than the Mac's —
+/// `min(900, 90 % of the width, 66 % of the screen)` — so it fills the top of
+/// the screen either way up and the first row still shows under it.
+///
 /// Pure, so the gate can check it without a window.
 public struct AppleMacHeroLayout: Equatable, Sendable {
+    public enum Platform: Equatable, Sendable {
+        case mac
+        case pad
+    }
+
     /// The Discover content's width and the window's height.
     public var contentWidth: CGFloat
     public var windowHeight: CGFloat
-    /// What the toolbar takes off the top (the scroll view's top content inset).
+    /// What the toolbar takes off the top (the scroll view's top content
+    /// inset): on the iPad, the status bar, navigation bar and tab bar.
     public var topInset: CGFloat
+    public var platform: Platform
 
-    public init(contentWidth: CGFloat = 0, windowHeight: CGFloat = 0, topInset: CGFloat = 0) {
+    public init(contentWidth: CGFloat = 0, windowHeight: CGFloat = 0, topInset: CGFloat = 0,
+                platform: Platform = .mac) {
         self.contentWidth = contentWidth
         self.windowHeight = windowHeight
         self.topInset = topInset
+        self.platform = platform
     }
 
     public static let maximumHeight: CGFloat = 680
@@ -27,6 +42,14 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
     public static let windowFraction: CGFloat = 0.75
     /// Before the window has been measured, and never less than this.
     public static let minimumHeight: CGFloat = 360
+
+    public static let padMaximumHeight: CGFloat = 900
+    public static let padWidthFraction: CGFloat = 0.9
+    public static let padScreenFraction: CGFloat = 0.66
+    public static let padMinimumHeight: CGFloat = 420
+    /// The bottom of the iPad's art to the centre of its page dots, under
+    /// the copy's 40 pt bottom inset.
+    public static let padDotsCentreInset: CGFloat = 20
 
     /// The copy column's inset from the leading edge: 24 pt in a narrow
     /// window, growing with the width to 48 pt by 1600 pt.
@@ -60,10 +83,14 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
 
     /// The hero's full height, from the top of the Discover area.
     public var height: CGFloat {
-        guard contentWidth > 0 else { return Self.minimumHeight }
-        var target = min(Self.maximumHeight, contentWidth * Self.widthFraction)
-        if windowHeight > 0 { target = min(target, windowHeight * Self.windowFraction) }
-        return max(target, Self.minimumHeight)
+        let (maximum, widthFraction, windowFraction, minimum) = switch platform {
+        case .mac: (Self.maximumHeight, Self.widthFraction, Self.windowFraction, Self.minimumHeight)
+        case .pad: (Self.padMaximumHeight, Self.padWidthFraction, Self.padScreenFraction, Self.padMinimumHeight)
+        }
+        guard contentWidth > 0 else { return minimum }
+        var target = min(maximum, contentWidth * widthFraction)
+        if windowHeight > 0 { target = min(target, windowHeight * windowFraction) }
+        return max(target, minimum)
     }
 
     public var horizontalPadding: CGFloat {
@@ -86,11 +113,9 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
 /// The Mac hero's two fades, as the Figma draws them: black 85 % on the left
 /// to clear at 70 % of the width, and black 90 % at the bottom to clear at
 /// 40 % of the height (owner: "Follow the Figma" for gradients).
+/// Over bright art the scrim deepens (`AppleHeroScrim.wide`).
 public enum AppleMacHeroFade {
-    public struct Stop: Equatable, Sendable {
-        public let location: CGFloat
-        public let opacity: Double
-    }
+    public typealias Stop = AppleHeroScrim.Stop
 
     /// Leading edge to trailing edge.
     public static let leading: [Stop] = [

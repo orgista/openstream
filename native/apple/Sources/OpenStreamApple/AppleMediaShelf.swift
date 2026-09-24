@@ -109,19 +109,37 @@ struct AppleFeaturedHero<Actions: View>: View {
     /// still for an inline trailer; Library passes nothing and gets the still.
     /// Either way the frame, the one fade and the copy block are the same.
     var stage: AnyView? = nil
+    /// The stage's still, measured by `AppleHomeBillboard`. With no stage the
+    /// hero measures the still it draws itself.
+    var artLuminance: AppleHeroLuminanceMap? = nil
     @ViewBuilder var actions: Actions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     var body: some View {
         #if os(tvOS)
         AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
-                         rotationIndex: rotationIndex, stage: stage) { actions }
+                         rotationIndex: rotationIndex, stage: stage, artLuminance: artLuminance) { actions }
         #else
         legacyHero
         #endif
     }
 
     #if !os(tvOS)
+    @State private var loadedStill: AppleHeroLoadedStill?
+    @State private var artMeasurement: AppleHeroArtMeasurement?
+
+    private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
+
+    /// Over bright art under the copy, a fade sized to the copy block from
+    /// the leading edge, a deeper bottom one and a shadow under the text.
+    private var scrim: AppleHeroScrim {
+        let map = artLuminance ?? AppleHeroArtMeasurement.map(artMeasurement, for: stillURL)
+        let frame = CGSize(width: max(viewportSize.width - 32, 0), height: featuredHeight)
+        let region = AppleHeroCopyRegion.featured(frame: frame, copyWidth: min(700, copyColumnWidth))
+        return .featured(tone: AppleHeroArtTone(reading: map?.reading(region: region, in: frame)),
+                         copyTrailing: AppleHeroCopyRegion.trailingFraction(region, in: frame))
+    }
+
     private var legacyHero: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
@@ -162,39 +180,39 @@ struct AppleFeaturedHero<Actions: View>: View {
                     // 6 pt text shadow is not enough over bright busy art, and
                     // "Remarkably Bright Creatures" over a lit aquarium was
                     // unreadable on iPad (2026-09-15). One fade, nowhere else.
+                    //
+                    // Over bright art it deepens and gains a leading fade
+                    // sized to the copy (N20, `AppleHeroScrim.featured`).
                     .overlay {
-                        LinearGradient(
-                            colors: [.clear, .black.opacity(0.85)],
-                            startPoint: .init(x: 0.5, y: AppleTVBillboardMetrics.fadeStartFraction),
-                            endPoint: .bottom
-                        )
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                        AppleHeroScrimView(scrim: scrim)
+                            .animation(.easeInOut(duration: 0.4), value: scrim)
                     }
                     .overlay(alignment: .bottomLeading) {
                         VStack(alignment: .leading, spacing: 10) {
-                            titleTreatment
-                            if let metadataLine {
-                                Text(metadataLine)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.75))
-                                    .lineLimit(1)
-                                    .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                            VStack(alignment: .leading, spacing: 10) {
+                                titleTreatment
+                                if let metadataLine {
+                                    Text(metadataLine)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.75))
+                                        .lineLimit(1)
+                                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                                }
+                                if let summary = item.summary, !summary.isEmpty {
+                                    // White at 90 %, the same as the Apple TV
+                                    // billboard, not `.secondary`: a hierarchical
+                                    // grey over bright art disappears, and "TOXIC"
+                                    // sits on a white backdrop (2026-09-20). The fade
+                                    // covers the bottom of the frame, and over
+                                    // bright art the copy's side too (N20).
+                                    Text(summary)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .lineLimit(2)
+                                        .frame(maxWidth: min(700, copyColumnWidth), alignment: .leading)
+                                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                                }
                             }
-                            if let summary = item.summary, !summary.isEmpty {
-                                // White at 90 %, the same as the Apple TV
-                                // billboard, not `.secondary`: a hierarchical
-                                // grey over bright art disappears, and "TOXIC"
-                                // sits on a white backdrop (2026-09-20). The one
-                                // approved fade covers the bottom of the frame;
-                                // nothing else may be dimmed, so the type
-                                // carries it.
-                                Text(summary)
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .lineLimit(2)
-                                    .frame(maxWidth: min(700, copyColumnWidth), alignment: .leading)
-                                    .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                            }
+                            .appleHeroCopyShadow(scrim.copyShadow)
                             actions
                             pageIndicator
                         }
@@ -210,6 +228,7 @@ struct AppleFeaturedHero<Actions: View>: View {
             }
         }
         .clipShape(.rect(cornerRadius: 18))
+        .appleMeasuresHeroArt(stage == nil ? loadedStill : nil) { artMeasurement = $0 }
         .accessibilityElement(children: .contain)
     }
 
@@ -219,7 +238,9 @@ struct AppleFeaturedHero<Actions: View>: View {
         if let stage {
             stage
         } else {
-            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+            AppleCatalogArtwork(url: stillURL, onImageLoad: { [stillURL] image in
+                if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
+            })
         }
     }
 

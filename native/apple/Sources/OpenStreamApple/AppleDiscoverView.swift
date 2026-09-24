@@ -60,6 +60,8 @@ struct AppleDiscoverView: View {
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
     /// The Mac hero's size, off the window and the toolbar's inset.
     @State private var macHeroLayout = AppleMacHeroLayout()
+    /// The iPad's: the same hero, off the screen and the bars' insets.
+    @State private var padHeroLayout = AppleMacHeroLayout(platform: .pad)
     /// Held up for `AppleProgressVisibility.minimum` even when the catalogues
     /// come back at once, so a press on Refresh is visible as a refresh.
     @State private var isRefreshing = false
@@ -211,6 +213,8 @@ struct AppleDiscoverView: View {
                                     // scrolls, then takes its usual material.
                                     .padding(.top, -phoneHeroLayout.topOverlap)
                                     .padding(.bottom, -AppleHomePhoneHeroLayout.trailingOverlap)
+                                } else if usesPadHero {
+                                    padHero(heroes)
                                 } else {
                                     rotatingHero(heroes)
                                 }
@@ -267,6 +271,15 @@ struct AppleDiscoverView: View {
                 } action: { _, layout in
                     phoneHeroLayout = layout
                     appleTrace("discover phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
+                }
+                .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
+                    AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
+                                       windowHeight: geometry.containerSize.height
+                                           + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                                       topInset: geometry.contentInsets.top,
+                                       platform: .pad)
+                } action: { _, layout in
+                    padHeroLayout = layout
                 }
                 #elseif os(macOS)
                 .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
@@ -780,8 +793,29 @@ struct AppleDiscoverView: View {
         )
     }
 
-    /// The iPad, a phone on its side and Vision Pro: the page the rotation clock
-    /// picks, held until that page's art is ready (`AppleHeroPageGate`).
+    /// The iPad, either way up (N20): the Mac's hero, edge to edge from the
+    /// top of the screen under the status bar and the floating tab bar, with
+    /// the iPhone's swipeable cycle and its dots centred at the bottom.
+    @ViewBuilder
+    private func padHero(_ heroes: [IndexedCatalogItem]) -> some View {
+        #if os(iOS)
+        AppleHomePhoneHeroCarousel(pageIDs: heroes.map(\.id),
+                                   dotsCentreInset: AppleMacHeroLayout.padDotsCentreInset) { index in
+            featuredHero(heroes[index], pad: true)
+        } preload: { index in
+            let item = heroItem(heroes[index].item)
+            AppleHomeMacHeroPreload(item: item, wordmark: heroWordmark(heroes[index], item: item),
+                                    layout: padHeroLayout)
+        }
+        .padding(.top, -padHeroLayout.topOverlap)
+        #else
+        rotatingHero(heroes)
+        #endif
+    }
+
+    /// A phone on its side, Vision Pro and the iPad at the accessibility text
+    /// sizes: the page the rotation clock picks, held until that page's art
+    /// is ready (`AppleHeroPageGate`).
     private func rotatingHero(_ heroes: [IndexedCatalogItem]) -> some View {
         TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
             if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
@@ -818,7 +852,7 @@ struct AppleDiscoverView: View {
     /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(
         _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
-        phone: Bool = false, mac: Bool = false, tv: AppleHomeTVHeroContext? = nil
+        phone: Bool = false, mac: Bool = false, pad: Bool = false, tv: AppleHomeTVHeroContext? = nil
     ) -> some View {
         let item = heroItem(value.item)
         return AppleHomeBillboard(
@@ -836,7 +870,7 @@ struct AppleDiscoverView: View {
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  copyFadeLine: phoneHeroLayout.topInset,
                                  badge: heroBadges[value.item.mediaID]) : nil,
-            mac: mac ? .init(layout: macHeroLayout) : nil,
+            mac: mac || pad ? .init(layout: pad ? padHeroLayout : macHeroLayout) : nil,
             tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
         ) { button, perform in
             #if os(macOS)
@@ -865,7 +899,7 @@ struct AppleDiscoverView: View {
                 featuredActions(value, button: button, onPlay: perform)
             }
             #else
-            if phone {
+            if phone || pad {
                 AppleHomePhoneHeroActions(
                     button: button,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
@@ -901,7 +935,18 @@ struct AppleDiscoverView: View {
         #endif
     }
 
-    /// Discover's hero on an iPhone held upright. The iPad (either way up), a
+    /// Discover's hero on an iPad, either way up (N20): the Mac's full-bleed
+    /// hero. The accessibility text sizes keep the featured hero, which
+    /// moves the copy under a shorter still instead of over it.
+    private var usesPadHero: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad && !dynamicTypeSize.isAccessibilitySize
+        #else
+        false
+        #endif
+    }
+
+    /// Discover's hero on an iPhone held upright. The iPad has its own; a
     /// phone on its side and every other platform keep the featured hero.
     private var usesPhoneHero: Bool {
         #if os(iOS)
@@ -1882,10 +1927,15 @@ struct AppleCatalogArtwork: View {
     var onLoad: (() -> Void)? = nil
     /// See `AppleRemoteImage.keepsImageWhileReloading`.
     var keepsImageWhileReloading = false
+    /// The decoded image, for a hero that measures its art (`AppleHeroLuminanceMap`).
+    var onImageLoad: ((CGImage) -> Void)? = nil
 
     var body: some View {
         AppleRemoteImage(url: url, placeholderSystemImage: "",
-                         onLoad: onLoad.map { callback in { _ in callback() } },
+                         onLoad: onLoad == nil && onImageLoad == nil ? nil : { [onLoad, onImageLoad] image in
+                             onLoad?()
+                             onImageLoad?(image)
+                         },
                          onFailure: onFailure,
                          loadingFill: loadingFill,
                          keepsImageWhileReloading: keepsImageWhileReloading)

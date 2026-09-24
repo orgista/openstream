@@ -1,4 +1,4 @@
-#if os(macOS)
+#if os(macOS) || os(iOS)
 import SwiftUI
 
 /// Discover's hero on the Mac, after the Apple TV app on the Mac and the Figma
@@ -8,16 +8,31 @@ import SwiftUI
 /// column the wordmark (or the name in black weight), "TV Show · Comedy" with
 /// the rating, the synopsis when there is room, and Resume/Play with a round
 /// My List button. The carousel draws the page dots over it.
+///
+/// The iPad's Discover hero too (N20), under the status bar and the floating
+/// tab bar, with the iPhone hero's touch-sized buttons and Dynamic Type text.
 struct AppleHomeMacHero<Actions: View>: View {
     let item: AppleCatalogItem
     let layout: AppleMacHeroLayout
     let wordmark: URL?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
     let stage: AnyView
+    /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
+    var artLuminance: AppleHeroLuminanceMap? = nil
     let onOpenDetails: () -> Void
     @ViewBuilder var actions: Actions
     /// The trailer is up over the still: the fade narrows to the copy.
     @State private var videoIsShowing = false
+
+    /// Bright art under the copy deepens the fades and shadows the copy; a
+    /// trailer on screen is not the still, so it keeps the narrow video fade.
+    private var scrim: AppleHeroScrim {
+        let region = AppleHeroCopyRegion.wide(layout)
+        let frame = CGSize(width: layout.contentWidth, height: layout.height)
+        let tone = videoIsShowing ? .unknown : AppleHeroArtTone(reading: artLuminance?.reading(region: region, in: frame))
+        return .wide(tone: tone, videoIsShowing: videoIsShowing,
+                     copyTrailing: AppleHeroCopyRegion.trailingFraction(region, in: frame))
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -28,9 +43,8 @@ struct AppleHomeMacHero<Actions: View>: View {
                     videoIsShowing = state.isPlaying
                 }
                 .overlay {
-                    AppleMacHeroFadeView(videoIsShowing: videoIsShowing)
-                        .allowsHitTesting(false)
-                        .animation(.easeInOut(duration: 0.6), value: videoIsShowing)
+                    AppleHeroScrimView(scrim: scrim)
+                        .animation(.easeInOut(duration: 0.6), value: scrim)
                 }
             copy
                 .frame(maxWidth: AppleMacHeroLayout.copyMaxWidth, alignment: .leading)
@@ -57,7 +71,7 @@ struct AppleHomeMacHero<Actions: View>: View {
                         .padding(.bottom, 12)
                     if layout.showsDescription, let summary = item.summary, !summary.isEmpty {
                         Text(summary)
-                            .font(.system(size: 14))
+                            .font(AppleMacHeroType.summary)
                             .foregroundStyle(.white.opacity(0.75))
                             .lineLimit(3)
                             .frame(maxWidth: AppleMacHeroLayout.descriptionMaxWidth, alignment: .leading)
@@ -65,6 +79,8 @@ struct AppleHomeMacHero<Actions: View>: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .appleHeroCopyShadow(scrim.copyShadow)
+                .animation(.easeInOut(duration: 0.3), value: scrim.copyShadow)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -100,6 +116,21 @@ struct AppleHomeMacHero<Actions: View>: View {
     }
 }
 
+/// The Mac hero's type: the Figma's fixed sizes on the Mac, the matching
+/// Dynamic Type styles on the iPad.
+private enum AppleMacHeroType {
+    #if os(macOS)
+    static let summary = Font.system(size: 14)
+    static let metadata = Font.system(size: 13)
+    static let rating = Font.system(size: 11, weight: .medium)
+    #else
+    static let summary = Font.callout
+    static let metadata = Font.subheadline
+    static let rating = Font.caption.weight(.medium)
+    #endif
+}
+
+#if os(macOS)
 extension View {
     /// Discover's and Library's scroll views on the Mac: the hero runs under
     /// the toolbar to the window's top edge with nothing drawn over it — no
@@ -123,6 +154,7 @@ private struct AppleMacHeroUnderToolbar: ViewModifier {
         }
     }
 }
+#endif
 
 /// "TV Show · Comedy" and the outlined rating, left-aligned under the title.
 private struct AppleMacHeroMetadata: View {
@@ -135,13 +167,13 @@ private struct AppleMacHeroMetadata: View {
             HStack(spacing: 8) {
                 if let line {
                     Text(line)
-                        .font(.system(size: 13))
+                        .font(AppleMacHeroType.metadata)
                         .foregroundStyle(.white.opacity(0.65))
                         .lineLimit(1)
                 }
                 if let rating {
                     Text(rating)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(AppleMacHeroType.rating)
                         .foregroundStyle(.white.opacity(0.85))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
@@ -156,23 +188,36 @@ private struct AppleMacHeroMetadata: View {
     }
 }
 
+/// One Mac or iPad hero page's still and wordmark at the sizes the page
+/// decodes them, for the carousel to warm the image caches with. Never shown.
+struct AppleHomeMacHeroPreload: View {
+    let item: AppleCatalogItem
+    let wordmark: URL?
+    let layout: AppleMacHeroLayout
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AppleRemoteImage(url: item.backgroundURL ?? item.posterURL, placeholderSystemImage: "",
+                             fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension)
+            if let url = wordmark {
+                AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading)
+                    .frame(width: AppleMacHeroLayout.wordmarkSize.width,
+                           height: AppleMacHeroLayout.wordmarkSize.height)
+            }
+        }
+        .frame(width: max(layout.contentWidth, 1), height: layout.height)
+        .clipped()
+    }
+}
+
+#if os(macOS)
 /// The Figma's two fades over the Mac hero's art (`AppleMacHeroFade`), and
 /// the narrower pair while a trailer plays.
 struct AppleMacHeroFadeView: View {
     var videoIsShowing = false
 
     var body: some View {
-        ZStack {
-            LinearGradient(stops: Self.stops(AppleMacHeroFade.leading(videoIsShowing: videoIsShowing)),
-                           startPoint: .leading, endPoint: .trailing)
-            LinearGradient(stops: Self.stops(AppleMacHeroFade.bottom(videoIsShowing: videoIsShowing)),
-                           startPoint: .bottom, endPoint: .top)
-        }
-        .accessibilityHidden(true)
-    }
-
-    private static func stops(_ stops: [AppleMacHeroFade.Stop]) -> [Gradient.Stop] {
-        stops.map { Gradient.Stop(color: .black.opacity($0.opacity), location: $0.location) }
+        AppleHeroScrimView(scrim: .wide(tone: .unknown, videoIsShowing: videoIsShowing, copyTrailing: 0))
     }
 }
 
@@ -283,4 +328,5 @@ struct AppleMacHeroButtonStyle: ButtonStyle {
         }
     }
 }
+#endif
 #endif
