@@ -26,9 +26,10 @@ public struct AppleCreditPerson: Equatable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// The iPhone title page's words and sections, after the Apple TV app's
-/// (INSPO-TEARDOWN §7, PDF pages 11–16). Everything here is read from the
-/// title's own metadata, episode list and saved position; a section with
+/// The title page's words and sections on the iPhone (N17) and the Mac
+/// (N18), after the Apple TV app's (INSPO-TEARDOWN §7, PDF pages 11–16).
+/// Everything here is read from the title's own metadata, episode list and
+/// saved position; a section with
 /// nothing real to say is `nil` or empty and is not drawn.
 public enum AppleTitlePagePolicy {
     // MARK: - The one button

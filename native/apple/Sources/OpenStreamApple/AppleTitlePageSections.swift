@@ -1,22 +1,30 @@
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
-// The pieces of the iPhone title page below the hero, after the Apple TV
-// app's (INSPO-TEARDOWN §7, PDF pages 11–16). Each one takes plain values and
-// closures; the page decides what is shown and omits a section with no data.
+// The pieces of the title page below the hero, after the Apple TV app's
+// (INSPO-TEARDOWN §7, PDF pages 11–16), shared by the iPhone (N17) and the
+// Mac (N18). Each one takes plain values and closures; the page decides what
+// is shown and omits a section with no data. On the Mac the page sets the
+// Discover row style (`appleDiscoverRows`), and the pieces that read it take
+// the Mac's type sizes; everywhere else it is nil and they are as on the iPhone.
 
 /// The text styles a clamped paragraph can use. Each maps to a SwiftUI font
-/// for drawing and a UIKit one for measuring, so the two agree.
+/// for drawing and a UIKit or AppKit one for measuring, so the two agree.
 enum AppleClampedTextStyle: Sendable {
     case subheadline
     case footnote
+    /// The Mac hero's synopsis: 13 pt there, where `.subheadline` is 11.
+    case body
 
     var font: Font {
         switch self {
         case .subheadline: .subheadline
         case .footnote: .footnote
+        case .body: .body
         }
     }
 
@@ -25,6 +33,15 @@ enum AppleClampedTextStyle: Sendable {
         switch self {
         case .subheadline: .subheadline
         case .footnote: .footnote
+        case .body: .body
+        }
+    }
+    #elseif canImport(AppKit)
+    var textStyle: NSFont.TextStyle {
+        switch self {
+        case .subheadline: .subheadline
+        case .footnote: .footnote
+        case .body: .body
         }
     }
     #endif
@@ -112,6 +129,25 @@ struct AppleMoreText: View {
             )
             return ceil(rect.height) <= limitHeight
         }
+        #elseif canImport(AppKit)
+        // The Mac has no Dynamic Type; its text styles are fixed sizes.
+        let font = NSFont.preferredFont(forTextStyle: style.textStyle)
+        let moreFont = NSFont.preferredFont(forTextStyle: .caption1)
+        let boldMore = NSFontManager.shared.convert(moreFont, toHaveTrait: .boldFontMask)
+        let limitHeight = ceil(NSLayoutManager().defaultLineHeight(for: font) * CGFloat(effectiveLineLimit)) + 1
+        let measureWidth = max(1, width - 2)
+        return AppleParagraphClamp.clamp(text, suffix: "…  MORE") { candidate in
+            let attributed = NSMutableAttributedString(string: candidate, attributes: [.font: font])
+            if candidate.hasSuffix("MORE") {
+                attributed.addAttributes([.font: boldMore],
+                                         range: NSRange(location: attributed.length - 4, length: 4))
+            }
+            let rect = attributed.boundingRect(
+                with: CGSize(width: measureWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            )
+            return ceil(rect.height) <= limitHeight
+        }
         #else
         return .init(visible: text, isTruncated: false)
         #endif
@@ -175,6 +211,7 @@ private extension UIFont {
 /// A section title on the title page: "Trailers", "Cast & Crew", "About".
 struct AppleTitlePageSectionTitle: View {
     let title: String
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     init(_ title: String) {
         self.title = title
@@ -182,7 +219,8 @@ struct AppleTitlePageSectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(.title2.bold())
+            // The Mac's rail headers (N13), so every heading on the page matches.
+            .font(rowStyle?.platform == .mac ? rowStyle?.headerFont ?? .title2.bold() : .title2.bold())
             .foregroundStyle(.white)
             .accessibilityAddTraits(.isHeader)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,6 +236,7 @@ struct AppleTitlePageSeasonPicker: View {
     let name: (Int) -> String
 
     @State private var isPresented = false
+    @State private var isHovered = false
     @ScaledMetric(relativeTo: .body) private var rowHeight: CGFloat = 46
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -219,14 +258,21 @@ struct AppleTitlePageSeasonPicker: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(.white.opacity(0.14), in: .capsule)
+                // Brighter under a pointer (iPad, Mac); a finger never hovers.
+                .background(.white.opacity(isHovered ? 0.22 : 0.14), in: .capsule)
                 .frame(minHeight: AppleDesignTokens.minimumActionSize)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            #if !os(tvOS)
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+            #endif
             // The iPhone title page only; Apple TV has its own season menu.
             #if !os(tvOS)
-            .popover(isPresented: $isPresented, arrowEdge: .top) {
+            // Below the control on both: an iPhone names the arrow's edge, a
+            // Mac the side of the control the list opens on.
+            .popover(isPresented: $isPresented, arrowEdge: Self.listEdge) {
                 seasonList
                     .presentationCompactAdaptation(.popover)
             }
@@ -235,6 +281,15 @@ struct AppleTitlePageSeasonPicker: View {
             .accessibilityValue(current.map(name) ?? "")
             .accessibilityHint("Shows the seasons")
             .accessibilityIdentifier("detail.season")
+            #if DEBUG
+            // `-OpenStreamDebugSeasonMenu YES` opens the list once the page
+            // has filled, so a headless sweep can photograph it open.
+            .task {
+                guard UserDefaults.standard.bool(forKey: "OpenStreamDebugSeasonMenu") else { return }
+                try? await Task.sleep(for: .seconds(6))
+                isPresented = true
+            }
+            #endif
         } else if let season = current {
             Text(name(season))
                 .font(.headline)
@@ -243,6 +298,12 @@ struct AppleTitlePageSeasonPicker: View {
                 .accessibilityIdentifier("detail.season")
         }
     }
+
+    #if os(macOS)
+    private static let listEdge: Edge = .bottom
+    #else
+    private static let listEdge: Edge = .top
+    #endif
 
     private var seasonList: some View {
         ScrollViewReader { proxy in
@@ -300,8 +361,13 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
 
     @ScaledMetric(relativeTo: .caption2) private var accessoryInset: CGFloat = 44
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     private var synopsisLines: Int { dynamicTypeSize.isAccessibilitySize ? 5 : 3 }
+
+    /// The Mac's text styles run two to three points smaller than the
+    /// iPhone's, so its card steps each line up one style.
+    private var isMac: Bool { rowStyle?.platform == .mac }
 
     private var stillHeight: CGFloat { width * 9 / 16 }
 
@@ -315,17 +381,17 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
                 still
                     .padding(.bottom, 4)
                 Text(eyebrow)
-                    .font(.caption2.weight(.semibold))
+                    .font(isMac ? .caption.weight(.semibold) : .caption2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(2)
                     .padding(.trailing, accessoryInset)
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(isMac ? .headline : .subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                 if let overview = episode.overview {
                     AppleWordClampedText(text: overview, lines: synopsisLines)
-                        .font(.footnote)
+                        .font(isMac ? .callout : .footnote)
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
@@ -372,6 +438,9 @@ struct AppleTitlePageEpisodeCard<Accessory: View>: View {
                 }
             }
             .clipShape(.rect(cornerRadius: 10))
+            // The pointer or keyboard focus lifts it, as on the Mac's
+            // Discover rails; nothing on any other platform.
+            .appleRowTileLift(true)
     }
 }
 
@@ -409,6 +478,7 @@ struct AppleTitlePageTrailerCard: View {
                     .frame(width: width, height: width * 9 / 16)
                     .background(.white.opacity(0.09))
                     .clipShape(.rect(cornerRadius: 10))
+                    .appleRowTileLift(true)
                 Text(caption)
                     .font(.subheadline)
                     .foregroundStyle(.white)
@@ -428,7 +498,16 @@ struct AppleTitlePageTrailerCard: View {
 struct AppleTitlePageCreditPortrait: View {
     let person: AppleCreditPerson
 
-    @ScaledMetric(relativeTo: .footnote) private var side: CGFloat = 84
+    @ScaledMetric private var side: CGFloat
+    @Environment(\.appleDiscoverRows) private var rowStyle
+
+    /// `side` is the portrait's diameter at the default text size.
+    init(person: AppleCreditPerson, side: CGFloat = 84) {
+        self.person = person
+        _side = ScaledMetric(wrappedValue: side, relativeTo: .footnote)
+    }
+
+    private var isMac: Bool { rowStyle?.platform == .mac }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -445,13 +524,13 @@ struct AppleTitlePageCreditPortrait: View {
             .clipShape(.circle)
             .accessibilityHidden(true)
             Text(person.name)
-                .font(.footnote.weight(.semibold))
+                .font(isMac ? .callout.weight(.semibold) : .footnote.weight(.semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
             if let role = person.role {
                 Text(role)
-                    .font(.caption)
+                    .font(isMac ? .footnote : .caption)
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -467,27 +546,45 @@ struct AppleTitlePageCreditPortrait: View {
 /// hold. Long values clamp at a word with MORE.
 struct AppleTitlePageFactList: View {
     let facts: [AppleTitlePagePolicy.Fact]
+    /// Facts side by side, for a wide Mac window with no other block beside
+    /// this one. Each keeps its label above its value.
+    var columns = 1
+    @Environment(\.appleDiscoverRows) private var rowStyle
+
+    private var isMac: Bool { rowStyle?.platform == .mac }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(facts) { fact in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(fact.label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                    AppleMoreText(text: fact.value, lineLimit: 3)
-                        .foregroundStyle(.white.opacity(0.6))
+        Group {
+            if columns > 1 {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 40, alignment: .topLeading), count: columns),
+                          alignment: .leading, spacing: 14) {
+                    ForEach(facts, content: factView)
                 }
-                .accessibilityElement(children: .combine)
+            } else {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(facts, content: factView)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func factView(_ fact: AppleTitlePagePolicy.Fact) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(fact.label)
+                .font(isMac ? .headline : .subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+            AppleMoreText(text: fact.value, lineLimit: 3, style: isMac ? .body : .subheadline)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
 /// Each accessibility chip from the hero, spelled out in plain words (A13).
 struct AppleTitlePageAccessibilityGlossary: View {
     let entries: [(badge: String, meaning: String)]
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -496,7 +593,7 @@ struct AppleTitlePageAccessibilityGlossary: View {
                     AppleFormatBadge(entry.badge)
                         .accessibilityHidden(true)
                     Text(entry.meaning)
-                        .font(.subheadline)
+                        .font(rowStyle?.platform == .mac ? .body : .subheadline)
                         .foregroundStyle(.white.opacity(0.6))
                         .fixedSize(horizontal: false, vertical: true)
                 }

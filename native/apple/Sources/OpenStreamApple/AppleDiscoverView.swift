@@ -2013,9 +2013,9 @@ struct AppleCatalogItemDetailView: View {
     @State private var arrFeedback: String?
     @State private var rating: AppleTitleRating?
     @State private var rankedSuggestions: [AppleCatalogItem] = []
-    /// The iPhone title page's schedule badge, worked out once per episode
-    /// list rather than on every redraw.
-    @State private var phoneScheduleBadge: String?
+    /// The title page's schedule badge (iPhone and Mac), worked out once per
+    /// episode list rather than on every redraw.
+    @State private var titlePageScheduleBadge: String?
     /// Scrolls the page back to the hero when a trailer is chosen below it.
     @State private var detailScrollPosition = ScrollPosition(edge: .top)
     @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
@@ -2075,6 +2075,15 @@ struct AppleCatalogItemDetailView: View {
                     reader.scrollTo("vision-episodes", anchor: .top)
                 }
             }
+            // `OpenStreamDetailScrollY` scrolls the title page this far once
+            // it has filled, so a headless sweep can photograph each section.
+            .task {
+                let scrollY = UserDefaults.standard.double(forKey: "OpenStreamDetailScrollY")
+                guard scrollY > 0 else { return }
+                try? await Task.sleep(for: .seconds(6))
+                guard !Task.isCancelled else { return }
+                detailScrollPosition.scrollTo(y: scrollY)
+            }
             #else
             detailContent
             #endif
@@ -2109,6 +2118,10 @@ struct AppleCatalogItemDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if usesPhoneTitlePage {
                     phoneTitlePage
+                } else if usesMacTitlePage {
+                    #if os(macOS)
+                    macTitlePage
+                    #endif
                 } else {
                 detailHero
                     #if os(iOS)
@@ -2205,7 +2218,8 @@ struct AppleCatalogItemDetailView: View {
         // status-bar shield above protects text once the page scrolls.
         .scrollClipDisabled()
         #else
-        .scrollClipDisabled(isLandscapeLayout)
+        // The Mac title page's art always runs up under the toolbar.
+        .scrollClipDisabled(isLandscapeLayout || usesMacTitlePage)
         #endif
         .onGeometryChange(for: AppleDetailViewport.self) { proxy in
             AppleDetailViewport(size: proxy.size, insets: proxy.safeAreaInsets)
@@ -2408,7 +2422,7 @@ struct AppleCatalogItemDetailView: View {
             await refreshSuggestions()
         }
         .onPreferenceChange(AppleDetailHeroFramePreferenceKey.self) { frame in
-            #if os(iOS)
+            #if os(iOS) || os(macOS)
             // Rotation can briefly report a stale frame. Stop only after the
             // hero has actually scrolled above the viewport.
             if frame != .zero, frame.maxY <= 0, trailerIsActive { pauseTrailerPreview() }
@@ -3420,6 +3434,9 @@ struct AppleCatalogItemDetailView: View {
     private func prepareTrailerAudio() -> Bool {
         #if os(iOS) || os(tvOS) || os(visionOS)
         ApplePlaybackSessionPolicy.prepareTrailerAudio()
+        #elseif os(macOS)
+        // No audio session to set up; the Mac title page's hero plays it.
+        usesMacTitlePage
         #else
         false
         #endif
@@ -4238,7 +4255,7 @@ struct AppleCatalogItemDetailView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: isLandscapeRegularLayout || horizontalSizeClass == .regular ? 10 : 8) {
-                    suggestedCards
+                    suggestedCards()
                 }
                 .padding(.vertical, 8)
                 // Leading only: the first card lines up with the heading and the
@@ -4250,8 +4267,10 @@ struct AppleCatalogItemDetailView: View {
         .accessibilityIdentifier("detail.more-like-this")
     }
 
+    /// `sizing` is the detail page's own suggestion card, or `.catalog` for
+    /// the Mac title page's Related rail, which draws the Discover poster.
     @ViewBuilder
-    private var suggestedCards: some View {
+    private func suggestedCards(sizing: AppleCatalogCardSizing = .detailSuggestions) -> some View {
         ForEach(suggestedItems) { suggestion in
             NavigationLink {
                 AppleCatalogItemDetailView(
@@ -4270,7 +4289,7 @@ struct AppleCatalogItemDetailView: View {
             } label: {
                 AppleCatalogCard(
                     item: suggestion,
-                    sizing: .detailSuggestions,
+                    sizing: sizing,
                     viewportWidth: viewportSize.width
                 )
             }
@@ -4775,7 +4794,7 @@ struct AppleCatalogItemDetailView: View {
         episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
         downloadedEpisodeIDs = []
-        phoneScheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodes)
+        titlePageScheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodes)
         selectedSeason = savedEpisode(in: episodes)?.season
             ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
             ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
@@ -4811,7 +4830,7 @@ struct AppleCatalogItemDetailView: View {
         previewAssets = nil
         fallbackArtwork = nil
         episodes = []
-        phoneScheduleBadge = nil
+        titlePageScheduleBadge = nil
         episodeLoadFinished = false
         selectedSeason = nil
         selectedEpisodeID = nil
@@ -6229,8 +6248,8 @@ private enum AppleDetailPrepareOutcome: Sendable {
 /// and the capability chips; the season menu and 16:9 episode cards; then
 /// Trailers, Related, Cast & Crew, About, Information, Languages and
 /// Accessibility — each only when there is real data for it. The back button
-/// and navigation stay as they were. iPad, landscape and every other platform
-/// keep the layout above.
+/// and navigation stay as they were. The Mac has its own title page (below);
+/// iPad, landscape and every other platform keep the layout above.
 extension AppleCatalogItemDetailView {
     private static let phoneSectionSpacing: CGFloat = 32
     private static let phoneInset: CGFloat = AppleDetailMetrics.portraitColumnInset
@@ -6243,11 +6262,21 @@ extension AppleCatalogItemDetailView {
         #endif
     }
 
+    /// The Mac title page (N18, below) replaces the Mac's detail page at
+    /// every window size.
+    var usesMacTitlePage: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     var phoneTitlePage: some View {
-        let chips = phoneCapabilityChips
-        let credits = phoneCredits
-        let information = phoneInformation
-        let languages = phoneLanguages
+        let chips = titlePageCapabilityChips
+        let credits = titlePageCredits
+        let information = titlePageInformation
+        let languages = titlePageLanguages
         let glossary = AppleTitlePagePolicy.accessibilityGlossary(chips: chips)
         return VStack(alignment: .leading, spacing: 0) {
             phoneHero
@@ -6258,7 +6287,7 @@ extension AppleCatalogItemDetailView {
                     .id("vision-episodes")
                     .padding(.top, Self.phoneSectionSpacing - 8)
             }
-            if !phoneTrailerKeys.isEmpty {
+            if !titlePageTrailerKeys.isEmpty {
                 phoneTrailersSection
                     .padding(.top, Self.phoneSectionSpacing)
             }
@@ -6270,7 +6299,7 @@ extension AppleCatalogItemDetailView {
                 phoneCastSection(credits)
                     .padding(.top, Self.phoneSectionSpacing - 8)
             }
-            if let summary = phoneSynopsis {
+            if let summary = titlePageSynopsis {
                 phoneAboutSection(summary)
                     .padding(.top, Self.phoneSectionSpacing)
             }
@@ -6306,8 +6335,8 @@ extension AppleCatalogItemDetailView {
 
     private var phoneHero: some View {
         VStack(spacing: 12) {
-            if let phoneScheduleBadge {
-                Text(phoneScheduleBadge)
+            if let titlePageScheduleBadge {
+                Text(titlePageScheduleBadge)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -6413,7 +6442,7 @@ extension AppleCatalogItemDetailView {
 
     /// "Comedy · 2026 · 51 min": the first genre, the year for a film or the
     /// run for a series, and the running time.
-    private var phoneMetadataValues: [String] {
+    private var titlePageMetadataValues: [String] {
         var values: [String] = []
         let genres = metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? []
         if let genre = genres.first(where: { !$0.isEmpty }) { values.append(genre) }
@@ -6433,7 +6462,7 @@ extension AppleCatalogItemDetailView {
 
     @ViewBuilder
     private var phoneMetadataLine: some View {
-        let values = phoneMetadataValues
+        let values = titlePageMetadataValues
         let rating = AppleBillboardCopy.ratingBadge(metadataDetails?.contentRating ?? item.contentRating)
         if !values.isEmpty || rating != nil {
             let layout = dynamicTypeSize.isAccessibilitySize
@@ -6480,7 +6509,7 @@ extension AppleCatalogItemDetailView {
         )
     }
 
-    private var phonePrimaryAction: AppleTitlePagePolicy.PrimaryAction {
+    private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction {
         AppleTitlePagePolicy.primaryAction(
             type: item.type,
             progress: playbackStore.progress(for: recordID),
@@ -6520,8 +6549,16 @@ extension AppleCatalogItemDetailView {
         }
     }
 
-    private var phonePrimaryButton: some View {
-        let action = phonePrimaryAction
+    /// The one button's words and state, shared by the iPhone and the Mac.
+    fileprivate struct TitlePagePrimaryButtonState {
+        let title: String
+        let isTrailer: Bool
+        let isBusy: Bool
+        let isEnabled: Bool
+    }
+
+    fileprivate var titlePagePrimaryButtonState: TitlePagePrimaryButtonState {
+        let action = titlePagePrimaryAction
         let isTrailer = action == .playTrailer
         let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || isPreparingMetadata)
         let title: String = if isBusy {
@@ -6529,13 +6566,24 @@ extension AppleCatalogItemDetailView {
         } else {
             action.displayTitle(hasCompletedDownload: downloadCoordinator.state.isCompleted)
         }
-        return Button {
-            if isTrailer {
-                playTrailerInHero(at: trailerCandidateIndex)
-            } else {
-                playRequest = UUID()
-            }
-        } label: {
+        return TitlePagePrimaryButtonState(title: title, isTrailer: isTrailer, isBusy: isBusy,
+                                           isEnabled: isTrailer || canStartPlayback)
+    }
+
+    /// Play (or resume), or the trailer when nothing here can play.
+    fileprivate func performTitlePagePrimaryAction() {
+        if titlePagePrimaryButtonState.isTrailer {
+            playTrailerInHero(at: trailerCandidateIndex)
+        } else {
+            playRequest = UUID()
+        }
+    }
+
+    private var phonePrimaryButton: some View {
+        let state = titlePagePrimaryButtonState
+        let isBusy = state.isBusy
+        let title = state.title
+        return Button(action: performTitlePagePrimaryAction) {
             HStack(spacing: 8) {
                 if isBusy {
                     ProgressView().tint(.black)
@@ -6556,7 +6604,7 @@ extension AppleCatalogItemDetailView {
             .contentShape(.rect(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!isTrailer && !canStartPlayback)
+        .disabled(!state.isEnabled)
         .accessibilityLabel(isBusy ? "Preparing playback" : title)
         .accessibilityIdentifier("detail.play")
         .contextMenu {
@@ -6582,15 +6630,20 @@ extension AppleCatalogItemDetailView {
         .accessibilityValue(offlineAccessibilityValue)
     }
 
+    /// The Rate menu's choices, on the iPhone and the Mac.
+    fileprivate var titlePageRateChoices: some View {
+        ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
+            Button {
+                selectRating(value)
+            } label: {
+                Label(value.title, systemImage: ratingGlyph(for: value, selected: rating == value))
+            }
+        }
+    }
+
     private var phoneRateMenu: some View {
         Menu {
-            ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
-                Button {
-                    selectRating(value)
-                } label: {
-                    Label(value.title, systemImage: ratingGlyph(for: value, selected: rating == value))
-                }
-            }
+            titlePageRateChoices
         } label: {
             AppleTitlePageRoundButtonLabel(title: "Rate", systemImage: ratingGlyph(for: rating, selected: rating != nil))
         }
@@ -6619,7 +6672,7 @@ extension AppleCatalogItemDetailView {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("detail.next-episode")
-            } else if let summary = phoneSynopsis {
+            } else if let summary = titlePageSynopsis {
                 AppleWordClampedText(text: summary, lines: dynamicTypeSize.isAccessibilitySize ? 5 : 3)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.7))
@@ -6639,11 +6692,11 @@ extension AppleCatalogItemDetailView {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var phoneSynopsis: String? {
+    private var titlePageSynopsis: String? {
         AppleMetadataPresentationPolicy.synopsis(catalog: item.summary, enriched: metadataDetails?.overview)
     }
 
-    private var phoneCapabilityChips: [String] {
+    private var titlePageCapabilityChips: [String] {
         let badges = metadataDetails?.formatBadges.isEmpty == false
             ? metadataDetails?.formatBadges ?? []
             : item.formatBadges ?? []
@@ -6740,8 +6793,8 @@ extension AppleCatalogItemDetailView {
 
     /// The trailers the hero could play; ones already found to be portrait
     /// clips are left out, as the hero skips them.
-    private var phoneTrailerKeys: [String] {
-        #if os(iOS)
+    private var titlePageTrailerKeys: [String] {
+        #if os(iOS) || os(macOS)
         trailerCandidates.filter { !trailerPortraitKeys.contains($0) }
         #else
         []
@@ -6749,7 +6802,7 @@ extension AppleCatalogItemDetailView {
     }
 
     private var phoneTrailersSection: some View {
-        let keys = phoneTrailerKeys
+        let keys = titlePageTrailerKeys
         return VStack(alignment: .leading, spacing: 10) {
             AppleTitlePageSectionTitle("Trailers")
                 .padding(.horizontal, Self.phoneInset)
@@ -6776,7 +6829,7 @@ extension AppleCatalogItemDetailView {
 
     /// Plays trailer `index` in the hero, scrolling back up to it first.
     private func playTrailerInHero(at index: Int) {
-        #if os(iOS) || os(visionOS)
+        #if os(iOS) || os(visionOS) || os(macOS)
         guard trailerCandidates.indices.contains(index) else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
             detailScrollPosition.scrollTo(edge: .top)
@@ -6802,7 +6855,7 @@ extension AppleCatalogItemDetailView {
 
     // MARK: Cast, About, Information, Languages
 
-    private var phoneCredits: [AppleCreditPerson] {
+    private var titlePageCredits: [AppleCreditPerson] {
         let details = metadataDetails
         let cast = details?.cast.isEmpty == false ? details?.cast ?? [] : item.cast ?? []
         let writers = details?.writers.isEmpty == false ? details?.writers ?? [] : item.writers ?? []
@@ -6860,7 +6913,7 @@ extension AppleCatalogItemDetailView {
         .accessibilityIdentifier("detail.about")
     }
 
-    private var phoneInformation: [AppleTitlePagePolicy.Fact] {
+    private var titlePageInformation: [AppleTitlePagePolicy.Fact] {
         AppleTitlePagePolicy.information(
             year: metadataDetails?.year ?? item.year,
             releaseInfo: displayReleaseInfo,
@@ -6869,7 +6922,7 @@ extension AppleCatalogItemDetailView {
         )
     }
 
-    private var phoneLanguages: [AppleTitlePagePolicy.Fact] {
+    private var titlePageLanguages: [AppleTitlePagePolicy.Fact] {
         AppleTitlePagePolicy.languages(
             originalLanguage: metadataDetails?.originalLanguage,
             spokenLanguages: metadataDetails?.spokenLanguages ?? []
@@ -6886,3 +6939,489 @@ extension AppleCatalogItemDetailView {
         .accessibilityIdentifier(identifier)
     }
 }
+
+// MARK: - Mac title page
+
+#if os(macOS)
+/// The Mac title page, after the Apple TV app's on the Mac (N18;
+/// INSPO-TEARDOWN §7, PDF pages 11–16) and the iPhone's (N17), whose policy,
+/// words and section views it shares: the art edge to edge from the top of
+/// the window, under the toolbar, about two thirds of it tall
+/// (`AppleTitlePageMacLayout`); bottom-left over the Mac hero's two fades the
+/// wordmark, the meta line and rating, one state-derived button with round My
+/// List, Download and Rate buttons, the episode Play starts (or the film's
+/// synopsis) clamped with MORE, and the capability chips. Below, on the
+/// Discover rails' inset and with their hover lift and ‹ › paging: the season
+/// menu and 16:9 episode cards, Trailers, Related, Cast & Crew, then About and
+/// the Information, Languages and Accessibility blocks side by side in a wide
+/// window. A section with nothing real to say is left out. The toolbar, its
+/// back button and the sidebar are the window's own and are not touched.
+extension AppleCatalogItemDetailView {
+    private var macLayout: AppleTitlePageMacLayout {
+        AppleTitlePageMacLayout(contentWidth: viewportSize.width, windowHeight: viewportSize.height)
+    }
+
+    /// The Mac Discover rails' tile sizes and inset, so the title page's rails
+    /// are the same rails.
+    private var macRowStyle: AppleDiscoverRowStyle {
+        .mac(contentWidth: viewportSize.width, inset: macLayout.horizontalInset)
+    }
+
+    var macTitlePage: some View {
+        let layout = macLayout
+        let chips = titlePageCapabilityChips
+        let credits = titlePageCredits
+        let reference = macReferenceBlocks(chips: chips)
+        return VStack(alignment: .leading, spacing: 0) {
+            macHero(layout: layout, chips: chips)
+            VStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
+                if item.type == "series" {
+                    macEpisodesSection(layout: layout)
+                        .id("vision-episodes")
+                }
+                if !titlePageTrailerKeys.isEmpty {
+                    macTrailersSection
+                }
+                if !suggestedItems.isEmpty {
+                    AppleMediaShelf(title: "Related", headingIdentifier: "detail.more-like-this") {
+                        suggestedCards(sizing: .catalog)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("detail.more-like-this")
+                }
+                if !credits.isEmpty {
+                    AppleMediaShelf(title: "Cast & Crew") {
+                        ForEach(credits) { person in
+                            AppleTitlePageCreditPortrait(person: person, side: AppleTitlePageMacLayout.portraitSide)
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("detail.cast")
+                }
+                if let summary = titlePageSynopsis {
+                    macAboutSection(summary)
+                        .padding(.horizontal, layout.horizontalInset)
+                }
+                if !reference.isEmpty {
+                    macReferenceGrid(reference, layout: layout)
+                        .padding(.horizontal, layout.horizontalInset)
+                }
+            }
+            .padding(.top, 28)
+            .padding(.bottom, 40)
+        }
+        .environment(\.appleDiscoverRows, macRowStyle)
+    }
+
+    // MARK: Hero
+
+    private func macHero(layout: AppleTitlePageMacLayout, chips: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let titlePageScheduleBadge {
+                Text(titlePageScheduleBadge)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .overlay { Capsule().strokeBorder(.white.opacity(0.6), lineWidth: 1) }
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("detail.schedule")
+            }
+            macTitleLockup(layout: layout)
+                .padding(.bottom, 10)
+            macMetadataLine
+                .padding(.bottom, 18)
+            macActionRow
+            macHeroDetails(chips: chips)
+                .padding(.top, 18)
+        }
+        .frame(width: layout.copyWidth, alignment: .leading)
+        .padding(.leading, layout.horizontalInset)
+        .padding(.bottom, AppleTitlePageMacLayout.heroBottomPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The copy is in the flow, anchored to the bottom of the art: in a
+        // short window it grows the hero downwards onto black rather than
+        // clipping the buttons.
+        .frame(minHeight: layout.heroHeight, alignment: .bottomLeading)
+        .background(alignment: .top) {
+            macHeroStage
+                .frame(maxWidth: .infinity)
+                .frame(height: layout.heroHeight)
+                .clipped()
+        }
+        .background(.black)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: AppleDetailHeroFramePreferenceKey.self,
+                    value: proxy.frame(in: .named("detail-scroll"))
+                )
+            }
+        }
+        // From the top of the window, under the toolbar.
+        .padding(.top, -detailSafeAreaInsets.top)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// The still — decoded once at one size, so a live resize never reloads
+    /// it — the trailer over it once one has been started, the mute button
+    /// while it plays, and the Mac hero's two fades.
+    private var macHeroStage: some View {
+        ZStack(alignment: .topTrailing) {
+            Button(action: toggleTrailerPlayback) {
+                AppleRemoteImage(
+                    url: heroArtworkURL,
+                    placeholderSystemImage: "",
+                    onLoad: { image in
+                        heroArtworkImage = image
+                        fillTimeline.mark(.artwork)
+                    },
+                    onFailure: { heroArtworkImage = nil },
+                    keepsImageWhileReloading: true,
+                    fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension
+                )
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .clipped()
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            // A key press lands here only while a trailer is up to pause.
+            .focusable(trailerHasStarted)
+            .accessibilityLabel(trailerIsActive ? "Pause trailer" : "Play trailer")
+            .accessibilityHidden(!trailerHasStarted && titlePageTrailerKeys.isEmpty)
+            if trailerHasStarted, let embedURL = trailerEmbedURL,
+               !playbackCoordinator.phase.isBusy, playerPresentation == nil {
+                AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: heroArtworkImage,
+                                           isPlaying: trailerIsActive, isMuted: trailerMuted,
+                                           onStateChange: handleTrailerState)
+                    // Only the frame offered, never the web view's own size
+                    // (the zero-minimum lesson, 2026-09-22).
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay { AppleMacHeroFadeView().allowsHitTesting(false) }
+        .overlay(alignment: .topTrailing) {
+            if trailerHasStarted, trailerIsActive {
+                AppleMacHeroMuteButton(isMuted: trailerMuted) { trailerMuted.toggle() }
+                    .padding(.top, detailSafeAreaInsets.top + AppleMacHeroLayout.muteTopInset)
+                    .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
+            }
+        }
+    }
+
+    /// The wordmark once it has drawn, otherwise the name in black weight;
+    /// the slot is held while the wordmark resolves.
+    @ViewBuilder
+    private func macTitleLockup(layout: AppleTitlePageMacLayout) -> some View {
+        switch titleLogoPresentation {
+        case .text:
+            Text(displayTitle)
+                .font(.system(size: layout.titleFontSize, weight: .black))
+                .tracking(-0.02 * layout.titleFontSize)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.6), radius: 10, y: 2)
+                .accessibilityAddTraits(.isHeader)
+        case .logo, .hidden:
+            ZStack(alignment: .bottomLeading) {
+                if case .valid = titleLogoState, let logoURL = titleLogoURL {
+                    AppleTrimmedTitleLogo(url: logoURL, alignment: .bottomLeading) { loaded in
+                        titleLogoLoadResult = loaded
+                        if loaded { fillTimeline.mark(.wordmark) }
+                    }
+                    .opacity(titleLogoPresentation == .logo ? 1 : 0)
+                }
+            }
+            .frame(width: min(AppleMacHeroLayout.wordmarkSize.width, layout.copyWidth),
+                   height: AppleMacHeroLayout.wordmarkSize.height, alignment: .bottomLeading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(displayTitle)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHidden(titleLogoPresentation != .logo)
+        }
+    }
+
+    /// "Crime · 2025– · 47 min" and the outlined rating, as the Mac Discover
+    /// hero draws its line.
+    @ViewBuilder
+    private var macMetadataLine: some View {
+        let values = titlePageMetadataValues
+        let rating = AppleBillboardCopy.ratingBadge(metadataDetails?.contentRating ?? item.contentRating)
+        if !values.isEmpty || rating != nil {
+            HStack(spacing: 8) {
+                if !values.isEmpty {
+                    Text(values.joined(separator: AppleBillboardCopy.separator))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+                if let rating {
+                    Text(rating)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                        }
+                        .accessibilityLabel("Rated \(rating)")
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// The one white button and the round ones, with the Mac hero's hover
+    /// and pressed states and a tooltip on each round one.
+    private var macActionRow: some View {
+        let state = titlePagePrimaryButtonState
+        return HStack(spacing: 12) {
+            Button(action: performTitlePagePrimaryAction) {
+                HStack(spacing: 8) {
+                    if state.isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color(white: 0.07))
+                    } else {
+                        Image(systemName: "play.fill")
+                            .accessibilityHidden(true)
+                    }
+                    Text(state.title)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .frame(minWidth: 180)
+            }
+            .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
+            .disabled(!state.isEnabled)
+            .accessibilityLabel(state.isBusy ? "Preparing playback" : state.title)
+            .accessibilityIdentifier("detail.play")
+            .contextMenu {
+                Button("Other sources", systemImage: "list.bullet") {
+                    Task { await chooseStreams() }
+                }
+            }
+
+            Button(action: toggleFavorite) {
+                AppleTitlePageMacRoundLabel(title: isFavorite ? "Remove from My List" : "Add to My List",
+                                            systemImage: isFavorite ? "checkmark" : "plus")
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
+            .help(isFavorite ? "Remove from My List" : "Add to My List")
+            .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+            .accessibilityIdentifier("detail.my-list")
+
+            if showsDownloadAction {
+                Button(action: performDownloadAction) {
+                    switch downloadGlyph {
+                    case .progress:
+                        AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
+                    case .systemImage(let name):
+                        AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: name)
+                    }
+                }
+                .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
+                .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+                .help(downloadButtonLabel)
+                .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
+                .accessibilityLabel(downloadButtonLabel)
+                .accessibilityValue(offlineAccessibilityValue)
+            }
+
+            Menu {
+                titlePageRateChoices
+            } label: {
+                AppleTitlePageMacRoundLabel(title: "Rate", systemImage: ratingGlyph(for: rating, selected: rating != nil))
+            }
+            .menuStyle(.button)
+            .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Rate")
+            .accessibilityLabel("Rate")
+            .accessibilityValue(rating?.title ?? "Not rated")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.icon-row")
+    }
+
+    /// Under the buttons: the episode Play starts ("S1, E3 · Title" and its
+    /// synopsis) or the film's synopsis, clamped with MORE; the chips; and
+    /// any download status.
+    private func macHeroDetails(chips: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if item.type == "series", let episode = selectedEpisode,
+               let heading = AppleTitlePagePolicy.nextEpisodeHeading(episode) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(heading)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    if let overview = episode.overview {
+                        AppleMoreText(text: overview, lineLimit: 3, style: .body)
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("detail.next-episode")
+            } else if let summary = titlePageSynopsis {
+                AppleMoreText(text: summary, lineLimit: 3, style: .body)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            if !chips.isEmpty {
+                AppleTitlePageChipRow(chips: chips)
+            }
+            if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
+                Text(downloadButtonLabel)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("detail.download.progress")
+            }
+            downloadFailureNotice
+            seasonDownloadStatus
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Rails
+
+    private func macEpisodesSection(layout: AppleTitlePageMacLayout) -> some View {
+        let style = macRowStyle
+        return VStack(alignment: .leading, spacing: 4) {
+            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $selectedSeason, name: seasonName)
+                .padding(.horizontal, layout.horizontalInset)
+            switch episodeListPresentation {
+            case .loading:
+                HStack(alignment: .top, spacing: style.cardGap) {
+                    AppleTitlePageEpisodePlaceholder(width: style.stillWidth)
+                    AppleTitlePageEpisodePlaceholder(width: style.stillWidth)
+                    AppleTitlePageEpisodePlaceholder(width: style.stillWidth)
+                }
+                .padding(.horizontal, layout.horizontalInset)
+                .padding(.vertical, 12)
+            case .unavailable:
+                Text("Episodes aren’t available from the connected metadata sources.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, layout.horizontalInset)
+            case .episodes:
+                macEpisodeRail(style: style)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.episodes")
+    }
+
+    private func macEpisodeRail(style: AppleDiscoverRowStyle) -> some View {
+        let saved = playbackStore.progress(for: recordID)
+        let now = Date.now
+        return AppleMacRail {
+            LazyHStack(alignment: .top, spacing: style.cardGap) {
+                ForEach(visibleEpisodes) { episode in
+                    AppleTitlePageEpisodeCard(
+                        episode: episode,
+                        eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
+                        isWatched: playbackStore.progress(for: episode.id)?.isComplete == true,
+                        isSelected: selectedEpisodeID == episode.id,
+                        progress: Self.progressFraction(saved, for: episode),
+                        width: style.stillWidth
+                    ) {
+                        selectedEpisodeID = episode.id
+                        playRequest = UUID()
+                    } accessory: {
+                        episodeDownloadButton(episode)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .id(episode.id)
+                }
+            }
+            .padding(.horizontal, style.horizontalInset)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var macTrailersSection: some View {
+        let keys = titlePageTrailerKeys
+        let width = macRowStyle.stillWidth
+        return AppleMediaShelf(title: "Trailers") {
+            ForEach(keys, id: \.self) { key in
+                let number = (keys.firstIndex(of: key) ?? 0) + 1
+                AppleTitlePageTrailerCard(
+                    key: key,
+                    caption: number == 1 ? "Trailer" : "Trailer \(number)",
+                    width: width
+                ) {
+                    if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.trailers")
+    }
+
+    // MARK: About and reference
+
+    private func macAboutSection(_ summary: String) -> some View {
+        let genres = (metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? [])
+            .prefix(2).joined(separator: AppleBillboardCopy.separator)
+        return VStack(alignment: .leading, spacing: 12) {
+            AppleTitlePageSectionTitle("About")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayTitle)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                if !genres.isEmpty {
+                    Text(genres.uppercased())
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                AppleMoreText(text: summary, lineLimit: 4, style: .body)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 8)
+            }
+            .padding(20)
+            .frame(maxWidth: AppleTitlePageMacLayout.aboutMaxWidth, alignment: .leading)
+            .background(.white.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.about")
+    }
+
+    /// Information, Languages and Accessibility, each only when it has
+    /// something real to say.
+    private func macReferenceBlocks(chips: [String]) -> [AppleTitlePageMacReferenceBlock] {
+        var blocks: [AppleTitlePageMacReferenceBlock] = []
+        let information = titlePageInformation
+        if !information.isEmpty { blocks.append(.facts(title: "Information", facts: information, identifier: "detail.information")) }
+        let languages = titlePageLanguages
+        if !languages.isEmpty { blocks.append(.facts(title: "Languages", facts: languages, identifier: "detail.languages")) }
+        let glossary = AppleTitlePagePolicy.accessibilityGlossary(chips: chips)
+        if !glossary.isEmpty { blocks.append(.accessibility(glossary)) }
+        return blocks
+    }
+
+    private func macReferenceGrid(_ blocks: [AppleTitlePageMacReferenceBlock], layout: AppleTitlePageMacLayout) -> some View {
+        let columns = layout.referenceColumns(count: blocks.count)
+        // A lone block in a wide window spreads its facts instead.
+        let factColumns = blocks.count == 1 ? layout.referenceColumns(count: AppleTitlePageMacLayout.maximumColumns) : 1
+        let stack = columns > 1
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: AppleTitlePageMacLayout.columnSpacing))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing))
+        return stack {
+            ForEach(blocks) { block in
+                AppleTitlePageMacReferenceBlockView(block: block, factColumns: factColumns)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+}
+#endif

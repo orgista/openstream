@@ -122,6 +122,7 @@ public enum AppleMacWindowShot {
             return
         }
         frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        lines.append(contentsOf: drawPopovers(over: target, into: rep))
         guard let data = rep.representation(using: .png, properties: [:]) else {
             emit(lines + ["OPENSTREAM-SHOT verdict: PNG encoding failed"])
             return
@@ -141,6 +142,33 @@ public enum AppleMacWindowShot {
         lines.append(contentsOf: menuDump())
         lines.append("OPENSTREAM-SHOT verdict: PASS")
         emit(lines)
+    }
+
+    /// A popover (the title page's season list) is a window of its own over
+    /// the main one, so the main window's layer tree does not have it. Each
+    /// visible one is rendered the same way and drawn in where it sits.
+    @MainActor
+    private static func drawPopovers(over window: NSWindow, into rep: NSBitmapImageRep) -> [String] {
+        let popovers = NSApp.windows.filter {
+            $0 !== window && $0.isVisible && $0.className.contains("Popover") && $0.frame.intersects(window.frame)
+        }
+        guard !popovers.isEmpty, let context = NSGraphicsContext(bitmapImageRep: rep) else { return [] }
+        var lines = [String]()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        for popover in popovers {
+            guard let view = popover.contentView?.superview,
+                  let popoverRep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: popoverRep)
+            // Both frames are in screen points with the origin bottom-left,
+            // as the bitmap context is.
+            let origin = CGPoint(x: popover.frame.minX - window.frame.minX, y: popover.frame.minY - window.frame.minY)
+            popoverRep.draw(in: NSRect(origin: origin, size: popover.frame.size), from: .zero,
+                            operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+            lines.append("OPENSTREAM-SHOT popover: \(popover.className) frame=\(NSStringFromRect(popover.frame))")
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return lines
     }
 
     /// A blank window is the failure this whole exercise started from, and a
