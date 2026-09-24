@@ -66,6 +66,7 @@ struct AppleWatchedHistoryTests {
         store.markUnwatched(mediaID: part)
         #expect(!store.isWatched(mediaID: part))
         #expect(ApplePlaybackStore(defaults: defaults).configurationWatchedHistory().isEmpty)
+        #expect(ApplePlaybackStore(defaults: defaults).configurationWatchedTombstones()[try key(part)] != nil)
     }
 
     @MainActor @Test func markingWatchedMovesTheFeed() throws {
@@ -99,6 +100,22 @@ struct AppleWatchedHistoryTests {
         #expect(stored[try key("id-\(limit)")] != nil)
     }
 
+    @MainActor @Test func storeLimitIncludesTombstonesAndKeepsNewestEvents() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let limit = ApplePlaybackStore.watchedHistoryLimit
+        let removed = Dictionary(uniqueKeysWithValues: (0..<limit).map {
+            ("id-\($0)", Date(timeIntervalSince1970: Double($0)))
+        })
+        store.restoreConfigurationWatchedHistory(["newest": Date(timeIntervalSince1970: Double(limit))],
+                                                 tombstones: removed)
+        let reloaded = ApplePlaybackStore(defaults: defaults)
+        #expect(reloaded.configurationWatchedHistory().count + reloaded.configurationWatchedTombstones().count == limit)
+        #expect(reloaded.configurationWatchedTombstones()[try key("id-0")] == nil)
+        #expect(reloaded.configurationWatchedTombstones()[try key("id-1")] != nil)
+        #expect(reloaded.isWatched(mediaID: "newest"))
+    }
+
     @MainActor @Test func restoreIsAUnionWhereTheLaterFinishWins() throws {
         let (store, defaults) = try makeStore()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -115,6 +132,49 @@ struct AppleWatchedHistoryTests {
         #expect(history[try key("both")] == late)
         store.restoreConfigurationWatchedHistory([try key("both"): Date(timeIntervalSince1970: 300)])
         #expect(store.configurationWatchedHistory()[try key("both")] == Date(timeIntervalSince1970: 300))
+    }
+
+    @MainActor @Test func laterUnwatchWinsInEitherImportOrder() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let mediaID = "fixture-episode"
+        let storageKey = try key(mediaID)
+        let watched = Date(timeIntervalSince1970: 100)
+        let unwatched = Date(timeIntervalSince1970: 200)
+        store.restoreConfigurationWatchedHistory([storageKey: watched], tombstones: [storageKey: unwatched])
+        #expect(!store.isWatched(mediaID: mediaID))
+        store.restoreConfigurationWatchedHistory([storageKey: watched])
+        #expect(!ApplePlaybackStore(defaults: defaults).isWatched(mediaID: mediaID))
+        #expect(store.configurationWatchedHistory().isEmpty)
+        #expect(store.configurationWatchedTombstones()[storageKey] == unwatched)
+    }
+
+    @MainActor @Test func rewatchAfterUnwatchWinsAndSurvivesOldSnapshot() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let mediaID = "fixture-episode"
+        let storageKey = try key(mediaID)
+        let first = Date(timeIntervalSince1970: 100)
+        let removed = Date(timeIntervalSince1970: 200)
+        let rewatched = Date(timeIntervalSince1970: 300)
+        store.markWatched(mediaID: mediaID, at: first)
+        store.markUnwatched(mediaID: mediaID, at: removed)
+        #expect(!store.isWatched(mediaID: mediaID))
+        store.markWatched(mediaID: mediaID, at: rewatched)
+        store.restoreConfigurationWatchedHistory([storageKey: first], tombstones: [storageKey: removed])
+        #expect(store.isWatched(mediaID: mediaID))
+        #expect(store.configurationWatchedHistory()[storageKey] == rewatched)
+        #expect(store.configurationWatchedTombstones()[storageKey] == nil)
+    }
+
+    @MainActor @Test func tombstoneOverridesRestoredCompleteProgress() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let mediaID = "fixture-episode"
+        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100)])
+        store.markUnwatched(mediaID: mediaID)
+        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100)])
+        #expect(store.completedMediaIDs(among: [mediaID]).isEmpty)
     }
 
     // MARK: Up Next
@@ -192,6 +252,15 @@ struct AppleWatchedHistoryTests {
         #expect(try AppleConfigurationFile.decode(sealed, passphrase: "fixture passphrase").snapshot.watchedHistory == history)
     }
 
+    @Test func backupRoundTripsTombstonesPlainAndEncrypted() throws {
+        let removed = ["sha256:fixture-a": Date(timeIntervalSince1970: 2_000)]
+        let snapshot = AppleConfigurationSnapshot(watchedTombstones: removed)
+        let plain = try AppleConfigurationFile.decode(AppleConfigurationFile.encode(snapshot: snapshot)).snapshot
+        #expect(plain.watchedTombstones == removed)
+        let sealed = try AppleConfigurationFile.encode(snapshot: snapshot, passphrase: "fixture passphrase")
+        #expect(try AppleConfigurationFile.decode(sealed, passphrase: "fixture passphrase").snapshot.watchedTombstones == removed)
+    }
+
     @Test func snapshotWithoutWatchedHistoryImports() throws {
         let data = try AppleConfigurationFile.encode(snapshot: AppleConfigurationSnapshot(watchedHistory: ["sha256:x": .now]))
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -201,6 +270,62 @@ struct AppleWatchedHistoryTests {
         let old = try JSONSerialization.data(withJSONObject: json)
         let restored = try AppleConfigurationFile.decode(old).snapshot
         #expect(restored.watchedHistory.isEmpty)
+        #expect(restored.watchedTombstones.isEmpty)
+    }
+
+    @Test func oldSnapshotWithWatchedHistoryImportsWithoutTombstones() throws {
+        let date = Date(timeIntervalSince1970: 100)
+        let data = try AppleConfigurationFile.encode(snapshot: AppleConfigurationSnapshot(watchedHistory: ["fixture": date]))
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let snapshot = try #require(body["snapshot"] as? [String: Any])
+        #expect(snapshot["watchedTombstones"] == nil)
+        let restored = try AppleConfigurationFile.decode(data).snapshot
+        #expect(restored.watchedHistory["fixture"] == date)
+        #expect(restored.watchedTombstones.isEmpty)
+    }
+
+    @Test func snapshotMergeUsesLatestEventInEitherOrder() {
+        let watched = AppleConfigurationSnapshot(watchedHistory: ["fixture": Date(timeIntervalSince1970: 100)])
+        let removed = AppleConfigurationSnapshot(watchedTombstones: ["fixture": Date(timeIntervalSince1970: 200)])
+        for merged in [watched.merging(removed), removed.merging(watched)] {
+            #expect(merged.watchedHistory["fixture"] == nil)
+            #expect(merged.watchedTombstones["fixture"] == Date(timeIntervalSince1970: 200))
+        }
+        let rewatched = AppleConfigurationSnapshot(watchedHistory: ["fixture": Date(timeIntervalSince1970: 300)])
+        #expect(removed.merging(rewatched).watchedHistory == rewatched.watchedHistory)
+        #expect(rewatched.merging(removed).watchedTombstones.isEmpty)
+    }
+
+    @Test func cloudBudgetCountsTombstonesAmongNewestEvents() throws {
+        let watched = Dictionary(uniqueKeysWithValues: (0..<400).map {
+            ("watched-\($0)", Date(timeIntervalSince1970: Double($0)))
+        })
+        let tombstones = Dictionary(uniqueKeysWithValues: (0..<400).map {
+            ("removed-\($0)", Date(timeIntervalSince1970: Double(400 + $0)))
+        })
+        let data = try AppleConfigurationSnapshot(watchedHistory: watched, watchedTombstones: tombstones).cloudData()
+        let restored = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
+        #expect(restored.watchedHistory.count + restored.watchedTombstones.count == 500)
+        #expect(restored.watchedHistory["watched-0"] == nil)
+        #expect(restored.watchedHistory["watched-399"] != nil)
+        #expect(restored.watchedTombstones.count == 400)
+    }
+
+    @Test func cloudByteTrimDropsOldTombstonesBeforeNewProgress() throws {
+        let longPart = String(repeating: "a", count: 4_000)
+        let progress = Dictionary(uniqueKeysWithValues: (0..<150).map {
+            ("progress-\($0)", ApplePlaybackProgress(position: 10, duration: 100,
+                updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart))
+        })
+        let tombstones = Dictionary(uniqueKeysWithValues: (0..<350).map {
+            ("removed-\($0)-" + String(repeating: "b", count: 1_000), Date(timeIntervalSince1970: Double($0)))
+        })
+        let data = try AppleConfigurationSnapshot(playbackProgress: progress, watchedTombstones: tombstones).cloudData()
+        let restored = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
+        #expect(data.count <= AppleConfigurationSnapshot.maximumCloudBytes)
+        #expect(restored.watchedTombstones.count < 350)
+        #expect(restored.watchedTombstones["removed-349-" + String(repeating: "b", count: 1_000)] != nil)
+        #expect(restored.playbackProgress.count == 150)
     }
 
     @Test func cloudKeepsNewest500WatchedAndFitsBudget() throws {

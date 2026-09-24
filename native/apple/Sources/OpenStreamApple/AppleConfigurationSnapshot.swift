@@ -1,5 +1,48 @@
 import Foundation
 
+struct AppleWatchedHistory {
+    private struct Entry {
+        let key: String
+        let date: Date
+        let isWatched: Bool
+    }
+
+    var watched: [String: Date] = [:]
+    var tombstones: [String: Date] = [:]
+
+    init(watched: [String: Date] = [:], tombstones: [String: Date] = [:]) {
+        merge(watched: watched, tombstones: tombstones)
+    }
+
+    mutating func merge(watched incomingWatched: [String: Date], tombstones incomingTombstones: [String: Date]) {
+        for (key, date) in incomingWatched {
+            if let removed = tombstones[key], removed >= date { continue }
+            if let previous = watched[key], previous >= date { continue }
+            tombstones.removeValue(forKey: key)
+            watched[key] = date
+        }
+        for (key, date) in incomingTombstones {
+            if let previous = watched[key], previous > date { continue }
+            if let previous = tombstones[key], previous >= date { continue }
+            watched.removeValue(forKey: key)
+            tombstones[key] = date
+        }
+    }
+
+    func newest(_ limit: Int) -> Self {
+        guard watched.count + tombstones.count > limit else { return self }
+        let events = watched.map { Entry(key: $0.key, date: $0.value, isWatched: true) }
+            + tombstones.map { Entry(key: $0.key, date: $0.value, isWatched: false) }
+        let newest = events.sorted { $0.date == $1.date ? $0.key < $1.key : $0.date > $1.date }.prefix(limit)
+        var result = Self()
+        for entry in newest {
+            if entry.isWatched { result.watched[entry.key] = entry.date }
+            else { result.tombstones[entry.key] = entry.date }
+        }
+        return result
+    }
+}
+
 public enum AppleConfigurationError: Error, Equatable, LocalizedError {
     case unsupportedVersion, passphraseRequired, wrongPassphrase, invalidFile, tooLarge
 
@@ -25,23 +68,28 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     /// Finished titles and when, keyed like `playbackProgress`. Snapshots
     /// written before this existed have none and import as empty.
     public var watchedHistory: [String: Date]
+    /// Un-watch events are separate so older readers can still decode `watchedHistory`.
+    public var watchedTombstones: [String: Date]
     public var watchlist: [AppleMediaRecord]
     public var ratings: [String: Int]
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchlist, ratings
+        case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchedTombstones, watchlist, ratings
     }
 
     public init(savedAt: Date = .now, sources: [AppleSource] = [], settings: [String: Data] = [:],
                 playbackProgress: [String: ApplePlaybackProgress] = [:],
                 watchedHistory: [String: Date] = [:],
+                watchedTombstones: [String: Date] = [:],
                 watchlist: [AppleMediaRecord] = [], ratings: [String: Int] = [:]) {
         formatVersion = 1
         self.savedAt = savedAt
         self.sources = sources.map(Self.portableSource)
         self.settings = settings
         self.playbackProgress = playbackProgress
-        self.watchedHistory = watchedHistory
+        let history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
+        self.watchedHistory = history.watched
+        self.watchedTombstones = history.tombstones
         self.watchlist = watchlist.map { record in
             var copy = record
             copy.artworkURL = nil
@@ -58,9 +106,26 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         sources = try container.decode([AppleSource].self, forKey: .sources)
         settings = try container.decode([String: Data].self, forKey: .settings)
         playbackProgress = try container.decode([String: ApplePlaybackProgress].self, forKey: .playbackProgress)
-        watchedHistory = try container.decodeIfPresent([String: Date].self, forKey: .watchedHistory) ?? [:]
+        let history = AppleWatchedHistory(
+            watched: try container.decodeIfPresent([String: Date].self, forKey: .watchedHistory) ?? [:],
+            tombstones: try container.decodeIfPresent([String: Date].self, forKey: .watchedTombstones) ?? [:])
+        watchedHistory = history.watched
+        watchedTombstones = history.tombstones
         watchlist = try container.decode([AppleMediaRecord].self, forKey: .watchlist)
         ratings = try container.decode([String: Int].self, forKey: .ratings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(formatVersion, forKey: .formatVersion)
+        try container.encode(savedAt, forKey: .savedAt)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(settings, forKey: .settings)
+        try container.encode(playbackProgress, forKey: .playbackProgress)
+        try container.encode(watchedHistory, forKey: .watchedHistory)
+        if !watchedTombstones.isEmpty { try container.encode(watchedTombstones, forKey: .watchedTombstones) }
+        try container.encode(watchlist, forKey: .watchlist)
+        try container.encode(ratings, forKey: .ratings)
     }
 
     public func validate() throws {
@@ -77,7 +142,10 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             else { combined.append(source) }
         }
         result.sources = combined
-        result.watchedHistory = watchedHistory.merging(incoming.watchedHistory) { max($0, $1) }
+        var history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
+        history.merge(watched: incoming.watchedHistory, tombstones: incoming.watchedTombstones)
+        result.watchedHistory = history.watched
+        result.watchedTombstones = history.tombstones
         return result
     }
 
@@ -89,18 +157,22 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt
         }.prefix(Self.cloudEntryLimit)
         copy.playbackProgress = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
-        let newestWatched = watchedHistory.sorted {
-            $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
-        }.prefix(Self.cloudEntryLimit)
-        copy.watchedHistory = Dictionary(uniqueKeysWithValues: newestWatched.map { ($0.key, $0.value) })
+        let newestWatched = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
+            .newest(Self.cloudEntryLimit)
+        copy.watchedHistory = newestWatched.watched
+        copy.watchedTombstones = newestWatched.tombstones
         var data = try Self.encoder.encode(copy)
         // Large episode identifiers can still exceed the quota with fewer
         // than 500 entries. The oldest entry of either list goes first.
         let progressEntries: [CloudTrimEntry] = newest.map { CloudTrimEntry(key: $0.key, date: $0.value.updatedAt, isWatched: false) }
-        let watchedEntries: [CloudTrimEntry] = newestWatched.map { CloudTrimEntry(key: $0.key, date: $0.value, isWatched: true) }
+        let watchedEntries: [CloudTrimEntry] = newestWatched.watched.map { CloudTrimEntry(key: $0.key, date: $0.value, isWatched: true) }
+            + newestWatched.tombstones.map { CloudTrimEntry(key: $0.key, date: $0.value, isWatched: true) }
         var oldestFirst = (progressEntries + watchedEntries).sorted(by: CloudTrimEntry.isOlder)[...]
         while data.count > Self.maximumCloudBytes, let entry = oldestFirst.popFirst() {
-            if entry.isWatched { copy.watchedHistory.removeValue(forKey: entry.key) }
+            if entry.isWatched {
+                copy.watchedHistory.removeValue(forKey: entry.key)
+                copy.watchedTombstones.removeValue(forKey: entry.key)
+            }
             else { copy.playbackProgress.removeValue(forKey: entry.key) }
             data = try Self.encoder.encode(copy)
         }

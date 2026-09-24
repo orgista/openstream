@@ -83,8 +83,11 @@ public final class ApplePlaybackStore {
     /// ever showed its tick and "next episode" always meant the first one.
     /// Watching a finished episode again does not take it off this list.
     private let watchedKey = "openstream.playback.watched.v1"
+    private let unwatchedKey = "openstream.playback.unwatched.v1"
     private var watchedCache: [String: Date]?
     private var watchedCachedData: Data?
+    private var unwatchedCache: [String: Date]?
+    private var unwatchedCachedData: Data?
     /// The newest this many finished titles are kept.
     nonisolated public static let watchedHistoryLimit = 5_000
 
@@ -103,12 +106,14 @@ public final class ApplePlaybackStore {
     /// from an older backup) counts too.
     public func completedMediaIDs(among mediaIDs: [String]) -> Set<String> {
         let watched = watchedEntries()
+        let tombstones = storedWatchedTombstones()
         let all = entries()
         return Set(mediaIDs.filter { mediaID in
             guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
             #if DEBUG
             if AppleWatchedHistoryFixture.isSeeded(mediaID: mediaID, storageKey: storageKey) { return true }
             #endif
+            if tombstones[storageKey] != nil { return false }
             return watched[storageKey] != nil || all[storageKey]?.isComplete == true
         })
     }
@@ -120,17 +125,17 @@ public final class ApplePlaybackStore {
     /// "Mark as Watched": records `mediaID` as finished now.
     public func markWatched(mediaID: String, at date: Date = .now) {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
-        var current = watchedEntries()
-        current[storageKey] = date
+        var history = AppleWatchedHistory(watched: watchedEntries(), tombstones: storedWatchedTombstones())
+        history.merge(watched: [storageKey: date], tombstones: [:])
         #if DEBUG
         AppleWatchedHistoryFixture.unwatched.remove(storageKey)
         #endif
-        persistWatched(current)
+        persistWatched(history.watched, tombstones: history.tombstones)
     }
 
-    /// "Mark as Unwatched": forgets that `mediaID` was finished. A resumable
+    /// "Mark as Unwatched": records a deletion event. A resumable
     /// position for it, if any, stays.
-    public func markUnwatched(mediaID: String) {
+    public func markUnwatched(mediaID: String, at date: Date = .now) {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
         var watched = watchedEntries()
         #if DEBUG
@@ -141,7 +146,9 @@ public final class ApplePlaybackStore {
             return
         }
         #endif
-        if watched.removeValue(forKey: storageKey) != nil { persistWatched(watched) }
+        var history = AppleWatchedHistory(watched: watched, tombstones: storedWatchedTombstones())
+        history.merge(watched: [:], tombstones: [storageKey: date])
+        persistWatched(history.watched, tombstones: history.tombstones)
         var progress = entries()
         if progress[storageKey]?.isComplete == true {
             progress.removeValue(forKey: storageKey)
@@ -180,12 +187,12 @@ public final class ApplePlaybackStore {
             // A series keeps its entry under the show and names the episode
             // in `partID`; the episode is what was finished, not the show.
             let finishedKey = partID.flatMap(ApplePlaybackIdentity.storageKey(for:)) ?? storageKey
-            var watched = watchedEntries()
+            var history = AppleWatchedHistory(watched: watchedEntries(), tombstones: storedWatchedTombstones())
             // The last half-minute saves "complete" several times; one
             // record per viewing is enough.
-            if watched[finishedKey].map({ progress.updatedAt.timeIntervalSince($0) > 600 }) ?? true {
-                watched[finishedKey] = progress.updatedAt
-                persistWatched(watched, notify: false)
+            if history.watched[finishedKey].map({ progress.updatedAt.timeIntervalSince($0) > 600 }) ?? true {
+                history.merge(watched: [finishedKey: progress.updatedAt], tombstones: [:])
+                persistWatched(history.watched, tombstones: history.tombstones, notify: false)
             }
         } else {
             current[storageKey] = progress
@@ -227,10 +234,10 @@ public final class ApplePlaybackStore {
         #if DEBUG
         if AppleWatchedHistoryFixture.isEnabled { return AppleWatchedHistoryFixture.memory }
         #endif
-        return storedWatchedEntries()
+        return storedWatchedHistory().watched
     }
 
-    private func persistWatched(_ entries: [String: Date], notify: Bool = true) {
+    private func persistWatched(_ entries: [String: Date], tombstones: [String: Date] = [:], notify: Bool = true) {
         #if DEBUG
         if AppleWatchedHistoryFixture.isEnabled {
             AppleWatchedHistoryFixture.memory = Self.boundedWatchedHistory(entries)
@@ -238,7 +245,7 @@ public final class ApplePlaybackStore {
             return
         }
         #endif
-        persistStoredWatched(entries, notify: notify)
+        persistStoredWatched(AppleWatchedHistory(watched: entries, tombstones: tombstones), notify: notify)
     }
 
     private func storedWatchedEntries() -> [String: Date] {
@@ -250,11 +257,27 @@ public final class ApplePlaybackStore {
         return decoded
     }
 
-    private func persistStoredWatched(_ entries: [String: Date], notify: Bool) {
-        let bounded = Self.boundedWatchedHistory(entries)
-        watchedCache = bounded
-        watchedCachedData = try? JSONEncoder().encode(bounded)
+    private func storedWatchedTombstones() -> [String: Date] {
+        let storedData = defaults.data(forKey: unwatchedKey)
+        if let unwatchedCache, unwatchedCachedData == storedData { return unwatchedCache }
+        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        unwatchedCache = decoded
+        unwatchedCachedData = storedData
+        return decoded
+    }
+
+    private func storedWatchedHistory() -> AppleWatchedHistory {
+        AppleWatchedHistory(watched: storedWatchedEntries(), tombstones: storedWatchedTombstones())
+    }
+
+    private func persistStoredWatched(_ history: AppleWatchedHistory, notify: Bool) {
+        let bounded = history.newest(Self.watchedHistoryLimit)
+        watchedCache = bounded.watched
+        watchedCachedData = try? JSONEncoder().encode(bounded.watched)
+        unwatchedCache = bounded.tombstones
+        unwatchedCachedData = try? JSONEncoder().encode(bounded.tombstones)
         defaults.set(watchedCachedData, forKey: watchedKey)
+        defaults.set(unwatchedCachedData, forKey: unwatchedKey)
         if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
     }
 
@@ -274,21 +297,27 @@ public final class ApplePlaybackStore {
 
     /// Backups and iCloud always read and write the stored history, never a
     /// review build's in-memory fixture.
-    func configurationWatchedHistory() -> [String: Date] { storedWatchedEntries() }
+    func configurationWatchedHistory() -> [String: Date] { storedWatchedHistory().watched }
+
+    func configurationWatchedTombstones() -> [String: Date] { storedWatchedHistory().tombstones }
 
     /// Merges a backup's or another device's watched history into this one:
-    /// the union, and where both know a title the later finish wins. Nothing
-    /// local is dropped, so an older backup never un-watches anything.
-    func restoreConfigurationWatchedHistory(_ incoming: [String: Date]) {
-        guard !incoming.isEmpty else { return }
-        let current = storedWatchedEntries()
-        var merged = current
+    /// the newest event per title wins, including un-watch events.
+    func restoreConfigurationWatchedHistory(_ incoming: [String: Date], tombstones: [String: Date] = [:]) {
+        guard !incoming.isEmpty || !tombstones.isEmpty else { return }
+        let current = storedWatchedHistory()
+        var normalized = AppleWatchedHistory()
         for (key, date) in incoming {
             guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
-            if let existing = merged[storageKey], existing >= date { continue }
-            merged[storageKey] = date
+            normalized.merge(watched: [storageKey: date], tombstones: [:])
         }
-        guard merged != current else { return }
+        for (key, date) in tombstones {
+            guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            normalized.merge(watched: [:], tombstones: [storageKey: date])
+        }
+        var merged = current
+        merged.merge(watched: normalized.watched, tombstones: normalized.tombstones)
+        guard merged.watched != current.watched || merged.tombstones != current.tombstones else { return }
         persistStoredWatched(merged, notify: true)
     }
 
