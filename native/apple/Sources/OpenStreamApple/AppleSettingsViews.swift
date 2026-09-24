@@ -113,15 +113,15 @@ struct AppleSettingsView: View {
         @Bindable var settings = settings
 
         return Form {
-            Section {
-                NavigationLink(value: AppleSettingsRoute.sources) {
-                    AppleTVNavigationLabel("Sources", systemImage: "rectangle.stack.badge.plus")
+            ForEach(AppleSettingsRootEntry.leadingSections, id: \.self) { entries in
+                Section {
+                    ForEach(entries, id: \.self) { entry in
+                        NavigationLink(value: entry.route) {
+                            AppleTVNavigationLabel(entry.title, systemImage: entry.systemImage)
+                        }
+                        .appleTVReadableFocus()
+                    }
                 }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSettingsRoute.channels) {
-                    AppleTVNavigationLabel("Channel Manager", systemImage: "list.star")
-                }
-                .appleTVReadableFocus()
             }
 
             Section("Discover") {
@@ -178,7 +178,6 @@ struct AppleSettingsView: View {
             }
 
             Section {
-                NavigationLink("Backup", value: AppleSettingsRoute.backup)
                 NavigationLink(value: AppleSettingsRoute.storage) {
                     AppleTVNavigationLabel("Storage", systemImage: "internaldrive")
                 }
@@ -193,6 +192,18 @@ struct AppleSettingsView: View {
     }
     #endif
 }
+
+#if !os(tvOS)
+private extension AppleSettingsRootEntry {
+    var route: AppleSettingsRoute {
+        switch self {
+        case .sources: .sources
+        case .channels: .channels
+        case .backup: .backup
+        }
+    }
+}
+#endif
 
 /// The last content tab still on cannot be switched off, so its toggle goes
 /// inert rather than leaving the bar with Settings alone. Every other toggle
@@ -834,48 +845,68 @@ private struct AppleArrConnectionSection: View {
     }
 
     var body: some View {
-        Section(kind.displayName) {
-            TextField("Server URL", text: $baseURL)
-                .autocorrectionDisabled()
-                #if os(iOS) || os(visionOS)
-                .keyboardType(.URL)
-                .textContentType(.URL)
-                #endif
-                .tint(.primary)
-                .appleFormSubmit(.baseURL, chain: Self.chain, focus: $focusedField)
-            SecureField("API key", text: $apiKey)
-                .textContentType(.password)
-                .appleFormSubmit(.apiKey, chain: Self.chain, focus: $focusedField)
-            TextField("Root folder path", text: $rootFolderPath)
-                .autocorrectionDisabled()
-                .appleFormSubmit(.rootFolder, chain: Self.chain, focus: $focusedField)
-            TextField("Quality profile ID", text: $qualityProfileID)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-                .appleFormSubmit(.qualityProfile, chain: Self.chain, focus: $focusedField)
-
-            AppleConnectionStatusView(state: state)
-
-            Button {
-                Task { await testConnection() }
-            } label: {
-                AppleConnectionTestLabel(isTesting: state.isTesting)
+        Group {
+            #if os(macOS)
+            Section {
+                fields
+            } header: {
+                Text(kind.displayName)
+            } footer: {
+                AppleFormActionBar { testButton }
             }
-            .buttonStyle(.brandSecondary)
-            .disabled(!canTest || state.isTesting)
-            // The list row draws its own capsule and `.brandSecondary` draws a
-            // pill inside it — a box in a box, which is the "no boxes and
-            // weirdness" the owner called out for the settings panes
-            // (2026-09-16). One piece of chrome, not two. Confirmed on the
-            // phone as well as the television (2026-09-17), so it is not
-            // platform-gated.
-            .listRowBackground(Color.clear)
+            #else
+            Section(kind.displayName) {
+                fields
+                testButton
+                    // The list row draws its own capsule and `.brandSecondary` draws a
+                    // pill inside it — a box in a box, which is the "no boxes and
+                    // weirdness" the owner called out for the settings panes
+                    // (2026-09-16). One piece of chrome, not two. Confirmed on the
+                    // phone as well as the television (2026-09-17), so it is not
+                    // platform-gated.
+                    .listRowBackground(Color.clear)
+            }
+            #endif
         }
         .onChange(of: baseURL) { _, _ in state = .idle }
         .onChange(of: apiKey) { _, _ in state = .idle }
         .onChange(of: rootFolderPath) { _, _ in state = .idle }
         .onChange(of: qualityProfileID) { _, _ in state = .idle }
+    }
+
+    @ViewBuilder
+    private var fields: some View {
+        TextField("Server URL", text: $baseURL)
+            .autocorrectionDisabled()
+            #if os(iOS) || os(visionOS)
+            .keyboardType(.URL)
+            .textContentType(.URL)
+            #endif
+            .tint(.primary)
+            .appleFormSubmit(.baseURL, chain: Self.chain, focus: $focusedField)
+        SecureField("API key", text: $apiKey)
+            .textContentType(.password)
+            .appleFormSubmit(.apiKey, chain: Self.chain, focus: $focusedField)
+        TextField("Root folder path", text: $rootFolderPath)
+            .autocorrectionDisabled()
+            .appleFormSubmit(.rootFolder, chain: Self.chain, focus: $focusedField)
+        TextField("Quality profile ID", text: $qualityProfileID)
+            #if os(iOS)
+            .keyboardType(.numberPad)
+            #endif
+            .appleFormSubmit(.qualityProfile, chain: Self.chain, focus: $focusedField)
+
+        AppleConnectionStatusView(state: state)
+    }
+
+    private var testButton: some View {
+        Button {
+            Task { await testConnection() }
+        } label: {
+            AppleConnectionTestLabel(isTesting: state.isTesting)
+        }
+        .buttonStyle(.brandSecondary)
+        .disabled(!canTest || state.isTesting)
     }
 
     private var canTest: Bool {

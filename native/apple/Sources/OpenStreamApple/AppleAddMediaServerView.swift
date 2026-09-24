@@ -451,9 +451,10 @@ struct AppleAddMediaServerView: View {
                 }
                 .disabled(isWorking)
                 
-                Section {
+                AppleFormActionSection {
                     Button { connectionAction = .signIn(UUID()) } label: { connectionLabel(saving: true, text: "Sign In") }
                         .disabled(!AppleMediaServerFormPolicy.canSignIn(email: embyEmail, password: embyPassword) || isWorking)
+                        .appleMacFormPrimaryAction()
                         .accessibilityIdentifier("sources.mediaServer.embySignIn")
                 }
                 
@@ -465,13 +466,13 @@ struct AppleAddMediaServerView: View {
                             }
                         }
                         .accessibilityIdentifier("sources.mediaServer.embyServer")
-                        Button {
-                            guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
-                            saveEmbyServer(server: server)
-                        } label: { connectionLabel(saving: true, text: "Save") }
-                            .disabled(isWorking)
-                            .accessibilityIdentifier("sources.mediaServer.saveEmby")
+                        #if !os(macOS)
+                        saveEmbyServerButton
+                        #endif
                     }
+                    #if os(macOS)
+                    AppleFormActionSection { saveEmbyServerButton }
+                    #endif
                 }
             } else if kind != .plex {
                 Section("Connection") {
@@ -486,6 +487,16 @@ struct AppleAddMediaServerView: View {
                 }
                 .disabled(isWorking)
                 
+                #if os(macOS)
+                // System Settings order: the default action at the trailing
+                // edge. Quick Connect joins them, so its section only appears
+                // once there is a code to show.
+                AppleFormActionSection {
+                    if kind == .jellyfin { quickConnectButton }
+                    testConnectionButton
+                    saveConnectionButton
+                }
+                #else
                 Section {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { connectionButtons }
@@ -494,12 +505,13 @@ struct AppleAddMediaServerView: View {
                     .controlSize(.large)
                 }
                 .listRowBackground(Color.clear)
-                
-                if kind == .jellyfin {
+                #endif
+
+                if kind == .jellyfin, AppleFormActionLayout.current == .formRow || ticket != nil {
                     Section("Quick Connect") {
-                        Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
-                            .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
-                            .accessibilityIdentifier("sources.mediaServer.quickConnect")
+                        #if !os(macOS)
+                        quickConnectButton
+                        #endif
                         if let ticket {
                             LabeledContent("Code") {
                                 Text(ticket.code).font(.system(.title2, design: .monospaced))
@@ -530,19 +542,15 @@ struct AppleAddMediaServerView: View {
                             }
                         }
                         .accessibilityIdentifier("sources.mediaServer.plex.server")
-                        Button {
-                            Task { await plexModel.saveSelectedServer() }
-                        } label: { 
-                            HStack(spacing: 8) {
-                                if plexModel.isWorking { ProgressView().accessibilityHidden(true) }
-                                Text("Save")
-                            }
-                        }
-                        .disabled(plexModel.isWorking)
-                        .accessibilityIdentifier("sources.mediaServer.plex.save")
+                        #if !os(macOS)
+                        plexSaveButton
+                        #endif
                     }
+                    #if os(macOS)
+                    AppleFormActionSection { plexSaveButton }
+                    #endif
                 } else {
-                    Section {
+                    AppleFormActionSection {
                         Button {
                             Task { await plexModel.signIn() }
                         } label: { 
@@ -552,6 +560,7 @@ struct AppleAddMediaServerView: View {
                             }
                         }
                         .disabled(plexModel.isWorking)
+                        .appleMacFormPrimaryAction()
                         .accessibilityIdentifier("sources.mediaServer.plexSignIn")
                     }
                 }
@@ -588,16 +597,60 @@ struct AppleAddMediaServerView: View {
     
     private var connectionButtons: some View {
         Group {
-            Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
-                .buttonStyle(.brandPrimary)
-                .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
-                .accessibilityIdentifier("sources.mediaServer.save")
-            
-            Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
-                .buttonStyle(.brandSecondary)
-                .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
-                .accessibilityIdentifier("sources.mediaServer.test")
+            saveConnectionButton
+            testConnectionButton
         }
+    }
+
+    private var saveConnectionButton: some View {
+        Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
+            .buttonStyle(.brandPrimary)
+            #if os(macOS)
+            .keyboardShortcut(.defaultAction)
+            #endif
+            .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
+            .accessibilityIdentifier("sources.mediaServer.save")
+    }
+
+    private var quickConnectButton: some View {
+        Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
+            .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+            #if os(macOS)
+            // It shares the action bar with Test Connection and Save.
+            .buttonStyle(.brandSecondary)
+            #endif
+            .accessibilityIdentifier("sources.mediaServer.quickConnect")
+    }
+
+    private var testConnectionButton: some View {
+        Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
+            .buttonStyle(.brandSecondary)
+            .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+            .accessibilityIdentifier("sources.mediaServer.test")
+    }
+
+    private var saveEmbyServerButton: some View {
+        Button {
+            guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
+            saveEmbyServer(server: server)
+        } label: { connectionLabel(saving: true, text: "Save") }
+            .disabled(isWorking)
+            .appleMacFormPrimaryAction()
+            .accessibilityIdentifier("sources.mediaServer.saveEmby")
+    }
+
+    private var plexSaveButton: some View {
+        Button {
+            Task { await plexModel.saveSelectedServer() }
+        } label: {
+            HStack(spacing: 8) {
+                if plexModel.isWorking { ProgressView().accessibilityHidden(true) }
+                Text("Save")
+            }
+        }
+        .disabled(plexModel.isWorking)
+        .appleMacFormPrimaryAction()
+        .accessibilityIdentifier("sources.mediaServer.plex.save")
     }
     #endif
     

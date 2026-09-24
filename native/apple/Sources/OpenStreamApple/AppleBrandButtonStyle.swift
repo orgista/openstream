@@ -35,9 +35,21 @@ public struct AppleBrandPrimaryButtonStyle: ButtonStyle {
     }
 
     private struct StyledBody: View {
+        @Environment(\.isEnabled) private var isEnabled
         @Environment(\.isFocused) private var isFocused
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         let configuration: ButtonStyleConfiguration
+
+        /// A Mac form's primary action is a free-standing button
+        /// (`AppleFormActionBar`), and a disabled one — Add Catalog with no
+        /// URL yet — looked exactly like a live one.
+        private var disabledOpacity: Double {
+            #if os(macOS)
+            isEnabled ? 1 : 0.4
+            #else
+            1
+            #endif
+        }
 
         var body: some View {
             configuration.label
@@ -54,7 +66,7 @@ public struct AppleBrandPrimaryButtonStyle: ButtonStyle {
                 }
                 .shadow(color: .white.opacity(isFocused ? 0.42 : 0), radius: 16)
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
-                .opacity(configuration.isPressed ? 0.7 : 1)
+                .opacity((configuration.isPressed ? 0.7 : 1) * disabledOpacity)
                 .contentShape(appleBrandButtonShape)
                 .appleHoverAffordance()
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)

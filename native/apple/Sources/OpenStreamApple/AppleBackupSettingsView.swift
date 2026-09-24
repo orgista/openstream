@@ -26,6 +26,7 @@ struct AppleBackupSettingsView: View {
     @State private var importing = false
     @State private var pendingImport: PendingImport?
     @State private var signingIn: AppleSource?
+    @State private var syncAvailability = AppleICloudSyncAvailability.available
 
     private struct PendingImport: Identifiable {
         let id = UUID()
@@ -36,29 +37,32 @@ struct AppleBackupSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Sync with iCloud", isOn: $syncEnabled)
-                    .tint(.green)
+                Toggle(isOn: $syncEnabled) {
+                    Text("Sync with iCloud")
+                    if let note = syncAvailability.note {
+                        Text(note)
+                    }
+                }
+                .tint(.green)
+                .disabled(!syncAvailability.allowsChange(from: syncEnabled))
+                .accessibilityIdentifier("backup.sync")
             }
             Section {
                 SecureField("Export passphrase (optional)", text: $passphrase)
                     .textContentType(.password)
-                Button {
-                    Task {
-                        do {
-                            document = try await AppleConfigurationDocument(data: controller.export(passphrase: passphrase))
-                            passphrase = ""
-                            exporting = true
-                        } catch { controller.setResult("Could not export configuration") }
-                    }
-                } label: {
-                    AppleWorkingButtonLabel(title: "Export Configuration…", workingTitle: "Exporting…", isWorking: controller.isBusy && !importing)
-                }
-                
-                Button { importing = true } label: {
-                    AppleWorkingButtonLabel(title: "Import Configuration…", workingTitle: "Importing…", isWorking: controller.isBusy && importing)
-                }
+                #if !os(macOS)
+                exportButton
+                importButton
+                #endif
             }
             .disabled(controller.isBusy)
+            #if os(macOS)
+            AppleFormActionSection {
+                importButton
+                exportButton
+            }
+            .disabled(controller.isBusy)
+            #endif
             if !controller.sources.sources.filter(\.needsSignIn).isEmpty {
                 Section("Needs sign-in") {
                     ForEach(controller.sources.sources.filter(\.needsSignIn)) { source in
@@ -70,9 +74,12 @@ struct AppleBackupSettingsView: View {
                 Section { Text(result) }
             }
         }
-        .appleSettingsPage("Backup")
+        .appleSettingsPage(AppleSettingsRootEntry.backup.title)
         .scrollIndicators(.hidden)
-        .task { syncEnabled = controller.syncEnabled }
+        .task {
+            syncEnabled = controller.syncEnabled
+            syncAvailability = AppleICloudSyncProbe.current()
+        }
         .onChange(of: syncEnabled) { _, enabled in
             Task {
                 await controller.setSyncEnabled(enabled)
@@ -108,6 +115,28 @@ struct AppleBackupSettingsView: View {
                 AppleBackupSourceSignInView(source: source, store: controller.sources)
             }
         }
+    }
+
+    private var exportButton: some View {
+        Button {
+            Task {
+                do {
+                    document = try await AppleConfigurationDocument(data: controller.export(passphrase: passphrase))
+                    passphrase = ""
+                    exporting = true
+                } catch { controller.setResult("Could not export configuration") }
+            }
+        } label: {
+            AppleWorkingButtonLabel(title: "Export Configuration…", workingTitle: "Exporting…", isWorking: controller.isBusy && !importing)
+        }
+        .accessibilityIdentifier("backup.export")
+    }
+
+    private var importButton: some View {
+        Button { importing = true } label: {
+            AppleWorkingButtonLabel(title: "Import Configuration…", workingTitle: "Importing…", isWorking: controller.isBusy && importing)
+        }
+        .accessibilityIdentifier("backup.import")
     }
 }
 
@@ -182,20 +211,13 @@ private struct AppleBackupSourceSignInView: View {
                     TextField("Username", text: $username).textContentType(.username)
                     SecureField("Password", text: $password).textContentType(.password)
                 }
-                if source.kind == .library {
-                    Button("Choose Folder…") { choosingFolder = true }
-                } else {
-                    Button("Sign In") {
-                        do {
-                            guard let url = URL(string: address),
-                                  ["http", "https", "smb"].contains(url.scheme?.lowercased() ?? ""),
-                                  url.host != nil else { throw AppleConfigurationError.invalidFile }
-                            try store.restoreSourceSignIn(id: source.id, address: url, username: username, password: password)
-                            dismiss()
-                        } catch { self.error = "Could not restore source" }
-                    }
-                }
+                #if os(macOS)
                 if let error { Text(error) }
+                AppleFormActionSection { signInButton }
+                #else
+                signInButton
+                if let error { Text(error) }
+                #endif
             }
             .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
                 do {
@@ -214,6 +236,24 @@ private struct AppleBackupSourceSignInView: View {
             .navigationTitle(source.name)
             .scrollIndicators(.hidden)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+    }
+
+    @ViewBuilder
+    private var signInButton: some View {
+        if source.kind == .library {
+            Button("Choose Folder…") { choosingFolder = true }
+        } else {
+            Button("Sign In") {
+                do {
+                    guard let url = URL(string: address),
+                          ["http", "https", "smb"].contains(url.scheme?.lowercased() ?? ""),
+                          url.host != nil else { throw AppleConfigurationError.invalidFile }
+                    try store.restoreSourceSignIn(id: source.id, address: url, username: username, password: password)
+                    dismiss()
+                } catch { self.error = "Could not restore source" }
+            }
+            .appleMacFormPrimaryAction()
         }
     }
 }

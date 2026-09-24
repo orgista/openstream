@@ -130,16 +130,11 @@ struct AppleStorageSettingsView: View {
                 LabeledContent("Downloaded Items", value: String(snapshot.downloadCount))
             }
 
-            Section("Actions") {
-                actionButton("Clear Cache", action: .cache) { run(.cache) }
-                    .disabled(snapshot.cacheBytes == 0 || workingAction != nil)
-
-                actionButton("Clear Metadata", role: .destructive, action: .metadata) { confirmation = .metadata }
-                    .disabled(snapshot.metadataBytes == 0 || workingAction != nil)
-
-                actionButton("Delete All Downloads", role: .destructive, action: .downloads) { confirmation = .downloads }
-                    .disabled(snapshot.downloadCount == 0 || workingAction != nil)
-            }
+            #if os(macOS)
+            AppleFormActionSection { actions }
+            #else
+            Section("Actions") { actions }
+            #endif
 
             if let statusMessage {
                 Section {
@@ -161,6 +156,18 @@ struct AppleStorageSettingsView: View {
                 secondaryButton: .cancel()
             )
         }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        actionButton("Clear Cache", action: .cache) { run(.cache) }
+            .disabled(snapshot.cacheBytes == 0 || workingAction != nil)
+
+        actionButton("Clear Metadata", role: .destructive, action: .metadata) { confirmation = .metadata }
+            .disabled(snapshot.metadataBytes == 0 || workingAction != nil)
+
+        actionButton("Delete All Downloads", role: .destructive, action: .downloads) { confirmation = .downloads }
+            .disabled(snapshot.downloadCount == 0 || workingAction != nil)
     }
 
     @ViewBuilder

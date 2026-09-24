@@ -80,7 +80,9 @@ struct AppleCatalogRowTitleTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([first, different], activeSourceIDs: [source.id, other.id])
         #expect(visible.count == 2)
         #expect(Set(visible.compactMap { $0.shelfTitle?.lowercased() }).count == 2)
-        #expect(visible.contains { $0.shelfTitle == "Popular · TMDB" })
+        // Which row is kept first depends on source IDs; the other is named after its add-on.
+        #expect(Set(visible.compactMap(\.shelfTitle)).isSubset(of: ["Popular", "Popular · TMDB", "Popular · Streaming Catalogs"]))
+        #expect(visible.contains { $0.shelfTitle == "Popular" })
     }
 
     @Test func typedTitleSwapsAnExistingTypeWord() {

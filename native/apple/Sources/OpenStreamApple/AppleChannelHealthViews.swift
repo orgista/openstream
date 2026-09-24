@@ -52,7 +52,7 @@ struct AppleChannelHealthDetailView: View {
                     Section {
                         ForEach(rows) { LabeledContent($0.label, value: $0.value) }
                     }
-                    Section {
+                    AppleFormActionSection {
                         Button(store.isSweeping ? "Checking" : "Check Again") { store.recheck(channel) }
                             .accessibilityIdentifier("health.detail.recheck")
                     }
@@ -119,6 +119,30 @@ struct AppleChannelHealthSettingsRows: View {
     #endif
 
     var body: some View {
+        #if os(macOS)
+        // One row, System Settings style: the summary on the left, its two
+        // actions as content-sized buttons at the trailing edge.
+        HStack(spacing: 12) {
+            summaryLine
+            AppleFormActionBar {
+                sweepButton
+                exportRow
+            }
+        }
+        if let progress = store.progress {
+            progressBar(progress)
+        }
+        #else
+        summaryLine
+        if let progress = store.progress {
+            progressBar(progress)
+        }
+        sweepButton
+        exportRow
+        #endif
+    }
+
+    private var summaryLine: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             VStack(alignment: .leading, spacing: 4) {
                 Text("Channel Health")
@@ -134,19 +158,23 @@ struct AppleChannelHealthSettingsRows: View {
             await store.loadIfNeeded()
             await store.prepareLineupIfNeeded(settings: settings, sourceStore: sourceStore)
         }
+    }
 
-        if let progress = store.progress {
-            ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
-                .accessibilityLabel("Checking channels")
-                .accessibilityValue(AppleChannelHealthSummary.progress(completed: progress.completed, total: progress.total))
+    private func progressBar(_ progress: AppleChannelHealthStore.Progress) -> some View {
+        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
+            .accessibilityLabel("Checking channels")
+            .accessibilityValue(AppleChannelHealthSummary.progress(completed: progress.completed, total: progress.total))
+    }
+
+    @ViewBuilder
+    private var sweepButton: some View {
+        if store.progress != nil {
             Button("Stop Checking") { store.cancelSweep() }
                 .accessibilityIdentifier("settings.health.stop")
         } else {
             Button("Check Channels Now") { store.startSweep() }
                 .accessibilityIdentifier("settings.health.check")
         }
-
-        exportRow
     }
 
     private func summary(now: Date) -> String {

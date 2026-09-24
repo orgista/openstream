@@ -797,17 +797,24 @@ private struct AppleAddManifestSourceView: View {
                 }
             }
 
-            Section {
+            AppleFormActionSection {
                 Button {
                     addManifest()
                 } label: {
                     if isAdding {
                         ProgressView()
+                            #if os(macOS)
+                            .controlSize(.small)
+                            #endif
                     } else {
                         Text("Add Catalog")
                     }
                 }
                 .disabled(isAdding || !hasManifestURL)
+                .appleMacFormPrimaryAction()
+                #if os(macOS)
+                .keyboardShortcut(.defaultAction)
+                #endif
                 .appleTVReadableFocus()
             }
         }
@@ -1252,6 +1259,13 @@ private struct AppleAddLiveTVSourceView: View {
                 }
             }
 
+            #if os(macOS)
+            // System Settings order: the default action at the trailing edge.
+            AppleFormActionSection {
+                testButton
+                saveButton
+            }
+            #else
             Section {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) { connectionButtons }
@@ -1260,6 +1274,7 @@ private struct AppleAddLiveTVSourceView: View {
                 .controlSize(.large)
             }
             .listRowBackground(Color.clear)
+            #endif
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .appleSettingsPage("Add Live TV")
@@ -1290,20 +1305,30 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var connectionButtons: some View {
         Group {
-            Button { connectionAction = .save(UUID()) } label: {
-                connectionLabel(saving: true)
-            }
-            .buttonStyle(.brandPrimary)
-            .disabled(!canSubmit || isWorking)
-            .accessibilityIdentifier("sources.live.save")
-
-            Button { connectionAction = .test(UUID()) } label: {
-                connectionLabel(saving: false)
-            }
-            .buttonStyle(.brandSecondary)
-            .disabled(!canSubmit || isWorking)
-            .accessibilityIdentifier("sources.live.test")
+            saveButton
+            testButton
         }
+    }
+
+    private var saveButton: some View {
+        Button { connectionAction = .save(UUID()) } label: {
+            connectionLabel(saving: true)
+        }
+        .buttonStyle(.brandPrimary)
+        #if os(macOS)
+        .keyboardShortcut(.defaultAction)
+        #endif
+        .disabled(!canSubmit || isWorking)
+        .accessibilityIdentifier("sources.live.save")
+    }
+
+    private var testButton: some View {
+        Button { connectionAction = .test(UUID()) } label: {
+            connectionLabel(saving: false)
+        }
+        .buttonStyle(.brandSecondary)
+        .disabled(!canSubmit || isWorking)
+        .accessibilityIdentifier("sources.live.test")
     }
     #endif
 
@@ -1480,25 +1505,14 @@ private struct AppleWebManagementView: View {
                     LabeledContent("Expires", value: activeSession.expiresAt.formatted(date: .omitted, time: .shortened))
                 }
 
+                #if os(macOS)
+                AppleFormActionSection { copyAddressButton(activeSession) }
+                #else
                 Section {
-                    // The button says what it did. Copying is invisible —
-                    // nothing on the screen changes and there is no way to tell
-                    // it from a dead control (button crawl, 2026-09-19) — so
-                    // the label carries the receipt and goes back on its own.
-                    Button(addressWasCopied ? "Address Copied" : "Copy Address") {
-                        copy(activeSession.friendlyURL)
-                        addressWasCopied = true
-                        copyReceipt?.cancel()
-                        copyReceipt = Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            guard !Task.isCancelled else { return }
-                            addressWasCopied = false
-                        }
-                    }
-                    .buttonStyle(.brandSecondary)
-                    .listRowBackground(Color.clear)
-                    .animation(nil, value: addressWasCopied)
+                    copyAddressButton(activeSession)
+                        .listRowBackground(Color.clear)
                 }
+                #endif
 
                 if !connectedBrowsers.isEmpty {
                     Section("Connected browsers") {
@@ -1511,6 +1525,9 @@ private struct AppleWebManagementView: View {
                     forgetBrowsersButton
                 }
             } else {
+                #if os(macOS)
+                AppleFormActionSection { startButton }
+                #else
                 Section {
                     // Its own section with no row fill: `startButton` draws a
                     // filled capsule, and inside a grouped card that is two
@@ -1518,6 +1535,7 @@ private struct AppleWebManagementView: View {
                     startButton
                         .listRowBackground(Color.clear)
                 }
+                #endif
                 Section {
                     forgetBrowsersButton
                 }
@@ -1686,11 +1704,32 @@ private struct AppleWebManagementView: View {
         // page and centres its own label, which is what put Start Web
         // Management in the middle of the screen while the heading above it was
         // flush left, and pushed Forget Paired Browsers off to the right.
-        #if !os(tvOS)
+        // On the Mac it is a content-sized button under the form instead
+        // (`AppleFormActionLayout`).
+        #if !os(tvOS) && !os(macOS)
         .frame(maxWidth: .infinity)
         #endif
         .buttonStyle(.brandPrimary)
         .disabled(isWorking)
+    }
+
+    private func copyAddressButton(_ session: AppleWebManagementSession) -> some View {
+        // The button says what it did. Copying is invisible — nothing on the
+        // screen changes and there is no way to tell it from a dead control
+        // (button crawl, 2026-09-19) — so the label carries the receipt and
+        // goes back on its own.
+        Button(addressWasCopied ? "Address Copied" : "Copy Address") {
+            copy(session.friendlyURL)
+            addressWasCopied = true
+            copyReceipt?.cancel()
+            copyReceipt = Task {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                addressWasCopied = false
+            }
+        }
+        .buttonStyle(.brandSecondary)
+        .animation(nil, value: addressWasCopied)
     }
 
     private var stopButton: some View {

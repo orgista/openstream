@@ -391,13 +391,7 @@ private struct AppleNetworkShareConnectForm: View {
                 }
             }
             #if os(macOS)
-            Section {
-            } footer: {
-                HStack {
-                    Spacer()
-                    connectButton
-                }
-            }
+            AppleFormActionSection { connectButton }
             #endif
         }
         .appleSettingsContent()
@@ -512,8 +506,7 @@ struct AppleNetworkShareBrowseView: View {
         #if os(macOS)
         .safeAreaInset(edge: .bottom) {
             if let location {
-                HStack {
-                    Spacer()
+                AppleFormActionBar {
                     Button("Add This Folder") { add(location) }
                         .buttonStyle(.brandPrimary)
                         .keyboardShortcut(.defaultAction)
@@ -733,13 +726,7 @@ struct AppleNetworkShareConfirmView: View {
                 }
             }
             #if os(macOS)
-            Section {
-            } footer: {
-                HStack {
-                    Spacer()
-                    addButton
-                }
-            }
+            AppleFormActionSection { addButton }
             #endif
         }
         .appleSettingsContent()
