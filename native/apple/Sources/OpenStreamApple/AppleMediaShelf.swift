@@ -9,6 +9,9 @@ struct AppleMediaShelf<Content: View>: View {
     var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
     @Environment(\.appleDiscoverRows) private var rowStyle
+    #if DEBUG
+    @State private var reviewScrollPosition = ScrollPosition()
+    #endif
     var body: some View {
         VStack(alignment: .leading, spacing: titleSpacing) {
             HStack(alignment: .center) {
@@ -59,6 +62,16 @@ struct AppleMediaShelf<Content: View>: View {
         ScrollView(.horizontal, showsIndicators: false) {
             rail
         }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+        #if DEBUG
+        .scrollPosition($reviewScrollPosition)
+        .task {
+            // Headless artwork review; launch arguments never change saved preferences.
+            guard UserDefaults.standard.string(forKey: "OpenStreamReviewShelf") == title else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            reviewScrollPosition.scrollTo(x: UserDefaults.standard.double(forKey: "OpenStreamReviewShelfX"))
+        }
+        #endif
     }
 
     // tvOS retains its safe-area gutter and room for the focus lift.
@@ -270,6 +283,9 @@ struct AppleFeaturedHero<Actions: View>: View {
 
 struct AppleFeaturedActions: View {
     let viewportSize: CGSize
+    let action: AppleTitlePagePolicy.PrimaryAction
+    var isDownloaded = false
+    let canPerform: Bool
     /// Landscape on any device, so the phone keeps the fixed-size pills too.
     private var isLandscapeLayout: Bool {
         #if os(visionOS) || os(iOS)
@@ -283,7 +299,7 @@ struct AppleFeaturedActions: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         #if os(tvOS)
-        AppleTVBillboardActions(onPlay: onPlay, onDetails: onDetails)
+        AppleTVBillboardActions(action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: onPlay, onDetails: onDetails)
         #else
         legacyBody
         #endif
@@ -295,10 +311,11 @@ struct AppleFeaturedActions: View {
         if isLandscapeLayout {
             HStack(spacing: AppleDetailMetrics.actionButtonGap) {
                 Button(action: onPlay) {
-                    AppleDetailActionButtonLabel(title: "Play", glyph: .systemImage("play.fill"), kind: .play,
+                    AppleDetailActionButtonLabel(title: action.displayTitle(hasCompletedDownload: isDownloaded), glyph: .systemImage("play.fill"), kind: .play,
                                                 width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
                 }
                 .accessibilityIdentifier("home.featured.play")
+                .disabled(!canPerform)
                 Button(action: onDetails) {
                     AppleDetailActionButtonLabel(title: "Details", glyph: .systemImage("info.circle"), kind: .download,
                                                 width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
@@ -316,11 +333,12 @@ struct AppleFeaturedActions: View {
             .featuredActionButtonWidth(portraitViewportWidth: viewportSize.width) ?? .infinity
         layout {
             Button(action: onPlay) {
-                Label("Play", systemImage: "play.fill")
+                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
                     .frame(maxWidth: buttonWidth)
             }
             .buttonStyle(.brandPrimary)
             .accessibilityIdentifier("home.featured.play")
+                .disabled(!canPerform)
 
             Button(action: onDetails) {
                 Label("Details", systemImage: "info.circle")

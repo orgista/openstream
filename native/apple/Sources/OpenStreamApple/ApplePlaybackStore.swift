@@ -86,6 +86,15 @@ public final class ApplePlaybackStore {
         return entries()[storageKey]
     }
 
+    /// The finished titles among `mediaIDs`, from one read of the store:
+    /// callers that check a whole episode list during a redraw stay O(1) reads.
+    public func completedMediaIDs(among mediaIDs: [String]) -> Set<String> {
+        let all = entries()
+        return Set(mediaIDs.filter { mediaID in
+            ApplePlaybackIdentity.storageKey(for: mediaID).flatMap { all[$0] }?.isComplete == true
+        })
+    }
+
     public func progress(for url: URL) -> ApplePlaybackProgress? {
         entries()[ApplePlaybackIdentity.storageKey(for: url)]
     }

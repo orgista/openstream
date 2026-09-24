@@ -40,6 +40,10 @@ public enum AppleTitlePagePolicy {
         /// Nothing on the page can play, but a trailer can.
         case playTrailer
 
+        public func displayTitle(hasCompletedDownload: Bool) -> String {
+            self == .play && hasCompletedDownload ? "Play Offline" : title
+        }
+
         public var title: String {
             switch self {
             case .resume(let episode?): "Resume \(episode)"
@@ -48,6 +52,44 @@ public enum AppleTitlePagePolicy {
             case .playTrailer: "Play Trailer"
             }
         }
+    }
+
+    /// Shared by title pages and every Discover hero. Metadata-only add-ons
+    /// are not playback routes. Local media and completed downloads work even
+    /// when the catalog has no episode list or streaming add-on.
+    public static func hasPlaybackRoute(
+        item: AppleCatalogItem,
+        sources: [AppleSource],
+        hasLocalGroup: Bool = false,
+        hasCompletedDownload: Bool = false,
+        episodesUnavailable: Bool = false
+    ) -> Bool {
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil || hasLocalGroup { return true }
+        if hasCompletedDownload { return true }
+        if item.type == "series", episodesUnavailable { return false }
+        return sources.contains { source in
+            source.isEnabled && (source.kind != .stremio
+                || source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame })
+        }
+    }
+
+    /// The hero has no episode picker: resume the saved episode, otherwise
+    /// use the title page's default. Media servers own their episode list and
+    /// resume routing; retain their opaque saved part id for the same label.
+    static func heroEpisode(item: AppleCatalogItem, progress: ApplePlaybackProgress?,
+                            episodes: [AppleStremioEpisode], completedIDs: Set<String> = [],
+                            localResumeEpisode: AppleStremioEpisode? = nil) -> AppleStremioEpisode? {
+        if let saved = AppleStremioEpisodePolicy.savedEpisode(progress: progress, in: episodes) { return saved }
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil,
+           let progress, progress.resumePosition != nil, let part = progress.partID {
+            let identity = AppleStremioMetadataClient.episodeIdentity(part)
+            return AppleStremioEpisode(id: part, title: "", season: identity?.season,
+                                       episode: identity?.episode, releaseInfo: nil)
+        }
+        if let localResumeEpisode { return localResumeEpisode }
+        return AppleStremioEpisodePolicy.nextUnwatched(
+            in: AppleStremioEpisodePolicy.initialSeason(in: episodes), from: episodes, completedIDs: completedIDs
+        )
     }
 
     /// The button's verb, derived from state rather than an error after the

@@ -225,6 +225,9 @@ struct AppleTVHeroRotationIndicator: View {
 /// Play and Details as content-sized pills (FEEDBACK X3); Play is the same
 /// white pill as the title page.
 struct AppleTVBillboardActions: View {
+    var action: AppleTitlePagePolicy.PrimaryAction = .play
+    var isDownloaded = false
+    var canPerform = true
     let onPlay: () -> Void
     let onDetails: () -> Void
 
@@ -236,11 +239,12 @@ struct AppleTVBillboardActions: View {
                 HStack(spacing: M.pillGlyphSpacing) {
                     Image(systemName: "play.fill")
                         .font(.system(size: M.pillGlyphSize, weight: .semibold))
-                    Text("Play")
+                    Text(action.displayTitle(hasCompletedDownload: isDownloaded))
                 }
             }
             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: M.pillSize, fontSize: M.pillFontSize))
             .accessibilityIdentifier("home.featured.play")
+            .disabled(!canPerform)
 
             Button(action: onDetails) {
                 HStack(spacing: M.pillGlyphSpacing) {

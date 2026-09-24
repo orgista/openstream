@@ -82,9 +82,9 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
 /// are not focusable: making them so would put a stop between Play and the tab
 /// bar. The two paging stops sit either side (`AppleTVHeroPaging`).
 struct AppleHomeTVHeroActions: View {
-    /// The record whose saved position names the Play button.
-    let progressID: String
-    let type: String?
+    let action: AppleTitlePagePolicy.PrimaryAction
+    var isDownloaded = false
+    let canPerform: Bool
     let isInList: Bool
     let focus: FocusState<AppleTVHeroPaging.Target?>.Binding
     let pagingEnabled: Bool
@@ -94,12 +94,6 @@ struct AppleHomeTVHeroActions: View {
 
     private typealias M = AppleTVBillboardMetrics
 
-    /// Read here, through the observable feed, so the label follows a save
-    /// made while the player was up rather than waiting for the next page.
-    private var playTitle: String {
-        AppleBillboardCopy.playTitle(progress: ApplePlaybackProgressFeed.shared.progress(for: progressID), type: type)
-    }
-
     var body: some View {
         HStack(spacing: M.pillGap) {
             pagingStop(.previousPage)
@@ -107,13 +101,14 @@ struct AppleHomeTVHeroActions: View {
                 HStack(spacing: M.pillGlyphSpacing) {
                     Image(systemName: "play.fill")
                         .font(.system(size: M.pillGlyphSize, weight: .semibold))
-                    Text(playTitle)
+                    Text(action.displayTitle(hasCompletedDownload: isDownloaded))
                         .lineLimit(1)
                 }
             }
             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: M.pillSize, fontSize: M.pillFontSize))
             .focused(focus, equals: .play)
             .accessibilityIdentifier("home.featured.play")
+            .disabled(!canPerform)
 
             Button(action: onToggleList) {
                 Label(isInList ? "In My List" : "Add to My List", systemImage: isInList ? "checkmark" : "plus")

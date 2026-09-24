@@ -75,12 +75,29 @@ struct AppleCatalogSearchLookup: Sendable {
         return names.isEmpty ? "Local source" : names.joined(separator: ", ")
     }
 
-    func match(title: String, type: String, seasonTitle: String? = nil) -> AppleCatalogSearchMatch? {
+    func match(title: String, type: String, seasonTitle: String? = nil,
+               ignoringLeadingArticle: Bool = false) -> AppleCatalogSearchMatch? {
         let wanted = Set([title, seasonTitle ?? ""].map(Self.normalized).filter { !$0.isEmpty })
-        return orderedMatches.first { match in
-            match.item.type.caseInsensitiveCompare(type) == .orderedSame
-                && wanted.contains(Self.normalized(match.item.name))
+        let typed = orderedMatches.filter { $0.item.type.caseInsensitiveCompare(type) == .orderedSame }
+        if let exact = typed.first(where: { wanted.contains(Self.normalized($0.item.name)) }) {
+            return exact
         }
+        guard ignoringLeadingArticle else { return nil }
+        // Ranking feeds and metadata catalogs sometimes differ only by "The".
+        // Keep exact matches first, and never guess between distinct title IDs.
+        let withoutArticles = Set(wanted.map(Self.removingLeadingArticle).filter { !$0.isEmpty })
+        let candidates = typed.filter {
+            withoutArticles.contains(Self.removingLeadingArticle(Self.normalized($0.item.name)))
+        }
+        guard let first = candidates.first,
+              candidates.allSatisfy({ $0.item.mediaID == first.item.mediaID }) else { return nil }
+        return first
+    }
+
+    private static func removingLeadingArticle(_ value: String) -> String {
+        let words = value.split(separator: " ")
+        guard let first = words.first, ["the", "a", "an"].contains(first) else { return value }
+        return words.dropFirst().joined(separator: " ")
     }
 
     private static func normalized(_ value: String) -> String {

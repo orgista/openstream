@@ -143,24 +143,18 @@ struct AppleMacHeroFadeView: View {
 /// into a check once the title is saved. Same label logic and actions as the
 /// iPhone hero's (`AppleHomePhoneHeroActions`).
 struct AppleHomeMacHeroActions: View {
-    /// The record whose saved position names the Play button.
-    let progressID: String
-    let type: String?
+    let action: AppleTitlePagePolicy.PrimaryAction
+    var isDownloaded = false
+    let canPerform: Bool
     /// Nil hides the My List button: the title has nothing to save it against.
     let isInList: Bool?
     let onPlay: () -> Void
     let onToggleList: () -> Void
 
-    /// Read here, through the observable feed, so the label follows a save
-    /// made while the player was up rather than waiting for the next page.
-    private var playTitle: String {
-        AppleBillboardCopy.playTitle(progress: ApplePlaybackProgressFeed.shared.progress(for: progressID), type: type)
-    }
-
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
-                Label(playTitle, systemImage: "play.fill")
+                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .padding(.horizontal, 20)
@@ -168,6 +162,7 @@ struct AppleHomeMacHeroActions: View {
             }
             .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
             .accessibilityIdentifier("home.featured.play")
+            .disabled(!canPerform)
 
             if let isInList {
                 Button(action: onToggleList) {

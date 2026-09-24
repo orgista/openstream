@@ -3,7 +3,8 @@ import Foundation
 @MainActor enum AppleTop10ArtworkLookup {
     static func find(
         title: String, type: String, seasonTitle: String?, sources: [AppleSource],
-        client: AppleStremioCatalogClient = AppleStremioCatalogClient()
+        client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
+        deadline: Duration = .seconds(4), retryDeadline: Duration = .seconds(12)
     ) async -> AppleCatalogSearchMatch? {
         // Configured metadata catalogs are asked first. Four catalogs and two
         // concurrent requests bound the work for each lazily visible card.
@@ -13,10 +14,24 @@ import Foundation
             value.catalogs = Array(source.catalogs.filter { $0.type == type && $0.supportsSearch }.prefix(1))
             return value.catalogs.isEmpty ? nil : value
         }
-        let store = AppleCatalogSearchStore(client: client, debounce: .zero, deadline: .seconds(4), maximumConcurrentRequests: 2)
-        await store.search(query: title, sources: searchSources(eligible, type: type), baseSections: []) { _ in [] }
-        guard !Task.isCancelled else { return nil }
-        return store.lookup.match(title: title, type: type, seasonTitle: seasonTitle)
+        let searchable = searchSources(eligible, type: type)
+        for (attempt, budget) in [deadline, retryDeadline].enumerated() {
+            let store = AppleCatalogSearchStore(client: client, debounce: .zero, deadline: budget, maximumConcurrentRequests: 2)
+            await store.search(query: title, sources: searchable, baseSections: []) { _ in [] }
+            guard !Task.isCancelled else { return nil }
+            let match = store.lookup.match(title: title, type: type, seasonTitle: seasonTitle, ignoringLeadingArticle: true)
+            let candidates = searchable.flatMap { store.lookup.relatedItems(for: $0.id) }
+            #if DEBUG
+            AppleInteractionTrace.record(.network,
+                "Top10 lookup title=\(title) attempt=\(attempt + 1) matched=\(match != nil) candidates=\(candidates.prefix(20).map(\.name).joined(separator: " | "))")
+            #endif
+            if let match { return match }
+            // A cold metadata search can outlive the interactive search budget.
+            // Retry once with more time; an answered, unmatched search is final.
+            guard candidates.isEmpty, let metrics = store.metrics,
+                  metrics.fetchDuration >= budget else { return nil }
+        }
+        return nil
     }
 
     /// The configured search catalogs, then Cinemeta's — the same fallback the

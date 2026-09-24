@@ -5,9 +5,9 @@ import SwiftUI
 /// into a check once the title is saved. Side by side, stacked at the
 /// accessibility text sizes so the label wraps instead of clipping.
 struct AppleHomePhoneHeroActions: View {
-    /// The record whose saved position names the Play button.
-    let progressID: String
-    let type: String?
+    let action: AppleTitlePagePolicy.PrimaryAction
+    var isDownloaded = false
+    let canPerform: Bool
     /// Nil hides the My List button: the title has nothing to save it against.
     let isInList: Bool?
     let onPlay: () -> Void
@@ -16,19 +16,13 @@ struct AppleHomePhoneHeroActions: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var listButtonSide: CGFloat = 44
 
-    /// Read here, through the observable feed, so the label follows a save
-    /// made while the player was up rather than waiting for the next page.
-    private var playTitle: String {
-        AppleBillboardCopy.playTitle(progress: ApplePlaybackProgressFeed.shared.progress(for: progressID), type: type)
-    }
-
     var body: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
         layout {
             Button(action: onPlay) {
-                Label(playTitle, systemImage: "play.fill")
+                Label(action.displayTitle(hasCompletedDownload: isDownloaded), systemImage: "play.fill")
                     .font(.body.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -40,6 +34,7 @@ struct AppleHomePhoneHeroActions: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("home.featured.play")
+            .disabled(!canPerform)
 
             if let isInList {
                 Button(action: onToggleList) {

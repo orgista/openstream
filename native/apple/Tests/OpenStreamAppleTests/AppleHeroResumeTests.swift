@@ -24,6 +24,22 @@ struct AppleHeroResumeTests {
         return (ApplePlaybackStore(defaults: defaults), defaults, suiteName)
     }
 
+    /// The hero asks this for every episode on each redraw; one store read
+    /// must answer exactly what per-episode lookups would.
+    @MainActor
+    @Test func completedEpisodesMatchPerEpisodeLookups() throws {
+        let (store, defaults, suiteName) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        store.save(mediaID: "tt1234567:1:1", position: 2_990, duration: 3_000)
+        store.save(mediaID: "tt1234567:1:2", position: 600, duration: 3_000)
+        store.save(mediaID: "tt1234567:2:1", position: 3_000, duration: 3_000)
+        let ids = ["tt1234567:1:1", "tt1234567:1:2", "tt1234567:1:3", "tt1234567:2:1", ""]
+
+        let batch = store.completedMediaIDs(among: ids)
+
+        #expect(batch == Set(ids.filter { store.progress(for: $0)?.isComplete == true }))
+    }
+
     @MainActor
     @Test(arguments: ["tt1234567:1:3", "tt1234567:2:1", "tt1234567:1:1"])
     func theButtonStartsTheEpisodeItNamesAtItsPosition(part: String) throws {

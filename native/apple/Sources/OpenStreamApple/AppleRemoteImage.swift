@@ -343,6 +343,10 @@ actor AppleRemoteImageCache {
             request,
             maximumBytes: 12 * 1_024 * 1_024
         )
+        #if DEBUG
+        AppleInteractionTrace.record(.network,
+            "artwork image=\(AppleCatalogArtworkPolicy.traceID(url)) HTTP=\((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        #endif
         guard let http = response as? HTTPURLResponse,
               (200 ... 299).contains(http.statusCode) else {
             throw URLError(.cannotDecodeContentData)

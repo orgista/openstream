@@ -10,15 +10,18 @@ import Combine
 /// rotation dots, all anchored bottom-leading over the art, with the first row
 /// peeking in underneath.
 ///
-/// This view's only job is to hand that hero a *stage* — the inline trailer
-/// preview that can take the still's place — so Discover keeps its preview
-/// without owning a second layout. A stacked card lived here between 2026-09-18
+/// This view supplies the inline trailer stage and the shared title-page
+/// primary action, so every hero layout agrees on what its button will do.
+/// A stacked card lived here between 2026-09-18
 /// and 2026-09-20 and was the iPad landscape regression the owner reported: the
 /// art was capped at a flat 600 pt, the wordmark sat below it at a flat 90 pt,
 /// and Play/Details were pushed off the bottom of the screen.
 struct AppleHomeBillboard<Actions: View>: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
+    let progressID: String
+    let preferredSourceID: AppleSource.ID
+    let onPlay: () -> Void
     let settings: AppleSettingsStore
     let viewportSize: CGSize
     let wordmark: URL?
@@ -33,7 +36,110 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// Set on the Apple TV's Discover: the Apple TV app's hero details over
     /// the billboard (badge, kind line and rating, cycle-driven dots).
     var tv: TV? = nil
-    @ViewBuilder var actions: Actions
+    @ViewBuilder var actions: (AppleTitlePagePolicy.PrimaryAction, Bool, Bool, @escaping () -> Void) -> Actions
+    @State private var episodes: [AppleStremioEpisode] = []
+    @State private var episodesLoaded = false
+    @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
+    @State private var previewTrailerKeys: [String] = []
+    @State private var detailTrailerKeys: [String] = []
+    @State private var trailerRequest: UUID?
+    @State private var downloadCoordinator = AppleOfflineDownloadCoordinator()
+
+    private var selectedEpisode: AppleStremioEpisode? {
+        let store = ApplePlaybackStore()
+        let progress = ApplePlaybackProgressFeed.shared.progress(for: progressID, in: store)
+        let completedIDs = store.completedMediaIDs(among: episodes.map(\.id))
+        return AppleTitlePagePolicy.heroEpisode(
+            item: item, progress: progress, episodes: episodes, completedIDs: completedIDs,
+            localResumeEpisode: AppleLocalLibraryStore.shared.resumeEpisode(for: item, group: nil, episodes: episodes)
+        )
+    }
+
+    private var hasPlaybackRoute: Bool {
+        AppleTitlePagePolicy.hasPlaybackRoute(
+            item: item, sources: sources,
+            hasCompletedDownload: downloadCoordinator.state.isCompleted,
+            episodesUnavailable: episodesLoaded && episodes.isEmpty
+        )
+    }
+
+    private var primaryAction: AppleTitlePagePolicy.PrimaryAction {
+        AppleTitlePagePolicy.primaryAction(
+            type: item.type, progress: ApplePlaybackProgressFeed.shared.progress(for: progressID),
+            selectedEpisode: selectedEpisode, isPlayable: hasPlaybackRoute, hasTrailer: trailerKey != nil
+        )
+    }
+
+    private var actionButtons: Actions {
+        actions(primaryAction, downloadCoordinator.state.isCompleted,
+                primaryAction == .playTrailer || hasPlaybackRoute, performPrimaryAction)
+    }
+
+    private func performPrimaryAction() {
+        if primaryAction == .playTrailer {
+            trailerRequest = UUID()
+        } else if hasPlaybackRoute {
+            onPlay()
+        }
+    }
+
+    private var trailerKey: String? {
+        (detailTrailerKeys + previewTrailerKeys).first { AppleTrailerPreviewPolicy.embedURL(for: $0) != nil }
+    }
+
+    /// Use the title page's metadata clients and canonical-id resolution too:
+    /// a catalog's private id may need resolving before it can list episodes.
+    private func loadActionMetadata() async {
+        episodes = []
+        episodesLoaded = false
+        previewTrailerKeys = []
+        detailTrailerKeys = []
+        trailerRequest = nil
+        let client = AppleStremioMetadataClient()
+        let resolver = AppleMetadataResolver()
+        let sources = sources
+        let preferred = preferredSourceID
+        let item = item
+        let configuration = metadataConfiguration
+        func addLookups(to group: inout TaskGroup<AppleHeroMetadataOutcome>, mediaID: String) {
+            if item.type == "series" {
+                group.addTask {
+                    .episodes((try? await client.episodes(sources: sources, preferredSourceID: preferred,
+                                                          mediaID: mediaID)) ?? [])
+                }
+            }
+            group.addTask {
+                .details(try? await resolver.resolve(sources: sources, preferredSourceID: preferred,
+                    type: item.type, mediaID: mediaID, configuration: configuration))
+            }
+        }
+        await withTaskGroup(of: AppleHeroMetadataOutcome.self) { group in
+            group.addTask {
+                .preview(await client.previewAssets(sources: sources, preferredSourceID: preferred,
+                                                     type: item.type, mediaID: item.mediaID))
+            }
+            if let canonicalID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) {
+                addLookups(to: &group, mediaID: canonicalID)
+            } else if AppleMediaServerItemReference.parse(item.mediaID) == nil {
+                group.addTask {
+                    .identity(await client.imdbIdentifier(sources: sources, preferredSourceID: preferred,
+                                                          type: item.type, id: item.mediaID))
+                }
+            }
+            while let outcome = await group.next() {
+                guard !Task.isCancelled else { group.cancelAll(); return }
+                switch outcome {
+                case .preview(let assets): previewTrailerKeys = assets?.trailerYouTubeKeys ?? []
+                case .details(let details): detailTrailerKeys = details?.trailerYouTubeKeys ?? []
+                case .identity(let id): addLookups(to: &group, mediaID: id ?? item.mediaID)
+                case .episodes(let loaded):
+                    episodes = loaded
+                    episodesLoaded = true
+                }
+            }
+        }
+    }
+
     /// The decoded still, handed to the iPhone hero's trailer so its cover
     /// paints these pixels the moment it is inserted — the title page does the
     /// same. Without it the cover loaded its own copy and the hero went black
@@ -57,10 +163,19 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     var body: some View {
+        heroBody
+            .task(id: "\(item.id):\(catalogConfigurationIdentity(sources))") { await loadActionMetadata() }
+            .task(id: "\(progressID):\(selectedEpisode?.id ?? "")") {
+                let offlineID = selectedEpisode.map { "\(progressID):\($0.id)" } ?? progressID
+                await downloadCoordinator.loadExisting(mediaID: offlineID, itemTitle: item.name)
+            }
+    }
+
+    @ViewBuilder private var heroBody: some View {
         #if os(macOS)
         if let mac {
             AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark, stage: stage,
-                             onOpenDetails: mac.onOpenDetails) { actions }
+                             onOpenDetails: mac.onOpenDetails) { actionButtons }
         } else {
             standardBody
         }
@@ -75,7 +190,7 @@ struct AppleHomeBillboard<Actions: View>: View {
         if let tv {
             AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
                              rotationIndex: rotationIndex, stage: stage, badge: tv.badge,
-                             usesKindMetadata: true, cycle: tv.cycle) { actions }
+                             usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
         } else {
             featuredBody
         }
@@ -88,7 +203,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, wordmark: wordmark, badge: phone.badge,
-                               stage: stage, onOpenDetails: phone.onOpenDetails) { actions }
+                               stage: stage, onOpenDetails: phone.onOpenDetails) { actionButtons }
         } else {
             AppleFeaturedHero(
                 item: item,
@@ -97,7 +212,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                 rotationCount: rotationCount,
                 rotationIndex: rotationIndex,
                 stage: stage
-            ) { actions }
+            ) { actionButtons }
         }
     }
 
@@ -131,6 +246,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                     fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil
                 )
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
+                                     trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
                                      artworkImage: phone != nil || mac != nil ? stillImage : nil,
                                      muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset })
                     .id(item.id)
@@ -191,6 +307,8 @@ private struct AppleHomeHeroPreview: View {
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
+    var trailerRequest: UUID? = nil
+    var requestedTrailerKey: String? = nil
     var artworkImage: CGImage? = nil
     /// The Mac hero's round mute button sits this far from the top of the
     /// art (below the toolbar); nil on every other hero.
@@ -211,11 +329,13 @@ private struct AppleHomeHeroPreview: View {
     #endif
 
     private var shouldPreview: Bool {
-        let active = isVisible && isPresented && scenePhase == .active && settings.autoPlayTrailer && !reduceMotion
+        let active = isVisible && isPresented && scenePhase == .active
+        if trailerRequest != nil { return active }
+        let autoplay = active && settings.autoPlayTrailer && !reduceMotion
         #if os(iOS) || os(visionOS)
-        return active && systemVideoAutoplayEnabled
+        return autoplay && systemVideoAutoplayEnabled
         #else
-        return active
+        return autoplay
         #endif
     }
 
@@ -304,7 +424,7 @@ private struct AppleHomeHeroPreview: View {
             systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
         }
         #endif
-        .task(id: "\(item.id):\(shouldPreview):\(catalogConfigurationIdentity(sources))") {
+        .task(id: "\(item.id):\(shouldPreview):\(trailerRequest?.uuidString ?? ""):\(catalogConfigurationIdentity(sources))") {
             await startPreview()
         }
     }
@@ -313,24 +433,28 @@ private struct AppleHomeHeroPreview: View {
         stop()
         guard shouldPreview else { return }
         #if os(macOS)
-        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        if trailerRequest == nil {
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         guard !Task.isCancelled, shouldPreview,
-              let key = assets?.trailerYouTubeKeys.first,
+              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
         // Always starts muted, as it does on the iPhone; the round button
         // top-right turns the sound on (the Mac has no audio session to lose).
-        isMuted = true
+        isMuted = trailerRequest == nil
         appleTrace("mac hero trailer start \(item.name)")
         embedURL = url
         isPlaying = true
         #elseif os(iOS) || os(tvOS) || os(visionOS)
-        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        if trailerRequest == nil {
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         guard !Task.isCancelled, shouldPreview,
-              let key = assets?.trailerYouTubeKeys.first,
+              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
-        isMuted = settings.autoMuteTrailer
+        isMuted = trailerRequest == nil && settings.autoMuteTrailer
         #if os(tvOS)
         guard let stream = try? await AppleYouTubeStreamResolver.shared.resolve(videoID: key),
               !Task.isCancelled, shouldPreview else { return }

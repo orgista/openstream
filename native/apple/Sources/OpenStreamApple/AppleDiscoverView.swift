@@ -433,6 +433,10 @@ struct AppleDiscoverView: View {
                 }
             }
             await catalogStore.refresh(sources: sourceStore.sources)
+            #if DEBUG
+            AppleInteractionTrace.record(.network,
+                "catalog review sources=\(sourceStore.sources.count) credentialError=\(sourceStore.credentialError != nil) sections=\(catalogStore.sections.count) failures=\(catalogStore.partialErrors.count)")
+            #endif
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
             await indexCatalogs()
@@ -742,7 +746,7 @@ struct AppleDiscoverView: View {
             AppleMediaShelf(title: title) {
                 ForEach(ordered, id: \.rank) { entry in
                     Group {
-                        let match = catalogLookup.match(title: entry.title, type: type, seasonTitle: entry.seasonTitle)
+                        let match = catalogLookup.match(title: entry.title, type: type, seasonTitle: entry.seasonTitle, ignoringLeadingArticle: true)
                         if let match {
                             let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
                             let value = IndexedCatalogItem(record: record, item: match.item, source: match.source)
@@ -822,6 +826,9 @@ struct AppleDiscoverView: View {
         return AppleHomeBillboard(
             item: item,
             sources: sourceStore.sources,
+            progressID: value.record.id,
+            preferredSourceID: value.source.id,
+            onPlay: { selectHero(value, autoPlay: true) },
             settings: settings,
             viewportSize: viewportSize,
             wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
@@ -832,45 +839,48 @@ struct AppleDiscoverView: View {
                                  onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
             mac: mac ? .init(layout: macHeroLayout, onOpenDetails: { selectHero(value, autoPlay: false) }) : nil,
             tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
-        ) {
+        ) { action, isDownloaded, canPerform, perform in
             #if os(macOS)
             if mac {
                 AppleHomeMacHeroActions(
-                    progressID: value.record.id,
-                    type: value.item.type,
+                    action: action,
+                    isDownloaded: isDownloaded,
+                    canPerform: canPerform,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    onPlay: { selectHero(value, autoPlay: true) },
+                    onPlay: perform,
                     onToggleList: { toggleHeroInList(value) }
                 )
             } else {
-                featuredActions(value)
+                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
             }
             #elseif os(tvOS)
             if let tv {
                 AppleHomeTVHeroActions(
-                    progressID: value.record.id,
-                    type: value.item.type,
+                    action: action,
+                    isDownloaded: isDownloaded,
+                    canPerform: canPerform,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     focus: tv.focus,
                     pagingEnabled: tv.pagingEnabled,
-                    onPlay: { selectHero(value, autoPlay: true) },
+                    onPlay: perform,
                     onToggleList: { toggleHeroInList(value) },
                     onDetails: { selectHero(value, autoPlay: false) }
                 )
             } else {
-                featuredActions(value)
+                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
             }
             #else
             if phone {
                 AppleHomePhoneHeroActions(
-                    progressID: value.record.id,
-                    type: value.item.type,
+                    action: action,
+                    isDownloaded: isDownloaded,
+                    canPerform: canPerform,
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    onPlay: { selectHero(value, autoPlay: true) },
+                    onPlay: perform,
                     onToggleList: { toggleHeroInList(value) }
                 )
             } else {
-                featuredActions(value)
+                featuredActions(value, action: action, isDownloaded: isDownloaded, canPerform: canPerform, onPlay: perform)
             }
             #endif
         }
@@ -1020,10 +1030,14 @@ struct AppleDiscoverView: View {
         #endif
     }
 
-    private func featuredActions(_ value: IndexedCatalogItem) -> some View {
+    private func featuredActions(_ value: IndexedCatalogItem, action: AppleTitlePagePolicy.PrimaryAction,
+                                 isDownloaded: Bool, canPerform: Bool, onPlay: @escaping () -> Void) -> some View {
         AppleFeaturedActions(
             viewportSize: viewportSize,
-            onPlay: { selectHero(value, autoPlay: true) },
+            action: action,
+            isDownloaded: isDownloaded,
+            canPerform: canPerform,
+            onPlay: onPlay,
             onDetails: { selectHero(value, autoPlay: false) }
         )
     }
@@ -1640,7 +1654,7 @@ struct AppleCatalogCard: View {
     @Environment(\.appleDiscoverRows) private var rowStyle
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
-    @State private var artworkFailed = false
+    @State private var failedArtworkURLs: Set<URL> = []
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
          progress: Double? = nil, remainingLabel: String? = nil) {
@@ -1660,10 +1674,10 @@ struct AppleCatalogCard: View {
     private var usesRowStyle: Bool { activeRowStyle != nil }
 
     private var resolvedPosterURL: URL? {
-        if isLandscapeCard {
-            return item.backgroundURL ?? fallbackArtwork?.backgroundURL ?? item.posterURL ?? fallbackArtwork?.posterURL
-        }
-        return item.posterURL ?? fallbackArtwork?.posterURL ?? item.backgroundURL
+        AppleCatalogArtworkPolicy.next(
+            in: AppleCatalogArtworkPolicy.candidates(item: item, landscape: isLandscapeCard, fallback: fallbackArtwork),
+            failed: failedArtworkURLs
+        )
     }
 
     /// A card never renders as an empty slot: when the artwork is missing or
@@ -1682,10 +1696,9 @@ struct AppleCatalogCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AppleCatalogArtwork(url: resolvedPosterURL, onFailure: { artworkFailed = true },
-                                onLoad: { artworkFailed = false })
+            AppleCatalogArtwork(url: resolvedPosterURL, onFailure: artworkDidFail)
                 .frame(width: cardWidth, height: cardHeight)
-                .overlay { if artworkFailed || resolvedPosterURL == nil { artworkPlaceholder } }
+                .overlay { if resolvedPosterURL == nil { artworkPlaceholder } }
                 .overlay {
                     // Figma's diagonal on the Top 10 tile (owner: follow the
                     // Figma for card gradients, these rows only).
@@ -1722,8 +1735,14 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
-                .onChange(of: resolvedPosterURL) { _, _ in artworkFailed = false }
+                .onChange(of: item.id) { _, _ in failedArtworkURLs = []; fallbackArtwork = nil }
                 .task(id: item.id) {
+                    #if DEBUG
+                    if sizing == .ranked {
+                        AppleInteractionTrace.record(.network,
+                            "ranked artwork title=\(item.name) background=\(AppleCatalogArtworkPolicy.traceID(item.backgroundURL)) poster=\(AppleCatalogArtworkPolicy.traceID(item.posterURL))")
+                    }
+                    #endif
                     // A Discover row still (iPhone, Mac) wants the backdrop: a
                     // title that arrives with a poster only (a Top 10 match
                     // found by search) asks TMDB for one rather than cropping
@@ -1767,6 +1786,18 @@ struct AppleCatalogCard: View {
         .accessibilityLabel(item.name)
         .accessibilityValue(item.releaseInfo ?? "")
         .appleHoverAffordance()
+    }
+
+    private func artworkDidFail() {
+        if let url = resolvedPosterURL {
+            #if DEBUG
+            if sizing == .ranked {
+                AppleInteractionTrace.record(.failure,
+                    "ranked artwork title=\(item.name) failed=\(AppleCatalogArtworkPolicy.traceID(url))")
+            }
+            #endif
+            failedArtworkURLs.insert(url)
+        }
     }
 
     private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching || sizing == .ranked }
@@ -6442,13 +6473,11 @@ extension AppleCatalogItemDetailView {
     /// title, a finished download, or an enabled source that serves streams —
     /// and, for a series, an episode list to play from.
     private var hasPlaybackRoute: Bool {
-        if AppleMediaServerItemReference.parse(item.mediaID) != nil || localGroup != nil { return true }
-        if downloadCoordinator.state.isCompleted { return true }
-        if item.type == "series", episodeListPresentation == .unavailable { return false }
-        return playbackSources.contains { source in
-            source.isEnabled && (source.kind != .stremio
-                || source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame })
-        }
+        AppleTitlePagePolicy.hasPlaybackRoute(
+            item: item, sources: playbackSources, hasLocalGroup: localGroup != nil,
+            hasCompletedDownload: downloadCoordinator.state.isCompleted,
+            episodesUnavailable: episodeListPresentation == .unavailable
+        )
     }
 
     private var phonePrimaryAction: AppleTitlePagePolicy.PrimaryAction {
@@ -6497,10 +6526,8 @@ extension AppleCatalogItemDetailView {
         let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || isPreparingMetadata)
         let title: String = if isBusy {
             playbackCoordinator.phase.isBusy ? "Preparing" : "Loading"
-        } else if action == .play, downloadCoordinator.state.isCompleted {
-            "Play Offline"
         } else {
-            action.title
+            action.displayTitle(hasCompletedDownload: downloadCoordinator.state.isCompleted)
         }
         return Button {
             if isTrailer {
