@@ -41,6 +41,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var externalSubtitleTracks: [AppleExternalSubtitleTrack] = []
     private var activeExternalSubtitleID: Int?
     private var externalSubtitleLoad: Task<Void, Never>?
+    /// The in-flight add-on subtitle download and parse, if any. Tests await
+    /// it instead of polling `subtitleCues` against the clock.
+    var pendingExternalSubtitleLoad: Task<Void, Never>? { externalSubtitleLoad }
     /// Latest `sourceVideoWidth/Height` and `softwareDisplaySize`, captured in
     /// the sinks for the same `willSet` reason as `lastPublishedDuration`.
     private var lastSourceVideoWidth: Int32 = 0

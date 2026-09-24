@@ -218,10 +218,10 @@ private func subtitleSource(
     ])
     engine.selectSubtitleTrack(id: AetherPlaybackEngine.externalSubtitleTrackIDBase)
 
-    let deadline = ContinuousClock().now.advanced(by: .seconds(2))
-    while engine.subtitleCues.isEmpty, ContinuousClock().now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
+    // The download and parse run in a task; wait for it to finish rather than
+    // for a wall-clock deadline, which a loaded gate run could outlast.
+    let load = try #require(engine.pendingExternalSubtitleLoad)
+    await load.value
     #expect(engine.subtitleCues.count == 1)
     #expect(engine.subtitleCues.first?.text == "From the add-on")
     #expect(engine.subtitleCues.first?.startTime == 2)

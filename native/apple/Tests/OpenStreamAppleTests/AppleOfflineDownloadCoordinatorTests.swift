@@ -102,18 +102,16 @@ private final class OfflineDownloadURLProtocol: URLProtocol {
     }
 }
 
+/// Waits for the transfer to reach a state. No wall-clock deadline: the
+/// transfer's steps run on the main actor, which the parallel gate can keep
+/// busy for seconds; the suite's time limit fails a state that never comes.
 @MainActor
 private func waitForDownloadState(
-    timeout: Duration = .seconds(4),
     _ predicate: @escaping (AppleOfflineDownloadCoordinator.State) -> Bool
 ) async throws {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: timeout)
-    while clock.now < deadline {
-        if predicate(DownloadTestContext.coordinator.state) { return }
+    while !predicate(DownloadTestContext.coordinator.state) {
         try await Task.sleep(for: .milliseconds(10))
     }
-    Issue.record("Timed out waiting for download state: \(DownloadTestContext.coordinator.state)")
 }
 
 @MainActor
@@ -121,7 +119,7 @@ private enum DownloadTestContext {
     static var coordinator = AppleOfflineDownloadCoordinator()
 }
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 @MainActor
 struct AppleOfflineDownloadCoordinatorTests {
     private func makeContext(data: Data) throws -> (AppleOfflineDownloadCoordinator, AppleOfflineMediaStore, URL) {

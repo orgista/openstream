@@ -216,8 +216,9 @@ final class AppleCatalogSearchStore {
     /// Channels are kept — the field offers "movies, shows, and channels".
     /// Internal rather than private so the collapsing rules can be tested
     /// directly; the duplicate-row bug lived here and was invisible from the
-    /// public surface.
-    static func mergedResults(
+    /// public surface. It and its helpers read nothing but their arguments,
+    /// so they are `nonisolated`: callers need not wait for the main actor.
+    nonisolated static func mergedResults(
         _ values: [AppleMediaRecord],
         matching query: String,
         limit: Int
@@ -269,7 +270,7 @@ final class AppleCatalogSearchStore {
     ///
     /// Ties still break alphabetically, so *Dune* stays ahead of *Dune: Part
     /// Two* and the ordering that was already right does not move.
-    static func relevance(_ record: AppleMediaRecord, query: String) -> Int {
+    nonisolated static func relevance(_ record: AppleMediaRecord, query: String) -> Int {
         guard !query.isEmpty else { return 2 }
         let title = normalized(record.title)
         if title == query { return 0 }
@@ -284,7 +285,7 @@ final class AppleCatalogSearchStore {
     /// `.video`, which is the absence of a classification rather than a real
     /// one, so including it would keep a local copy and its catalog entry apart
     /// — the merge that makes a result useful.
-    private static func collapseKey(_ record: AppleMediaRecord) -> String {
+    nonisolated private static func collapseKey(_ record: AppleMediaRecord) -> String {
         "\(normalized(record.title))|\(record.year.map(String.init) ?? "")"
     }
 
@@ -300,7 +301,7 @@ final class AppleCatalogSearchStore {
     /// A token now has to begin a word — "her" does not begin "sherlock" — or
     /// begin the title with its spaces removed, which is what lets "mash" find
     /// *M\*A\*S\*H* and "walle" find *WALL·E*. The id is matched only in full.
-    private static func matches(_ record: AppleMediaRecord, tokens: [Substring]) -> Bool {
+    nonisolated private static func matches(_ record: AppleMediaRecord, tokens: [Substring]) -> Bool {
         guard !tokens.isEmpty else { return false }
         if let canonical = record.canonicalID?.lowercased(),
            tokens.count == 1, tokens[0] == canonical {
@@ -320,7 +321,7 @@ final class AppleCatalogSearchStore {
         }
     }
 
-    private static func merge(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> AppleMediaRecord {
+    nonisolated private static func merge(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> AppleMediaRecord {
         var result = metadataScore(rhs) > metadataScore(lhs) ? rhs : lhs
         result.availability = Dictionary(grouping: lhs.availability + rhs.availability, by: \.instanceID)
             .compactMap { _, values in values.max { $0.lastVerified < $1.lastVerified } }
@@ -333,14 +334,14 @@ final class AppleCatalogSearchStore {
         return result
     }
 
-    private static func metadataScore(_ record: AppleMediaRecord) -> Int {
+    nonisolated private static func metadataScore(_ record: AppleMediaRecord) -> Int {
         (record.summary == nil ? 0 : 4)
             + (record.artworkURL == nil ? 0 : 2)
             + (record.year == nil ? 0 : 1)
             + min(record.aliases.count, 2)
     }
 
-    private static func normalized(_ value: String) -> String {
+    nonisolated private static func normalized(_ value: String) -> String {
         // "&" becomes "and" before punctuation is stripped, so "Law & Order"
         // and someone typing "law and order" reach the same words.
         value.replacingOccurrences(of: "&", with: " and ")

@@ -191,10 +191,17 @@ struct AppleParallelMetadataResolutionTests {
 
     /// Three add-ons that each time out used to cost three deadlines in a
     /// row; together they cost one.
+    ///
+    /// Proven without a stopwatch: each slow add-on holds its request until
+    /// all three are in flight at once, which a one-after-another walk can
+    /// never reach — its first request would sit out the whole deadline
+    /// alone. Timing the call failed whenever the gate was busy.
     @Test func slowAddOnsCostOneDeadlineNotOneEach() async throws {
+        let rendezvous = AddOnRendezvous(expected: 3)
         let client = AppleStremioMetadataClient { request in
             if request.url?.host != "default.fixture" {
-                try await Task.sleep(for: .seconds(10))
+                try await rendezvous.arriveAndWait()
+                throw URLError(.timedOut)
             }
             let body = #"{"meta":{"id":"tt1234567","type":"movie","name":"Default"}}"#
             return (
@@ -204,13 +211,11 @@ struct AppleParallelMetadataResolutionTests {
         }
         let resolver = AppleMetadataResolver(
             sourceClient: client,
-            requestDeadline: .milliseconds(300),
-            overallDeadline: .seconds(3),
+            requestDeadline: .seconds(30),
+            overallDeadline: .seconds(30),
             defaultSource: source("default.fixture", manifestID: "com.linvo.cinemeta")
         )
 
-        let clock = ContinuousClock()
-        let start = clock.now
         let details = try await resolver.resolve(
             sources: [source("a.fixture", manifestID: "a"), source("b.fixture", manifestID: "b"),
                       source("c.fixture", manifestID: "c")],
@@ -219,7 +224,52 @@ struct AppleParallelMetadataResolutionTests {
         )
 
         #expect(details?.title == "Default")
-        #expect(start.duration(to: clock.now) < .milliseconds(850))
+        #expect(rendezvous.everyoneArrived)
+    }
+}
+
+/// Holds each caller until `expected` callers are waiting together. A caller
+/// cancelled first (its request deadline ran out) is released with
+/// `CancellationError`, so a regression fails instead of hanging.
+private final class AddOnRendezvous: @unchecked Sendable {
+    private let lock = NSLock()
+    private let expected: Int
+    private var arrived = 0
+    private var waiters: [Int: CheckedContinuation<Void, any Error>] = [:]
+    private var cancelled: Set<Int> = []
+
+    init(expected: Int) { self.expected = expected }
+
+    var everyoneArrived: Bool { lock.withLock { arrived >= expected } }
+
+    func arriveAndWait() async throws {
+        let (ticket, released): (Int, [CheckedContinuation<Void, any Error>]) = lock.withLock {
+            arrived += 1
+            guard arrived >= expected else { return (arrived, []) }
+            defer { waiters = [:] }
+            return (arrived, Array(waiters.values))
+        }
+        if ticket >= expected {
+            released.forEach { $0.resume() }
+            return
+        }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                let outcome: Result<Void, any Error>? = lock.withLock {
+                    if arrived >= expected { return .success(()) }
+                    if cancelled.contains(ticket) { return .failure(CancellationError()) }
+                    waiters[ticket] = continuation
+                    return nil
+                }
+                if let outcome { continuation.resume(with: outcome) }
+            }
+        } onCancel: {
+            let waiter: CheckedContinuation<Void, any Error>? = lock.withLock {
+                cancelled.insert(ticket)
+                return waiters.removeValue(forKey: ticket)
+            }
+            waiter?.resume(throwing: CancellationError())
+        }
     }
 }
 

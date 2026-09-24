@@ -10,7 +10,11 @@ import Testing
 /// test makes that call itself and then replays what the app does afterwards:
 /// the host's bind tick re-running discovery, and an add-on's subtitles
 /// arriving late, which is when the engine re-applies the captions setting.
+///
+/// The time limit is the hang guard for `waitUntil`, which has no deadline of
+/// its own.
 @MainActor
+@Suite(.timeLimit(.minutes(1)))
 struct AppleMacCaptionsSelectionTests {
     private static let fixture = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -140,12 +144,15 @@ struct AppleMacCaptionsSelectionTests {
             (option.extendedLanguageTag ?? option.locale?.identifier).map { String($0.prefix(2)) }
         }
 
+        /// Waits for AVFoundation's side of a change (item readiness, the
+        /// selection KVO reaching the mirror on the main queue). Nothing here
+        /// can be awaited directly, and a wall-clock deadline failed whenever
+        /// the parallel gate kept the main actor busy for a few seconds; the
+        /// suite's time limit fails a change that never lands.
         private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-            while !condition(), ContinuousClock.now < deadline {
+            while !condition() {
                 try await Task.sleep(for: .milliseconds(20))
             }
-            #expect(condition())
         }
     }
 }

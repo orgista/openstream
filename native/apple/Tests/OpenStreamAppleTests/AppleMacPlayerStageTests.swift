@@ -7,7 +7,7 @@ import Testing
 /// The Mac player takes over the window it was opened from.
 @MainActor
 struct AppleMacPlayerStageTests {
-    private static let sources = URL(fileURLWithPath: #filePath)
+    private nonisolated static let sources = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/OpenStreamApple")
 
@@ -22,7 +22,11 @@ struct AppleMacPlayerStageTests {
     /// Every page that opens a player hands it to the one modifier, and only
     /// the stage (Mac), the cover (iOS, tvOS) and the vision window build the
     /// player view — so no entry point can grow a presentation of its own.
-    @Test func everyEntryPointUsesTheOnePresentationPath() throws {
+    ///
+    /// `nonisolated`: it reads every source file, which on the SMB share can
+    /// take seconds, and on the main actor that stalled the other tests'
+    /// main-actor work until their request timeouts and deadlines ran out.
+    @Test nonisolated func everyEntryPointUsesTheOnePresentationPath() throws {
         let files = try FileManager.default.contentsOfDirectory(atPath: Self.sources.path)
             .filter { $0.hasSuffix(".swift") }
         var builders: Set<String> = []

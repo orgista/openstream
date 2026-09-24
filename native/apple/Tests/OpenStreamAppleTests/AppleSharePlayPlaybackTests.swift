@@ -65,8 +65,11 @@ import Testing
         let binding = AppleSharePlayPlaybackBinding(owner: owner, identifier: "openstream.live.fixture", createsDelegatingCoordinator: false)
         let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         await receive(.play(.init(itemTime: 10, hostTime: now, rate: 1)), on: binding)
+        // The group's clock keeps running while the command waits for the main
+        // actor, so the target is 10 s plus however long that took — never more.
+        let elapsed = CMClockGetTime(CMClockGetHostTimeClock()).seconds - now
         #expect(engine.rate == 1)
-        #expect(engine.position >= 10 && engine.position < 11)
+        #expect(engine.position >= 10 && engine.position <= 10 + elapsed)
         await receive(.pause(prepare: false, rate: 1), on: binding)
         #expect(engine.rate == 0)
         await receive(.seek(25, prepare: false, rate: 1), on: binding)
