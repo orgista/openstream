@@ -48,14 +48,16 @@ public enum AppleICloudSyncProbe {
         .resolve(isEntitled: isEntitled, hasICloudAccount: FileManager.default.ubiquityIdentityToken != nil)
     }
 
-    /// The Mac reads its own code signature. Elsewhere the store answers:
-    /// `synchronize()` returns false when the app lacks the entitlement.
+    /// The Mac reads its own code signature; only local Mac builds ever ship
+    /// without the entitlement. Elsewhere every installed build is signed with
+    /// a profile that carries it, and `synchronize()` returning false can be a
+    /// passing failure, so it must not lock the switch (review of 696fdd4).
     static var isEntitled: Bool {
         #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else { return false }
         return SecTaskCopyValueForEntitlement(task, entitlement as CFString, nil) != nil
         #else
-        return NSUbiquitousKeyValueStore.default.synchronize()
+        return true
         #endif
     }
 }
