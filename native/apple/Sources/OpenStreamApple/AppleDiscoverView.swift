@@ -237,9 +237,9 @@ struct AppleDiscoverView: View {
                             }
                         }
 
-                        // One list of rails. The iPhone held upright orders
-                        // it by the A4 rhythm (stills, then posters, then
-                        // stills); everywhere else it is the list as built.
+                        // One list of rails. The iPhone held upright and the
+                        // Mac order it by the A4 rhythm (stills, then posters,
+                        // then stills); everywhere else it is the list as built.
                         let continueShelf = continueWatchingShelf(local: localContinueWatching)
                         ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
                             railView(rail, continueWatching: continueShelf, picks: picks)
@@ -250,7 +250,7 @@ struct AppleDiscoverView: View {
                     #else
                     .padding(.vertical)
                     #endif
-                    .environment(\.applePhoneDiscoverRows, usesPhoneHero)
+                    .environment(\.appleDiscoverRows, discoverRowStyle)
                 }
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
                 #if DEBUG
@@ -609,7 +609,7 @@ struct AppleDiscoverView: View {
             let isRanked = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
             rails.append((.catalog(section.id), isRanked ? .still : .poster))
         }
-        var ordered = usesPhoneHero
+        var ordered = discoverRowStyle != nil
             ? AppleDiscoverRailRhythm.order(rails.map(\.1)).map { rails[$0].0 }
             : rails.map(\.0)
         if settings.top10ListsEnabled, top10Week?.isStale == true {
@@ -624,8 +624,8 @@ struct AppleDiscoverView: View {
                           picks: [IndexedCatalogItem]) -> some View {
         switch rail {
         case .continueWatching:
-            if usesPhoneHero {
-                continueWatchingPhoneShelf(continueWatching.values, isFixture: continueWatching.isFixture)
+            if discoverRowStyle != nil {
+                continueWatchingRowShelf(continueWatching.values, isFixture: continueWatching.isFixture)
             } else {
                 indexedShelf(title: "Continue Watching", identifier: "continue", values: continueWatching.values,
                              showsProgress: true)
@@ -671,13 +671,13 @@ struct AppleDiscoverView: View {
         }
     }
 
-    /// A2 on the iPhone: stills with the time left, the accent bar, and a
-    /// caption row carrying a ⋯ menu.
-    private func continueWatchingPhoneShelf(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+    /// A2 on the iPhone and the Mac: stills with the time left, the accent
+    /// bar, and a caption row carrying a ⋯ menu.
+    private func continueWatchingRowShelf(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
         let store = ApplePlaybackStore()
         return AppleMediaShelf(title: "Continue Watching") {
             ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
-                AppleContinueWatchingPhoneTile(
+                AppleContinueWatchingTile(
                     item: value.item,
                     info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
@@ -686,6 +686,9 @@ struct AppleDiscoverView: View {
                 ) {
                     detail(value)
                 }
+                #if DEBUG
+                .environment(\.appleDebugTileHover, AppleRailHoverFixture.isEnabled && index == 1)
+                #endif
                 .accessibilityIdentifier("home.continue.\(value.id)")
             }
         }
@@ -718,6 +721,9 @@ struct AppleDiscoverView: View {
     #endif
 
     private func loadTop10() {
+        #if DEBUG
+        if AppleTop10Fixture.isEnabled { return }
+        #endif
         Task {
             do {
                 top10Week = try await AppleNetflixTop10Client(session: .shared).latestWeek()
@@ -879,6 +885,17 @@ struct AppleDiscoverView: View {
             if mediaIndex.record(id: value.record.id) == nil { try? await mediaIndex.upsert(value.record) }
             try? await mediaIndex.setFavorite(!isInList, recordID: value.record.id)
         }
+    }
+
+    /// The Apple TV app row style for Discover's rails: the iPhone held upright
+    /// and the Mac. The iPad, a phone on its side, Apple TV and Vision Pro keep
+    /// their own rows.
+    private var discoverRowStyle: AppleDiscoverRowStyle? {
+        #if os(macOS)
+        .mac(contentWidth: macHeroLayout.contentWidth, inset: macHeroLayout.horizontalPadding)
+        #else
+        usesPhoneHero ? .phone : nil
+        #endif
     }
 
     /// Discover's hero on an iPhone held upright. The iPad (either way up), a
@@ -1054,7 +1071,7 @@ struct AppleDiscoverView: View {
             initialAutoPlay: initialAutoPlay,
             mediaServerLibrary: mediaServerLibrary
         )
-        .environment(\.applePhoneDiscoverRows, false)
+        .environment(\.appleDiscoverRows, nil)
     }
 
     private var catalogLookupIdentity: String {
@@ -1068,6 +1085,11 @@ struct AppleDiscoverView: View {
         )
         guard !Task.isCancelled else { return }
         catalogLookup = updated
+        #if DEBUG
+        // Only once the lookup exists, so every fixture rank matches a
+        // catalogue title and nothing falls back to a network search.
+        if AppleTop10Fixture.isEnabled { top10Week = AppleTop10Fixture.week(sections: catalogStore.sections) }
+        #endif
     }
 
     private var featuredHeight: CGFloat {
@@ -1482,7 +1504,7 @@ private struct AppleCatalogSectionView: View {
             settings: settings,
             openSettings: openSettings
         )
-        .environment(\.applePhoneDiscoverRows, false)
+        .environment(\.appleDiscoverRows, nil)
     }
 
 }
@@ -1490,7 +1512,7 @@ private struct AppleCatalogSectionView: View {
 private struct AppleTop10Card: View {
     let item: AppleCatalogItem
     let rank: Int
-    @Environment(\.applePhoneDiscoverRows) private var phoneRows
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     private var cardWidth: CGFloat {
         #if os(tvOS)
@@ -1503,8 +1525,8 @@ private struct AppleTop10Card: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             AppleCatalogCard(item: item, sizing: .ranked)
-            if phoneRows {
-                AppleTop10PhoneCaption(item: item, rank: rank)
+            if rowStyle != nil {
+                AppleTop10RowCaption(item: item, rank: rank)
             } else {
                 standardCaption
             }
@@ -1610,12 +1632,12 @@ struct AppleCatalogCard: View {
     let sizing: AppleCatalogCardSizing
     let viewportWidth: CGFloat?
     let progress: Double?
-    /// "57 MIN LEFT" on an iPhone Discover Continue Watching still.
+    /// "57 MIN LEFT" on a Discover Continue Watching still (iPhone, Mac).
     let remainingLabel: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
-    @Environment(\.applePhoneDiscoverRows) private var phoneRows
+    @Environment(\.appleDiscoverRows) private var rowStyle
     @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
     @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
     @State private var artworkFailed = false
@@ -1629,11 +1651,13 @@ struct AppleCatalogCard: View {
         self.remainingLabel = remainingLabel
     }
 
-    /// The iPhone Discover style applies to the home rails only, never to a
-    /// detail page's suggestions or the full-width promo card.
-    private var usesPhoneRowStyle: Bool {
-        phoneRows && [.catalog, .featured, .continueWatching, .ranked].contains(sizing)
+    /// The Discover row style (iPhone, Mac) applies to the home rails only,
+    /// never to a detail page's suggestions or the full-width promo card.
+    private var activeRowStyle: AppleDiscoverRowStyle? {
+        [.catalog, .featured, .continueWatching, .ranked].contains(sizing) ? rowStyle : nil
     }
+
+    private var usesRowStyle: Bool { activeRowStyle != nil }
 
     private var resolvedPosterURL: URL? {
         if isLandscapeCard {
@@ -1665,7 +1689,7 @@ struct AppleCatalogCard: View {
                 .overlay {
                     // Figma's diagonal on the Top 10 tile (owner: follow the
                     // Figma for card gradients, these rows only).
-                    if usesPhoneRowStyle && sizing == .ranked {
+                    if usesRowStyle && sizing == .ranked {
                         LinearGradient(colors: [.black.opacity(0.45), .clear],
                                        startPoint: .bottomLeading, endPoint: .topTrailing)
                             .allowsHitTesting(false)
@@ -1673,14 +1697,16 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .overlay(alignment: .topLeading) {
-                    if usesPhoneRowStyle, let remainingLabel { AppleRemainingTimePill(label: remainingLabel) }
+                    if let activeRowStyle, let remainingLabel {
+                        AppleRemainingTimePill(label: remainingLabel, fontSize: activeRowStyle.pillFontSize)
+                    }
                 }
                 .overlay(alignment: .bottom) {
-                    if usesPhoneRowStyle, let progress { AppleStillProgressBar(progress: progress, width: cardWidth) }
+                    if usesRowStyle, let progress { AppleStillProgressBar(progress: progress, width: cardWidth) }
                 }
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay(alignment: .bottom) {
-                    if !usesPhoneRowStyle, let progress {
+                    if !usesRowStyle, let progress {
                         GeometryReader { geometry in
                             Capsule()
                                 .fill(.white.opacity(0.3))
@@ -1695,13 +1721,14 @@ struct AppleCatalogCard: View {
                         .accessibilityHidden(true)
                     }
                 }
+                .appleRowTileLift(activeRowStyle?.platform == .mac)
                 .onChange(of: resolvedPosterURL) { _, _ in artworkFailed = false }
                 .task(id: item.id) {
-                    // An iPhone Discover still wants the backdrop: a title
-                    // that arrives with a poster only (a Top 10 match found by
-                    // search) asks TMDB for one rather than cropping the poster
-                    // into 16:9. Other platforms keep their behaviour.
-                    let wantsBackdrop = usesPhoneRowStyle && isLandscapeCard && item.backgroundURL == nil
+                    // A Discover row still (iPhone, Mac) wants the backdrop: a
+                    // title that arrives with a poster only (a Top 10 match
+                    // found by search) asks TMDB for one rather than cropping
+                    // the poster into 16:9. Other platforms keep their behaviour.
+                    let wantsBackdrop = usesRowStyle && isLandscapeCard && item.backgroundURL == nil
                     guard item.posterURL == nil || wantsBackdrop else { return }
                     fallbackArtwork = await AppleArtworkResolver.shared.resolve(
                         mediaID: item.mediaID,
@@ -1712,11 +1739,11 @@ struct AppleCatalogCard: View {
                     )
                 }
 
-            if showsTitle && usesPhoneRowStyle {
+            if showsTitle, let activeRowStyle {
                 // Figma: 12 pt medium at 70 % white, clamped at a word.
                 AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 4 : 2,
                                      reservesSpace: true)
-                    .font(.caption.weight(.medium))
+                    .font(activeRowStyle.posterTitleFont)
                     .foregroundStyle(.white.opacity(0.7))
                     .frame(width: cardWidth, alignment: .leading)
             } else if showsTitle {
@@ -1726,7 +1753,7 @@ struct AppleCatalogCard: View {
                     .truncationMode(.tail)
                     .frame(width: cardWidth, alignment: .leading)
             }
-            if progress == nil, showsTitle, !usesPhoneRowStyle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
+            if progress == nil, showsTitle, !usesRowStyle, let releaseInfo = item.releaseInfo, !releaseInfo.isEmpty {
                 Text(releaseInfo)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1747,7 +1774,7 @@ struct AppleCatalogCard: View {
     private var showsTitle: Bool {
         if sizing == .ranked || sizing == .portraitPromo { return false }
         // The Continue Watching tile draws its own caption row, with the menu.
-        if usesPhoneRowStyle && sizing == .continueWatching { return false }
+        if usesRowStyle && sizing == .continueWatching { return false }
         #if os(tvOS)
         return isLandscapeCard
         #else
@@ -1756,11 +1783,11 @@ struct AppleCatalogCard: View {
     }
 
     private var cardWidth: CGFloat {
-        if usesPhoneRowStyle {
+        if let activeRowStyle {
             switch sizing {
-            case .ranked: return AppleDiscoverPhoneRowMetrics.rankedWidth
-            case .continueWatching, .featured: return AppleDiscoverPhoneRowMetrics.stillWidth
-            default: return AppleDiscoverPhoneRowMetrics.posterWidth
+            case .ranked: return activeRowStyle.rankedWidth
+            case .continueWatching, .featured: return activeRowStyle.stillWidth
+            default: return activeRowStyle.posterWidth
             }
         }
         if sizing == .portraitPromo {

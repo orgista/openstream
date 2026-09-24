@@ -1,11 +1,25 @@
 import SwiftUI
 
 extension EnvironmentValues {
-    /// True inside Discover on an iPhone held upright: shelves, cards and
-    /// captions take the Apple TV app's row style (N11). Every other screen
-    /// and platform leaves it false and keeps its own look; pages pushed from
-    /// Discover set it back to false.
-    @Entry var applePhoneDiscoverRows = false
+    /// Set inside Discover on an iPhone held upright (N11) and on the Mac
+    /// (N13): shelves, cards and captions take the Apple TV app's row style
+    /// at that style's sizes. Every other screen and platform leaves it nil
+    /// and keeps its own look; pages pushed from Discover set it back to nil.
+    @Entry var appleDiscoverRows: AppleDiscoverRowStyle? = nil
+}
+
+extension AppleDiscoverRowStyle {
+    // The phone's are the N11 sizes. The Mac's type is a step up: a macOS
+    // footnote is 10 pt, where the Figma asks for 13 pt titles and 12 pt meta.
+    var headerFont: Font { platform == .phone ? .title3.bold() : .title.bold() }
+    var headerChevronFont: Font { platform == .phone ? .body.weight(.bold) : .title3.weight(.bold) }
+    var headerSpacing: CGFloat { platform == .phone ? 10 : 4 }
+    var captionTitleFont: Font { platform == .phone ? .footnote.weight(.semibold) : .body.weight(.semibold) }
+    var captionMetaFont: Font { platform == .phone ? .caption2 : .callout }
+    var posterTitleFont: Font { platform == .phone ? .caption.weight(.medium) : .callout.weight(.medium) }
+    var menuGlyphFont: Font { platform == .phone ? .footnote.weight(.bold) : .body.weight(.bold) }
+    var rankNumeralSize: CGFloat { platform == .phone ? 40 : 52 }
+    var pillFontSize: CGFloat { platform == .phone ? 10 : 11 }
 }
 
 /// Text clamped to a line budget at a word boundary (A4 note: never
@@ -105,8 +119,9 @@ struct AppleContinueWatchingTileInfo: Equatable {
 }
 
 /// A2: a 16:9 still with the pill and bar on it, and under it the title, the
-/// "Continue · S1, E3" line and a ⋯ menu of the actions the app already has.
-struct AppleContinueWatchingPhoneTile<Destination: View>: View {
+/// "Continue · S1, E3" line and a ⋯ menu of the actions the app already has
+/// (on the Mac the same actions are also the tile's right-click menu).
+struct AppleContinueWatchingTile<Destination: View>: View {
     let item: AppleCatalogItem
     let info: AppleContinueWatchingTileInfo
     let isInList: Bool
@@ -114,81 +129,96 @@ struct AppleContinueWatchingPhoneTile<Destination: View>: View {
     let onToggleList: () -> Void
     @ViewBuilder let destination: () -> Destination
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     var body: some View {
+        let style = rowStyle ?? .phone
         VStack(alignment: .leading, spacing: 6) {
             NavigationLink(destination: destination) {
                 AppleCatalogCard(item: item, sizing: .continueWatching, progress: info.progress,
                                  remainingLabel: info.remainingLabel)
             }
             .accessibilityValue([info.remainingLabel?.capitalized, info.subtitle].compactMap { $0 }.joined(separator: ", "))
+            #if os(macOS)
+            .contextMenu { actions }
+            #endif
             HStack(alignment: .top, spacing: 4) {
                 VStack(alignment: .leading, spacing: 2) {
                     AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 3 : 1)
-                        .font(.footnote.weight(.semibold))
+                        .font(style.captionTitleFont)
                     Text(info.subtitle)
-                        .font(.caption2)
+                        .font(style.captionMetaFont)
                         .foregroundStyle(.white.opacity(0.4))
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                 }
                 Menu {
-                    Button(item.type == "movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle",
-                           action: onOpenTitle)
-                    Button(isInList ? "Remove from My List" : "Add to My List",
-                           systemImage: isInList ? "checkmark" : "plus", action: onToggleList)
+                    actions
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.footnote.weight(.bold))
+                        .font(style.menuGlyphFont)
                         .foregroundStyle(.white.opacity(0.4))
                         .frame(width: 44, height: 32)
                         .contentShape(.rect)
                 }
+                .appleBareMenu()
                 .accessibilityLabel("More for \(item.name)")
                 .padding(.trailing, -12)
+                .appleHoverAffordance()
             }
-            .frame(width: AppleDiscoverPhoneRowMetrics.stillWidth, alignment: .leading)
+            .frame(width: style.stillWidth, alignment: .leading)
         }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button(item.type == "movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle",
+               action: onOpenTitle)
+        Button(isInList ? "Remove from My List" : "Add to My List",
+               systemImage: isInList ? "checkmark" : "plus", action: onToggleList)
     }
 }
 
 /// A3: the rank sits outside the art, beside the caption under the tile.
-struct AppleTop10PhoneCaption: View {
+struct AppleTop10RowCaption: View {
     let item: AppleCatalogItem
     let rank: Int
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appleDiscoverRows) private var rowStyle
 
     var body: some View {
+        let style = rowStyle ?? .phone
         // At AX sizes the numeral goes above the caption, so the title keeps
         // the tile's full width and wraps at words, not inside them.
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
-            AppleTop10RankNumeral(rank: rank, size: 40)
+            AppleTop10RankNumeral(rank: rank, size: style.rankNumeralSize)
             VStack(alignment: .leading, spacing: 2) {
                 AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 3 : 1,
                                      reservesSpace: true)
-                    .font(.footnote.weight(.semibold))
+                    .font(style.captionTitleFont)
                 let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.caption2)
+                        .font(style.captionMetaFont)
                         .foregroundStyle(.white.opacity(0.4))
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 }
             }
         }
-        .frame(width: AppleDiscoverPhoneRowMetrics.rankedWidth, alignment: .leading)
+        .frame(width: style.rankedWidth, alignment: .leading)
     }
 }
 
 /// "57 MIN LEFT" on the top-left of a Continue Watching still.
 struct AppleRemainingTimePill: View {
     let label: String
+    var fontSize: CGFloat = 10
 
     var body: some View {
         Text(label)
-            .font(.system(size: 10, weight: .bold))
+            .font(.system(size: fontSize, weight: .bold))
             .tracking(0.3)
             .foregroundStyle(.white)
             .padding(.horizontal, 8)

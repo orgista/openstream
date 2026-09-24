@@ -1,7 +1,7 @@
 import Foundation
 
-/// The iPhone portrait Discover rows in the Apple TV app's style (N11: owner
-/// Figma + inspo PDF A2–A4). Pure rules; the views are in
+/// Discover's rows in the Apple TV app's style (N11 iPhone portrait, N13 Mac:
+/// owner Figma + inspo PDF A2–A4). Pure rules; the views are in
 /// `AppleDiscoverPhoneRowViews.swift`.
 enum AppleDiscoverPhoneRowMetrics {
     /// Continue Watching and the other still rails (A2, Figma 248 pt).
@@ -13,6 +13,106 @@ enum AppleDiscoverPhoneRowMetrics {
     static let cornerRadius: CGFloat = 12
     static let cardGap: CGFloat = 12
     static let progressHeight: CGFloat = 3
+}
+
+/// The Apple TV app row style Discover's rails take, and at what size: the
+/// iPhone held upright (N11) and the Mac (N13) share every rule and view; only
+/// the numbers and the type sizes differ. `nil` in the environment is every
+/// other screen and platform, which keep their own look.
+struct AppleDiscoverRowStyle: Equatable, Sendable {
+    enum Platform: Equatable, Sendable { case phone, mac }
+
+    var platform: Platform
+    var stillWidth: CGFloat
+    var rankedWidth: CGFloat
+    var posterWidth: CGFloat
+    var horizontalInset: CGFloat
+    var cardGap: CGFloat
+
+    static let phone = Self(platform: .phone,
+                            stillWidth: AppleDiscoverPhoneRowMetrics.stillWidth,
+                            rankedWidth: AppleDiscoverPhoneRowMetrics.rankedWidth,
+                            posterWidth: AppleDiscoverPhoneRowMetrics.posterWidth,
+                            horizontalInset: 16,
+                            cardGap: AppleDiscoverPhoneRowMetrics.cardGap)
+
+    /// The Mac: tiles grow with the window, and are sized so that a whole
+    /// number of them and part of the next are in view at any width (A11
+    /// peek) — in a 1440 pt window about 310 pt stills, 250 pt Top 10 tiles
+    /// and 176 pt posters. `inset` is the hero copy's, so the rails line up
+    /// under it.
+    static func mac(contentWidth: CGFloat, inset: CGFloat) -> Self {
+        let available = contentWidth - inset
+        func width(_ fraction: CGFloat, _ range: ClosedRange<CGFloat>) -> CGFloat {
+            let preferred = min(max(contentWidth * fraction, range.lowerBound), range.upperBound)
+            return AppleDiscoverMacRowMetrics.peekWidth(available: available, preferred: preferred,
+                                                        gap: AppleDiscoverMacRowMetrics.cardGap, range: range)
+        }
+        return Self(platform: .mac,
+                    stillWidth: width(0.22, 260...380),
+                    rankedWidth: width(0.18, 200...320),
+                    posterWidth: width(0.125, 140...230),
+                    horizontalInset: inset,
+                    cardGap: AppleDiscoverMacRowMetrics.cardGap)
+    }
+}
+
+enum AppleDiscoverMacRowMetrics {
+    static let cardGap: CGFloat = 16
+    /// How much of the trailing tile shows past the last whole one.
+    static let peekFraction: CGFloat = 0.3
+
+    /// The tile width nearest `preferred` that leaves `peekFraction` of a
+    /// tile at the trailing edge of `available`, within `range`. Before the
+    /// window is measured it is `preferred`.
+    static func peekWidth(available: CGFloat, preferred: CGFloat, gap: CGFloat,
+                          range: ClosedRange<CGFloat>) -> CGFloat {
+        guard available > 0, available.isFinite else { return preferred }
+        let whole = max(1, ((available + gap) / (preferred + gap) - peekFraction).rounded())
+        let width = (available - whole * gap) / (whole + peekFraction)
+        return min(max(width, range.lowerBound), range.upperBound).rounded()
+    }
+}
+
+/// Paging a Mac rail with its hover-revealed ‹ › buttons.
+enum AppleRailPaging {
+    struct Geometry: Equatable, Sendable {
+        var offset: CGFloat = 0
+        var contentWidth: CGFloat = 0
+        var visibleWidth: CGFloat = 0
+    }
+
+    static func canPageBack(_ geometry: Geometry) -> Bool { geometry.offset > 1 }
+
+    static func canPageForward(_ geometry: Geometry) -> Bool {
+        geometry.offset + geometry.visibleWidth < geometry.contentWidth - 1
+    }
+
+    /// A page is most of the visible width, so the tile that was clipped at
+    /// the edge is whole on the next page; never past either end.
+    static func target(_ geometry: Geometry, forward: Bool) -> CGFloat {
+        let page = max(geometry.visibleWidth * 0.8, 1)
+        let end = max(geometry.contentWidth - geometry.visibleWidth, 0)
+        return min(max(geometry.offset + (forward ? page : -page), 0), end)
+    }
+
+    /// The rail scrolls to invisible anchors laid every `anchorStep` points
+    /// behind its tiles; a target rounds to the nearest one.
+    static let anchorStep: CGFloat = 40
+
+    static func anchorCount(contentWidth: CGFloat) -> Int {
+        guard contentWidth.isFinite, contentWidth > 0 else { return 0 }
+        return Int((contentWidth / anchorStep).rounded(.up))
+    }
+
+    static func anchorIndex(for offset: CGFloat) -> Int {
+        guard offset.isFinite, offset > 0 else { return 0 }
+        return Int((offset / anchorStep).rounded())
+    }
+
+    /// Strings, so they can never collide with a tile's own id (Top 10 tiles
+    /// are keyed by their Int rank).
+    static func anchorID(_ index: Int) -> String { "openstream.rail.page.\(index)" }
 }
 
 /// The copy under and on a Continue Watching still.

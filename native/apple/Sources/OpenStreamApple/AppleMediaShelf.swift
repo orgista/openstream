@@ -8,7 +8,7 @@ struct AppleMediaShelf<Content: View>: View {
     var onOpen: (() -> Void)? = nil
     var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
-    @Environment(\.applePhoneDiscoverRows) private var phoneRows
+    @Environment(\.appleDiscoverRows) private var rowStyle
     var body: some View {
         VStack(alignment: .leading, spacing: titleSpacing) {
             HStack(alignment: .center) {
@@ -17,8 +17,8 @@ struct AppleMediaShelf<Content: View>: View {
                         HStack(spacing: 8) {
                             Text(title).font(titleFont)
                             Image(systemName: "chevron.right")
-                                .font(phoneRows ? .body.weight(.bold) : .headline.bold())
-                                .foregroundStyle(phoneRows ? .secondary : .primary)
+                                .font(rowStyle?.headerChevronFont ?? .headline.bold())
+                                .foregroundStyle(rowStyle != nil ? .secondary : .primary)
                         }
                         .multilineTextAlignment(.leading)
                         .frame(minHeight: 44, alignment: .leading)
@@ -38,11 +38,27 @@ struct AppleMediaShelf<Content: View>: View {
                 }
             }
             .padding(.horizontal, horizontalInset)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: cardGap, content: content)
-                    .padding(.horizontal, horizontalInset).padding(.vertical, verticalBleed)
-            }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+            #if os(macOS)
+            if rowStyle?.platform == .mac {
+                AppleMacRail { rail }
+            } else {
+                railScrollView
+            }
+            #else
+            railScrollView
+            #endif
         }.appleCatalogFocusSection()
+    }
+
+    private var rail: some View {
+        LazyHStack(alignment: .top, spacing: cardGap, content: content)
+            .padding(.horizontal, horizontalInset).padding(.vertical, verticalBleed)
+    }
+
+    private var railScrollView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            rail
+        }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
     }
 
     // tvOS retains its safe-area gutter and room for the focus lift.
@@ -53,13 +69,15 @@ struct AppleMediaShelf<Content: View>: View {
     private var cardGap: CGFloat { AppleTVBillboardMetrics.cardGap }
     private var verticalBleed: CGFloat { AppleTVBillboardMetrics.rowVerticalBleed }
     #else
-    // iPhone Discover (N11): a 20 pt header over a 12 pt card gap, per the
-    // Figma; rails are not snapped, so the trailing tile stays clipped (A11).
-    private var titleFont: Font { phoneRows ? .title3.bold() : .title.bold() }
-    private var titleSpacing: CGFloat { phoneRows ? 10 : 12 }
-    private var horizontalInset: CGFloat { 16 }
-    private var cardGap: CGFloat { phoneRows ? AppleDiscoverPhoneRowMetrics.cardGap : 8 }
-    private var verticalBleed: CGFloat { 4 }
+    // Discover on the iPhone (N11) and the Mac (N13): the row style's header
+    // and card gap, per the Figma; rails are not snapped, so the trailing
+    // tile stays clipped (A11). The Mac's rails start under the hero copy and
+    // leave room above and below for the hover lift.
+    private var titleFont: Font { rowStyle?.headerFont ?? .title.bold() }
+    private var titleSpacing: CGFloat { rowStyle?.headerSpacing ?? 12 }
+    private var horizontalInset: CGFloat { rowStyle?.horizontalInset ?? 16 }
+    private var cardGap: CGFloat { rowStyle?.cardGap ?? 8 }
+    private var verticalBleed: CGFloat { rowStyle?.platform == .mac ? 12 : 4 }
     #endif
 }
 

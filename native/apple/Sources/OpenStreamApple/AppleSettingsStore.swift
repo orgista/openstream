@@ -48,7 +48,18 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
         self.service = service
     }
 
+    #if DEBUG
+    /// `-OpenStreamDebugNoKeychain YES`: a review build launched headlessly
+    /// reads no saved credential and writes none. On the Mac a build signed
+    /// differently from the one that saved an item raises a keychain dialog
+    /// on the owner's screen (N13, 2026-09-23); with this it never asks.
+    static var isBypassedForReview: Bool { UserDefaults.standard.bool(forKey: "OpenStreamDebugNoKeychain") }
+    #else
+    static let isBypassedForReview = false
+    #endif
+
     public func string(for account: String) throws -> String? {
+        if Self.isBypassedForReview { return nil }
         var query = baseQuery(for: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -67,6 +78,7 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     }
 
     public func set(_ value: String, for account: String) throws {
+        if Self.isBypassedForReview { return }
         let data = Data(value.utf8)
         let query = baseQuery(for: account)
         let update: [String: Any] = [
@@ -92,6 +104,7 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     }
 
     public func remove(_ account: String) throws {
+        if Self.isBypassedForReview { return }
         let status = SecItemDelete(baseQuery(for: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw AppleKeychainStoreError.unexpectedStatus(status)
@@ -102,7 +115,7 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     /// Roll back migrated services if a later update fails, leaving the toggle unchanged.
     static func setSynchronizationEnabled(_ enabled: Bool) throws {
         let previous = UserDefaults.standard.bool(forKey: syncPreferenceKey)
-        guard previous != enabled else { return }
+        guard previous != enabled, !isBypassedForReview else { return }
         var changed: [String] = []
         do {
             for service in ["com.orgista.openstream.settings", "com.orgista.openstream.instances"] {
