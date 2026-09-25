@@ -1964,19 +1964,7 @@ struct AppleCatalogCard: View {
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay(alignment: .bottom) {
                     if !usesRowStyle, let progress {
-                        // The artwork is framed at `cardWidth`, so the bar
-                        // needs no GeometryReader to learn its width.
-                        Capsule()
-                            .fill(AppleDesignTokens.artworkProgressTrack)
-                            .overlay(alignment: .leading) {
-                                Capsule()
-                                    .fill(.white)
-                                    .frame(width: cardWidth * min(max(progress, 0), 1))
-                            }
-                            .frame(height: 3)
-                            .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
+                        artworkProgressBar(progress)
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
@@ -2131,6 +2119,28 @@ struct AppleCatalogCard: View {
 
     private var cardHeight: CGFloat {
         cardWidth * (isLandscapeCard ? 9.0 / 16.0 : 1.5)
+    }
+
+    /// The bar sits inside the artwork, inset from its edges as in the
+    /// Apple TV app. On the very bottom edge the Apple TV's focus lift
+    /// dropped it from the focused card (N58: `03-discover-down-2`), so
+    /// the card you are on lost its progress. The artwork is framed at
+    /// `cardWidth`, so the bar needs no GeometryReader to learn its width.
+    private func artworkProgressBar(_ progress: Double) -> some View {
+        let inset = AppleCatalogCardMetrics.progressBarInset
+        let width = max(cardWidth - inset.horizontal * 2, 0)
+        return Capsule()
+            .fill(AppleDesignTokens.artworkProgressTrack)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(.white)
+                    .frame(width: width * min(max(progress, 0), 1))
+            }
+            .frame(width: width, height: 3)
+            .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
+            .padding(.bottom, inset.bottom)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var cornerRadius: CGFloat {
