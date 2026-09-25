@@ -82,6 +82,58 @@ struct AppleCaptionHandoffTests {
         #expect(handoff.stage == .declaring)
     }
 
+    /// The picture goes away again, then the withdraw fails: the declare is
+    /// tried once anyway, or PiP / AirPlay would stay caption-less until the
+    /// next track, route or whereabouts change.
+    @Test func aFailedWithdrawWithThePictureAwayAgainDeclaresOnce() {
+        var handoff = nativeHandoff()
+        _ = handoff.update(pictureIsAway: false, wantedTrackID: english)
+        _ = handoff.update(pictureIsAway: true, wantedTrackID: english)
+        #expect(handoff.reloadFinished(succeeded: false) == [.reload(declaringRenditions: true)])
+        #expect(handoff.stage == .declaring)
+        #expect(handoff.reloadFinished(succeeded: true) == [.nativeRendering(true)])
+        #expect(handoff.stage == .native)
+        #expect(handoff.renderedTrackID == english)
+    }
+
+    /// The other order: the withdraw fails while the picture is still here,
+    /// and the picture leaves afterwards. The handoff is back in `.app`, so
+    /// leaving declares as it would from scratch.
+    @Test func aFailedWithdrawThenThePictureAwayDeclares() {
+        var handoff = nativeHandoff()
+        _ = handoff.update(pictureIsAway: false, wantedTrackID: english)
+        #expect(handoff.reloadFinished(succeeded: false) == [])
+        #expect(handoff.stage == .app)
+        #expect(handoff.update(pictureIsAway: true, wantedTrackID: english) == [.reload(declaringRenditions: true)])
+        #expect(handoff.stage == .declaring)
+    }
+
+    /// The retry is one retry: a session that can neither withdraw nor
+    /// declare is left alone until the picture comes back.
+    @Test func aFailedRetryAfterAFailedWithdrawWaitsForThePicture() {
+        var handoff = nativeHandoff()
+        _ = handoff.update(pictureIsAway: false, wantedTrackID: english)
+        _ = handoff.update(pictureIsAway: true, wantedTrackID: english)
+        _ = handoff.reloadFinished(succeeded: false)
+        #expect(handoff.reloadFinished(succeeded: false) == [])
+        #expect(handoff.stage == .app)
+        #expect(handoff.declineUntilPictureReturns)
+        #expect(handoff.update(pictureIsAway: true, wantedTrackID: 5) == [])
+        _ = handoff.update(pictureIsAway: false, wantedTrackID: english)
+        #expect(handoff.update(pictureIsAway: true, wantedTrackID: english) == [.reload(declaringRenditions: true)])
+    }
+
+    /// Away again with captions off: nothing to hand over, so the failed
+    /// withdraw rebuilds nothing; turning a track on declares from `.app`.
+    @Test func aFailedWithdrawAwayWithoutATrackWaitsForOne() {
+        var handoff = nativeHandoff()
+        _ = handoff.update(pictureIsAway: false, wantedTrackID: english)
+        _ = handoff.update(pictureIsAway: true, wantedTrackID: nil)
+        #expect(handoff.reloadFinished(succeeded: false) == [])
+        #expect(handoff.stage == .app)
+        #expect(handoff.update(pictureIsAway: true, wantedTrackID: english) == [.reload(declaringRenditions: true)])
+    }
+
     /// The engine rebuilds the item under a transient nil track; the
     /// rendition follows whatever the track is when the rebuild lands.
     @Test func theTrackAtTheMomentTheDeclareLandsIsTheOneRendered() {

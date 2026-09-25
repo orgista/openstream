@@ -372,6 +372,22 @@ struct AppleDiscoverView: View {
                 visionReviewAutoPlay = screen == "play"
                 visionReviewDetailOpened = true
                 visionReviewDetail = true
+                // `OpenStreamDetailReopen N` pops the page after 6 s and pushes
+                // it again, N times, so a trace sees repeat opens as well as
+                // the first. Not this task: Discover's tasks end when it is
+                // covered.
+                let reopens = UserDefaults.standard.integer(forKey: "OpenStreamDetailReopen")
+                if reopens > 0 {
+                    Task {
+                        for _ in 0..<reopens {
+                            try? await Task.sleep(for: .seconds(6))
+                            visionReviewDetail = false
+                            try? await Task.sleep(for: .seconds(3))
+                            appleTrace("detail reopen")
+                            visionReviewDetail = true
+                        }
+                    }
+                }
                 // `OpenStreamDetailPopAfter <seconds>` goes back to Discover
                 // that long after, so a probe sees the hero come back (N44).
                 // Unstructured: this task sleeps while the page covers it.
@@ -2088,62 +2104,28 @@ struct AppleCatalogItemDetailView: View {
     let localSourceStore: AppleSourceStore?
     let mediaServerLibrary: AppleMediaServerLibraryStore?
     @State private var library = AppleLocalLibraryStore.shared
-    @State private var selectedLocalFile: AppleLibraryItem?
-    @State private var pickingStreams = false
 
     private var localFiles: [AppleLibraryItem] {
-        library.localFiles(for: item.withMediaID(resolvedMediaID ?? item.mediaID), group: localGroup,
-            episode: episodes.first { $0.id == selectedEpisodeID })
+        library.localFiles(for: item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID), group: localGroup,
+            episode: episodeList.episodes.first { $0.id == episodeList.selectedEpisodeID })
     }
 
-
     @State private var playbackCoordinator = ApplePlaybackCoordinator()
-    @State private var playRequest: UUID?
-    /// When Retry was pressed, so a failure that comes straight back still
-    /// shows the loading state first (`ApplePlaybackFailureRecovery`).
-    @State private var playbackRetryStartedAt: ContinuousClock.Instant?
-    @State private var playerPresentation: AppleStremioPlayerPresentation?
-    @State private var episodes: [AppleStremioEpisode] = []
-    @State private var selectedSeason: Int?
-    @State private var selectedEpisodeID: String?
-    @State private var isLoadingEpisodes = false
-    /// Set only when the current title's episode load has finished, so a
-    /// superseded load clearing `isLoadingEpisodes` cannot surface the
-    /// "not available" text while the newer fetch is still in flight.
-    @State private var episodeLoadFinished = false
-    @State private var isFavorite = false
     @State private var downloadCoordinator = AppleOfflineDownloadCoordinator()
     @State private var seasonDownloads = AppleSeasonDownloadQueue()
-    @State private var downloadSeason: Int?
-    @State private var metadataDetails: AppleTMDBDetails?
-    @State private var fallbackArtwork: AppleArtworkResolver.Artwork?
-    @State private var previewAssets: AppleStremioPreviewAssets?
-    @State private var isPreparingMetadata = true
-    @State private var trailerIsActive = false
-    @State private var trailerIsPlaying = false
-    @State private var detailViewportSize: CGSize = .zero
-    @State private var detailSafeAreaInsets = EdgeInsets()
-    @State private var trailerHasStarted = false
-    @State private var heroArtworkImage: CGImage?
-    /// The hero still's load; the trailer waits on it (art-first).
-    @State private var heroArt = AppleTrailerArtFirstPolicy.Art.loading
-    @State private var trailerMuted = false
-    @State private var trailerCandidateIndex = 0
-    @State private var trailerPortraitKeys: Set<String> = []
-    @State private var trailerLandscapeKeys: Set<String> = []
-    @State private var trailerReplayGeneration = 0
-    @State private var trailerInteractionGlyph: String?
-    @State private var trailerInteractionGeneration = 0
-    @State private var titleLogoState = AppleTitleLogoState.loading
-    @State private var titleLogoLoadResult: Bool?
-    @State private var titleLogoGraceExpired = false
-    @State private var streamChoices: [AppleStremioHTTPPlaybackCandidate] = []
-    /// A resolution picked in the Quality sheet for the next Play; nil is Automatic.
-    @State private var selectedQuality: AppleStreamQualityTier?
-    @State private var streamPickerPresented = false
-    @State private var downloadedEpisodeIDs = Set<String>()
-    @State private var downloadActionsPresented = false
-    @State private var seasonDownloadActionsPresented = false
+    // The page's own values, grouped (N45): SwiftUI sets up and checks each
+    // dynamic property of a view, and the page had sixty.
+    @State private var heroTrailer = AppleTitlePageTrailerState()
+    @State private var heroStill = AppleTitlePageHeroStill()
+    @State private var titleWordmark = AppleTitlePageWordmarkState()
+    @State private var pageGeometry = AppleTitlePageGeometry()
+    @State private var prompts = AppleTitlePagePrompts()
+    @State private var titleActions = AppleTitlePageActionState()
+    @State private var playbackUI = AppleTitlePagePlaybackState()
+    @State private var pageMetadata = AppleTitlePageMetadataState()
+    @State private var episodeList = AppleTitlePageEpisodeState()
+    @State private var offlineState = AppleTitlePageOfflineState()
+    @State private var rating: AppleTitleRating?
     @State private var preparationGeneration = UUID()
     @State private var fillTimeline = AppleDetailFillTimeline()
     #if os(iOS)
@@ -2156,25 +2138,9 @@ struct AppleCatalogItemDetailView: View {
     /// Set once Play has held focus; see `AppleTVDetailOpeningFocus`.
     @State private var tvDetailOpeningSettled = false
     #endif
-    // The item's canonical IMDB id, resolved via a meta add-on. Catalog add-ons
-    // (RT, Streaming Catalogs) key items by non-IMDB ids that stream add-ons
-    // can't resolve; this is the id actually used for episode + stream lookups.
-    @State private var resolvedMediaID: String?
-    /// Services the viewer subscribes to that also carry this title. Empty
-    /// unless they have opted in — see `AppleWatchProviderPolicy`.
-    @State private var watchProviders: [AppleWatchProvider] = []
-    @State private var arrRequestKind: AppleArrKind?
-    @State private var arrFeedback: String?
-    @State private var rating: AppleTitleRating?
-    @State private var rankedSuggestions: [AppleCatalogItem] = []
-    /// The title page's schedule badge (iPhone and Mac), worked out once per
-    /// episode list rather than on every redraw.
-    @State private var titlePageScheduleBadge: String?
     /// Scrolls the page back to the hero when a trailer is chosen below it.
     @State private var detailScrollPosition = ScrollPosition(edge: .top)
     @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
-    @State private var rateChoicesExpanded = false
-    @State private var ratingSelectionGeneration = 0
     private let playbackStore = ApplePlaybackStore()
     private let ratingStore = AppleTitleRatingStore()
 
@@ -2220,19 +2186,19 @@ struct AppleCatalogItemDetailView: View {
         self.localGroup = localGroup
         self.localSourceStore = localSourceStore
         self.mediaServerLibrary = mediaServerLibrary
-        _isPreparingMetadata = State(
-            initialValue: ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: item.mediaID)
-        )
+        _pageMetadata = State(initialValue: AppleTitlePageMetadataState(
+            isPreparing: ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: item.mediaID)
+        ))
     }
 
     var body: some View {
         Group {
             #if DEBUG
             ScrollViewReader { reader in
-                detailContent.task(id: episodes.count) {
-                    guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodes", !episodes.isEmpty else { return }
+                detailContent.task(id: episodeList.episodes.count) {
+                    guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodeList.episodes", !episodeList.episodes.isEmpty else { return }
                     try? await Task.sleep(for: .milliseconds(700))
-                    reader.scrollTo("vision-episodes", anchor: .top)
+                    reader.scrollTo("vision-episodeList.episodes", anchor: .top)
                     // `OpenStreamDebugSeasonSwitch YES` then steps through the
                     // first seasons, for a trace of the switch.
                     guard UserDefaults.standard.bool(forKey: "OpenStreamDebugSeasonSwitch") else { return }
@@ -2240,7 +2206,7 @@ struct AppleCatalogItemDetailView: View {
                         try? await Task.sleep(for: .seconds(3))
                         guard !Task.isCancelled else { return }
                         appleTrace("season switch \(season)")
-                        selectedSeason = season
+                        episodeList.selectedSeason = season
                     }
                 }
             }
@@ -2262,8 +2228,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func applyDetailViewport(_ viewport: AppleDetailViewport) {
-        detailSafeAreaInsets = viewport.insets
-        detailViewportSize = CGSize(
+        pageGeometry.safeAreaInsets = viewport.insets
+        pageGeometry.viewportSize = CGSize(
             width: viewport.size.width + viewport.insets.leading + viewport.insets.trailing,
             height: viewport.size.height + viewport.insets.top + viewport.insets.bottom
         )
@@ -2272,9 +2238,9 @@ struct AppleCatalogItemDetailView: View {
     /// Wordmark, text title, or nothing while the wordmark resolves.
     private var titleLogoPresentation: AppleTitleLogoPresentation {
         AppleTitleLogoPolicy.resolvedState(
-            validated: titleLogoState.validation,
-            loadResult: titleLogoLoadResult,
-            elapsed: titleLogoGraceExpired ? AppleTitleLogoPolicy.loadingGrace : 0
+            validated: titleWordmark.state.validation,
+            loadResult: titleWordmark.loadResult,
+            elapsed: titleWordmark.graceExpired ? AppleTitleLogoPolicy.loadingGrace : 0
         )
     }
 
@@ -2284,112 +2250,7 @@ struct AppleCatalogItemDetailView: View {
             tvOSDetailLayout
             #else
             ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if usesPhoneTitlePage {
-                    phoneTitlePage
-                } else if usesMacTitlePage {
-                    #if os(macOS)
-                    macTitlePage
-                    #endif
-                } else {
-                detailHero
-                    #if os(iOS)
-                    // With the navigation bar hidden, extend the hero through
-                    // the status-bar safe area in portrait as well as landscape.
-                    .padding(.top, -detailSafeAreaInsets.top)
-                    #else
-                    .padding(.top, isLandscapeLayout ? -detailSafeAreaInsets.top : 0)
-                    #endif
-                    .padding(.leading, isLandscapeLayout ? -detailSafeAreaInsets.leading : 0)
-                    .padding(.trailing, isLandscapeLayout ? -detailSafeAreaInsets.trailing : 0)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    if usesOverlayHero {
-                        EmptyView()
-                    } else {
-                        if titleLogoPresentation != .text {
-                            portraitTrailerTitle
-                                .padding(.top, trailerIsPlaying ? AppleDetailMetrics.heroToTitleSpacing : 0)
-                        } else {
-                            Text(displayTitle)
-                                .font(.system(size: 17, weight: .semibold))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, AppleDetailMetrics.heroToTitleSpacing)
-                                .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                                .accessibilityAddTraits(.isHeader)
-                        }
-                        titleMetadata
-                            .padding(.top, AppleDetailMetrics.titleToMetadataSpacing)
-                        secondaryActionButtons
-                            .padding(.top, AppleDetailMetrics.metadataToButtonsSpacing)
-                    }
-                    downloadFailureNotice
-                        .padding(.top, 12)
-                    if let tagline = metadataDetails?.tagline, !tagline.isEmpty {
-                        Text(tagline)
-                            .font(.headline)
-                            .italic()
-                            .padding(.top, 12)
-                    }
-
-                    if let summary = AppleMetadataPresentationPolicy.synopsis(
-                        catalog: item.summary,
-                        enriched: metadataDetails?.overview
-                    ) {
-                        Text(summary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: detailContentWidth, alignment: .leading)
-                            .padding(.top, AppleDetailMetrics.iconRowToSynopsisSpacing)
-                            .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                    }
-
-                    #if !os(iOS)
-                    if item.type == "series" {
-                        episodeSection
-                            .id("vision-episodes")
-                            .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
-                    }
-                    #endif
-
-                }
-                .frame(maxWidth: detailContentWidth, alignment: .leading)
-                .padding(.horizontal, detailHorizontalInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                #if os(iOS)
-                // A rail, outside the column for the same reason as More Like This.
-                if item.type == "series" {
-                    padEpisodesSection
-                        .id("vision-episodes")
-                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
-                }
-                #endif
-
-                // Outside the column on purpose. Prose belongs in a readable
-                // width; a poster rail does not — every other rail in the app
-                // (Discover, Library) runs to the page edge. Inside the column
-                // the fifth card was sliced vertically at 695 pt of an 834 pt
-                // iPad page with 139 pt of black beside it, which reads as a
-                // rendering fault rather than "there is more to the right"
-                // (measured 2026-09-17). It carries its own leading inset.
-                if !suggestedItems.isEmpty {
-                    moreLikeThisSection(title: "More Like This")
-                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
-                }
-                #if os(iOS)
-                // The iPhone's and the Mac's Cast & Crew rail: the iPad had
-                // none, so its portraits were nowhere (N37).
-                let credits = titlePageCredits
-                if !credits.isEmpty {
-                    phoneCastSection(credits)
-                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
-                }
-                #endif
-                }
-            }
-            .padding(.bottom)
+                AppleTitlePageScrollContent(page: self)
             }
             .scrollPosition($detailScrollPosition)
             #if os(macOS)
@@ -2401,7 +2262,7 @@ struct AppleCatalogItemDetailView: View {
             // once the page scrolls, and the synopsis was drawn through the
             // clock. Applied to the scroll view itself, not the group, because
             // it reads that scroll view's offset.
-            .appleStatusBarShield(topInset: detailSafeAreaInsets.top)
+            .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top)
             #endif
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
@@ -2444,7 +2305,7 @@ struct AppleCatalogItemDetailView: View {
         .navigationTitle("")
         #if os(macOS) || os(iOS)
         // Discover's bar, unchanged, with ‹ at its leading edge (N37).
-        .appleTitlePageToolbar(backIsBlocked: playerPresentation != nil) { dismiss() }
+        .appleTitlePageToolbar(backIsBlocked: playbackUI.presentation != nil) { dismiss() }
         #endif
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2461,35 +2322,35 @@ struct AppleCatalogItemDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         #endif
         .alert(
-            "Download to \(arrRequestKind?.displayName ?? "ARR")",
+            "Download to \(prompts.arrRequestKind?.displayName ?? "ARR")",
             isPresented: Binding(
-                get: { arrRequestKind != nil },
-                set: { if !$0 { arrRequestKind = nil } }
+                get: { prompts.arrRequestKind != nil },
+                set: { if !$0 { prompts.arrRequestKind = nil } }
             )
         ) {
-            Button("Cancel", role: .cancel) { arrRequestKind = nil }
+            Button("Cancel", role: .cancel) { prompts.arrRequestKind = nil }
             Button("Add to Queue") {
-                guard let kind = arrRequestKind else { return }
-                arrRequestKind = nil
+                guard let kind = prompts.arrRequestKind else { return }
+                prompts.arrRequestKind = nil
                 Task { await enqueueARR(kind) }
             }
         } message: {
-            Text("Add \(item.name) to your configured \(arrRequestKind?.displayName ?? "ARR") queue?")
+            Text("Add \(item.name) to your configured \(prompts.arrRequestKind?.displayName ?? "ARR") queue?")
         }
         .alert(
             "Download Request",
             isPresented: Binding(
-                get: { arrFeedback != nil },
-                set: { if !$0 { arrFeedback = nil } }
+                get: { prompts.arrFeedback != nil },
+                set: { if !$0 { prompts.arrFeedback = nil } }
             )
         ) {
-            Button("OK", role: .cancel) { arrFeedback = nil }
+            Button("OK", role: .cancel) { prompts.arrFeedback = nil }
         } message: {
-            Text(arrFeedback ?? "")
+            Text(prompts.arrFeedback ?? "")
         }
         .confirmationDialog(
             "Download Options",
-            isPresented: $downloadActionsPresented,
+            isPresented: $prompts.downloadActions,
             titleVisibility: .visible
         ) {
             switch downloadCoordinator.state {
@@ -2512,7 +2373,7 @@ struct AppleCatalogItemDetailView: View {
         }
         .confirmationDialog(
             "Season Download Options",
-            isPresented: $seasonDownloadActionsPresented,
+            isPresented: $prompts.seasonDownloadActions,
             titleVisibility: .visible
         ) {
             switch downloadCoordinator.state {
@@ -2530,75 +2391,75 @@ struct AppleCatalogItemDetailView: View {
         } message: {
             Text(seasonDownloadMessage)
         }
-        .sheet(isPresented: $streamPickerPresented) {
+        .sheet(isPresented: $prompts.streamPicker) {
             streamPicker
                 #if os(visionOS)
                 .frame(width: 720, height: 540)
                 #endif
         }
-        .task(id: playRequest) {
-            guard playRequest != nil else { return }
+        .task(id: playbackUI.request) {
+            guard playbackUI.request != nil else { return }
             await resolvePlayback()
         }
         .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
-            trailerIsActive = false
-            trailerIsPlaying = false
-            trailerHasStarted = false
-            trailerMuted = settings.autoMuteTrailer
+            heroTrailer.isActive = false
+            heroTrailer.isPlaying = false
+            heroTrailer.hasStarted = false
+            heroTrailer.muted = settings.autoMuteTrailer
         }
         // Art-first: the autoplaying trailer is not even looked for until the
         // hero still is on screen, and at low priority behind the page.
-        .task(id: "trailer-autoplay:\(item.id):\(allowsTrailerAutoplay):\(heroArt == .loaded)", priority: .low) {
+        .task(id: "trailer-autoplay:\(item.id):\(allowsTrailerAutoplay):\(heroStill.art == .loaded)", priority: .low) {
             guard allowsTrailerAutoplay,
-                  AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroArt, pressed: false) else { return }
+                  AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroStill.art, pressed: false) else { return }
             try? await Task.sleep(for: .seconds(2))
             // A pressed Play Trailer got there first.
-            guard !Task.isCancelled, !trailerHasStarted else { return }
-            guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: trailerCandidateIndex) else { return }
+            guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
+            guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: heroTrailer.candidateIndex) else { return }
             guard !Task.isCancelled else { return }
-            trailerCandidateIndex = playableIndex
+            heroTrailer.candidateIndex = playableIndex
             guard prepareTrailerAudio() else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
-                trailerHasStarted = true
-                trailerIsActive = true
+                heroTrailer.hasStarted = true
+                heroTrailer.isActive = true
             }
         }
-        .onChange(of: settings.autoMuteTrailer) { _, muted in trailerMuted = muted }
+        .onChange(of: settings.autoMuteTrailer) { _, muted in heroTrailer.muted = muted }
         .task(id: "title-logo:\(titleLogoURL?.absoluteString ?? "")") {
-            titleLogoLoadResult = nil
+            titleWordmark.loadResult = nil
             guard let logoURL = titleLogoURL else {
-                titleLogoState = .unavailable
+                titleWordmark.state = .unavailable
                 return
             }
-            titleLogoState = .loading
+            titleWordmark.state = .loading
             #if DEBUG
             AppleLaunchClock.mark("detail.logoURL")
             #endif
             guard await AppleTransparentPNGLogoValidator.isValid(url: logoURL), !Task.isCancelled else {
-                if !Task.isCancelled { titleLogoState = .unavailable }
+                if !Task.isCancelled { titleWordmark.state = .unavailable }
                 return
             }
             #if DEBUG
             AppleLaunchClock.mark("detail.validated")
             #endif
-            titleLogoState = .valid(logoURL)
+            titleWordmark.state = .valid(logoURL)
         }
         // Keyed by the item only: a wordmark URL that arrives late must not
         // hide a text title that is already on screen; the text stays until
         // the wordmark has actually loaded.
         .task(id: "title-logo-grace:\(item.id)") {
-            titleLogoGraceExpired = false
+            titleWordmark.graceExpired = false
             try? await Task.sleep(for: .seconds(AppleTitleLogoPolicy.loadingGrace))
             guard !Task.isCancelled else { return }
-            titleLogoGraceExpired = true
+            titleWordmark.graceExpired = true
         }
         .task(id: item.id) {
-            trailerCandidateIndex = 0
-            trailerIsActive = false
-            trailerIsPlaying = false
-            trailerMuted = settings.autoMuteTrailer
-            titleLogoLoadResult = nil
-            titleLogoGraceExpired = false
+            heroTrailer.candidateIndex = 0
+            heroTrailer.isActive = false
+            heroTrailer.isPlaying = false
+            heroTrailer.muted = settings.autoMuteTrailer
+            titleWordmark.loadResult = nil
+            titleWordmark.graceExpired = false
             #if DEBUG
             AppleLaunchClock.mark("detail.task")
             #endif
@@ -2612,7 +2473,7 @@ struct AppleCatalogItemDetailView: View {
             // The favourite state is read first (a new record is never a
             // favourite, so the answer is the same either way), the write runs
             // on its own, and the metadata starts immediately.
-            isFavorite = mediaIndex.record(id: recordID)?.isFavorite ?? false
+            titleActions.isFavorite = mediaIndex.record(id: recordID)?.isFavorite ?? false
             let viewedRecord = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
             Task { try? await mediaIndex.upsert(viewedRecord) }
             #if DEBUG
@@ -2621,12 +2482,12 @@ struct AppleCatalogItemDetailView: View {
             await prepare()
             if !Task.isCancelled { fillTimeline.mark(.done) }
             await refreshOfflineState()
-            if initialAutoPlay { playRequest = UUID() }
+            if initialAutoPlay { playbackUI.request = UUID() }
             #if DEBUG
             if AppleTitlePageStreamFixture.opensQuality { await chooseStreams() }
             #endif
         }
-        .task(id: "similar:\(item.id):\(relatedItems.count):\(metadataDetails?.mediaID ?? "")") {
+        .task(id: "similar:\(item.id):\(relatedItems.count):\(pageMetadata.details?.mediaID ?? "")") {
             await refreshSuggestions()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -2638,15 +2499,15 @@ struct AppleCatalogItemDetailView: View {
             seasonDownloads.cancel()
             if downloadCoordinator.state.ownsDownload { downloadCoordinator.cancel() }
         }
-        .task(id: "offline:\(selectedEpisodeID ?? ""):\(seasonDownloads.isRunning)") {
+        .task(id: "offline:\(episodeList.selectedEpisodeID ?? ""):\(seasonDownloads.isRunning)") {
             guard !seasonDownloads.isRunning, !downloadCoordinator.state.ownsDownload else { return }
             await refreshOfflineState()
         }
-        .task(id: "downloaded-episodes:\(episodes.count):\(seasonDownloads.completed):\(downloadCoordinator.state.isCompleted)") {
+        .task(id: "downloaded-episodes:\(episodeList.episodes.count):\(seasonDownloads.completed):\(downloadCoordinator.state.isCompleted)") {
             await refreshDownloadedEpisodeIDs()
         }
-        .onChange(of: selectedSeason) { _, season in
-            selectedEpisodeID = nextUnwatchedEpisodeID(in: season, from: episodes)
+        .onChange(of: episodeList.selectedSeason) { _, season in
+            episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: season, from: episodeList.episodes)
         }
         #if os(iOS)
         .onReceive(NotificationCenter.default.publisher(
@@ -2655,7 +2516,7 @@ struct AppleCatalogItemDetailView: View {
             systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
         }
         #endif
-        .modifier(AppleStremioPlayerPresentationModifier(presentation: $playerPresentation))
+        .modifier(AppleStremioPlayerPresentationModifier(presentation: $playbackUI.presentation))
         .alert("Playback Unavailable", isPresented: Binding(
             get: { playbackFailure != nil },
             // The alert reports itself dismissed after its animation, by
@@ -2682,6 +2543,108 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    /// The iPad, landscape and Vision title page: the hero, the title block
+    /// and the rails below it. (The iPhone in portrait and the Mac have their
+    /// own pages; see `AppleTitlePageScrollContent`.)
+    @ViewBuilder
+    var regularTitlePage: some View {
+        detailHero
+            #if os(iOS)
+            // With the navigation bar hidden, extend the hero through
+            // the status-bar safe area in portrait as well as landscape.
+            .padding(.top, -pageGeometry.safeAreaInsets.top)
+            #else
+            .padding(.top, isLandscapeLayout ? -pageGeometry.safeAreaInsets.top : 0)
+            #endif
+            .padding(.leading, isLandscapeLayout ? -pageGeometry.safeAreaInsets.leading : 0)
+            .padding(.trailing, isLandscapeLayout ? -pageGeometry.safeAreaInsets.trailing : 0)
+
+        VStack(alignment: .leading, spacing: 0) {
+            if usesOverlayHero {
+                EmptyView()
+            } else {
+                if titleLogoPresentation != .text {
+                    portraitTrailerTitle
+                        .padding(.top, heroTrailer.isPlaying ? AppleDetailMetrics.heroToTitleSpacing : 0)
+                } else {
+                    Text(displayTitle)
+                        .font(.system(size: 17, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, AppleDetailMetrics.heroToTitleSpacing)
+                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                titleMetadata
+                    .padding(.top, AppleDetailMetrics.titleToMetadataSpacing)
+                secondaryActionButtons
+                    .padding(.top, AppleDetailMetrics.metadataToButtonsSpacing)
+            }
+            downloadFailureNotice
+                .padding(.top, 12)
+            if let tagline = pageMetadata.details?.tagline, !tagline.isEmpty {
+                Text(tagline)
+                    .font(.headline)
+                    .italic()
+                    .padding(.top, 12)
+            }
+
+            if let summary = AppleMetadataPresentationPolicy.synopsis(
+                catalog: item.summary,
+                enriched: pageMetadata.details?.overview
+            ) {
+                Text(summary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: detailContentWidth, alignment: .leading)
+                    .padding(.top, AppleDetailMetrics.iconRowToSynopsisSpacing)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+            }
+
+            #if !os(iOS)
+            if item.type == "series" {
+                episodeSection
+                    .id("vision-episodeList.episodes")
+                    .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+            }
+            #endif
+
+        }
+        .frame(maxWidth: detailContentWidth, alignment: .leading)
+        .padding(.horizontal, detailHorizontalInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        #if os(iOS)
+        // A rail, outside the column for the same reason as More Like This.
+        if item.type == "series" {
+            padEpisodesSection
+                .id("vision-episodeList.episodes")
+                .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+        }
+        #endif
+
+        // Outside the column on purpose. Prose belongs in a readable
+        // width; a poster rail does not — every other rail in the app
+        // (Discover, Library) runs to the page edge. Inside the column
+        // the fifth card was sliced vertically at 695 pt of an 834 pt
+        // iPad page with 139 pt of black beside it, which reads as a
+        // rendering fault rather than "there is more to the right"
+        // (measured 2026-09-17). It carries its own leading inset.
+        if !suggestedItems.isEmpty {
+            moreLikeThisSection(title: "More Like This")
+                .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+        }
+        #if os(iOS)
+        // The iPhone's and the Mac's Cast & Crew rail: the iPad had
+        // none, so its portraits were nowhere (N37).
+        let credits = titlePageCredits
+        if !credits.isEmpty {
+            phoneCastSection(credits)
+                .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+        }
+        #endif
+    }
+
     @ViewBuilder
     private var detailHero: some View {
         detailHeroContent
@@ -2703,9 +2666,9 @@ struct AppleCatalogItemDetailView: View {
             trailerPreview()
             #endif
 
-            if !isLandscapeLayout, !usesPadPortraitHero, case .valid = titleLogoState, let logoURL = titleLogoURL {
+            if !isLandscapeLayout, !usesPadPortraitHero, case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                 AppleTrimmedTitleLogo(url: logoURL) { loaded in
-                    titleLogoLoadResult = loaded
+                    titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
@@ -2717,19 +2680,19 @@ struct AppleCatalogItemDetailView: View {
                         x: proxy.size.width / 2,
                         y: proxy.size.height - AppleDetailMetrics.titleLogoBottomBuffer - titleLogoHeight / 2
                     )
-                    .opacity(trailerIsPlaying || titleLogoPresentation != .logo ? 0 : 1)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration), value: trailerIsPlaying)
+                    .opacity(heroTrailer.isPlaying || titleLogoPresentation != .logo ? 0 : 1)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration), value: heroTrailer.isPlaying)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(item.name)
                     .accessibilityAddTraits(.isHeader)
-                    .accessibilityHidden(trailerIsActive)
+                    .accessibilityHidden(heroTrailer.isActive)
             }
 
             if usesPadHeroFades {
                 // Discover's iPad hero fades, so the copy reads over the art
                 // exactly as it does there.
-                AppleHeroScrimView(scrim: .wide(tone: .unknown, videoIsShowing: trailerIsPlaying, copyTrailing: 0))
-                    .animation(.easeInOut(duration: 0.6), value: trailerIsPlaying)
+                AppleHeroScrimView(scrim: .wide(tone: .unknown, videoIsShowing: heroTrailer.isPlaying, copyTrailing: 0))
+                    .animation(.easeInOut(duration: 0.6), value: heroTrailer.isPlaying)
             }
 
             if usesOverlayHero, landscapeOverlaysVisible {
@@ -2740,7 +2703,7 @@ struct AppleCatalogItemDetailView: View {
                     .transition(.opacity)
             }
 
-            if isLandscapeLayout, let trailerInteractionGlyph {
+            if isLandscapeLayout, let trailerInteractionGlyph = heroTrailer.interactionGlyph {
                 Image(systemName: trailerInteractionGlyph)
                     .font(.system(size: 56))
                     .foregroundStyle(.white.opacity(0.70))
@@ -2755,7 +2718,7 @@ struct AppleCatalogItemDetailView: View {
             // below it (macOS sweep, 2026-09-21).
             #if os(tvOS)
             detailBackButton
-                .padding(.leading, isLandscapeLayout ? detailSafeAreaInsets.leading : 0)
+                .padding(.leading, isLandscapeLayout ? pageGeometry.safeAreaInsets.leading : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             #endif
         }
@@ -2784,15 +2747,15 @@ struct AppleCatalogItemDetailView: View {
             AppleYouTubeAutoPreview(
                 url: embedURL,
                 artworkURL: heroArtworkURL,
-                artworkImage: heroArtworkImage,
+                artworkImage: heroStill.image,
                 isLandscape: viewportSize.width > viewportSize.height,
-                isPlaying: $trailerIsActive,
-                isMuted: $trailerMuted,
-                replayGeneration: $trailerReplayGeneration,
-                showsReplay: !trailerIsActive,
+                isPlaying: $heroTrailer.isActive,
+                isMuted: $heroTrailer.muted,
+                replayGeneration: $heroTrailer.replayGeneration,
+                showsReplay: !heroTrailer.isActive,
                 onStateChange: handleTrailerState,
                 onTap: toggleTrailerPlayback,
-                onMute: { trailerMuted.toggle() },
+                onMute: { heroTrailer.muted.toggle() },
                 onReplay: restartTrailer,
                 controlTopInset: controlTopInset
             )
@@ -2858,11 +2821,11 @@ struct AppleCatalogItemDetailView: View {
 
     private var viewportSize: CGSize {
         #if os(visionOS)
-        detailViewportSize == .zero ? CGSize(width: 1100, height: 760) : detailViewportSize
+        pageGeometry.viewportSize == .zero ? CGSize(width: 1100, height: 760) : pageGeometry.viewportSize
         #elseif os(iOS)
-        detailViewportSize
+        pageGeometry.viewportSize
         #elseif os(macOS)
-        // `detailViewportSize` has always been measured on macOS too — the
+        // `pageGeometry.viewportSize` has always been measured on macOS too — the
         // `.onGeometryChange` that fills it is unconditional — but this
         // property threw the measurement away and answered `.zero`, so every
         // metric derived from it fell back to a constant and the detail page
@@ -2870,7 +2833,7 @@ struct AppleCatalogItemDetailView: View {
         // sweep, 2026-09-21). A Mac window with no measurement yet is assumed
         // to be the default opening size rather than nothing, the same
         // substitution visionOS makes for its own default.
-        detailViewportSize == .zero ? CGSize(width: 1280, height: 860) : detailViewportSize
+        pageGeometry.viewportSize == .zero ? CGSize(width: 1280, height: 860) : pageGeometry.viewportSize
         #else
         .zero
         #endif
@@ -2931,13 +2894,13 @@ struct AppleCatalogItemDetailView: View {
 
     private var overlayLeadingMargin: CGFloat {
         isCompactLandscapeLayout
-            ? AppleDetailMetrics.compactLandscapeOverlayLeadingMargin + detailSafeAreaInsets.leading
+            ? AppleDetailMetrics.compactLandscapeOverlayLeadingMargin + pageGeometry.safeAreaInsets.leading
             : AppleDetailMetrics.landscapeOverlayLeadingMargin
     }
 
     private var overlayBottomMargin: CGFloat {
         isCompactLandscapeLayout
-            ? max(AppleDetailMetrics.compactLandscapeOverlayBottomMargin, detailSafeAreaInsets.bottom)
+            ? max(AppleDetailMetrics.compactLandscapeOverlayBottomMargin, pageGeometry.safeAreaInsets.bottom)
             : AppleDetailMetrics.landscapeOverlayBottomMargin
     }
 
@@ -2961,7 +2924,7 @@ struct AppleCatalogItemDetailView: View {
     /// sideways. The iPad keeps it on the trailer, as its Discover hero does
     /// (N37): upright, hiding it left the hero with no title or buttons.
     private var copyYieldsToTrailer: Bool {
-        trailerIsPlaying && !usesPadHeroFades
+        heroTrailer.isPlaying && !usesPadHeroFades
     }
 
     private var isWideLandscape: Bool {
@@ -2970,10 +2933,10 @@ struct AppleCatalogItemDetailView: View {
 
     private func landscapeHeroOverlay(in heroSize: CGSize) -> some View {
         VStack(alignment: .leading, spacing: AppleDetailMetrics.landscapeOverlaySpacing) {
-            if case .valid = titleLogoState, let logoURL = titleLogoURL {
+            if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                 ZStack(alignment: .leading) {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
-                    titleLogoLoadResult = loaded
+                    titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
@@ -3035,7 +2998,7 @@ struct AppleCatalogItemDetailView: View {
             .accessibilityAddTraits(.isHeader)
             .animation(
             reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration),
-                value: trailerIsPlaying
+                value: heroTrailer.isPlaying
             )
     }
 
@@ -3052,13 +3015,13 @@ struct AppleCatalogItemDetailView: View {
 
     private var portraitTrailerTitle: some View {
         trailerTitleText
-            .frame(height: trailerIsPlaying ? 20 : 0, alignment: .leading)
+            .frame(height: heroTrailer.isPlaying ? 20 : 0, alignment: .leading)
             .clipped()
-            .opacity(trailerIsPlaying ? 1 : 0)
-            .accessibilityHidden(!trailerIsPlaying)
+            .opacity(heroTrailer.isPlaying ? 1 : 0)
+            .accessibilityHidden(!heroTrailer.isPlaying)
             .animation(
             reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration),
-                value: trailerIsActive
+                value: heroTrailer.isActive
             )
     }
 
@@ -3074,8 +3037,8 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSDetailLayout: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
-                tvOSHero
-                tvOSBelowFold
+                AppleTitlePageTVHero(page: self)
+                AppleTitlePageTVBelowFold(page: self)
             }
         }
         .scrollClipDisabled()
@@ -3109,7 +3072,7 @@ struct AppleCatalogItemDetailView: View {
             // Play went away under focus (the episode list came back empty).
             if !showsPlay, tvDetailFocus == .play { tvDetailFocus = .myList }
         }
-        .onChange(of: rateChoicesExpanded) { _, expanded in
+        .onChange(of: titleActions.rateChoicesExpanded) { _, expanded in
             if !expanded { tvDetailFocus = .rate }
         }
     }
@@ -3129,7 +3092,7 @@ struct AppleCatalogItemDetailView: View {
         appleTrace("detail focus: the title row never took focus on open (focus=\(String(describing: tvDetailFocus)))")
     }
 
-    private var tvOSHero: some View {
+    var tvOSHero: some View {
         ZStack(alignment: .bottomLeading) {
             heroArtwork
                 .frame(
@@ -3180,10 +3143,10 @@ struct AppleCatalogItemDetailView: View {
     /// the text title only if it fails, nothing while it resolves.
     @ViewBuilder
     private var tvOSTitleBlock: some View {
-        if case .valid = titleLogoState, let logoURL = titleLogoURL {
+        if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
             ZStack(alignment: .leading) {
                 AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
-                    titleLogoLoadResult = loaded
+                    titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
                     AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
@@ -3232,7 +3195,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var tvOSPlayIsBusy: Bool {
-        playbackCoordinator.phase.isBusy || isPreparingMetadata
+        playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
     }
 
     /// Stays focusable while metadata prepares so the default focus lands on
@@ -3240,7 +3203,7 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSPlayButton: some View {
         Button {
             guard canStartPlayback else { return }
-            playRequest = UUID()
+            playbackUI.request = UUID()
         } label: {
             HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
                 if tvOSPlayIsBusy {
@@ -3270,12 +3233,12 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSIconRow: some View {
         HStack(alignment: .appleTVControlCenter, spacing: 0) {
             Button(action: toggleFavorite) {
-                AppleTVDetailIconLabel(title: "My List", systemImage: isFavorite ? "checkmark" : "plus")
+                AppleTVDetailIconLabel(title: "My List", systemImage: titleActions.isFavorite ? "checkmark" : "plus")
             }
             .buttonStyle(AppleTVBareButtonStyle())
             .focused($tvDetailFocus, equals: .myList)
-            .accessibilityLabel(isFavorite ? "Remove from My List" : "Add to My List")
-            .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+            .accessibilityLabel(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+            .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             tvOSRateControl
         }
         .accessibilityIdentifier("detail.icon-row")
@@ -3284,7 +3247,7 @@ struct AppleCatalogItemDetailView: View {
     /// Rate expands in place into the three choices at the same 120 pt pitch.
     @ViewBuilder
     private var tvOSRateControl: some View {
-        if rateChoicesExpanded {
+        if titleActions.rateChoicesExpanded {
             ForEach(Array(AppleTitleRating.selectableCases.enumerated()), id: \.offset) { index, value in
                 Button {
                     selectRating(value)
@@ -3301,7 +3264,7 @@ struct AppleCatalogItemDetailView: View {
             }
         } else {
             Button {
-                withAnimation(rateAnimation) { rateChoicesExpanded = true }
+                withAnimation(rateAnimation) { titleActions.rateChoicesExpanded = true }
                 // Hand focus to the first choice in the same breath. The Rate
                 // button is gone by the next update, and focus with nowhere to
                 // go falls back to `defaultFocus`, which is Play.
@@ -3319,22 +3282,22 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private var tvOSBelowFold: some View {
+    var tvOSBelowFold: some View {
         VStack(alignment: .leading, spacing: AppleTVDetailMetrics.sectionSpacing) {
             if let summary = AppleMetadataPresentationPolicy.synopsis(
                 catalog: item.summary,
-                enriched: metadataDetails?.overview
+                enriched: pageMetadata.details?.overview
             ) {
                 AppleTVFocusableParagraph(text: summary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             }
             // Sits with the synopsis, in secondary text, competing with
             // nothing. It is a line of prose rather than a second Play.
-            AppleWatchProviderRow(providers: watchProviders)
+            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
                 .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             if item.type == "series" {
                 tvOSEpisodeShelf
-                    .id("vision-episodes")
+                    .id("vision-episodeList.episodes")
             }
             if !suggestedItems.isEmpty {
                 tvOSMoreLikeThisShelf
@@ -3350,7 +3313,7 @@ struct AppleCatalogItemDetailView: View {
             AppleTVShelfTitle(title: "Episodes")
             if seasonNumbers.count > 1 {
                 tvOSSeasonRow
-            } else if let season = selectedSeason {
+            } else if let season = episodeList.selectedSeason {
                 Text(seasonName(season))
                     .font(.system(size: AppleTVDetailMetrics.seasonPillFontSize))
                     .foregroundStyle(AppleDesignTokens.textSecondary)
@@ -3374,12 +3337,12 @@ struct AppleCatalogItemDetailView: View {
                             AppleTVEpisodeCard(
                                 episode: episode,
                                 subtitle: episodeMetadata(episode),
-                                isSelected: selectedEpisodeID == episode.id,
+                                isSelected: episodeList.selectedEpisodeID == episode.id,
                                 isWatched: watched.contains(episode.id),
                                 seriesBackdropURL: episodeFallbackStillURL
                             ) {
-                                selectedEpisodeID = episode.id
-                                playRequest = UUID()
+                                episodeList.selectedEpisodeID = episode.id
+                                playbackUI.request = UUID()
                             }
                             .contextMenu { watchedMenuButton(episode, isWatched: watched.contains(episode.id)) }
                         }
@@ -3397,7 +3360,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var tvOSCurrentSeason: Int {
-        selectedSeason ?? seasonNumbers.first ?? 1
+        episodeList.selectedSeason ?? seasonNumbers.first ?? 1
     }
 
     /// One dropdown showing the current season instead of a pill per season
@@ -3408,9 +3371,9 @@ struct AppleCatalogItemDetailView: View {
             Menu {
                 ForEach(seasonNumbers, id: \.self) { season in
                     Button {
-                        selectedSeason = season
+                        episodeList.selectedSeason = season
                     } label: {
-                        if selectedSeason == season {
+                        if episodeList.selectedSeason == season {
                             Label(seasonName(season), systemImage: "checkmark")
                         } else {
                             Text(seasonName(season))
@@ -3496,13 +3459,13 @@ struct AppleCatalogItemDetailView: View {
             url: heroArtworkURL,
             placeholderSystemImage: "",
             onLoad: { image in
-                heroArtworkImage = image
-                heroArt = heroArt.settling(with: .loaded)
+                heroStill.image = image
+                heroStill.art = heroStill.art.settling(with: .loaded)
                 fillTimeline.mark(.artwork)
             },
             onFailure: {
-                heroArtworkImage = nil
-                heroArt = heroArt.settling(with: .failed)
+                heroStill.image = nil
+                heroStill.art = heroStill.art.settling(with: .failed)
             },
             keepsImageWhileReloading: true
         )
@@ -3511,32 +3474,32 @@ struct AppleCatalogItemDetailView: View {
     /// Landscape art only: a poster cropped to 16:9 reads worse than the
     /// placeholder it replaces.
     private var episodeFallbackStillURL: URL? {
-        metadataDetails?.backdropURL ?? item.backgroundURL ?? fallbackArtwork?.backgroundURL
+        pageMetadata.details?.backdropURL ?? item.backgroundURL ?? pageMetadata.fallbackArtwork?.backgroundURL
     }
 
     private var heroArtworkURL: URL? {
-        metadataDetails?.backdropURL
+        pageMetadata.details?.backdropURL
                 ?? item.backgroundURL
-                ?? metadataDetails?.posterURL
+                ?? pageMetadata.details?.posterURL
                 ?? item.posterURL
-                ?? fallbackArtwork?.backgroundURL
-                ?? fallbackArtwork?.posterURL
+                ?? pageMetadata.fallbackArtwork?.backgroundURL
+                ?? pageMetadata.fallbackArtwork?.posterURL
     }
 
     private var displayTitle: String {
-        metadataDetails?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? metadataDetails?.title ?? item.name
+        pageMetadata.details?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? pageMetadata.details?.title ?? item.name
             : item.name
     }
 
     private var displayReleaseInfo: String? {
-        let value = metadataDetails?.releaseInfo ?? item.releaseInfo
+        let value = pageMetadata.details?.releaseInfo ?? item.releaseInfo
         let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return clean.isEmpty ? nil : clean
     }
 
     private var titleLogoURL: URL? {
-        metadataDetails?.logoURL ?? previewAssets?.logoURL
+        pageMetadata.details?.logoURL ?? pageMetadata.previewAssets?.logoURL
     }
 
     private var trailerEmbedURL: URL? {
@@ -3544,13 +3507,13 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var trailerKey: String? {
-        guard trailerCandidateIndex < trailerCandidates.count else { return nil }
-        return trailerCandidates[trailerCandidateIndex]
+        guard heroTrailer.candidateIndex < trailerCandidates.count else { return nil }
+        return trailerCandidates[heroTrailer.candidateIndex]
     }
 
     private var trailerCandidates: [String] {
-        let keys = (metadataDetails?.trailerYouTubeKeys ?? [])
-            + (previewAssets?.trailerYouTubeKeys ?? [])
+        let keys = (pageMetadata.details?.trailerYouTubeKeys ?? [])
+            + (pageMetadata.previewAssets?.trailerYouTubeKeys ?? [])
         var seen = Set<String>()
         return keys.filter { seen.insert($0).inserted }
     }
@@ -3564,7 +3527,7 @@ struct AppleCatalogItemDetailView: View {
     /// screen — trailers are art-first) takes the presses instead.
     private var heroTrailerCanPlay: Bool {
         #if os(iOS) || os(visionOS)
-        trailerEmbedURL != nil && !trailerHasStarted
+        trailerEmbedURL != nil && !heroTrailer.hasStarted
         #else
         false
         #endif
@@ -3590,9 +3553,9 @@ struct AppleCatalogItemDetailView: View {
     /// The trailer's web view — its request — only goes in once the hero
     /// still has settled; until then a started trailer waits, unseen.
     private var trailerPreviewIsShown: Bool {
-        trailerHasStarted && trailerEmbedURL != nil
-            && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroArt, pressed: true)
-            && !playbackCoordinator.phase.isBusy && playerPresentation == nil
+        heroTrailer.hasStarted && trailerEmbedURL != nil
+            && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroStill.art, pressed: true)
+            && !playbackCoordinator.phase.isBusy && playbackUI.presentation == nil
     }
 
     /// Never on the Apple TV, which plays no trailer — so its title page
@@ -3615,7 +3578,7 @@ struct AppleCatalogItemDetailView: View {
     /// codecs, containers or source names (owner 2026-09-24). A resolution
     /// plays its best candidate for this device, falling to the nearest one.
     private var streamPicker: some View {
-        let tiers = AppleStremioCandidateRanking.qualityTiers(streamChoices, device: .current)
+        let tiers = AppleStremioCandidateRanking.qualityTiers(playbackUI.streamChoices, device: .current)
         return NavigationStack {
             List {
                 Button {
@@ -3639,7 +3602,7 @@ struct AppleCatalogItemDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             #elseif os(macOS)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { streamPickerPresented = false } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { prompts.streamPicker = false } }
             }
             #endif
         }
@@ -3650,10 +3613,10 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func choosePlaybackQuality(_ tier: AppleStreamQualityTier?) {
-        selectedLocalFile = nil
-        selectedQuality = tier
-        streamPickerPresented = false
-        playRequest = UUID()
+        playbackUI.selectedLocalFile = nil
+        playbackUI.selectedQuality = tier
+        prompts.streamPicker = false
+        playbackUI.request = UUID()
     }
 
     private func toggleTrailerPlayback() {
@@ -3665,12 +3628,12 @@ struct AppleCatalogItemDetailView: View {
             logTrailerFailure("no trailer is available for this title")
             return
         }
-        let shouldPlay = !trailerIsActive
+        let shouldPlay = !heroTrailer.isActive
         if shouldPlay, !prepareTrailerAudio() { return }
-        trailerHasStarted = true
+        heroTrailer.hasStarted = true
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
-            trailerIsActive = shouldPlay
-            trailerIsPlaying = false
+            heroTrailer.isActive = shouldPlay
+            heroTrailer.isPlaying = false
         }
         if isLandscapeLayout {
             showTrailerInteractionGlyph(shouldPlay ? "play.circle.fill" : "pause.circle.fill")
@@ -3681,17 +3644,17 @@ struct AppleCatalogItemDetailView: View {
     private func restartTrailer() {
         guard trailerEmbedURL != nil, prepareTrailerAudio() else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-            trailerIsActive = true
-            trailerIsPlaying = false
+            heroTrailer.isActive = true
+            heroTrailer.isPlaying = false
         }
-        trailerReplayGeneration &+= 1
+        heroTrailer.replayGeneration &+= 1
     }
 
     private func pauseTrailerPreview() {
-        guard trailerIsActive else { return }
+        guard heroTrailer.isActive else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
-            trailerIsActive = false
-            trailerIsPlaying = false
+            heroTrailer.isActive = false
+            heroTrailer.isPlaying = false
         }
     }
 
@@ -3699,7 +3662,7 @@ struct AppleCatalogItemDetailView: View {
         #if os(iOS) || os(macOS)
         // Rotation can briefly report a stale frame. Stop only after the
         // hero has actually scrolled above the viewport.
-        if frame != .zero, frame.maxY <= 0, trailerIsActive { pauseTrailerPreview() }
+        if frame != .zero, frame.maxY <= 0, heroTrailer.isActive { pauseTrailerPreview() }
         #endif
     }
 
@@ -3715,7 +3678,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func handleTrailerState(_ state: String, muted: Bool, errorCode: Int?) {
-        print("[OpenStream] trailer title=\(item.name) candidate=\(trailerCandidateIndex) state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(trailerIsActive)")
+        print("[OpenStream] trailer title=\(item.name) candidate=\(heroTrailer.candidateIndex) state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
         if state == "autoplay-blocked" {
             showTrailerArtworkOnly()
             logTrailerFailure("autoplay was blocked by the video provider")
@@ -3728,41 +3691,41 @@ struct AppleCatalogItemDetailView: View {
             return
         }
         if state == "error" {
-            trailerIsActive = false
-            trailerIsPlaying = false
-            trailerMuted = settings.autoMuteTrailer
-            let nextIndex = trailerCandidateIndex + 1
+            heroTrailer.isActive = false
+            heroTrailer.isPlaying = false
+            heroTrailer.muted = settings.autoMuteTrailer
+            let nextIndex = heroTrailer.candidateIndex + 1
             let candidates = trailerCandidates
             if nextIndex < candidates.count {
                 Task { @MainActor in
                     guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: nextIndex) else {
-                        trailerCandidateIndex = candidates.count
+                        heroTrailer.candidateIndex = candidates.count
                         showTrailerArtworkOnly()
                         logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
                         return
                     }
-                    trailerCandidateIndex = playableIndex
-                    trailerIsActive = true
+                    heroTrailer.candidateIndex = playableIndex
+                    heroTrailer.isActive = true
                 }
             } else {
-                trailerCandidateIndex = candidates.count
+                heroTrailer.candidateIndex = candidates.count
                 showTrailerArtworkOnly()
                 logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
             }
             return
         }
-        trailerMuted = muted
-        if state == "revealed", trailerIsActive {
-            trailerIsPlaying = true
+        heroTrailer.muted = muted
+        if state == "revealed", heroTrailer.isActive {
+            heroTrailer.isPlaying = true
         } else if state == "concealed" {
-            trailerIsPlaying = false
+            heroTrailer.isPlaying = false
         } else if state == "paused" {
-            trailerIsActive = false
-            trailerIsPlaying = false
+            heroTrailer.isActive = false
+            heroTrailer.isPlaying = false
         } else if state == "ended" {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-                trailerIsActive = false
-                trailerIsPlaying = false
+                heroTrailer.isActive = false
+                heroTrailer.isPlaying = false
             }
         }
     }
@@ -3771,12 +3734,12 @@ struct AppleCatalogItemDetailView: View {
     /// nothing said: a trailer that cannot play simply is not there.
     private func showTrailerArtworkOnly() {
         withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
-            trailerHasStarted = false
-            trailerIsActive = false
+            heroTrailer.hasStarted = false
+            heroTrailer.isActive = false
         }
-        trailerIsPlaying = false
-        trailerInteractionGeneration &+= 1
-        trailerInteractionGlyph = nil
+        heroTrailer.isPlaying = false
+        heroTrailer.interactionGeneration &+= 1
+        heroTrailer.interactionGlyph = nil
     }
 
     private func resolvePlayableTrailerCandidateIndex(startingAt index: Int) async -> Int? {
@@ -3784,14 +3747,14 @@ struct AppleCatalogItemDetailView: View {
         var searchIndex = index
         while let candidateIndex = AppleTrailerPreviewPolicy.firstPlayableCandidate(
             keys,
-            portraitKeys: trailerPortraitKeys,
+            portraitKeys: heroTrailer.portraitKeys,
             startingAt: searchIndex
         ) {
             let key = keys[candidateIndex]
-            if !trailerLandscapeKeys.contains(key) {
+            if !heroTrailer.landscapeKeys.contains(key) {
                 await probeTrailerFrameAspect(for: key)
             }
-            if trailerPortraitKeys.contains(key) {
+            if heroTrailer.portraitKeys.contains(key) {
                 searchIndex = candidateIndex + 1
                 continue
             }
@@ -3802,7 +3765,7 @@ struct AppleCatalogItemDetailView: View {
 
     private func probeTrailerFrameAspect(for key: String) async {
         guard let url = AppleTrailerPreviewPolicy.frameProbeURL(for: key) else {
-            trailerLandscapeKeys.insert(key)
+            heroTrailer.landscapeKeys.insert(key)
             return
         }
         var request = URLRequest(url: url)
@@ -3813,34 +3776,34 @@ struct AppleCatalogItemDetailView: View {
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
                   let height = properties[kCGImagePropertyPixelHeight] as? CGFloat else {
-                trailerLandscapeKeys.insert(key)
+                heroTrailer.landscapeKeys.insert(key)
                 return
             }
             if AppleTrailerPreviewPolicy.isPortraitFrame(CGSize(width: width, height: height)) {
-                trailerPortraitKeys.insert(key)
+                heroTrailer.portraitKeys.insert(key)
             } else {
-                trailerLandscapeKeys.insert(key)
+                heroTrailer.landscapeKeys.insert(key)
             }
         } catch {
-            trailerLandscapeKeys.insert(key)
+            heroTrailer.landscapeKeys.insert(key)
         }
     }
 
     private func logTrailerFailure(_ reason: String) {
-        print("[OpenStream] trailer unavailable title=\(item.name) candidate=\(trailerCandidateIndex) reason=\(reason)")
+        print("[OpenStream] trailer unavailable title=\(item.name) candidate=\(heroTrailer.candidateIndex) reason=\(reason)")
     }
 
     private func showTrailerInteractionGlyph(_ glyph: String) {
-        trailerInteractionGeneration &+= 1
-        let generation = trailerInteractionGeneration
+        heroTrailer.interactionGeneration &+= 1
+        let generation = heroTrailer.interactionGeneration
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
-            trailerInteractionGlyph = glyph
+            heroTrailer.interactionGlyph = glyph
         }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(1_200))
-            guard !Task.isCancelled, generation == trailerInteractionGeneration else { return }
+            guard !Task.isCancelled, generation == heroTrailer.interactionGeneration else { return }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-                trailerInteractionGlyph = nil
+                heroTrailer.interactionGlyph = nil
             }
         }
     }
@@ -3876,22 +3839,22 @@ struct AppleCatalogItemDetailView: View {
 
     private var titleMetadataBadges: [String] {
         AppleTitleMetadataPresentation.orderedBadges(
-            contentRating: metadataDetails?.contentRating ?? item.contentRating,
-            formatBadges: metadataDetails?.formatBadges ?? item.formatBadges ?? [],
+            contentRating: pageMetadata.details?.contentRating ?? item.contentRating,
+            formatBadges: pageMetadata.details?.formatBadges ?? item.formatBadges ?? [],
             limit: AppleDetailMetrics.maxBadgeCount
         )
     }
 
     private var titleMetadataTextValues: [String] {
         AppleTitleMetadataPresentation.textValues(
-            genres: metadataDetails?.genres ?? [],
+            genres: pageMetadata.details?.genres ?? [],
             releaseInfo: displayReleaseInfo,
-            runtimeMinutes: metadataDetails?.runtimeMinutes
+            runtimeMinutes: pageMetadata.details?.runtimeMinutes
         )
     }
 
     private var downloadLabel: String {
-        if item.type == "series", selectedEpisodeID != nil {
+        if item.type == "series", episodeList.selectedEpisodeID != nil {
             switch downloadCoordinator.state {
             case .resolving: return "Preparing \(selectedEpisodeLabel)"
             case .downloading(_, _, let received, let expected):
@@ -3935,7 +3898,7 @@ struct AppleCatalogItemDetailView: View {
 
     private var seasonDownloadMessage: String {
         let count = seasonDownloads.total > 0
-            ? "\(seasonDownloads.completed) of \(seasonDownloads.total) episodes"
+            ? "\(seasonDownloads.completed) of \(seasonDownloads.total) episodeList.episodes"
             : "the season"
         return "Downloading \(count)."
     }
@@ -3963,22 +3926,22 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var selectedEpisodeLabel: String {
-        guard let id = selectedEpisodeID,
-              let episode = episodes.first(where: { $0.id == id }) else { return "episode" }
+        guard let id = episodeList.selectedEpisodeID,
+              let episode = episodeList.episodes.first(where: { $0.id == id }) else { return "episode" }
         return episodeNumber(episode).replacingOccurrences(of: " ", with: ":")
     }
 
     private var selectedEpisodeSelection: AppleStremioEpisodeSelection? {
-        guard let selectedEpisodeID,
-              let episode = episodes.first(where: { $0.id == selectedEpisodeID }) else { return nil }
+        guard let selectedEpisodeID = episodeList.selectedEpisodeID,
+              let episode = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }) else { return nil }
         return AppleStremioEpisodeSelection(
-            seriesMediaID: resolvedMediaID ?? item.mediaID,
+            seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
             episode: episode
         )
     }
 
     private var selectedPlaybackMediaID: String {
-        selectedEpisodeSelection?.mediaID ?? resolvedMediaID ?? item.mediaID
+        selectedEpisodeSelection?.mediaID ?? pageMetadata.resolvedMediaID ?? item.mediaID
     }
 
     /// Play, Play Trailer, or nothing (`titlePagePrimaryAction`); the row
@@ -3991,7 +3954,7 @@ struct AppleCatalogItemDetailView: View {
         case .playTrailer?:
             AppleDetailActionButton(title: "Play Trailer", glyph: .systemImage("play.fill"),
                                     kind: .play, width: actionButtonWidth) {
-                playTrailerInHero(at: trailerCandidateIndex)
+                playTrailerInHero(at: heroTrailer.candidateIndex)
             }
             .accessibilityIdentifier("detail.play")
         default:
@@ -4001,18 +3964,18 @@ struct AppleCatalogItemDetailView: View {
 
     private var regularPlayButton: some View {
         AppleDetailActionButton(
-            title: playbackCoordinator.phase.isBusy || isPreparingMetadata
+            title: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
                 ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading")
                 : (downloadCoordinator.state.isCompleted ? "Play Offline" : "Play"),
-            glyph: playbackCoordinator.phase.isBusy || isPreparingMetadata ? .progress : .systemImage("play.fill"),
+            glyph: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing ? .progress : .systemImage("play.fill"),
             kind: .play,
             width: actionButtonWidth
         ) {
-            playRequest = UUID()
+            playbackUI.request = UUID()
         }
         .disabled(!canStartPlayback)
         .accessibilityLabel(
-            playbackCoordinator.phase.isBusy || isPreparingMetadata
+            playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
                 ? "Preparing playback"
                 : (downloadCoordinator.state.isCompleted ? "Play Offline" : "Play")
         )
@@ -4052,8 +4015,8 @@ struct AppleCatalogItemDetailView: View {
                 320,
                 viewportSize.width
                     - 2 * AppleDetailMetrics.portraitColumnInset
-                    - detailSafeAreaInsets.leading
-                    - detailSafeAreaInsets.trailing
+                    - pageGeometry.safeAreaInsets.leading
+                    - pageGeometry.safeAreaInsets.trailing
             )
         }
         return AppleDetailMetrics.portraitContentWidth(
@@ -4130,7 +4093,7 @@ struct AppleCatalogItemDetailView: View {
     private var seasonDownloadStatus: some View {
         if item.type == "series", !visibleEpisodes.isEmpty, seasonDownloads.total > 0 {
             HStack {
-                Text("\(downloadSeason.map(seasonName) ?? "Season"): \(seasonDownloads.completed) of \(seasonDownloads.total) downloaded")
+                Text("\(offlineState.downloadSeason.map(seasonName) ?? "Season"): \(seasonDownloads.completed) of \(seasonDownloads.total) downloaded")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -4158,9 +4121,9 @@ struct AppleCatalogItemDetailView: View {
         // "My ListRate" (measured on the iPad, 2026-09-17), so the row supplies
         // the gap itself at those sizes.
         HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 0) {
-            detailIconAction("My List", systemImage: isFavorite ? "checkmark" : "plus", action: toggleFavorite)
-                .accessibilityLabel(isFavorite ? "Remove from My List" : "Add to My List")
-                .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+            detailIconAction("My List", systemImage: titleActions.isFavorite ? "checkmark" : "plus", action: toggleFavorite)
+                .accessibilityLabel(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+                .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             rateControl
         }
         .frame(
@@ -4181,7 +4144,7 @@ struct AppleCatalogItemDetailView: View {
             width: actionButtonWidth,
             action: performDownloadAction
         )
-        .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+        .disabled(pageMetadata.isPreparing || downloadCoordinator.state.isCompleted)
         .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
         .accessibilityLabel(downloadButtonLabel)
         .accessibilityValue(offlineAccessibilityValue)
@@ -4192,14 +4155,14 @@ struct AppleCatalogItemDetailView: View {
     private func performDownloadAction() {
         if item.type == "series", !visibleEpisodes.isEmpty {
             if seasonDownloads.isRunning {
-                seasonDownloadActionsPresented = true
+                prompts.seasonDownloadActions = true
             } else {
                 startSeasonDownload()
             }
         } else {
             switch downloadCoordinator.state {
             case .resolving, .downloading, .resuming, .paused:
-                downloadActionsPresented = true
+                prompts.downloadActions = true
             case .idle, .failed, .cancelled:
                 startDownload()
             default:
@@ -4217,7 +4180,7 @@ struct AppleCatalogItemDetailView: View {
                     : 0
                 return "Downloading · \(percent)%"
             }
-            return "Download \(selectedSeason.map(seasonName) ?? "Season")"
+            return "Download \(episodeList.selectedSeason.map(seasonName) ?? "Season")"
         }
 
         switch downloadCoordinator.state {
@@ -4295,7 +4258,7 @@ struct AppleCatalogItemDetailView: View {
                     apiKey: settings.radarrAPIKey,
                     title: item.name,
                     year: Int(item.releaseInfo ?? ""),
-                    mediaID: resolvedMediaID ?? item.id,
+                    mediaID: pageMetadata.resolvedMediaID ?? item.id,
                     rootFolderPath: settings.radarrRootFolderPath,
                     qualityProfileID: settings.radarrQualityProfileID
                 )
@@ -4306,14 +4269,14 @@ struct AppleCatalogItemDetailView: View {
                     apiKey: settings.sonarrAPIKey,
                     title: item.name,
                     year: Int(item.releaseInfo ?? ""),
-                    mediaID: resolvedMediaID ?? item.id,
+                    mediaID: pageMetadata.resolvedMediaID ?? item.id,
                     rootFolderPath: settings.sonarrRootFolderPath,
                     qualityProfileID: settings.sonarrQualityProfileID
                 )
             }
-            arrFeedback = "Added \(item.name) to the \(kind.displayName) queue."
+            prompts.arrFeedback = "Added \(item.name) to the \(kind.displayName) queue."
         } catch {
-            arrFeedback = error.localizedDescription
+            prompts.arrFeedback = error.localizedDescription
         }
     }
 
@@ -4353,7 +4316,7 @@ struct AppleCatalogItemDetailView: View {
     @ViewBuilder
     private var seasonControl: some View {
         if seasonNumbers.count > 1 {
-            Picker("Season", selection: $selectedSeason) {
+            Picker("Season", selection: $episodeList.selectedSeason) {
                 ForEach(seasonNumbers, id: \.self) { season in
                     Text(seasonName(season)).tag(Optional(season))
                 }
@@ -4361,7 +4324,7 @@ struct AppleCatalogItemDetailView: View {
             .pickerStyle(.menu)
             .appleVisionActionTarget()
             .accessibilityIdentifier("detail.season")
-        } else if let season = selectedSeason {
+        } else if let season = episodeList.selectedSeason {
             Text(seasonName(season))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -4370,9 +4333,9 @@ struct AppleCatalogItemDetailView: View {
 
     private var episodeListPresentation: AppleEpisodeListPresentation {
         AppleEpisodeListPresentation.resolve(
-            episodeCount: episodes.count,
-            isLoading: isLoadingEpisodes,
-            hasFinishedLoading: episodeLoadFinished
+            episodeCount: episodeList.episodes.count,
+            isLoading: episodeList.isLoading,
+            hasFinishedLoading: episodeList.loadFinished
         )
     }
 
@@ -4423,7 +4386,7 @@ struct AppleCatalogItemDetailView: View {
     /// The title `startDownload(episode:)` hands the coordinator, so a row can
     /// tell its own download from another episode's.
     private func episodeDownloadTitle(_ episode: AppleStremioEpisode) -> String {
-        AppleStremioEpisodeSelection(seriesMediaID: resolvedMediaID ?? item.mediaID, episode: episode)?.displayTitle
+        AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: episode)?.displayTitle
             ?? episode.displayTitle
     }
 
@@ -4431,7 +4394,7 @@ struct AppleCatalogItemDetailView: View {
         AppleEpisodeDownloadIndicator.resolve(
             episodeTitle: episodeDownloadTitle(episode),
             coordinatorState: downloadCoordinator.state,
-            isDownloaded: downloadedEpisodeIDs.contains(episode.id))
+            isDownloaded: offlineState.downloadedEpisodeIDs.contains(episode.id))
     }
 
     /// App Store-style ring while this episode downloads; the plain arrow
@@ -4473,8 +4436,8 @@ struct AppleCatalogItemDetailView: View {
     private func episodeRow(_ episode: AppleStremioEpisode, isWatched: Bool) -> some View {
         HStack(spacing: 0) {
             Button {
-                selectedEpisodeID = episode.id
-                playRequest = UUID()
+                episodeList.selectedEpisodeID = episode.id
+                playbackUI.request = UUID()
             } label: {
                 HStack(spacing: 14) {
                     ZStack {
@@ -4514,8 +4477,8 @@ struct AppleCatalogItemDetailView: View {
             .appleHoverAffordance()
             .accessibilityLabel("Play \(episode.displayTitle)")
             .accessibilityValue([episodeNumber(episode), isWatched ? "Watched" : nil,
-                                 selectedEpisodeID == episode.id ? "selected" : nil].compactMap { $0 }.joined(separator: ", "))
-            .accessibilityAddTraits(selectedEpisodeID == episode.id ? .isSelected : [])
+                                 episodeList.selectedEpisodeID == episode.id ? "selected" : nil].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityAddTraits(episodeList.selectedEpisodeID == episode.id ? .isSelected : [])
             .contextMenu { watchedMenuButton(episode, isWatched: isWatched) }
             episodeDownloadButton(episode)
                 .padding(.trailing, 8)
@@ -4529,14 +4492,14 @@ struct AppleCatalogItemDetailView: View {
         #if os(iOS) || os(macOS)
         if localGroup == nil,
            AppleTitlePagePolicy.showsEpisodeDownload(offersDownload: offersDownload,
-                                                     isDownloaded: downloadedEpisodeIDs.contains(episode.id)) {
+                                                     isDownloaded: offlineState.downloadedEpisodeIDs.contains(episode.id)) {
             Button {
                 if seasonDownloads.isRunning {
-                    seasonDownloadActionsPresented = true
+                    prompts.seasonDownloadActions = true
                 } else if downloadCoordinator.state.ownsDownload {
-                    downloadActionsPresented = true
+                    prompts.downloadActions = true
                 } else {
-                    selectedEpisodeID = episode.id
+                    episodeList.selectedEpisodeID = episode.id
                     startDownload(episode: episode)
                 }
             } label: {
@@ -4545,7 +4508,7 @@ struct AppleCatalogItemDetailView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.borderless)
-            .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+            .disabled(pageMetadata.isPreparing || downloadCoordinator.state.isCompleted)
             .accessibilityLabel(episodeDownloadIndicator(for: episode).accessibilityLabel(episodeTitle: episodeDownloadTitle(episode)))
             .accessibilityIdentifier("detail.episode.download")
         }
@@ -4618,12 +4581,12 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private var suggestedItems: [AppleCatalogItem] { rankedSuggestions }
+    private var suggestedItems: [AppleCatalogItem] { pageMetadata.rankedSuggestions }
 
     /// Ranks the in-memory catalog against this title on genre, synopsis
     /// keywords, cast and crew, year and rating. No network call.
     private func refreshSuggestions() async {
-        let target = metadataDetails.map { item.merging(details: $0) } ?? item
+        let target = pageMetadata.details.map { item.merging(details: $0) } ?? item
         let candidates = relatedItems
         let ranked = await AppleSimilarTitleKeywordCache.shared.rankSimilar(
             target: AppleSimilarTitleProfile(item: target),
@@ -4635,7 +4598,7 @@ struct AppleCatalogItemDetailView: View {
         for candidate in candidates where itemsByID[candidate.id] == nil {
             itemsByID[candidate.id] = candidate
         }
-        rankedSuggestions = ranked.compactMap { itemsByID[$0.profile.id] }
+        pageMetadata.rankedSuggestions = ranked.compactMap { itemsByID[$0.profile.id] }
     }
 
     private func seasonName(_ season: Int) -> String {
@@ -4673,7 +4636,7 @@ struct AppleCatalogItemDetailView: View {
         let mediaID = item.mediaID.split(separator: ":").first.map(String.init) ?? item.mediaID
         let cleanedMediaID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanedMediaID.isEmpty { return String(cleanedMediaID.prefix(120)) }
-        if let episode = selectedEpisodeID,
+        if let episode = episodeList.selectedEpisodeID,
            !episode.isEmpty {
             return !episode.isEmpty ? "Episode \(episode)".trimmingCharacters(in: .whitespacesAndNewlines) : "Series episode"
         }
@@ -4683,8 +4646,8 @@ struct AppleCatalogItemDetailView: View {
     private var canStartPlayback: Bool {
         AppleTitlePagePolicy.canStartPlayback(
             type: item.type, hasPlaybackRoute: hasPlaybackRoute,
-            isPreparing: isPreparingMetadata || playbackCoordinator.phase.isBusy,
-            hasSelectedEpisode: selectedEpisodeID != nil
+            isPreparing: pageMetadata.isPreparing || playbackCoordinator.phase.isBusy,
+            hasSelectedEpisode: episodeList.selectedEpisodeID != nil
         )
     }
 
@@ -4734,18 +4697,18 @@ struct AppleCatalogItemDetailView: View {
 
     private var canStartDownload: Bool {
         showsDownloadAction
-            && !isPreparingMetadata
+            && !pageMetadata.isPreparing
             && !downloadCoordinator.state.ownsDownload
             && !downloadCoordinator.state.isCompleted
-            && (item.type != "series" || selectedEpisodeID != nil)
+            && (item.type != "series" || episodeList.selectedEpisodeID != nil)
     }
 
     private var seasonNumbers: [Int] {
-        AppleStremioEpisodePolicy.seasons(in: episodes)
+        AppleStremioEpisodePolicy.seasons(in: episodeList.episodes)
     }
 
     private var visibleEpisodes: [AppleStremioEpisode] {
-        AppleStremioEpisodePolicy.episodes(in: selectedSeason, from: episodes)
+        AppleStremioEpisodePolicy.episodes(in: episodeList.selectedSeason, from: episodeList.episodes)
     }
 
     private func episodeMetadata(_ episode: AppleStremioEpisode) -> String {
@@ -4796,25 +4759,25 @@ struct AppleCatalogItemDetailView: View {
         rating = value
         ratingStore.set(value, for: item.mediaID)
         #if os(tvOS)
-        ratingSelectionGeneration += 1
-        let generation = ratingSelectionGeneration
-        withAnimation(rateAnimation) { rateChoicesExpanded = true }
+        titleActions.ratingSelectionGeneration += 1
+        let generation = titleActions.ratingSelectionGeneration
+        withAnimation(rateAnimation) { titleActions.rateChoicesExpanded = true }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, generation == ratingSelectionGeneration else { return }
-            withAnimation(rateAnimation) { rateChoicesExpanded = false }
+            guard !Task.isCancelled, generation == titleActions.ratingSelectionGeneration else { return }
+            withAnimation(rateAnimation) { titleActions.rateChoicesExpanded = false }
         }
         #endif
     }
 
     private func toggleFavorite() {
-        let next = !isFavorite
-        isFavorite = next
+        let next = !titleActions.isFavorite
+        titleActions.isFavorite = next
         Task { @MainActor in
             do {
                 try await mediaIndex.setFavorite(next, recordID: recordID)
             } catch {
-                isFavorite.toggle()
+                titleActions.isFavorite.toggle()
             }
         }
     }
@@ -4825,30 +4788,30 @@ struct AppleCatalogItemDetailView: View {
 
     private func refreshDownloadedEpisodeIDs() async {
         guard item.type == "series" else { return }
-        let resolvedIDs = episodes.compactMap { episode -> (String, String)? in
+        let resolvedIDs = episodeList.episodes.compactMap { episode -> (String, String)? in
             guard let selection = AppleStremioEpisodeSelection(
-                seriesMediaID: resolvedMediaID ?? item.mediaID,
+                seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
                 episode: episode
             ) else { return nil }
             return (episode.id, "\(recordID):\(selection.mediaID)")
         }
         let downloaded = await downloadCoordinator.downloadedMediaIDs(among: Set(resolvedIDs.map(\.1)))
         guard !Task.isCancelled else { return }
-        downloadedEpisodeIDs = Set(resolvedIDs.filter { downloaded.contains($0.1) }.map(\.0))
+        offlineState.downloadedEpisodeIDs = Set(resolvedIDs.filter { downloaded.contains($0.1) }.map(\.0))
     }
 
     private func chooseStreams() async {
-        pickingStreams = true
-        defer { pickingStreams = false }
+        playbackUI.pickingStreams = true
+        defer { playbackUI.pickingStreams = false }
         do {
-            streamChoices = try await playbackResolver.rankedCandidates(sources: playbackSources,
+            playbackUI.streamChoices = try await playbackResolver.rankedCandidates(sources: playbackSources,
                 preferredSourceID: source.id, item: item.withMediaID(selectedPlaybackMediaID),
                 streamingServerConfiguration: streamingServerConfiguration)
         } catch {
-            streamChoices = []
+            playbackUI.streamChoices = []
             if localFiles.isEmpty { playbackCoordinator.fail(error); return }
         }
-        streamPickerPresented = true
+        prompts.streamPicker = true
     }
 
     private func configuredSources(_ presentation: AppleStremioPlayerPresentation, selectedID: URL? = nil) -> AppleStremioPlayerPresentation {
@@ -4910,14 +4873,14 @@ struct AppleCatalogItemDetailView: View {
     /// one's. Nil for a movie, for a series with nothing selected, and for the
     /// last episode of the last season.
     private func nextEpisodeContext() -> AppleNextEpisodeContext? {
-        guard let selectedEpisodeID,
-              let current = episodes.first(where: { $0.id == selectedEpisodeID }),
-              let next = AppleStremioEpisodePolicy.following(current, in: episodes) else { return nil }
+        guard let selectedEpisodeID = episodeList.selectedEpisodeID,
+              let current = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }),
+              let next = AppleStremioEpisodePolicy.following(current, in: episodeList.episodes) else { return nil }
         return AppleNextEpisodeContext(title: next.displayTitle) {
             Task { @MainActor in
                 appleTrace("next episode → \(next.displayTitle)")
-                self.playerPresentation = nil
-                self.selectedEpisodeID = next.id
+                self.playbackUI.presentation = nil
+                self.episodeList.selectedEpisodeID = next.id
                 await self.resolvePlayback()
             }
         }
@@ -4932,9 +4895,9 @@ struct AppleCatalogItemDetailView: View {
     /// anything is asked again, so the press is seen to do something even when
     /// the answer comes back at once.
     private func retryPlayback() {
-        playbackRetryStartedAt = .now
+        playbackUI.retryStartedAt = .now
         playbackCoordinator.beginResolving()
-        playRequest = UUID()
+        playbackUI.request = UUID()
     }
 
     private func openSourcesAfterPlaybackFailure() {
@@ -4943,8 +4906,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func resolvePlayback() async {
-        let retryStartedAt = playbackRetryStartedAt
-        playbackRetryStartedAt = nil
+        let retryStartedAt = playbackUI.retryStartedAt
+        playbackUI.retryStartedAt = nil
         playbackCoordinator.beginResolving()
         do {
             if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
@@ -4952,7 +4915,7 @@ struct AppleCatalogItemDetailView: View {
                 
                 let episodeToPlay: AppleMediaServerItem
                 if item.type == "series" || msDetail.item.type == .series || msDetail.item.type == .episode {
-                    let epID = selectedEpisodeID ?? msRef.itemID
+                    let epID = episodeList.selectedEpisodeID ?? msRef.itemID
                     var found: AppleMediaServerItem?
                     for eps in msDetail.episodesBySeason.values {
                         if let e = eps.first(where: { $0.id == epID }) { found = e; break }
@@ -4966,25 +4929,25 @@ struct AppleCatalogItemDetailView: View {
                 let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: true)
                 let presentation = AppleStremioPlayerPresentation(request: req, settings: settings)
                 playbackCoordinator = presentation.coordinator
-                playerPresentation = configuredSources(presentation, selectedID: req.url)
+                playbackUI.presentation = configuredSources(presentation, selectedID: req.url)
                 return
             }
 
-            if selectedQuality == nil {
-                let files = selectedLocalFile.map { [$0] } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
-                selectedLocalFile = nil
+            if playbackUI.selectedQuality == nil {
+                let files = playbackUI.selectedLocalFile.map { [$0] } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
+                playbackUI.selectedLocalFile = nil
                 for file in files {
                     do {
                         let presentation = try await library.presentation(for: file,
                             sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings)
                         playbackCoordinator = presentation.coordinator
-                        playerPresentation = configuredSources(presentation, selectedID: file.url)
+                        playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
                         return
                     } catch is CancellationError { throw CancellationError() }
                     catch { ApplePlaybackFailureHistory.shared.record(file.url) }
                 }
             }
-            if selectedQuality == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
+            if playbackUI.selectedQuality == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
                !ApplePlaybackFailureHistory.shared.contains(offlineRecord.localURL) {
                 do {
                     playbackCoordinator.update(.loading)
@@ -5009,7 +4972,7 @@ struct AppleCatalogItemDetailView: View {
                         settings: settings
                     )
                     playbackCoordinator = presentation.coordinator
-                    playerPresentation = configuredSources(presentation, selectedID: offlineRecord.localURL)
+                    playbackUI.presentation = configuredSources(presentation, selectedID: offlineRecord.localURL)
                     return
                 } catch is CancellationError { throw CancellationError() }
                 catch { ApplePlaybackFailureHistory.shared.record(offlineRecord.localURL) }
@@ -5027,10 +4990,10 @@ struct AppleCatalogItemDetailView: View {
                 streamingServerConfiguration: streamingServerConfiguration
             )
             try Task.checkCancellation()
-            streamChoices = ranked
+            playbackUI.streamChoices = ranked
             // Automatic, or the resolution picked in the Quality sheet: the
             // best candidate this device plays, then the rest as fallbacks.
-            let chosen = selectedQuality
+            let chosen = playbackUI.selectedQuality
             let ordered = AppleStremioCandidateRanking.playbackOrder(
                 ranked, choice: chosen.map(AppleStreamQualityChoice.tier) ?? .automatic,
                 device: AppleStreamDeviceCapabilities.current,
@@ -5044,7 +5007,7 @@ struct AppleCatalogItemDetailView: View {
                         partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
                     addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type)
             }
-            selectedQuality = nil
+            playbackUI.selectedQuality = nil
             guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }
             let presentation = AppleStremioPlayerPresentation(
                 request: first,
@@ -5052,7 +5015,7 @@ struct AppleCatalogItemDetailView: View {
                 settings: settings
             )
             playbackCoordinator = presentation.coordinator
-            playerPresentation = configuredSources(presentation)
+            playbackUI.presentation = configuredSources(presentation)
         } catch is CancellationError {
             playbackCoordinator.reset()
         } catch {
@@ -5070,7 +5033,7 @@ struct AppleCatalogItemDetailView: View {
 
     private func startDownload(episode: AppleStremioEpisode? = nil) {
         guard !seasonDownloads.isRunning else { return }
-        let selection = episode.flatMap { AppleStremioEpisodeSelection(seriesMediaID: resolvedMediaID ?? item.mediaID, episode: $0) }
+        let selection = episode.flatMap { AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0) }
         let streamID = selection?.mediaID ?? selectedPlaybackMediaID
         let selectedItem = item.withMediaID(streamID)
         let sources = playbackSources
@@ -5106,10 +5069,10 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func startSeasonDownload() {
-        guard !isPreparingMetadata, !downloadCoordinator.state.ownsDownload else { return }
-        downloadSeason = selectedSeason
+        guard !pageMetadata.isPreparing, !downloadCoordinator.state.ownsDownload else { return }
+        offlineState.downloadSeason = episodeList.selectedSeason
         let selections = visibleEpisodes.compactMap {
-            AppleStremioEpisodeSelection(seriesMediaID: resolvedMediaID ?? item.mediaID, episode: $0)
+            AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0)
         }
         let byID = selections.reduce(into: [String: AppleStremioEpisodeSelection]()) { $0[$1.mediaID] = $1 }
         let baseID = recordID
@@ -5139,8 +5102,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var offlineSubtitle: String? {
-        guard let selectedEpisodeID,
-              let episode = episodes.first(where: { $0.id == selectedEpisodeID }) else {
+        guard let selectedEpisodeID = episodeList.selectedEpisodeID,
+              let episode = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }) else {
             return item.releaseInfo
         }
         let title = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5148,78 +5111,78 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func applyEpisodes(_ fetched: [AppleStremioEpisode]) {
-        let mediaID = resolvedMediaID ?? item.mediaID
-        episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
+        let mediaID = pageMetadata.resolvedMediaID ?? item.mediaID
+        episodeList.episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
-        downloadedEpisodeIDs = []
-        titlePageScheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodes)
-        selectedSeason = savedEpisode(in: episodes)?.season
-            ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodes)?.season
-            ?? upNextEpisode(in: episodes)?.season
-            ?? AppleStremioEpisodePolicy.initialSeason(in: episodes)
+        offlineState.downloadedEpisodeIDs = []
+        pageMetadata.scheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodeList.episodes)
+        episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
+            ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodeList.episodes)?.season
+            ?? upNextEpisode(in: episodeList.episodes)?.season
+            ?? AppleStremioEpisodePolicy.initialSeason(in: episodeList.episodes)
         // Play needs an episode: fall back to the first episode of the
         // first season so the button works the moment the list arrives.
-        selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes)
-            ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes)
-        isLoadingEpisodes = false
-        episodeLoadFinished = true
-        fillTimeline.mark(.episodes, detail: "\(episodes.count)")
+        episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: episodeList.selectedSeason, from: episodeList.episodes)
+            ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodeList.episodes)
+        episodeList.isLoading = false
+        episodeList.loadFinished = true
+        fillTimeline.mark(.episodes, detail: "\(episodeList.episodes.count)")
     }
 
     private func markMetadataArrived() {
-        fillTimeline.mark(.metadata, detail: metadataDetails?.overview?.isEmpty == false ? "overview" : "no-overview")
+        fillTimeline.mark(.metadata, detail: pageMetadata.details?.overview?.isEmpty == false ? "overview" : "no-overview")
         markOverviewIfVisible(source: "enriched")
     }
 
     private func markOverviewIfVisible(source: String) {
         guard AppleMetadataPresentationPolicy.synopsis(
             catalog: item.summary,
-            enriched: metadataDetails?.overview
+            enriched: pageMetadata.details?.overview
         ) != nil else { return }
         fillTimeline.mark(.overview, detail: source)
     }
 
-    /// Resolve the item to its IMDB id, then (for series) load episodes keyed
+    /// Resolve the item to its IMDB id, then (for series) load episodeList.episodes keyed
     /// by that id so both metadata and streams resolve against a stream-add-on
     /// friendly identifier.
     private func prepare() async {
         let generation = UUID()
         preparationGeneration = generation
-        metadataDetails = nil
-        previewAssets = nil
-        fallbackArtwork = nil
-        episodes = []
-        titlePageScheduleBadge = nil
-        episodeLoadFinished = false
-        selectedSeason = nil
-        selectedEpisodeID = nil
-        resolvedMediaID = nil
-        watchProviders = []
+        pageMetadata.details = nil
+        pageMetadata.previewAssets = nil
+        pageMetadata.fallbackArtwork = nil
+        episodeList.episodes = []
+        pageMetadata.scheduleBadge = nil
+        episodeList.loadFinished = false
+        episodeList.selectedSeason = nil
+        episodeList.selectedEpisodeID = nil
+        pageMetadata.resolvedMediaID = nil
+        pageMetadata.watchProviders = []
         
         if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
-            isPreparingMetadata = true
+            pageMetadata.isPreparing = true
             do {
                 let msDetail = try await msLibrary.detail(for: msRef)
                 guard !Task.isCancelled, preparationGeneration == generation else { return }
-                self.metadataDetails = msLibrary.metadata(from: msDetail)
-                self.resolvedMediaID = item.mediaID
-                self.episodes = msLibrary.episodes(from: msDetail)
+                self.pageMetadata.details = msLibrary.metadata(from: msDetail)
+                self.pageMetadata.resolvedMediaID = item.mediaID
+                self.episodeList.episodes = msLibrary.episodes(from: msDetail)
                 markMetadataArrived()
-                fillTimeline.mark(.episodes, detail: "\(self.episodes.count)")
-                self.downloadedEpisodeIDs = []
-                self.selectedSeason = upNextEpisode(in: self.episodes)?.season
-                    ?? AppleStremioEpisodePolicy.initialSeason(in: self.episodes)
-                self.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.selectedSeason, from: self.episodes)
-                    ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodes)
-                self.isPreparingMetadata = false
-                self.isLoadingEpisodes = false
-                self.episodeLoadFinished = true
+                fillTimeline.mark(.episodes, detail: "\(self.episodeList.episodes.count)")
+                self.offlineState.downloadedEpisodeIDs = []
+                self.episodeList.selectedSeason = upNextEpisode(in: self.episodeList.episodes)?.season
+                    ?? AppleStremioEpisodePolicy.initialSeason(in: self.episodeList.episodes)
+                self.episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.episodeList.selectedSeason, from: self.episodeList.episodes)
+                    ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodeList.episodes)
+                self.pageMetadata.isPreparing = false
+                self.episodeList.isLoading = false
+                self.episodeList.loadFinished = true
             } catch {
                 guard !Task.isCancelled, preparationGeneration == generation else { return }
-                self.isPreparingMetadata = false
-                self.isLoadingEpisodes = false
-                self.episodeLoadFinished = true
-                self.metadataDetails = AppleTMDBDetails(
+                self.pageMetadata.isPreparing = false
+                self.episodeList.isLoading = false
+                self.episodeList.loadFinished = true
+                self.pageMetadata.details = AppleTMDBDetails(
                     mediaID: item.mediaID,
                     title: item.name,
                     overview: (error as? AppleMediaServerError).map { AppleMediaServerFormPolicy.message(for: $0) } ?? "An unexpected error occurred."
@@ -5233,17 +5196,17 @@ struct AppleCatalogItemDetailView: View {
         // add-on round trip, so Play is usable before anything is awaited.
         let canonicalID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID)
         if let canonicalID {
-            resolvedMediaID = canonicalID
-            isPreparingMetadata = false
+            pageMetadata.resolvedMediaID = canonicalID
+            pageMetadata.isPreparing = false
         } else {
-            isPreparingMetadata = true
+            pageMetadata.isPreparing = true
         }
-        if isSeries { isLoadingEpisodes = true }
+        if isSeries { episodeList.isLoading = true }
         rating = ratingStore.rating(for: item.mediaID)
 
         // Preview art, the canonical id, the episode list and the enriched
         // details all load at once, and each is drawn the moment it arrives.
-        // The details used to be requested only after the episodes and the
+        // The details used to be requested only after the episodeList.episodes and the
         // preview art had both come back, so one slow add-on held the
         // overview back too.
         let client = metadataClient
@@ -5253,7 +5216,7 @@ struct AppleCatalogItemDetailView: View {
         let type = item.type
         let catalogID = item.mediaID
         let configuration = metadataConfiguration
-        // The episodes and details requests go out before this task gets
+        // The episodeList.episodes and details requests go out before this task gets
         // the main actor back: the page is still being built then, and
         // waiting for it cost ~0.4-0.8 s on the Apple TV.
         func addLookups(to group: inout TaskGroup<AppleDetailPrepareOutcome>, mediaID: String) {
@@ -5315,35 +5278,35 @@ struct AppleCatalogItemDetailView: View {
                     // enrichment. Make the actions usable as soon as that
                     // identity is ready.
                     let mediaID = resolved ?? catalogID
-                    resolvedMediaID = mediaID
-                    isPreparingMetadata = false
+                    pageMetadata.resolvedMediaID = mediaID
+                    pageMetadata.isPreparing = false
                     addLookups(to: &group, mediaID: mediaID)
                 case .episodes(let fetched):
                     guard let fetched else { continue }
                     applyEpisodes(fetched)
                     await refreshDownloadedEpisodeIDs()
                 case .preview(let preview):
-                    previewAssets = preview
+                    pageMetadata.previewAssets = preview
                 case .details(let details):
-                    metadataDetails = details
+                    pageMetadata.details = details
                     if details != nil { markMetadataArrived() }
                 }
             }
         }
-        if isSeries, preparationGeneration == generation { isLoadingEpisodes = false }
+        if isSeries, preparationGeneration == generation { episodeList.isLoading = false }
         guard !Task.isCancelled, preparationGeneration == generation else { return }
         await loadWatchProviders()
         guard !Task.isCancelled, preparationGeneration == generation else { return }
-        if item.posterURL == nil, metadataDetails?.backdropURL == nil, metadataDetails?.posterURL == nil {
+        if item.posterURL == nil, pageMetadata.details?.backdropURL == nil, pageMetadata.details?.posterURL == nil {
             let artwork = await AppleArtworkResolver.shared.resolve(
-                mediaID: resolvedMediaID ?? item.mediaID,
+                mediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
                 type: item.type,
                 existingPosterURL: item.posterURL,
                 existingBackgroundURL: item.backgroundURL,
                 configuration: metadataConfiguration
             )
             guard !Task.isCancelled, preparationGeneration == generation else { return }
-            fallbackArtwork = artwork
+            pageMetadata.fallbackArtwork = artwork
         }
     }
 
@@ -5356,9 +5319,9 @@ struct AppleCatalogItemDetailView: View {
         let enabled = settings.watchProviderIDs
         guard !enabled.isEmpty,
               let configuration = metadataConfiguration,
-              let imdbID = (resolvedMediaID ?? item.mediaID) as String?,
+              let imdbID = (pageMetadata.resolvedMediaID ?? item.mediaID) as String?,
               imdbID.hasPrefix("tt") else {
-            watchProviders = []
+            pageMetadata.watchProviders = []
             return
         }
         let kind: AppleMediaKind = item.type == "series" ? .series : .movie
@@ -5369,7 +5332,7 @@ struct AppleCatalogItemDetailView: View {
             configuration: configuration
         )
         guard !Task.isCancelled else { return }
-        watchProviders = AppleWatchProviderPolicy.visible(all ?? [], enabledProviderIDs: enabled)
+        pageMetadata.watchProviders = AppleWatchProviderPolicy.visible(all ?? [], enabledProviderIDs: enabled)
     }
 
     /// The episode the show's saved position names — what Continue Watching
@@ -5408,7 +5371,7 @@ struct AppleCatalogItemDetailView: View {
         } else {
             playbackStore.markUnwatched(mediaID: episode.id)
         }
-        selectedEpisodeID = nextUnwatchedEpisodeID(in: selectedSeason, from: episodes) ?? selectedEpisodeID
+        episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: episodeList.selectedSeason, from: episodeList.episodes) ?? episodeList.selectedEpisodeID
     }
 
     @ViewBuilder
@@ -5422,7 +5385,7 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    /// Finished episodes on the visible list, read through the feed so a
+    /// Finished episodeList.episodes on the visible list, read through the feed so a
     /// finish, mark or unmark redraws the ticks.
     private var watchedEpisodeIDs: Set<String> {
         ApplePlaybackProgressFeed.shared.completedMediaIDs(among: visibleEpisodes.map(\.id), in: playbackStore)
@@ -6198,6 +6161,100 @@ enum AppleTrailerPreviewLayout {
     }
 }
 
+// The title page's state, grouped so SwiftUI keeps a dozen dynamic properties
+// for the page rather than sixty (N45).
+
+private struct AppleTitlePageTrailerState {
+    var isActive = false
+    var isPlaying = false
+    var hasStarted = false
+    var muted = false
+    var candidateIndex = 0
+    var portraitKeys: Set<String> = []
+    var landscapeKeys: Set<String> = []
+    var replayGeneration = 0
+    var interactionGlyph: String?
+    var interactionGeneration = 0
+}
+
+private struct AppleTitlePageHeroStill {
+    /// The hero still's load; the trailer waits on it (art-first).
+    var art = AppleTrailerArtFirstPolicy.Art.loading
+    var image: CGImage?
+}
+
+private struct AppleTitlePageWordmarkState {
+    var state = AppleTitleLogoState.loading
+    var loadResult: Bool?
+    var graceExpired = false
+}
+
+private struct AppleTitlePageGeometry {
+    var viewportSize: CGSize = .zero
+    var safeAreaInsets = EdgeInsets()
+}
+
+private struct AppleTitlePagePrompts {
+    var downloadActions = false
+    var seasonDownloadActions = false
+    var streamPicker = false
+    var arrRequestKind: AppleArrKind?
+    var arrFeedback: String?
+}
+
+private struct AppleTitlePageActionState {
+    var isFavorite = false
+    var rateChoicesExpanded = false
+    var ratingSelectionGeneration = 0
+}
+
+private struct AppleTitlePagePlaybackState {
+    var request: UUID?
+    /// When Retry was pressed, so a failure that comes straight back still
+    /// shows the loading state first (`ApplePlaybackFailureRecovery`).
+    var retryStartedAt: ContinuousClock.Instant?
+    var presentation: AppleStremioPlayerPresentation?
+    var streamChoices: [AppleStremioHTTPPlaybackCandidate] = []
+    /// A resolution picked in the Quality sheet for the next Play; nil is Automatic.
+    var selectedQuality: AppleStreamQualityTier?
+    var selectedLocalFile: AppleLibraryItem?
+    var pickingStreams = false
+}
+
+private struct AppleTitlePageMetadataState {
+    var details: AppleTMDBDetails?
+    var fallbackArtwork: AppleArtworkResolver.Artwork?
+    var previewAssets: AppleStremioPreviewAssets?
+    var isPreparing = true
+    // The item's canonical IMDB id, resolved via a meta add-on. Catalog add-ons
+    // (RT, Streaming Catalogs) key items by non-IMDB ids that stream add-ons
+    // can't resolve; this is the id actually used for episode + stream lookups.
+    var resolvedMediaID: String?
+    /// Services the viewer subscribes to that also carry this title. Empty
+    /// unless they have opted in — see `AppleWatchProviderPolicy`.
+    var watchProviders: [AppleWatchProvider] = []
+    var rankedSuggestions: [AppleCatalogItem] = []
+    /// The title page's schedule badge (iPhone and Mac), worked out once per
+    /// episode list rather than on every redraw.
+    var scheduleBadge: String?
+}
+
+private struct AppleTitlePageEpisodeState {
+    var episodes: [AppleStremioEpisode] = []
+    var selectedSeason: Int?
+    var selectedEpisodeID: String?
+    var isLoading = false
+    /// Set only when the current title's episode load has finished, so a
+    /// superseded load clearing `isLoadingEpisodes` cannot surface the
+    /// "not available" text while the newer fetch is still in flight.
+    var loadFinished = false
+}
+
+private struct AppleTitlePageOfflineState {
+    var downloadedEpisodeIDs = Set<String>()
+    var downloadSeason: Int?
+}
+
 private struct AppleDetailViewport: Equatable {
     let size: CGSize
     let insets: EdgeInsets
@@ -6747,7 +6804,7 @@ extension AppleCatalogItemDetailView {
                 .padding(.horizontal, Self.phoneInset)
             if item.type == "series" {
                 phoneEpisodesSection
-                    .id("vision-episodes")
+                    .id("vision-episodeList.episodes")
                     .padding(.top, Self.phoneSectionSpacing - 8)
             }
             if !titlePageTrailerKeys.isEmpty {
@@ -6798,7 +6855,7 @@ extension AppleCatalogItemDetailView {
 
     private var phoneHero: some View {
         VStack(spacing: 12) {
-            if let titlePageScheduleBadge {
+            if let titlePageScheduleBadge = pageMetadata.scheduleBadge {
                 Text(titlePageScheduleBadge)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
@@ -6835,7 +6892,7 @@ extension AppleCatalogItemDetailView {
             detailHeroFrameChanged(frame)
         }
         // With the navigation bar hidden, the art runs up under the status bar.
-        .padding(.top, -detailSafeAreaInsets.top)
+        .padding(.top, -pageGeometry.safeAreaInsets.top)
         .accessibilityElement(children: .contain)
     }
 
@@ -6849,7 +6906,7 @@ extension AppleCatalogItemDetailView {
                 .accessibilityHidden(true)
             heroTrailerStartButton
             #if os(iOS) || os(visionOS)
-            trailerPreview(controlTopInset: detailSafeAreaInsets.top + 10)
+            trailerPreview(controlTopInset: pageGeometry.safeAreaInsets.top + 10)
             #endif
         }
         .overlay {
@@ -6878,9 +6935,9 @@ extension AppleCatalogItemDetailView {
                 .accessibilityAddTraits(.isHeader)
         case .logo, .hidden:
             ZStack {
-                if case .valid = titleLogoState, let logoURL = titleLogoURL {
+                if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .center) { loaded in
-                        titleLogoLoadResult = loaded
+                        titleWordmark.loadResult = loaded
                         if loaded { fillTimeline.mark(.wordmark) }
                     }
                     .opacity(titleLogoPresentation == .logo ? 1 : 0)
@@ -6900,9 +6957,9 @@ extension AppleCatalogItemDetailView {
     /// run for a series, and the running time.
     private var titlePageMetadataValues: [String] {
         var values: [String] = []
-        let genres = metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? []
+        let genres = pageMetadata.details?.genres.isEmpty == false ? pageMetadata.details?.genres ?? [] : item.genres ?? []
         if let genre = genres.first(where: { !$0.isEmpty }) { values.append(genre) }
-        let year = metadataDetails?.year ?? item.year
+        let year = pageMetadata.details?.year ?? item.year
         if item.type != "series", let year {
             values.append(String(year))
         } else if let release = AppleTitleMetadataPresentation.formattedReleaseInfo(displayReleaseInfo) {
@@ -6910,7 +6967,7 @@ extension AppleCatalogItemDetailView {
         } else if let year {
             values.append(String(year))
         }
-        if let minutes = metadataDetails?.runtimeMinutes, (1 ... 24 * 60).contains(minutes) {
+        if let minutes = pageMetadata.details?.runtimeMinutes, (1 ... 24 * 60).contains(minutes) {
             values.append(AppleTitleMetadataPresentation.formattedRuntime(minutes))
         }
         return values
@@ -6919,7 +6976,7 @@ extension AppleCatalogItemDetailView {
     @ViewBuilder
     private var phoneMetadataLine: some View {
         let values = titlePageMetadataValues
-        let rating = AppleBillboardCopy.ratingBadge(metadataDetails?.contentRating ?? item.contentRating)
+        let rating = AppleBillboardCopy.ratingBadge(pageMetadata.details?.contentRating ?? item.contentRating)
         if !values.isEmpty || rating != nil {
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 6))
@@ -6950,8 +7007,8 @@ extension AppleCatalogItemDetailView {
     }
 
     private var selectedEpisode: AppleStremioEpisode? {
-        guard let selectedEpisodeID else { return nil }
-        return episodes.first { $0.id == selectedEpisodeID }
+        guard let selectedEpisodeID = episodeList.selectedEpisodeID else { return nil }
+        return episodeList.episodes.first { $0.id == selectedEpisodeID }
     }
 
     /// Whether anything on this page can start: a media-server or library
@@ -6987,16 +7044,16 @@ extension AppleCatalogItemDetailView {
             HStack(spacing: 12) {
                 Button(action: toggleFavorite) {
                     AppleTitlePageRoundButtonLabel(
-                        title: isFavorite ? "Remove from My List" : "Add to My List",
-                        systemImage: isFavorite ? "checkmark" : "plus"
+                        title: titleActions.isFavorite ? "Remove from My List" : "Add to My List",
+                        systemImage: titleActions.isFavorite ? "checkmark" : "plus"
                     )
                     .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
-                .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+                .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
                 .accessibilityIdentifier("detail.my-list")
                 #if os(iOS)
-                .sensoryFeedback(.selection, trigger: isFavorite)
+                .sensoryFeedback(.selection, trigger: titleActions.isFavorite)
                 #endif
                 if showsDownloadAction {
                     phoneDownloadButton
@@ -7020,7 +7077,7 @@ extension AppleCatalogItemDetailView {
     fileprivate var titlePagePrimaryButtonState: TitlePagePrimaryButtonState? {
         guard let action = titlePagePrimaryAction else { return nil }
         let isTrailer = action == .playTrailer
-        let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || isPreparingMetadata)
+        let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || pageMetadata.isPreparing)
         let title: String = if isBusy {
             playbackCoordinator.phase.isBusy ? "Preparing" : "Loading"
         } else {
@@ -7033,9 +7090,9 @@ extension AppleCatalogItemDetailView {
     /// Play (or resume), or the trailer when nothing here can play.
     fileprivate func performTitlePagePrimaryAction() {
         if titlePagePrimaryButtonState?.isTrailer == true {
-            playTrailerInHero(at: trailerCandidateIndex)
+            playTrailerInHero(at: heroTrailer.candidateIndex)
         } else {
-            playRequest = UUID()
+            playbackUI.request = UUID()
         }
     }
 
@@ -7083,7 +7140,7 @@ extension AppleCatalogItemDetailView {
             }
         }
         .buttonStyle(.plain)
-        .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+        .disabled(pageMetadata.isPreparing || downloadCoordinator.state.isCompleted)
         .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
         .accessibilityLabel(downloadButtonLabel)
         .accessibilityValue(offlineAccessibilityValue)
@@ -7152,12 +7209,12 @@ extension AppleCatalogItemDetailView {
     }
 
     private var titlePageSynopsis: String? {
-        AppleMetadataPresentationPolicy.synopsis(catalog: item.summary, enriched: metadataDetails?.overview)
+        AppleMetadataPresentationPolicy.synopsis(catalog: item.summary, enriched: pageMetadata.details?.overview)
     }
 
     private var titlePageCapabilityChips: [String] {
-        let badges = metadataDetails?.formatBadges.isEmpty == false
-            ? metadataDetails?.formatBadges ?? []
+        let badges = pageMetadata.details?.formatBadges.isEmpty == false
+            ? pageMetadata.details?.formatBadges ?? []
             : item.formatBadges ?? []
         return AppleTitlePagePolicy.capabilityChips(formatBadges: badges)
     }
@@ -7180,7 +7237,7 @@ extension AppleCatalogItemDetailView {
 
     private var phoneEpisodesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $selectedSeason, name: seasonName)
+            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $episodeList.selectedSeason, name: seasonName)
                 .padding(.horizontal, Self.phoneInset)
             switch episodeListPresentation {
             case .loading:
@@ -7258,13 +7315,13 @@ extension AppleCatalogItemDetailView {
                             episode: episode,
                             eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
                             isWatched: watched.contains(episode.id),
-                            isSelected: selectedEpisodeID == episode.id,
+                            isSelected: episodeList.selectedEpisodeID == episode.id,
                             progress: Self.progressFraction(saved, for: episode),
                             width: cardWidth,
                             seriesBackdropURL: episodeFallbackStillURL
                         ) {
-                            selectedEpisodeID = episode.id
-                            playRequest = UUID()
+                            episodeList.selectedEpisodeID = episode.id
+                            playbackUI.request = UUID()
                         } accessory: {
                             episodeDownloadButton(episode)
                                 .font(.body)
@@ -7278,8 +7335,8 @@ extension AppleCatalogItemDetailView {
             .contentMargins(.horizontal, inset, for: .scrollContent)
             .scrollIndicators(.hidden)
             // Lands on the episode Play starts, as the Apple TV app does.
-            .task(id: "\(selectedSeason ?? -1):\(visibleEpisodes.count)") {
-                guard let target = selectedEpisodeID, target != visibleEpisodes.first?.id,
+            .task(id: "\(episodeList.selectedSeason ?? -1):\(visibleEpisodes.count)") {
+                guard let target = episodeList.selectedEpisodeID, target != visibleEpisodes.first?.id,
                       visibleEpisodes.contains(where: { $0.id == target }) else { return }
                 proxy.scrollTo(target, anchor: .leading)
             }
@@ -7297,7 +7354,7 @@ extension AppleCatalogItemDetailView {
     /// clips are left out, as the hero skips them.
     private var titlePageTrailerKeys: [String] {
         #if os(iOS) || os(macOS)
-        trailerCandidates.filter { !trailerPortraitKeys.contains($0) }
+        trailerCandidates.filter { !heroTrailer.portraitKeys.contains($0) }
         #else
         []
         #endif
@@ -7340,16 +7397,16 @@ extension AppleCatalogItemDetailView {
             // Started after the scroll, or the hero's off-screen pause
             // (the frame preference) would stop it straight away.
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
-            if index == trailerCandidateIndex, trailerHasStarted {
+            if index == heroTrailer.candidateIndex, heroTrailer.hasStarted {
                 restartTrailer()
                 return
             }
             guard prepareTrailerAudio() else { return }
-            trailerCandidateIndex = index
-            trailerHasStarted = true
+            heroTrailer.candidateIndex = index
+            heroTrailer.hasStarted = true
             withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-                trailerIsActive = true
-                trailerIsPlaying = false
+                heroTrailer.isActive = true
+                heroTrailer.isPlaying = false
             }
         }
         #endif
@@ -7358,7 +7415,7 @@ extension AppleCatalogItemDetailView {
     // MARK: Cast, About, Information, Languages
 
     private var titlePageCredits: [AppleCreditPerson] {
-        let details = metadataDetails
+        let details = pageMetadata.details
         let cast = details?.cast.isEmpty == false ? details?.cast ?? [] : item.cast ?? []
         let writers = details?.writers.isEmpty == false ? details?.writers ?? [] : item.writers ?? []
         return AppleTitlePagePolicy.credits(
@@ -7389,7 +7446,7 @@ extension AppleCatalogItemDetailView {
     }
 
     private func phoneAboutSection(_ summary: String) -> some View {
-        let genres = (metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? [])
+        let genres = (pageMetadata.details?.genres.isEmpty == false ? pageMetadata.details?.genres ?? [] : item.genres ?? [])
             .prefix(2).joined(separator: AppleBillboardCopy.separator)
         return VStack(alignment: .leading, spacing: 12) {
             AppleTitlePageSectionTitle("About")
@@ -7417,17 +7474,17 @@ extension AppleCatalogItemDetailView {
 
     private var titlePageInformation: [AppleTitlePagePolicy.Fact] {
         AppleTitlePagePolicy.information(
-            year: metadataDetails?.year ?? item.year,
+            year: pageMetadata.details?.year ?? item.year,
             releaseInfo: displayReleaseInfo,
-            contentRating: metadataDetails?.contentRating ?? item.contentRating,
-            countries: metadataDetails?.countries ?? []
+            contentRating: pageMetadata.details?.contentRating ?? item.contentRating,
+            countries: pageMetadata.details?.countries ?? []
         )
     }
 
     private var titlePageLanguages: [AppleTitlePagePolicy.Fact] {
         AppleTitlePagePolicy.languages(
-            originalLanguage: metadataDetails?.originalLanguage,
-            spokenLanguages: metadataDetails?.spokenLanguages ?? []
+            originalLanguage: pageMetadata.details?.originalLanguage,
+            spokenLanguages: pageMetadata.details?.spokenLanguages ?? []
         )
     }
 
@@ -7479,7 +7536,7 @@ extension AppleCatalogItemDetailView {
             VStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
                 if item.type == "series" {
                     macEpisodesSection(layout: layout)
-                        .id("vision-episodes")
+                        .id("vision-episodeList.episodes")
                 }
                 if !titlePageTrailerKeys.isEmpty {
                     macTrailersSection
@@ -7519,7 +7576,7 @@ extension AppleCatalogItemDetailView {
 
     private func macHero(layout: AppleTitlePageMacLayout, chips: [String]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let titlePageScheduleBadge {
+            if let titlePageScheduleBadge = pageMetadata.scheduleBadge {
                 Text(titlePageScheduleBadge)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
@@ -7560,7 +7617,7 @@ extension AppleCatalogItemDetailView {
             detailHeroFrameChanged(frame)
         }
         // From the top of the window, under the toolbar.
-        .padding(.top, -detailSafeAreaInsets.top)
+        .padding(.top, -pageGeometry.safeAreaInsets.top)
         .accessibilityElement(children: .contain)
     }
 
@@ -7574,13 +7631,13 @@ extension AppleCatalogItemDetailView {
                     url: heroArtworkURL,
                     placeholderSystemImage: "",
                     onLoad: { image in
-                        heroArtworkImage = image
-                        heroArt = heroArt.settling(with: .loaded)
+                        heroStill.image = image
+                        heroStill.art = heroStill.art.settling(with: .loaded)
                         fillTimeline.mark(.artwork)
                     },
                     onFailure: {
-                        heroArtworkImage = nil
-                        heroArt = heroArt.settling(with: .failed)
+                        heroStill.image = nil
+                        heroStill.art = heroStill.art.settling(with: .failed)
                     },
                     keepsImageWhileReloading: true,
                     fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension,
@@ -7593,12 +7650,12 @@ extension AppleCatalogItemDetailView {
             }
             .buttonStyle(.plain)
             // A key press lands here only while a trailer is up to pause.
-            .focusable(trailerHasStarted)
-            .accessibilityLabel(trailerIsActive ? "Pause trailer" : "Play trailer")
-            .accessibilityHidden(!trailerHasStarted && titlePageTrailerKeys.isEmpty)
+            .focusable(heroTrailer.hasStarted)
+            .accessibilityLabel(heroTrailer.isActive ? "Pause trailer" : "Play trailer")
+            .accessibilityHidden(!heroTrailer.hasStarted && titlePageTrailerKeys.isEmpty)
             if trailerPreviewIsShown, let embedURL = trailerEmbedURL {
-                AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: heroArtworkImage,
-                                           isPlaying: trailerIsActive, isMuted: trailerMuted,
+                AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: heroStill.image,
+                                           isPlaying: heroTrailer.isActive, isMuted: heroTrailer.muted,
                                            onStateChange: handleTrailerState)
                     // Only the frame offered, never the web view's own size
                     // (the zero-minimum lesson, 2026-09-22).
@@ -7610,15 +7667,15 @@ extension AppleCatalogItemDetailView {
             }
         }
         .overlay {
-            AppleMacHeroFadeView(videoIsShowing: trailerHasStarted && trailerIsPlaying)
+            AppleMacHeroFadeView(videoIsShowing: heroTrailer.hasStarted && heroTrailer.isPlaying)
                 .allowsHitTesting(false)
-                .animation(.easeInOut(duration: 0.6), value: trailerHasStarted && trailerIsPlaying)
+                .animation(.easeInOut(duration: 0.6), value: heroTrailer.hasStarted && heroTrailer.isPlaying)
         }
         .overlay(alignment: .topTrailing) {
             // Nothing over the art until the video is really on screen.
-            if trailerHasStarted, trailerIsPlaying {
-                AppleMacHeroMuteButton(isMuted: trailerMuted) { trailerMuted.toggle() }
-                    .padding(.top, detailSafeAreaInsets.top + AppleMacHeroLayout.muteTopInset)
+            if heroTrailer.hasStarted, heroTrailer.isPlaying {
+                AppleMacHeroMuteButton(isMuted: heroTrailer.muted) { heroTrailer.muted.toggle() }
+                    .padding(.top, pageGeometry.safeAreaInsets.top + AppleMacHeroLayout.muteTopInset)
                     .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
             }
         }
@@ -7640,9 +7697,9 @@ extension AppleCatalogItemDetailView {
                 .accessibilityAddTraits(.isHeader)
         case .logo, .hidden:
             ZStack(alignment: .bottomLeading) {
-                if case .valid = titleLogoState, let logoURL = titleLogoURL {
+                if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .bottomLeading) { loaded in
-                        titleLogoLoadResult = loaded
+                        titleWordmark.loadResult = loaded
                         if loaded { fillTimeline.mark(.wordmark) }
                     }
                     .opacity(titleLogoPresentation == .logo ? 1 : 0)
@@ -7662,7 +7719,7 @@ extension AppleCatalogItemDetailView {
     @ViewBuilder
     private var macMetadataLine: some View {
         let values = titlePageMetadataValues
-        let rating = AppleBillboardCopy.ratingBadge(metadataDetails?.contentRating ?? item.contentRating)
+        let rating = AppleBillboardCopy.ratingBadge(pageMetadata.details?.contentRating ?? item.contentRating)
         if !values.isEmpty || rating != nil {
             HStack(spacing: 8) {
                 if !values.isEmpty {
@@ -7723,13 +7780,13 @@ extension AppleCatalogItemDetailView {
             }
 
             Button(action: toggleFavorite) {
-                AppleTitlePageMacRoundLabel(title: isFavorite ? "Remove from My List" : "Add to My List",
-                                            systemImage: isFavorite ? "checkmark" : "plus")
+                AppleTitlePageMacRoundLabel(title: titleActions.isFavorite ? "Remove from My List" : "Add to My List",
+                                            systemImage: titleActions.isFavorite ? "checkmark" : "plus")
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
-            .help(isFavorite ? "Remove from My List" : "Add to My List")
-            .accessibilityValue(isFavorite ? "Saved" : "Not saved")
+            .help(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+            .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             .accessibilityIdentifier("detail.my-list")
 
             if showsDownloadAction {
@@ -7742,7 +7799,7 @@ extension AppleCatalogItemDetailView {
                     }
                 }
                 .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
-                .disabled(isPreparingMetadata || downloadCoordinator.state.isCompleted)
+                .disabled(pageMetadata.isPreparing || downloadCoordinator.state.isCompleted)
                 .help(downloadButtonLabel)
                 .accessibilityIdentifier(item.type == "series" && !visibleEpisodes.isEmpty ? "detail.download.season" : "detail.download")
                 .accessibilityLabel(downloadButtonLabel)
@@ -7809,7 +7866,7 @@ extension AppleCatalogItemDetailView {
     private func macEpisodesSection(layout: AppleTitlePageMacLayout) -> some View {
         let style = macRowStyle
         return VStack(alignment: .leading, spacing: 4) {
-            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $selectedSeason, name: seasonName)
+            AppleTitlePageSeasonPicker(seasons: seasonNumbers, selection: $episodeList.selectedSeason, name: seasonName)
                 .padding(.horizontal, layout.horizontalInset)
             switch episodeListPresentation {
             case .loading:
@@ -7844,13 +7901,13 @@ extension AppleCatalogItemDetailView {
                         episode: episode,
                         eyebrow: AppleTitlePagePolicy.episodeEyebrow(episode, now: now),
                         isWatched: watched.contains(episode.id),
-                        isSelected: selectedEpisodeID == episode.id,
+                        isSelected: episodeList.selectedEpisodeID == episode.id,
                         progress: Self.progressFraction(saved, for: episode),
                         width: style.stillWidth,
                         seriesBackdropURL: episodeFallbackStillURL
                     ) {
-                        selectedEpisodeID = episode.id
-                        playRequest = UUID()
+                        episodeList.selectedEpisodeID = episode.id
+                        playbackUI.request = UUID()
                     } accessory: {
                         episodeDownloadButton(episode)
                             .font(.body)
@@ -7899,7 +7956,7 @@ extension AppleCatalogItemDetailView {
     // MARK: About and reference
 
     private func macAboutSection(_ summary: String) -> some View {
-        let genres = (metadataDetails?.genres.isEmpty == false ? metadataDetails?.genres ?? [] : item.genres ?? [])
+        let genres = (pageMetadata.details?.genres.isEmpty == false ? pageMetadata.details?.genres ?? [] : item.genres ?? [])
             .prefix(2).joined(separator: AppleBillboardCopy.separator)
         return VStack(alignment: .leading, spacing: 12) {
             AppleTitlePageSectionTitle("About")

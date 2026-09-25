@@ -44,8 +44,9 @@ struct AppleCaptionHandoff: Equatable, Sendable {
     private(set) var wantedTrackID: Int?
     /// What the last `.nativeRendering` asked for, while `.native`.
     private(set) var renderedTrackID: Int?
-    /// A declaring reload failed. Not retried until the picture comes back,
-    /// so a session that cannot be rebuilt is not rebuilt on every tick.
+    /// A declaring reload failed (including the one retried after a failed
+    /// withdraw). Not retried until the picture comes back, so a session
+    /// that cannot be rebuilt is not rebuilt on every tick.
     private(set) var declineUntilPictureReturns = false
 
     /// Whether the app's cue layer should draw. Never while the picture is
@@ -119,10 +120,13 @@ struct AppleCaptionHandoff: Equatable, Sendable {
             renderedTrackID = wantedTrackID
             return wantedTrackID == nil ? [] : [.nativeRendering(true)]
         case .withdrawing:
-            // A failed withdraw leaves a session the engine could not
-            // rebuild; the next load starts from scratch either way.
             stage = .app
-            guard succeeded, pictureIsAway, wantedTrackID != nil else { return [] }
+            // The picture went away again mid-withdraw. Declare whether or
+            // not the withdraw worked: a failed one may have left either
+            // item attached, and only a declaring rebuild puts the viewer's
+            // captions on the receiver. That is one retry: if the declare
+            // fails too, `declineUntilPictureReturns` holds the next one.
+            guard pictureIsAway, wantedTrackID != nil, !declineUntilPictureReturns else { return [] }
             stage = .declaring
             return [.reload(declaringRenditions: true)]
         case .app, .native:
