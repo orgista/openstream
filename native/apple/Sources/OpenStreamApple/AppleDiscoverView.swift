@@ -1275,7 +1275,15 @@ struct AppleSearchView: View {
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
             }
         }
+        // Always-visible field: with Refresh in the toolbar, iPadOS folds the
+        // default placement into a second magnifier, so the Search button
+        // opened a page with nothing to type into (N35 regression sweep).
+        #if os(iOS)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search movies, shows, and channels")
+        #else
         .searchable(text: $query, prompt: "Search movies, shows, and channels")
+        #endif
         .navigationDestination(item: $routedResult) { value in
             AppleCatalogItemDetailView(
                 item: value.item,
