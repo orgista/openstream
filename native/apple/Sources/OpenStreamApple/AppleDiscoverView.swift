@@ -1140,13 +1140,16 @@ struct AppleDiscoverView: View {
         values: [IndexedCatalogItem],
         showsProgress: Bool
     ) -> some View {
+        let store = ApplePlaybackStore()
         AppleMediaShelf(title: title) {
             ForEach(values) { value in
                 NavigationLink { detail(value) } label: {
                     AppleCatalogCard(
                         item: value.item,
                         sizing: showsProgress ? .continueWatching : .featured,
-                        progress: showsProgress ? (value.record.progress ?? 0) : nil)
+                        progress: showsProgress ? (AppleContinueWatchingResolver.progress(
+                            isSeries: value.item.type == "series", saved: store.progress(for: value.record.id),
+                            recordProgress: value.record.progress) ?? 0) : nil)
                 }.accessibilityIdentifier("home.\(identifier).\(value.id)")
             }
         }

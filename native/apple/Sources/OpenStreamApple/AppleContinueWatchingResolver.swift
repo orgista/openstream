@@ -70,6 +70,25 @@ enum AppleContinueWatchingResolver {
         }
     }
 
+    /// How far along a Continue Watching card's bar is, 0...1, or nil for
+    /// none. One rule for Discover's row (both styles) and the Top Shelf.
+    ///
+    /// A series keeps one saved position, under the show, and names the
+    /// episode in `partID`; that is the episode Resume plays
+    /// (`AppleTitlePagePolicy.heroEpisode`), so the bar is that episode's,
+    /// read from the store. The record's own `progress` is only a copy made
+    /// at the last index sync, and a series entry that names no episode, or
+    /// a finished one, resumes nothing: Play starts the next episode from the
+    /// beginning, so there is no bar. A film is unchanged: its saved
+    /// position, else the record's copy.
+    static func progress(isSeries: Bool, saved: ApplePlaybackProgress?, recordProgress: Double?) -> Double? {
+        guard let saved else {
+            return isSeries ? nil : recordProgress.map { min(max($0, 0), 1) }
+        }
+        if isSeries, saved.partID == nil || saved.resumePosition == nil { return nil }
+        return AppleWatchProgress.fraction(position: saved.position, duration: saved.duration)
+    }
+
     static func resolve(_ record: AppleMediaRecord, in lookups: [AppleCatalogSearchLookup]) -> Resolution {
         if let match = lookups.lazy.compactMap({ $0.match(for: record) }).first {
             return .listed(match)

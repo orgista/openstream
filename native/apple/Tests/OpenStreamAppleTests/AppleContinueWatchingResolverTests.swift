@@ -206,6 +206,60 @@ struct AppleContinueWatchingResolverTests {
         #expect(!text.contains("metahub"))
     }
 
+    // MARK: The bar (N59)
+
+    /// A series' bar is the episode Resume plays, not the record's copy made
+    /// at the last index sync.
+    @Test func aSeriesBarIsTheSavedEpisodes() throws {
+        let saved = ApplePlaybackProgress(position: 1_200, duration: 2_400, partID: "tt0000101:1:3")
+        let value = try #require(AppleContinueWatchingResolver.progress(isSeries: true, saved: saved,
+                                                                        recordProgress: 0.0003))
+        #expect(abs(value - 0.5) < 0.0001)
+    }
+
+    /// The episode finished: the store drops the show's entry, or it names no
+    /// episode to resume. Play starts the next episode from the beginning, so
+    /// there is no bar, whatever the record's stale copy says.
+    @Test func aSeriesWithNothingToResumeHasNoBar() {
+        let finished = ApplePlaybackProgress(position: 2_390, duration: 2_400, partID: "tt0000101:1:3")
+        let unnamed = ApplePlaybackProgress(position: 1_200, duration: 2_400)
+        #expect(AppleContinueWatchingResolver.progress(isSeries: true, saved: nil, recordProgress: 0.5) == nil)
+        #expect(AppleContinueWatchingResolver.progress(isSeries: true, saved: finished, recordProgress: 0.5) == nil)
+        #expect(AppleContinueWatchingResolver.progress(isSeries: true, saved: unnamed, recordProgress: 0.5) == nil)
+    }
+
+    @Test func aFilmBarIsUnchanged() throws {
+        let saved = ApplePlaybackProgress(position: 600, duration: 2_400)
+        let value = try #require(AppleContinueWatchingResolver.progress(isSeries: false, saved: saved,
+                                                                        recordProgress: 0.1))
+        #expect(abs(value - 0.25) < 0.0001)
+        #expect(AppleContinueWatchingResolver.progress(isSeries: false, saved: nil, recordProgress: 0.4) == 0.4)
+    }
+
+    @Test func noDataHasNoBar() {
+        #expect(AppleContinueWatchingResolver.progress(isSeries: true, saved: nil, recordProgress: nil) == nil)
+        #expect(AppleContinueWatchingResolver.progress(isSeries: false, saved: nil, recordProgress: nil) == nil)
+    }
+
+    /// The Top Shelf draws the same bar as Discover when given the store.
+    @Test func theTopShelfBarFollowsTheSavedEpisode() async throws {
+        let series = record(listed, progress: 0.0003)
+        let film = record(unlisted("tt0000110", name: "Night Train"), progress: 0.4)
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-continue-bar-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
+        let saved = [series.id: ApplePlaybackProgress(position: 1_200, duration: 2_400, updatedAt: now,
+                                                      partID: "tt0000101:1:3")]
+        try await writer.write(records: [series, film], sections: sections, watchedAt: [series.id: now],
+                               savedProgress: saved, enabled: true)
+        let snapshot = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
+        let bars = Dictionary(uniqueKeysWithValues: snapshot.continueWatching.map { ($0.id, $0.progress) })
+        #expect(bars[series.id] == 0.5)
+        #expect(bars[film.id] == 0.4)
+    }
+
     // MARK: The saved backdrop
 
     @Test func aCatalogRecordSavesTheItemsBackdrop() {

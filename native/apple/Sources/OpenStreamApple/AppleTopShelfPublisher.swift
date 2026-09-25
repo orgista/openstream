@@ -35,11 +35,14 @@ public final class AppleTopShelfPublisher {
         guard digest != lastDigest else { return }
         lastDigest = digest
         var watchedAt: [String: Date] = [:]
+        var savedProgress: [String: ApplePlaybackProgress] = [:]
         for record in records where (record.progress ?? 0) > 0 {
-            if let updatedAt = playbackStore.progress(for: record.id)?.updatedAt { watchedAt[record.id] = updatedAt }
+            guard let saved = playbackStore.progress(for: record.id) else { continue }
+            watchedAt[record.id] = saved.updatedAt
+            savedProgress[record.id] = saved
         }
         try? await writer.write(records: records, sections: sections, sources: sources,
-                                watchedAt: watchedAt, enabled: enabled)
+                                watchedAt: watchedAt, savedProgress: savedProgress, enabled: enabled)
     }
 
     private static func digest(

@@ -129,11 +129,11 @@ struct AppleContinueWatchingTileInfo: Equatable {
     static func live(type: String, recordID: String, recordProgress: Double?,
                      store: ApplePlaybackStore) -> Self {
         let saved = store.progress(for: recordID)
-        let fraction = saved.map { AppleWatchProgress.fraction(position: $0.position, duration: $0.duration) }
-            ?? recordProgress ?? 0
+        let fraction = AppleContinueWatchingResolver.progress(isSeries: type == "series", saved: saved,
+                                                              recordProgress: recordProgress)
         return Self(
-            progress: fraction,
-            remainingLabel: saved.flatMap {
+            progress: fraction ?? 0,
+            remainingLabel: fraction == nil ? nil : saved.flatMap {
                 AppleContinueWatchingCaption.remainingLabel(position: $0.position, duration: $0.duration)
             },
             subtitle: AppleContinueWatchingCaption.subtitle(type: type, partID: saved?.partID)

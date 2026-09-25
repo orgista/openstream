@@ -246,11 +246,16 @@ public actor AppleTopShelfSnapshotWriter {
     ///   - watchedAt: When each record was last watched, by record id —
     ///     Continue Watching is most recent first, as on Discover. A record
     ///     missing here falls back to its `lastVerified`.
+    ///   - savedProgress: The playback store's entry for each record, by
+    ///     record id; the bar follows it as Discover's does
+    ///     (`AppleContinueWatchingResolver.progress`). Nil keeps each
+    ///     record's own `progress`.
     public func write(
         records: [AppleMediaRecord],
         sections: [AppleCatalogSection] = [],
         sources: [AppleSource]? = nil,
         watchedAt: [String: Date] = [:],
+        savedProgress: [String: ApplePlaybackProgress]? = nil,
         enabled: Bool
     ) throws {
         guard let root = containerProvider() else { return }
@@ -272,7 +277,10 @@ public actor AppleTopShelfSnapshotWriter {
             version: 1,
             generatedAt: .now,
             continueWatching: shownContinued.map { entry in
-                Self.item(entry.record, progress: entry.record.progress,
+                Self.item(entry.record, progress: savedProgress.map {
+                    AppleContinueWatchingResolver.progress(isSeries: entry.record.kind == .series,
+                        saved: $0[entry.record.id], recordProgress: entry.record.progress)
+                } ?? entry.record.progress,
                           landscapeArtworkURL: backdrops[entry.record.id] ?? Self.landscapeURL(for: entry))
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
