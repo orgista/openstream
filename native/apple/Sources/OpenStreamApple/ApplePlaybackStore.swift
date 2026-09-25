@@ -207,10 +207,13 @@ public final class ApplePlaybackStore {
     }
 
     private func entries() -> [String: ApplePlaybackProgress] {
+        // One read of the stored blob: it is compared, decoded and kept from
+        // the same value (it was read three times on a miss, N47).
         let storedData = defaults.data(forKey: key)
         if let cache, cachedData == storedData { return cache }
         let loaded: [String: ApplePlaybackProgress]
-        if let data = defaults.data(forKey: key) {
+        var keptData = storedData
+        if let data = storedData {
             let decoded = (try? JSONDecoder().decode([String: ApplePlaybackProgress].self, from: data)) ?? [:]
             var normalized: [String: ApplePlaybackProgress] = [:]
             for (mediaID, progress) in decoded {
@@ -220,13 +223,15 @@ public final class ApplePlaybackStore {
             }
             loaded = normalized
             if loaded.keys.sorted() != decoded.keys.sorted() {
-                defaults.set(try? JSONEncoder().encode(loaded), forKey: key)
+                let rewritten = try? JSONEncoder().encode(loaded)
+                defaults.set(rewritten, forKey: key)
+                keptData = rewritten
             }
         } else {
             loaded = [:]
         }
         cache = loaded
-        cachedData = defaults.data(forKey: key)
+        cachedData = keptData
         return loaded
     }
 

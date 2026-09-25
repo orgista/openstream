@@ -62,15 +62,28 @@ struct AppleWordClampedText: View {
 struct AppleWordClampLayout: Layout {
     var reservesSpace = false
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let (_, size) = choice(width: proposal.width, subviews: subviews) else { return .zero }
-        let budget = subviews[subviews.startIndex].sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+    /// The last choice per offered width. SwiftUI asks for the size more
+    /// than once per pass and again on every update of the card, and each
+    /// fresh choice measures the candidates one by one (the title page's
+    /// episode cards, ~20 ms of its open on the Mac, N47). The probe's
+    /// height is re-measured each time and keys the entry, so a new type
+    /// size or line budget never reuses an old choice.
+    struct Cache {
+        var choices: [CGFloat?: (budget: CGFloat, index: Int, size: CGSize)] = [:]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard let (_, size, budget) = choice(width: proposal.width, subviews: subviews, cache: &cache) else { return .zero }
         return CGSize(width: proposal.width ?? size.width,
                       height: reservesSpace ? max(size.height, budget.height) : size.height)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let chosen = choice(width: bounds.width, subviews: subviews)?.index
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let chosen = choice(width: bounds.width, subviews: subviews, cache: &cache)?.index
         for index in subviews.indices {
             if index == chosen {
                 subviews[index].place(at: bounds.origin, anchor: .topLeading,
@@ -82,16 +95,26 @@ struct AppleWordClampLayout: Layout {
         }
     }
 
-    private func choice(width: CGFloat?, subviews: Subviews) -> (index: Int, size: CGSize)? {
+    private func choice(width: CGFloat?, subviews: Subviews,
+                        cache: inout Cache) -> (index: Int, size: CGSize, budget: CGSize)? {
         guard subviews.count > 1 else { return nil }
         let proposal = ProposedViewSize(width: width, height: nil)
-        let budget = subviews[subviews.startIndex].sizeThatFits(proposal).height
+        let budget = subviews[subviews.startIndex].sizeThatFits(proposal)
+        if let cached = cache.choices[width], cached.budget == budget.height {
+            return (cached.index, cached.size, budget)
+        }
+        var chosen: (index: Int, size: CGSize)?
         for index in subviews.indices.dropFirst() {
             let size = subviews[index].sizeThatFits(proposal)
-            if size.height <= budget + 0.5 { return (index, size) }
+            if size.height <= budget.height + 0.5 { chosen = (index, size); break }
         }
-        let last = subviews.index(before: subviews.endIndex)
-        return (last, subviews[last].sizeThatFits(proposal))
+        if chosen == nil {
+            let last = subviews.index(before: subviews.endIndex)
+            chosen = (last, subviews[last].sizeThatFits(proposal))
+        }
+        guard let chosen else { return nil }
+        cache.choices[width] = (budget.height, chosen.index, chosen.size)
+        return (chosen.index, chosen.size, budget)
     }
 }
 

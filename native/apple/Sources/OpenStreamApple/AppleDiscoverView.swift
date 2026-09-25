@@ -371,6 +371,7 @@ struct AppleDiscoverView: View {
                 }
                 visionReviewAutoPlay = screen == "play"
                 visionReviewDetailOpened = true
+                AppleTitlePageOpenProbe.pushed("first")
                 visionReviewDetail = true
                 // `OpenStreamDetailReopen N` pops the page after 6 s and pushes
                 // it again, N times, so a trace sees repeat opens as well as
@@ -384,6 +385,7 @@ struct AppleDiscoverView: View {
                             visionReviewDetail = false
                             try? await Task.sleep(for: .seconds(3))
                             appleTrace("detail reopen")
+                            AppleTitlePageOpenProbe.pushed("reopen")
                             visionReviewDetail = true
                         }
                     }
@@ -2210,14 +2212,23 @@ struct AppleCatalogItemDetailView: View {
                     }
                 }
             }
+            .onAppear { AppleTitlePageOpenProbe.appeared() }
             // `OpenStreamDetailScrollY` scrolls the title page this far once
             // it has filled, so a headless sweep can photograph each section.
             .task {
                 let scrollY = UserDefaults.standard.double(forKey: "OpenStreamDetailScrollY")
                 guard scrollY > 0 else { return }
                 try? await Task.sleep(for: .seconds(6))
-                guard !Task.isCancelled else { return }
-                detailScrollPosition.scrollTo(y: scrollY)
+                // A screen at a time, as a viewer scrolls: the sections below
+                // the hero are built as they come into view (N47), and one
+                // jump past unbuilt ones lands on their estimated heights.
+                var y = 0.0
+                while y < scrollY {
+                    guard !Task.isCancelled else { return }
+                    y = min(scrollY, y + 500)
+                    detailScrollPosition.scrollTo(y: y)
+                    try? await Task.sleep(for: .milliseconds(400))
+                }
             }
             #else
             detailContent
@@ -6697,15 +6708,24 @@ enum AppleTitleMetadataPresentation {
         let cleanValue = clean(value)
         guard !cleanValue.isEmpty else { return nil }
         let day = String(cleanValue.prefix(10))
+        guard let date = releaseDayFormatter.date(from: day), releaseDayFormatter.string(from: date) == day else {
+            return AppleReleaseYearText.display(cleanValue)
+        }
+        return releaseDisplayFormatter.string(from: date)
+    }
+
+    // Built once: the title page's meta line asks on every redraw, and a
+    // DateFormatter is expensive to make (N47). Neither is changed after
+    // this, and formatting from several threads is safe.
+    nonisolated(unsafe) private static let releaseDayFormatter = releaseFormatter("yyyy-MM-dd")
+    nonisolated(unsafe) private static let releaseDisplayFormatter = releaseFormatter("MMM d, yyyy")
+
+    private static func releaseFormatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: day), formatter.string(from: date) == day else {
-            return AppleReleaseYearText.display(cleanValue)
-        }
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter.string(from: date)
+        formatter.dateFormat = format
+        return formatter
     }
 
     private static func clean(_ value: String) -> String {
@@ -6878,44 +6898,48 @@ extension AppleCatalogItemDetailView {
             phoneHero
             phoneHeroFooter(chips: chips)
                 .padding(.horizontal, Self.phoneInset)
-            if item.type == "series" {
-                phoneEpisodesSection
-                    .id("vision-episodes")
-                    .padding(.top, Self.phoneSectionSpacing - 8)
-            }
-            if !titlePageTrailerKeys.isEmpty {
-                phoneTrailersSection
-                    .padding(.top, Self.phoneSectionSpacing)
-            }
-            if !suggestedItems.isEmpty {
-                moreLikeThisSection(title: "Related")
-                    .padding(.top, Self.phoneSectionSpacing - 8)
-            }
-            if !credits.isEmpty {
-                phoneCastSection(credits)
-                    .padding(.top, Self.phoneSectionSpacing - 8)
-            }
-            if let summary = titlePageSynopsis {
-                phoneAboutSection(summary)
-                    .padding(.top, Self.phoneSectionSpacing)
-            }
-            if !information.isEmpty {
-                phoneFactSection("Information", facts: information, identifier: "detail.information")
-                    .padding(.top, Self.phoneSectionSpacing)
-            }
-            if !languages.isEmpty {
-                phoneFactSection("Languages", facts: languages, identifier: "detail.languages")
-                    .padding(.top, Self.phoneSectionSpacing)
-            }
-            if !glossary.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    AppleTitlePageSectionTitle("Accessibility")
-                    AppleTitlePageAccessibilityGlossary(entries: glossary)
+            // Lazy: the push builds only the sections on screen; the rest
+            // are built as they scroll in, as Discover's shelves are (N47).
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if item.type == "series" {
+                    phoneEpisodesSection
+                        .id("vision-episodes")
+                        .padding(.top, Self.phoneSectionSpacing - 8)
                 }
-                .padding(.horizontal, Self.phoneInset)
-                .padding(.top, Self.phoneSectionSpacing)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("detail.accessibility")
+                if !titlePageTrailerKeys.isEmpty {
+                    phoneTrailersSection
+                        .padding(.top, Self.phoneSectionSpacing)
+                }
+                if !suggestedItems.isEmpty {
+                    moreLikeThisSection(title: "Related")
+                        .padding(.top, Self.phoneSectionSpacing - 8)
+                }
+                if !credits.isEmpty {
+                    phoneCastSection(credits)
+                        .padding(.top, Self.phoneSectionSpacing - 8)
+                }
+                if let summary = titlePageSynopsis {
+                    phoneAboutSection(summary)
+                        .padding(.top, Self.phoneSectionSpacing)
+                }
+                if !information.isEmpty {
+                    phoneFactSection("Information", facts: information, identifier: "detail.information")
+                        .padding(.top, Self.phoneSectionSpacing)
+                }
+                if !languages.isEmpty {
+                    phoneFactSection("Languages", facts: languages, identifier: "detail.languages")
+                        .padding(.top, Self.phoneSectionSpacing)
+                }
+                if !glossary.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        AppleTitlePageSectionTitle("Accessibility")
+                        AppleTitlePageAccessibilityGlossary(entries: glossary)
+                    }
+                    .padding(.horizontal, Self.phoneInset)
+                    .padding(.top, Self.phoneSectionSpacing)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("detail.accessibility")
+                }
             }
         }
         .padding(.bottom, 24)
@@ -7609,7 +7633,10 @@ extension AppleCatalogItemDetailView {
         let reference = macReferenceBlocks(chips: chips)
         return VStack(alignment: .leading, spacing: 0) {
             macHero(layout: layout, chips: chips)
-            VStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
+            // Lazy: the push builds only the sections on screen (the
+            // episodes under a series' hero); the rest are built as they
+            // scroll in, as Discover's shelves are (N47).
+            LazyVStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
                 if item.type == "series" {
                     macEpisodesSection(layout: layout)
                         .id("vision-episodes")
