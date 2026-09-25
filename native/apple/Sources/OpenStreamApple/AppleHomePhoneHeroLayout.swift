@@ -73,6 +73,17 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
         return min(max((copyTop - fadeLine) / (fadeStart - fadeLine), 0), 1)
     }
 
+    /// The copy's top on the screen's scale, which `restingTop` and `fadeLine`
+    /// use, from its place in the scroll view. The `.scrollView` space starts
+    /// under the bars, at the top content inset, not at the top of the screen:
+    /// measured on the iPhone (N49), the copy at rest read exactly `topInset`
+    /// points higher than it sits. Compared as it was, the fade ended that far
+    /// below the bar, and at Accessibility XL, where the copy rests close to
+    /// the bar, it started out fully faded: no title, no Play.
+    public static func screenTop(scrollViewMinY: CGFloat, topInset: CGFloat) -> CGFloat {
+        scrollViewMinY + topInset
+    }
+
     /// Whether the copy has faded all the way out (`copyOpacity` is zero):
     /// its buttons then take no taps and leave the accessibility tree, as
     /// they would once scrolled under the bar.

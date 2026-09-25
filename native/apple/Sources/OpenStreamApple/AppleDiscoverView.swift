@@ -1936,15 +1936,11 @@ struct AppleCatalogCard: View {
         }
         .contentShape(Rectangle())
         .foregroundStyle(.primary)
-        #if os(tvOS)
-        // A poster draws no title on Apple TV, and a combined element with
-        // no text of its own left the link without a name (blank label on
-        // every Discover and Library poster, N41 survey). The Top 10 card
-        // names itself the same way.
-        .accessibilityElement(children: .ignore)
-        #else
-        .accessibilityElement(children: .combine)
-        #endif
+        // A combined element with no text of its own left the link without a
+        // name: every Apple TV poster (N41) and the iPad's full-height
+        // Featured posters (N49) had a blank VoiceOver label.
+        .accessibilityElement(children: AppleCatalogCardAccessibility.namesItself(drawsTitle: showsTitle)
+            ? .ignore : .combine)
         .accessibilityLabel(item.name)
         .accessibilityValue(item.releaseInfo ?? "")
         .appleHoverAffordance()

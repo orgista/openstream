@@ -77,6 +77,20 @@ import Testing
     }
 }
 
+/// At the accessibility sizes the hero's buttons stack, and the tablet's
+/// fixed pill broke "Resume S1, E2" and "Details" inside the word on the
+/// iPad at AX XL (N49). Stacked, they take the column like the phone's.
+@Test(arguments: [390.0, 834.0, 1_024.0])
+func featuredHeroActionsFillTheColumnAtAccessibilitySizes(width: Double) {
+    #expect(AppleFeaturedActions.buttonMaxWidth(portraitViewportWidth: width, isAccessibilitySize: true) == .infinity)
+}
+
+@Test func featuredHeroActionsKeepTheTabletPillAtStandardSizes() {
+    #expect(AppleFeaturedActions.buttonMaxWidth(portraitViewportWidth: 834, isAccessibilitySize: false)
+        == AppleDetailMetrics.portraitIPadActionButtonWidth)
+    #expect(AppleFeaturedActions.buttonMaxWidth(portraitViewportWidth: 390, isAccessibilitySize: false) == .infinity)
+}
+
 /// The detail page's content column in portrait used to be the *action row*
 /// width. That is right on a phone by coincidence and wrong on a tablet: the
 /// review iPad squeezed the synopsis, the Episodes header and every episode row

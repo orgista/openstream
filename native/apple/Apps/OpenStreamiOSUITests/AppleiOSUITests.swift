@@ -3735,4 +3735,235 @@ final class AppleiOSUITests: XCTestCase {
         }
         return scene
     }
+
+    // MARK: - Parity survey (N49)
+
+    /// Opt-in walk through Discover, a title page, Search, Library, Live and
+    /// Settings, for comparing the iPhone and iPad app against the Apple TV
+    /// app — the iOS twin of the tvOS `testParitySurveyWalk` (N41). It saves a
+    /// frame per step and logs what VoiceOver would read for every button on
+    /// screen, with its frame. Navigation only: it scrolls, opens a title page
+    /// and goes back, switches tabs, opens a ⋯ menu and dismisses it, and runs
+    /// Discover, Library and Settings again at Accessibility XL. It never
+    /// presses Play, Download, My List, Rate, Refresh or any setting.
+    func testParitySurveyWalk() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_PARITY_SURVEY"] == "1" else {
+            throw XCTSkip("Set OPENSTREAM_PARITY_SURVEY=1 to walk the screens for a parity survey.")
+        }
+        continueAfterFailure = true
+        executionTimeAllowance = 3600
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let idiom = isPad ? "ipad" : "iphone"
+        let folder = env["OPENSTREAM_PARITY_SURVEY_DIR"].map(URL.init(fileURLWithPath:))
+        var frameIndex = 0
+        func shoot(_ step: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            frameIndex += 1
+            let name = String(format: "%@-%02d-%@", idiom, frameIndex, step)
+            if let folder {
+                try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent(name + ".png"))
+            }
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        // One snapshot per step is far quicker than asking each element in
+        // turn. Buttons with no label are the ones VoiceOver reads as nothing.
+        func inventory(_ step: String) {
+            guard let root = try? app.snapshot() else { return print("SURVEY \(idiom) \(step): no snapshot") }
+            let screen = app.frame
+            var lines: [String] = []
+            var unnamed = 0
+            let surveyedTypes: Set<XCUIElement.ElementType> = [.button, .staticText, .link, .cell, .image]
+            func visit(_ node: XCUIElementSnapshot) {
+                let frame = node.frame
+                let onScreen = frame.width >= 1 && frame.height >= 1
+                    && screen.contains(CGPoint(x: frame.midX, y: frame.midY))
+                if onScreen, surveyedTypes.contains(node.elementType)
+                    || (node.elementType == .other && node.identifier.hasPrefix("home.")) {
+                    let label = node.label.contains("://") ? "[URL]" : String(node.label.prefix(70))
+                    if node.elementType == .button, label.isEmpty { unnamed += 1 }
+                    lines.append("\(node.elementType.rawValue)|\(node.identifier)|\(label)|"
+                                 + "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+                }
+                node.children.forEach(visit)
+            }
+            visit(root)
+            print("SURVEY \(idiom) \(step): \(lines.count) elements, \(unnamed) unnamed buttons")
+            for line in lines.prefix(120) { print("SURVEY-EL \(idiom) \(step) \(line)") }
+        }
+        func step(_ name: String, wait: TimeInterval = 1.5) {
+            Thread.sleep(forTimeInterval: wait)
+            shoot(name)
+            inventory(name)
+        }
+        func scrollUp(_ from: CGFloat = 0.8, to: CGFloat = 0.35) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        func relaunch(_ screen: String?, extra: [String] = [], settle: TimeInterval) {
+            app.terminate()
+            app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+            app.launchArguments = ["-OpenStreamTrace", "YES", "-openstream.settings.trailer.autoplay.v1", "NO"] + extra
+            if let screen { app.launchArguments += ["-OpenStreamVisionScreen", screen] }
+            app.launch()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+            Thread.sleep(forTimeInterval: settle)
+        }
+        // A menu is closed by its own dismiss region; failing that, a press
+        // in the status bar, where no control of ours lives.
+        func dismissMenu() {
+            if !tapIfPossible(app.otherElements["PopoverDismissRegion"].firstMatch) {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.012)).tap()
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        func back() {
+            if !tapIfPossible(app.buttons["detail.back"].firstMatch) {
+                _ = tapIfPossible(app.navigationBars.buttons["BackButton"].firstMatch)
+                    || tapIfPossible(app.navigationBars.buttons.firstMatch)
+            }
+        }
+        // iPadOS draws the tab bar at the top, and XCTest does not report it
+        // as a tab bar: there it is the named button in the top strip.
+        func tab(_ title: String) -> Bool {
+            if tapIfPossible(app.tabBars.buttons[title].firstMatch) { return true }
+            let top = app.buttons.matching(NSPredicate(format: "label == %@", title)).allElementsBoundByIndex
+                .first { isSafelyHittable($0) && $0.frame.maxY < 100 }
+            guard let top else { return false }
+            top.tap()
+            return true
+        }
+        func firstHittable(_ prefix: String) -> XCUIElement? {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
+                .allElementsBoundByIndex.prefix(40).first { isSafelyHittable($0) }
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+
+        // Discover, top to bottom; Continue Watching scrolled sideways and its ⋯ menu opened.
+        relaunch(nil, settle: 22)
+        step("discover-top", wait: 0)
+        var sawContinue = false
+        for index in 1 ... 8 {
+            scrollUp()
+            step("discover-scroll-\(index)")
+            if !sawContinue, let card = firstHittable("home.continue.") {
+                sawContinue = true
+                card.swipeLeft()
+                step("discover-continue-swiped")
+                let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "More for "))
+                    .allElementsBoundByIndex.prefix(12).first { isSafelyHittable($0) }
+                if let more {
+                    more.tap()
+                    step("discover-continue-menu", wait: 1.2)
+                    dismissMenu()
+                    step("discover-continue-menu-dismissed", wait: 0.5)
+                }
+            }
+        }
+
+        // A catalog poster opened, its page scrolled, then Back.
+        relaunch(nil, settle: 22)
+        var poster = firstHittable("home.media.")
+        for _ in 0 ..< 4 where poster == nil {
+            scrollUp()
+            Thread.sleep(forTimeInterval: 1.2)
+            poster = firstHittable("home.media.")
+        }
+        if let poster {
+            poster.tap()
+            let page = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+            if page.waitForExistence(timeout: 30) {
+                step("title-top", wait: 6)
+                for index in 1 ... 4 {
+                    scrollUp()
+                    step("title-scroll-\(index)")
+                }
+                back()
+                step("title-back", wait: 2)
+            } else {
+                print("SURVEY \(idiom): the poster opened no title page")
+            }
+        }
+
+        // The debug routes' own series and movie pages, top and one scroll.
+        for route in ["detail", "detail-movie"] {
+            relaunch(route, settle: 4)
+            let page = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+            guard page.waitForExistence(timeout: 60) else { continue }
+            step("\(route)-top", wait: 8)
+            scrollUp()
+            step("\(route)-scroll-1")
+            let season = app.buttons["detail.season"].firstMatch
+            if route == "detail", tapIfPossible(season) {
+                step("detail-season-menu", wait: 1.2)
+                dismissMenu()
+            }
+        }
+
+        // Search from the Discover toolbar: empty, then a query (nothing is stored).
+        relaunch(nil, settle: 16)
+        if tapIfPossible(app.buttons["Search"].firstMatch) {
+            step("search-empty", wait: 2)
+            let field = app.searchFields.firstMatch
+            if field.waitForExistence(timeout: 10) {
+                field.tap()
+                field.typeText("star")
+                step("search-results", wait: 8)
+                app.swipeUp()
+                step("search-results-scroll")
+            }
+        }
+
+        // Library, Live and Settings through the tab bar.
+        relaunch(nil, settle: 12)
+        if tab("Library") {
+            step("library-top", wait: 8)
+            for index in 1 ... 3 {
+                scrollUp()
+                step("library-scroll-\(index)")
+            }
+        }
+        if tab("Live") {
+            step("live-top", wait: 12)
+            scrollUp()
+            step("live-scroll-1")
+        }
+        if tab("Settings") {
+            step("settings-top", wait: 3)
+            scrollUp()
+            step("settings-scroll-1")
+        }
+        if tab("Discover") { step("discover-return", wait: 3) }
+
+        // Dynamic Type at Accessibility XL on three screens.
+        let accessibilityXL = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+        for route in ["discover", "library", "settings"] {
+            relaunch(route, extra: accessibilityXL, settle: route == "discover" ? 22 : 10)
+            step("axxl-\(route)-top", wait: 0)
+            scrollUp()
+            step("axxl-\(route)-scroll-1")
+            scrollUp()
+            step("axxl-\(route)-scroll-2")
+        }
+
+        // iPad in landscape: the two poster screens.
+        if isPad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            for route in ["discover", "library"] {
+                relaunch(route, settle: route == "discover" ? 22 : 10)
+                step("landscape-\(route)-top", wait: 0)
+                scrollUp()
+                step("landscape-\(route)-scroll-1")
+            }
+            XCUIDevice.shared.orientation = .portrait
+        }
+        app.terminate()
+    }
 }

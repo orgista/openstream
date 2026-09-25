@@ -287,3 +287,38 @@ struct AppleHomePhoneHeroLayoutTests {
         #expect(flags == [false, false, true, true, true, false, false])
     }
 }
+
+/// N49: the copy was read from the `.scrollView` space, which starts under
+/// the bars, and compared with a resting top and a fade line on the screen's
+/// scale. The numbers are the iPhone 16 Pro's, measured at rest.
+@Suite("iPhone hero copy fade, measured")
+struct AppleHomePhoneHeroCopyFadeScaleTests {
+    let topInset: CGFloat = 116
+
+    private func restingOpacity(scrollViewMinY: CGFloat, restingTop: CGFloat) -> CGFloat {
+        AppleHomePhoneHeroLayout.copyOpacity(
+            copyTop: AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: scrollViewMinY, topInset: topInset),
+            restingTop: restingTop, fadeLine: topInset)
+    }
+
+    /// At Accessibility XL the copy rests 42 pt below the bar; it used to
+    /// open fully faded — no title and no Play on Discover.
+    @Test func theCopyShowsAtRestAtAccessibilityXL() {
+        #expect(restingOpacity(scrollViewMinY: 42.02, restingTop: 158.02) == 1)
+        let top = AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: 42.02, topInset: topInset)
+        #expect(AppleHomePhoneHeroLayout.copyIsHidden(copyTop: top, restingTop: 158.02, fadeLine: topInset) == false)
+    }
+
+    @Test func theCopyShowsAtRestAtTheStandardSize() {
+        #expect(restingOpacity(scrollViewMinY: 246.02, restingTop: 362.02) == 1)
+    }
+
+    /// Scrolled up until its top meets the bottom of the bar, the copy is
+    /// gone — at the bar, not a bar's height below it.
+    @Test func theCopyIsGoneExactlyAtTheBar() {
+        let atTheBar = AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: 0, topInset: topInset)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: atTheBar, restingTop: 362.02, fadeLine: topInset) == 0)
+        let aBarBelow = AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: topInset, topInset: topInset)
+        #expect(AppleHomePhoneHeroLayout.copyOpacity(copyTop: aBarBelow, restingTop: 362.02, fadeLine: topInset) > 0.9)
+    }
+}

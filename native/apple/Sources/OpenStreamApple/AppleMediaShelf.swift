@@ -353,10 +353,8 @@ struct AppleFeaturedActions: View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
-        // `nil` on the phone, where filling half the column is the right pill;
-        // a fixed width on a tablet in portrait, where it was not.
-        let buttonWidth = AppleDetailMetrics
-            .featuredActionButtonWidth(portraitViewportWidth: viewportSize.width) ?? .infinity
+        let buttonWidth = Self.buttonMaxWidth(portraitViewportWidth: viewportSize.width,
+                                              isAccessibilitySize: dynamicTypeSize.isAccessibilitySize)
         layout {
             Button(action: onPlay) {
                 AppleHeroPrimaryButtonLabel(button: button)
@@ -378,6 +376,16 @@ struct AppleFeaturedActions: View {
         .controlSize(.large)
         .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The widest a portrait hero button may grow. Unbounded on the phone,
+    /// where filling half the column is the right pill; a fixed width on a
+    /// tablet, where it was not — except at the accessibility sizes, where
+    /// the buttons are stacked and the fixed width broke "Resume" and
+    /// "Details" in the middle of the word (N49, iPad at AX XL).
+    static func buttonMaxWidth(portraitViewportWidth width: CGFloat, isAccessibilitySize: Bool) -> CGFloat {
+        guard !isAccessibilitySize else { return .infinity }
+        return AppleDetailMetrics.featuredActionButtonWidth(portraitViewportWidth: width) ?? .infinity
     }
     #endif
 

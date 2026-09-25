@@ -80,7 +80,8 @@ struct AppleHomePhoneHero<Actions: View>: View {
         .accessibilityHidden(copyHidden)
         .onGeometryChange(for: Bool.self) { [copyFadeLine, space = Self.coordinateSpaceName] proxy in
             AppleHomePhoneHeroLayout.copyIsHidden(
-                copyTop: proxy.frame(in: .scrollView).minY,
+                copyTop: AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: proxy.frame(in: .scrollView).minY,
+                                                            topInset: copyFadeLine),
                 restingTop: proxy.frame(in: .named(space)).minY,
                 fadeLine: copyFadeLine)
         } action: { hidden in
@@ -92,7 +93,8 @@ struct AppleHomePhoneHero<Actions: View>: View {
         // rests on screen before any scroll.
         .visualEffect { [copyFadeLine, space = Self.coordinateSpaceName] content, proxy in
             content.opacity(AppleHomePhoneHeroLayout.copyOpacity(
-                copyTop: proxy.frame(in: .scrollView).minY,
+                copyTop: AppleHomePhoneHeroLayout.screenTop(scrollViewMinY: proxy.frame(in: .scrollView).minY,
+                                                            topInset: copyFadeLine),
                 restingTop: proxy.frame(in: .named(space)).minY,
                 fadeLine: copyFadeLine))
         }
