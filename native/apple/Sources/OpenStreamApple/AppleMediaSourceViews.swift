@@ -165,7 +165,7 @@ struct AppleLiveTVView: View {
                 }
 
                 let guideColumn = VStack(spacing: 0) {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    ScrollView(.horizontal) {
                         HStack(spacing: AppleDesignTokens.spacingLarge) {
                             ForEach(channelSnapshot.categories, id: \.self) { category in
                                 Button { selectedCategory = category } label: {
@@ -191,7 +191,7 @@ struct AppleLiveTVView: View {
                         }
                         .padding(.horizontal, AppleDesignTokens.spacingMedium)
                     }
-                    .scrollIndicators(.hidden)
+                    .scrollIndicators(.never)
 
                     // One line, only when the cap kept channels off the guide.
                     // Not an explainer: the count is the whole message, and the

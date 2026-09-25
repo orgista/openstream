@@ -2,6 +2,7 @@ import Foundation
 import MediaAccessibility
 import Observation
 import Security
+import Synchronization
 #if os(iOS) || os(tvOS)
 import UIKit
 #endif
@@ -175,16 +176,15 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
 
 /// A test run's keychain: one dictionary per process, keyed by service and
 /// account (see `AppleKeychainStore.testMemory`).
-final class AppleKeychainTestMemory: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [String: String] = [:]
+final class AppleKeychainTestMemory: Sendable {
+    private let items = Mutex<[String: String]>([:])
 
     func value(service: String, account: String) -> String? {
-        lock.withLock { items[service + "\u{0}" + account] }
+        items.withLock { $0[service + "\u{0}" + account] }
     }
 
     func set(_ value: String?, service: String, account: String) {
-        lock.withLock { items[service + "\u{0}" + account] = value }
+        items.withLock { $0[service + "\u{0}" + account] = value }
     }
 }
 

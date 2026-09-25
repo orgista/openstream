@@ -1806,18 +1806,18 @@ struct AppleCatalogCard: View {
                 .clipShape(.rect(cornerRadius: cornerRadius))
                 .overlay(alignment: .bottom) {
                     if !usesRowStyle, let progress {
-                        GeometryReader { geometry in
-                            Capsule()
-                                .fill(.white.opacity(0.3))
-                                .overlay(alignment: .leading) {
-                                    Capsule()
-                                        .fill(.white)
-                                        .frame(width: geometry.size.width * min(max(progress, 0), 1))
-                                }
-                        }
-                        .frame(height: 3)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                        // The artwork is framed at `cardWidth`, so the bar
+                        // needs no GeometryReader to learn its width.
+                        Capsule()
+                            .fill(.white.opacity(0.3))
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(.white)
+                                    .frame(width: cardWidth * min(max(progress, 0), 1))
+                            }
+                            .frame(height: 3)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
@@ -2570,13 +2570,6 @@ struct AppleCatalogItemDetailView: View {
         .task(id: "similar:\(item.id):\(relatedItems.count):\(metadataDetails?.mediaID ?? "")") {
             await refreshSuggestions()
         }
-        .onPreferenceChange(AppleDetailHeroFramePreferenceKey.self) { frame in
-            #if os(iOS) || os(macOS)
-            // Rotation can briefly report a stale frame. Stop only after the
-            // hero has actually scrolled above the viewport.
-            if frame != .zero, frame.maxY <= 0, trailerIsActive { pauseTrailerPreview() }
-            #endif
-        }
         .onChange(of: scenePhase) { _, phase in
             guard phase != .active else { return }
             pauseTrailerPreview()
@@ -2712,13 +2705,12 @@ struct AppleCatalogItemDetailView: View {
         .frame(height: heroHeight)
         .background(.black)
         .clipped()
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: AppleDetailHeroFramePreferenceKey.self,
-                    value: proxy.frame(in: .named("detail-scroll"))
-                )
-            }
+        // Where the hero sits in the page, read without a GeometryReader
+        // in the tree or a preference climbing it on every scroll frame.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("detail-scroll"))
+        } action: { frame in
+            detailHeroFrameChanged(frame)
         }
         .accessibilityElement(children: .contain)
     }
@@ -3637,6 +3629,14 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    private func detailHeroFrameChanged(_ frame: CGRect) {
+        #if os(iOS) || os(macOS)
+        // Rotation can briefly report a stale frame. Stop only after the
+        // hero has actually scrolled above the viewport.
+        if frame != .zero, frame.maxY <= 0, trailerIsActive { pauseTrailerPreview() }
+        #endif
+    }
+
     private func prepareTrailerAudio() -> Bool {
         #if os(iOS) || os(visionOS)
         ApplePlaybackSessionPolicy.prepareTrailerAudio()
@@ -4508,7 +4508,7 @@ struct AppleCatalogItemDetailView: View {
                 .padding(.leading, detailHorizontalInset)
                 .accessibilityAddTraits(.isHeader)
 
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: isLandscapeRegularLayout || horizontalSizeClass == .regular ? 10 : 8) {
                     suggestedCards()
                 }
@@ -4517,7 +4517,7 @@ struct AppleCatalogItemDetailView: View {
                 // last one runs off the edge, which is what says "keep scrolling".
                 .padding(.leading, detailHorizontalInset)
             }
-            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+            .scrollIndicators(.never)
         }
         .accessibilityIdentifier("detail.more-like-this")
     }
@@ -6578,14 +6578,6 @@ struct AppleFormatBadge: View {
     }
 }
 
-private struct AppleDetailHeroFramePreferenceKey: PreferenceKey {
-    static let defaultValue = CGRect.zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
-
 struct AppleStremioPlayerPresentationModifier: ViewModifier {
     @Binding var presentation: AppleStremioPlayerPresentation?
 
@@ -6764,13 +6756,12 @@ extension AppleCatalogItemDetailView {
                 .clipped()
         }
         .background(.black)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: AppleDetailHeroFramePreferenceKey.self,
-                    value: proxy.frame(in: .named("detail-scroll"))
-                )
-            }
+        // Where the hero sits in the page, read without a GeometryReader
+        // in the tree or a preference climbing it on every scroll frame.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("detail-scroll"))
+        } action: { frame in
+            detailHeroFrameChanged(frame)
         }
         // With the navigation bar hidden, the art runs up under the status bar.
         .padding(.top, -detailSafeAreaInsets.top)
@@ -7490,13 +7481,12 @@ extension AppleCatalogItemDetailView {
                 .clipped()
         }
         .background(.black)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: AppleDetailHeroFramePreferenceKey.self,
-                    value: proxy.frame(in: .named("detail-scroll"))
-                )
-            }
+        // Where the hero sits in the page, read without a GeometryReader
+        // in the tree or a preference climbing it on every scroll frame.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("detail-scroll"))
+        } action: { frame in
+            detailHeroFrameChanged(frame)
         }
         // From the top of the window, under the toolbar.
         .padding(.top, -detailSafeAreaInsets.top)

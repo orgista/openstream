@@ -96,11 +96,11 @@ struct AppleMacRail<Content: View>: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 content
                     .background(alignment: .leading) { anchors }
             }
-            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+            .scrollIndicators(.never)
             .buttonStyle(.plain)
             .onScrollGeometryChange(for: AppleRailPaging.Geometry.self) { scroll in
                 AppleRailPaging.Geometry(offset: scroll.contentOffset.x, contentWidth: scroll.contentSize.width,
@@ -148,11 +148,31 @@ struct AppleMacRail<Content: View>: View {
     private func pageButton(forward: Bool, proxy: ScrollViewProxy) -> some View {
         let canPage = forward ? AppleRailPaging.canPageForward(geometry) : AppleRailPaging.canPageBack(geometry)
         if showsButtons && canPage {
-            Button {
-                page(forward: forward, proxy: proxy)
-            } label: {
-                Image(systemName: forward ? "chevron.right" : "chevron.left")
-                    .font(.title2.weight(.semibold))
+            pageButtonBody(forward: forward) { page(forward: forward, proxy: proxy) }
+            // The tiles are the keyboard path through a rail; moving focus
+            // scrolls it. These are the pointer's.
+            .focusable(false)
+            .padding(.horizontal, 10)
+            .accessibilityLabel(forward ? "Next" : "Previous")
+            .transition(.opacity)
+        }
+    }
+
+    /// A glass circle on macOS 26+, as the Tahoe Apple TV app draws its shelf
+    /// arrows; the dark disc over a material before that.
+    @ViewBuilder
+    private func pageButtonBody(forward: Bool, action: @escaping () -> Void) -> some View {
+        let chevron = Image(systemName: forward ? "chevron.right" : "chevron.left")
+            .font(.title2.weight(.semibold))
+        if #available(macOS 26, *) {
+            Button(action: action) {
+                chevron.frame(width: 32, height: 32)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+        } else {
+            Button(action: action) {
+                chevron
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(.black.opacity(0.55), in: .circle)
@@ -161,12 +181,6 @@ struct AppleMacRail<Content: View>: View {
                     .contentShape(.circle)
             }
             .buttonStyle(.plain)
-            // The tiles are the keyboard path through a rail; moving focus
-            // scrolls it. These are the pointer's.
-            .focusable(false)
-            .padding(.horizontal, 10)
-            .accessibilityLabel(forward ? "Next" : "Previous")
-            .transition(.opacity)
         }
     }
 

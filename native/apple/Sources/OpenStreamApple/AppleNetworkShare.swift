@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Synchronization
 
 #if canImport(Darwin)
 import Darwin
@@ -936,52 +937,52 @@ private final class AppleSMBBonjourResolver: NSObject, NetServiceDelegate, @unch
     }
 }
 
-private final class AppleSMBDiscoveryCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [NWEndpoint] = []
-    private var ready = false
-    private var denied = false
-    var isReady: Bool { lock.withLock { ready } }
-    var permissionDenied: Bool { lock.withLock { denied } }
+private final class AppleSMBDiscoveryCollector: Sendable {
+    private struct State {
+        var endpoints: [NWEndpoint] = []
+        var ready = false
+        var denied = false
+    }
 
-    func record(_ state: NWBrowser.State) {
-        lock.withLock {
-            switch state {
-            case .ready: ready = true
+    private let state = Mutex(State())
+    var isReady: Bool { state.withLock { $0.ready } }
+    var permissionDenied: Bool { state.withLock { $0.denied } }
+
+    func record(_ browserState: NWBrowser.State) {
+        state.withLock { state in
+            switch browserState {
+            case .ready: state.ready = true
             case .waiting(let error), .failed(let error):
                 // dns_sd.h: kDNSServiceErr_PolicyDenied, local-network privacy.
-                if case .dns(let code) = error, code == -65570 { denied = true }
+                if case .dns(let code) = error, code == -65570 { state.denied = true }
             default: break
             }
         }
     }
 
-    var endpoints: [NWEndpoint] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storage
-    }
+    var endpoints: [NWEndpoint] { state.withLock { $0.endpoints } }
 
     func replace(with values: [NWEndpoint]) {
-        lock.lock()
-        storage = values
-        lock.unlock()
+        state.withLock { $0.endpoints = values }
     }
 }
 
-private final class AppleSMBResolutionState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var currentIsReady = false
-    private var currentFailed = false
+private final class AppleSMBResolutionState: Sendable {
+    private struct State {
+        var ready = false
+        var failed = false
+    }
 
-    var ready: Bool { lock.withLock { currentIsReady } }
-    var failed: Bool { lock.withLock { currentFailed } }
+    private let state = Mutex(State())
 
-    func record(_ state: NWConnection.State) {
-        lock.withLock {
-            if case .ready = state { currentIsReady = true }
-            if case .failed = state { currentFailed = true }
-            if case .cancelled = state { currentFailed = true }
+    var ready: Bool { state.withLock { $0.ready } }
+    var failed: Bool { state.withLock { $0.failed } }
+
+    func record(_ connectionState: NWConnection.State) {
+        state.withLock { state in
+            if case .ready = connectionState { state.ready = true }
+            if case .failed = connectionState { state.failed = true }
+            if case .cancelled = connectionState { state.failed = true }
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 enum AppleBoundedHTTPError: Swift.Error, Equatable, Sendable {
     case responseTooLarge
@@ -240,24 +241,27 @@ final class AppleBoundedHTTPClient: NSObject, URLSessionDataDelegate, @unchecked
     }
 }
 
-private final class AppleBoundedHTTPTaskBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var task: URLSessionTask?
-    private var isCancelled = false
+private final class AppleBoundedHTTPTaskBox: Sendable {
+    private struct State {
+        var task: URLSessionTask?
+        var isCancelled = false
+    }
+
+    private let state = Mutex(State())
 
     func assign(_ task: URLSessionTask) {
-        lock.lock()
-        self.task = task
-        let shouldCancel = isCancelled
-        lock.unlock()
+        let shouldCancel = state.withLock { state in
+            state.task = task
+            return state.isCancelled
+        }
         if shouldCancel { task.cancel() }
     }
 
     func cancel() {
-        lock.lock()
-        isCancelled = true
-        let task = task
-        lock.unlock()
+        let task = state.withLock { state in
+            state.isCancelled = true
+            return state.task
+        }
         task?.cancel()
     }
 }

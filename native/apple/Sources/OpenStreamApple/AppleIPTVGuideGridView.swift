@@ -71,8 +71,8 @@ public struct AppleIPTVGuideGridView: View {
                     accessibleSchedule(window: window)
                 } else {
                     GeometryReader { geometry in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            ScrollView(.vertical, showsIndicators: false) {
+                        ScrollView(.horizontal) {
+                            ScrollView(.vertical) {
                                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                                     Section {
                                         ForEach(rows) { row in
@@ -120,10 +120,10 @@ public struct AppleIPTVGuideGridView: View {
                                     }
                                 }
                             }
-                            .scrollIndicators(.hidden)
+                            .scrollIndicators(.never)
                             .frame(width: railWidth + timelineWidth, height: geometry.size.height)
                         }
-                        .scrollIndicators(.hidden)
+                        .scrollIndicators(.never)
                         .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.x) } action: { _, offset in
                             scrollState.horizontalOffset = offset
                         }

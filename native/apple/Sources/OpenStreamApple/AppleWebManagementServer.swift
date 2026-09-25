@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Network
+import Synchronization
 
 public enum AppleWebManagementServerError: Error, Equatable, LocalizedError, Sendable {
     case localNetworkUnavailable
@@ -858,12 +859,11 @@ private final class AppleBonjourPublishMonitor: NSObject, NetServiceDelegate {
     }
 }
 
-private final class AppleWebManagementListenerStartupGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, any Error>?
+private final class AppleWebManagementListenerStartupGate: Sendable {
+    private let continuation: Mutex<CheckedContinuation<Void, any Error>?>
 
     init(continuation: CheckedContinuation<Void, any Error>) {
-        self.continuation = continuation
+        self.continuation = Mutex(continuation)
     }
 
     func receive(_ state: NWListener.State) {
@@ -882,10 +882,10 @@ private final class AppleWebManagementListenerStartupGate: @unchecked Sendable {
         }
         guard let result else { return }
 
-        lock.lock()
-        let continuation = continuation
-        self.continuation = nil
-        lock.unlock()
+        let continuation = continuation.withLock { stored in
+            defer { stored = nil }
+            return stored
+        }
         continuation?.resume(with: result)
     }
 }

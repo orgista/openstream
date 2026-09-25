@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 #if DEBUG
 import os
 #endif
@@ -6,34 +7,39 @@ import os
 /// One immutable projection per lineup/filter change. SwiftUI reads these
 /// arrays directly instead of normalizing every channel during each render.
 
-final class AppleLiveChannelMatchCache: @unchecked Sendable {
+final class AppleLiveChannelMatchCache: Sendable {
     static let shared = AppleLiveChannelMatchCache()
-    private let lock = NSLock()
-    private var matches = [String: AppleChannelLineupEntry?]()
-    private var lastEntries: [AppleChannelLineupEntry] = []
-    /// Bumped on every lineup change, so matches computed (outside the lock)
-    /// against an older lineup are dropped instead of cached under the new one.
-    private var generation = 0
+
+    private struct State {
+        var matches = [String: AppleChannelLineupEntry?]()
+        var lastEntries: [AppleChannelLineupEntry] = []
+        /// Bumped on every lineup change, so matches computed (outside the lock)
+        /// against an older lineup are dropped instead of cached under the new one.
+        var generation = 0
+    }
+
+    private let state = Mutex(State())
     
     func match(channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [String: AppleChannelLineupEntry] {
-        lock.lock()
-        if entries != lastEntries {
-            matches.removeAll()
-            lastEntries = entries
-            generation += 1
-        }
-        let computedGeneration = generation
-        var result = [String: AppleChannelLineupEntry](minimumCapacity: channels.count)
-        var toCompute = [(String, String)]()
-        for channel in channels {
-            let key = "\(channel.id)|\(channel.name)"
-            if let cached = matches[key] {
-                if let entry = cached { result[channel.id] = entry }
-            } else {
-                toCompute.append((channel.id, channel.name))
+        let (computedGeneration, cachedResult, toCompute) = state.withLock { state in
+            if entries != state.lastEntries {
+                state.matches.removeAll()
+                state.lastEntries = entries
+                state.generation += 1
             }
+            var result = [String: AppleChannelLineupEntry](minimumCapacity: channels.count)
+            var toCompute = [(String, String)]()
+            for channel in channels {
+                let key = "\(channel.id)|\(channel.name)"
+                if let cached = state.matches[key] {
+                    if let entry = cached { result[channel.id] = entry }
+                } else {
+                    toCompute.append((channel.id, channel.name))
+                }
+            }
+            return (state.generation, result, toCompute)
         }
-        lock.unlock()
+        var result = cachedResult
         
         if toCompute.isEmpty { return result }
         
@@ -51,13 +57,12 @@ final class AppleLiveChannelMatchCache: @unchecked Sendable {
             if let e = entry { result[id] = e }
         }
         
-        lock.lock()
-        if generation == computedGeneration {
+        state.withLock { state in
+            guard state.generation == computedGeneration else { return }
             for (k, v) in computed {
-                matches[k] = v
+                state.matches[k] = v
             }
         }
-        lock.unlock()
         
         return result
     }

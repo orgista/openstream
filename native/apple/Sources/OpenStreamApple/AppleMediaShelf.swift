@@ -59,9 +59,9 @@ struct AppleMediaShelf<Content: View>: View {
     }
 
     private var railScrollView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
             rail
-        }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+        }.scrollIndicators(.never)
         #if DEBUG
         .scrollPosition($reviewScrollPosition)
         .task {

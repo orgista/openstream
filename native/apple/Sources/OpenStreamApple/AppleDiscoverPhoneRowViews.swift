@@ -223,10 +223,32 @@ struct AppleRemainingTimePill: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(.black.opacity(0.7), in: .rect(cornerRadius: 6))
-            .background(.ultraThinMaterial, in: .rect(cornerRadius: 6))
+            .modifier(AppleRemainingTimePillGround())
             .padding(8)
             .accessibilityHidden(true)
+    }
+}
+
+/// Liquid Glass on the 26 releases, tinted dark so white text holds over a
+/// bright still; the dark chip over a material before that (and on visionOS,
+/// which has no `glassEffect`).
+private struct AppleRemainingTimePillGround: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(visionOS)
+        fallback(content)
+        #else
+        if #available(iOS 26, macOS 26, tvOS 26, *) {
+            content.glassEffect(.regular.tint(.black.opacity(0.6)), in: .rect(cornerRadius: 6))
+        } else {
+            fallback(content)
+        }
+        #endif
+    }
+
+    private func fallback(_ content: Content) -> some View {
+        content
+            .background(.black.opacity(0.7), in: .rect(cornerRadius: 6))
+            .background(.ultraThinMaterial, in: .rect(cornerRadius: 6))
     }
 }
 
