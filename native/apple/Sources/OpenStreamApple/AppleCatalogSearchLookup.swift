@@ -10,6 +10,13 @@ struct AppleCatalogSearchMatch: Equatable, Sendable {
 /// avoids regenerating every media record for every visible result row.
 struct AppleCatalogSearchLookup: Sendable {
     private let matchesByRecordID: [String: AppleCatalogSearchMatch]
+    /// The same matches keyed by the source and hashed item reference each
+    /// record's availability carries. A merged search row keeps the id of
+    /// whichever record had the richer metadata, and that record may be one
+    /// the shelves no longer list; its other availabilities still name items
+    /// that are listed.
+    private let matchesByAvailability: [String: AppleCatalogSearchMatch]
+    private let activeCatalogSourcesByID: [AppleSource.ID: AppleSource]
     private let orderedMatches: [AppleCatalogSearchMatch]
     private let relatedItemsBySourceID: [AppleSource.ID: [AppleCatalogItem]]
     private let sourceNamesByID: [AppleSource.ID: String]
@@ -28,6 +35,7 @@ struct AppleCatalogSearchLookup: Sendable {
         }
         let activeSourcesByID = allSourcesByID.filter { $0.value.isEnabled }
         var matches: [String: AppleCatalogSearchMatch] = [:]
+        var matchesByAvailability: [String: AppleCatalogSearchMatch] = [:]
         var ordered: [AppleCatalogSearchMatch] = []
         var related: [AppleSource.ID: [AppleCatalogItem]] = [:]
         var seenRelatedIDs: [AppleSource.ID: Set<String>] = [:]
@@ -38,19 +46,21 @@ struct AppleCatalogSearchLookup: Sendable {
                 if seenRelatedIDs[section.sourceID, default: []].insert(item.id).inserted {
                     related[section.sourceID, default: []].append(item)
                 }
-                let recordID = AppleMediaIngestion.catalogRecord(
-                    instanceID: source.id,
-                    item: item
-                ).id
-                if matches[recordID] == nil {
-                    let match = AppleCatalogSearchMatch(item: item, source: source)
-                    matches[recordID] = match
+                let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+                let match = AppleCatalogSearchMatch(item: item, source: source)
+                if matches[record.id] == nil {
+                    matches[record.id] = match
                     ordered.append(match)
+                }
+                for availability in record.availability where matchesByAvailability[Self.key(availability)] == nil {
+                    matchesByAvailability[Self.key(availability)] = match
                 }
             }
         }
 
         matchesByRecordID = matches
+        self.matchesByAvailability = matchesByAvailability
+        activeCatalogSourcesByID = activeSourcesByID.filter { $0.value.kind == .stremio }
         orderedMatches = ordered
         relatedItemsBySourceID = related
         sourceNamesByID = allSourcesByID.mapValues(\.name)
@@ -79,6 +89,61 @@ struct AppleCatalogSearchLookup: Sendable {
 
     func match(for recordID: String) -> AppleCatalogSearchMatch? {
         matchesByRecordID[recordID]
+    }
+
+    /// The listed catalog item a search row stands for: its own id first, then
+    /// any item one of its merged availabilities names.
+    func match(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
+        matchesByRecordID[record.id]
+            ?? record.availability.lazy.compactMap { matchesByAvailability[Self.key($0)] }.first
+    }
+
+    /// A title page for a catalog record no shelf lists any more.
+    ///
+    /// The media index keeps catalog records after they leave the shelves —
+    /// every title page that opens writes one, and a shelf refresh retains
+    /// the most recent ones — so Search finds them locally while no loaded
+    /// section holds their item, and the row could not open (N49 #7). The
+    /// item reference is hashed, but a record with an IMDb id names the
+    /// title outright, which is all the title page needs to load it.
+    func rebuiltMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
+        guard record.kind == .movie || record.kind == .series,
+              let mediaID = record.canonicalID,
+              AppleStremioMetadataClient.isIMDBIdentifier(mediaID),
+              let source = record.availability
+                  .filter({ $0.capability == .resolvable })
+                  .lazy.compactMap({ activeCatalogSourcesByID[$0.instanceID] }).first else {
+            return nil
+        }
+        let item = AppleCatalogItem(
+            mediaID: mediaID,
+            type: record.kind == .series ? "series" : "movie",
+            name: record.title,
+            posterURL: record.artworkURL,
+            summary: record.summary,
+            releaseInfo: record.year.map(String.init),
+            year: record.year
+        )
+        return AppleCatalogSearchMatch(item: item, source: source)
+    }
+
+    /// Resolves a search row against every lookup, preferring a listed item in
+    /// any of them over a rebuilt one.
+    static func match(
+        for record: AppleMediaRecord,
+        in lookups: [AppleCatalogSearchLookup]
+    ) -> AppleCatalogSearchMatch? {
+        lookups.lazy.compactMap { $0.match(for: record) }.first
+            ?? lookups.lazy.compactMap { $0.rebuiltMatch(for: record) }.first
+    }
+
+    /// Whether a row that resolves to no title page should still be listed.
+    ///
+    /// A record whose every availability is a catalog entry has nothing else
+    /// to offer: shown, it was a row that looked tappable and did nothing.
+    /// Library files, server titles and channels are listed as before.
+    static func listsUnmatched(_ record: AppleMediaRecord) -> Bool {
+        !record.availability.allSatisfy { $0.capability == .resolvable }
     }
 
     func relatedItems(for sourceID: AppleSource.ID) -> [AppleCatalogItem] {
@@ -115,6 +180,10 @@ struct AppleCatalogSearchLookup: Sendable {
 
     private func articleFreeTitle(at index: Int) -> String {
         articleFreeTitles.isEmpty ? Self.removingLeadingArticle(normalizedTitle(at: index)) : articleFreeTitles[index]
+    }
+
+    private static func key(_ availability: AppleMediaAvailability) -> String {
+        "\(availability.instanceID.uuidString)|\(availability.itemReference)"
     }
 
     private static func removingLeadingArticle(_ value: String) -> String {

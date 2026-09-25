@@ -282,13 +282,14 @@ struct AppleStillProgressBar: View {
 
     var body: some View {
         Rectangle()
-            .fill(.white.opacity(0.15))
+            .fill(AppleDesignTokens.artworkProgressTrack)
             .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(AppleDesignTokens.brandAccent)
                     .frame(width: width * min(max(progress, 0), 1))
             }
             .frame(height: AppleDiscoverPhoneRowMetrics.progressHeight)
+            .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

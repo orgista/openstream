@@ -11,6 +11,13 @@ public enum AppleDesignTokens {
     /// Channel health dots only: reachable but not playable, and offline.
     public static let healthAmber = Color(red: 1.0, green: 0.7, blue: 0.0) // #FFB300
     public static let healthRed = Color(red: 1.0, green: 0.27, blue: 0.23) // #FF453A
+    /// The unwatched part of a progress bar drawn on artwork. It was a white
+    /// tint, so on a bright still a white fill vanished (N49 #9). A mid-grey
+    /// track darkens a bright still under the fill and still shows against a
+    /// black one, where a plain black track disappeared.
+    public static let artworkProgressTrack = Color(white: 0.35).opacity(0.7)
+    /// Lifts the bar off artwork as bright as its fill.
+    public static let artworkProgressShadow = Color.black.opacity(0.4)
 
     #if os(visionOS)
     public static let minimumActionSize: CGFloat = 60

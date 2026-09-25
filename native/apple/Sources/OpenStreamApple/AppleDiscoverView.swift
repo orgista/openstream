@@ -1288,11 +1288,11 @@ struct AppleSearchView: View {
                 } else {
                     ContentUnavailableView("Search Your Sources", systemImage: "magnifyingglass")
                 }
-            } else if searchStore.results.isEmpty {
+            } else if listedResults.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
-                List(searchStore.results) { record in
-                    if let result = searchMatch(for: record.id) {
+                List(listedResults) { record in
+                    if let result = searchMatch(for: record) {
                         NavigationLink {
                             AppleCatalogItemDetailView(
                                 item: result.item,
@@ -1419,7 +1419,7 @@ struct AppleSearchView: View {
               deliveredRouteRevision != revision,
               case .media(let id, let action) = router.route,
               let record = mediaIndex.records.first(where: { $0.id == id }),
-              let result = searchMatch(for: id) else { return }
+              let result = searchMatch(for: record) else { return }
         deliveredRouteRevision = revision
         appleTrace("detail route \"\(result.item.name)\"")
         routedResult = .init(record: record, item: result.item, source: result.source,
@@ -1449,8 +1449,16 @@ struct AppleSearchView: View {
         searchStore.lookup.sourceName(for: record)
     }
 
-    private func searchMatch(for recordID: String) -> AppleCatalogSearchMatch? {
-        searchStore.lookup.match(for: recordID) ?? catalogLookup.match(for: recordID)
+    private func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
+        AppleCatalogSearchLookup.match(for: record, in: [searchStore.lookup, catalogLookup])
+    }
+
+    /// Every row either opens its title page or is not a catalog title at all
+    /// (a file or a channel); see `AppleCatalogSearchLookup.listsUnmatched`.
+    private var listedResults: [AppleMediaRecord] {
+        searchStore.results.filter {
+            AppleCatalogSearchLookup.listsUnmatched($0) || searchMatch(for: $0) != nil
+        }
     }
 
     private func relatedItems(for sourceID: AppleSource.ID) -> [AppleCatalogItem] {
@@ -1868,13 +1876,14 @@ struct AppleCatalogCard: View {
                         // The artwork is framed at `cardWidth`, so the bar
                         // needs no GeometryReader to learn its width.
                         Capsule()
-                            .fill(.white.opacity(0.3))
+                            .fill(AppleDesignTokens.artworkProgressTrack)
                             .overlay(alignment: .leading) {
                                 Capsule()
                                     .fill(.white)
                                     .frame(width: cardWidth * min(max(progress, 0), 1))
                             }
                             .frame(height: 3)
+                            .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
