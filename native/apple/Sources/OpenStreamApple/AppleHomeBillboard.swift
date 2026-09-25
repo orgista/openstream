@@ -434,7 +434,8 @@ private struct AppleHomeHeroPreview: View {
     @State private var systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
     #endif
     #if os(macOS)
-    /// False while a pushed page covers Discover (`AppleMacWindowPresence`).
+    /// False while a pushed page covers Discover, or the window is off screen
+    /// or fully covered (`AppleMacWindowPresence`).
     @State private var isInWindow = false
     @Environment(\.displayScale) private var displayScale
     #endif

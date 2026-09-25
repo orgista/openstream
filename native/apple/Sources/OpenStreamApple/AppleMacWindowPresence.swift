@@ -8,6 +8,10 @@ import SwiftUI
 /// true — so Discover's hero kept cycling and loading trailers under the
 /// title page (Mac trace, 2026-09-24). A view never added to a window
 /// reports nothing, so callers start from `false`.
+///
+/// It also reports `false` while the window is off screen or fully covered
+/// (`NSWindow.occlusionState`), so a hero in a window nobody can see holds its
+/// cycle and trailer (N36).
 struct AppleMacWindowPresence: NSViewRepresentable {
     let onChange: (Bool) -> Void
 
@@ -32,11 +36,35 @@ struct AppleMacWindowPresence: NSViewRepresentable {
         /// then or nothing changed.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            let present = window != nil
+            observeOcclusion()
+            deliver()
+        }
+
+        private var occlusionObserver: NSObjectProtocol?
+
+        /// In a window, and that window is at least partly on screen.
+        private var isShowing: Bool {
+            window?.occlusionState.contains(.visible) ?? false
+        }
+
+        private func deliver() {
+            let showing = isShowing
             Task { [weak self] in
                 guard let self,
-                      let report = self.reports.report(present, stillPresent: self.window != nil) else { return }
+                      let report = self.reports.report(showing, stillPresent: self.isShowing) else { return }
                 self.onChange(report)
+            }
+        }
+
+        /// Follows the window the view is in now; none once it has left.
+        private func observeOcclusion() {
+            if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+            occlusionObserver = nil
+            guard let window else { return }
+            occlusionObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.deliver() }
             }
         }
 

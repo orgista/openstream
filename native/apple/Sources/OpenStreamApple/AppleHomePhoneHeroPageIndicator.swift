@@ -5,11 +5,16 @@ import SwiftUI
 /// towards the far end (`AppleHeroPageDots`). A dot is a button that jumps to
 /// its page; VoiceOver gets one adjustable element, "Page 2 of 5".
 ///
+/// The fill is redrawn only when it has grown by half a device pixel
+/// (`AppleHeroRotation.Cycle.fillTickInterval`, as on the Mac): ~10 Hz for
+/// the 20 pt capsule on a 3x iPhone rather than 30.
+///
 /// The fill keeps running with Reduce Motion on: it is the only sign that the
 /// page is about to change, and it moves in place rather than across the screen.
 struct AppleHomePhoneHeroPageIndicator: View {
     let cycle: AppleHeroRotation.Cycle
     let onSelect: (Int) -> Void
+    @Environment(\.displayScale) private var displayScale
 
     /// The strip each dot can be hit in, taller than the dot.
     static let height: CGFloat = 28
@@ -25,7 +30,8 @@ struct AppleHomePhoneHeroPageIndicator: View {
                         .fill(.white.opacity(0.3))
                         .overlay(alignment: .leading) {
                             if position == cycle.index {
-                                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: cycle.isPaused)) { context in
+                                TimelineView(.animation(minimumInterval: cycle.fillTickInterval(width: size.width, displayScale: displayScale),
+                                                         paused: cycle.isPaused)) { context in
                                     Capsule()
                                         .fill(.white)
                                         .frame(width: size.width * cycle.progress(at: context.date))

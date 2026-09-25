@@ -21,6 +21,8 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isTouching = false
     @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
+    /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
+    @State private var heroIsVisible = false
     /// The edge the incoming page slides in from.
     @State private var incomingEdge: Edge = .trailing
 
@@ -64,9 +66,11 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
         .onChange(of: pageIDs) { old, _ in
             restart(showing: old.indices.contains(cycle.index) ? old[cycle.index] : nil)
         }
-        .onChange(of: isPaused) { _, paused in
-            if paused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
+        .appleHeroVisibility { visible in
+            heroIsVisible = visible
+            holdOrRun()
         }
+        .onChange(of: isPaused) { holdOrRun() }
         .task(id: cycle) {
             // Restarted by every change to the cycle, so this only ever waits
             // for the page that is showing.
@@ -78,7 +82,8 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
 
     private var isPaused: Bool {
         AppleHeroRotation.cycleIsPaused(isTouching: isTouching, trailerIsPlaying: trailer.isPlaying,
-                                        trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested)
+                                        trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested,
+                                        isHidden: !heroIsVisible)
     }
 
     /// Horizontal only: vertical drags belong to the page's scroll view, and
@@ -95,6 +100,11 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
                 else { return }
                 move(by: dx < 0 ? 1 : -1)
             }
+    }
+
+    /// Holds the timer where it is, or runs it on from there.
+    private func holdOrRun() {
+        if isPaused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
     }
 
     private func select(_ position: Int) {

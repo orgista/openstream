@@ -21,6 +21,8 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isHovering = false
     @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
+    /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
+    @State private var heroIsVisible = false
     @State private var incomingEdge: Edge = .trailing
 
     var body: some View {
@@ -87,9 +89,11 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
         .onChange(of: pageIDs) { old, _ in
             restart(showing: old.indices.contains(cycle.index) ? old[cycle.index] : nil)
         }
-        .onChange(of: isPaused) { _, paused in
-            if paused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
+        .appleHeroVisibility { visible in
+            heroIsVisible = visible
+            holdOrRun()
         }
+        .onChange(of: isPaused) { holdOrRun() }
         .task(id: cycle) {
             // Restarted by every change to the cycle, so this only ever waits
             // for the page that is showing.
@@ -120,7 +124,13 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
         if UserDefaults.standard.bool(forKey: "OpenStreamMacHeroHold") { return true }
         #endif
         return AppleHeroRotation.cycleIsPaused(isTouching: isHovering, trailerIsPlaying: trailer.isPlaying,
-                                        trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested)
+                                        trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested,
+                                        isHidden: !heroIsVisible)
+    }
+
+    /// Holds the timer where it is, or runs it on from there.
+    private func holdOrRun() {
+        if isPaused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
     }
 
     private func select(_ position: Int) {

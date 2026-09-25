@@ -27,6 +27,8 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
 
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @FocusState private var focus: AppleTVHeroPaging.Target?
+    /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
+    @State private var heroIsVisible = false
 
     var body: some View {
         let requested = min(cycle.index, max(pages.count - 1, 0))
@@ -42,9 +44,11 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
             cycle.step(by: turn.offset, at: .now)
             focus = turn.refocus
         }
-        .onChange(of: isPaused) { _, paused in
-            if paused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
+        .appleHeroVisibility { visible in
+            heroIsVisible = visible
+            holdOrRun()
         }
+        .onChange(of: isPaused) { holdOrRun() }
         .onAppear {
             if cycle.count != pages.count { restart(showing: nil) }
         }
@@ -61,7 +65,12 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     }
 
     private var isPaused: Bool {
-        AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
+        !heroIsVisible || AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
+    }
+
+    /// Holds the timer where it is, or runs it on from there.
+    private func holdOrRun() {
+        if isPaused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
     }
 
     /// A new set of pages keeps the one on screen when it is still there,

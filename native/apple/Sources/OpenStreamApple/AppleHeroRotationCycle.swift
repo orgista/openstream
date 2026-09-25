@@ -75,7 +75,8 @@ extension AppleHeroRotation {
         }
 
         /// How often the active dot's fill needs redrawing: each time it has
-        /// grown by half a device pixel, and never faster than 30 Hz.
+        /// grown by half a device pixel, and never faster than 30 Hz. The Mac,
+        /// iPhone and iPad dots all tick by this.
         ///
         /// The Mac's 22 pt fill crosses 44 pixels in 12 s, so a 30 Hz timeline
         /// redrew it 360 times to move it 44 pixels — and on the Mac every
@@ -98,9 +99,11 @@ extension AppleHeroRotation {
     /// `isPlaying` drops), then after what is left of its art interval (owner,
     /// 2026-09-24: "the trailer loads and it cycles too fast … give it more
     /// time, depending how long the trailer is"). Mute and Play Trailer no
-    /// longer change this; the parameters stay for the callers.
+    /// longer change this; the parameters stay for the callers. It also
+    /// holds while nobody can see the hero (`heroIsVisible`), so the page is
+    /// where it was when the viewer comes back.
     public static func cycleIsPaused(isTouching: Bool, trailerIsPlaying: Bool, trailerIsMuted _: Bool,
-                                     trailerWasRequested _: Bool = false) -> Bool {
-        isTouching || trailerIsPlaying
+                                     trailerWasRequested _: Bool = false, isHidden: Bool = false) -> Bool {
+        isHidden || isTouching || trailerIsPlaying
     }
 }
