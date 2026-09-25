@@ -13,7 +13,7 @@ import Foundation
 struct AppleStremioCredits: Decodable, Sendable {
     let people: [AppleCreditPerson]
 
-    static let tmdbProfileBase = "https://image.tmdb.org/t/p/w185"
+    static let tmdbProfileBase = "https://image.tmdb.org/t/p/\(AppleCreditPerson.tmdbPortraitSize)"
 
     private enum CodingKeys: String, CodingKey {
         case appExtras = "app_extras"
@@ -91,6 +91,12 @@ struct AppleStremioCredits: Decodable, Sendable {
                   components.host?.isEmpty == false,
                   components.user == nil, components.password == nil else { return nil }
             components.scheme = "https"
+            // A TMDB thumbnail (w45…w185) drawn in a Cast & Crew circle
+            // upscaled and looked blurry on the Mac and Apple TV
+            // (owner, 2026-09-25): ask TMDB for its sharp profile size.
+            if components.host?.lowercased() == "image.tmdb.org" {
+                components.path = AppleCreditPerson.sharpTMDBPortraitPath(components.path)
+            }
             return components.url
         }
     }

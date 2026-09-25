@@ -18,6 +18,23 @@ public struct AppleCreditPerson: Equatable, Hashable, Sendable, Identifiable {
         self.portraitURL = portraitURL.flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
     }
 
+    /// TMDB's portrait size for Cast & Crew: 632 px tall, sharp in the Mac's
+    /// and Apple TV's large circles at 2x. `w185` upscaled and looked blurry
+    /// (owner, 2026-09-25).
+    static let tmdbPortraitSize = "h632"
+
+    /// A TMDB image path at a thumbnail size (`/t/p/w185/x.jpg`, w45…w185)
+    /// moved to `tmdbPortraitSize`. Larger sizes and face crops are kept.
+    static func sharpTMDBPortraitPath(_ path: String) -> String {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        // "", "t", "p", size, file…
+        guard parts.count >= 5, parts[1] == "t", parts[2] == "p",
+              ["w45", "w92", "w154", "w185"].contains(String(parts[3])) else { return path }
+        var sharp = parts.map(String.init)
+        sharp[3] = tmdbPortraitSize
+        return sharp.joined(separator: "/")
+    }
+
     /// "Bryan Cranston" → "BC", for a portrait that has no picture.
     public var initials: String {
         let words = name.split(whereSeparator: { $0.isWhitespace || $0 == "-" })

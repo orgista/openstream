@@ -446,10 +446,10 @@ private func makeLogoPNG(edgeAlpha: UInt8) throws -> Data {
     #expect(details.cast == ["Bryan Cranston", "Aaron Paul"])
     #expect(details.castMembers == [
         AppleCreditPerson(name: "Bryan Cranston", role: "Walter White",
-                          portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/bryan.jpg")),
+                          portraitURL: URL(string: "https://image.tmdb.org/t/p/h632/bryan.jpg")),
         AppleCreditPerson(name: "Aaron Paul", role: "Jesse Pinkman"),
         AppleCreditPerson(name: "Vince Gilligan", role: "Creator",
-                          portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/vince.jpg")),
+                          portraitURL: URL(string: "https://image.tmdb.org/t/p/h632/vince.jpg")),
     ])
     #expect(details.countries == [AppleTitlePagePolicy.regionName("US")])
     #expect(details.originalLanguage == AppleTitlePagePolicy.languageName("en"))

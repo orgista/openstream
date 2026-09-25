@@ -410,18 +410,18 @@ public struct AppleTMDBClient: Sendable {
         let actors = (value.credits?.cast ?? []).prefix(15).compactMap { member -> AppleCreditPerson? in
             guard let name = bounded(member.name, limit: 100) else { return nil }
             return AppleCreditPerson(name: name, role: bounded(member.character, limit: 100),
-                                     portraitURL: imageURL(path: member.profilePath, width: "w185"))
+                                     portraitURL: imageURL(path: member.profilePath, width: AppleCreditPerson.tmdbPortraitSize))
         }
         let creators = (value.createdBy ?? []).prefix(4).compactMap { member -> AppleCreditPerson? in
             guard let name = bounded(member.name, limit: 100) else { return nil }
             return AppleCreditPerson(name: name, role: "Creator",
-                                     portraitURL: imageURL(path: member.profilePath, width: "w185"))
+                                     portraitURL: imageURL(path: member.profilePath, width: AppleCreditPerson.tmdbPortraitSize))
         }
         let directors = (value.credits?.crew ?? []).filter { $0.job == "Director" }.prefix(2)
             .compactMap { member -> AppleCreditPerson? in
                 guard let name = bounded(member.name, limit: 100) else { return nil }
                 return AppleCreditPerson(name: name, role: "Director",
-                                         portraitURL: imageURL(path: member.profilePath, width: "w185"))
+                                         portraitURL: imageURL(path: member.profilePath, width: AppleCreditPerson.tmdbPortraitSize))
             }
         let countryCodes = (value.originCountry ?? []) + (value.productionCountries ?? []).compactMap(\.code)
         let countries = countryCodes.compactMap { AppleTitlePagePolicy.regionName($0) }

@@ -57,10 +57,10 @@ struct AppleStremioCreditsTests {
 
         #expect(details.castMembers == [
             AppleCreditPerson(name: "Ada Actor", role: "Heroine",
-                              portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/ada.jpg")),
+                              portraitURL: URL(string: "https://image.tmdb.org/t/p/h632/ada.jpg")),
             AppleCreditPerson(name: "Ben Actor", role: "Sidekick"),
             AppleCreditPerson(name: "Dee Director", role: "Director",
-                              portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/dee.jpg")),
+                              portraitURL: URL(string: "https://image.tmdb.org/t/p/h632/dee.jpg")),
         ])
     }
 
@@ -113,9 +113,19 @@ struct AppleStremioCreditsTests {
 
         #expect(details?.castMembers == [
             AppleCreditPerson(name: "Ada Actor", role: "Heroine",
-                              portraitURL: URL(string: "https://image.tmdb.org/t/p/w185/ada.jpg")),
+                              portraitURL: URL(string: "https://image.tmdb.org/t/p/h632/ada.jpg")),
             AppleCreditPerson(name: "Ben Actor"),
         ])
+    }
+
+    /// Thumbnails upscaled into blurry circles (owner, 2026-09-25); larger
+    /// sizes, face crops and other hosts are left as sent.
+    @Test func tmdbThumbnailsAreAskedForAtThePortraitSize() {
+        #expect(AppleCreditPerson.sharpTMDBPortraitPath("/t/p/w185/a.jpg") == "/t/p/h632/a.jpg")
+        #expect(AppleCreditPerson.sharpTMDBPortraitPath("/t/p/w45/a.jpg") == "/t/p/h632/a.jpg")
+        #expect(AppleCreditPerson.sharpTMDBPortraitPath("/t/p/w276_and_h350_face/a.jpg") == "/t/p/w276_and_h350_face/a.jpg")
+        #expect(AppleCreditPerson.sharpTMDBPortraitPath("/t/p/original/a.jpg") == "/t/p/original/a.jpg")
+        #expect(AppleCreditPerson.sharpTMDBPortraitPath("/photos/w185/a.jpg") == "/photos/w185/a.jpg")
     }
 
     @Test func fillingPortraitsLeavesPeopleWithAPictureAlone() {
