@@ -330,7 +330,7 @@ struct AppleTransportOverlay: View {
                 }
                 if let otherSources, controls.contains(.otherSourcesMenu) {
                     Menu {
-                        Button("Other sources", systemImage: "list.bullet", action: otherSources)
+                        Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
                     } label: {
                         Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                             .contentShape(.rect)

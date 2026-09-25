@@ -943,8 +943,9 @@ struct AppleLiveInlinePlayer: View {
                     zoomToFill: macCommands.zoomToFill,
                     showsAVKitFullScreenButton: onRequestFullWindow == nil,
                     subtitleEntries: inlineSubtitles.menuEntries,
-                    showsSubtitleMenu: AppleMacSubtitleMenuPolicy.showsAppMenu(
-                        tracks: coordinator.engine.subtitleTracks),
+                    showsSubtitleMenu: AppleStockSubtitleMenuPolicy.showsAppMenu(
+                        tracks: coordinator.engine.subtitleTracks,
+                        stockPlayerListsCaptions: inlineSubtitles.stockPlayerListsCaptions),
                     onSelectSubtitle: { id in
                         host.selectSubtitleTrack(id: id)
                         inlineSubtitles.refresh(from: coordinator.engine)

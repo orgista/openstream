@@ -75,9 +75,13 @@ struct AppleStremioPlayerView: View {
     @State private var nativeMenuVisible = true
     @State private var nativeMenuActivity = 0
     @State private var showsOtherSources = false
+    /// What the fallback loop walks after a failure: Automatic's order, or
+    /// the picked resolution's once one is picked.
     @State private var otherSources: [ApplePlaybackSourceOption] = []
-    @State private var groupedSources: [ApplePlaybackSourceOption] = []
-    @State private var showsAllSources = false
+    @State private var sourceOptions: ApplePlaybackSourceOptions?
+    @State private var quality = AppleStreamQualityChoice.automatic
+    /// The source on screen, so picking the quality already playing is a no-op.
+    @State private var playingSource: URL?
     @State private var sourceError: String?
     @State private var isLoadingSources = false
     @State private var sourceIdentities: [URL: URL] = [:]
@@ -134,20 +138,20 @@ struct AppleStremioPlayerView: View {
             if coordinator.route == .surface {
                 #if os(visionOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: { showsOtherSources = true }, onClose: closePlayer,
+                    otherSources: qualityPickerAction, onClose: closePlayer,
                     nextEpisode: nextEpisode)
                 #elseif os(tvOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: { showsOtherSources = true }, onClose: closeFromRemote,
+                    otherSources: qualityPickerAction, onClose: closeFromRemote,
                     nextEpisode: nextEpisode)
                 #elseif os(macOS)
                 // Its top bar keeps to the safe area, under the traffic lights.
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: { showsOtherSources = true }, onClose: closePlayer,
+                    otherSources: qualityPickerAction, onClose: closePlayer,
                     nextEpisode: nextEpisode)
                 #else
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: { showsOtherSources = true }, nextEpisode: nextEpisode)
+                    otherSources: qualityPickerAction, nextEpisode: nextEpisode)
                 #endif
             }
         }
@@ -199,16 +203,20 @@ struct AppleStremioPlayerView: View {
         #endif
         #if os(iOS)
         .statusBarHidden()
+        #endif
+        #if os(iOS) || os(visionOS)
         .overlay(alignment: .topTrailing) {
-            if coordinator.route == .avPlayer && nativeMenuVisible {
+            if coordinator.route == .avPlayer && nativeMenuVisible
+                && (sourceOptionsLoader != nil || showsAppSubtitleMenu) {
                 Menu {
-                    Button("Other sources", systemImage: "list.bullet") { showsOtherSources = true }
-                    if drawsStockPlayerCues, !stockSubtitles.menuEntries.isEmpty {
+                    if sourceOptionsLoader != nil {
+                        Button("Quality", systemImage: "slider.horizontal.3") { showsOtherSources = true }
+                    }
+                    if showsAppSubtitleMenu {
                         Menu("Subtitles", systemImage: "captions.bubble") {
                             ForEach(stockSubtitles.menuEntries) { entry in
                                 Button {
-                                    host.selectSubtitleTrack(id: entry.trackID)
-                                    stockSubtitles.refresh(from: coordinator.engine)
+                                    selectStockSubtitle(entry.trackID)
                                 } label: {
                                     if entry.isSelected {
                                         Label(entry.title, systemImage: "checkmark")
@@ -253,6 +261,10 @@ struct AppleStremioPlayerView: View {
             otherSourcesSheet
                 #if os(visionOS)
                 .frame(width: 720, height: 540)
+                #elseif os(macOS)
+                // A list in a Mac sheet has no height of its own; it came up
+                // one row tall.
+                .frame(width: 360, height: 300)
                 #endif
         }
         .task(id: coordinator.fallbackNoticeGeneration) {
@@ -303,8 +315,9 @@ struct AppleStremioPlayerView: View {
                 for option in otherSources where !triedSources.contains(option.id) && !ApplePlaybackFailureHistory.shared.contains(option.id) {
                     triedSources.insert(option.id)
                     do {
-                        let next = try await option.prepare()
+                        let next = try await option.prepare(nil)
                         sourceIdentities[next.request.url] = option.id
+                        playingSource = option.id
                         securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
                         return next.request
                     } catch is CancellationError { throw CancellationError() }
@@ -336,6 +349,9 @@ struct AppleStremioPlayerView: View {
                 closePlayer()
             }
         }
+        #if DEBUG && os(macOS)
+        .task { await AppleDebugMacCaptionsProbe.runIfRequested(host: host, coordinator: coordinator, subtitles: stockSubtitles) }
+        #endif
         #if DEBUG && os(visionOS)
         .task {
             for _ in 0..<3 {
@@ -402,6 +418,33 @@ struct AppleStremioPlayerView: View {
     }
     #endif
 
+    #if os(iOS) || os(visionOS)
+    /// The app's Subtitles menu beside the stock player, only where AVKit's
+    /// own captions button cannot do the job (`AppleStockSubtitleMenuPolicy`).
+    private var showsAppSubtitleMenu: Bool {
+        drawsStockPlayerCues && !stockSubtitles.menuEntries.isEmpty
+            && AppleStockSubtitleMenuPolicy.showsAppMenu(
+                tracks: coordinator.engine.subtitleTracks,
+                stockPlayerListsCaptions: stockSubtitles.stockPlayerListsCaptions)
+    }
+
+    private func selectStockSubtitle(_ id: Int?) {
+        #if os(iOS)
+        // Through the host, so AVKit's CC menu and this one agree.
+        host.selectSubtitleTrack(id: id)
+        stockSubtitles.refresh(from: coordinator.engine)
+        #else
+        stockSubtitles.select(id, on: coordinator.engine)
+        #endif
+    }
+    #endif
+
+    /// Opens the Quality sheet; nil (no entry at all) when the source has
+    /// no alternatives to offer, such as a file opened directly.
+    private var qualityPickerAction: (() -> Void)? {
+        sourceOptionsLoader == nil ? nil : { showsOtherSources = true }
+    }
+
     /// Both engines publish sidecar cues and use the app's subtitle menu.
     private var drawsStockPlayerCues: Bool {
         AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(engine: coordinator.engine.kind, route: coordinator.route)
@@ -409,9 +452,10 @@ struct AppleStremioPlayerView: View {
 
     private func installSourceMenu() {
         #if os(tvOS)
-        var items: [UIMenuElement] = [UIAction(title: "Other sources", image: UIImage(systemName: "list.bullet")) { _ in
-            showsOtherSources = true
-        }]
+        var items: [UIMenuElement] = sourceOptionsLoader == nil ? [] : [
+            UIAction(title: "Quality", image: UIImage(systemName: "slider.horizontal.3")) { _ in
+                showsOtherSources = true
+            }]
         if drawsStockPlayerCues {
             // One captions control for embedded and add-on tracks. The app's
             // menu drives selection; AVKit draws native embedded tracks and
@@ -437,60 +481,81 @@ struct AppleStremioPlayerView: View {
     }
 
     private func loadOtherSources() async throws {
-        guard otherSources.isEmpty, let sourceOptionsLoader else { return }
+        guard sourceOptions == nil, let sourceOptionsLoader else { return }
         isLoadingSources = true
         defer { isLoadingSources = false }
         let options = try await sourceOptionsLoader()
-        otherSources = options.all
-        groupedSources = options.grouped
+        sourceOptions = options
+        otherSources = options.order(for: quality)
     }
 
-    /// The sheet's default view is the collapsed quality list; "Show all
-    /// sources" swaps in the full resolver order so a specific stream stays
-    /// reachable when the grouped choice isn't the one a viewer wants.
-    private var visibleSources: [ApplePlaybackSourceOption] {
-        showsAllSources || groupedSources.isEmpty ? otherSources : groupedSources
-    }
-
+    /// Automatic and one row per resolution this device can play; the
+    /// backend picks the candidate (`AppleStremioCandidateRanking.playbackOrder`).
     private var otherSourcesSheet: some View {
         NavigationStack {
             List {
                 if isLoadingSources { ProgressView().tint(.white) }
                 if let sourceError { Text(sourceError) }
-                ForEach(visibleSources) { option in
-                    Button {
-                        Task {
-                            do {
-                                let next = try await option.prepare()
-                                sourceIdentities[next.request.url] = option.id
-                                securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
-                                triedSources = [option.id]
-                                showsOtherSources = false
-                                await coordinator.begin(next.request, fallbackCandidates: [])
-                            } catch { sourceError = error.localizedDescription }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(option.title)
-                            Text(option.detail).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                if !isLoadingSources, groupedSources.count < otherSources.count {
-                    Button(showsAllSources ? "Fewer sources" : "Show all sources") {
-                        showsAllSources.toggle()
-                    }
-                    .foregroundStyle(.secondary)
+                qualityRow(.automatic, title: "Automatic")
+                ForEach(sourceOptions?.tiers ?? [], id: \.self) { tier in
+                    qualityRow(.tier(tier), title: tier.title)
                 }
             }
             .scrollIndicators(.hidden)
-            .navigationTitle("Other sources")
+            .navigationTitle("Quality")
+            #if os(macOS)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { showsOtherSources = false } }
+            }
+            #endif
             .task {
                 do { try await loadOtherSources() }
                 catch { sourceError = error.localizedDescription }
             }
         }
         .tint(.primary)
+    }
+
+    private func qualityRow(_ choice: AppleStreamQualityChoice, title: String) -> some View {
+        Button {
+            Task { await switchQuality(to: choice) }
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if quality == choice { Image(systemName: "checkmark").accessibilityHidden(true) }
+            }
+            .contentShape(.rect)
+        }
+        .accessibilityAddTraits(quality == choice ? .isSelected : [])
+        .accessibilityIdentifier("player.quality.\(title)")
+    }
+
+    /// Plays the best candidate for `choice` from where the viewer is, and
+    /// makes its order the fallback for a later failure. Nothing restarts
+    /// when that candidate is the one already playing.
+    private func switchQuality(to choice: AppleStreamQualityChoice) async {
+        guard let options = sourceOptions else { return }
+        let order = options.order(for: choice)
+        let playing = playingSource ?? sourceID
+        let position = coordinator.engine.position
+        quality = choice
+        otherSources = order
+        showsOtherSources = false
+        guard order.first?.id != playing else { return }
+        triedSources = []
+        for option in order where !triedSources.contains(option.id) {
+            triedSources.insert(option.id)
+            do {
+                let next = try await option.prepare(position > 1 ? position : nil)
+                sourceIdentities[next.request.url] = option.id
+                securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
+                playingSource = option.id
+                await coordinator.begin(next.request, fallbackCandidates: [])
+                return
+            } catch is CancellationError { return }
+            catch { sourceError = error.localizedDescription }
+        }
     }
 
     @ViewBuilder
@@ -501,13 +566,15 @@ struct AppleStremioPlayerView: View {
             zoomToFill: macCommands.zoomToFill,
             takesKeyboardFocus: true,
             subtitleEntries: stockSubtitles.menuEntries,
-            showsSubtitleMenu: AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: coordinator.engine.subtitleTracks),
+            showsSubtitleMenu: AppleStockSubtitleMenuPolicy.showsAppMenu(
+                tracks: coordinator.engine.subtitleTracks,
+                stockPlayerListsCaptions: stockSubtitles.stockPlayerListsCaptions),
             onSelectSubtitle: { id in
                 // Through the host, so AVKit's CC menu and this one agree.
                 host.selectSubtitleTrack(id: id)
                 stockSubtitles.refresh(from: coordinator.engine)
             },
-            onOtherSources: { showsOtherSources = true }
+            onOtherSources: qualityPickerAction
         )
         #elseif os(visionOS)
         if let visionHost {

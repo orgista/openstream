@@ -154,12 +154,20 @@ struct AppleMacPlayerStageTests {
     @Test func theAppCaptionsMenuShowsOnlyForTracksAVKitCannotReach() {
         let native = [ApplePlaybackTrack(id: 0, title: "English", language: "en", codec: "sub"),
                       ApplePlaybackTrack(id: 1, title: "French", language: "fr", codec: "sub")]
-        #expect(AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: native) == false)
-        #expect(AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: []) == false)
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: native, stockPlayerListsCaptions: true) == false)
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: [], stockPlayerListsCaptions: true) == false)
         let sidecar = ApplePlaybackTrack(id: 1_000_000, title: "Add-on", language: "en", codec: "srt")
-        #expect(AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: native + [sidecar]))
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: native + [sidecar], stockPlayerListsCaptions: true))
         let bitmap = ApplePlaybackTrack(id: 4, title: "PGS", language: "en", codec: "hdmv_pgs_subtitle")
-        #expect(AppleMacSubtitleMenuPolicy.showsAppMenu(tracks: [bitmap]))
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: [bitmap], stockPlayerListsCaptions: true))
+    }
+
+    /// The default engine's loopback item carries no legible renditions on
+    /// the Mac, so AVKit has no CC button and the app's menu is the only one.
+    @Test func theAppCaptionsMenuIsTheOnlyOneWhenAVKitListsNothing() {
+        let embedded = [ApplePlaybackTrack(id: 2, title: "English", language: "eng", codec: "subrip")]
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: embedded, stockPlayerListsCaptions: false))
+        #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: [], stockPlayerListsCaptions: false) == false)
     }
 }
 

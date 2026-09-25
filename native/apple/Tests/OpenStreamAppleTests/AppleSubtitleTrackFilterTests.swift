@@ -104,16 +104,21 @@ struct AppleSubtitleTrackFilterTests {
         ]
         let menu = AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["English", "es-MX"])
         #expect(menu.map(\.id) == [6, 8, 5, 7, 4, 9])
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: []).map(\.id) == [6, 7, 4, 5, 8, 9])
+        // English SDH sits under English, the language it belongs to.
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: []).map(\.id) == [6, 8, 7, 4, 5, 9])
         #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"], isExplicitChoice: true).map(\.id) == [6])
         #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["ja"], isExplicitChoice: true).isEmpty)
     }
 
-    @Test func menuExcludesForcedTracksEvenWhenPreferredAndDefault() {
+    /// A forced track is its own row only beside a full one of its language;
+    /// alone, a variant is simply that language.
+    @Test func forcedIsItsOwnRowOnlyBesideAFullTrack() {
         let forced = ApplePlaybackTrack(id: 0, title: "English", language: "en", isDefault: true, isForced: true)
         let tracks = [forced, track(1, "es", "Spanish"), track(2, "en", "English SDH")]
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [2, 1])
-        #expect(AppleSubtitleTrackFilter.menu([forced], preferredLanguages: []).isEmpty)
+        let choices = AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["en"])
+        #expect(choices.map(\.track.id) == [2, 0, 1])
+        #expect(choices.map(\.title) == ["English", "English (Forced)", "Spanish"])
+        #expect(AppleSubtitleTrackFilter.menuChoices([forced], preferredLanguages: []).map(\.title) == ["English"])
         #expect(AppleSubtitleTrackFilter.menu([], preferredLanguages: []).isEmpty)
     }
 

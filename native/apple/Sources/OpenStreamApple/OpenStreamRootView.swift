@@ -306,6 +306,9 @@ public struct OpenStreamRootView: View {
         // (`AppleSettingsContentModifier`).
         .background(Color.black.ignoresSafeArea())
         #endif
+        #if DEBUG && os(macOS)
+        .modifier(AppleDebugMacCaptionsProbe.Presenter(settings: settingsStore))
+        #endif
         #if os(macOS)
         .appleMacPlayerStage(macPlayerStage)
         #endif

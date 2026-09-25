@@ -1,15 +1,20 @@
-/// Which subtitle tracks the stock player's own CC menu cannot reach, so the
-/// app's captions menu has to be the one shown for them.
+/// Whether the app's captions menu is shown beside the stock player on the
+/// Mac and iPhone — one captions control wherever AVKit's can do the job.
 ///
 /// AVKit lists the item's legible renditions and nothing else. Add-on
 /// subtitle files (sidecars, ids from 1 000 000) never become one, and
 /// neither do bitmap tracks (PGS, DVB, VobSub) or CEA-708, which the engine
-/// draws itself. A stream whose tracks are all native text renditions needs no
-/// second menu: AVKit's drives them through `ApplePlayerSubtitleSelection`.
+/// draws itself. The default engine's loopback streams declare no renditions
+/// on these platforms (`AetherPlaybackEngine.declaresNativeSubtitleRenditions`),
+/// so AVKit shows no CC button at all there and the app's menu is the only
+/// one. A stream whose tracks are all native text renditions needs no second
+/// menu: AVKit's drives them through `ApplePlayerSubtitleSelection`.
 @MainActor
-enum AppleMacSubtitleMenuPolicy {
-    static func showsAppMenu(tracks: [ApplePlaybackTrack]) -> Bool {
-        tracks.contains { !hasNativeRendition($0) }
+enum AppleStockSubtitleMenuPolicy {
+    static func showsAppMenu(tracks: [ApplePlaybackTrack], stockPlayerListsCaptions: Bool) -> Bool {
+        guard !tracks.isEmpty else { return false }
+        guard stockPlayerListsCaptions else { return true }
+        return tracks.contains { !hasNativeRendition($0) }
     }
 
     static func hasNativeRendition(_ track: ApplePlaybackTrack) -> Bool {
@@ -26,8 +31,8 @@ import SwiftUI
 
 /// The Mac's `AVPlayerView`, as the full player and Live's inline player both
 /// use it: the picture scaled by View ▸ Zoom to Fill, and the "…" button
-/// carrying Other sources and — for tracks AVKit's CC menu cannot reach — the
-/// app's Subtitles menu.
+/// carrying Quality and — where AVKit's CC menu cannot do the job
+/// (`AppleStockSubtitleMenuPolicy`) — the app's Subtitles menu.
 struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     let playerView: AVPlayerView
     var zoomToFill = false
@@ -80,10 +85,10 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     private func actionMenu(coordinator: Coordinator) -> NSMenu? {
         let menu = NSMenu(title: "Options")
         if onOtherSources != nil {
-            let item = NSMenuItem(title: "Other Sources…", action: #selector(Coordinator.showOtherSources(_:)),
+            let item = NSMenuItem(title: "Quality…", action: #selector(Coordinator.showOtherSources(_:)),
                                   keyEquivalent: "")
             item.target = coordinator
-            item.image = NSImage(systemSymbolName: "list.bullet", accessibilityDescription: nil)
+            item.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
             menu.addItem(item)
         }
         if showsSubtitleMenu, !subtitleEntries.isEmpty {

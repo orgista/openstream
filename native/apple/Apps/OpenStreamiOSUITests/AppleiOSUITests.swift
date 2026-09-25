@@ -477,7 +477,7 @@ final class AppleiOSUITests: XCTestCase {
         attach("download-after-tap")
 
         XCTAssertFalse(app.navigationBars["Download from"].exists, "a source sheet appeared — downloads must be automatic")
-        XCTAssertFalse(app.navigationBars["Other sources"].exists, "the playback source sheet appeared on Download")
+        XCTAssertFalse(app.navigationBars["Quality"].exists, "the playback quality sheet appeared on Download")
 
         // Something must be happening: the row's control or the page's download
         // state should read as in progress within a generous window.
@@ -2475,7 +2475,7 @@ final class AppleiOSUITests: XCTestCase {
     /// dropped.
     private static let crawlCollectionPrefixes = [
         "home.media.", "home.continue.", "home.top10.", "home.ms.", "home.top-picks.",
-        "library.title.", "librarytv.channel.", "detail.similar.", "detail.other-sources.",
+        "library.title.", "librarytv.channel.", "detail.similar.", "detail.quality.",
         "guide.play.", "guide.favorite.", "live.footer.", "live.picker.channel.",
         "settings.subtitleLanguages.", "watchprovider.", "sources.smb.share.",
         "sources.mediaServer.embyServer.", "sources.mediaServer.plex.server.",

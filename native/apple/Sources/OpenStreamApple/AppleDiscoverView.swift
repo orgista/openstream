@@ -2087,7 +2087,8 @@ struct AppleCatalogItemDetailView: View {
     @State private var titleLogoLoadResult: Bool?
     @State private var titleLogoGraceExpired = false
     @State private var streamChoices: [AppleStremioHTTPPlaybackCandidate] = []
-    @State private var selectedStream: AppleStremioHTTPPlaybackCandidate?
+    /// A resolution picked in the Quality sheet for the next Play; nil is Automatic.
+    @State private var selectedQuality: AppleStreamQualityTier?
     @State private var streamPickerPresented = false
     @State private var downloadedEpisodeIDs = Set<String>()
     @State private var downloadActionsPresented = false
@@ -2150,7 +2151,9 @@ struct AppleCatalogItemDetailView: View {
         self.relatedItems = relatedItems
         self.mediaIndex = mediaIndex
         #if DEBUG
-        self.playbackSources = playbackSources + AppleTitlePageStreamFixture.sources
+        self.playbackSources = AppleTitlePageStreamFixture.opensQuality
+            ? AppleTitlePageStreamFixture.sources
+            : playbackSources + AppleTitlePageStreamFixture.sources
         #else
         self.playbackSources = playbackSources
         #endif
@@ -2566,6 +2569,9 @@ struct AppleCatalogItemDetailView: View {
             if !Task.isCancelled { fillTimeline.mark(.done) }
             await refreshOfflineState()
             if initialAutoPlay { playRequest = UUID() }
+            #if DEBUG
+            if AppleTitlePageStreamFixture.opensQuality { await chooseStreams() }
+            #endif
         }
         .task(id: "similar:\(item.id):\(relatedItems.count):\(metadataDetails?.mediaID ?? "")") {
             await refreshSuggestions()
@@ -3179,7 +3185,7 @@ struct AppleCatalogItemDetailView: View {
         .accessibilityLabel(tvOSPlayIsBusy ? "Preparing playback" : "Play")
         .accessibilityIdentifier("detail.play")
         .contextMenu {
-            Button("Other sources", systemImage: "list.bullet") {
+            Button("Quality", systemImage: "slider.horizontal.3") {
                 Task { await chooseStreams() }
             }
         }
@@ -3522,72 +3528,49 @@ struct AppleCatalogItemDetailView: View {
         #endif
     }
 
+    /// Automatic and one row per resolution this device can play — no
+    /// codecs, containers or source names (owner 2026-09-24). A resolution
+    /// plays its best candidate for this device, falling to the nearest one.
     private var streamPicker: some View {
-        // Once per pass: `localFiles` matches the item against every library group.
-        let localFiles = self.localFiles
+        let tiers = AppleStremioCandidateRanking.qualityTiers(streamChoices, device: .current)
         return NavigationStack {
-            if localFiles.isEmpty && streamChoices.isEmpty {
-                ContentUnavailableView("No other sources", systemImage: "antenna.radiowaves.left.and.right")
-                    .navigationTitle("Other Sources")
-                    #if os(iOS) || os(visionOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                    #endif
-            } else {
-                List {
-                    if !localFiles.isEmpty {
-                        Section("On this device") {
-                            ForEach(localFiles) { file in
-                                Button {
-                                    selectedLocalFile = file
-                                    selectedStream = nil
-                                    streamPickerPresented = false
-                                    playRequest = UUID()
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Local · \(library.sources.first { $0.id == file.sourceID }?.name ?? "Library")")
-                                            .font(.body.weight(.medium))
-                                        Text(AppleLocalLibraryStore.format(file)).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }.accessibilityIdentifier("detail.other-sources.local")
-                            }
-                        }
-                    }
-                    if !streamChoices.isEmpty {
-                        Section("Sources") {
-                            ForEach(Array(streamChoices.enumerated()), id: \.offset) { index, candidate in
-                                Button {
-                                    selectedLocalFile = nil
-                                    selectedStream = candidate
-                                    streamPickerPresented = false
-                                    playRequest = UUID()
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(appleStreamDisplayText(candidate.title))
-                                            .lineLimit(1)
-                                            .truncationMode(.tail)
-                                            .font(.body.weight(.medium))
-                                            .foregroundStyle(.primary)
-                                        if let sourceName = candidate.sourceName {
-                                            Text(appleStreamDisplayText(sourceName))
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .accessibilityIdentifier("detail.other-sources.\(index)")
-                            }
-                        }
-                    }
+            List {
+                Button {
+                    choosePlaybackQuality(nil)
+                } label: {
+                    Text("Automatic").frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-                .navigationTitle("Other Sources")
-                #if os(iOS) || os(visionOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
+                .accessibilityIdentifier("detail.quality.automatic")
+                ForEach(tiers, id: \.self) { tier in
+                    Button {
+                        choosePlaybackQuality(tier)
+                    } label: {
+                        Text(tier.title).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("detail.quality.\(tier.title)")
+                }
             }
+            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+            .navigationTitle("Quality")
+            #if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #elseif os(macOS)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { streamPickerPresented = false } }
+            }
+            #endif
         }
+        #if os(macOS)
+        .frame(width: 360, height: 300)
+        #endif
         .presentationDetents([.medium])
+    }
+
+    private func choosePlaybackQuality(_ tier: AppleStreamQualityTier?) {
+        selectedLocalFile = nil
+        selectedQuality = tier
+        streamPickerPresented = false
+        playRequest = UUID()
     }
 
     private func toggleTrailerPlayback() {
@@ -3952,7 +3935,7 @@ struct AppleCatalogItemDetailView: View {
         )
         .accessibilityIdentifier("detail.play")
         .contextMenu {
-            Button("Other sources", systemImage: "list.bullet") {
+            Button("Quality", systemImage: "slider.horizontal.3") {
                 Task { await chooseStreams() }
             }
         }
@@ -4798,48 +4781,40 @@ struct AppleCatalogItemDetailView: View {
         let selectedItem = item.withMediaID(selectedPlaybackMediaID)
         let mediaID = recordID
         let title = selectedEpisodeSelection?.displayTitle ?? item.name
+        let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
-                ApplePlaybackSourceOption(id: file.url,
-                    title: "Local · \(library.sources.first { $0.id == file.sourceID }?.name ?? "Library")",
-                    detail: AppleLocalLibraryStore.format(file)) {
-                        try await library.presentation(for: file, sourceStore: store, settings: settings)
-                    }
+                ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
+                    try await library.presentation(for: file, sourceStore: store, settings: settings)
+                }
             }
-            // Local files carry no structured quality metadata, only a name,
-            // so grouping falls back to scanning it — the one case the
-            // grouping type's doc comment calls out explicitly.
-            var candidates = files.map { AppleStreamSourceGrouping.Candidate(text: $0.name, isLocal: true) }
-            var streamOptions: [ApplePlaybackSourceOption] = []
+            var streams: [AppleStremioHTTPPlaybackCandidate] = []
             var loadError: Error?
             do {
-                let streams = try await playbackResolver.rankedCandidates(sources: playbackSources,
+                streams = try await playbackResolver.rankedCandidates(sources: playbackSources,
                     preferredSourceID: source.id, item: selectedItem,
                     streamingServerConfiguration: streamingServerConfiguration)
-                streamOptions = streams.map { candidate in
-                    ApplePlaybackSourceOption(id: candidate.sourceURL,
-                        title: AppleStreamSourceGrouping.strippingProviderTag(from: appleStreamDisplayText(candidate.title)),
-                        detail: candidate.sourceName.map { "via \(appleStreamDisplayText($0))" } ?? "Add-on") {
-                            AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
-                                resume: AppleDetailResume.position(mediaID: mediaID,
-                                    partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
-                                addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type), settings: settings)
-                        }
-                }
-                candidates += streams.map {
-                    AppleStreamSourceGrouping.Candidate(
-                        text: [$0.qualityDescription ?? $0.title, $0.filename ?? ""].joined(separator: " "),
-                        isLocal: false
-                    )
-                }
             } catch { loadError = error }
-            let all = localOptions + streamOptions
-            if all.isEmpty, let loadError { throw loadError }
-            let grouped = AppleStreamSourceGrouping.choices(for: candidates).compactMap { choice in
-                all.indices.contains(choice.index) ? ApplePlaybackSourceOption(id: all[choice.index].id, title: choice.title,
-                    detail: all[choice.index].detail, prepare: all[choice.index].prepare) : nil
+            if localOptions.isEmpty && streams.isEmpty, let loadError { throw loadError }
+            let partID = AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)
+            @MainActor func option(_ candidate: AppleStremioHTTPPlaybackCandidate) -> ApplePlaybackSourceOption {
+                ApplePlaybackSourceOption(id: candidate.sourceURL,
+                    tier: AppleStremioCandidateRanking.traits(of: candidate).tier) { resume in
+                        AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
+                            resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
+                            addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type), settings: settings)
+                    }
             }
-            return ApplePlaybackSourceOptions(grouped: grouped, all: all)
+            let device = AppleStreamDeviceCapabilities.current
+            @MainActor func order(_ choice: AppleStreamQualityChoice) -> [ApplePlaybackSourceOption] {
+                AppleStremioCandidateRanking.playbackOrder(streams, choice: choice, device: device,
+                    episode: episode, title: selectedItem.name).map(option)
+            }
+            let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
+            return ApplePlaybackSourceOptions(
+                tiers: tiers,
+                automatic: localOptions + order(.automatic),
+                byTier: Dictionary(uniqueKeysWithValues: tiers.map { ($0, order(.tier($0))) }))
         }
         return result
     }
@@ -4912,7 +4887,7 @@ struct AppleCatalogItemDetailView: View {
                 return
             }
 
-            if selectedStream == nil {
+            if selectedQuality == nil {
                 let files = selectedLocalFile.map { [$0] } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
                 selectedLocalFile = nil
                 for file in files {
@@ -4926,7 +4901,7 @@ struct AppleCatalogItemDetailView: View {
                     catch { ApplePlaybackFailureHistory.shared.record(file.url) }
                 }
             }
-            if selectedStream == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
+            if selectedQuality == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
                !ApplePlaybackFailureHistory.shared.contains(offlineRecord.localURL) {
                 do {
                     playbackCoordinator.update(.loading)
@@ -4962,28 +4937,31 @@ struct AppleCatalogItemDetailView: View {
             // back to the raw catalog id only if meta resolution found nothing.
             let streamID = selectedPlaybackMediaID
             let selectedItem = item.withMediaID(streamID)
-            let ranked: [AppleStremioHTTPPlaybackCandidate]
-            if let selectedStream {
-                ranked = [selectedStream]
-            } else {
-                ranked = try await playbackResolver.rankedCandidates(
-                    sources: playbackSources,
-                    preferredSourceID: source.id,
-                    item: selectedItem,
-                    streamingServerConfiguration: streamingServerConfiguration
-                )
-            }
+            let ranked = try await playbackResolver.rankedCandidates(
+                sources: playbackSources,
+                preferredSourceID: source.id,
+                item: selectedItem,
+                streamingServerConfiguration: streamingServerConfiguration
+            )
             try Task.checkCancellation()
             streamChoices = ranked
+            // Automatic, or the resolution picked in the Quality sheet: the
+            // best candidate this device plays, then the rest as fallbacks.
+            let chosen = selectedQuality
+            let ordered = AppleStremioCandidateRanking.playbackOrder(
+                ranked, choice: chosen.map(AppleStreamQualityChoice.tier) ?? .automatic,
+                device: AppleStreamDeviceCapabilities.current,
+                episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
+                title: item.name)
             let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
-            let requests = ranked.filter { selectedStream != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
+            let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
                 candidate.playbackRequest(mediaID: mediaID, title: title,
                     resume: AppleDetailResume.position(mediaID: mediaID,
                         partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
                     addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type)
             }
-            selectedStream = nil
+            selectedQuality = nil
             guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }
             let presentation = AppleStremioPlayerPresentation(
                 request: first,
@@ -6996,7 +6974,7 @@ extension AppleCatalogItemDetailView {
         .accessibilityLabel(isBusy ? "Preparing playback" : title)
         .accessibilityIdentifier("detail.play")
         .contextMenu {
-            Button("Other sources", systemImage: "list.bullet") {
+            Button("Quality", systemImage: "slider.horizontal.3") {
                 Task { await chooseStreams() }
             }
         }
@@ -7643,7 +7621,7 @@ extension AppleCatalogItemDetailView {
                 .accessibilityLabel(state.isBusy ? "Preparing playback" : state.title)
                 .accessibilityIdentifier("detail.play")
                 .contextMenu {
-                    Button("Other sources", systemImage: "list.bullet") {
+                    Button("Quality", systemImage: "slider.horizontal.3") {
                         Task { await chooseStreams() }
                     }
                 }
@@ -7888,6 +7866,14 @@ extension AppleCatalogItemDetailView {
 /// in the page's own source list — never in the source store, a backup or
 /// iCloud.
 enum AppleTitlePageStreamFixture {
+    /// `-OpenStreamDebugOpenQuality YES` (with the fixture): the page opens
+    /// its Quality sheet once loaded, over the fixture's streams alone — no
+    /// saved add-on is asked for streams and nothing plays (N38 proof).
+    static var opensQuality: Bool {
+        UserDefaults.standard.bool(forKey: "OpenStreamDebugStreamFixture")
+            && UserDefaults.standard.bool(forKey: "OpenStreamDebugOpenQuality")
+    }
+
     static var sources: [AppleSource] {
         guard UserDefaults.standard.bool(forKey: "OpenStreamDebugStreamFixture"),
               let url = URL(string: "http://127.0.0.1:8765/manifest.json") else { return [] }

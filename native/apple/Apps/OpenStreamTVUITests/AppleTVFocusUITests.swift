@@ -718,7 +718,7 @@ final class AppleTVFocusUITests: XCTestCase {
         XCTAssertTrue(focusedElement.exists, "the shelf left focus nowhere")
     }
 
-    /// Owner B24: the "Other sources" entry point.
+    /// Owner B24: the source choice, now the Quality picker (N38).
     ///
     /// On Apple TV it is not a visible control — it lives in a `contextMenu` on
     /// the Play button, so the only way to it is a long press of Select. That
@@ -734,15 +734,15 @@ final class AppleTVFocusUITests: XCTestCase {
         remote.press(.select, forDuration: 2.0)
 
         let entry = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Other sources")).firstMatch
+            .matching(NSPredicate(format: "label == %@", "Quality")).firstMatch
         let opened = entry.waitForExistence(timeout: 10)
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "other-sources-context-menu"
+        shot.name = "quality-context-menu"
         shot.lifetime = .keepAlways
         add(shot)
 
-        XCTAssertTrue(opened, "long-pressing Play did not reveal the Other sources entry")
+        XCTAssertTrue(opened, "long-pressing Play did not reveal the Quality entry")
     }
 
     /// Owner B23: the episode list must show which episode is focused.

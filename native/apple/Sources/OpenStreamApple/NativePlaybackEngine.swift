@@ -389,12 +389,13 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// Keep the legible-group index as the track ID, even when forced options
     /// or duplicate languages disappear from the app's captions menu.
     nonisolated static func subtitleTrack(
-        optionIndex: Int, title: String, language: String?, codec: String, isForced: Bool
+        optionIndex: Int, title: String, language: String?, codec: String, isForced: Bool,
+        isHearingImpaired: Bool = false
     ) -> ApplePlaybackTrack? {
         guard !isForced else { return nil }
         return ApplePlaybackTrack(
             id: optionIndex, title: title, language: language, codec: codec,
-            isDefault: optionIndex == 0)
+            isDefault: optionIndex == 0, isHearingImpaired: isHearingImpaired)
     }
 
     /// Publishes the stream's own subtitle tracks and honours the captions
@@ -416,7 +417,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
                 title: option.displayName,
                 language: option.extendedLanguageTag ?? option.locale?.identifier,
                 codec: option.mediaType == .closedCaption ? "cc" : "sub",
-                isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+                isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles),
+                isHearingImpaired: option.hasMediaCharacteristic(.describesMusicAndSoundForAccessibility)
             ) else { continue }
             options[track.id] = option
             tracks.append(track)

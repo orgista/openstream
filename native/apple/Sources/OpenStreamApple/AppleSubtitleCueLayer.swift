@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import MediaAccessibility
@@ -47,6 +48,14 @@ enum AppleSubtitleCueLayerPolicy {
         cues.filter { position >= $0.startTime && position < $0.endTime }
     }
 
+    /// The Mac's text cue size for a picture this tall. The 12 pt base is
+    /// sidebar-sized; AVKit draws captions at about a twentieth of the
+    /// picture's height, and on the default engine the app draws every
+    /// caption on the Mac (N38), so its cues grow with the window the same way.
+    static func macTextSize(base: CGFloat, pictureHeight: CGFloat) -> CGFloat {
+        max(base, (pictureHeight * 0.045).rounded())
+    }
+
     /// One row of the app's subtitle menu on the stock player.
     struct MenuEntry: Equatable, Identifiable {
         let trackID: Int?
@@ -62,11 +71,14 @@ enum AppleSubtitleCueLayerPolicy {
         languagesAreExplicit: Bool,
         activeTrackID: Int?
     ) -> [MenuEntry] {
-        let choices = AppleSubtitleTrackFilter.menu(
+        let choices = AppleSubtitleTrackFilter.menuChoices(
             tracks, preferredLanguages: preferredLanguages, activeTrackID: activeTrackID)
         guard !choices.isEmpty else { return [] }
         return [MenuEntry(trackID: nil, title: "Off", isSelected: activeTrackID == nil)]
-            + choices.map { MenuEntry(trackID: $0.id, title: $0.title, isSelected: $0.id == activeTrackID) }
+            + choices.map { choice in
+                MenuEntry(trackID: choice.track.id, title: choice.title,
+                          isSelected: activeTrackID.map(choice.memberIDs.contains) ?? false)
+            }
     }
 }
 
@@ -80,6 +92,11 @@ final class AppleStockPlayerSubtitles {
     /// Inline UIKit players have no transport overlay, including on surface routes.
     private(set) var drawsInlineCues = false
     private(set) var menuEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
+    /// Whether the current item has legible options, i.e. whether AVKit's
+    /// own captions button is there (`AppleStockSubtitleMenuPolicy`).
+    private(set) var stockPlayerListsCaptions = false
+    private weak var probedItem: AVPlayerItem?
+    private var legibleProbe: Task<Void, Never>?
 
     /// Runs for as long as the calling `.task` lives.
     func follow(_ engine: any ApplePlaybackEngine) async {
@@ -114,7 +131,24 @@ final class AppleStockPlayerSubtitles {
             languagesAreExplicit: chosen != nil,
             activeTrackID: engine.activeSubtitleTrackID)
         if entries != menuEntries { menuEntries = entries }
+        probeStockCaptions(of: engine.avPlayer?.currentItem)
     }
+
+    private func probeStockCaptions(of item: AVPlayerItem?) {
+        guard item !== probedItem else { return }
+        probedItem = item
+        legibleProbe?.cancel()
+        if stockPlayerListsCaptions { stockPlayerListsCaptions = false }
+        guard let item else { return }
+        legibleProbe = Task { [weak self] in
+            let group = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+            guard !Task.isCancelled, let self, self.probedItem === item else { return }
+            let lists = !(group?.options.isEmpty ?? true)
+            if lists != self.stockPlayerListsCaptions { self.stockPlayerListsCaptions = lists }
+        }
+    }
+
+    isolated deinit { legibleProbe?.cancel() }
 }
 
 /// The active subtitle cues, sat against the **picture** rather than the
@@ -166,7 +200,7 @@ private struct AppleSubtitleTextCues: View {
                 if !cues.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(cues) { cue in
-                            Text(appearance.text(for: cue, baseSize: baseSize))
+                            Text(appearance.text(for: cue, baseSize: textSize(in: proxy.size)))
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -190,6 +224,16 @@ private struct AppleSubtitleTextCues: View {
             for: Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String))) { _ in
             appearance = .system()
         }
+    }
+
+    private func textSize(in container: CGSize) -> CGFloat {
+        #if os(macOS)
+        AppleSubtitleCueLayerPolicy.macTextSize(
+            base: baseSize,
+            pictureHeight: AppleVideoFitting.fittedRect(container: container, videoSize: videoSize).height)
+        #else
+        baseSize
+        #endif
     }
 }
 

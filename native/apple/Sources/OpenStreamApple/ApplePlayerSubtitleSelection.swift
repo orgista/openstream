@@ -189,7 +189,7 @@ final class ApplePlayerSubtitleSelection {
         }.map(\.element)
     }
 
-    static func isBitmap(_ track: ApplePlaybackTrack) -> Bool {
+    nonisolated static func isBitmap(_ track: ApplePlaybackTrack) -> Bool {
         let codec = track.codec?.lowercased() ?? ""
         return ["pgs", "hdmv", "dvb_sub", "dvbsub", "dvd_sub", "dvdsub", "vobsub", "xsub"]
             .contains { codec.contains($0) }

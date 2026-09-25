@@ -30,15 +30,19 @@ public struct ApplePlaybackTrack: Identifiable, Equatable, Sendable {
     /// Container disposition FORCED: every cue on the track is a forced one
     /// (signs, foreign dialogue). Carried as data; drawn like any cue.
     public let isForced: Bool
+    /// Container disposition HEARING_IMPAIRED (or the SDH characteristic):
+    /// the captions menu names it "English (SDH)" beside a plain English.
+    public let isHearingImpaired: Bool
 
     public init(id: Int, title: String, language: String? = nil, codec: String? = nil,
-                isDefault: Bool = false, isForced: Bool = false) {
+                isDefault: Bool = false, isForced: Bool = false, isHearingImpaired: Bool = false) {
         self.id = id
         self.title = title
         self.language = language
         self.codec = codec
         self.isDefault = isDefault
         self.isForced = isForced
+        self.isHearingImpaired = isHearingImpaired
     }
 }
 

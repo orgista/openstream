@@ -55,7 +55,10 @@ struct AetherLoadOptionsTests {
         #expect(options.dvrWindowSeconds == 600)
         #expect(options.autoplay == false)
         #expect(options.preferredDecodePath == .automatic)
-        #expect(options.prepareNativeSubtitles)
+        // Mac/iPhone: no renditions for AVKit's CC menu; the app's menu and
+        // cue layer own captions (N38). Apple TV keeps them for AirPlay.
+        #expect(options.prepareNativeSubtitles == AetherPlaybackEngine.declaresNativeSubtitleRenditions)
+        #expect(AetherPlaybackEngine.declaresNativeSubtitleRenditions == false)
         #expect(options.preferredSubtitleLanguages == (languages.isEmpty ? ["eng", "en"] : languages))
     }
 }

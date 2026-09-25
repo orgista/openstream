@@ -256,6 +256,28 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
 
+    /// Whether loopback HLS declares WebVTT renditions for the stream's own
+    /// text subtitles. Only where the stock player's captions rows are hidden
+    /// (Apple TV, `allowedSubtitleOptionLanguages`), so they serve AirPlay
+    /// without reaching a menu.
+    ///
+    /// On the Mac and iPhone they did reach one — AVKit's CC menu listed them
+    /// under the engine's unique rendition names ("English", "English 2",
+    /// "English 3" for one film) — and a choice there drew nothing: the
+    /// renditions are non-default, lazily filled and pinned deselected for the
+    /// host overlay (AetherEngine Sodalite#32/#38), while the app took the
+    /// choice as AVKit's to draw and cleared its own cues (N38, measured on
+    /// the Mac stage player: no caption layer ever appeared). Without them
+    /// the item has no legible options, AVKit shows no CC button, and the
+    /// app's captions menu is the one control, drawn by the app's cue layer.
+    nonisolated static var declaresNativeSubtitleRenditions: Bool {
+        #if os(tvOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Builds the engine policy without loading media or reading viewer defaults.
     nonisolated static func loadOptions(
         for request: ApplePlaybackRequest,
@@ -268,13 +290,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             isLive: request.isLive,
             dvrWindowSeconds: request.effectiveDVRWindowSeconds
         )
-        // Declare WebVTT renditions in the loopback HLS so embedded SRT/ASS
-        // (and DVB/teletext the engine can render to text) reach the system
-        // player's own captions menu on `.avPlayer`/loopback routes. On `.surface`
-        // the host overlay reads `subtitleCues` instead; declaring native
-        // renditions also keeps cues flowing there.
         options.preferredDecodePath = .automatic
-        options.prepareNativeSubtitles = true
+        options.prepareNativeSubtitles = declaresNativeSubtitleRenditions
         // Live HLS from an extension-less URL: AVPlayer plays the origin
         // directly; the raw live path would hand it to FFmpeg and fail.
         if request.hints.nativeRemoteHLS { options.nativeRemoteHLS = true }
@@ -666,7 +683,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             language: track.language,
             codec: track.codec,
             isDefault: track.isDefault,
-            isForced: track.isForced
+            isForced: track.isForced,
+            isHearingImpaired: track.isHearingImpaired
         )
     }
 
