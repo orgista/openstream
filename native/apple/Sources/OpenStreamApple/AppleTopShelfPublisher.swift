@@ -65,10 +65,10 @@ public final class AppleTopShelfPublisher {
         let shelvesKey = sections.map { "\($0.id)#\($0.items.count)" }.joined(separator: ",")
         // Enabling or removing an add-on changes what Continue Watching can open.
         let sourcesKey = sources.map { "\($0.id.uuidString)#\($0.isEnabled)#\($0.kind)" }.joined(separator: ",")
-        // The bars follow the playback store, which moves between index syncs
+        // The bars and the order follow the playback store, which moves between index syncs
         // (review of 2b1f930).
         let progressKey = savedProgress.sorted { $0.key < $1.key }
-            .map { "\($0.key)|\($0.value.position)|\($0.value.duration)|\($0.value.partID ?? "")" }
+            .map { "\($0.key)|\($0.value.position)|\($0.value.duration)|\($0.value.partID ?? "")|\($0.value.updatedAt.timeIntervalSince1970)" }
             .joined(separator: ",")
         return ApplePlaybackIdentity.digest(for: [
             enabled ? "1" : "0", recordsKey, topPicksKey, shelvesKey, sourcesKey, progressKey,
