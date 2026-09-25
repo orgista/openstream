@@ -7,6 +7,7 @@ import Testing
 /// line starting at the row's leading edge, underneath the glyph. Measured on
 /// an iPhone 16 Pro at `accessibility-extra-extra-extra-large`.
 @Suite("Settings row icon column")
+@MainActor
 struct AppleNavigationLabelColumnTests {
     @Test func ordinarySizesKeepTheStockLabel() {
         for size in [DynamicTypeSize.xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge] {

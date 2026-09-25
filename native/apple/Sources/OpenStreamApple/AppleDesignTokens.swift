@@ -69,7 +69,7 @@ public struct PrimaryPillButtonStyle: ButtonStyle {
             .hoverEffect(.highlight)
             #endif
             .background(Color.white)
-            .foregroundColor(.black)
+            .foregroundStyle(.black)
             .clipShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
     }
@@ -87,7 +87,7 @@ public struct SecondaryPillButtonStyle: ButtonStyle {
             .hoverEffect(.highlight)
             #endif
             .background(Color(white: 0.2))
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .clipShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
     }

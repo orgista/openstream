@@ -8,11 +8,11 @@ import UIKit
 /// an empty field never reads as a filled-in value.
 private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     #if os(visionOS)
-    Text(title).foregroundColor(.white)
+    Text(title).foregroundStyle(.white)
     #elseif os(tvOS)
     Text(title).italic().foregroundStyle(.tertiary)
     #elseif os(iOS)
-    Text(title).foregroundColor(Color(uiColor: .secondaryLabel))
+    Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
     #else
     Text(title).foregroundStyle(.secondary)
     #endif

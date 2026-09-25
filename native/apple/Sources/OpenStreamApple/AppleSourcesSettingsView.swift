@@ -14,13 +14,13 @@ import AppKit
 /// reads as a filled-in value from across the room (owner item S9).
 private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     #if os(visionOS)
-    Text(title).foregroundColor(.white)
+    Text(title).foregroundStyle(.white)
     #elseif os(tvOS)
     Text(title).italic().foregroundStyle(.tertiary)
     #elseif os(iOS)
     // Use the system label color directly; hierarchical secondary styling
     // compounds the text field's placeholder dimming on a dark form.
-    Text(title).foregroundColor(Color(uiColor: .secondaryLabel))
+    Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
     #else
     Text(title).foregroundStyle(.secondary)
     #endif

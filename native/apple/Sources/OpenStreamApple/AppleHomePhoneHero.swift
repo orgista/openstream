@@ -78,10 +78,10 @@ struct AppleHomePhoneHero<Actions: View>: View {
         // scrolling still costs no per-frame state change.
         .allowsHitTesting(!copyHidden)
         .accessibilityHidden(copyHidden)
-        .onGeometryChange(for: Bool.self) { [copyFadeLine] proxy in
+        .onGeometryChange(for: Bool.self) { [copyFadeLine, space = Self.coordinateSpaceName] proxy in
             AppleHomePhoneHeroLayout.copyIsHidden(
                 copyTop: proxy.frame(in: .scrollView).minY,
-                restingTop: proxy.frame(in: .named(Self.coordinateSpaceName)).minY,
+                restingTop: proxy.frame(in: .named(space)).minY,
                 fadeLine: copyFadeLine)
         } action: { hidden in
             copyHidden = hidden
@@ -90,10 +90,10 @@ struct AppleHomePhoneHero<Actions: View>: View {
         // costs no state change and no body pass. The hero starts at the top
         // edge of the screen, so where the copy sits inside it is where it
         // rests on screen before any scroll.
-        .visualEffect { [copyFadeLine] content, proxy in
+        .visualEffect { [copyFadeLine, space = Self.coordinateSpaceName] content, proxy in
             content.opacity(AppleHomePhoneHeroLayout.copyOpacity(
                 copyTop: proxy.frame(in: .scrollView).minY,
-                restingTop: proxy.frame(in: .named(Self.coordinateSpaceName)).minY,
+                restingTop: proxy.frame(in: .named(space)).minY,
                 fadeLine: copyFadeLine))
         }
         .padding(.horizontal, 20)

@@ -31,6 +31,8 @@
 		D00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000008 /* Assets.xcassets */; };
 		D00000000000000000000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000008 /* Assets.xcassets */; };
 		D00000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000008 /* Assets.xcassets */; };
+		D00000000000000000000061 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000060 /* AppIcon.icon */; };
+		D00000000000000000000062 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000060 /* AppIcon.icon */; };
 		D00000000000000000000015 /* TopShelfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000010 /* TopShelfProvider.swift */; };
 		D00000000000000000000016 /* OpenStream Top Shelf.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = C00000000000000000000013 /* OpenStream Top Shelf.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D00000000000000000000017 /* AMSMB2 in Frameworks */ = {isa = PBXBuildFile; productRef = K00000000000000000000005 /* AMSMB2 */; };
@@ -182,6 +184,7 @@
 		C00000000000000000000006 /* OpenStream macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OpenStream macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C00000000000000000000007 /* OpenStreamMacOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenStreamMacOS.entitlements; sourceTree = "<group>"; };
 		C00000000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C00000000000000000000060 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		C00000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C00000000000000000000010 /* TopShelfProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfProvider.swift; sourceTree = "<group>"; };
 		C00000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -350,6 +353,7 @@
 				C00000000000000000000007 /* OpenStreamMacOS.entitlements */,
 				C00000000000000000000014 /* OpenStreamTV.entitlements */,
 				C00000000000000000000008 /* Assets.xcassets */,
+				C00000000000000000000060 /* AppIcon.icon */,
 				C00000000000000000000009 /* Info.plist */,
 			);
 			path = Shared;
@@ -785,6 +789,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D00000000000000000000011 /* Assets.xcassets in Resources */,
+				D00000000000000000000061 /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -809,6 +814,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D00000000000000000000014 /* Assets.xcassets in Resources */,
+				D00000000000000000000062 /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

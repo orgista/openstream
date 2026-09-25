@@ -435,7 +435,7 @@ public struct OpenStreamRootView: View {
             if sharePlay.channel != nil { selectedTab = .live }
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }
         }
-        .environment(\.appleOpenSourcesSettings) { openSourcesSettings() }
+        .environment(\.appleOpenSourcesSettings, AppleOpenSourcesSettingsAction { openSourcesSettings() })
         .environment(\.appleSettingsNavigator, settingsNavigator)
         .preferredColorScheme(.dark)
         #if !os(tvOS)

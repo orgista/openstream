@@ -3,6 +3,7 @@ import Testing
 @testable import OpenStreamApple
 
 @Suite("Apple TV title page and chrome metrics")
+@MainActor
 struct AppleTVDetailMetricsTests {
     @Test func heroFillsTheWholeScreen() {
         #expect(AppleTVDetailMetrics.screenSize == CGSize(width: 1920, height: 1080))

@@ -183,6 +183,7 @@ struct AppleWatchProviderRequestTests {
 /// The sentence under a title. It has to stay a quiet line rather than becoming
 /// a paragraph, which is the whole point of the feature being "subtle".
 @Suite("Also available on")
+@MainActor
 struct AppleWatchProviderRowTests {
     private func provider(_ name: String, _ offer: AppleWatchProviderOffer = .subscription) -> AppleWatchProvider {
         AppleWatchProvider(id: abs(name.hashValue % 10_000), name: name, offer: offer)

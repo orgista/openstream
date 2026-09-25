@@ -355,6 +355,7 @@ public enum AppleMacWindowShot {
     /// real `NSApp.mainMenu`, because what SwiftUI does with a `.commands`
     /// block is not obvious from the source — an auto-generated "Toggle
     /// Sidebar ⌘S" was landing in *Help*.
+    @MainActor
     public static func menuDump() -> [String] {
         guard let main = NSApp.mainMenu else { return ["OPENSTREAM-MENU mainMenu: nil"] }
         var lines = ["OPENSTREAM-MENU menus: \(main.items.count)"]

@@ -53,17 +53,10 @@ public actor AppleArtworkResolver {
     }
 }
 
-private struct AppleTMDBConfigurationEnvironmentKey: EnvironmentKey {
-    static let defaultValue: AppleTMDBConfiguration? = nil
-}
-
 extension EnvironmentValues {
     /// The active TMDB configuration (nil when Settings > Metadata is off).
     /// Catalog cards read this to request poster fallback art lazily.
-    public var appleTMDBConfiguration: AppleTMDBConfiguration? {
-        get { self[AppleTMDBConfigurationEnvironmentKey.self] }
-        set { self[AppleTMDBConfigurationEnvironmentKey.self] = newValue }
-    }
+    @Entry public var appleTMDBConfiguration: AppleTMDBConfiguration? = nil
 }
 
 extension AppleSettingsStore {

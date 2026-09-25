@@ -91,7 +91,7 @@ final class OpenStreamMessagesViewController: MSMessagesAppViewController {
             message.url = layout.url
             message.summaryText = layout.summaryText
 
-            conversation.insert(message, completionHandler: nil)
+            try? await conversation.insert(message)
             // Collapse back to the conversation so the composed message is
             // visible; in compact there is nothing to collapse.
             if self?.presentationStyle == .expanded { self?.dismiss() }

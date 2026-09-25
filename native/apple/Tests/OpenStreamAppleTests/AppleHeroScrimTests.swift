@@ -266,6 +266,7 @@ struct AppleHeroCopyRegionTests {
 }
 
 @Suite("iPad full-bleed hero")
+@MainActor
 struct AppleIPadHeroLayoutTests {
     @Test("Height is min(900, 90 % of the width, 66 % of the screen), in portrait and landscape",
           arguments: [
