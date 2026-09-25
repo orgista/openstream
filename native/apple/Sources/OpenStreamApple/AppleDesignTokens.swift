@@ -295,6 +295,13 @@ public struct AppleSourceEmptyState: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(16)
+        #if os(macOS)
+        // No grey toolbar band over an empty page: the black runs to the
+        // window's top edge and only the tab picker and buttons keep their
+        // glass, as over the hero (owner, 2026-09-25).
+        .background(Color.black.ignoresSafeArea())
+        .appleMacHeroUnderToolbar()
+        #endif
     }
 }
 
