@@ -8,9 +8,12 @@ import SwiftUI
 /// consistent"). Discover and Library put their own items here; a title page
 /// draws them unchanged with its back button beside them
 /// (`appleTitlePageToolbar`), as the Apple TV app on the Mac keeps its bar.
-/// A page pushed with `navigationDestination` takes the stack's environment,
-/// not the view that declared it, so each destination is handed this
-/// explicitly; a `NavigationLink` destination inherits it.
+/// The title page takes this as a required init argument
+/// (`AppleCatalogItemDetailView.tabToolbar`), so no entry point can open it
+/// without the bar, and sets it on its own bar. Its items carry their own ids
+/// (`AppleTabToolbar.scope`): with the tab's ids, a page pushed by a
+/// `NavigationLink` (a Discover poster, a search result) drew Back alone
+/// (N49 #21).
 struct AppleTabToolbarContext {
     let tab: OpenStreamTab
     /// Read by the page's bar as it draws, not when the page was pushed: a
@@ -29,13 +32,16 @@ extension EnvironmentValues {
 extension View {
     /// The title page's bar: a round ‹ at the leading edge, then the tab's
     /// own Search and Refresh. ⌘[ and Esc go back too, except while
-    /// `backIsBlocked` (a player is up and owns Esc).
-    func appleTitlePageToolbar(backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
-        modifier(AppleTitlePageToolbar(backIsBlocked: backIsBlocked, onBack: onBack))
+    /// `backIsBlocked` (a player is up and owns Esc). `pageID` keeps this
+    /// page's items apart from the tab's and from a title page under it
+    /// (`AppleTabToolbar.scope`).
+    func appleTitlePageToolbar(pageID: String, backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
+        modifier(AppleTitlePageToolbar(pageID: pageID, backIsBlocked: backIsBlocked, onBack: onBack))
     }
 }
 
 private struct AppleTitlePageToolbar: ViewModifier {
+    let pageID: String
     let backIsBlocked: Bool
     let onBack: () -> Void
     @Environment(\.appleTabToolbar) private var tabToolbar
@@ -58,7 +64,8 @@ private struct AppleTitlePageToolbar: ViewModifier {
                 }
                 if let tabToolbar {
                     AppleTabToolbar(tab: tabToolbar.tab, isRefreshing: isRefreshing,
-                                    onSearch: tabToolbar.onSearch, onRefresh: tabToolbar.onRefresh)
+                                    onSearch: tabToolbar.onSearch, onRefresh: tabToolbar.onRefresh,
+                                    scope: "title.\(pageID)")
                 }
             }
             #if os(macOS)

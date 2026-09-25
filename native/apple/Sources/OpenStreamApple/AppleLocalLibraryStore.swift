@@ -429,6 +429,8 @@ struct AppleLocalTitleShelf: View {
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    /// The bar of the tab the shelf sits on, for the title pages it opens.
+    let tabToolbar: AppleTabToolbarContext?
     var showsProgress = false
     var accessory: AnyView? = nil
     @State private var library = AppleLocalLibraryStore.shared
@@ -436,7 +438,8 @@ struct AppleLocalTitleShelf: View {
         AppleMediaShelf(title: title, accessory: accessory) {
             ForEach(groups) { group in
                 NavigationLink {
-                    AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
+                    AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings,
+                                               openSettings: openSettings, tabToolbar: tabToolbar)
                         .environment(\.appleDiscoverRows, nil)
                 } label: {
                     #if os(tvOS)
@@ -489,6 +492,7 @@ struct AppleLocalTitleDestination: View {
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    let tabToolbar: AppleTabToolbarContext?
     var autoPlay = false
     @State private var library = AppleLocalLibraryStore.shared
     var body: some View {
@@ -498,7 +502,8 @@ struct AppleLocalTitleDestination: View {
                 gatewayConfig: settings.gatewayEnabled ? try? AppleTranscodeGatewayConfig(baseURL: settings.gatewayURL,
                     sessionToken: settings.gatewayToken, isEnabled: true) : nil,
                 streamingServerConfiguration: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
-                openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore)
+                openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
+                tabToolbar: tabToolbar)
         }
     }
 }

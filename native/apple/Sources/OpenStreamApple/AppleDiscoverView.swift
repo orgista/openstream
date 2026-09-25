@@ -488,6 +488,19 @@ struct AppleDiscoverView: View {
             guard settings.top10ListsEnabled else { return }
             loadTop10()
         }
+        #if DEBUG
+        // `-OpenStreamDebugOpenHeroDetails YES` presses the billboard's
+        // Details once, so a headless sweep reaches the title page the way a
+        // viewer does from the hero (N53: every entry point keeps the bar).
+        .task(id: heroes.first?.id) {
+            guard UserDefaults.standard.bool(forKey: "OpenStreamDebugOpenHeroDetails"),
+                  let first = heroes.first, !visionReviewDetailOpened else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            visionReviewDetailOpened = true
+            selectHero(first, autoPlay: false)
+        }
+        #endif
         // The same Search and Refresh on every page pushed from here.
         .environment(\.appleTabToolbar, tabToolbarContext)
     }
@@ -684,7 +697,8 @@ struct AppleDiscoverView: View {
             }
         case .library:
             AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
-                sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
+                sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings,
+                tabToolbar: tabToolbarContext)
                 .accessibilityIdentifier("home.your-library")
         case .mediaServer(let id):
             if let shelf = mediaServerLibrary.shelves.first(where: { $0.id == id }) {
@@ -826,6 +840,7 @@ struct AppleDiscoverView: View {
             playbackResolver: playbackResolver,
             settings: settings,
             openSettings: openSettings,
+            tabToolbar: tabToolbarContext,
             onOpen: { selectedCatalog = section; showsCatalog = true }
         )
     }
@@ -1151,10 +1166,10 @@ struct AppleDiscoverView: View {
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: initialAutoPlay,
-                mediaServerLibrary: mediaServerLibrary
+                mediaServerLibrary: mediaServerLibrary,
+                tabToolbar: tabToolbarContext
             )
             .environment(\.appleDiscoverRows, nil)
-            .environment(\.appleTabToolbar, tabToolbarContext)
         }
     }
 
@@ -1252,6 +1267,9 @@ struct AppleSearchView: View {
     @State private var routedResult: RoutedResult?
     @State private var deliveredRouteRevision: Int?
     @State private var catalogLookup = AppleCatalogSearchLookup()
+    #if DEBUG
+    @State private var debugOpenedFirstResult = false
+    #endif
 
     private struct RoutedResult: Identifiable, Hashable {
         let record: AppleMediaRecord
@@ -1308,7 +1326,8 @@ struct AppleSearchView: View {
                                 streamingServerConfiguration: streamingServerConfiguration,
                                 playbackResolver: playbackResolver,
                                 settings: settings,
-                                openSettings: openSettings
+                                openSettings: openSettings,
+                                tabToolbar: tabToolbar
                             )
                         } label: {
                             resultRow(record, sourceName: result.source.name)
@@ -1342,9 +1361,9 @@ struct AppleSearchView: View {
                 playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
-                initialAutoPlay: value.action == .play
+                initialAutoPlay: value.action == .play,
+                tabToolbar: tabToolbar
             )
-            .environment(\.appleTabToolbar, tabToolbar)
         }
         .task(id: router.searchQuery) {
             if !router.searchQuery.isEmpty { query = router.searchQuery }
@@ -1386,6 +1405,23 @@ struct AppleSearchView: View {
         .task(id: catalogLookupIdentity) {
             await rebuildCatalogLookup()
         }
+        #if DEBUG
+        // `-OpenStreamDebugSearchQuery <text>` types a query and opens the
+        // first result's title page once, for a headless sweep of Search as
+        // an entry point (N53).
+        .task(id: listedResults.count) {
+            guard let typed = UserDefaults.standard.string(forKey: "OpenStreamDebugSearchQuery"),
+                  !typed.isEmpty else { return }
+            if query.isEmpty { query = typed; return }
+            guard !debugOpenedFirstResult, let record = listedResults.first,
+                  let match = searchMatch(for: record) else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            debugOpenedFirstResult = true
+            routedResult = RoutedResult(record: record, item: match.item, source: match.source,
+                                        action: .display, revision: -1)
+        }
+        #endif
         // tvOS: no Refresh. It drew as a boxed glyph floating over the empty
         // state beside the keyboard (owner 2026-09-14) and there is nothing
         // for it to do that typing does not already do — the same call the
@@ -1521,6 +1557,8 @@ private struct AppleCatalogSectionView: View {
     let playbackResolver: AppleStremioPlaybackResolver
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    /// Discover's Search and Refresh, for the title pages its posters open.
+    let tabToolbar: AppleTabToolbarContext?
     let onOpen: () -> Void
     @FocusState private var focusedItemID: String?
 
@@ -1606,7 +1644,8 @@ private struct AppleCatalogSectionView: View {
                 streamingServerConfiguration: streamingServerConfiguration,
                 playbackResolver: playbackResolver,
                 settings: settings,
-                openSettings: openSettings
+                openSettings: openSettings,
+                tabToolbar: tabToolbar
             )
             .environment(\.appleDiscoverRows, nil)
         }
@@ -1806,17 +1845,25 @@ struct AppleCatalogCard: View {
     }
 
     /// A card never renders as an empty slot: when the artwork is missing or
-    /// fails, the tile carries the title instead (FEEDBACK X7).
+    /// fails, the tile carries the title instead (FEEDBACK X7), set as a
+    /// title card — bold white type, not a grey box with grey text (N49 #20).
     private var artworkPlaceholder: some View {
         ZStack {
             Color(white: 0.12)
             Text(item.name)
-                .font(.headline)
-                .foregroundStyle(.secondary)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(4)
+                .minimumScaleFactor(0.6)
                 .padding(12)
         }
+    }
+
+    /// The backdrop a logo-on-a-plate poster is drawn over.
+    private var plateBackdropURL: URL? {
+        guard artworkPlate != .none, !isLandscapeCard else { return nil }
+        return AppleCatalogArtworkPolicy.plateBackdrop(item: item, fallback: fallbackArtwork, showing: resolvedPosterURL)
     }
 
     /// "2013–2018" under the title; none on a card that shows progress.
@@ -1853,7 +1900,18 @@ struct AppleCatalogCard: View {
                 // logo itself is brighter than the tile and draws unchanged.
                 .blendMode(artworkPlate == .black ? .lighten : .normal)
                 .frame(width: cardWidth, height: cardHeight)
-                .background { if artworkPlate != .none { Color(white: 0.12) } }
+                .background {
+                    if artworkPlate != .none {
+                        ZStack {
+                            Color(white: 0.12)
+                            if let plateBackdropURL {
+                                AppleCatalogArtwork(url: plateBackdropURL)
+                                    .frame(width: cardWidth, height: cardHeight)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                    }
+                }
                 .overlay { if resolvedPosterURL == nil { artworkPlaceholder } }
                 .overlay {
                     // Figma's diagonal on the Top 10 tile (owner: follow the
@@ -1924,6 +1982,19 @@ struct AppleCatalogCard: View {
                         type: item.type,
                         existingPosterURL: wantsBackdrop ? nil : item.posterURL,
                         existingBackgroundURL: item.backgroundURL,
+                        configuration: metadataConfiguration
+                    )
+                }
+                .task(id: artworkPlate) {
+                    // A logo-only poster with no backdrop of its own: look one
+                    // up once, for the card to draw the logo over.
+                    guard artworkPlate != .none, !isLandscapeCard, fallbackArtwork == nil,
+                          plateBackdropURL == nil else { return }
+                    fallbackArtwork = await AppleArtworkResolver.shared.resolve(
+                        mediaID: item.mediaID,
+                        type: item.type,
+                        existingPosterURL: nil,
+                        existingBackgroundURL: nil,
                         configuration: metadataConfiguration
                     )
                 }
@@ -2113,6 +2184,11 @@ struct AppleCatalogItemDetailView: View {
     let localGroup: AppleLibrarySeries?
     let localSourceStore: AppleSourceStore?
     let mediaServerLibrary: AppleMediaServerLibraryStore?
+    /// The bar of the tab this page was opened from — Search and Refresh
+    /// beside Back, from every entry point (owner 2026-09-24, N49 #21).
+    /// Required, so a new way in cannot forget it. Nil only where the
+    /// platform has no tab bar items (Apple TV).
+    let tabToolbar: AppleTabToolbarContext?
     @State private var library = AppleLocalLibraryStore.shared
 
     private var localFiles: [AppleLibraryItem] {
@@ -2173,7 +2249,8 @@ struct AppleCatalogItemDetailView: View {
         initialAutoPlay: Bool = false,
         localGroup: AppleLibrarySeries? = nil,
         localSourceStore: AppleSourceStore? = nil,
-        mediaServerLibrary: AppleMediaServerLibraryStore? = nil
+        mediaServerLibrary: AppleMediaServerLibraryStore? = nil,
+        tabToolbar: AppleTabToolbarContext?
     ) {
         self.item = item
         self.source = source
@@ -2196,6 +2273,7 @@ struct AppleCatalogItemDetailView: View {
         self.localGroup = localGroup
         self.localSourceStore = localSourceStore
         self.mediaServerLibrary = mediaServerLibrary
+        self.tabToolbar = tabToolbar
         _pageMetadata = State(initialValue: AppleTitlePageMetadataState(
             isPreparing: ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: item.mediaID)
         ))
@@ -2324,7 +2402,8 @@ struct AppleCatalogItemDetailView: View {
         .navigationTitle("")
         #if os(macOS) || os(iOS)
         // Discover's bar, unchanged, with ‹ at its leading edge (N37).
-        .appleTitlePageToolbar(backIsBlocked: playbackUI.presentation != nil) { dismiss() }
+        .appleTitlePageToolbar(pageID: item.id, backIsBlocked: playbackUI.presentation != nil) { dismiss() }
+        .environment(\.appleTabToolbar, tabToolbar)
         #endif
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -3453,7 +3532,8 @@ struct AppleCatalogItemDetailView: View {
                                 streamingServerConfiguration: streamingServerConfiguration,
                                 playbackResolver: playbackResolver,
                                 settings: settings,
-                                openSettings: openSettings
+                                openSettings: openSettings,
+                                tabToolbar: tabToolbar
                             )
                         } label: {
                             AppleTVPosterCard(item: suggestion)
@@ -4590,7 +4670,8 @@ struct AppleCatalogItemDetailView: View {
                     streamingServerConfiguration: streamingServerConfiguration,
                     playbackResolver: playbackResolver,
                     settings: settings,
-                    openSettings: openSettings
+                    openSettings: openSettings,
+                    tabToolbar: tabToolbar
                 )
             } label: {
                 AppleCatalogCard(
@@ -4738,30 +4819,37 @@ struct AppleCatalogItemDetailView: View {
             .compactMap { $0 }.joined(separator: " · ")
     }
 
+    @ViewBuilder
     private var rateControl: some View {
+        #if os(tvOS)
         Menu {
-            ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
-                Button {
-                    selectRating(value)
-                } label: {
-                    Label(value.title, systemImage: ratingGlyph(for: value, selected: rating == value))
-                }
-            }
+            titlePageRateChoices
         } label: {
-            VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
-                Image(systemName: ratingGlyph(for: rating, selected: rating != nil))
-                    .font(.system(size: scaledIconGlyphSize))
-                Text("Rate")
-                    .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
-            }
-            .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth)
-            .frame(minWidth: 44, minHeight: max(44, scaledIconRowHeight))
-            .contentShape(.rect)
+            rateControlLabel
         }
         .appleBareMenu()
         .foregroundStyle(.white)
         .accessibilityLabel("Rate")
         .accessibilityValue(rating?.title ?? "Not rated")
+        #else
+        // One element, as on the iPhone (`AppleTitlePageRatePicker`).
+        AppleTitlePageRatePicker(rating: rating, glyph: ratingGlyph(for:selected:), onSelect: selectRating) {
+            rateControlLabel
+        }
+        .foregroundStyle(.white)
+        #endif
+    }
+
+    private var rateControlLabel: some View {
+        VStack(spacing: AppleDetailMetrics.iconLabelSpacing) {
+            Image(systemName: ratingGlyph(for: rating, selected: rating != nil))
+                .font(.system(size: scaledIconGlyphSize))
+            Text("Rate")
+                .font(.system(size: scaledIconLabelFontSize, weight: .semibold))
+        }
+        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : AppleDetailMetrics.iconActionWidth)
+        .frame(minWidth: 44, minHeight: max(44, scaledIconRowHeight))
+        .contentShape(.rect)
     }
 
     private var rateAnimation: Animation {
@@ -5813,6 +5901,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             configuration.websiteDataStore = .nonPersistent()
             configuration.userContentController.addUserScript(WKUserScript(
                 source: ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: AppleYouTubePreviewHTML.playerChromeScript,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false
             ))
@@ -7273,7 +7366,9 @@ extension AppleCatalogItemDetailView {
         }
     }
 
+    @ViewBuilder
     private var phoneRateMenu: some View {
+        #if os(tvOS)
         Menu {
             titlePageRateChoices
         } label: {
@@ -7282,6 +7377,11 @@ extension AppleCatalogItemDetailView {
         .appleBareMenu()
         .accessibilityLabel("Rate")
         .accessibilityValue(rating?.title ?? "Not rated")
+        #else
+        AppleTitlePageRatePicker(rating: rating, glyph: ratingGlyph(for:selected:), onSelect: selectRating) {
+            AppleTitlePageRoundButtonLabel(title: "Rate", systemImage: ratingGlyph(for: rating, selected: rating != nil))
+        }
+        #endif
     }
 
     /// Under the hero, on black: the episode Play starts ("S4, E8 · Title"

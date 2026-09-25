@@ -2153,7 +2153,8 @@ struct AppleLibraryView: View {
     private func reload() async { await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings) }
     private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil) -> some View {
         AppleLocalTitleShelf(title: title, groups: groups, sourceStore: sourceStore,
-            mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, showsProgress: progress, accessory: accessory)
+            mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, tabToolbar: titlePageToolbar,
+            showsProgress: progress, accessory: accessory)
     }
 
     /// The first kind a source actually has, so the Sort control lands on the
@@ -2198,10 +2199,16 @@ struct AppleLibraryView: View {
     }
     private func detail(_ group: AppleLibrarySeries, autoPlay: Bool = false) -> some View {
         AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex,
-            settings: settings, openSettings: openSettings, autoPlay: autoPlay)
-            #if !os(tvOS)
-            .environment(\.appleTabToolbar, tabToolbarContext)
-            #endif
+            settings: settings, openSettings: openSettings, tabToolbar: titlePageToolbar, autoPlay: autoPlay)
+    }
+
+    /// Library's Search and Refresh for its title pages; Apple TV draws none.
+    private var titlePageToolbar: AppleTabToolbarContext? {
+        #if os(tvOS)
+        nil
+        #else
+        tabToolbarContext
+        #endif
     }
 
     #if !os(tvOS)

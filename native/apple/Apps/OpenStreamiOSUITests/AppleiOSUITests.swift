@@ -3736,6 +3736,191 @@ final class AppleiOSUITests: XCTestCase {
         return scene
     }
 
+    // MARK: - Title page bar from every entry point (N53)
+
+    /// Opt-in: opens a title page from a Discover poster, the billboard's
+    /// Details, a Search result, Continue Watching and Library, and expects
+    /// Discover's (or Library's) Search and Refresh beside Back every time,
+    /// and the Rate menu as one named element. Navigation only: it never
+    /// presses Play, Download, My List, Rate or Refresh.
+    func testTitlePageKeepsTheTabBarFromEveryEntryPoint() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_TITLE_BAR_CHECK"] == "1" else {
+            throw XCTSkip("Set OPENSTREAM_TITLE_BAR_CHECK=1 to walk the title page entry points.")
+        }
+        continueAfterFailure = true
+        executionTimeAllowance = 1800
+        let idiom = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
+        let folder = env["OPENSTREAM_TITLE_BAR_DIR"].map(URL.init(fileURLWithPath:))
+        func shoot(_ name: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            if let folder {
+                try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent("\(idiom)-\(name).png"))
+            }
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = "\(idiom)-\(name)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func relaunch(_ extra: [String] = []) {
+            app.terminate()
+            app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+            app.launchArguments = ["-OpenStreamTrace", "YES"] + extra
+            app.launch()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+            Thread.sleep(forTimeInterval: 20)
+        }
+        func firstHittable(_ prefix: String) -> XCUIElement? {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
+                .allElementsBoundByIndex.prefix(40).first { isSafelyHittable($0) }
+        }
+        func scrollUp() {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        func find(_ prefix: String, scrolls: Int = 8) -> XCUIElement? {
+            var element = firstHittable(prefix)
+            for _ in 0 ..< scrolls where element == nil {
+                scrollUp()
+                Thread.sleep(forTimeInterval: 1.2)
+                element = firstHittable(prefix)
+            }
+            return element
+        }
+        // iPadOS draws the tab bar at the top, where XCTest reports its tabs
+        // as plain buttons.
+        func tab(_ title: String) -> Bool {
+            if tapIfPossible(app.tabBars.buttons[title].firstMatch) { return true }
+            let top = app.buttons.matching(NSPredicate(format: "label == %@", title)).allElementsBoundByIndex
+                .first { isSafelyHittable($0) && $0.frame.maxY < 100 }
+            guard let top else { return false }
+            top.tap()
+            return true
+        }
+        func barButton(_ label: String) -> XCUIElement? {
+            app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+                .first { $0.exists && $0.frame.height >= 1 && $0.frame.maxY < 160 }
+        }
+        func expectBar(_ entry: String) {
+            let page = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+            guard page.waitForExistence(timeout: 40) else {
+                XCTFail("\(entry): no title page opened")
+                return
+            }
+            Thread.sleep(forTimeInterval: 3)
+            let back = app.buttons["detail.back"].firstMatch.exists
+            let search = barButton("Search") != nil
+            let refresh = barButton("Refresh") != nil
+            print("TITLE-BAR \(idiom) \(entry): back=\(back) search=\(search) refresh=\(refresh)")
+            XCTAssertTrue(back, "\(entry): the title page has no Back")
+            XCTAssertTrue(search, "\(entry): the title page lost Search")
+            XCTAssertTrue(refresh, "\(entry): the title page lost Refresh")
+            // One element named Rate, and no unnamed button on top of it.
+            let rates = app.buttons.matching(NSPredicate(format: "label == %@", "Rate")).allElementsBoundByIndex
+            if let rate = rates.first(where: { $0.exists && $0.frame.width >= 1 }) {
+                // Only a button drawn at Rate's own frame: the trailer's
+                // full-width shield under the hero also intersects it.
+                let unnamed = app.buttons.allElementsBoundByIndex.filter {
+                    $0.exists && $0.label.isEmpty
+                        && abs($0.frame.midX - rate.frame.midX) < 4 && abs($0.frame.midY - rate.frame.midY) < 4
+                        && abs($0.frame.width - rate.frame.width) < 8
+                }
+                print("TITLE-BAR \(idiom) \(entry): rate buttons=\(rates.count) at \(rate.frame) "
+                      + "unnamed-at-rate=\(unnamed.map { "\($0.identifier)@\($0.frame)" })")
+                XCTAssertEqual(unnamed.count, 0, "\(entry): an unnamed button sits on Rate")
+            }
+            shoot("\(entry)-top")
+        }
+        XCUIDevice.shared.orientation = .portrait
+
+        // A Discover poster: the trailer is left to play (no glyph over it,
+        // N49 #17), then the page is scrolled to Related (N49 #20).
+        relaunch()
+        if let poster = find("home.media.") {
+            poster.tap()
+            expectBar("poster")
+            // Rate still opens its menu as one element; closed untouched.
+            let rate = app.buttons.matching(NSPredicate(format: "label == %@", "Rate")).firstMatch
+            if isSafelyHittable(rate) {
+                rate.tap()
+                Thread.sleep(forTimeInterval: 1.2)
+                let opened = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not for Me", "I Like This", "Love This"]))
+                    .count > 0
+                print("TITLE-BAR \(idiom) poster: rate menu opened=\(opened)")
+                XCTAssertTrue(opened, "Rate no longer opens its menu")
+                shoot("poster-rate-menu")
+                if !tapIfPossible(app.otherElements["PopoverDismissRegion"].firstMatch) {
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.012)).tap()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+            Thread.sleep(forTimeInterval: 14)
+            shoot("poster-trailer")
+            for index in 1 ... 3 {
+                scrollUp()
+                Thread.sleep(forTimeInterval: 1.5)
+                shoot("poster-scroll-\(index)")
+            }
+        } else {
+            XCTFail("no Discover poster to open")
+        }
+
+        // The billboard's Details.
+        relaunch(["-openstream.settings.trailer.autoplay.v1", "NO"])
+        let details = app.buttons["home.featured.details"].firstMatch
+        if details.waitForExistence(timeout: 30), isSafelyHittable(details) {
+            details.tap()
+            expectBar("hero-details")
+        } else {
+            print("TITLE-BAR \(idiom) hero-details: the billboard showed no Details")
+        }
+
+        // Continue Watching.
+        relaunch(["-openstream.settings.trailer.autoplay.v1", "NO"])
+        if let card = find("home.continue.", scrolls: 3) {
+            card.tap()
+            expectBar("continue-watching")
+        } else {
+            print("TITLE-BAR \(idiom) continue-watching: no row on this device")
+        }
+
+        // A Search result, from Discover's Search.
+        relaunch(["-openstream.settings.trailer.autoplay.v1", "NO"])
+        if let search = barButton("Search") {
+            search.tap()
+            let field = app.searchFields.firstMatch
+            if field.waitForExistence(timeout: 10) {
+                field.tap()
+                field.typeText("the")
+                Thread.sleep(forTimeInterval: 6)
+                let result = app.cells.allElementsBoundByIndex.first { isSafelyHittable($0) }
+                    ?? app.collectionViews.buttons.allElementsBoundByIndex.first { isSafelyHittable($0) }
+                if let result {
+                    result.tap()
+                    expectBar("search-result")
+                } else {
+                    XCTFail("Search found nothing for a common word")
+                }
+            }
+        } else {
+            XCTFail("Discover has no Search")
+        }
+
+        // A Library title.
+        relaunch(["-openstream.settings.trailer.autoplay.v1", "NO"])
+        if tab("Library") {
+            Thread.sleep(forTimeInterval: 8)
+            if let title = find("library.title.", scrolls: 4) {
+                title.tap()
+                expectBar("library")
+            } else {
+                print("TITLE-BAR \(idiom) library: no Library title on this device")
+            }
+        }
+    }
+
     // MARK: - Parity survey (N49)
 
     /// Opt-in walk through Discover, a title page, Search, Library, Live and

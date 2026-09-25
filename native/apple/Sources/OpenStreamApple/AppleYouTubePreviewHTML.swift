@@ -383,11 +383,32 @@ enum AppleYouTubePreviewHTML {
         """
     }
 
+    /// YouTube's own chrome that `controls: 0` still draws: the play/pause
+    /// glyph in the middle of the picture and the caption window.
+    private static let playerChromeHidingCSS =
+        #"[class^="player-controls"],[class*=" player-controls"],.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
+
+    /// Injected into every frame of the title page's web view on iPhone and
+    /// iPad, it acts only in YouTube's own player page, which the host page
+    /// cannot reach across origins. Without it the mobile player left a large
+    /// pause glyph over the playing trailer (N49 #17); the Apple TV app draws
+    /// nothing over a playing preview. Pausing stays with the native shield
+    /// over the web view, which never passes a touch to YouTube.
+    static let playerChromeScript = """
+    (function() {
+      if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
+      var style = document.createElement('style');
+      style.textContent = '\(playerChromeHidingCSS)';
+      (document.head || document.documentElement).appendChild(style);
+    })();
+    """
+
     /// Injected into every frame of the Mac hero's web view, it acts only in
     /// YouTube's own player page, which the host page cannot reach across
     /// origins (macOS WebKit runs user scripts there):
     /// - the play/pause glyph YouTube flashes in the middle of the picture
-    ///   (it showed at the crossfade, N31) and its caption window never draw;
+    ///   (it showed at the crossfade, N31) and its caption window never draw
+    ///   (`playerChromeHidingCSS`);
     /// - it reports the player page's size and where its `<video>` is drawn
     ///   whenever either changes (`geometry`). YouTube re-lays its video out
     ///   a few frames after the page is resized, so the host waits for this
@@ -397,7 +418,7 @@ enum AppleYouTubePreviewHTML {
     (function() {
       if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
       var style = document.createElement('style');
-      style.textContent = '[class^="player-controls"],[class*=" player-controls"],.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}';
+      style.textContent = '\(playerChromeHidingCSS)';
       (document.head || document.documentElement).appendChild(style);
       var last = '';
       function report() {

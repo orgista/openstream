@@ -11,12 +11,18 @@ struct AppleTabToolbar: ToolbarContent {
     let isRefreshing: Bool
     let onSearch: () -> Void
     let onRefresh: () -> Void
+    /// Keeps a pushed page's copy of these items apart from the tab's own.
+    /// With the same ids at both levels, a title page pushed by a
+    /// `NavigationLink` (a Discover poster, a search result) drew Back alone:
+    /// its Search and Refresh were taken for the tab's, already placed
+    /// (N49 #21). A page pushed by `navigationDestination` was unaffected.
+    var scope = "tab"
 
     var body: some ToolbarContent {
         // Refresh is a new item when it starts or stops: the Mac toolbar
         // caches an item's view by identity, so on a pushed page (a title
         // page, N37) the spinner it was first given never went away.
-        ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
+        ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(scope: scope, item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
             let item = slot.item
             ToolbarItem(placement: Self.placement) {
                 switch item {
@@ -43,9 +49,10 @@ struct AppleTabToolbar: ToolbarContent {
     }
 
     private struct Slot: Identifiable {
+        let scope: String
         let item: AppleTabToolbarPolicy.Item
         let isRefreshing: Bool
-        var id: String { "\(item.rawValue)\(isRefreshing ? ".busy" : "")" }
+        var id: String { "\(scope).\(item.rawValue)\(isRefreshing ? ".busy" : "")" }
     }
 
     private static var placement: ToolbarItemPlacement {

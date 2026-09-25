@@ -342,6 +342,69 @@ struct AppleTitlePageSeasonPicker: View {
     }
 }
 
+/// The title page's Rate control on iPhone and iPad: its button (the round
+/// one beside My List, or the iPad's glyph over "Rate"), opening the three
+/// ratings in a list anchored to it, as the season control does. A `Menu`
+/// here was two elements to VoiceOver — "Rate" and, under it, the menu's own
+/// unnamed button (N49 #18) — whatever modifiers wrapped it.
+struct AppleTitlePageRatePicker<Label: View>: View {
+    let rating: AppleTitleRating?
+    let glyph: (AppleTitleRating?, Bool) -> String
+    let onSelect: (AppleTitleRating) -> Void
+    @ViewBuilder let label: () -> Label
+
+    @State private var isPresented = false
+    @ScaledMetric(relativeTo: .body) private var rowHeight: CGFloat = 46
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+        #if !os(tvOS)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            choices
+                .presentationCompactAdaptation(.popover)
+        }
+        #endif
+        .accessibilityLabel("Rate")
+        .accessibilityValue(rating?.title ?? "Not rated")
+        .accessibilityHint("Shows the ratings")
+        .accessibilityIdentifier("detail.rate")
+    }
+
+    private var choices: some View {
+        VStack(spacing: 0) {
+            ForEach(AppleTitleRating.selectableCases, id: \.rawValue) { value in
+                let isCurrent = value == rating
+                Button {
+                    onSelect(value)
+                    isPresented = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: glyph(value, isCurrent))
+                            .font(.body.weight(.semibold))
+                            .frame(width: 24)
+                            .accessibilityHidden(true)
+                        Text(value.title)
+                            .font(.body.weight(isCurrent ? .semibold : .regular))
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: rowHeight)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                .accessibilityIdentifier("detail.rate.\(value.rawValue)")
+            }
+        }
+        .frame(width: 240)
+    }
+}
+
 /// One episode on the rail (A10): the 16:9 still with a tick once watched and
 /// a progress line while part-watched, "EPISODE 8" over the title, and the
 /// synopsis clamped at a word. Tapping it plays the episode; `accessory` (the

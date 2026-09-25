@@ -83,6 +83,21 @@ enum AppleCatalogArtworkPolicy {
         return Double(black) >= needed ? .black : .none
     }
 
+    /// What a logo-on-a-plate poster is drawn over: the title's own backdrop,
+    /// so the card reads as the title's art with its logo on it rather than
+    /// a grey box with the name on it (N49 #20). The add-on's backdrop first,
+    /// then a resolved one, then Cinemeta's for an IMDb id; never the image
+    /// the card is already showing. Nil leaves the logo on the dark tile.
+    static func plateBackdrop(item: AppleCatalogItem, fallback: AppleArtworkResolver.Artwork? = nil,
+                              showing: URL?) -> URL? {
+        var values = [item.backgroundURL, fallback?.backgroundURL].compactMap { $0 }
+        if AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID),
+           let url = URL(string: "https://images.metahub.space/background/medium/\(item.mediaID)/img") {
+            values.append(url)
+        }
+        return values.first { $0 != showing }
+    }
+
     static func retryDelay(afterRetries retries: Int) -> Duration? {
         switch retries {
         case 0: .seconds(3)
