@@ -40,7 +40,14 @@ struct AppleMacWindowPresence: NSViewRepresentable {
             deliver()
         }
 
-        private var occlusionObserver: NSObjectProtocol?
+        /// Removed when the view leaves its window, and in deinit for a view
+        /// torn down while still in one (review of 45facac). Only touched on
+        /// the main thread; `nonisolated(unsafe)` lets deinit reach it.
+        nonisolated(unsafe) private var occlusionObserver: NSObjectProtocol?
+
+        deinit {
+            if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+        }
 
         /// In a window, and that window is at least partly on screen.
         private var isShowing: Bool {
