@@ -13,8 +13,16 @@ struct AppleCatalogSearchLookup: Sendable {
     private let orderedMatches: [AppleCatalogSearchMatch]
     private let relatedItemsBySourceID: [AppleSource.ID: [AppleCatalogItem]]
     private let sourceNamesByID: [AppleSource.ID: String]
+    /// Each match's title as `match(title:)` compares it, in `orderedMatches`
+    /// order — only when built with `indexesTitles`, otherwise empty and
+    /// worked out per call. Discover's two Top 10 rows match 20 titles
+    /// against every catalog title each time Discover draws, and folding
+    /// and splitting those names there was its heaviest app code while
+    /// scrolling (N34 trace).
+    private let normalizedTitles: [String]
+    private let articleFreeTitles: [String]
 
-    init(sections: [AppleCatalogSection] = [], sources: [AppleSource] = []) {
+    init(sections: [AppleCatalogSection] = [], sources: [AppleSource] = [], indexesTitles: Bool = false) {
         let allSourcesByID = sources.reduce(into: [AppleSource.ID: AppleSource]()) {
             $0[$1.id] = $1
         }
@@ -46,6 +54,13 @@ struct AppleCatalogSearchLookup: Sendable {
         orderedMatches = ordered
         relatedItemsBySourceID = related
         sourceNamesByID = allSourcesByID.mapValues(\.name)
+        if indexesTitles {
+            normalizedTitles = ordered.map { Self.normalized($0.item.name) }
+            articleFreeTitles = normalizedTitles.map(Self.removingLeadingArticle)
+        } else {
+            normalizedTitles = []
+            articleFreeTitles = []
+        }
     }
 
     static func buildOffMain(
@@ -53,7 +68,7 @@ struct AppleCatalogSearchLookup: Sendable {
         sources: [AppleSource]
     ) async -> AppleCatalogSearchLookup {
         let work = Task.detached(priority: .userInitiated) {
-            AppleCatalogSearchLookup(sections: sections, sources: sources)
+            AppleCatalogSearchLookup(sections: sections, sources: sources, indexesTitles: true)
         }
         return await withTaskCancellationHandler {
             await work.value
@@ -78,20 +93,28 @@ struct AppleCatalogSearchLookup: Sendable {
     func match(title: String, type: String, seasonTitle: String? = nil,
                ignoringLeadingArticle: Bool = false) -> AppleCatalogSearchMatch? {
         let wanted = Set([title, seasonTitle ?? ""].map(Self.normalized).filter { !$0.isEmpty })
-        let typed = orderedMatches.filter { $0.item.type.caseInsensitiveCompare(type) == .orderedSame }
-        if let exact = typed.first(where: { wanted.contains(Self.normalized($0.item.name)) }) {
-            return exact
+        let typed = orderedMatches.indices.filter {
+            orderedMatches[$0].item.type.caseInsensitiveCompare(type) == .orderedSame
+        }
+        if let exact = typed.first(where: { wanted.contains(normalizedTitle(at: $0)) }) {
+            return orderedMatches[exact]
         }
         guard ignoringLeadingArticle else { return nil }
         // Ranking feeds and metadata catalogs sometimes differ only by "The".
         // Keep exact matches first, and never guess between distinct title IDs.
         let withoutArticles = Set(wanted.map(Self.removingLeadingArticle).filter { !$0.isEmpty })
-        let candidates = typed.filter {
-            withoutArticles.contains(Self.removingLeadingArticle(Self.normalized($0.item.name)))
-        }
+        let candidates = typed.filter { withoutArticles.contains(articleFreeTitle(at: $0)) }.map { orderedMatches[$0] }
         guard let first = candidates.first,
               candidates.allSatisfy({ $0.item.mediaID == first.item.mediaID }) else { return nil }
         return first
+    }
+
+    private func normalizedTitle(at index: Int) -> String {
+        normalizedTitles.isEmpty ? Self.normalized(orderedMatches[index].item.name) : normalizedTitles[index]
+    }
+
+    private func articleFreeTitle(at index: Int) -> String {
+        articleFreeTitles.isEmpty ? Self.removingLeadingArticle(normalizedTitle(at: index)) : articleFreeTitles[index]
     }
 
     private static func removingLeadingArticle(_ value: String) -> String {

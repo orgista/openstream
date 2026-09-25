@@ -1099,22 +1099,25 @@ struct AppleDiscoverView: View {
     }
 
     private func detail(_ value: IndexedCatalogItem, initialAutoPlay: Bool = false) -> some View {
-        AppleCatalogItemDetailView(
-            item: value.item,
-            source: value.source,
-            relatedItems: catalogLookup.relatedItems(for: value.source.id),
-            mediaIndex: mediaIndex,
-            playbackSources: sourceStore.sources,
-            metadataConfiguration: metadataConfiguration,
-            gatewayConfig: gatewayConfig,
-            streamingServerConfiguration: streamingServerConfiguration,
-            playbackResolver: playbackResolver,
-            settings: settings,
-            openSettings: openSettings,
-            initialAutoPlay: initialAutoPlay,
-            mediaServerLibrary: mediaServerLibrary
-        )
-        .environment(\.appleDiscoverRows, nil)
+        // Built when pushed, not with every link (`AppleLazyDestination`).
+        AppleLazyDestination {
+            AppleCatalogItemDetailView(
+                item: value.item,
+                source: value.source,
+                relatedItems: catalogLookup.relatedItems(for: value.source.id),
+                mediaIndex: mediaIndex,
+                playbackSources: sourceStore.sources,
+                metadataConfiguration: metadataConfiguration,
+                gatewayConfig: gatewayConfig,
+                streamingServerConfiguration: streamingServerConfiguration,
+                playbackResolver: playbackResolver,
+                settings: settings,
+                openSettings: openSettings,
+                initialAutoPlay: initialAutoPlay,
+                mediaServerLibrary: mediaServerLibrary
+            )
+            .environment(\.appleDiscoverRows, nil)
+        }
     }
 
     private var catalogLookupIdentity: String {
@@ -1528,20 +1531,23 @@ private struct AppleCatalogSectionView: View {
     }
 
     private func detail(_ item: AppleCatalogItem) -> some View {
-        AppleCatalogItemDetailView(
-            item: item,
-            source: source,
-            relatedItems: relatedItems,
-            mediaIndex: mediaIndex,
-            playbackSources: playbackSources,
-            metadataConfiguration: metadataConfiguration,
-            gatewayConfig: gatewayConfig,
-            streamingServerConfiguration: streamingServerConfiguration,
-            playbackResolver: playbackResolver,
-            settings: settings,
-            openSettings: openSettings
-        )
-        .environment(\.appleDiscoverRows, nil)
+        // Built when pushed, not with every card (`AppleLazyDestination`).
+        AppleLazyDestination {
+            AppleCatalogItemDetailView(
+                item: item,
+                source: source,
+                relatedItems: relatedItems,
+                mediaIndex: mediaIndex,
+                playbackSources: playbackSources,
+                metadataConfiguration: metadataConfiguration,
+                gatewayConfig: gatewayConfig,
+                streamingServerConfiguration: streamingServerConfiguration,
+                playbackResolver: playbackResolver,
+                settings: settings,
+                openSettings: openSettings
+            )
+            .environment(\.appleDiscoverRows, nil)
+        }
     }
 
 }
@@ -2150,6 +2156,15 @@ struct AppleCatalogItemDetailView: View {
                     guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodes", !episodes.isEmpty else { return }
                     try? await Task.sleep(for: .milliseconds(700))
                     reader.scrollTo("vision-episodes", anchor: .top)
+                    // `OpenStreamDebugSeasonSwitch YES` then steps through the
+                    // first seasons, for a trace of the switch.
+                    guard UserDefaults.standard.bool(forKey: "OpenStreamDebugSeasonSwitch") else { return }
+                    for season in seasonNumbers.dropFirst().prefix(3) + seasonNumbers.prefix(1) {
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled else { return }
+                        appleTrace("season switch \(season)")
+                        selectedSeason = season
+                    }
                 }
             }
             // `OpenStreamDetailScrollY` scrolls the title page this far once

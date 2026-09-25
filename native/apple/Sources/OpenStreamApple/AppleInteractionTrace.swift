@@ -112,6 +112,7 @@ public enum AppleInteractionTrace {
         lock.unlock()
         #if DEBUG
         print("[OpenStream] trace \(line)")
+        fflush(stdout)
         #endif
         append(line)
     }

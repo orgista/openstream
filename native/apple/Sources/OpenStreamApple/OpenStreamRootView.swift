@@ -325,7 +325,12 @@ public struct OpenStreamRootView: View {
         .defaultHoverEffect(.highlight)
         #endif
         #if DEBUG
-        .onAppear { AppleLaunchClock.mark("root.appear") }
+        .onAppear {
+            AppleLaunchClock.mark("root.appear")
+            #if os(macOS)
+            AppleDebugMacHarness.startIfRequested()
+            #endif
+        }
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()

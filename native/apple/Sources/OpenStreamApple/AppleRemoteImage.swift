@@ -84,6 +84,10 @@ struct AppleRemoteImage: View {
                     guard !Task.isCancelled else { return }
                     image = loaded
                     imageIdentity = loadIdentity(url: url, size: geometry.size)
+                    #if DEBUG
+                    AppleLaunchClock.count(fixedPixelDimension != nil || keepsImageWhileReloading ? "image.hero" : "image.card",
+                                           marking: [1, 8, 16, 32])
+                    #endif
                     onLoad?(loaded)
                 } catch is CancellationError {
                     return

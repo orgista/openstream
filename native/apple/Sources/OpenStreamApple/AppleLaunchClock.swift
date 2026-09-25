@@ -14,6 +14,7 @@ import Foundation
 /// from whenever the clock was first touched, so it read far too small.
 public enum AppleLaunchClock {
     nonisolated(unsafe) private static var seen = Set<String>()
+    nonisolated(unsafe) private static var counts: [String: Int] = [:]
     private static let lock = NSLock()
     private static let origin: Date = processStartDate() ?? Date()
 
@@ -37,6 +38,20 @@ public enum AppleLaunchClock {
         lock.unlock()
         guard isFirst else { return }
         print("[OpenStream] timing \(label) \(Int((elapsed * 1000).rounded()))ms")
+        // Flushed per line: a headless run reads stdout from a file, which is
+        // block-buffered, and the process is killed rather than quit.
+        fflush(stdout)
+    }
+
+    /// Counts `label` and records `label.<n>` the first time the count
+    /// reaches each of `thresholds` — "the 16th poster has drawn".
+    public static func count(_ label: String, marking thresholds: Set<Int>) {
+        guard isEnabled else { return }
+        lock.lock()
+        let count = counts[label, default: 0] + 1
+        counts[label] = count
+        lock.unlock()
+        if thresholds.contains(count) { mark("\(label).\(count)") }
     }
 
     private static func processStartDate() -> Date? {

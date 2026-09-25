@@ -73,6 +73,23 @@ extension AppleHeroRotation {
             step(by: 1, at: now)
             return true
         }
+
+        /// How often the active dot's fill needs redrawing: each time it has
+        /// grown by half a device pixel, and never faster than 30 Hz.
+        ///
+        /// The Mac's 22 pt fill crosses 44 pixels in 12 s, so a 30 Hz timeline
+        /// redrew it 360 times to move it 44 pixels — and on the Mac every
+        /// tick lays out and renders the whole window (~6 ms of main thread,
+        /// a fifth of a core while Discover sits idle, N34 trace). Half-pixel
+        /// steps draw the same bar at ~7 Hz.
+        public func fillTickInterval(width: CGFloat, displayScale: CGFloat) -> TimeInterval {
+            let steps = Double(width * max(displayScale, 1)) * 2
+            guard interval > 0, steps > 0 else { return Self.slowestFillTick }
+            return min(max(interval / steps, Self.fastestFillTick), Self.slowestFillTick)
+        }
+
+        static let fastestFillTick: TimeInterval = 1.0 / 30.0
+        static let slowestFillTick: TimeInterval = 0.5
     }
 
     /// Whether a hero's timer holds still: while a finger (or the pointer) is

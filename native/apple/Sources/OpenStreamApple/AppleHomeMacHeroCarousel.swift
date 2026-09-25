@@ -153,6 +153,7 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
 private struct AppleMacHeroPageIndicator: View {
     let cycle: AppleHeroRotation.Cycle
     let onSelect: (Int) -> Void
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         HStack(spacing: AppleMacHeroPageDots.spacing - (AppleMacHeroPageDots.hitSize - AppleMacHeroPageDots.dotSize)) {
@@ -165,7 +166,8 @@ private struct AppleMacHeroPageIndicator: View {
                         .fill(.white.opacity(AppleMacHeroPageDots.inactiveOpacity))
                         .overlay(alignment: .leading) {
                             if position == cycle.index {
-                                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: cycle.isPaused)) { context in
+                                TimelineView(.animation(minimumInterval: cycle.fillTickInterval(width: size.width, displayScale: displayScale),
+                                                         paused: cycle.isPaused)) { context in
                                     Capsule()
                                         .fill(.white)
                                         .frame(width: size.width * cycle.progress(at: context.date))
