@@ -88,7 +88,7 @@ import Testing
         let engine = FakePlaybackEngine()
         engine.script([.playing])
         var coordinator: ApplePlaybackCoordinator? = ApplePlaybackCoordinator(engine: engine)
-        weak var reference = coordinator
+        weak let reference = coordinator
         await coordinator?.begin(makeRequest())
         try? await Task.sleep(for: .milliseconds(20))
         coordinator = nil
