@@ -98,4 +98,26 @@ struct AppleTopShelfLandscapeTests {
         #expect(snapshot.favorites.allSatisfy { $0.landscapeArtworkURL == nil })
         #expect(snapshot.recentlyAdded.allSatisfy { $0.landscapeArtworkURL == nil })
     }
+
+    @Test func aLaterShelfWithABackdropStillSuppliesIt() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = AppleSource(kind: .stremio, name: "Cinemeta",
+                                 url: URL(string: "https://fixture.example/manifest.json")!)
+        let backdrop = URL(string: "https://image.tmdb.org/t/p/w1280/wide.jpg")!
+        let bare = AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide")
+        let withBackdrop = AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide", backgroundURL: backdrop)
+        let sections = [
+            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "new"), items: [bare]),
+            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "top"), items: [withBackdrop]),
+        ]
+        var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: bare)
+        record.progress = 0.5
+
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
+        try await writer.write(records: [record], sections: sections, enabled: true)
+        let snapshot = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
+
+        #expect(snapshot.continueWatching.map(\.landscapeArtworkURL) == [backdrop])
+    }
 }

@@ -313,7 +313,10 @@ public actor AppleTopShelfSnapshotWriter {
         for section in sections where !remaining.isEmpty {
             for item in section.items where !remaining.isEmpty {
                 let id = AppleMediaIngestion.catalogRecord(instanceID: section.sourceID, item: item).id
-                guard remaining.remove(id) != nil, let url = landscapeURL(for: item) else { continue }
+                // Only a match with a backdrop settles the id: the same record
+                // can appear in a later shelf that has one (review of 3217b67).
+                guard remaining.contains(id), let url = landscapeURL(for: item) else { continue }
+                remaining.remove(id)
                 found[id] = url
             }
         }
