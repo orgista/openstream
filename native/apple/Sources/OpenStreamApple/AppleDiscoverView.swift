@@ -372,6 +372,17 @@ struct AppleDiscoverView: View {
                 visionReviewAutoPlay = screen == "play"
                 visionReviewDetailOpened = true
                 visionReviewDetail = true
+                // `OpenStreamDetailPopAfter <seconds>` goes back to Discover
+                // that long after, so a probe sees the hero come back (N44).
+                // Unstructured: this task sleeps while the page covers it.
+                let pop = UserDefaults.standard.double(forKey: "OpenStreamDetailPopAfter")
+                if pop > 0 {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(pop))
+                        appleTrace("debug detail pop")
+                        visionReviewDetail = false
+                    }
+                }
             }
         }
         #endif
@@ -6104,19 +6115,29 @@ enum AppleTrailerPreviewLayout {
         return CGRect(x: (size.width - width) / 2, y: y, width: width, height: height)
     }
 
-    /// The Mac hero's trailer frame: the 16:9 player sized and centred so its
-    /// picture fills `size` exactly as the hero's still does — aspect-fill,
-    /// centre crop, no extra zoom (N30: the frame "jumped" when the video
-    /// came in 1.3× larger than the art). `pictureWindow` is the measured
-    /// picture band inside the raster; a letterboxed trailer's band is what
-    /// covers, so its mattes stay outside the hero.
-    static func coverFrame(in size: CGSize, pictureWindow: ClosedRange<CGFloat> = 0...1) -> CGRect {
+    /// The 16:9 player sized and centred to fill `size` exactly as a 16:9
+    /// still does — aspect-fill, centre crop, no extra zoom (N30: the frame
+    /// "jumped" when the video came in 1.3× larger than the art). The Mac
+    /// hero draws it at its own still's geometry (`artMatchedFrame`).
+    static func coverFrame(in size: CGSize) -> CGRect {
         guard size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
-        let pictureFraction = max(pictureWindow.upperBound - pictureWindow.lowerBound, 0.01)
-        let height = max(size.width * 9 / 16, size.height / pictureFraction)
-        let width = height * 16 / 9
-        let pictureCentre = height * (pictureWindow.lowerBound + pictureFraction / 2)
-        return CGRect(x: (size.width - width) / 2, y: size.height / 2 - pictureCentre, width: width, height: height)
+        return aspectFillFrame(of: CGSize(width: 16, height: 9), in: size)
+    }
+
+    /// The Mac hero's trailer frame over its art (N44): the 16:9 player at
+    /// the art's own aspect-fill scale about the same centre — for a 16:9
+    /// still, exactly the still's rect — so the crossfade from the art to
+    /// its trailer never reads as a zoom. It was sized to crop a letterboxed
+    /// trailer's mattes off the hero, which drew
+    /// the picture 11–13 % larger than the art it replaced in a window under
+    /// ~1,600 pt wide: the "grow" the owner still saw after N31. Such a
+    /// trailer now keeps its own mattes where the hero is taller than its
+    /// picture. No still yet: as a 16:9 still would be drawn (`coverFrame`).
+    static func artMatchedFrame(in size: CGSize, art: CGSize?) -> CGRect {
+        guard let art, art.width > 0, art.height > 0 else { return coverFrame(in: size) }
+        let drawn = aspectFillFrame(of: art, in: size)
+        let player = aspectFillFrame(of: CGSize(width: 16, height: 9), in: drawn.size)
+        return player.offsetBy(dx: drawn.minX, dy: drawn.minY)
     }
 
     /// The same aspect-fill rect for a still of `imageSize` — what the hero's
@@ -7562,7 +7583,9 @@ extension AppleCatalogItemDetailView {
                         heroArt = heroArt.settling(with: .failed)
                     },
                     keepsImageWhileReloading: true,
-                    fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension
+                    fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension,
+                    // Centred like the trailer's cover over it (N44).
+                    fillAlignment: .center
                 )
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()

@@ -30,7 +30,11 @@ struct AppleHomeMacHero<Actions: View>: View {
     private var scrim: AppleHeroScrim {
         let region = AppleHeroCopyRegion.wide(layout)
         let frame = CGSize(width: layout.contentWidth, height: layout.height)
-        let tone = videoIsShowing ? .unknown : AppleHeroArtTone(reading: artLuminance?.reading(region: region, in: frame))
+        // The Mac still is centred (`AppleRemoteImage.fillAlignment`); the
+        // iPad's is pinned top-leading.
+        let anchor = layout.platform == .mac ? CGPoint(x: 0.5, y: 0.5) : .zero
+        let tone = videoIsShowing ? .unknown
+            : AppleHeroArtTone(reading: artLuminance?.reading(region: region, in: frame, anchor: anchor))
         return .wide(tone: tone, videoIsShowing: videoIsShowing,
                      copyTrailing: AppleHeroCopyRegion.trailingFraction(region, in: frame))
     }

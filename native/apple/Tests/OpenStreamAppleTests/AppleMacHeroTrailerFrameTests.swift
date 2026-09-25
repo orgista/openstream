@@ -28,18 +28,6 @@ struct AppleMacHeroTrailerFrameTests {
         #expect(abs(video.midX - hero.width / 2) < 0.001 && abs(video.midY - hero.height / 2) < 0.001)
     }
 
-    @Test("A letterboxed trailer's picture band covers the hero, centred, mattes outside", arguments: heroes)
-    func letterboxedBandCovers(hero: CGSize) {
-        let band: ClosedRange<CGFloat> = 0.128...0.872
-        let frame = AppleTrailerPreviewLayout.coverFrame(in: hero, pictureWindow: band)
-        let pictureTop = frame.minY + frame.height * band.lowerBound
-        let pictureBottom = frame.minY + frame.height * band.upperBound
-        #expect(pictureTop <= 0.001)
-        #expect(pictureBottom >= hero.height - 0.001)
-        #expect(abs((pictureTop + pictureBottom) / 2 - hero.height / 2) < 0.001)
-        #expect(frame.minX <= 0.001 && frame.maxX >= hero.width - 0.001)
-    }
-
     @Test("Art and trailer draw the same fade, so nothing darkens when the video comes in",
           arguments: [AppleHeroArtTone.dark, .unknown])
     func sameFadeForArtAndVideo(tone: AppleHeroArtTone) {

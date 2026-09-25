@@ -10,6 +10,8 @@ import QuartzCore
 /// windows do not cover it. `-OpenStreamMacWindowSize w,h` also sets its
 /// size, so every run lays out the same page.
 ///
+/// `-OpenStreamMacFullScreen` / `-OpenStreamMacWindowZoom` (below).
+///
 /// `-OpenStreamMacFrameMeter start,seconds` counts display frames on the
 /// main thread over that window of the launch and logs how many arrived
 /// more than 33 ms after the one before (a visible hitch) and the longest
@@ -25,6 +27,8 @@ import QuartzCore
 enum AppleDebugMacHarness {
     static func startIfRequested() {
         placeWindowIfRequested()
+        arrangeWindowIfRequested()
+        driveWindowsIfRequested()
         meterIfRequested()
         let distance = UserDefaults.standard.double(forKey: "OpenStreamMacScrollSweep")
         guard distance > 0 else { return }
@@ -82,6 +86,51 @@ enum AppleDebugMacHarness {
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
+    }
+
+    /// `-OpenStreamMacFullScreen <seconds>` enters full screen that long
+    /// after launch, and `-OpenStreamMacWindowZoom <seconds>` zooms the
+    /// window (the green button's maximise), through the window's own API,
+    /// never a keystroke (N44). Logs the screen the window is on.
+    private static func arrangeWindowIfRequested() {
+        let fullScreen = UserDefaults.standard.double(forKey: "OpenStreamMacFullScreen")
+        let zoom = UserDefaults.standard.double(forKey: "OpenStreamMacWindowZoom")
+        guard fullScreen > 0 || zoom > 0 else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(fullScreen, zoom)))
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.frame.width > 400 }) else {
+                appleTrace("mac window arrange: no window")
+                return
+            }
+            if fullScreen > 0, !window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+            if zoom > 0, !window.isZoomed { window.zoom(nil) }
+            try? await Task.sleep(for: .seconds(2))
+            let screen = window.screen ?? NSScreen.main
+            // The full-screen transition needs the window server; with the
+            // display asleep it never starts, so the window takes the
+            // screen's whole frame instead — the same content size.
+            if fullScreen > 0, !window.styleMask.contains(.fullScreen), let screen {
+                window.setFrame(screen.frame, display: true)
+                appleTrace("mac window full screen unavailable; window set to the screen's frame")
+            }
+            appleTrace("mac window arranged fullScreen=\(window.styleMask.contains(.fullScreen)) zoomed=\(window.isZoomed) frame=\(NSStringFromRect(window.frame)) screen=\(screen.map { NSStringFromRect($0.frame) } ?? "none") backingScale=\(screen?.backingScaleFactor ?? 0)")
+        }
+    }
+
+    /// `-OpenStreamMacAssumeVisible YES` (N44): with the display asleep
+    /// AppKit stops drawing, so a test copy lays out and draws its windows
+    /// itself at 60 Hz and can be measured without waking the display.
+    private static func driveWindowsIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "OpenStreamMacAssumeVisible") else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                for window in NSApp.windows where window.isVisible {
+                    window.contentView?.superview?.layoutSubtreeIfNeeded()
+                    window.displayIfNeeded()
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// The tallest vertically scrolling view in a visible window: Discover's

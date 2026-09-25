@@ -45,6 +45,13 @@ struct AppleRemoteImage: View {
     /// live resize otherwise asked for a new decode at every size it passed
     /// through. Nil decodes near the rendered size.
     var fixedPixelDimension: Int? = nil
+    /// Where a filled image that overhangs its frame is pinned. Nil keeps the
+    /// `GeometryReader`'s top-leading corner, which every other caller is laid
+    /// out and measured against (`AppleHeroLuminanceMap.reading`). The Mac
+    /// heroes centre it, as the trailer's cover over it is centred: pinned
+    /// top-leading, the art jumped by the overhang when the trailer mounted
+    /// (67 pt in a 1440 pt window, 627 pt in a 3440 pt one; N44).
+    var fillAlignment: Alignment? = nil
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
@@ -56,7 +63,7 @@ struct AppleRemoteImage: View {
         GeometryReader { geometry in
             Group {
                 if let image = displayedImage(size: geometry.size) {
-                    rendered(image)
+                    rendered(image, in: geometry.size)
                 } else if failed {
                     placeholder
                 } else {
@@ -104,10 +111,13 @@ struct AppleRemoteImage: View {
     }
 
     @ViewBuilder
-    private func rendered(_ image: CGImage) -> some View {
+    private func rendered(_ image: CGImage, in size: CGSize) -> some View {
         let value = Image(decorative: image, scale: displayScale)
             .resizable()
-        if contentMode == .fill {
+        if contentMode == .fill, let fillAlignment {
+            value.scaledToFill()
+                .frame(width: size.width, height: size.height, alignment: fillAlignment)
+        } else if contentMode == .fill {
             value.scaledToFill()
         } else {
             value.scaledToFit()

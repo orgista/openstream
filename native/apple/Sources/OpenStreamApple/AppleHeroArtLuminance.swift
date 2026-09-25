@@ -67,15 +67,22 @@ public struct AppleHeroLuminanceMap: Equatable, Sendable {
 
     /// The art under `region` (points, from the top-left of a `frame`-sized
     /// hero), drawn as `AppleRemoteImage` draws it: scaled to fill and pinned
-    /// to the frame's top-leading corner, the overhang cropped off the right
-    /// or the bottom. Nil when the frame or the region is empty.
-    public func reading(region: CGRect, in frame: CGSize) -> AppleHeroLuminanceReading? {
+    /// at `anchor` — by default the frame's top-leading corner, the overhang
+    /// cropped off the right or the bottom; `(0.5, 0.5)` for a centred still
+    /// (the Mac hero, `AppleRemoteImage.fillAlignment`). Nil when the frame or
+    /// the region is empty.
+    public func reading(region: CGRect, in frame: CGSize,
+                        anchor: CGPoint = .zero) -> AppleHeroLuminanceReading? {
         guard frame.width > 0, frame.height > 0, aspectRatio > 0, !values.isEmpty else { return nil }
-        let clipped = region.intersection(CGRect(origin: .zero, size: frame))
+        var clipped = region.intersection(CGRect(origin: .zero, size: frame))
         guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else { return nil }
         // Height of the drawn image in points; its width is that times the aspect.
         let drawnHeight = max(frame.height, frame.width / aspectRatio)
         let drawnWidth = drawnHeight * aspectRatio
+        // Into the drawn image's own points: the overhang left of and above
+        // the frame, which is zero when pinned top-leading.
+        clipped = clipped.offsetBy(dx: (drawnWidth - frame.width) * anchor.x,
+                                   dy: (drawnHeight - frame.height) * anchor.y)
         let minColumn = Int((clipped.minX / drawnWidth * CGFloat(columns)).rounded(.down))
         let maxColumn = Int((clipped.maxX / drawnWidth * CGFloat(columns)).rounded(.up))
         let minRow = Int((clipped.minY / drawnHeight * CGFloat(rows)).rounded(.down))

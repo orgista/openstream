@@ -9,13 +9,14 @@ import WebKit
 /// once the video has frames — so the hero shows its art, never a black
 /// iframe, until the trailer is really playing.
 ///
-/// The web view is laid out to cover the frame it is offered exactly as the
-/// still does — aspect-fill, centre crop (`AppleTrailerPreviewLayout.coverFrame`)
-/// — sized to the trailer's measured picture before the cover fades, and
-/// never re-sized while the video is on screen, so the picture keeps the
-/// art's frame (N30). The cover fades only once YouTube has re-laid its
-/// video out at that size and held it (N31). It reports only that frame to
-/// SwiftUI: a window resize moves it in place and never reloads the page.
+/// The web view is laid out at exactly the still's geometry — the art's
+/// aspect-fill scale about the same centre (`AppleTrailerPreviewLayout
+/// .artMatchedFrame`), the still under it centred to match — and never
+/// re-sized while the video is on screen, so the crossfade from the art to
+/// its trailer never reads as a zoom (N30, N44). The cover fades only once
+/// YouTube has laid its video out at that size and held it (N31). It
+/// reports only that frame to SwiftUI: a window resize moves it in place
+/// and never reloads the page.
 @MainActor
 struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
     let url: URL
@@ -122,13 +123,13 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             container?.setPreviewVisible(false, animated: animated, completion: completion)
         }
 
-        /// Measures the picture band first, so a letterboxed trailer is
-        /// cropped to its picture before the cover fades. A frame that
-        /// measures as nothing (a fade-in, a title card) is looked at again
-        /// a second later, up to three times, with the art still up. Then it
-        /// waits for YouTube to lay its video out at the web view's final
-        /// size and hold it, so the geometry is settled before the video is
-        /// seen and never changes under it.
+        /// Looks for a real picture first: a frame that measures as nothing
+        /// (a fade-in, a title card) is looked at again a second later, up
+        /// to three times, with the art still up. The band it finds is not
+        /// cropped to — that drew a letterboxed trailer larger than its art
+        /// (N44). Then it waits for YouTube to lay its video out at the web
+        /// view's size and hold it, so the geometry is settled before the
+        /// video is seen and never changes under it.
         private func reveal(then revealed: @escaping () -> Void) {
             guard let container else { return }
             revealGeneration += 1
@@ -186,9 +187,10 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
                 if let window {
                     container.pictureWindow = window
                     container.hasMeasuredPicture = true
+                    appleTrace(String(format: "mac hero trailer picture band %.3f...%.3f", window.lowerBound, window.upperBound))
                 }
                 guard !container.hasMeasuredPicture, remaining > 0 else {
-                    // Laid out at the measured band before the cover fades.
+                    // Laid out at the art's frame before the cover fades.
                     container.layoutSubtreeIfNeeded()
                     then(container)
                     return
@@ -204,7 +206,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
     final class PlayerContainer: NSView {
         let webView: WKWebView
         private let cover = CoverView()
-        var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { needsLayout = true } }
+        /// The picture band last measured inside the 16:9 raster (the
+        /// trailer's own mattes outside it). Traced, never cropped to.
+        var pictureWindow: ClosedRange<CGFloat> = 0...1
         var hasMeasuredPicture = false
         /// How many times the web view's size the page lays YouTube out at.
         var layoutScale = 1
@@ -214,6 +218,8 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         /// Read by the probe each tick.
         var geometry: () -> AppleMacTrailerGeometry? = { nil }
         var coverOpacity: Float { cover.layer?.presentation()?.opacity ?? cover.layer?.opacity ?? -1 }
+        var coverImage: CGImage? { cover.image }
+        var coverImageSize: CGSize? { cover.imageSize }
         #endif
 
         init(messageHandler: WKScriptMessageHandler) {
@@ -240,6 +246,13 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             addSubview(cover)
             #if DEBUG
             probe?.container = self
+            // WebKit stops drawing a web view whose window is hidden; a
+            // test copy measured while the display sleeps keeps it drawing.
+            if UserDefaults.standard.bool(forKey: "OpenStreamMacAssumeVisible"),
+               webView.responds(to: NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")) {
+                // KVC finds the `_set…:` accessor for this key.
+                webView.setValue(false, forKey: "windowOcclusionDetectionEnabled")
+            }
             #endif
         }
 
@@ -254,12 +267,14 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            webView.frame = AppleTrailerPreviewLayout.coverFrame(in: bounds.size, pictureWindow: pictureWindow)
+            webView.frame = AppleTrailerPreviewLayout.artMatchedFrame(in: bounds.size, art: cover.imageSize)
             cover.frame = bounds
         }
 
         func updateStill(_ image: CGImage?) {
+            let size = cover.imageSize
             cover.image = image
+            if cover.imageSize != size { needsLayout = true }
         }
 
         /// Reveal cross-fades the cover away over the live frames. Hiding
@@ -293,6 +308,7 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         var image: CGImage? {
             didSet { if image !== oldValue { needsDisplay = true } }
         }
+        var imageSize: CGSize? { image.map { CGSize(width: $0.width, height: $0.height) } }
 
         override init(frame: NSRect) {
             super.init(frame: frame)

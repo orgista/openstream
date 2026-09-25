@@ -51,7 +51,12 @@ struct AppleMacWindowPresence: NSViewRepresentable {
 
         /// In a window, and that window is at least partly on screen.
         private var isShowing: Bool {
-            window?.occlusionState.contains(.visible) ?? false
+            #if DEBUG
+            // `-OpenStreamMacAssumeVisible YES`: a test copy measured while
+            // the display sleeps counts its window as seen (N44).
+            if window != nil, UserDefaults.standard.bool(forKey: "OpenStreamMacAssumeVisible") { return true }
+            #endif
+            return window?.occlusionState.contains(.visible) ?? false
         }
 
         private func deliver() {

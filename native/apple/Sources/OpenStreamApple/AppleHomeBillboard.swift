@@ -339,7 +339,9 @@ struct AppleHomeBillboard<Actions: View>: View {
                     loadingFill: AppleDesignTokens.surface,
                     keepsImageWhileReloading: true,
                     // The Mac window resizes live; decode the still once.
-                    fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil
+                    fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil,
+                    // Centred like the trailer's cover over it (N44).
+                    fillAlignment: mac?.layout.platform == .mac ? .center : nil
                 )
                 #if !os(tvOS)
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
