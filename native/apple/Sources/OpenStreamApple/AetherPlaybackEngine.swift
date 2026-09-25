@@ -27,6 +27,12 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var loadGeneration = 0
     private var subtitleSelectionOverridden = false
     private var stockPlayerRendersSubtitles = false
+    /// Captions for Picture in Picture and AirPlay (`AppleCaptionHandoff`).
+    private(set) var captionHandoff = AppleCaptionHandoff()
+    /// Whether this load's item is one the handoff manages: a loopback item
+    /// on a platform that keeps renditions off it while the picture is here.
+    private var captionHandoffEligible = false
+    private var captionHandoffReload: Task<Void, Never>?
     private var lastPositionUpdate = Date.distantPast
     /// Latest values published by `aether.$duration` / `aether.$isLive`. Used by
     /// `refreshDuration` because `@Published` sinks fire on `willSet`, when the
@@ -69,6 +75,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         didSet {
             guard route != oldValue else { return }
             emit(.route(route))
+            refreshCaptionHandoff()
         }
     }
     public private(set) var position: Double = 0
@@ -94,6 +101,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             guard subtitleTracks != oldValue else { return }
             emit(.tracks)
             autoSelectSubtitleIfPreferred()
+            refreshCaptionHandoff()
         }
     }
 
@@ -106,7 +114,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// or the app-owned sidecar/native selection while that renderer owns cues.
     public private(set) var activeSubtitleTrackID: Int? {
         didSet {
-            if activeSubtitleTrackID != oldValue { emit(.tracks) }
+            guard activeSubtitleTrackID != oldValue else { return }
+            emit(.tracks)
+            refreshCaptionHandoff()
         }
     }
     /// Container chapters from the engine's probe demuxer (`mediaChapters`),
@@ -236,18 +246,29 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             sourceURL = master
             headers = [:]
         }
-        let options = Self.loadOptions(
+        var options = Self.loadOptions(
             for: request, headers: headers,
             preferredSubtitleLanguages: preferredSubtitleLanguages,
             captionsPreference: captionsPreference
         )
-        _ = try await aether.load(
-            url: sourceURL,
-            startPosition: request.resumePosition,
-            options: options
-        )
+        // An episode that starts while PiP or AirPlay holds the picture
+        // declares the renditions itself rather than rebuilding right after.
+        captionHandoffReload?.cancel()
+        captionHandoffEligible = !Self.declaresNativeSubtitleRenditions && !request.hints.nativeRemoteHLS
+        if captionHandoff.loadStarted(eligible: captionHandoffEligible) { options.prepareNativeSubtitles = true }
+        do {
+            _ = try await aether.load(
+                url: sourceURL,
+                startPosition: request.resumePosition,
+                options: options
+            )
+        } catch {
+            if generation == loadGeneration { performCaptionHandoff(captionHandoff.reloadFinished(succeeded: false)) }
+            throw error
+        }
         print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
         guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
+        performCaptionHandoff(captionHandoff.reloadFinished(succeeded: true))
         observeLiveCaptions(request, generation: generation)
         if !request.autoplay, let resume = request.resumePosition, resume.isFinite, resume > 0 {
             // A paused mount prepares the demuxer at the resume offset but
@@ -270,12 +291,86 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// the Mac stage player: no caption layer ever appeared). Without them
     /// the item has no legible options, AVKit shows no CC button, and the
     /// app's captions menu is the one control, drawn by the app's cue layer.
+    /// Picture in Picture and AirPlay get them for as long as they hold the
+    /// picture (`AppleCaptionHandoff`, N42).
     nonisolated static var declaresNativeSubtitleRenditions: Bool {
         #if os(tvOS)
         true
         #else
         false
         #endif
+    }
+
+    // MARK: - Captions for Picture in Picture and AirPlay
+
+    /// The host says where the picture is: in a Picture in Picture window,
+    /// on an AirPlay receiver or external screen, or (both false) in the app.
+    ///
+    /// The engine hears about PiP too (`pictureInPictureActive`): it is what
+    /// makes a rebuild keep the running item attached until the new one is
+    /// ready (AE#158). Without it the handoff's own reload closed the window
+    /// it was rebuilding for, 0.3 s after it opened (N42, Mac probe).
+    public func setPictureWhereabouts(pictureInPicture: Bool, external: Bool) {
+        if aether.pictureInPictureActive != pictureInPicture { aether.pictureInPictureActive = pictureInPicture }
+        let away = pictureInPicture || external
+        guard away != captionHandoff.pictureIsAway else { return }
+        appleTrace("caption handoff: picture \(away ? "away" : "back") stage=\(captionHandoff.stage)")
+        refreshCaptionHandoff(pictureIsAway: away)
+        // The stock player's cue layer re-reads `appDrawsCaptions`.
+        emit(.tracks)
+    }
+
+    private func refreshCaptionHandoff(pictureIsAway: Bool? = nil) {
+        let wanted = captionHandoffEligible && route == .avPlayer
+            ? AppleCaptionHandoff.wantedTrack(activeTrackID: activeSubtitleTrackID, tracks: subtitleTracks)
+            : nil
+        performCaptionHandoff(captionHandoff.update(
+            pictureIsAway: pictureIsAway ?? captionHandoff.pictureIsAway, wantedTrackID: wanted))
+    }
+
+    private func performCaptionHandoff(_ actions: [AppleCaptionHandoff.Action]) {
+        for action in actions {
+            appleTrace("caption handoff: \(action) stage=\(captionHandoff.stage)")
+            switch action {
+            case .nativeRendering(let on):
+                // The engine maps its own active track to a rendition, and
+                // `activeSubtitleTrackID` changes before `applySubtitleSelection`
+                // hands the track to it; wait for the selection to finish so a
+                // new track is not answered with the old one's rendition.
+                let generation = loadGeneration
+                Task { [weak self] in
+                    guard let self, generation == self.loadGeneration else { return }
+                    self.aether.setNativeSubtitleRendering(on)
+                }
+            case .reload(let declaring):
+                let generation = loadGeneration
+                captionHandoffReload = Task { [weak self] in
+                    await self?.waitForSettledSession()
+                    guard let self, !Task.isCancelled, generation == self.loadGeneration else { return }
+                    var succeeded = true
+                    do {
+                        try await self.aether.reloadAtCurrentPosition { $0.prepareNativeSubtitles = declaring }
+                    } catch {
+                        succeeded = false
+                        appleTrace("caption handoff: reload failed: \(error)")
+                    }
+                    guard generation == self.loadGeneration else { return }
+                    self.performCaptionHandoff(self.captionHandoff.reloadFinished(succeeded: succeeded))
+                }
+            }
+        }
+    }
+
+    /// A handoff reload waits out a rebuild the engine started itself: an
+    /// AirPlay receiver makes it reload the item on the LAN address
+    /// (AetherEngine #86) on the same edge the host reports, and a second
+    /// rebuild inside that one would snapshot the subtitle state mid-teardown.
+    /// Every load clears the first-frame latch until its item is ready.
+    private func waitForSettledSession() async {
+        try? await Task.sleep(for: .milliseconds(300))
+        for _ in 0..<40 where !aether.hasFirstFrameReadyForDisplay && !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
     }
 
     /// Builds the engine policy without loading media or reading viewer defaults.
@@ -324,7 +419,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
 
-    isolated deinit { captionObservation?.cancel() }
+    isolated deinit {
+        captionObservation?.cancel()
+        captionHandoffReload?.cancel()
+    }
 
     private func revokeCaptionMaster() {
         guard let url = captionMasterURL else { return }
@@ -344,6 +442,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         loadGeneration &+= 1
         captionObservation?.cancel()
         captionObservation = nil
+        captionHandoffReload?.cancel()
+        captionHandoffReload = nil
+        captionHandoffEligible = false
+        _ = captionHandoff.loadStarted(eligible: false)
         aether.stop()
         revokeCaptionMaster()
         activeSubtitleTrackID = nil

@@ -160,7 +160,7 @@ public final class AppleTransportOverlayModel {
     /// See `AetherPlaybackEngine.subtitleLanguagesAreExplicit`.
     public var subtitleLanguagesAreExplicit = false
 
-    /// The candidate used when the captions toggle turns subtitles on.
+    /// The tracks in the viewer's languages, best first.
     public var visibleSubtitleTracks: [ApplePlaybackTrack] {
         AppleSubtitleTrackFilter.visible(
             subtitleTracks,
@@ -380,28 +380,11 @@ public final class AppleTransportOverlayModel {
         selectedSubtitleID = coordinator.engine.activeSubtitleTrackID
     }
 
-    /// True when a subtitle track is selected. The CC key reads pressed-in
-    /// while this is set; "Off" clears it. Seeded from the engine's own
-    /// selection and then driven by the overlay, so it is the immediate,
-    /// testable signal that captions are on screen.
+    /// True when a subtitle track is selected; "Off" clears it. Seeded from
+    /// the engine's own selection and then driven by the overlay, so it is
+    /// the immediate, testable signal that captions are on screen (the
+    /// Audio & Subtitles bubble fills while it is set).
     public var isCCActive: Bool { AppleCaptionsToggle.isOn(selected: selectedSubtitleID) }
-
-    /// Whether the CC key is drawn: only when there is a preferred-language
-    /// track for it to turn on.
-    public var showsCaptionsToggle: Bool {
-        AppleCaptionsToggle.isAvailable(visible: visibleSubtitleTracks)
-    }
-
-    /// One tap: on selects the preferred-language track, off clears it. The
-    /// Audio & Subtitles menu stays the place a *different* track is chosen.
-    public func toggleCaptions() {
-        selectSubtitle(
-            AppleCaptionsToggle.nextSelection(
-                selected: selectedSubtitleID,
-                visible: visibleSubtitleTracks
-            )
-        )
-    }
 
     /// The cues active at the current position on either video route. Empty
     /// when no track is selected or no cue overlaps the position. Stock and

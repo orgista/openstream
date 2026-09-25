@@ -318,7 +318,6 @@ struct AppleTransportOverlay: View {
 
             HStack(spacing: 8) {
                 if liveTopControls {
-                    captionsToggle
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.menuSubtitleTracks,
@@ -547,9 +546,8 @@ struct AppleTransportOverlay: View {
                 if liveTopControls { liveBadge }
                 Spacer()
                 if controls.contains(.captions), !liveTopControls {
-                    // The quick key, then the menu where a different track or
-                    // audio language is chosen.
-                    captionsToggle
+                    // One captions control, as in the Apple TV app: the menu
+                    // holds Off, every track and the audio languages.
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         subtitleTracks: model.menuSubtitleTracks,
@@ -565,23 +563,6 @@ struct AppleTransportOverlay: View {
             }
         }
         .padding(.horizontal, 8)
-    }
-
-    /// The quick CC key.
-    ///
-    /// Apple TV does not get it. The owner's standing rule for that platform is
-    /// one captions control and no boxed icons (AGENTS.md §4), and the Siri
-    /// Remote already reaches the existing menu in one click — a second
-    /// focusable next to it would cost a focus move to gain a tap. Everywhere
-    /// there is a finger or a pointer, the key sits left of the menu: instant
-    /// on/off there, choosing among tracks in the menu.
-    @ViewBuilder
-    private var captionsToggle: some View {
-        #if !os(tvOS)
-        if model.showsCaptionsToggle {
-            AppleCaptionsToggleButton(isOn: model.isCCActive) { model.toggleCaptions() }
-        }
-        #endif
     }
 
     /// Big centered play/pause flanked by 10 s skip buttons.
@@ -713,8 +694,10 @@ private struct AppleTransportScrubberRow: View {
     #endif
 }
 
-/// The single secondary control: a "Audio & Subtitles" menu grouping the
-/// audio track choices and the subtitle (Off + tracks) choices. Extracted
+/// The single captions control: an "Audio & Subtitles" menu grouping the
+/// audio track choices and the subtitle (Off + tracks) choices, like the
+/// Apple TV app's. A separate CC key beside it made two captions controls
+/// (N42); the bubble fills while a subtitle is on instead. Extracted
 /// into its own view so its Observation tracking depends only on the track
 /// arrays passed in, not on the overlay's per-tick position state — an open
 /// `Menu` inside a view that also reads `position` gets torn down and
@@ -757,7 +740,7 @@ struct AppleTransportTrackMenu: View {
                 }
             }
         } label: {
-            Image(systemName: "captions.bubble")
+            Image(systemName: selectedSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill")
                 .font(.system(size: 22))
                 .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                 .contentShape(.rect)
@@ -765,6 +748,7 @@ struct AppleTransportTrackMenu: View {
         }
         .appleBareMenu()
         .accessibilityLabel("Audio & Subtitles")
+        .accessibilityValue(selectedSubtitleID == nil ? "Subtitles off" : "Subtitles on")
         .accessibilityIdentifier("player.captions")
         #if os(tvOS)
         // A `.focusable()` wrapper used to take the focus and swallow Select,

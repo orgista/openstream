@@ -24,6 +24,12 @@ final class ApplePlayerSubtitleSelection {
     var isObserving: Bool { observation != nil }
 
     func bind(to item: AVPlayerItem?) {
+        // While Picture in Picture or AirPlay holds the picture the caption
+        // handoff puts renditions on the item and selects among them itself
+        // (`AppleCaptionHandoff`); none of that is a viewer's command, so the
+        // mirror stands down until the item is the app's again.
+        var item = item
+        if let aether = engine as? AetherPlaybackEngine, aether.captionHandoff.stage != .app { item = nil }
         if self.item === item, let item, let group {
             // Auto-selection can happen after the group was bound. Mirror it
             // too, so AVKit cannot keep Off checked over an app-rendered cue.

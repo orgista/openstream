@@ -31,6 +31,11 @@ public final class ApplePlayerHost {
     private lazy var subtitleSelection = ApplePlayerSubtitleSelection(engine: coordinator.engine)
     private var mirrorsSubtitleSelection = false
     #endif
+    #if !os(tvOS)
+    /// Picture in Picture and external screens, for the caption handoff.
+    private let pictureInPicture = ApplePictureInPictureWatcher()
+    private var externalPictureActive = false
+    #endif
     private var boundPlayer: AVPlayer?
     private var bindTimer: Timer?
     private var resumeAfterInterruption = false
@@ -63,6 +68,7 @@ public final class ApplePlayerHost {
         view.allowsPictureInPicturePlayback = true
         // Disable Live Text / "Show Text" frame analysis.
         view.allowsVideoFrameAnalysis = false
+        view.pictureInPictureDelegate = pictureInPicture
         _playerView = view
         #else
         let controller = AVPlayerViewController()
@@ -79,6 +85,9 @@ public final class ApplePlayerHost {
         controller.allowsVideoFrameAnalysis = false
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         #endif
+        #if !os(tvOS)
+        controller.delegate = pictureInPicture
+        #endif
         #if os(tvOS)
         controller.appliesPreferredDisplayCriteriaAutomatically = false
         // AVKit treats an empty language array as unrestricted on tvOS 26.
@@ -90,7 +99,50 @@ public final class ApplePlayerHost {
         _viewController = controller
         #endif
 
+        #if !os(tvOS)
+        pictureInPicture.onChange = { [weak self] _ in self?.refreshPictureWhereabouts() }
+        #endif
         activate()
+    }
+
+    /// A Picture in Picture window started or stopped by something other
+    /// than the stock player's own button (the DEBUG captions probe).
+    func pictureInPictureDidChange(_ active: Bool) {
+        #if !os(tvOS)
+        pictureInPicture.set(active, source: .other, event: active ? "started elsewhere" : "stopping elsewhere")
+        #endif
+    }
+
+    /// Tells the default engine whether the picture is somewhere the app's
+    /// cue layer cannot follow, so it can hand the film's captions to AVKit
+    /// there (`AppleCaptionHandoff`). Apple TV declares its renditions
+    /// always and has nothing to hand over.
+    private func refreshPictureWhereabouts() {
+        #if !os(tvOS)
+        guard let aether = coordinator.engine as? AetherPlaybackEngine else { return }
+        #if os(visionOS)
+        // No external playback on Vision: the picture is always the wearer's.
+        let playerReportsExternal = false
+        #else
+        let playerReportsExternal = coordinator.engine.avPlayer?.isExternalPlaybackActive ?? false
+        #endif
+        externalPictureActive = AppleCaptionHandoff.externalPictureActive(
+            playerReportsExternal: playerReportsExternal,
+            externalRouteHoldsAudio: Self.externalRouteHoldsAudio,
+            wasActive: externalPictureActive)
+        aether.setPictureWhereabouts(pictureInPicture: pictureInPicture.isActive, external: externalPictureActive)
+        #endif
+    }
+
+    /// An AirPlay receiver or an HDMI screen holds the audio route. Survives
+    /// the item rebuild that briefly clears `isExternalPlaybackActive`
+    /// (AetherEngine #227).
+    private static var externalRouteHoldsAudio: Bool {
+        #if os(iOS)
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay || $0.portType == .HDMI }
+        #else
+        false
+        #endif
     }
 
     public func activate() {
@@ -249,6 +301,7 @@ public final class ApplePlayerHost {
             AppleSharePlaySessionStore.shared.refreshPlayback(coordinator, channel: channel)
         }
         if let player { coordinator.configureExternalPlayback(on: player) }
+        refreshPictureWhereabouts()
         #if os(iOS) || os(macOS)
         // The item can change without replacing the AVPlayer (recovery/seek).
         if mirrorsSubtitleSelection { subtitleSelection.bind(to: player?.currentItem) }

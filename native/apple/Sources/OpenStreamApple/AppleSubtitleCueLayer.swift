@@ -121,7 +121,10 @@ final class AppleStockPlayerSubtitles {
     func refresh(from engine: any ApplePlaybackEngine) {
         drawsInlineCues = engine.route == .surface || AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(
             engine: engine.kind, route: engine.route)
-        let next = AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.position)
+        // Nothing over AVKit's placeholder while PiP or AirPlay has the picture.
+        let drawsHere = (engine as? AetherPlaybackEngine)?.captionHandoff.appDrawsCaptions ?? true
+        let next = drawsHere
+            ? AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.position) : []
         if next != cues { cues = next }
         // Same persisted list the overlay model reads, so both menus agree.
         let chosen = UserDefaults.standard.stringArray(forKey: AppleSubtitleLanguages.defaultsKey)
