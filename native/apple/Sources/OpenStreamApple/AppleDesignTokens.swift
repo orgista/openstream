@@ -277,6 +277,26 @@ public struct AppleSourceEmptyState: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+        // The toolbar only drops its band over a scroll view that runs under
+        // it: on a plain view macOS 26 draws the window's own grey title-bar
+        // strip (owner, 2026-09-25: "not blending, it has a hard different
+        // UI"). So the empty page is laid out exactly like the hero pages —
+        // a scroll view that doesn't scroll, one screen tall.
+        ScrollView {
+            message
+                .containerRelativeFrame([.horizontal, .vertical])
+        }
+        .scrollDisabled(true)
+        .scrollIndicators(.hidden)
+        .background(Color.black.ignoresSafeArea())
+        .appleMacHeroUnderToolbar()
+        #else
+        message
+        #endif
+    }
+
+    private var message: some View {
         VStack(spacing: 16) {
             if let systemImage {
                 Image(systemName: systemImage)
@@ -295,13 +315,6 @@ public struct AppleSourceEmptyState: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(16)
-        #if os(macOS)
-        // No grey toolbar band over an empty page: the black runs to the
-        // window's top edge and only the tab picker and buttons keep their
-        // glass, as over the hero (owner, 2026-09-25).
-        .background(Color.black.ignoresSafeArea())
-        .appleMacHeroUnderToolbar()
-        #endif
     }
 }
 
