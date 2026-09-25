@@ -16,6 +16,13 @@ struct OpenStreamPlatformApp: App {
     @State private var webManagement = AppleWebManagementController()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    #if DEBUG && os(macOS)
+    init() {
+        // Before any view exists, so a stall early in launch is caught too.
+        AppleDebugMainThreadWatchdog.startIfRequested()
+    }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             #if DEBUG && os(tvOS)

@@ -18,6 +18,7 @@ public struct AppleMacMenuCommands: Commands {
 
     public init(commands: AppleMacCommandCenter = .shared) {
         self.commands = commands
+        AppleMacFullScreenObserver.start(updating: commands)
     }
 
     public var body: some Commands {
@@ -59,7 +60,16 @@ public struct AppleMacMenuCommands: Commands {
             ))
             .keyboardShortcut("z", modifiers: [.option, .command])
             .disabled(!commands.canControlPlayback)
-            Button("Toggle Full Screen", action: toggleFullScreen)
+            // AppKit's own item, reproduced (N56): the same "Enter Full
+            // Screen"/"Exit Full Screen" wording, the same ⌃⌘F, the same
+            // `toggleFullScreen:` sent up the responder chain to the key
+            // window. It was "Toggle Full Screen", a title no Mac app uses.
+            // The app keeps the item rather than leaving it to AppKit because
+            // AppKit's is added lazily (it never appeared in a dump of this
+            // menu bar, even after an update pass), and
+            // `AppleMacFullScreenObserver` opts out of that insertion so the
+            // menu can never show both.
+            Button(AppleMacFullScreenItem.title(isFullScreen: commands.isFullScreen), action: toggleFullScreen)
                 .keyboardShortcut("f", modifiers: [.control, .command])
         }
 
@@ -97,14 +107,57 @@ public struct AppleMacMenuCommands: Commands {
             Button("Skip Back") { commands.perform(.skipBackward) }
                 .keyboardShortcut(.leftArrow, modifiers: .command)
                 .disabled(!commands.canControlPlayback)
+            Divider()
+            // The Apple TV app's titles and keys, read from its own menu
+            // (`TV.app` MainMenu.nib: "Increase Volume" ⌘↑, "Decrease
+            // Volume" ⌘↓). It has no Mute item; ⌥⌘↓ is the Music app's
+            // old mute key and sits beside the other two.
+            Button("Increase Volume") { commands.perform(.volumeUp) }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!commands.canControlPlayback)
+            Button("Decrease Volume") { commands.perform(.volumeDown) }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .disabled(!commands.canControlPlayback)
+            Button("Mute") { commands.perform(.toggleMute) }
+                .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+                .disabled(!commands.canControlPlayback)
         }
     }
 
-    /// The window, not the app: `NSApp.keyWindow` is the one the viewer is
-    /// looking at, and a player opened in its own window has to be the one
-    /// that goes full screen.
+    /// Up the responder chain, as AppKit's own item sends it: the key window
+    /// first — a player opened in its own window is the one that goes full
+    /// screen — then the main window.
     private func toggleFullScreen() {
-        (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
+        NSApp.sendAction(#selector(NSWindow.toggleFullScreen(_:)), to: nil, from: nil)
+    }
+}
+
+/// Keeps `AppleMacCommandCenter.isFullScreen` in step with the key window,
+/// for the View menu's Enter/Exit Full Screen title.
+@MainActor
+enum AppleMacFullScreenObserver {
+    private static var observers: [NSObjectProtocol] = []
+
+    static func start(updating commands: AppleMacCommandCenter) {
+        guard observers.isEmpty else { return }
+        // AppKit adds its own "Enter Full Screen" to a View menu that has no
+        // `toggleFullScreen:` item, and SwiftUI's buttons do not carry that
+        // selector, so without this the menu could show the item twice. The
+        // documented opt-out, the one browsers set for the same reason.
+        UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
+        let names: [Notification.Name] = [
+            NSWindow.didEnterFullScreenNotification,
+            NSWindow.didExitFullScreenNotification,
+            NSWindow.didBecomeKeyNotification,
+        ]
+        observers = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    let window = NSApp.keyWindow ?? NSApp.mainWindow
+                    commands.isFullScreen = window?.styleMask.contains(.fullScreen) ?? false
+                }
+            }
+        }
     }
 }
 #endif

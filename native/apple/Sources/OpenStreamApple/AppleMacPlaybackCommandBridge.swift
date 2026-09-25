@@ -1,4 +1,5 @@
 #if os(macOS)
+import AVFoundation
 import SwiftUI
 
 extension ApplePlaybackCoordinator {
@@ -9,7 +10,8 @@ extension ApplePlaybackCoordinator {
     /// session. Weakly captured: the menu outlives the player, and a strong
     /// capture here would keep a finished session's engine alive.
     func macPlaybackControls(id: UUID) -> AppleMacPlaybackControls {
-        AppleMacPlaybackControls(
+        let mute = AppleMacMuteMemory()
+        return AppleMacPlaybackControls(
             id: id,
             togglePlayPause: { [weak self] in
                 guard let self else { return }
@@ -19,8 +21,56 @@ extension ApplePlaybackCoordinator {
                 if phase == .playing { userPause() } else { userPlay() }
             },
             skipForward: { [weak self] in self?.macSkip(by: AppleRemoteCommand.skipInterval) },
-            skipBackward: { [weak self] in self?.macSkip(by: -AppleRemoteCommand.skipInterval) }
+            skipBackward: { [weak self] in self?.macSkip(by: -AppleRemoteCommand.skipInterval) },
+            volumeUp: { [weak self] in self?.macStepVolume(AppleMacVolumeStep.raised, mute: mute) },
+            volumeDown: { [weak self] in self?.macStepVolume(AppleMacVolumeStep.lowered, mute: mute) },
+            toggleMute: { [weak self] in self?.macToggleMute(mute) }
         )
+    }
+
+    /// The session's volume. The Aether engine routes it to whichever host is
+    /// playing (its AVPlayer or its own renderer); the native engine is an
+    /// AVPlayer.
+    private var macVolume: Float? {
+        get {
+            if let aether = engine as? AetherPlaybackEngine { return aether.aetherEngine.volume }
+            return engine.avPlayer?.volume
+        }
+        set {
+            guard let newValue else { return }
+            if let aether = engine as? AetherPlaybackEngine {
+                aether.aetherEngine.volume = newValue
+            } else {
+                engine.avPlayer?.volume = newValue
+            }
+        }
+    }
+
+    /// A volume key unmutes first, as it does in the Apple TV app.
+    private func macStepVolume(_ step: (Float) -> Float, mute: AppleMacMuteMemory) {
+        if isMacMuted(mute) { macToggleMute(mute) }
+        guard let volume = macVolume else { return }
+        macVolume = step(volume)
+    }
+
+    /// AVPlayer's own mute where there is an AVPlayer, so AVPlayerView's
+    /// controls and the overlay's speaker glyph show it. Aether's software
+    /// renderer has no mute, so there it is volume 0 and back.
+    private func macToggleMute(_ mute: AppleMacMuteMemory) {
+        if let player = engine.avPlayer {
+            player.isMuted.toggle()
+        } else if let restore = mute.volumeBeforeMute {
+            mute.volumeBeforeMute = nil
+            macVolume = restore
+        } else if let volume = macVolume {
+            mute.volumeBeforeMute = volume
+            macVolume = 0
+        }
+    }
+
+    private func isMacMuted(_ mute: AppleMacMuteMemory) -> Bool {
+        if let player = engine.avPlayer { return player.isMuted }
+        return mute.volumeBeforeMute != nil
     }
 
     private func macSkip(by offset: Double) {
@@ -31,6 +81,13 @@ extension ApplePlaybackCoordinator {
         )
         Task { await userSeek(to: destination) }
     }
+}
+
+/// The volume a software-rendered session had before Controls ▸ Mute, for
+/// the next Mute (or volume key) to put back. One per installation.
+@MainActor
+private final class AppleMacMuteMemory {
+    var volumeBeforeMute: Float?
 }
 
 extension View {

@@ -162,6 +162,7 @@ public enum AppleMacWindowShot {
             return
         }
         lines.append(contentsOf: menuDump())
+        lines.append(contentsOf: menuDumpAfterUpdate())
         if let againAfter = request.againAfter {
             try? await Task.sleep(for: .seconds(againAfter))
             let later = url.deletingPathExtension().appendingPathExtension("later.png")
@@ -356,25 +357,73 @@ public enum AppleMacWindowShot {
     /// block is not obvious from the source — an auto-generated "Toggle
     /// Sidebar ⌘S" was landing in *Help*.
     @MainActor
-    public static func menuDump() -> [String] {
-        guard let main = NSApp.mainMenu else { return ["OPENSTREAM-MENU mainMenu: nil"] }
-        var lines = ["OPENSTREAM-MENU menus: \(main.items.count)"]
+    public static func menuDump(prefix: String = "OPENSTREAM-MENU") -> [String] {
+        guard let main = NSApp.mainMenu else { return ["\(prefix) mainMenu: nil"] }
+        var lines = ["\(prefix) menus: \(main.items.count)"]
         for menu in main.items {
             let submenu = menu.submenu
-            lines.append("OPENSTREAM-MENU [\(menu.title)] items=\(submenu?.items.count ?? 0)")
+            lines.append("\(prefix) [\(menu.title)] items=\(submenu?.items.count ?? 0)")
             for item in submenu?.items ?? [] {
                 if item.isSeparatorItem { continue }
                 let key = item.keyEquivalent.isEmpty
                     ? ""
                     : "  key=\(modifierString(item.keyEquivalentModifierMask))\(printable(item.keyEquivalent))"
-                lines.append("OPENSTREAM-MENU     \(item.title)\(key)\(item.isEnabled ? "" : "  (disabled)")")
+                // The selector shows which items are AppKit's own (the stock
+                // full-screen item is `toggleFullScreen:`) and which SwiftUI's.
+                let action = item.action.map { "  action=\(NSStringFromSelector($0))" } ?? ""
+                lines.append("\(prefix)     \(item.title)\(key)\(item.isEnabled ? "" : "  (disabled)")\(action)")
             }
         }
         return lines
     }
 
+    /// The same dump after the menu bar has been through AppKit's update pass.
+    ///
+    /// AppKit adds some items only when a menu is about to be shown (N56: the
+    /// stock "Enter Full Screen" is one), so a dump of a menu nobody has opened
+    /// cannot say whether one would appear beside the app's own. This runs the
+    /// update, the tracking notifications and the menus' own will-open calls
+    /// without opening anything on the owner's screen.
+    @MainActor
+    static func menuDumpAfterUpdate() -> [String] {
+        guard let main = NSApp.mainMenu else { return [] }
+        main.update()
+        NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: main)
+        for item in main.items {
+            guard let submenu = item.submenu else { continue }
+            submenu.delegate?.menuNeedsUpdate?(submenu)
+            submenu.delegate?.menuWillOpen?(submenu)
+            submenu.update()
+        }
+        // A key equivalent nothing claims (⌃⌥⇧⌘J), through the menu bar's
+        // own matching — where AppKit would have to add a full-screen item
+        // for its shortcut to work before any menu was opened.
+        if let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 400 }),
+           let probe = NSEvent.keyEvent(with: .keyDown, location: .zero,
+                                        modifierFlags: [.control, .option, .shift, .command],
+                                        timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: window.windowNumber, context: nil,
+                                        characters: "j", charactersIgnoringModifiers: "j",
+                                        isARepeat: false, keyCode: 38) {
+            let claimed = main.performKeyEquivalent(with: probe)
+            let primary = window.collectionBehavior.contains(.fullScreenPrimary)
+            let none = window.collectionBehavior.contains(.fullScreenNone)
+            appleTrace("mac menu probe claimed=\(claimed) fullScreenPrimary=\(primary) fullScreenNone=\(none)")
+        }
+        var lines = menuDump(prefix: "OPENSTREAM-MENU-UPDATED")
+        lines.append("OPENSTREAM-MENU-UPDATED toggleFullScreen items: \(main.items.flatMap { $0.submenu?.items ?? [] }.filter { $0.action == #selector(NSWindow.toggleFullScreen(_:)) }.map(\.title))")
+        for item in main.items {
+            guard let submenu = item.submenu else { continue }
+            submenu.delegate?.menuDidClose?(submenu)
+        }
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: main)
+        return lines
+    }
+
     private static func printable(_ key: String) -> String {
         switch key.unicodeScalars.first?.value {
+        case 0xF700: "up"
+        case 0xF701: "down"
         case 0xF702: "left"
         case 0xF703: "right"
         case 0x20: "space"

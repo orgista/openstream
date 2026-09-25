@@ -120,11 +120,13 @@ struct AppleSourcesSettingsView: View {
 
             // Not "Sources" again: the pane is already titled Sources, so the
             // screen read "Sources … Sources" (review 2026-09-14).
-            // Uppercased explicitly: this pane is a `List` while the other
-            // settings panes are `Form`s, and on tvOS a Form uppercases its
-            // section headers while a List does not — so this one header read
-            // "Your Sources" beside "CHANNEL PREFERENCES" and "CONNECTION"
-            // everywhere else.
+            // Uppercased on Apple TV only: this pane is a `List` there while
+            // the other settings panes are `Form`s, and a tvOS Form uppercases
+            // its section headers while a List does not — so this one header
+            // read "Your Sources" beside "CHANNEL PREFERENCES" and
+            // "CONNECTION". Everywhere else the header takes the platform's
+            // own case like its neighbours; forcing it read "YOUR SOURCES"
+            // among the Mac's title-case headers (N54 #13).
             Section {
                 if sourceStore.sources.isEmpty {
                     Text("No sources")
@@ -141,7 +143,10 @@ struct AppleSourcesSettingsView: View {
                 // Scoped to the header on purpose: `.textCase` on the Section
                 // uppercases its *rows* too, which turned every source name
                 // into "TORRENTIO TB".
-                Text("Your Sources").textCase(.uppercase)
+                Text("Your Sources")
+                    #if os(tvOS)
+                    .textCase(.uppercase)
+                    #endif
             }
         }
         .appleSettingsPane("Sources", embedded: embeddedInSplit)
@@ -943,12 +948,15 @@ struct AppleTVChoicePill: View {
 #endif
 
 /// Stock field chrome on Apple TV (the focused field lifts the way the system
-/// Settings app's do); the plain in-row style inside forms elsewhere.
+/// Settings app's do) and on the Mac (the outlined field System Settings
+/// draws, N56); the plain in-row style inside iPhone, iPad and visionOS forms.
 extension View {
     @ViewBuilder
     func appleSourceFieldStyle() -> some View {
         #if os(tvOS)
         self
+        #elseif os(macOS)
+        self.appleMacFormFields()
         #else
         self.textFieldStyle(.plain)
         #endif

@@ -179,6 +179,7 @@ public struct AppleSettingsContentModifier: ViewModifier {
             // puts every pane on the one window ground; a grouped `Form` keeps
             // its own row boxes either way, so nothing is lost.
             .scrollContentBackground(.hidden)
+            .appleMacFormFields()
             .frame(maxWidth: AppleMacChromeMetrics.settingsColumnWidth, maxHeight: .infinity)
             .frame(maxWidth: .infinity)
         #else
@@ -192,6 +193,24 @@ public struct AppleSettingsContentModifier: ViewModifier {
 public extension View {
     func appleSettingsContent() -> some View {
         modifier(AppleSettingsContentModifier())
+    }
+}
+
+extension View {
+    /// The Mac's field box on every text and secure field in a settings form.
+    ///
+    /// In a grouped macOS `Form` a field's default style draws no outline and
+    /// no background, so "Client ID", "Server URL" and the rest read as plain
+    /// rows with nowhere to click (N54 #12). `.roundedBorder` is the field
+    /// System Settings draws. The style is inherited, so one application
+    /// covers a whole form; iOS, tvOS and visionOS keep their own fields.
+    @ViewBuilder
+    func appleMacFormFields() -> some View {
+        #if os(macOS)
+        self.textFieldStyle(.roundedBorder)
+        #else
+        self
+        #endif
     }
 }
 
@@ -250,7 +269,8 @@ public extension View {
 }
 
 /// The intentionally minimal empty state used when a source-backed tab has no
-/// content. It contains one title and one action, with no explanatory copy.
+/// content. It contains one title and one action (two where a failure can be
+/// retried), with no explanatory copy.
 public struct AppleSourceEmptyState: View {
     public let title: String
     /// The tab's own symbol over the title, as Search's empty state has its
@@ -259,12 +279,25 @@ public struct AppleSourceEmptyState: View {
     public let systemImage: String?
     public let actionTitle: String?
     public let action: (() -> Void)?
+    /// A second, quieter button under the first: Discover's "Open Settings"
+    /// under "Try Again" when its catalogs could not be read.
+    public let secondaryActionTitle: String?
+    public let secondaryAction: (() -> Void)?
 
-    public init(title: String, systemImage: String? = nil, actionTitle: String, action: @escaping () -> Void) {
+    public init(
+        title: String,
+        systemImage: String? = nil,
+        actionTitle: String,
+        action: @escaping () -> Void,
+        secondaryActionTitle: String? = nil,
+        secondaryAction: (() -> Void)? = nil
+    ) {
         self.title = title
         self.systemImage = systemImage
         self.actionTitle = actionTitle
         self.action = action
+        self.secondaryActionTitle = secondaryActionTitle
+        self.secondaryAction = secondaryAction
     }
 
     /// Title only. For a dead end an action cannot open: a button that runs and
@@ -274,6 +307,8 @@ public struct AppleSourceEmptyState: View {
         self.systemImage = nil
         self.actionTitle = nil
         self.action = nil
+        self.secondaryActionTitle = nil
+        self.secondaryAction = nil
     }
 
     public var body: some View {
@@ -311,6 +346,10 @@ public struct AppleSourceEmptyState: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.brandPrimary)
+            }
+            if let secondaryActionTitle, let secondaryAction {
+                Button(secondaryActionTitle, action: secondaryAction)
+                    .buttonStyle(.brandSecondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

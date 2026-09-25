@@ -13,9 +13,8 @@ import SwiftUI
 /// rgb(30,30,30) on an rgb(40,40,40) window (measured 2026-09-21).
 ///
 /// It stays a `List` off macOS on purpose. tvOS uppercases a `Form`'s section
-/// headers and not a `List`'s, and the Sources pane writes its own header case
-/// to match its neighbours (`AppleSourcesSettingsView`, "Your Sources"); a
-/// `Form` there would uppercase it twice. This wrapper changes nothing on any
+/// headers and not a `List`'s, and the Sources pane uppercases its own header
+/// there to match its neighbours (`AppleSourcesSettingsView`, "Your Sources"). This wrapper changes nothing on any
 /// platform but macOS.
 struct AppleSettingsCollection<Content: View>: View {
     @ViewBuilder var content: Content

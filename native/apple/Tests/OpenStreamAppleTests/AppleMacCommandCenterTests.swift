@@ -92,6 +92,57 @@ struct AppleMacCommandCenterTests {
         centre.perform(.togglePlayPause)
         centre.perform(.skipForward)
         centre.perform(.skipBackward)
+        centre.perform(.volumeUp)
+        centre.perform(.volumeDown)
+        centre.perform(.toggleMute)
+    }
+
+    /// N56: the Apple TV app's Controls menu has Increase/Decrease Volume, and
+    /// this one had only Play/Pause and the skips.
+    @Test("Each volume item runs its own closure")
+    func volumeCommandsRouteToTheRightClosure() {
+        let centre = AppleMacCommandCenter()
+        let calls = Calls()
+        centre.install(AppleMacPlaybackControls(
+            togglePlayPause: { calls.record("toggle") },
+            skipForward: {},
+            skipBackward: {},
+            volumeUp: { calls.record("up") },
+            volumeDown: { calls.record("down") },
+            toggleMute: { calls.record("mute") }
+        ))
+        centre.perform(.volumeDown)
+        centre.perform(.toggleMute)
+        centre.perform(.volumeUp)
+        #expect(calls.names == ["down", "mute", "up"])
+    }
+
+    @Test("Ten volume steps run from silence to exactly full, and stop at both ends")
+    func volumeStepsAreTenthsAndClamped() {
+        var volume: Float = 0
+        for _ in 0 ..< 10 { volume = AppleMacVolumeStep.raised(volume) }
+        #expect(volume == 1)
+        #expect(AppleMacVolumeStep.raised(1) == 1)
+        #expect(AppleMacVolumeStep.lowered(0) == 0)
+        #expect(AppleMacVolumeStep.lowered(0.05) == 0)
+        #expect(AppleMacVolumeStep.raised(0.95) == 1)
+    }
+
+    /// A volume left between tenths by something else (the system, the
+    /// stock player's slider) still moves on the first press.
+    @Test("A press always moves an in-between volume", arguments: [Float(0.33), 0.36, 0.5, 0.71])
+    func volumeStepAlwaysMoves(volume: Float) {
+        #expect(AppleMacVolumeStep.raised(volume) > volume)
+        #expect(AppleMacVolumeStep.lowered(volume) < volume)
+    }
+
+    /// N56: the item read "Toggle Full Screen"; AppKit's own, and the Apple
+    /// TV app's, read "Enter Full Screen" and "Exit Full Screen".
+    @Test("The full-screen item is worded like AppKit's")
+    func fullScreenItemWording() {
+        #expect(AppleMacFullScreenItem.title(isFullScreen: false) == "Enter Full Screen")
+        #expect(AppleMacFullScreenItem.title(isFullScreen: true) == "Exit Full Screen")
+        #expect(AppleMacCommandCenter().isFullScreen == false)
     }
 
     @Test("Each Controls item runs its own closure")

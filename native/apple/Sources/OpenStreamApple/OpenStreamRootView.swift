@@ -639,7 +639,7 @@ public struct OpenStreamRootView: View {
             // showing before the route can push it.
             selectedTab = OpenStreamTabVisibility.selection(current: .home, visible: visibleTabs)
             router.openSearch()
-        case .togglePlayPause, .skipForward, .skipBackward, .none:
+        case .togglePlayPause, .skipForward, .skipBackward, .volumeUp, .volumeDown, .toggleMute, .none:
             break
         }
     }

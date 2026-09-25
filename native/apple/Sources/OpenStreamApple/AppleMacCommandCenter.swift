@@ -15,6 +15,9 @@ public enum AppleMacCommand: Equatable, Sendable {
     case togglePlayPause
     case skipForward
     case skipBackward
+    case volumeUp
+    case volumeDown
+    case toggleMute
 }
 
 /// The four tabs a Mac menu item can select, in menu order.
@@ -46,7 +49,7 @@ public enum AppleMacTabTarget: String, CaseIterable, Sendable {
 ///
 /// Values, not a reference to the coordinator: the menu is built once for the
 /// whole app and there is one coordinator per playback session, so the player
-/// hands over three closures while it is on screen and takes them back when it
+/// hands over its closures while it is on screen and takes them back when it
 /// leaves.
 @MainActor
 public struct AppleMacPlaybackControls {
@@ -54,17 +57,49 @@ public struct AppleMacPlaybackControls {
     let togglePlayPause: () -> Void
     let skipForward: () -> Void
     let skipBackward: () -> Void
+    let volumeUp: () -> Void
+    let volumeDown: () -> Void
+    let toggleMute: () -> Void
 
     public init(
         id: UUID = UUID(),
         togglePlayPause: @escaping () -> Void,
         skipForward: @escaping () -> Void,
-        skipBackward: @escaping () -> Void
+        skipBackward: @escaping () -> Void,
+        volumeUp: @escaping () -> Void = {},
+        volumeDown: @escaping () -> Void = {},
+        toggleMute: @escaping () -> Void = {}
     ) {
         self.id = id
         self.togglePlayPause = togglePlayPause
         self.skipForward = skipForward
         self.skipBackward = skipBackward
+        self.volumeUp = volumeUp
+        self.volumeDown = volumeDown
+        self.toggleMute = toggleMute
+    }
+}
+
+/// Controls ▸ Increase/Decrease Volume, as values.
+///
+/// Tenths, snapped, so ten presses from silence land on exactly full volume
+/// rather than 0.99999994 short of it, and a press past either end stays at
+/// that end.
+public enum AppleMacVolumeStep {
+    public static let step: Float = 0.1
+
+    public static func raised(_ volume: Float) -> Float { snapped(volume + step) }
+    public static func lowered(_ volume: Float) -> Float { snapped(volume - step) }
+
+    private static func snapped(_ volume: Float) -> Float {
+        min(1, max(0, (volume * 10).rounded() / 10))
+    }
+}
+
+/// View ▸ Enter/Exit Full Screen, worded the way AppKit's own item is.
+public enum AppleMacFullScreenItem {
+    public static func title(isFullScreen: Bool) -> String {
+        isFullScreen ? "Exit Full Screen" : "Enter Full Screen"
     }
 }
 
@@ -105,6 +140,11 @@ public final class AppleMacCommandCenter {
     /// cropped, for 16:9 films on an ultrawide display. Off by default and
     /// kept for the session, not saved — the next film may be 2.39:1.
     public var zoomToFill = false
+
+    /// Whether the key window is in full screen, so View ▸ Enter Full Screen
+    /// can read "Exit Full Screen" the way AppKit's own item does. Kept by the
+    /// menu's window observer.
+    public internal(set) var isFullScreen = false
 
     /// True while a player covers a window. The tab bar is hidden then, so
     /// the View menu's tab items step aside rather than switch the page under
@@ -164,6 +204,9 @@ public final class AppleMacCommandCenter {
         case .togglePlayPause: playback.togglePlayPause()
         case .skipForward: playback.skipForward()
         case .skipBackward: playback.skipBackward()
+        case .volumeUp: playback.volumeUp()
+        case .volumeDown: playback.volumeDown()
+        case .toggleMute: playback.toggleMute()
         case .selectTab, .openSearch: break
         }
     }

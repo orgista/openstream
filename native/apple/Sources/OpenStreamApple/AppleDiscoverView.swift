@@ -156,12 +156,7 @@ struct AppleDiscoverView: View {
         let heroes = featuredCandidates(continueWatching: localContinueWatching, picks: picks)
         Group {
             if visibleSections.isEmpty && library.groups.isEmpty {
-                AppleSourceEmptyState(
-                    title: sourceStore.sources.isEmpty ? "No Sources" : "Nothing to Show",
-                    systemImage: OpenStreamTab.home.systemImage,
-                    actionTitle: "Open Settings",
-                    action: openSettings
-                )
+                discoverEmptyState
                 // The black ground was on the populated branch only, so an
                 // empty Discover fell through to the tvOS system material —
                 // measured rgb(39,41,37) against Library's rgb(0,0,0), and not
@@ -1241,6 +1236,34 @@ struct AppleDiscoverView: View {
     private var tabToolbarContext: AppleTabToolbarContext {
         AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing || catalogStore.isLoading },
                                onSearch: { showsSearch = true }, onRefresh: refresh)
+    }
+
+    /// No Sources, a catalog that couldn't be read (Try Again, then
+    /// Settings), or sources with nothing in them.
+    @ViewBuilder
+    private var discoverEmptyState: some View {
+        let state = AppleDiscoverEmptyState(
+            sourceCount: sourceStore.sources.count,
+            catalogFailureCount: catalogStore.partialErrors.count,
+            hasSourceError: sourceStore.credentialError != nil
+        )
+        if state.offersRetry {
+            AppleSourceEmptyState(
+                title: state.title,
+                systemImage: OpenStreamTab.home.systemImage,
+                actionTitle: "Try Again",
+                action: refresh,
+                secondaryActionTitle: "Open Settings",
+                secondaryAction: openSettings
+            )
+        } else {
+            AppleSourceEmptyState(
+                title: state.title,
+                systemImage: OpenStreamTab.home.systemImage,
+                actionTitle: "Open Settings",
+                action: openSettings
+            )
+        }
     }
 
     private func refresh() {

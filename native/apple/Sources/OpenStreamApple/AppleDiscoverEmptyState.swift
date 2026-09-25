@@ -1,0 +1,39 @@
+import Foundation
+
+/// What Discover says when it has no rows to show.
+///
+/// "Nothing to Show" used to cover every case with sources, including the one
+/// where the saved catalog could not be read at all (a source address the
+/// keychain would not give back, every catalog request failing). The page
+/// looked like an empty catalog and offered only Settings (N54 #14).
+public enum AppleDiscoverEmptyState: Equatable, Sendable {
+    /// No sources at all: Settings is where one is added.
+    case noSources
+    /// Sources exist but reading them failed: say so, and offer a reload.
+    case couldNotLoad
+    /// Sources were read and hold nothing to show (all switched off, or
+    /// catalogs that came back empty).
+    case nothingToShow
+
+    public init(sourceCount: Int, catalogFailureCount: Int, hasSourceError: Bool) {
+        if sourceCount == 0 {
+            self = .noSources
+        } else if catalogFailureCount > 0 || hasSourceError {
+            self = .couldNotLoad
+        } else {
+            self = .nothingToShow
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .noSources: "No Sources"
+        case .couldNotLoad: "Couldn't Load Your Catalogs"
+        case .nothingToShow: "Nothing to Show"
+        }
+    }
+
+    /// Only a failure is worth retrying; reloading an empty or missing
+    /// catalog would leave the page exactly as it was.
+    public var offersRetry: Bool { self == .couldNotLoad }
+}

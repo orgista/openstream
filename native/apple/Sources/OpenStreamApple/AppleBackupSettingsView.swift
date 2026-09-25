@@ -169,6 +169,7 @@ private struct AppleBackupImportView: View {
             }
             .navigationTitle("Import Configuration")
             .scrollIndicators(.hidden)
+            .appleMacFormFields()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -235,6 +236,7 @@ private struct AppleBackupSourceSignInView: View {
             }
             .navigationTitle(source.name)
             .scrollIndicators(.hidden)
+            .appleMacFormFields()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
