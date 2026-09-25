@@ -100,14 +100,44 @@ enum AppleRailPaging {
     /// behind its tiles; a target rounds to the nearest one.
     static let anchorStep: CGFloat = 40
 
-    static func anchorCount(contentWidth: CGFloat) -> Int {
-        guard contentWidth.isFinite, contentWidth > 0 else { return 0 }
-        return Int((contentWidth / anchorStep).rounded(.up))
+    static func anchorCount(contentWidth: CGFloat, step: CGFloat = anchorStep) -> Int {
+        guard contentWidth.isFinite, contentWidth > 0, step.isFinite, step > 0 else { return 0 }
+        return Int((contentWidth / step).rounded(.up))
     }
 
-    static func anchorIndex(for offset: CGFloat) -> Int {
-        guard offset.isFinite, offset > 0 else { return 0 }
-        return Int((offset / anchorStep).rounded())
+    static func anchorIndex(for offset: CGFloat, step: CGFloat = anchorStep) -> Int {
+        guard offset.isFinite, offset > 0, step.isFinite, step > 0 else { return 0 }
+        return Int((offset / step).rounded())
+    }
+
+    /// Paging by whole tiles when the rail knows its tile pitch (tile width
+    /// plus gap): the anchors sit one pitch apart, so anchor `n` scrolled to
+    /// the leading edge puts tile `n` exactly at the row's inset, under the
+    /// header, as the Apple TV app's shelves land. Paging by 80 % of the
+    /// width to 40 pt anchors left the first tile at an arbitrary x — 16 pt
+    /// on a 43 pt inset in a 1440 pt window (N54).
+    ///
+    /// A page is the number of tiles wholly in view past the inset (the
+    /// trailing peek is not counted, so it is whole on the next page). The
+    /// last anchor is the first one at or past the scroll's end; the scroll
+    /// view stops at the end, so the row finishes flush right.
+    /// A rail of `tileCount` equal tiles `gap` apart, inset on both sides,
+    /// is `inset·2 + count·width + (count−1)·gap` wide, so the pitch
+    /// (width + gap) follows from its measured content width. Nil until the
+    /// rail is measured.
+    static func tilePitch(contentWidth: CGFloat, tileCount: Int, inset: CGFloat, gap: CGFloat) -> CGFloat? {
+        guard tileCount > 0, contentWidth.isFinite else { return nil }
+        let pitch = (contentWidth - 2 * inset + gap) / CGFloat(tileCount)
+        return pitch > gap ? pitch : nil
+    }
+
+    static func tileAnchorIndex(_ geometry: Geometry, forward: Bool, pitch: CGFloat, inset: CGFloat) -> Int {
+        guard pitch.isFinite, pitch > 0 else { return 0 }
+        let whole = max(1, Int(((geometry.visibleWidth - inset) / pitch).rounded(.down)))
+        let current = Int((max(geometry.offset, 0) / pitch).rounded())
+        let end = max(geometry.contentWidth - geometry.visibleWidth, 0)
+        let last = Int((end / pitch).rounded(.up))
+        return min(max(current + (forward ? whole : -whole), 0), last)
     }
 
     /// Strings, so they can never collide with a tile's own id (Top 10 tiles

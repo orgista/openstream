@@ -43,7 +43,7 @@ struct AppleMediaShelf<Content: View>: View {
             .padding(.horizontal, horizontalInset)
             #if os(macOS)
             if rowStyle?.platform == .mac {
-                AppleMacRail { rail }
+                macRail
             } else {
                 railScrollView
             }
@@ -57,6 +57,21 @@ struct AppleMediaShelf<Content: View>: View {
         LazyHStack(alignment: .top, spacing: cardGap, content: content)
             .padding(.horizontal, horizontalInset).padding(.vertical, verticalBleed)
     }
+
+    #if os(macOS)
+    /// The Mac rail, told how many tiles it has so its ‹ › buttons can page
+    /// by whole tiles (`AppleRailPaging.tilePitch`).
+    private var macRail: some View {
+        Group(subviews: content()) { tiles in
+            AppleMacRail(tileCount: tiles.count, inset: horizontalInset, gap: cardGap) {
+                LazyHStack(alignment: .top, spacing: cardGap) {
+                    ForEach(tiles) { $0 }
+                }
+                .padding(.horizontal, horizontalInset).padding(.vertical, verticalBleed)
+            }
+        }
+    }
+    #endif
 
     private var railScrollView: some View {
         ScrollView(.horizontal) {

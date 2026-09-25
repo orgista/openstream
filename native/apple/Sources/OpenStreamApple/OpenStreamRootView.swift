@@ -427,6 +427,9 @@ public struct OpenStreamRootView: View {
         }
         #if os(macOS)
         .onChange(of: macCommands.revision) { applyMacCommand() }
+        .onChange(of: selectedTab, initial: true) { _, tab in
+            macCommands.selectedTab = AppleMacTabTarget(tab: tab)
+        }
         // The owner's "no scroll indicators" rule, which had no macOS branch:
         // `AppleDesignTokens.scrollIndicatorVisibility` was only ever applied
         // under `#if os(visionOS)` here, so every shelf and list on the Mac

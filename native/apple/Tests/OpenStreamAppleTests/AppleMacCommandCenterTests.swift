@@ -34,6 +34,40 @@ struct AppleMacCommandCenterTests {
         #expect(AppleMacTabTarget(tab: .search) == nil)
     }
 
+    /// N54: the toolbar's Refresh had no key equivalent and no menu item.
+    /// View ▸ Refresh ⌘R is live exactly where the toolbar has the button.
+    @Test("Refresh is live on Discover and Library only", arguments: AppleMacTabTarget.allCases)
+    func refreshFollowsTheToolbar(tab: AppleMacTabTarget) {
+        let centre = AppleMacCommandCenter()
+        #expect(centre.canRefresh == false)
+        centre.selectedTab = tab
+        #expect(centre.canRefresh == [.discover, .library].contains(tab))
+    }
+
+    @Test("Refresh names the selected tab and bumps its own revision")
+    func refreshTargetsTheSelectedTab() {
+        let centre = AppleMacCommandCenter()
+        centre.selectedTab = .library
+        centre.requestRefresh()
+        #expect(centre.refreshTarget == .library)
+        #expect(centre.refreshRevision == 1)
+        #expect(centre.revision == 0)
+        centre.selectedTab = .settings
+        centre.requestRefresh()
+        #expect(centre.refreshRevision == 1)
+        #expect(centre.refreshTarget == .library)
+    }
+
+    @Test("Refresh steps aside while a player covers the window")
+    func refreshIsOffUnderThePlayer() {
+        let centre = AppleMacCommandCenter()
+        centre.selectedTab = .discover
+        centre.isPlayerOnStage = true
+        #expect(centre.canRefresh == false)
+        centre.requestRefresh()
+        #expect(centre.refreshRevision == 0)
+    }
+
     @Test("Sending a command bumps the revision the root view watches")
     func sendingBumpsRevision() {
         let centre = AppleMacCommandCenter()

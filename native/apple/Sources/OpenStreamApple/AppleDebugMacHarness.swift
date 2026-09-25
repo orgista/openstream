@@ -23,6 +23,17 @@ import QuartzCore
 /// measures real scrolling. It moves the AppKit scroll view directly: moving
 /// a SwiftUI `ScrollPosition` instead writes state on the screen being
 /// measured and re-renders all of it at every step.
+///
+/// `-OpenStreamMacScrollTo <points>` moves the same scroll view to that
+/// offset once, sixteen seconds after launch (`-OpenStreamMacScrollToAfter`),
+/// and leaves it there for a window shot. Discover's `ScrollPosition` review
+/// hook does not move the Mac page, so rows below the hero could not be
+/// photographed (N54).
+///
+/// `-OpenStreamMacMenuRefreshAfter <seconds>` runs View ▸ Refresh's own
+/// action (`requestRefresh()`) that long after launch and logs whether it was
+/// live. A key equivalent posted to a background app never reaches its menu
+/// bar, and bringing the test copy forward would take the owner's focus.
 @MainActor
 enum AppleDebugMacHarness {
     static func startIfRequested() {
@@ -30,6 +41,8 @@ enum AppleDebugMacHarness {
         arrangeWindowIfRequested()
         driveWindowsIfRequested()
         meterIfRequested()
+        scrollOnceIfRequested()
+        menuRefreshIfRequested()
         let distance = UserDefaults.standard.double(forKey: "OpenStreamMacScrollSweep")
         guard distance > 0 else { return }
         Task { @MainActor in
@@ -50,6 +63,36 @@ enum AppleDebugMacHarness {
                 try? await Task.sleep(for: .milliseconds(16))
             }
             appleTrace("mac sweep end \(Int(target)) pt; \(meter.finish())")
+        }
+    }
+
+    private static func menuRefreshIfRequested() {
+        let after = UserDefaults.standard.double(forKey: "OpenStreamMacMenuRefreshAfter")
+        guard after > 0 else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(after))
+            let centre = AppleMacCommandCenter.shared
+            appleTrace("mac menu refresh tab=\(centre.selectedTab.map { "\($0)" } ?? "none") live=\(centre.canRefresh)")
+            centre.requestRefresh()
+        }
+    }
+
+    private static func scrollOnceIfRequested() {
+        let offset = UserDefaults.standard.double(forKey: "OpenStreamMacScrollTo")
+        guard offset > 0 else { return }
+        let requested = UserDefaults.standard.double(forKey: "OpenStreamMacScrollToAfter")
+        let after = requested > 0 ? requested : 16
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(after))
+            guard let scrollView = mainScrollView() else {
+                appleTrace("mac scroll-to: no scroll view")
+                return
+            }
+            let clip = scrollView.contentView
+            let bottom = max(0, (scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(offset, bottom)))
+            scrollView.reflectScrolledClipView(clip)
+            appleTrace("mac scroll-to \(Int(min(offset, bottom))) of \(Int(bottom)) pt")
         }
     }
 

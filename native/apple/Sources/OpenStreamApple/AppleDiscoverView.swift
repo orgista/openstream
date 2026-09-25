@@ -336,6 +336,13 @@ struct AppleDiscoverView: View {
                             onSearch: { showsSearch = true }, onRefresh: refresh)
         }
         #endif
+        #if os(macOS)
+        .onChange(of: AppleMacCommandCenter.shared.refreshRevision) {
+            guard AppleMacCommandCenter.shared.refreshTarget == .discover, !isRefreshing, !catalogStore.isLoading else { return }
+            appleTrace("discover refresh from the menu")
+            refresh()
+        }
+        #endif
         #if DEBUG
         .navigationDestination(isPresented: $visionReviewDetail) {
             if let value = visionReviewItem { detail(value, initialAutoPlay: visionReviewAutoPlay) }

@@ -183,10 +183,12 @@ public struct AppleTVNavigationLabel: View {
                 // edge, underneath the glyph. The fixed slot is the same thing
                 // the tvOS branch above does, and for the same reason.
                 HStack(alignment: .firstTextBaseline,
-                       spacing: AppleTVNavigationLabel.iconSpacing) {
+                       spacing: AppleTVNavigationLabel.isMacPlatform
+                           ? AppleTVNavigationLabel.macIconSpacing : AppleTVNavigationLabel.iconSpacing) {
                     Image(systemName: systemImage)
                         .foregroundStyle(.primary)
-                        .frame(width: iconSlot, alignment: .leading)
+                        .frame(width: AppleTVNavigationLabel.isMacPlatform ? AppleTVNavigationLabel.macIconSlotWidth : iconSlot,
+                               alignment: AppleTVNavigationLabel.isMacPlatform ? .center : .leading)
                         .accessibilityHidden(true)
                     Text(title)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -220,12 +222,29 @@ public struct AppleTVNavigationLabel: View {
 
     /// Whether to take the icon column over from `Label`.
     ///
-    /// Only at accessibility sizes: at ordinary sizes the stock label is
-    /// correct and matches every other iOS settings screen, so it is left
-    /// alone.
-    public static func usesFixedIconColumn(for size: DynamicTypeSize) -> Bool {
-        size.isAccessibilitySize
+    /// On iOS and visionOS only at accessibility sizes: at ordinary sizes the
+    /// stock label is correct and matches every other iOS settings screen, so
+    /// it is left alone. On the Mac always: a macOS `Label` sizes its icon
+    /// column to each glyph, so titles started wherever their symbol ended —
+    /// "Metadata" (photo.on.rectangle.angled) sat 4 pt right of "Sources" and
+    /// "Radarr & Sonarr" 1 pt left, in the same list (N54, 1440 pt window).
+    /// System Settings centres its glyphs in one column; so does this.
+    public static func usesFixedIconColumn(for size: DynamicTypeSize, isMac: Bool = isMacPlatform) -> Bool {
+        isMac || size.isAccessibilitySize
     }
+
+    public static var isMacPlatform: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The Mac's column: the stock label's glyph-to-title distance (27 pt,
+    /// measured on the Settings list) kept, with the glyph centred in it.
+    public static let macIconSlotWidth: CGFloat = 20
+    public static let macIconSpacing: CGFloat = 7
 
     /// Widest tvOS body-size symbol in the settings rows is ~42 pt.
     public static let iconSlotWidth: CGFloat = 48

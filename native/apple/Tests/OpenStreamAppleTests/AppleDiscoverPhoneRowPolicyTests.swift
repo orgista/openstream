@@ -115,6 +115,46 @@ import Testing
         #expect(AppleRailPaging.anchorID(3) != AppleRailPaging.anchorID(4))
     }
 
+    /// N54: a 1440 pt window, 43 pt inset, 176 pt posters 16 pt apart. Each
+    /// page moves by the seven posters wholly in view and lands a poster on
+    /// the inset; the last page stops at the scroll's end, and paging back
+    /// from there returns to tile boundaries.
+    @Test func tilePagingLandsWholeTilesOnTheInset() {
+        let pitch: CGFloat = 176 + 16
+        let content: CGFloat = 43 * 2 + 20 * 176 + 19 * 16
+        var geometry = AppleRailPaging.Geometry(offset: 0, contentWidth: content, visibleWidth: 1440)
+        let first = AppleRailPaging.tileAnchorIndex(geometry, forward: true, pitch: pitch, inset: 43)
+        #expect(first == 7)
+        geometry.offset = CGFloat(first) * pitch
+        // Tile 7 starts at 43 + 7 × pitch; scrolled by 7 × pitch it sits at the inset.
+        #expect(43 + 7 * pitch - geometry.offset == 43)
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: true, pitch: pitch, inset: 43) == 13)
+        geometry.offset = content - 1440
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: true, pitch: pitch, inset: 43) == 13)
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: false, pitch: pitch, inset: 43) == 6)
+        geometry.offset = pitch * 3
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: false, pitch: pitch, inset: 43) == 0)
+    }
+
+    @Test func thePitchFollowsFromTheRailsWidthAndTileCount() {
+        let content: CGFloat = 43 * 2 + 20 * 176 + 19 * 16
+        #expect(AppleRailPaging.tilePitch(contentWidth: content, tileCount: 20, inset: 43, gap: 16) == 192)
+        #expect(AppleRailPaging.tilePitch(contentWidth: 0, tileCount: 20, inset: 43, gap: 16) == nil)
+        #expect(AppleRailPaging.tilePitch(contentWidth: content, tileCount: 0, inset: 43, gap: 16) == nil)
+    }
+
+    @Test func tilePagingAlwaysMovesAtLeastOneTile() {
+        let geometry = AppleRailPaging.Geometry(offset: 0, contentWidth: 2000, visibleWidth: 300)
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: true, pitch: 396, inset: 43) == 1)
+        #expect(AppleRailPaging.tileAnchorIndex(geometry, forward: true, pitch: 0, inset: 43) == 0)
+    }
+
+    @Test func tileAnchorsArePlacedOnePitchApart() {
+        #expect(AppleRailPaging.anchorCount(contentWidth: 3910, step: 192) == 21)
+        #expect(AppleRailPaging.anchorIndex(for: 1344, step: 192) == 7)
+        #expect(AppleRailPaging.anchorCount(contentWidth: 3910, step: 0) == 0)
+    }
+
     @Test func aRailNarrowerThanTheWindowHasNothingToPage() {
         let geometry = AppleRailPaging.Geometry(offset: 0, contentWidth: 600, visibleWidth: 1000)
         #expect(!AppleRailPaging.canPageBack(geometry))

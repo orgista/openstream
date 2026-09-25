@@ -111,7 +111,31 @@ public final class AppleMacCommandCenter {
     /// the picture.
     public internal(set) var isPlayerOnStage = false
 
+    /// The tab the window shows, kept by the root view, so View ▸ Refresh
+    /// knows whose content to reload.
+    public var selectedTab: AppleMacTabTarget?
+
+    /// View ▸ Refresh ⌘R, the Mac path to the toolbar's Refresh button
+    /// (N54: the button had no key equivalent and no menu item). The tab
+    /// that owns the button watches `refreshRevision` and reloads when
+    /// `refreshTarget` is itself.
+    public private(set) var refreshTarget: AppleMacTabTarget?
+    public private(set) var refreshRevision = 0
+
     public init() {}
+
+    /// Refresh is live on the tabs whose toolbar has the button
+    /// (`AppleTabToolbarPolicy`), and not while a player covers the window.
+    public var canRefresh: Bool {
+        guard let selectedTab, !isPlayerOnStage else { return false }
+        return AppleTabToolbarPolicy.items(for: OpenStreamTab(macTarget: selectedTab), isTV: false).contains(.refresh)
+    }
+
+    public func requestRefresh() {
+        guard canRefresh, let selectedTab else { return }
+        refreshTarget = selectedTab
+        refreshRevision &+= 1
+    }
 
     /// Whether the Controls menu is live. The menu reads this directly.
     public var canControlPlayback: Bool { playback != nil }

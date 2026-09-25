@@ -89,6 +89,13 @@ private struct AppleRowTileLift: ViewModifier {
 /// `AppleRailPaging.anchorStep` points: a `ScrollPosition` point scroll on
 /// this nested horizontal rail was ignored on macOS 27 (traced 2026-09-23).
 struct AppleMacRail<Content: View>: View {
+    /// How many equal tiles the rail holds, its inset and its gap, when the
+    /// caller knows them: the ‹ › buttons then page by whole tiles and land
+    /// each page's first tile under the header
+    /// (`AppleRailPaging.tileAnchorIndex`). Nil keeps the 40 pt anchors.
+    var tileCount: Int? = nil
+    var inset: CGFloat = 0
+    var gap: CGFloat = 0
     @ViewBuilder let content: Content
     @State private var geometry = AppleRailPaging.Geometry()
     @State private var isHovered = false
@@ -116,6 +123,13 @@ struct AppleMacRail<Content: View>: View {
             .task {
                 guard AppleRailHoverFixture.isEnabled else { return }
                 try? await Task.sleep(for: .seconds(4))
+                // A rail whose tiles are still arriving has nothing to page
+                // yet (the Top 10 rows fill in after their lookup), and a
+                // page then is a no-op; wait for it, up to 20 s.
+                for _ in 0..<40 where !AppleRailPaging.canPageForward(geometry) {
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                try? await Task.sleep(for: .seconds(1))
                 // Unanimated: a headless window behind the owner's is
                 // occluded, its display link idles, and an animated scroll
                 // never leaves the start (traced 2026-09-23).
@@ -127,14 +141,23 @@ struct AppleMacRail<Content: View>: View {
 
     private var anchors: some View {
         HStack(spacing: 0) {
-            ForEach(0..<AppleRailPaging.anchorCount(contentWidth: geometry.contentWidth), id: \.self) { index in
+            ForEach(0..<AppleRailPaging.anchorCount(contentWidth: geometry.contentWidth, step: anchorStep), id: \.self) { index in
                 Color.clear
-                    .frame(width: AppleRailPaging.anchorStep)
+                    .frame(width: anchorStep)
                     .id(AppleRailPaging.anchorID(index))
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var tilePitch: CGFloat? {
+        tileCount.flatMap { AppleRailPaging.tilePitch(contentWidth: geometry.contentWidth, tileCount: $0, inset: inset, gap: gap) }
+    }
+
+    private var anchorStep: CGFloat {
+        guard let tilePitch, tilePitch > 0 else { return AppleRailPaging.anchorStep }
+        return tilePitch
     }
 
     private var showsButtons: Bool {
@@ -185,8 +208,13 @@ struct AppleMacRail<Content: View>: View {
     }
 
     private func page(forward: Bool, proxy: ScrollViewProxy, animated: Bool = true) {
-        appleTrace("mac rail page \(forward ? "forward" : "back") from \(Int(geometry.offset))")
-        let anchor = AppleRailPaging.anchorID(AppleRailPaging.anchorIndex(for: AppleRailPaging.target(geometry, forward: forward)))
+        let index = if let tilePitch, tilePitch > 0 {
+            AppleRailPaging.tileAnchorIndex(geometry, forward: forward, pitch: tilePitch, inset: inset)
+        } else {
+            AppleRailPaging.anchorIndex(for: AppleRailPaging.target(geometry, forward: forward))
+        }
+        appleTrace("mac rail page \(forward ? "forward" : "back") from \(Int(geometry.offset)) of \(Int(geometry.contentWidth)) pitch=\(Int(tilePitch ?? 0)) → anchor \(index)")
+        let anchor = AppleRailPaging.anchorID(index)
         if reduceMotion || !animated {
             proxy.scrollTo(anchor, anchor: .leading)
         } else {

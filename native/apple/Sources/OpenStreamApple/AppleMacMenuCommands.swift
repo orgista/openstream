@@ -45,6 +45,12 @@ public struct AppleMacMenuCommands: Commands {
                     .disabled(!commands.availableTabs.contains(target) || commands.isPlayerOnStage)
             }
             Divider()
+            // The toolbar's Refresh, by its Mac key (the Apple TV app and
+            // Safari both reload on ⌘R). Disabled on the tabs without one.
+            Button("Refresh") { commands.requestRefresh() }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(!commands.canRefresh)
+            Divider()
             // 16:9 on an ultrawide display leaves bars at the sides; this
             // crops to fill instead. Only while something is playing.
             Toggle("Zoom to Fill", isOn: Binding(

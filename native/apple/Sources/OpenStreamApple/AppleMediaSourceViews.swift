@@ -1918,6 +1918,13 @@ struct AppleLibraryView: View {
             AppleTabToolbar(tab: .library, isRefreshing: library.isLoading,
                             onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
         }
+        #if os(macOS)
+        .onChange(of: AppleMacCommandCenter.shared.refreshRevision) {
+            guard AppleMacCommandCenter.shared.refreshTarget == .library, !library.isLoading else { return }
+            appleTrace("library refresh from the menu")
+            Task { await reload() }
+        }
+        #endif
         .navigationDestination(isPresented: $showsSearch) {
             // Its own router: deep links belong to Discover's Search, and two
             // views answering one route would push it twice.
