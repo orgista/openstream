@@ -49,7 +49,9 @@ public final class AppleTopShelfPublisher {
         enabled: Bool
     ) -> String {
         let recordsKey = records
-            .map { "\($0.id)|\($0.isFavorite)|\($0.progress ?? -1)|\($0.lastVerified.timeIntervalSince1970)" }
+            // The saved backdrop is the tile's art once a title leaves the shelves
+            // (review of 0627624).
+            .map { "\($0.id)|\($0.isFavorite)|\($0.progress ?? -1)|\($0.lastVerified.timeIntervalSince1970)|\($0.backdropURL?.absoluteString ?? "")" }
             .joined(separator: ",")
         let topPicksKey = sections.first(where: { !$0.items.isEmpty })?
             .items.prefix(10).map(\.id).joined(separator: ",") ?? ""
