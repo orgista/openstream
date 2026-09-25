@@ -2196,9 +2196,9 @@ struct AppleCatalogItemDetailView: View {
             #if DEBUG
             ScrollViewReader { reader in
                 detailContent.task(id: episodeList.episodes.count) {
-                    guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodeList.episodes", !episodeList.episodes.isEmpty else { return }
+                    guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "episodes", !episodeList.episodes.isEmpty else { return }
                     try? await Task.sleep(for: .milliseconds(700))
-                    reader.scrollTo("vision-episodeList.episodes", anchor: .top)
+                    reader.scrollTo("vision-episodes", anchor: .top)
                     // `OpenStreamDebugSeasonSwitch YES` then steps through the
                     // first seasons, for a trace of the switch.
                     guard UserDefaults.standard.bool(forKey: "OpenStreamDebugSeasonSwitch") else { return }
@@ -2604,7 +2604,7 @@ struct AppleCatalogItemDetailView: View {
             #if !os(iOS)
             if item.type == "series" {
                 episodeSection
-                    .id("vision-episodeList.episodes")
+                    .id("vision-episodes")
                     .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
             }
             #endif
@@ -2618,7 +2618,7 @@ struct AppleCatalogItemDetailView: View {
         // A rail, outside the column for the same reason as More Like This.
         if item.type == "series" {
             padEpisodesSection
-                .id("vision-episodeList.episodes")
+                .id("vision-episodes")
                 .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
         }
         #endif
@@ -3297,7 +3297,7 @@ struct AppleCatalogItemDetailView: View {
                 .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             if item.type == "series" {
                 tvOSEpisodeShelf
-                    .id("vision-episodeList.episodes")
+                    .id("vision-episodes")
             }
             if !suggestedItems.isEmpty {
                 tvOSMoreLikeThisShelf
@@ -3898,7 +3898,7 @@ struct AppleCatalogItemDetailView: View {
 
     private var seasonDownloadMessage: String {
         let count = seasonDownloads.total > 0
-            ? "\(seasonDownloads.completed) of \(seasonDownloads.total) episodeList.episodes"
+            ? "\(seasonDownloads.completed) of \(seasonDownloads.total) episodes"
             : "the season"
         return "Downloading \(count)."
     }
@@ -6804,7 +6804,7 @@ extension AppleCatalogItemDetailView {
                 .padding(.horizontal, Self.phoneInset)
             if item.type == "series" {
                 phoneEpisodesSection
-                    .id("vision-episodeList.episodes")
+                    .id("vision-episodes")
                     .padding(.top, Self.phoneSectionSpacing - 8)
             }
             if !titlePageTrailerKeys.isEmpty {
@@ -7536,7 +7536,7 @@ extension AppleCatalogItemDetailView {
             VStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
                 if item.type == "series" {
                     macEpisodesSection(layout: layout)
-                        .id("vision-episodeList.episodes")
+                        .id("vision-episodes")
                 }
                 if !titlePageTrailerKeys.isEmpty {
                     macTrailersSection
