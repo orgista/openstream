@@ -248,10 +248,14 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
             probe?.container = self
             // WebKit stops drawing a web view whose window is hidden; a
             // test copy measured while the display sleeps keeps it drawing.
+            // Called through its implementation, never KVC: an unknown key
+            // throws an Objective-C exception that ends the app (N44's test
+            // copies crashed that way, 2026-09-25 02:12-02:22).
+            let occlusion = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
             if UserDefaults.standard.bool(forKey: "OpenStreamMacAssumeVisible"),
-               webView.responds(to: NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")) {
-                // KVC finds the `_set…:` accessor for this key.
-                webView.setValue(false, forKey: "windowOcclusionDetectionEnabled")
+               let method = class_getInstanceMethod(type(of: webView), occlusion) {
+                typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+                unsafeBitCast(method_getImplementation(method), to: Setter.self)(webView, occlusion, false)
             }
             #endif
         }
