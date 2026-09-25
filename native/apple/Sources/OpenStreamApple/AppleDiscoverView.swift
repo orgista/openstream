@@ -1875,7 +1875,15 @@ struct AppleCatalogCard: View {
         }
         .contentShape(Rectangle())
         .foregroundStyle(.primary)
+        #if os(tvOS)
+        // A poster draws no title on Apple TV, and a combined element with
+        // no text of its own left the link without a name (blank label on
+        // every Discover and Library poster, N41 survey). The Top 10 card
+        // names itself the same way.
+        .accessibilityElement(children: .ignore)
+        #else
         .accessibilityElement(children: .combine)
+        #endif
         .accessibilityLabel(item.name)
         .accessibilityValue(item.releaseInfo ?? "")
         .appleHoverAffordance()
@@ -3029,8 +3037,15 @@ struct AppleCatalogItemDetailView: View {
         .ignoresSafeArea()
         .defaultFocus($tvDetailFocus, tvOpeningFocusTarget, priority: .userInitiated)
         .task { await settleTVOpeningFocus() }
-        .onChange(of: tvDetailFocus) { _, focus in
-            guard !tvDetailOpeningSettled else { return }
+        .onChange(of: tvDetailFocus) { old, focus in
+            guard !tvDetailOpeningSettled else {
+                if let correction = AppleTVDetailReturnFocus.correction(
+                    from: old, to: focus, target: tvOpeningFocusTarget
+                ) {
+                    tvDetailFocus = correction
+                }
+                return
+            }
             if AppleTVDetailOpeningFocus.settles(on: focus, target: tvOpeningFocusTarget) {
                 tvDetailOpeningSettled = true
             } else if let correction = AppleTVDetailOpeningFocus.correction(
@@ -3299,7 +3314,8 @@ struct AppleCatalogItemDetailView: View {
                                 episode: episode,
                                 subtitle: episodeMetadata(episode),
                                 isSelected: selectedEpisodeID == episode.id,
-                                isWatched: watched.contains(episode.id)
+                                isWatched: watched.contains(episode.id),
+                                seriesBackdropURL: episodeFallbackStillURL
                             ) {
                                 selectedEpisodeID = episode.id
                                 playRequest = UUID()
@@ -3358,6 +3374,11 @@ struct AppleCatalogItemDetailView: View {
             .accessibilityLabel("Season")
             .accessibilityValue(seasonName(tvOSCurrentSeason))
             .accessibilityIdentifier("detail.season")
+            // The picker is a pill at the leading edge; without a section as
+            // wide as the rail, Up from any episode but the first missed it
+            // and landed on the title row (N41 survey).
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
         } else {
             Text(seasonName(tvOSCurrentSeason))
                 .font(.system(size: AppleTVDetailMetrics.seasonPillFontSize, weight: .semibold))

@@ -75,6 +75,22 @@ enum AppleTVDetailOpeningFocus {
     }
 }
 
+/// Where focus goes when it climbs back onto the title row from below.
+///
+/// Focus is geometric, and the shelves below span the screen while the title
+/// row sits at the leading edge, so Up from a card in the middle landed on
+/// Rate — the last thing anyone climbs up for (N41 survey, both kinds of
+/// title page). The Apple TV app goes back to its primary action; so does
+/// this page. `nil` is focus below the title row; moves along the row are the
+/// user's and are left alone.
+enum AppleTVDetailReturnFocus {
+    static func correction(from old: AppleTVDetailFocus?, to new: AppleTVDetailFocus?,
+                           target: AppleTVDetailFocus) -> AppleTVDetailFocus? {
+        guard old == nil, let new, new != target else { return nil }
+        return target
+    }
+}
+
 /// Apple TV title page geometry from the rework plan (FEEDBACK section C,
 /// task 5): a 1920x1080 backdrop, the overlay anchored bottom-leading at
 /// (80, bottom 60), a 220x66 Play pill, 38 pt glyph actions whose centers are

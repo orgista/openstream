@@ -439,6 +439,12 @@ struct AppleLocalTitleShelf: View {
                     AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
                         .environment(\.appleDiscoverRows, nil)
                 } label: {
+                    #if os(tvOS)
+                    // On Apple TV a linear ProgressView in a card label drew
+                    // as a dot under the poster (N41 survey), so the bar goes
+                    // on the artwork, as on Discover's Continue Watching.
+                    AppleCatalogCard(item: library.catalogItem(for: group), progress: progressFraction(group))
+                    #else
                     VStack(alignment: .leading, spacing: 8) {
                         AppleCatalogCard(item: library.catalogItem(for: group))
                         if showsProgress, let value = library.progress[group.id] {
@@ -458,6 +464,7 @@ struct AppleLocalTitleShelf: View {
                             .tint(.white)
                         }
                     }
+                    #endif
                 }.appleCatalogCardButtonStyle().accessibilityIdentifier("library.title.\(group.parsed.title)")
                 .task(id: group.id) { await library.resolve(group, sourceStore: sourceStore, settings: settings) }
             }
@@ -467,6 +474,13 @@ struct AppleLocalTitleShelf: View {
         // wherever they are drawn.
         .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
     }
+
+    #if os(tvOS)
+    private func progressFraction(_ group: AppleLibrarySeries) -> Double? {
+        guard showsProgress, let value = library.progress[group.id] else { return nil }
+        return AppleWatchProgress.fraction(position: value.position, duration: value.duration)
+    }
+    #endif
 }
 
 struct AppleLocalTitleDestination: View {

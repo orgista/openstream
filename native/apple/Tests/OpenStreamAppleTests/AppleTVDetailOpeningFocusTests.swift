@@ -49,3 +49,33 @@ struct AppleTVDetailOpeningFocusWithoutPlayTests {
         #expect(AppleTVDetailOpeningFocus.correction(for: .myList, hasHadAnyFocus: true, target: .myList) == nil)
     }
 }
+
+/// N41: Up from a shelf lands on the title row wherever the geometry says,
+/// usually Rate; the page sends it to its primary action instead.
+@Suite("Apple TV title page focus coming back up")
+struct AppleTVDetailReturnFocusTests {
+    @Test(arguments: [AppleTVDetailFocus.myList, .rate, .rateChoice(1)])
+    func climbingOntoTheTitleRowGoesToPlay(_ landing: AppleTVDetailFocus) {
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: landing, target: .play) == .play)
+    }
+
+    @Test func withoutPlayItGoesToMyList() {
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: .rate, target: .myList) == .myList)
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: .myList, target: .myList) == nil)
+    }
+
+    @Test func landingOnPlayNeedsNothing() {
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: .play, target: .play) == nil)
+    }
+
+    @Test(arguments: [(AppleTVDetailFocus.play, AppleTVDetailFocus.myList), (.myList, .rate), (.rate, .rateChoice(0)),
+                      (.rateChoice(2), .rate)])
+    func movesAlongTheRowAreLeftAlone(_ old: AppleTVDetailFocus, _ new: AppleTVDetailFocus) {
+        #expect(AppleTVDetailReturnFocus.correction(from: old, to: new, target: .play) == nil)
+    }
+
+    @Test func leavingTheRowIsLeftAlone() {
+        #expect(AppleTVDetailReturnFocus.correction(from: .rate, to: nil, target: .play) == nil)
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: nil, target: .play) == nil)
+    }
+}

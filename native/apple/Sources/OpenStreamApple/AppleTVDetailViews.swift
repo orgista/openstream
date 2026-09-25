@@ -109,18 +109,27 @@ private struct AppleTVDetailFocusRing: ViewModifier {
 
 /// A 16:9 episode card, 400x225, with the title (Body 29) and the episode's
 /// number, date and runtime (Caption 1 25) under it, and a tick on the still
-/// once watched.
+/// once watched. An episode with no still, or one that fails, shows the
+/// show's backdrop rather than a grey box (`AppleEpisodeStillPolicy`, as on
+/// the other platforms).
 struct AppleTVEpisodeCard: View {
     let episode: AppleStremioEpisode
     let subtitle: String
     let isSelected: Bool
     let isWatched: Bool
+    let seriesBackdropURL: URL?
     let action: () -> Void
+
+    @State private var stillFailed = false
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
-                AppleRemoteImage(url: episode.thumbnailURL, placeholderSystemImage: "play.fill")
+                AppleRemoteImage(url: AppleEpisodeStillPolicy.url(still: episode.thumbnailURL, stillFailed: stillFailed,
+                                                                  seriesBackdrop: seriesBackdropURL),
+                                 placeholderSystemImage: "play.fill",
+                                 onFailure: { stillFailed = true })
+                    .onChange(of: episode.thumbnailURL) { stillFailed = false }
                     .frame(
                         width: AppleTVDetailMetrics.episodeCardSize.width,
                         height: AppleTVDetailMetrics.episodeCardSize.height

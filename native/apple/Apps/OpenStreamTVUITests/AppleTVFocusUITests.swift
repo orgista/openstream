@@ -1000,6 +1000,123 @@ final class AppleTVFocusUITests: XCTestCase {
         add(shot)
     }
 
+    // MARK: - Parity survey (N41)
+
+    /// Opt-in walk through Discover, both kinds of title page, Library, Live,
+    /// Search and Settings with the remote, for comparing against the Apple
+    /// TV app. It logs where focus lands after every move (and its frame, for
+    /// card sizes) and attaches a frame per stop. Navigation only: Select is
+    /// pressed on a catalog poster and nothing else, and Play/Pause never.
+    func testParitySurveyWalk() throws {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_PARITY_SURVEY"] == "1" else {
+            throw XCTSkip("Set OPENSTREAM_PARITY_SURVEY=1 to walk the screens for a parity survey.")
+        }
+        func log(_ step: String) {
+            let f = focusedElement
+            guard app.state == .runningForeground, f.exists else {
+                return print("SURVEY \(step): nothing focused (app state \(app.state.rawValue))")
+            }
+            let frame = f.frame
+            print("SURVEY \(step): id='\(f.identifier)' label='\(f.label.prefix(60))' "
+                  + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+        }
+        // Frames also go straight to a folder when one is given, so a run
+        // whose result bundle is lost still leaves its pictures.
+        let folder = ProcessInfo.processInfo.environment["OPENSTREAM_PARITY_SURVEY_DIR"].map(URL.init(fileURLWithPath:))
+        var frameIndex = 0
+        func shoot(_ step: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            if let folder {
+                frameIndex += 1
+                try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent(String(format: "%02d-%@.png", frameIndex, step)))
+            }
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = step
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func press(_ button: XCUIRemote.Button, _ step: String, wait: TimeInterval = 1.4, shot: Bool = true) {
+            remote.press(button)
+            Thread.sleep(forTimeInterval: wait)
+            log(step)
+            if shot { shoot(step) }
+        }
+        func headers(_ step: String) {
+            let found = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'discover.shelf.' OR identifier BEGINSWITH 'library.shelf.'"))
+                .allElementsBoundByIndex.prefix(6)
+            for header in found where header.exists {
+                let frame = header.frame
+                print("SURVEY \(step) header: '\(header.label.prefix(40))' "
+                      + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+            }
+        }
+        func relaunch(_ screen: String, settle: TimeInterval = 14) {
+            app.terminate()
+            app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+            app.launchArguments = ["-OpenStreamVisionScreen", screen, "-OpenStreamTrace", "YES",
+                                   "-openstream.settings.trailer.autoplay.v1", "NO"]
+            app.launch()
+            Thread.sleep(forTimeInterval: settle)
+            log("\(screen)-open")
+            shoot("\(screen)-open")
+        }
+
+        // Discover: the hero, then down through the rows (Top 10 among them).
+        relaunch("discover", settle: 20)
+        for step in 1 ... 8 { press(.down, "discover-down-\(step)"); if step == 2 { headers("discover") } }
+        press(.right, "discover-row-right-1")
+        press(.right, "discover-row-right-2")
+        // Menu from deep in the rows: the Apple TV app scrolls back to the top.
+        press(.menu, "discover-menu-1", wait: 2)
+        press(.menu, "discover-menu-2", wait: 2)
+
+        // A poster opened with Select: where focus lands, and where Menu returns.
+        relaunch("discover", settle: 20)
+        var opened = false
+        for step in 1 ... 10 {
+            press(.down, "open-down-\(step)", shot: false)
+            if focusedElement.exists, focusedElement.identifier.hasPrefix("home.media.") { opened = true; break }
+        }
+        if opened {
+            let poster = focusedElement.identifier
+            press(.right, "open-poster")
+            let target = focusedElement.identifier
+            if target.hasPrefix("home.media.") {
+                press(.select, "open-title-page", wait: 4)
+                press(.menu, "open-back", wait: 2.5)
+                print("SURVEY open-back expected='\(target)' first='\(poster)'")
+            }
+        }
+
+        // The series and movie title pages, top to bottom.
+        for (screen, prefix) in [("detail", "series"), ("detail-movie", "movie")] {
+            relaunch(screen, settle: 24)
+            for step in 1 ... 7 { press(.down, "\(prefix)-down-\(step)") }
+            press(.right, "\(prefix)-right-1")
+            for step in 1 ... 8 { press(.up, "\(prefix)-up-\(step)", shot: step == 8) }
+            press(.menu, "\(prefix)-menu", wait: 2.5)
+        }
+
+        relaunch("library", settle: 16)
+        for step in 1 ... 4 { press(.down, "library-down-\(step)"); if step == 2 { headers("library") } }
+        press(.menu, "library-menu", wait: 2)
+
+        relaunch("live", settle: 16)
+        for step in 1 ... 3 { press(.down, "live-down-\(step)", wait: 0.8) }
+        press(.menu, "live-menu", wait: 2)
+
+        relaunch("discover", settle: 16)
+        for _ in 0 ..< 3 { remote.press(.up); Thread.sleep(forTimeInterval: 1.0) }
+        for _ in 0 ..< 5 where !(focusedElement.exists && focusedElement.label == "Search") { remote.press(.left); Thread.sleep(forTimeInterval: 1.0) }
+        press(.select, "search-open", wait: 3)
+        press(.down, "search-down-1")
+        press(.down, "search-down-2")
+
+        relaunch("settings", settle: 10)
+        for step in 1 ... 4 { press(.down, "settings-down-\(step)", wait: 1.0) }
+    }
+
     // MARK: - Title page fill timing (speed item D2)
 
     /// Opens the title pages listed in `OPENSTREAM_FILL_IDS` (media-index record
