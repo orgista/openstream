@@ -236,7 +236,7 @@ struct AppleHeroCopyRegionTests {
         let region = AppleHeroCopyRegion.wide(layout)
         #expect(region.minX == layout.horizontalPadding)
         #expect(region.width == AppleMacHeroLayout.copyMaxWidth)
-        #expect(region.maxY < layout.height - AppleMacHeroLayout.bottomPadding)
+        #expect(region.maxY < layout.height - layout.copyBottomPadding)
         #expect(region.minY > layout.height / 3)
         let fraction = AppleHeroCopyRegion.trailingFraction(region, in: CGSize(width: 1440, height: layout.height))
         #expect(abs(fraction - (layout.horizontalPadding + 480) / 1440) < 0.0001)
@@ -298,11 +298,12 @@ struct AppleIPadHeroLayoutTests {
         #expect(layout.topOverlap == 74 + AppleMacHeroLayout.stackTopPadding)
     }
 
-    @Test("Before the screen is measured it keeps a sensible height, and the Mac is unchanged")
+    @Test("Before the screen is measured it keeps a sensible height, and the Mac keeps its own rule")
     func unmeasured() {
         #expect(AppleMacHeroLayout(platform: .pad).height == AppleMacHeroLayout.padMinimumHeight)
         #expect(AppleMacHeroLayout().platform == .mac)
-        #expect(AppleMacHeroLayout(contentWidth: 1200, windowHeight: 800).height == 600)
+        // The window less the first row's peek.
+        #expect(AppleMacHeroLayout(contentWidth: 1200, windowHeight: 800).height == 800 - AppleMacHeroLayout.firstRowPeek)
     }
 
     @Test("The page dots sit centred under the copy's bottom inset")

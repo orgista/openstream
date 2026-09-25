@@ -3,10 +3,13 @@ import CoreGraphics
 /// Where the Mac's Discover hero draws, after the Apple TV app on the Mac and
 /// the Figma "MacOS-OpenStream" frame (owner 2026-09-23: "make sure the bigger
 /// apple tv style hero is on the macOS version as well"): art edge to edge
-/// across the content, from the top of the Discover area under the toolbar,
-/// `min(680, 75 % of the width)` tall and never more than 75 % of the window,
-/// so the first row still peeks; the copy bottom-left in a 480 pt column; the
-/// page dots bottom-centre; a round mute button top-right.
+/// across the content, from the top of the window under the toolbar, as tall
+/// as the window less a peek of the first row (owner 2026-09-25, with the
+/// Apple TV app on the Mac beside it: "apple tv handles resizing of hero
+/// better" — ours stopped at 680 pt, 47 % of a 3440 × 1440 window); the copy
+/// bottom-left in a 480 pt column, its wordmark and bottom inset growing
+/// gently with the hero; the page dots bottom-centre; a round mute button
+/// top-right.
 ///
 /// The iPad's Discover hero is the same hero (N20, after the Apple TV app on
 /// the iPad): edge to edge from the top of the screen, under the status bar,
@@ -37,11 +40,26 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
         self.platform = platform
     }
 
-    public static let maximumHeight: CGFloat = 680
+    /// What shows of the first row under the Mac hero: its header and the
+    /// top of its cards. The Apple TV app on the Mac, 1928 × 1107 pt window:
+    /// the hero is 930 pt, leaving 177 pt — the header and ~120 pt of cards.
+    public static let firstRowPeek: CGFloat = 176
+    /// A tall, narrow window still gets a landscape hero: never taller than
+    /// 75 % of the width, so the aspect-fill crop stays wider than tall.
     public static let widthFraction: CGFloat = 0.75
-    public static let windowFraction: CGFloat = 0.75
     /// Before the window has been measured, and never less than this.
     public static let minimumHeight: CGFloat = 360
+    /// The hero height the copy is drawn at 1× (a 1440 × 900 window's); the
+    /// copy grows at half the hero's rate from it, between these bounds. The
+    /// upper one keeps the 400 pt wordmark inside the 480 pt column.
+    public static let copyReferenceHeight: CGFloat = 724
+    public static let minimumCopyScale: CGFloat = 0.85
+    public static let maximumCopyScale: CGFloat = 1.2
+    /// The copy's bottom inset, as a fraction of the Mac hero's height:
+    /// 40 pt at the reference height, between 32 and 72 pt.
+    public static let bottomPaddingFraction: CGFloat = 0.055
+    public static let minimumBottomPadding: CGFloat = 32
+    public static let maximumBottomPadding: CGFloat = 72
 
     public static let padMaximumHeight: CGFloat = 900
     public static let padWidthFraction: CGFloat = 0.9
@@ -75,22 +93,50 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
     /// live resize never reloads it.
     public static let stillPixelDimension = 2_560
     /// The wordmark's slot. Fixed rather than scaled with the window for the
-    /// same reason: the trimmed logo decodes at its slot's size.
+    /// same reason: the trimmed logo decodes at its slot's size. The hero
+    /// scales the drawn mark instead (`wordmarkDrawnSize`).
     public static let wordmarkSize = CGSize(width: 400, height: 130)
     /// Discover's rows start 16 pt below the toolbar (`padding(.vertical)`);
     /// the hero is pulled up past that too.
     public static let stackTopPadding: CGFloat = 16
 
-    /// The hero's full height, from the top of the Discover area.
+    /// The hero's full height, from the top of the window. On the Mac the
+    /// window less `firstRowPeek`, so it grows and shrinks with the window as
+    /// the Apple TV app's does; on the iPad `min(900, 90 % of the width,
+    /// 66 % of the screen)`.
     public var height: CGFloat {
-        let (maximum, widthFraction, windowFraction, minimum) = switch platform {
-        case .mac: (Self.maximumHeight, Self.widthFraction, Self.windowFraction, Self.minimumHeight)
-        case .pad: (Self.padMaximumHeight, Self.padWidthFraction, Self.padScreenFraction, Self.padMinimumHeight)
+        switch platform {
+        case .mac:
+            guard contentWidth > 0 else { return Self.minimumHeight }
+            var target = contentWidth * Self.widthFraction
+            if windowHeight > 0 { target = min(target, windowHeight - Self.firstRowPeek) }
+            return max(target, Self.minimumHeight)
+        case .pad:
+            guard contentWidth > 0 else { return Self.padMinimumHeight }
+            var target = min(Self.padMaximumHeight, contentWidth * Self.padWidthFraction)
+            if windowHeight > 0 { target = min(target, windowHeight * Self.padScreenFraction) }
+            return max(target, Self.padMinimumHeight)
         }
-        guard contentWidth > 0 else { return minimum }
-        var target = min(maximum, contentWidth * widthFraction)
-        if windowHeight > 0 { target = min(target, windowHeight * windowFraction) }
-        return max(target, minimum)
+    }
+
+    /// How much the Mac copy's wordmark and fallback name are scaled with the
+    /// hero: gently, and within bounds. 1 on the iPad.
+    public var copyScale: CGFloat {
+        guard platform == .mac else { return 1 }
+        let scale = 1 + (height / Self.copyReferenceHeight - 1) / 2
+        return min(max(scale, Self.minimumCopyScale), Self.maximumCopyScale)
+    }
+
+    /// The copy's bottom inset: in proportion to the Mac hero, 40 pt on the iPad.
+    public var copyBottomPadding: CGFloat {
+        guard platform == .mac else { return Self.bottomPadding }
+        let padding = (height * Self.bottomPaddingFraction).rounded()
+        return min(max(padding, Self.minimumBottomPadding), Self.maximumBottomPadding)
+    }
+
+    /// The wordmark's drawn size: its fixed decode slot, scaled.
+    public var wordmarkDrawnSize: CGSize {
+        CGSize(width: Self.wordmarkSize.width * copyScale, height: Self.wordmarkSize.height * copyScale)
     }
 
     public var horizontalPadding: CGFloat {
@@ -102,6 +148,11 @@ public struct AppleMacHeroLayout: Equatable, Sendable {
     /// width, between 36 and 72 pt.
     public var titleFontSize: CGFloat {
         min(max(contentWidth * 0.06, 36), 72)
+    }
+
+    /// The hero's fallback name: `titleFontSize` scaled with the copy.
+    public var heroTitleFontSize: CGFloat {
+        (titleFontSize * copyScale).rounded()
     }
 
     public var showsDescription: Bool { height >= Self.descriptionMinimumHeight }

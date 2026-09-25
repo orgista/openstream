@@ -148,11 +148,13 @@ public struct AppleHeroScrim: Equatable, Sendable {
 public enum AppleHeroCopyRegion {
     /// The Mac's and the iPad's column, bottom-left: the text block above the
     /// buttons (a 130 pt wordmark, the kind line and up to three lines of
-    /// synopsis — about 220 pt — over ~64 pt of buttons).
+    /// synopsis — about 220 pt — over ~64 pt of buttons). The wordmark and
+    /// the bottom inset grow with a tall Mac hero, and the patch with them.
     public static func wide(_ layout: AppleMacHeroLayout) -> CGRect {
         let width = max(min(AppleMacHeroLayout.copyMaxWidth, layout.contentWidth - 2 * layout.horizontalPadding), 1)
-        let bottom = layout.height - AppleMacHeroLayout.bottomPadding - 64
-        return CGRect(x: layout.horizontalPadding, y: bottom - 220, width: width, height: 220)
+        let bottom = layout.height - layout.copyBottomPadding - 64
+        let height = 220 + layout.wordmarkDrawnSize.height - AppleMacHeroLayout.wordmarkSize.height
+        return CGRect(x: layout.horizontalPadding, y: bottom - height, width: width, height: height)
     }
 
     /// The iPhone's centred wordmark and kind line, above the buttons.

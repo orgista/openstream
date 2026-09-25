@@ -5,28 +5,68 @@ import Testing
 
 @Suite("Mac Discover hero")
 struct AppleMacHeroLayoutTests {
-    @Test("Height is min(680, 75 % of the width), capped at 75 % of the window",
+    @Test("Height is the window less a peek of the first row, as the Apple TV app's",
           arguments: [
-              (CGFloat(1200), CGFloat(800), CGFloat(600)),   // the window caps it: 75 % of 800
-              (CGFloat(1200), CGFloat(1200), CGFloat(680)),  // 75 % of 1200 is 900; the ceiling wins
-              (CGFloat(1600), CGFloat(1000), CGFloat(680)),
-              (CGFloat(800), CGFloat(1400), CGFloat(600)),   // 75 % of the width
-              (CGFloat(700), CGFloat(420), CGFloat(360)),    // never shorter than the floor
+              (CGFloat(1440), CGFloat(900), CGFloat(724)),    // a 1440 × 900 window
+              (CGFloat(1928), CGFloat(1107), CGFloat(931)),   // the Apple TV app's 930 in this window
+              (CGFloat(3440), CGFloat(1440), CGFloat(1264)),  // the owner's display, maximised
+              (CGFloat(3440), CGFloat(1312), CGFloat(1136)),  // full-screen sized
+              (CGFloat(900), CGFloat(600), CGFloat(424)),     // a small window
+              (CGFloat(700), CGFloat(500), CGFloat(360)),     // never shorter than the floor
+              (CGFloat(800), CGFloat(1400), CGFloat(600)),    // tall and narrow: 75 % of the width
           ])
-    func heightFollowsWidthAndWindow(width: CGFloat, window: CGFloat, expected: CGFloat) {
+    func heightFollowsTheWindow(width: CGFloat, window: CGFloat, expected: CGFloat) {
         let layout = AppleMacHeroLayout(contentWidth: width, windowHeight: window, topInset: 52)
         #expect(layout.height == expected)
     }
 
-    @Test("The first row peeks: the hero never fills more than 75 % of the window")
+    @Test("The first row's header and the top of its cards always show, and the hero grows with the window")
     func firstRowPeeks() {
-        for width in stride(from: CGFloat(900), through: 2400, by: 150) {
-            for window in stride(from: CGFloat(600), through: 1400, by: 100) {
+        for width in stride(from: CGFloat(900), through: 3440, by: 170) {
+            var previous: CGFloat = 0
+            for window in stride(from: CGFloat(600), through: 1440, by: 60) {
                 let layout = AppleMacHeroLayout(contentWidth: width, windowHeight: window)
-                #expect(layout.height <= window * 0.75 + 0.5)
-                #expect(layout.height <= AppleMacHeroLayout.maximumHeight)
+                #expect(window - layout.height >= AppleMacHeroLayout.firstRowPeek)
+                #expect(layout.height <= width * AppleMacHeroLayout.widthFraction)
+                #expect(layout.height >= previous)
+                previous = layout.height
             }
         }
+    }
+
+    @Test("A resize changes the height by what the window changed, with no step")
+    func resizeIsContinuous() {
+        let width: CGFloat = 3440
+        for window in stride(from: CGFloat(900), to: 1440, by: 1) {
+            let a = AppleMacHeroLayout(contentWidth: width, windowHeight: window).height
+            let b = AppleMacHeroLayout(contentWidth: width, windowHeight: window + 1).height
+            #expect(b - a == 1)
+        }
+    }
+
+    @Test("The copy grows gently with the hero, within its bounds",
+          arguments: [
+              (CGFloat(1440), CGFloat(900), CGFloat(1), CGFloat(40)),
+              (CGFloat(1928), CGFloat(1107), CGFloat(1.143), CGFloat(51)),
+              (CGFloat(3440), CGFloat(1440), CGFloat(1.2), CGFloat(70)),
+              (CGFloat(3440), CGFloat(1312), CGFloat(1.2), CGFloat(62)),
+              (CGFloat(900), CGFloat(600), CGFloat(0.85), CGFloat(32)),
+          ])
+    func copyScales(width: CGFloat, window: CGFloat, scale: CGFloat, bottom: CGFloat) {
+        let layout = AppleMacHeroLayout(contentWidth: width, windowHeight: window)
+        #expect(abs(layout.copyScale - scale) < 0.001)
+        #expect(layout.copyBottomPadding == bottom)
+        // The wordmark stays inside the 480 pt copy column.
+        #expect(layout.wordmarkDrawnSize.width <= AppleMacHeroLayout.copyMaxWidth)
+    }
+
+    @Test("The iPad's hero and copy are unchanged")
+    func padUnchanged() {
+        let pad = AppleMacHeroLayout(contentWidth: 1180, windowHeight: 820, platform: .pad)
+        #expect(abs(pad.height - 541.2) < 0.01)
+        #expect(pad.copyScale == 1)
+        #expect(pad.copyBottomPadding == AppleMacHeroLayout.bottomPadding)
+        #expect(abs(AppleMacHeroLayout(contentWidth: 1366, windowHeight: 1024, platform: .pad).height - 675.84) < 0.01)
     }
 
     @Test("Before the window is measured the hero keeps a sensible height")
@@ -47,12 +87,15 @@ struct AppleMacHeroLayoutTests {
         #expect(AppleMacHeroLayout(contentWidth: 500).titleFontSize == 36)
         #expect(AppleMacHeroLayout(contentWidth: 1000).titleFontSize == 60)
         #expect(AppleMacHeroLayout(contentWidth: 1600).titleFontSize == 72)
+        // The hero's scales with the copy.
+        #expect(AppleMacHeroLayout(contentWidth: 1440, windowHeight: 900).heroTitleFontSize == 72)
+        #expect(AppleMacHeroLayout(contentWidth: 3440, windowHeight: 1440).heroTitleFontSize == 86)
     }
 
     @Test("The synopsis shows only when the hero has room for it")
     func synopsisNeedsRoom() {
         #expect(AppleMacHeroLayout(contentWidth: 1200, windowHeight: 800).showsDescription)
-        #expect(!AppleMacHeroLayout(contentWidth: 1200, windowHeight: 560).showsDescription)
+        #expect(!AppleMacHeroLayout(contentWidth: 1200, windowHeight: 600).showsDescription)
     }
 
     @Test("The art is pulled up under the toolbar and past the stack's top padding")

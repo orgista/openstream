@@ -20,7 +20,9 @@ import WebKit
 /// 0.7 s after it, all at the hero's size.
 /// `-OpenStreamHeroTrailerProbeStill <seconds>` also writes `still.png`.
 /// `-OpenStreamHeroTrailerProbeResize w,h` resizes the window 1.5 s after
-/// the fade, so a resize while the trailer plays is logged.
+/// the fade, so a resize while the trailer plays is logged;
+/// `-OpenStreamHeroTrailerProbeResizeSteps n` gets there in `n` steps a
+/// frame apart, as a drag of the window's corner does (N55).
 @MainActor
 final class AppleMacHeroTrailerProbe {
     weak var container: AppleMacYouTubeHeroPreview.PlayerContainer?
@@ -92,11 +94,27 @@ final class AppleMacHeroTrailerProbe {
             }
         }
         if size.count == 2 {
+            let steps = max(UserDefaults.standard.integer(forKey: "OpenStreamHeroTrailerProbeResizeSteps"), 1)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let window = self?.container?.window else { return }
-                self?.lines.append("RESIZE to \(Int(size[0]))x\(Int(size[1])) at \(self?.milliseconds(since: self?.fadeAt) ?? 0)ms after fade")
-                window.setContentSize(NSSize(width: size[0], height: size[1]))
+                guard let window = self?.container?.window, let content = window.contentView else { return }
+                self?.lines.append("RESIZE to \(Int(size[0]))x\(Int(size[1])) in \(steps) steps at \(self?.milliseconds(since: self?.fadeAt) ?? 0)ms after fade")
+                self?.resize(window, from: content.bounds.size, to: CGSize(width: size[0], height: size[1]),
+                             step: 1, of: steps)
             }
+        }
+    }
+
+    /// One step of a stepped resize, then the next a frame later, so each
+    /// step is laid out and drawn (and sampled) before the next.
+    private func resize(_ window: NSWindow, from: CGSize, to: CGSize, step: Int, of steps: Int) {
+        let t = Double(step) / Double(steps)
+        window.setContentSize(NSSize(width: (from.width + (to.width - from.width) * t).rounded(),
+                                     height: (from.height + (to.height - from.height) * t).rounded()))
+        guard step < steps else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.sample()
+            self.resize(window, from: from, to: to, step: step + 1, of: steps)
         }
     }
 

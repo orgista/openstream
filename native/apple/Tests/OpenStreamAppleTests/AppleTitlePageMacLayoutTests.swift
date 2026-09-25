@@ -19,9 +19,10 @@ struct AppleTitlePageMacLayoutTests {
     }
 
     @Test func heroSizesAtCommonWindows() {
-        // min(680, 75 % of the width, 75 % of the window), never under 360.
-        #expect(AppleTitlePageMacLayout(contentWidth: 1440, windowHeight: 900).heroHeight == 675)
-        #expect(AppleTitlePageMacLayout(contentWidth: 1700, windowHeight: 1000).heroHeight == 680)
+        // The window less the first row's peek, at most 75 % of the width,
+        // never under 360.
+        #expect(AppleTitlePageMacLayout(contentWidth: 1440, windowHeight: 900).heroHeight == 724)
+        #expect(AppleTitlePageMacLayout(contentWidth: 1700, windowHeight: 1000).heroHeight == 824)
         #expect(AppleTitlePageMacLayout(contentWidth: 700, windowHeight: 1400).heroHeight == 525)
         #expect(AppleTitlePageMacLayout(contentWidth: 800, windowHeight: 400).heroHeight == 360)
         #expect(AppleTitlePageMacLayout.heroBottomPadding == AppleMacHeroLayout.bottomPadding)

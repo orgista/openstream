@@ -57,7 +57,7 @@ struct AppleHomeMacHero<Actions: View>: View {
                 .frame(maxWidth: AppleMacHeroLayout.copyMaxWidth, alignment: .leading)
                 .padding(.leading, layout.horizontalPadding)
                 .padding(.trailing, layout.horizontalPadding)
-                .padding(.bottom, AppleMacHeroLayout.bottomPadding)
+                .padding(.bottom, layout.copyBottomPadding)
         }
         .frame(maxWidth: .infinity)
         .frame(height: layout.height)
@@ -106,13 +106,17 @@ struct AppleHomeMacHero<Actions: View>: View {
         AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .leading) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading, onLoadResult: onLoadResult)
                 .frame(width: AppleMacHeroLayout.wordmarkSize.width, height: AppleMacHeroLayout.wordmarkSize.height, alignment: .bottomLeading)
+                // Drawn larger in a taller hero, but decoded at its fixed
+                // slot, so a live resize never decodes the mark again.
+                .scaleEffect(layout.copyScale, anchor: .bottomLeading)
+                .frame(width: layout.wordmarkDrawnSize.width, height: layout.wordmarkDrawnSize.height, alignment: .bottomLeading)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(item.name)
                 .accessibilityAddTraits(.isHeader)
         } name: {
             Text(item.name)
-                .font(.system(size: layout.titleFontSize, weight: .black))
-                .tracking(-0.02 * layout.titleFontSize)
+                .font(.system(size: layout.heroTitleFontSize, weight: .black))
+                .tracking(-0.02 * layout.heroTitleFontSize)
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)
                 .foregroundStyle(.white)
