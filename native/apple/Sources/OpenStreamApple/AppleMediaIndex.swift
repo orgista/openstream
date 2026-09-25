@@ -55,6 +55,11 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
     public var year: Int?
     public var summary: String?
     public var artworkURL: URL?
+    /// The title's 16:9 backdrop, saved with the record so a landscape card —
+    /// Continue Watching, the Top Shelf — still has a still to draw once no
+    /// loaded shelf lists the title (N52). Records written before this field
+    /// decode it as nil.
+    public var backdropURL: URL?
     public var availability: [AppleMediaAvailability]
     public var isFavorite: Bool
     public var progress: Double?
@@ -69,6 +74,7 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
         year: Int? = nil,
         summary: String? = nil,
         artworkURL: URL? = nil,
+        backdropURL: URL? = nil,
         availability: [AppleMediaAvailability],
         isFavorite: Bool = false,
         progress: Double? = nil,
@@ -86,6 +92,7 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
         self.year = year.flatMap { (1_880 ... 2_200).contains($0) ? $0 : nil }
         self.summary = summary.map { Self.clean($0, limit: 4_000) }.flatMap { $0.isEmpty ? nil : $0 }
         self.artworkURL = Self.safeArtworkURL(artworkURL)
+        self.backdropURL = Self.safeArtworkURL(backdropURL)
         self.availability = Self.deduplicate(availability)
         self.isFavorite = isFavorite
         self.progress = progress.flatMap { $0.isFinite && (0 ... 1).contains($0) ? $0 : nil }
@@ -95,6 +102,7 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
 
     fileprivate static func merged(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> AppleMediaRecord {
         var result = rhs
+        result.backdropURL = rhs.backdropURL ?? lhs.backdropURL
         result.availability = deduplicate(lhs.availability + rhs.availability)
         result.aliases = Array(Set(lhs.aliases + rhs.aliases)).sorted()
         result.isFavorite = lhs.isFavorite || rhs.isFavorite
@@ -226,6 +234,7 @@ public actor AppleMediaIndexRepository {
                 refreshed.isFavorite = old.isFavorite || refreshed.isFavorite
                 refreshed.progress = old.progress ?? refreshed.progress
                 refreshed.isPrivate = old.isPrivate || refreshed.isPrivate
+                refreshed.backdropURL = refreshed.backdropURL ?? old.backdropURL
             }
             if let existing = next[record.id] {
                 next[record.id] = AppleMediaRecord.merged(existing, refreshed)
@@ -468,6 +477,7 @@ public enum AppleMediaIngestion {
             year: item.releaseInfo.flatMap { Int($0.prefix(4)) },
             summary: item.summary,
             artworkURL: item.posterURL,
+            backdropURL: item.backgroundURL,
             availability: [.init(
                 instanceID: instanceID,
                 capability: .resolvable,

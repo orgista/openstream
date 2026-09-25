@@ -239,9 +239,18 @@ public actor AppleTopShelfSnapshotWriter {
         self.containerProvider = containerProvider
     }
 
+    /// - Parameters:
+    ///   - sources: When given, Continue Watching lists only what Discover's
+    ///     row lists (`AppleContinueWatchingResolver`): a catalog title nothing
+    ///     can open is left out. Nil treats every record as openable.
+    ///   - watchedAt: When each record was last watched, by record id —
+    ///     Continue Watching is most recent first, as on Discover. A record
+    ///     missing here falls back to its `lastVerified`.
     public func write(
         records: [AppleMediaRecord],
         sections: [AppleCatalogSection] = [],
+        sources: [AppleSource]? = nil,
+        watchedAt: [String: Date] = [:],
         enabled: Bool
     ) throws {
         guard let root = containerProvider() else { return }
@@ -253,17 +262,18 @@ public actor AppleTopShelfSnapshotWriter {
         }
 
         let eligible = records.filter { !$0.availability.isEmpty && !$0.isPrivate }
-        let continued = eligible.filter { ($0.progress ?? 0) > 0 && ($0.progress ?? 1) < 0.95 }
-            .sorted { ($0.progress ?? 0) > ($1.progress ?? 0) }
+        let continued = AppleContinueWatchingResolver.inProgress(eligible) { watchedAt[$0.id] ?? $0.lastVerified }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
-        let shownContinued = Array(continued.prefix(12))
-        let backdrops = Self.backdrops(for: Set(shownContinued.map(\.id)), in: sections)
+        let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)
+            .prefix(AppleContinueWatchingResolver.maximumCount))
+        let backdrops = Self.backdrops(for: Set(shownContinued.map(\.record.id)), in: sections)
         let snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
-            continueWatching: shownContinued.map {
-                Self.item($0, progress: $0.progress, landscapeArtworkURL: backdrops[$0.id])
+            continueWatching: shownContinued.map { entry in
+                Self.item(entry.record, progress: entry.record.progress,
+                          landscapeArtworkURL: backdrops[entry.record.id] ?? Self.landscapeURL(for: entry))
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
@@ -276,6 +286,31 @@ public actor AppleTopShelfSnapshotWriter {
         try data.write(to: url, options: .atomic)
         #endif
         notify()
+    }
+
+    /// The in-progress records Continue Watching can open, resolved as on
+    /// Discover; hidden ones are logged once. Without sources, every record.
+    private static func openable(
+        _ records: [AppleMediaRecord],
+        sections: [AppleCatalogSection],
+        sources: [AppleSource]?
+    ) -> [AppleContinueWatchingResolver.Entry] {
+        guard let sources else {
+            return records.map { .init(record: $0, resolution: .notCatalog) }
+        }
+        let lookup = AppleCatalogSearchLookup(sections: sections, sources: sources)
+        let entries = AppleContinueWatchingResolver.entries(records, in: [lookup])
+        AppleContinueWatchingResolver.logHidden(entries)
+        return entries.filter(\.resolution.isAvailable)
+    }
+
+    /// A record's landscape art when no shelf carries it under its own id:
+    /// the listed item a merged source names, else the backdrop saved with
+    /// the record. Never a rebuilt item's image-service fallback — its URL
+    /// carries the IMDb id, which the snapshot deliberately never contains.
+    private static func landscapeURL(for entry: AppleContinueWatchingResolver.Entry) -> URL? {
+        if case .listed(let match) = entry.resolution, let url = landscapeURL(for: match.item) { return url }
+        return AppleSystemArtworkPolicy.publicURL(entry.record.backdropURL)
     }
 
     /// The first non-empty catalog shelf, e.g. Cinemeta Popular for a fresh

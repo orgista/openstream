@@ -106,6 +106,11 @@ struct AppleCatalogSearchLookup: Sendable {
     /// section holds their item, and the row could not open (N49 #7). The
     /// item reference is hashed, but a record with an IMDb id names the
     /// title outright, which is all the title page needs to load it.
+    ///
+    /// The record's saved art comes with it: the backdrop it was ingested
+    /// with, else the image service's backdrop for the IMDb id — so a
+    /// landscape card such as Continue Watching draws a still, not a poster
+    /// cropped to 16:9 — and its poster behind that.
     func rebuiltMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
         guard record.kind == .movie || record.kind == .series,
               let mediaID = record.canonicalID,
@@ -120,6 +125,8 @@ struct AppleCatalogSearchLookup: Sendable {
             type: record.kind == .series ? "series" : "movie",
             name: record.title,
             posterURL: record.artworkURL,
+            backgroundURL: record.backdropURL
+                ?? AppleCatalogArtworkPolicy.imageServiceURL(kind: "background", mediaID: mediaID),
             summary: record.summary,
             releaseInfo: record.year.map(String.init),
             year: record.year
@@ -135,6 +142,14 @@ struct AppleCatalogSearchLookup: Sendable {
     ) -> AppleCatalogSearchMatch? {
         lookups.lazy.compactMap { $0.match(for: record) }.first
             ?? lookups.lazy.compactMap { $0.rebuiltMatch(for: record) }.first
+    }
+
+    /// False for the empty lookup a screen holds before its first build.
+    var hasSources: Bool { !sourceNamesByID.isEmpty }
+
+    /// Whether any add-on the record came from is an enabled catalog source.
+    func hasActiveCatalogSource(for record: AppleMediaRecord) -> Bool {
+        record.availability.contains { activeCatalogSourcesByID[$0.instanceID] != nil }
     }
 
     /// Whether a row that resolves to no title page should still be listed.

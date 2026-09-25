@@ -27,14 +27,18 @@ enum AppleCatalogArtworkPolicy {
         // guessed from the rail or an add-on's private identifier.
         if AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) {
             let kinds = landscape ? ["background", "poster"] : ["poster", "background"]
-            values += kinds.compactMap {
-                URL(string: "https://images.metahub.space/\($0)/medium/\(item.mediaID)/img")
-            }
+            values += kinds.compactMap { imageServiceURL(kind: $0, mediaID: item.mediaID) }
         }
         values += (landscape ? [fallback?.backgroundURL, fallback?.posterURL]
                             : [fallback?.posterURL, fallback?.backgroundURL]).compactMap { $0 }
         var seen = Set<URL>()
         return values.filter { seen.insert($0).inserted }
+    }
+
+    /// Cinemeta's image-service art for an IMDb id: "poster" or "background".
+    static func imageServiceURL(kind: String, mediaID: String) -> URL? {
+        guard AppleStremioMetadataClient.isIMDBIdentifier(mediaID) else { return nil }
+        return URL(string: "https://images.metahub.space/\(kind)/medium/\(mediaID)/img")
     }
 
     /// How long a card that has run out of art waits before trying its

@@ -514,7 +514,8 @@ public struct OpenStreamRootView: View {
             )
         }
         .modifier(AppleSystemSurfacePublishing(
-            mediaIndex: mediaIndex, catalogStore: catalogStore, settingsStore: settingsStore))
+            mediaIndex: mediaIndex, catalogStore: catalogStore, sourceStore: sourceStore,
+            settingsStore: settingsStore))
     }
 
     private var arrConfigurationIdentity: String {
@@ -857,6 +858,7 @@ public struct OpenStreamThreeBarMark: View {
 private struct AppleSystemSurfacePublishing: ViewModifier {
     let mediaIndex: AppleMediaIndexStore
     let catalogStore: AppleCatalogStore
+    let sourceStore: AppleSourceStore
     let settingsStore: AppleSettingsStore
 
     func body(content: Content) -> some View {
@@ -871,6 +873,9 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
             }
             .onChange(of: catalogStore.sections) { _, sections in
                 Task { await publish(records: mediaIndex.records, sections: sections) }
+            }
+            .onChange(of: sourceStore.sources) {
+                Task { await publish(records: mediaIndex.records, sections: catalogStore.sections) }
             }
             .onChange(of: settingsStore.topShelfEnabled) { _, enabled in
                 Task {
@@ -898,6 +903,7 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
         await AppleTopShelfPublisher.shared.publish(
             records: records,
             sections: sections,
+            sources: sourceStore.sources,
             enabled: enabled ?? settingsStore.topShelfEnabled
         )
     }

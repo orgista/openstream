@@ -531,21 +531,24 @@ struct AppleDiscoverView: View {
     /// It was sorted by how far through each title was, which put whatever was
     /// closest to finishing at the front — and the billboard follows this
     /// order, so the home screen led with the wrong title too.
+    ///
+    /// A title no loaded shelf lists any more still shows: it resolves as
+    /// Search does, through its merged sources or its IMDb id
+    /// (`AppleContinueWatchingResolver`, N52). Only one nothing can open is
+    /// left out, and that is logged once — not before the lookup's first
+    /// off-main build lands, when it knows no sources and everything fails.
     private var continueWatching: [IndexedCatalogItem] {
         let store = ApplePlaybackStore()
-        let unfinished = mediaIndex.records
-            .filter { ($0.progress ?? 0) > 0 && ($0.progress ?? 1) < ApplePlaybackProgress.completionFraction }
-        var watchedAt: [String: Date] = [:]
-        for record in unfinished {
-            watchedAt[record.id] = store.progress(for: record.id)?.updatedAt ?? record.lastVerified
+        let ordered = AppleContinueWatchingResolver.inProgress(mediaIndex.records) {
+            store.progress(for: $0.id)?.updatedAt ?? $0.lastVerified
         }
-        return unfinished
-            .sorted { (watchedAt[$0.id] ?? .distantPast) > (watchedAt[$1.id] ?? .distantPast) }
-            .compactMap { record in
-                guard let match = catalogLookup.match(for: record.id) else { return nil }
-                return IndexedCatalogItem(record: record, item: match.item, source: match.source)
+        let entries = AppleContinueWatchingResolver.entries(ordered, in: [catalogLookup])
+        if catalogLookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
+        return entries
+            .compactMap { entry in
+                entry.resolution.match.map { IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source) }
             }
-            .prefix(12)
+            .prefix(AppleContinueWatchingResolver.maximumCount)
             .map { $0 }
     }
 

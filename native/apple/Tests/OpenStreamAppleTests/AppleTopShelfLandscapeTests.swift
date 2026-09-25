@@ -87,8 +87,14 @@ struct AppleTopShelfLandscapeTests {
         records[1].progress = 0.4
         records.append(unmatched)
 
+        // Most recently watched first (N52), so the order is stated outright.
+        let now = Date.now
+        let watchedAt = Dictionary(uniqueKeysWithValues: records.enumerated().map {
+            ($1.id, now.addingTimeInterval(-Double($0) * 60))
+        })
+
         let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
-        try await writer.write(records: records, sections: sections, enabled: true)
+        try await writer.write(records: records, sections: sections, watchedAt: watchedAt, enabled: true)
         let snapshot = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
 
         #expect(snapshot.continueWatching.map(\.title) == ["Wide", "Private Backdrop", "Unlisted"])
