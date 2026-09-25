@@ -31,9 +31,6 @@ public final class AppleTopShelfPublisher {
         enabled: Bool,
         playbackStore: ApplePlaybackStore = ApplePlaybackStore()
     ) async {
-        let digest = Self.digest(records: records, sections: sections, sources: sources, enabled: enabled)
-        guard digest != lastDigest else { return }
-        lastDigest = digest
         var watchedAt: [String: Date] = [:]
         var savedProgress: [String: ApplePlaybackProgress] = [:]
         for record in records where (record.progress ?? 0) > 0 {
@@ -41,6 +38,10 @@ public final class AppleTopShelfPublisher {
             watchedAt[record.id] = saved.updatedAt
             savedProgress[record.id] = saved
         }
+        let digest = Self.digest(records: records, sections: sections, sources: sources,
+                                 savedProgress: savedProgress, enabled: enabled)
+        guard digest != lastDigest else { return }
+        lastDigest = digest
         try? await writer.write(records: records, sections: sections, sources: sources,
                                 watchedAt: watchedAt, savedProgress: savedProgress, enabled: enabled)
     }
@@ -49,6 +50,7 @@ public final class AppleTopShelfPublisher {
         records: [AppleMediaRecord],
         sections: [AppleCatalogSection],
         sources: [AppleSource],
+        savedProgress: [String: ApplePlaybackProgress] = [:],
         enabled: Bool
     ) -> String {
         let recordsKey = records
@@ -63,8 +65,13 @@ public final class AppleTopShelfPublisher {
         let shelvesKey = sections.map { "\($0.id)#\($0.items.count)" }.joined(separator: ",")
         // Enabling or removing an add-on changes what Continue Watching can open.
         let sourcesKey = sources.map { "\($0.id.uuidString)#\($0.isEnabled)#\($0.kind)" }.joined(separator: ",")
+        // The bars follow the playback store, which moves between index syncs
+        // (review of 2b1f930).
+        let progressKey = savedProgress.sorted { $0.key < $1.key }
+            .map { "\($0.key)|\($0.value.position)|\($0.value.duration)|\($0.value.partID ?? "")" }
+            .joined(separator: ",")
         return ApplePlaybackIdentity.digest(for: [
-            enabled ? "1" : "0", recordsKey, topPicksKey, shelvesKey, sourcesKey,
+            enabled ? "1" : "0", recordsKey, topPicksKey, shelvesKey, sourcesKey, progressKey,
         ].joined(separator: "\u{1f}"))
     }
 }
