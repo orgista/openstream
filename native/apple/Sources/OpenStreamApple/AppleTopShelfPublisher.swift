@@ -41,8 +41,11 @@ public final class AppleTopShelfPublisher {
             .joined(separator: ",")
         let topPicksKey = sections.first(where: { !$0.items.isEmpty })?
             .items.prefix(10).map(\.id).joined(separator: ",") ?? ""
+        // Continue Watching takes its backdrops from any shelf, so a catalog
+        // arriving after the records has to publish again.
+        let shelvesKey = sections.map { "\($0.id)#\($0.items.count)" }.joined(separator: ",")
         return ApplePlaybackIdentity.digest(for: [
-            enabled ? "1" : "0", recordsKey, topPicksKey,
+            enabled ? "1" : "0", recordsKey, topPicksKey, shelvesKey,
         ].joined(separator: "\u{1f}"))
     }
 }

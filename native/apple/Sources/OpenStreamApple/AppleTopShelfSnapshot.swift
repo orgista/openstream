@@ -20,9 +20,14 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         /// The Top Shelf draws it as the bar under the tile, as the Apple TV
         /// app does. Snapshots written before this field decode it as nil.
         public let progress: Double?
+        /// The title's 16:9 backdrop — the art its Continue Watching card
+        /// shows — so the Top Shelf can draw landscape tiles as the Apple TV
+        /// app does. `artworkURL` stays the poster for a row that cannot go
+        /// landscape. Snapshots written before this field decode it as nil.
+        public let landscapeArtworkURL: URL?
 
         public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
-                    progress: Double? = nil) {
+                    progress: Double? = nil, landscapeArtworkURL: URL? = nil) {
             self.id = id
             self.title = title
             self.kind = kind
@@ -30,6 +35,7 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.displayURL = displayURL
             self.playURL = playURL
             self.progress = progress
+            self.landscapeArtworkURL = landscapeArtworkURL
         }
     }
 
@@ -81,8 +87,25 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
 /// extension cannot be unit tested directly. `TopShelfProvider` mirrors this
 /// logic when it builds `TVTopShelfSectionedContent`; keep the two in sync.
 public struct AppleTopShelfSection: Equatable, Sendable {
+    public enum ImageShape: Equatable, Sendable { case poster, hdtv }
+
     public let title: String
     public let items: [AppleTopShelfSnapshot.Item]
+
+    /// One shape per row, as the system draws it: 16:9 only when every tile
+    /// has landscape art, since a poster stretched into a 16:9 tile is worse
+    /// than a row of posters.
+    public var imageShape: ImageShape {
+        items.allSatisfy { $0.landscapeArtworkURL != nil } ? .hdtv : .poster
+    }
+
+    /// The picture a tile shows in this row's shape.
+    public func imageURL(for item: AppleTopShelfSnapshot.Item) -> URL? {
+        switch imageShape {
+        case .hdtv: item.landscapeArtworkURL
+        case .poster: item.artworkURL ?? item.landscapeArtworkURL
+        }
+    }
 }
 
 public enum AppleTopShelfContentBuilder {
@@ -234,10 +257,14 @@ public actor AppleTopShelfSnapshotWriter {
             .sorted { ($0.progress ?? 0) > ($1.progress ?? 0) }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
+        let shownContinued = Array(continued.prefix(12))
+        let backdrops = Self.backdrops(for: Set(shownContinued.map(\.id)), in: sections)
         let snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
-            continueWatching: Array(continued.prefix(12)).map { Self.item($0, progress: $0.progress) },
+            continueWatching: shownContinued.map {
+                Self.item($0, progress: $0.progress, landscapeArtworkURL: backdrops[$0.id])
+            },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
             topPicks: Self.topPicks(from: sections)
@@ -271,11 +298,40 @@ public actor AppleTopShelfSnapshotWriter {
             artworkURL: AppleSystemArtworkPolicy.publicURL(item.posterURL)
                 ?? AppleSystemArtworkPolicy.publicURL(item.backgroundURL),
             displayURL: display,
-            playURL: play
+            playURL: play,
+            landscapeArtworkURL: landscapeURL(for: item)
         )
     }
 
-    private static func item(_ record: AppleMediaRecord, progress: Double? = nil) -> AppleTopShelfSnapshot.Item {
+    /// The backdrop each Continue Watching record's card shows on Discover:
+    /// the catalog item the record was ingested from, matched by record id
+    /// as `AppleCatalogSearchLookup` does. Stops once every wanted id is found.
+    private static func backdrops(for recordIDs: Set<String>,
+                                  in sections: [AppleCatalogSection]) -> [String: URL] {
+        var found: [String: URL] = [:]
+        var remaining = recordIDs
+        for section in sections where !remaining.isEmpty {
+            for item in section.items where !remaining.isEmpty {
+                let id = AppleMediaIngestion.catalogRecord(instanceID: section.sourceID, item: item).id
+                guard remaining.remove(id) != nil, let url = landscapeURL(for: item) else { continue }
+                found[id] = url
+            }
+        }
+        return found
+    }
+
+    /// The card's landscape art (`AppleCatalogArtworkPolicy`, landscape):
+    /// the title's backdrop. An episode still would win over it, as on the
+    /// title page (`AppleEpisodeStillPolicy`), but a snapshot record is a
+    /// title, never an episode, so there is no still to offer. The Cinemeta
+    /// image-service fallback the card also tries is left out: its URL
+    /// carries the IMDb id, which the snapshot deliberately never contains.
+    private static func landscapeURL(for item: AppleCatalogItem) -> URL? {
+        AppleSystemArtworkPolicy.publicURL(item.backgroundURL)
+    }
+
+    private static func item(_ record: AppleMediaRecord, progress: Double? = nil,
+                             landscapeArtworkURL: URL? = nil) -> AppleTopShelfSnapshot.Item {
         let display = URL(string: "openstream://media/\(record.id)?action=display")!
         let play = record.availability.count == 1
             ? URL(string: "openstream://media/\(record.id)?action=play")
@@ -287,7 +343,8 @@ public actor AppleTopShelfSnapshotWriter {
             artworkURL: AppleSystemArtworkPolicy.publicURL(record.artworkURL),
             displayURL: display,
             playURL: play,
-            progress: progress.map { min(max($0, 0), 1) }
+            progress: progress.map { min(max($0, 0), 1) },
+            landscapeArtworkURL: landscapeArtworkURL
         )
     }
 

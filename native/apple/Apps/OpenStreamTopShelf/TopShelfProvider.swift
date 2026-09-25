@@ -18,6 +18,9 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             let playURL: URL?
             /// 0–1 for a title in Continue Watching; absent in older snapshots.
             let progress: Double?
+            /// The 16:9 backdrop; absent in older snapshots and for titles
+            /// with no landscape art.
+            let landscapeArtworkURL: URL?
         }
 
         let version: Int
@@ -70,22 +73,28 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             collection(title: "Continue Watching", values: snapshot.continueWatching),
             collection(title: "Top Picks", values: snapshot.topPicks),
         ].compactMap { $0 }
-        log.info("serving \(sections.count) section(s): continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
+        let shapes = sections.map { $0.items.first?.imageShape == .hdtv ? "hdtv" : "poster" }.joined(separator: ",")
+        log.info("serving \(sections.count) section(s): continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count) shapes=\(shapes, privacy: .public)")
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 
     private func collection(title: String, values: [Snapshot.Item]) -> TVTopShelfItemCollection<TVTopShelfSectionedItem>? {
-        let items = values.prefix(20).map { value in
+        let values = values.prefix(20)
+        // 16:9 tiles like the Apple TV app's, but only when every tile has a
+        // backdrop — a row takes one shape, and a poster stretched to 16:9 is
+        // worse than posters. Mirrors AppleTopShelfSection.imageShape.
+        let landscape = values.allSatisfy { $0.landscapeArtworkURL != nil }
+        let items = values.map { value in
             let item = TVTopShelfSectionedItem(identifier: value.id)
             item.title = String(value.title.prefix(200))
-            item.imageShape = .poster
+            item.imageShape = landscape ? .hdtv : .poster
             item.displayAction = TVTopShelfAction(url: value.displayURL)
             if let playURL = value.playURL { item.playAction = TVTopShelfAction(url: playURL) }
             // The bar under a started title, as the Apple TV app draws it.
             if let progress = value.progress, progress > 0 {
                 item.playbackProgress = min(progress, 1)
             }
-            if let imageURL = value.artworkURL,
+            if let imageURL = landscape ? value.landscapeArtworkURL : (value.artworkURL ?? value.landscapeArtworkURL),
                ["https", "http"].contains(imageURL.scheme?.lowercased()),
                imageURL.user == nil, imageURL.password == nil {
                 item.setImageURL(imageURL, for: [.screenScale1x, .screenScale2x])
