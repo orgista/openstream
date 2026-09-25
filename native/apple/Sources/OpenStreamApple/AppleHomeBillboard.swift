@@ -459,6 +459,17 @@ private struct AppleHomeHeroPreview: View {
         #endif
     }
 
+    /// The iPhone and iPad hero holds its art until the trailer's crop is
+    /// final (N46b). Vision Pro, measured on no device, keeps the title
+    /// page's reveal.
+    private var settlesTrailerPicture: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         ZStack {
             // Holds the art frame so scroll visibility is measured even with
@@ -479,7 +490,8 @@ private struct AppleHomeHeroPreview: View {
                     onStateChange: handleState,
                     onTap: { isPlaying.toggle() },
                     onMute: { isMuted.toggle() },
-                    onReplay: { replayGeneration &+= 1; isPlaying = true }
+                    onReplay: { replayGeneration &+= 1; isPlaying = true },
+                    settlesPictureBeforeReveal: settlesTrailerPicture
                 )
                 // Cover the art frame instead of fitting inside it. The embed
                 // letterboxes the video against its own black ground, so a
@@ -528,7 +540,12 @@ private struct AppleHomeHeroPreview: View {
             #endif
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { artFrameSize = $0 }
-        .onAppear { isPresented = true }
+        .onAppear {
+            isPresented = true
+            #if DEBUG && os(iOS)
+            AppleHeroTrailerProbeIOS.applyDebugOrientation()
+            #endif
+        }
         .onDisappear { isPresented = false; stop() }
         .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0 }
         .preference(key: AppleHomeHeroTrailerStateKey.self,

@@ -5559,6 +5559,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     /// Puts the mute/replay control this far from the top instead of at the
     /// bottom right (the iPhone title page draws its buttons over the bottom).
     var controlTopInset: CGFloat? = nil
+    /// Set by the iPhone and iPad hero: the art stays up until the trailer's
+    /// crop is final (`AppleTrailerPictureSettle`), and it is never
+    /// re-measured once seen. The title page keeps its reveal-then-remeasure.
+    var settlesPictureBeforeReveal = false
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var loadedURL: URL?
@@ -5602,8 +5606,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         }
 
         private func reveal(muted: Bool) {
-            guard playbackIntent, let webView, let _ = container else { return }
+            guard playbackIntent, let webView, let container else { return }
             let generation = revealGeneration
+            if container.settlesPictureBeforeReveal {
+                settlePicture(generation: generation, gate: AppleTrailerPictureSettle(), muted: muted)
+                return
+            }
             measurePicture(webView: webView) { [weak self] window in
                 guard let self, self.revealGeneration == generation, self.playbackIntent,
                       let webView = self.webView, let container = self.container else { return }
@@ -5621,6 +5629,32 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 self.onStateChange?("revealed", muted, nil)
                 if !container.hasMeasuredPicture {
                     self.scheduleRemeasure(generation: generation, remaining: 3)
+                }
+            }
+        }
+
+        /// Measures a frame every `pollInterval` under the art until the gate
+        /// settles, applies that crop under the art, then fades the art away.
+        private func settlePicture(generation: Int, gate: AppleTrailerPictureSettle, muted: Bool) {
+            guard revealGeneration == generation, playbackIntent, let webView else { return }
+            measurePicture(webView: webView) { [weak self] window in
+                guard let self, self.revealGeneration == generation, self.playbackIntent,
+                      let webView = self.webView, let container = self.container else { return }
+                var gate = gate
+                switch gate.record(window, size: container.bounds.size, at: Date()) {
+                case .wait:
+                    DispatchQueue.main.asyncAfter(deadline: .now() + AppleTrailerPictureSettle.pollInterval) { [weak self] in
+                        self?.settlePicture(generation: generation, gate: gate, muted: muted)
+                    }
+                case let .reveal(window, settled):
+                    appleTrace("trailer picture \(settled ? "settled" : "unsettled") window=\(window.map { "\($0.lowerBound)...\($0.upperBound)" } ?? "nil")")
+                    container.pictureWindow = window ?? 0...1
+                    container.hasMeasuredPicture = true
+                    container.layoutIfNeeded()
+                    webView.alpha = 1
+                    container.setPreviewVisible(true)
+                    appleTrace("trailer native reveal: live viewport")
+                    self.onStateChange?("revealed", muted, nil)
                 }
             }
         }
@@ -5678,6 +5712,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             let mediaTime = payload["mediaTime"] as? Double ?? 0
             let quality = payload["quality"] as? String ?? ""
             appleTrace("trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
+            #if DEBUG && os(iOS)
+            if state == "playing" { container?.probe?.begin() }
+            #endif
             if state == "revealed" {
                 guard playbackIntent else { return }
                 reveal(muted: muted)
@@ -5733,6 +5770,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var coverSize: CGSize? = nil { didSet { if oldValue != coverSize { setNeedsLayout() } } }
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
+        var settlesPictureBeforeReveal = false
+        #if DEBUG && os(iOS)
+        var probe: AppleHeroTrailerProbeIOS?
+        #endif
         private var isPlaying = true
         private var showsReplay = false
         private var previewVisible = false
@@ -5890,6 +5931,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func setPreviewVisible(_ visible: Bool, animated: Bool = true, completion: (() -> Void)? = nil) {
             let wasVisible = previewVisible
             if visible != wasVisible { appleTrace("trailer cover \(visible ? "fading out" : "up")") }
+            #if DEBUG && os(iOS)
+            if visible, !wasVisible { probe?.markFade() }
+            #endif
             previewVisible = visible
             cover.layer.removeAllAnimations()
             let duration = AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: UIAccessibility.isReduceMotionEnabled)
@@ -5920,6 +5964,31 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             muteButton.isHidden = !showsReplay
                 && (ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback || loading)
         }
+
+        #if DEBUG && os(iOS)
+        var probeCover: UIView? { cover }
+
+        var probeGeometry: AppleHeroTrailerProbeGeometry {
+            let still = artworkStill.image?.cgImage.map { CGSize(width: $0.width, height: $0.height) }
+            let web = convert(webView.frame, to: nil)
+            let picture = CGRect(x: web.minX, y: web.minY + web.height * pictureWindow.lowerBound, width: web.width,
+                                 height: web.height * (pictureWindow.upperBound - pictureWindow.lowerBound))
+            return AppleHeroTrailerProbeGeometry(
+                hero: convert(cover.frame, to: nil),
+                // The hero's SwiftUI still: aspect-fill, pinned top-leading.
+                still: still.map { size in
+                    let fill = AppleTrailerPreviewLayout.aspectFillFrame(of: size, in: cover.bounds.size)
+                    return cover.convert(CGRect(origin: .zero, size: fill.size), to: nil)
+                },
+                // As UIKit draws it: `scaleAspectFill` centres the overhang.
+                coverArt: still.map { size in
+                    artworkStill.convert(AppleTrailerPreviewLayout.aspectFillFrame(of: size, in: artworkStill.bounds.size), to: nil)
+                },
+                urlArtworkShows: !artworkCover.isHidden && artworkCover.alpha > 0,
+                web: web, picture: picture,
+                coverOpacity: cover.layer.presentation()?.opacity ?? cover.layer.opacity)
+        }
+        #endif
 
         @objc private func tapPreview() {
             if isPlaying {
@@ -5953,6 +6022,13 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         container.isLandscape = isLandscape
         container.controlTopInset = controlTopInset
         container.coverSize = coverSize
+        container.settlesPictureBeforeReveal = settlesPictureBeforeReveal
+        #if DEBUG && os(iOS)
+        if settlesPictureBeforeReveal, let probe = AppleHeroTrailerProbeIOS.fromDefaults() {
+            probe.container = container
+            container.probe = probe
+        }
+        #endif
         container.onTap = onTap
         container.onMute = onMute
         container.onReplay = onReplay
