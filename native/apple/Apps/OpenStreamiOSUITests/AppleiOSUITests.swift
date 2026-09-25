@@ -4051,6 +4051,34 @@ final class AppleiOSUITests: XCTestCase {
             }
         }
 
+        // The hero's pages, dragged sideways across the artwork above its
+        // buttons, then the first shelf paged sideways (N60).
+        relaunch(nil, settle: 22)
+        for index in 1 ... 5 {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.18))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.18))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.1)
+            step("hero-page-\(index)", wait: 2)
+        }
+        var shelfCard = firstHittable("home.media.")
+        for _ in 0 ..< 3 where shelfCard == nil {
+            scrollUp()
+            Thread.sleep(forTimeInterval: 1.2)
+            shelfCard = firstHittable("home.media.")
+        }
+        if let shelfCard {
+            // By coordinates at the row's height: once the row pages, the
+            // card itself is off screen.
+            let rowY = shelfCard.frame.midY / max(app.frame.height, 1)
+            step("shelf-before-paging", wait: 0.5)
+            for index in 1 ... 2 {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: rowY))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: rowY))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.1)
+                step("shelf-paged-\(index)")
+            }
+        }
+
         // A catalog poster opened, its page scrolled, then Back.
         relaunch(nil, settle: 22)
         var poster = firstHittable("home.media.")
@@ -4141,11 +4169,20 @@ final class AppleiOSUITests: XCTestCase {
         // iPad in landscape: the two poster screens.
         if isPad {
             XCUIDevice.shared.orientation = .landscapeLeft
-            for route in ["discover", "library"] {
+            for route in ["discover", "library", "detail", "detail-movie", "settings"] {
                 relaunch(route, settle: route == "discover" ? 22 : 10)
                 step("landscape-\(route)-top", wait: 0)
                 scrollUp()
                 step("landscape-\(route)-scroll-1")
+            }
+            relaunch(nil, settle: 16)
+            if tapIfPossible(app.buttons["Search"].firstMatch) {
+                let field = app.searchFields.firstMatch
+                if field.waitForExistence(timeout: 10) {
+                    field.tap()
+                    field.typeText("star")
+                    step("landscape-search-results", wait: 8)
+                }
             }
             XCUIDevice.shared.orientation = .portrait
         }
