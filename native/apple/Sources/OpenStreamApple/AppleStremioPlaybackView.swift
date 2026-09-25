@@ -80,6 +80,10 @@ struct AppleStremioPlayerView: View {
     @State private var otherSources: [ApplePlaybackSourceOption] = []
     @State private var sourceOptions: ApplePlaybackSourceOptions?
     @State private var quality = AppleStreamQualityChoice.automatic
+    /// The quality switch in flight: replaced by a newer choice and cancelled
+    /// when the player goes away, so a slow `prepare` can never start
+    /// playback after the viewer closed it (review of f555eaa).
+    @State private var qualitySwitch: Task<Void, Never>?
     /// The source on screen, so picking the quality already playing is a no-op.
     @State private var playingSource: URL?
     @State private var sourceError: String?
@@ -331,6 +335,7 @@ struct AppleStremioPlayerView: View {
             await coordinator.begin(request, fallbackCandidates: fallbackCandidates)
         }
         .onDisappear {
+            qualitySwitch?.cancel()
             coordinator.nextAutomaticSource = nil
             coordinator.onSourceFailure = nil
             #if os(tvOS)
@@ -518,7 +523,8 @@ struct AppleStremioPlayerView: View {
 
     private func qualityRow(_ choice: AppleStreamQualityChoice, title: String) -> some View {
         Button {
-            Task { await switchQuality(to: choice) }
+            qualitySwitch?.cancel()
+            qualitySwitch = Task { await switchQuality(to: choice) }
         } label: {
             HStack {
                 Text(title)
@@ -548,6 +554,7 @@ struct AppleStremioPlayerView: View {
             triedSources.insert(option.id)
             do {
                 let next = try await option.prepare(position > 1 ? position : nil)
+                guard !Task.isCancelled else { return }
                 sourceIdentities[next.request.url] = option.id
                 securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
                 playingSource = option.id
