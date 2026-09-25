@@ -17,9 +17,6 @@ public enum AppleDesignTokens {
     #else
     public static let minimumActionSize: CGFloat = 44
     #endif
-    /// The dark translucent circle behind a title page's back chevron, as the
-    /// Apple TV app draws it; the tap target around it stays 44 pt.
-    public static let backButtonCircleSide: CGFloat = 36
 
     /// The owner's "no scroll indicators" rule.
     ///

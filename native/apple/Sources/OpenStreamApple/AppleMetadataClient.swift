@@ -804,7 +804,8 @@ public struct AppleMetadataResolver: Sendable {
                 if !keys.contains(key) { keys.append(key) }
             },
             textlessBackdropURL: lhs.textlessBackdropURL ?? rhs.textlessBackdropURL,
-            castMembers: lhs.castMembers.isEmpty ? rhs.castMembers : lhs.castMembers,
+            castMembers: AppleTitlePagePolicy.fillingPortraits(lhs.castMembers.isEmpty ? rhs.castMembers : lhs.castMembers,
+                                                               from: lhs.castMembers + rhs.castMembers),
             countries: lhs.countries.isEmpty ? rhs.countries : lhs.countries,
             originalLanguage: nonEmpty(lhs.originalLanguage) ?? nonEmpty(rhs.originalLanguage),
             spokenLanguages: lhs.spokenLanguages.isEmpty ? rhs.spokenLanguages : lhs.spokenLanguages

@@ -451,6 +451,24 @@ public enum AppleTitlePagePolicy {
             .prefix(20).map { $0 }
     }
 
+    /// `people` with a portrait for anyone who has none, taken from the same
+    /// name in `others`: the add-on that wins the merge can name a person
+    /// without a picture that another source (TMDB, a second add-on) has.
+    public static func fillingPortraits(_ people: [AppleCreditPerson], from others: [AppleCreditPerson]) -> [AppleCreditPerson] {
+        guard people.contains(where: { $0.portraitURL == nil }) else { return people }
+        var portraits: [String: URL] = [:]
+        for person in others {
+            if let url = person.portraitURL, portraits[person.name.lowercased()] == nil {
+                portraits[person.name.lowercased()] = url
+            }
+        }
+        guard !portraits.isEmpty else { return people }
+        return people.map { person in
+            guard person.portraitURL == nil, let url = portraits[person.name.lowercased()] else { return person }
+            return AppleCreditPerson(name: person.name, role: person.role, portraitURL: url)
+        }
+    }
+
     /// A display name for a language code ("en" → "English"), or the value
     /// itself when it is already a name.
     public static func languageName(_ value: String?, locale: Locale = .current) -> String? {

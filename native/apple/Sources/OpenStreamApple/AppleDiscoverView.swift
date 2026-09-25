@@ -307,6 +307,7 @@ struct AppleDiscoverView: View {
             if let selectedCatalog,
                let source = sourceStore.sources.first(where: { $0.id == selectedCatalog.sourceID }) {
                 catalogSection(selectedCatalog, source: source).catalogList
+                    .environment(\.appleTabToolbar, tabToolbarContext)
             }
         }
         .navigationDestination(isPresented: $showsSelectedHero) {
@@ -386,6 +387,7 @@ struct AppleDiscoverView: View {
             )
             .navigationTitle("Search")
             .appleTraceScreen("search")
+            .environment(\.appleTabToolbar, tabToolbarContext)
         }
         .onChange(of: settings.top10ListsEnabled) { _, enabled in
             if enabled { loadTop10() }
@@ -457,6 +459,8 @@ struct AppleDiscoverView: View {
             guard settings.top10ListsEnabled else { return }
             loadTop10()
         }
+        // The same Search and Refresh on every page pushed from here.
+        .environment(\.appleTabToolbar, tabToolbarContext)
     }
 
     /// What the hero rotates through: what the owner is part-way into first,
@@ -1117,6 +1121,7 @@ struct AppleDiscoverView: View {
                 mediaServerLibrary: mediaServerLibrary
             )
             .environment(\.appleDiscoverRows, nil)
+            .environment(\.appleTabToolbar, tabToolbarContext)
         }
     }
 
@@ -1177,6 +1182,12 @@ struct AppleDiscoverView: View {
 
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 
+    /// Discover's Search and Refresh, for the pages pushed from here.
+    private var tabToolbarContext: AppleTabToolbarContext {
+        AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing || catalogStore.isLoading },
+                               onSearch: { showsSearch = true }, onRefresh: refresh)
+    }
+
     private func refresh() {
         Task { @MainActor in
             isRefreshing = true
@@ -1202,6 +1213,7 @@ struct AppleDiscoverView: View {
 
 @MainActor
 struct AppleSearchView: View {
+    @Environment(\.appleTabToolbar) private var tabToolbar
     @State private var query = ""
     @State private var searchStore = AppleCatalogSearchStore()
     @State private var routedResult: RoutedResult?
@@ -1299,6 +1311,7 @@ struct AppleSearchView: View {
                 openSettings: openSettings,
                 initialAutoPlay: value.action == .play
             )
+            .environment(\.appleTabToolbar, tabToolbar)
         }
         .task(id: router.searchQuery) {
             if !router.searchQuery.isEmpty { query = router.searchQuery }
@@ -2190,13 +2203,6 @@ struct AppleCatalogItemDetailView: View {
         }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
         .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
-        #if os(iOS)
-        // Pinned over the page, not drawn on the hero: on the art it scrolled
-        // up under the status bar and could no longer be tapped (N22). Outside
-        // the screen identifier, which would otherwise replace `detail.back`.
-        // The overlay sits inside the safe area, so no inset arithmetic.
-        .overlay(alignment: .topLeading) { detailBackButton }
-        #endif
     }
 
     private func applyDetailViewport(_ viewport: AppleDetailViewport) {
@@ -2242,13 +2248,10 @@ struct AppleCatalogItemDetailView: View {
                     .padding(.trailing, isLandscapeLayout ? -detailSafeAreaInsets.trailing : 0)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    if isLandscapeLayout {
+                    if usesOverlayHero {
                         EmptyView()
                     } else {
-                        if usesPadPortraitTitleLockup {
-                            padPortraitTitleLockup
-                                .padding(.top, AppleDetailMetrics.padTitleLockupTopSpacing)
-                        } else if titleLogoPresentation != .text {
+                        if titleLogoPresentation != .text {
                             portraitTrailerTitle
                                 .padding(.top, trailerIsPlaying ? AppleDetailMetrics.heroToTitleSpacing : 0)
                         } else {
@@ -2319,11 +2322,24 @@ struct AppleCatalogItemDetailView: View {
                     moreLikeThisSection(title: "More Like This")
                         .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
                 }
+                #if os(iOS)
+                // The iPhone's and the Mac's Cast & Crew rail: the iPad had
+                // none, so its portraits were nowhere (N37).
+                let credits = titlePageCredits
+                if !credits.isEmpty {
+                    phoneCastSection(credits)
+                        .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+                }
+                #endif
                 }
             }
             .padding(.bottom)
             }
             .scrollPosition($detailScrollPosition)
+            #if os(macOS)
+            // Discover's: the hero runs up under the toolbar with no backing.
+            .appleMacHeroUnderToolbar()
+            #endif
             // The navigation bar is hidden here so the hero can bleed to the top
             // of the screen. With no bar there is nothing behind the status bar
             // once the page scrolls, and the synopsis was drawn through the
@@ -2370,13 +2386,19 @@ struct AppleCatalogItemDetailView: View {
         #endif
         .appleTraceScreen("title", detail: "\(item.name) (\(item.mediaID))")
         .navigationTitle("")
+        #if os(macOS) || os(iOS)
+        // Discover's bar, unchanged, with ‹ at its leading edge (N37).
+        .appleTitlePageToolbar(backIsBlocked: playerPresentation != nil) { dismiss() }
+        #endif
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         #endif
         #if os(iOS)
-        .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
+        // The bar stays, as it is over Discover's hero: see-through, the
+        // art running up under it (the hero pulls itself up by the page's
+        // top inset, which now includes the bar).
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #endif
         #if os(tvOS)
         // The backdrop fills 1920x1080; the tab bar returns when Menu pops.
@@ -2629,7 +2651,7 @@ struct AppleCatalogItemDetailView: View {
             trailerPreview()
             #endif
 
-            if !isLandscapeLayout, !usesPadPortraitTitleLockup, case .valid = titleLogoState, let logoURL = titleLogoURL {
+            if !isLandscapeLayout, !usesPadPortraitHero, case .valid = titleLogoState, let logoURL = titleLogoURL {
                 AppleTrimmedTitleLogo(url: logoURL) { loaded in
                     titleLogoLoadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
@@ -2651,7 +2673,14 @@ struct AppleCatalogItemDetailView: View {
                     .accessibilityHidden(trailerIsActive)
             }
 
-            if isLandscapeLayout, landscapeOverlaysVisible {
+            if usesPadHeroFades {
+                // Discover's iPad hero fades, so the copy reads over the art
+                // exactly as it does there.
+                AppleHeroScrimView(scrim: .wide(tone: .unknown, videoIsShowing: trailerIsPlaying, copyTrailing: 0))
+                    .animation(.easeInOut(duration: 0.6), value: trailerIsPlaying)
+            }
+
+            if usesOverlayHero, landscapeOverlaysVisible {
                 landscapeHeroOverlay(in: proxy.size)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, overlayLeadingMargin)
@@ -2723,26 +2752,16 @@ struct AppleCatalogItemDetailView: View {
     }
     #endif
 
-    #if !os(visionOS) && !os(macOS)
+    // tvOS only: iOS and the Mac put ‹ in the toolbar (`appleTitlePageToolbar`).
+    // Apple TV keeps the bare glyph — no boxed icons there.
+    #if os(tvOS)
     private var detailBackButton: some View {
         Button {
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
-                #if os(iOS)
-                // The Apple TV app's back button: a small dark translucent
-                // circle, so the chevron reads over white art too (owner,
-                // 2026-09-24: a bare white glyph vanished over bright art).
-                // Apple TV keeps the bare glyph — no boxed icons there.
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: AppleDesignTokens.backButtonCircleSide, height: AppleDesignTokens.backButtonCircleSide)
-                .background(.ultraThinMaterial, in: .circle)
-                .environment(\.colorScheme, .dark)
-                #else
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
-                #endif
                 .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                 .contentShape(Rectangle())
         }
@@ -2760,10 +2779,14 @@ struct AppleCatalogItemDetailView: View {
         #elseif os(visionOS)
         min(viewportSize.height * 0.78, viewportSize.width * 9 / 16)
         #elseif os(iOS)
-        AppleDetailMetrics.heroHeight(
-            in: viewportSize,
-            horizontalSizeClassIsRegular: horizontalSizeClass == .regular
-        )
+        usesPadPortraitHero
+            // The iPad's Discover hero, from the same screen.
+            ? AppleMacHeroLayout(contentWidth: viewportSize.width, windowHeight: viewportSize.height,
+                                 platform: .pad).height
+            : AppleDetailMetrics.heroHeight(
+                in: viewportSize,
+                horizontalSizeClassIsRegular: horizontalSizeClass == .regular
+            )
         #elseif os(macOS)
         // Was a flat 420 pt at every window size, which is a third of a
         // full-screen Mac display and read as a letterbox strip. The same
@@ -2832,6 +2855,24 @@ struct AppleCatalogItemDetailView: View {
         #endif
     }
 
+    /// The title, metadata and buttons drawn over the art: landscape, and
+    /// the iPad either way up (N37, owner 2026-09-24: "it should be a full
+    /// hero like the main page even on the content page"). Upright, the iPad
+    /// drew the art as a box with the title under it, unlike its Discover
+    /// hero (N20); it now opens on that hero's height with the copy on it.
+    private var usesOverlayHero: Bool {
+        isLandscapeLayout || usesPadPortraitHero
+    }
+
+    /// The iPad's hero draws Discover's iPad fades under its copy.
+    private var usesPadHeroFades: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .regular && usesOverlayHero
+        #else
+        false
+        #endif
+    }
+
     /// Phone landscape: same layout as the iPad, tighter metrics.
     private var isCompactLandscapeLayout: Bool {
         isLandscapeLayout && !isLandscapeRegularLayout
@@ -2862,7 +2903,14 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var landscapeOverlaysVisible: Bool {
-        !trailerIsPlaying
+        !copyYieldsToTrailer
+    }
+
+    /// A playing trailer hides the copy over the art on the phone held
+    /// sideways. The iPad keeps it on the trailer, as its Discover hero does
+    /// (N37): upright, hiding it left the hero with no title or buttons.
+    private var copyYieldsToTrailer: Bool {
+        trailerIsPlaying && !usesPadHeroFades
     }
 
     private var isWideLandscape: Bool {
@@ -2888,27 +2936,27 @@ struct AppleCatalogItemDetailView: View {
                             height: overlayLogoMaxHeight,
                             alignment: .leading
                         )
-                        .opacity(trailerIsPlaying || titleLogoPresentation != .logo ? 0 : 1)
+                        .opacity(copyYieldsToTrailer || titleLogoPresentation != .logo ? 0 : 1)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(item.name)
                         .accessibilityAddTraits(.isHeader)
-                        .accessibilityHidden(trailerIsPlaying || titleLogoPresentation != .logo)
+                        .accessibilityHidden(copyYieldsToTrailer || titleLogoPresentation != .logo)
 
                     trailerTitleText
-                        .opacity(trailerIsPlaying || titleLogoPresentation == .text ? 1 : 0)
-                        .accessibilityHidden(!trailerIsPlaying && titleLogoPresentation != .text)
+                        .opacity(copyYieldsToTrailer || titleLogoPresentation == .text ? 1 : 0)
+                        .accessibilityHidden(!copyYieldsToTrailer && titleLogoPresentation != .text)
                 }
                 .frame(
                     width: min(
                         heroSize.width * AppleDetailMetrics.landscapeTitleLogoWidthFraction,
                         overlayLogoMaxWidth
                     ),
-                    height: trailerIsPlaying ? AppleDetailMetrics.landscapeTitleFontSize : overlayLogoMaxHeight,
+                    height: copyYieldsToTrailer ? AppleDetailMetrics.landscapeTitleFontSize : overlayLogoMaxHeight,
                     alignment: .leading
                 )
                 .animation(
                     reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration),
-                    value: trailerIsPlaying
+                    value: copyYieldsToTrailer
                 )
             } else {
                 trailerTitleText
@@ -2940,50 +2988,15 @@ struct AppleCatalogItemDetailView: View {
             )
     }
 
-    /// The iPad held upright (N32 #9): the title sat in 17 pt body text
-    /// under the hero whenever a trailer hid the wordmark. The iPhone and
-    /// the Mac give the title its own slot; the iPad now does too, leading
-    /// under the hero where a playing trailer never covers it — the wordmark
-    /// once drawn, otherwise the name as a large title.
-    private var usesPadPortraitTitleLockup: Bool {
+    /// The iPad held upright: its title page opens on the iPad Discover
+    /// hero's height with the copy over the art (`usesOverlayHero`, N37).
+    /// It had been a box of art with the title under it (N32 #9).
+    private var usesPadPortraitHero: Bool {
         #if os(iOS)
         horizontalSizeClass == .regular && !isLandscapeLayout
         #else
         false
         #endif
-    }
-
-    @ViewBuilder
-    private var padPortraitTitleLockup: some View {
-        switch titleLogoPresentation {
-        case .text:
-            Text(displayTitle)
-                .font(.system(size: AppleDetailMetrics.padTitleFontSize, weight: .bold))
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-        case .logo, .hidden:
-            ZStack(alignment: .leading) {
-                if case .valid = titleLogoState, let logoURL = titleLogoURL {
-                    AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
-                        titleLogoLoadResult = loaded
-                        if loaded { fillTimeline.mark(.wordmark) }
-                        #if DEBUG
-                        AppleLaunchClock.mark(loaded ? "detail.wordmark" : "detail.wordmark.failed")
-                        #endif
-                    }
-                    .opacity(titleLogoPresentation == .logo ? 1 : 0)
-                }
-            }
-            .frame(width: AppleDetailMetrics.padTitleLogoMaxSize.width,
-                   height: AppleDetailMetrics.padTitleLogoMaxSize.height, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(displayTitle)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityHidden(titleLogoPresentation != .logo)
-        }
     }
 
     private var portraitTrailerTitle: some View {
@@ -6296,7 +6309,6 @@ struct AppleDetailMetrics {
     /// box, and a large title when there is no wordmark.
     static let padTitleLogoMaxSize = CGSize(width: 360, height: 110)
     static let padTitleFontSize: CGFloat = 40
-    static let padTitleLockupTopSpacing: CGFloat = 20
 
     /// An iPad episode card: about two and a half across upright, three and
     /// a half on its side, as the Apple TV app's iPad rail shows them.

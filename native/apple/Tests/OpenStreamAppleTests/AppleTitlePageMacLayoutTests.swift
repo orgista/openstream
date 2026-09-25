@@ -4,25 +4,27 @@ import Testing
 
 @Suite("Mac title page layout")
 struct AppleTitlePageMacLayoutTests {
-    @Test("The art is two thirds of the window tall", arguments: [
-        (CGSize(width: 1440, height: 900), 594.0),
-        (CGSize(width: 1000, height: 800), 528.0),
-        (CGSize(width: 1700, height: 1000), 660.0),
+    @Test("The art is Discover's hero, from the same window", arguments: [
+        CGSize(width: 1440, height: 900),
+        CGSize(width: 1000, height: 800),
+        CGSize(width: 1700, height: 1000),
+        CGSize(width: 700, height: 1400),
+        CGSize(width: 800, height: 400),
+        CGSize.zero,
     ])
-    func heroFollowsTheWindowHeight(window: CGSize, expected: CGFloat) {
+    func heroIsTheDiscoverHero(window: CGSize) {
         let layout = AppleTitlePageMacLayout(contentWidth: window.width, windowHeight: window.height)
-        #expect(layout.heroHeight == expected)
+        let discover = AppleMacHeroLayout(contentWidth: window.width, windowHeight: window.height)
+        #expect(layout.heroHeight == discover.height.rounded())
     }
 
-    @Test func aTallNarrowWindowDoesNotGetAPortraitHero() {
-        let layout = AppleTitlePageMacLayout(contentWidth: 700, windowHeight: 1400)
-        #expect(layout.heroHeight == 525)
-    }
-
-    @Test func theHeroNeverDropsBelowItsFloor() {
-        #expect(AppleTitlePageMacLayout(contentWidth: 800, windowHeight: 500).heroHeight == 420)
-        // Before the window has been measured.
-        #expect(AppleTitlePageMacLayout(contentWidth: 0, windowHeight: 0).heroHeight == 420)
+    @Test func heroSizesAtCommonWindows() {
+        // min(680, 75 % of the width, 75 % of the window), never under 360.
+        #expect(AppleTitlePageMacLayout(contentWidth: 1440, windowHeight: 900).heroHeight == 675)
+        #expect(AppleTitlePageMacLayout(contentWidth: 1700, windowHeight: 1000).heroHeight == 680)
+        #expect(AppleTitlePageMacLayout(contentWidth: 700, windowHeight: 1400).heroHeight == 525)
+        #expect(AppleTitlePageMacLayout(contentWidth: 800, windowHeight: 400).heroHeight == 360)
+        #expect(AppleTitlePageMacLayout.heroBottomPadding == AppleMacHeroLayout.bottomPadding)
     }
 
     @Test func theCopyColumnGrowsWithTheWindowWithinItsBounds() {

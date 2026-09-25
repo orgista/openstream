@@ -13,7 +13,11 @@ struct AppleTabToolbar: ToolbarContent {
     let onRefresh: () -> Void
 
     var body: some ToolbarContent {
-        ForEach(AppleTabToolbarPolicy.items(for: tab), id: \.self) { item in
+        // Refresh is a new item when it starts or stops: the Mac toolbar
+        // caches an item's view by identity, so on a pushed page (a title
+        // page, N37) the spinner it was first given never went away.
+        ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
+            let item = slot.item
             ToolbarItem(placement: Self.placement) {
                 switch item {
                 case .search:
@@ -36,6 +40,12 @@ struct AppleTabToolbar: ToolbarContent {
                 }
             }
         }
+    }
+
+    private struct Slot: Identifiable {
+        let item: AppleTabToolbarPolicy.Item
+        let isRefreshing: Bool
+        var id: String { "\(item.rawValue)\(isRefreshing ? ".busy" : "")" }
     }
 
     private static var placement: ToolbarItemPlacement {

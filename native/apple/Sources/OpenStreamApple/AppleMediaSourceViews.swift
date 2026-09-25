@@ -1924,7 +1924,12 @@ struct AppleLibraryView: View {
                             router: AppleAppRouter(), settings: settings, openSettings: openSettings)
                 .navigationTitle("Search")
                 .appleTraceScreen("search")
+                .environment(\.appleTabToolbar, tabToolbarContext)
         }
+        #endif
+        #if !os(tvOS)
+        // The same Search and Refresh on every page pushed from here.
+        .environment(\.appleTabToolbar, tabToolbarContext)
         #endif
         // Discover's artwork lookup for the hero and title pages too.
         .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
@@ -2193,5 +2198,16 @@ struct AppleLibraryView: View {
     private func detail(_ group: AppleLibrarySeries, autoPlay: Bool = false) -> some View {
         AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex,
             settings: settings, openSettings: openSettings, autoPlay: autoPlay)
+            #if !os(tvOS)
+            .environment(\.appleTabToolbar, tabToolbarContext)
+            #endif
     }
+
+    #if !os(tvOS)
+    /// Library's Search and Refresh, for the pages pushed from here.
+    private var tabToolbarContext: AppleTabToolbarContext {
+        AppleTabToolbarContext(tab: .library, isRefreshing: { library.isLoading },
+                               onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
+    }
+    #endif
 }

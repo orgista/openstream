@@ -378,6 +378,7 @@ public struct AppleStremioMetadataClient: Sendable {
                         }
                 }(),
                 // Cinemeta sends "United States, United Kingdom".
+                castMembers: value.credits,
                 countries: (value.country ?? "").split(separator: ",").compactMap { AppleTitlePagePolicy.regionName(String($0)) }
             )
         }
@@ -878,6 +879,8 @@ public struct AppleStremioMetadataClient: Sendable {
         let trailers: [Trailer]?
         let trailerStreams: [TrailerStream]?
         let country: String?
+        /// The same people with their pictures, when the add-on sends them.
+        let credits: [AppleCreditPerson]
 
         private enum CodingKeys: String, CodingKey {
             case id, type, name, description, releaseInfo, released, runtime, genre, genres, poster, background, landscapePoster, logo, contentRating, certification, badges, formats
@@ -931,6 +934,7 @@ public struct AppleStremioMetadataClient: Sendable {
             trailers = try? container.decode([Trailer].self, forKey: .trailers)
             trailerStreams = try? container.decode([TrailerStream].self, forKey: .trailerStreams)
             country = try? container.decode(String.self, forKey: .country)
+            credits = (try? AppleStremioCredits(from: decoder))?.people ?? []
         }
 
         /// Cinemeta returns `cast`/`director`/`writer` as an array of names, but
