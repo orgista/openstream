@@ -9,8 +9,12 @@ struct AppleCatalogCardAccessibilityTests {
     }
 
     /// Off Apple TV a titled card keeps its children combined, so the caption
-    /// it draws is what VoiceOver reads.
+    /// it draws is what VoiceOver reads. Apple TV cards always name themselves.
     @Test func aTitledCardCombinesItsCaption() {
+        #if os(tvOS)
+        #expect(AppleCatalogCardAccessibility.namesItself(drawsTitle: true))
+        #else
         #expect(AppleCatalogCardAccessibility.namesItself(drawsTitle: true) == false)
+        #endif
     }
 }
