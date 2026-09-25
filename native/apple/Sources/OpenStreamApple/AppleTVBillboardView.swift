@@ -243,11 +243,17 @@ struct AppleTVHeroRotationIndicator: View {
 }
 
 /// Play and Details as content-sized pills (FEEDBACK X3); Play is the same
-/// white pill as the title page.
+/// white pill as the title page. Focus arriving from the tab bar or a row goes
+/// to Play, as on Discover's hero (`AppleTVHeroPaging.entry`); Library landed
+/// on Details (N41 survey).
 struct AppleTVBillboardActions: View {
     var button = AppleTitlePagePolicy.HeroButton(action: .play)
     let onPlay: () -> Void
     let onDetails: () -> Void
+
+    @FocusState private var focus: AppleTVHeroPaging.Target?
+    /// Details while its page is open: focus coming back stays on it.
+    @State private var returnTarget: AppleTVHeroPaging.Target?
 
     private typealias M = AppleTVBillboardMetrics
 
@@ -261,11 +267,15 @@ struct AppleTVBillboardActions: View {
                 }
             }
             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: M.pillSize, fontSize: M.pillFontSize))
+            .focused($focus, equals: .play)
             .accessibilityIdentifier("home.featured.play")
 
             // The primary pill already is Details when nothing plays.
             if button.action != .details {
-                Button(action: onDetails) {
+                Button {
+                    returnTarget = .details
+                    onDetails()
+                } label: {
                     HStack(spacing: M.pillGlyphSpacing) {
                         Image(systemName: "info.circle")
                             .font(.system(size: M.pillGlyphSize, weight: .semibold))
@@ -273,8 +283,18 @@ struct AppleTVBillboardActions: View {
                     }
                 }
                 .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: M.pillSize, fontSize: M.pillFontSize))
+                .focused($focus, equals: .details)
                 .accessibilityIdentifier("home.featured.details")
             }
+        }
+        .frame(width: M.actionsFocusWidth, alignment: .leading)
+        .focusSection()
+        .onChange(of: focus) { old, target in
+            guard old == nil, let target else { return }
+            let settled = AppleTVHeroPaging.entry(arriving: target, returningTo: returnTarget)
+            appleTrace("billboard focus: arrived on \(target), settles on \(settled)")
+            returnTarget = nil
+            if settled != target { focus = settled }
         }
     }
 }

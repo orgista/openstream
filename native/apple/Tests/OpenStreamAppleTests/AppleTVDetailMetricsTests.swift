@@ -10,6 +10,13 @@ struct AppleTVDetailMetricsTests {
         #expect(AppleTVDetailMetrics.heroFrame == CGRect(x: 0, y: 0, width: 1920, height: 1080))
     }
 
+    /// N43: the backdrop fades into the page instead of ending in a hard
+    /// line; the upper art, where the picture is, stays untouched.
+    @Test func backdropFadesOnlyInItsLowerPart() {
+        let start = AppleTVDetailMetrics.backdropFadeStartFraction
+        #expect(start > 0.5 && start < 1)
+    }
+
     @Test func overlaySitsAtEightyFromTheLeadingEdgeAndSixtyFromTheBottom() {
         #expect(AppleTVDetailMetrics.overlayLeadingInset == 80)
         #expect(AppleTVDetailMetrics.overlayBottomInset == 60)

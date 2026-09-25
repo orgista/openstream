@@ -34,6 +34,13 @@ enum AppleTVDetailFocus: Hashable, Sendable {
     /// `defaultFocus` and the remote jumped to Play — the owner's "when you
     /// rate if you click rate it sends you back to Play button" (2026-09-15).
     case rateChoice(Int)
+    /// A More Like This card, by the suggestion's id. Below the title row.
+    case similar(String)
+
+    /// Play, My List, Rate or a rating choice: the row the page opens on.
+    var isOnTitleRow: Bool {
+        if case .similar = self { false } else { true }
+    }
 }
 
 /// How the Apple TV title page gets Play focused when it opens.
@@ -64,12 +71,13 @@ enum AppleTVDetailOpeningFocus {
 
     /// The focus to request while the opening is not over yet: the target,
     /// unless focus has already moved below the title row (`nil` there means
-    /// an episode or a shelf holds it), which only a user can do.
+    /// an episode or the season picker holds it), which only a user can do.
     static func correction(for focus: AppleTVDetailFocus?, hasHadAnyFocus: Bool,
                            target: AppleTVDetailFocus = .play) -> AppleTVDetailFocus? {
         switch focus {
         case let focus? where focus == target: nil
         case .play, .myList, .rate, .rateChoice: target
+        case .similar: nil
         case nil: hasHadAnyFocus ? nil : target
         }
     }
@@ -81,13 +89,41 @@ enum AppleTVDetailOpeningFocus {
 /// row sits at the leading edge, so Up from a card in the middle landed on
 /// Rate — the last thing anyone climbs up for (N41 survey, both kinds of
 /// title page). The Apple TV app goes back to its primary action; so does
-/// this page. `nil` is focus below the title row; moves along the row are the
-/// user's and are left alone.
+/// this page. `nil` and `.similar` are focus below the title row; moves along
+/// the row are the user's and are left alone.
 enum AppleTVDetailReturnFocus {
     static func correction(from old: AppleTVDetailFocus?, to new: AppleTVDetailFocus?,
                            target: AppleTVDetailFocus) -> AppleTVDetailFocus? {
-        guard old == nil, let new, new != target else { return nil }
+        guard old?.isOnTitleRow != true, let new, new.isOnTitleRow, new != target else { return nil }
         return target
+    }
+}
+
+/// Where Down from the title row lands on More Like This: its first card.
+///
+/// On a movie the row sits right under Play, yet Down landed on the third
+/// poster (N41 survey: Zootopia 2 at x = 672, with the first at x = 80). The
+/// row is off screen when the move is decided, and the engine enters its focus
+/// section away from the column Play is in. The Apple TV app goes to the first
+/// item of the next row, so the page sends focus there. Moves along the row,
+/// and focus that comes from an episode above, are left alone.
+///
+/// The move does not arrive in one step: focus reports `nil` for a frame
+/// between Play and the card (16 ms in the N43 trace). `leftTitleRowAgo` is
+/// how long ago focus left the title row for that `nil`; a `nil` that brief is
+/// the same move. An episode or the season picker holds focus as `nil` for as
+/// long as the viewer stays there, far longer.
+enum AppleTVDetailShelfEntry {
+    static let sameMoveWindow: Duration = .milliseconds(300)
+
+    static func correction(from old: AppleTVDetailFocus?, to new: AppleTVDetailFocus?,
+                           leftTitleRowAgo: Duration? = nil,
+                           firstSimilarID: String?) -> AppleTVDetailFocus? {
+        let fromTitleRow = old?.isOnTitleRow == true
+            || (old == nil && leftTitleRowAgo.map { $0 <= sameMoveWindow } == true)
+        guard fromTitleRow, case .similar(let id)? = new,
+              let firstSimilarID, id != firstSimilarID else { return nil }
+        return .similar(firstSimilarID)
     }
 }
 
@@ -100,6 +136,11 @@ enum AppleTVDetailMetrics {
     // Screen and hero
     static let screenSize = CGSize(width: 1920, height: 1080)
     static var heroFrame: CGRect { CGRect(origin: .zero, size: screenSize) }
+    /// Where the backdrop starts to fade into the page, as a fraction of its
+    /// height. It had ended in a hard line, black below, the moment the page
+    /// scrolled (N41 survey); the Apple TV app lets its art dissolve into the
+    /// page instead. The art itself fades out; nothing is laid over it.
+    static let backdropFadeStartFraction: CGFloat = 0.72
 
     // Overlay anchor: HIG safe zone, 80 pt from the sides and 60 pt from the bottom.
     static let overlayLeadingInset: CGFloat = 80
@@ -164,9 +205,11 @@ enum AppleTVDetailMetrics {
     static let posterGap: CGFloat = 40
     static let posterNameFontSize: CGFloat = 25
 
-    // Focus treatment shared by cards and glyphs
+    // Cards lift with the system highlight (`appleTVCardArtworkFocus`); the
+    // glyph discs scale by `focusScale`.
     static let cardCornerRadius: CGFloat = 18
-    static let focusRingWidth: CGFloat = 4
+    /// How far a card's name slides down while the lifted art is over it.
+    static let cardCaptionFocusDrop: CGFloat = 14
     static let focusScale: CGFloat = 1.06
 
     /// The full-screen tvOS layout replaces the phone/iPad detail page only on

@@ -352,6 +352,45 @@ import Testing
     #expect(decoded.topPicks == [item])
 }
 
+/// N43: the Top Shelf draws a progress bar under a started title, as the
+/// Apple TV app does; only Continue Watching carries one.
+@Test func topShelfSnapshotCarriesProgressForContinueWatchingOnly() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appending(path: "openstream-topshelf-progress-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let instanceID = UUID()
+    let records = [0.3, nil].enumerated().map { index, progress in
+        AppleMediaRecord(
+            canonicalID: "tt\(String(format: "%07d", index))",
+            kind: .movie,
+            title: "Movie \(index)",
+            availability: [.init(instanceID: instanceID, capability: .resolvable,
+                                 itemReference: "https://fixture.example/\(index).mkv")],
+            isFavorite: true,
+            progress: progress,
+            isPrivate: false
+        )
+    }
+    let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
+    try await writer.write(records: records, enabled: true)
+
+    let data = try Data(contentsOf: root.appending(path: AppleTopShelfSnapshotWriter.filename))
+    let snapshot = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: data)
+    #expect(snapshot.continueWatching.map(\.progress) == [0.3])
+    #expect(snapshot.favorites.allSatisfy { $0.progress == nil })
+    #expect(snapshot.recentlyAdded.allSatisfy { $0.progress == nil })
+}
+
+@Test func topShelfSnapshotDecodesItemsWrittenBeforeProgressAsNoProgress() throws {
+    let legacyJSON = """
+    {"version":1,"generatedAt":0,"continueWatching":[{"id":"a","title":"A","kind":"movie",\
+    "displayURL":"openstream://media/a?action=display"}],"recentlyAdded":[],"favorites":[]}
+    """
+    let decoded = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(legacyJSON.utf8))
+    #expect(decoded.continueWatching.first?.progress == nil)
+}
+
 @Test func topShelfSnapshotDecodesLegacyPayloadsMissingTopPicksAsEmpty() throws {
     let legacyJSON = """
     {"version":1,"generatedAt":0,"continueWatching":[],"recentlyAdded":[],"favorites":[]}

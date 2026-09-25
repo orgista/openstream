@@ -46,6 +46,11 @@ enum AppleTVBillboardMetrics {
     /// The invisible paging stops beside the Discover hero's buttons
     /// (`AppleTVHeroPaging`): wide enough to be a focus target, no wider.
     static let pagingStopWidth: CGFloat = 2
+    /// The hero's buttons sit in a focus section this wide (the screen inside
+    /// the safe-zone gutters), so Down from any tab reaches them before the
+    /// first row. The billboard's own section starts under the tab bar, and
+    /// Down from Discover skipped it for a Continue Watching card (N41 survey).
+    static var actionsFocusWidth: CGFloat { screenSize.width - 2 * copyLeadingInset }
 
     // Discover's "New Season" capsule and outlined rating, after the Apple TV
     // app (N12, same shapes as the iPhone and Mac heroes at tvOS sizes).

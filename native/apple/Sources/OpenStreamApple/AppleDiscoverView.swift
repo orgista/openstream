@@ -896,6 +896,7 @@ struct AppleDiscoverView: View {
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     focus: tv.focus,
                     pagingEnabled: tv.pagingEnabled,
+                    willOpenPage: tv.willOpenPage,
                     onPlay: perform,
                     onToggleList: { toggleHeroInList(value) },
                     onDetails: { selectHero(value, autoPlay: false) }
@@ -1593,6 +1594,7 @@ private struct AppleTop10Card: View {
                 AppleTop10RowCaption(item: item, rank: rank)
             } else {
                 standardCaption
+                    .appleTVCardCaptionFocus()
             }
         }
         .accessibilityElement(children: .ignore)
@@ -1670,10 +1672,11 @@ extension View {
     @ViewBuilder
     func appleCatalogFocusSection() -> some View {
         #if os(tvOS)
-        // One focus treatment for every home row: the title page's lift and
-        // shadow on the artwork itself, never the stock platter behind it
-        // (owner 16:20, "still not great").
-        focusSection().buttonStyle(AppleTVDetailCardStyle())
+        // One focus treatment for every card on the Apple TV, the Apple TV
+        // app's: the artwork lifts, tilts with the remote and catches the
+        // light (`appleTVCardArtworkFocus`), never the stock platter behind
+        // it (owner 16:20, "still not great") and never a ring.
+        focusSection().buttonStyle(.borderless)
         #elseif os(visionOS)
         self.buttonStyle(.plain)
         #else
@@ -1686,9 +1689,36 @@ extension View {
     @ViewBuilder
     func appleCatalogCardButtonStyle() -> some View {
         #if os(tvOS)
-        self.buttonStyle(AppleTVDetailCardStyle())
+        self.buttonStyle(.borderless)
         #else
         self.buttonStyle(.plain)
+        #endif
+    }
+
+    /// The Apple TV app's focus on a card's artwork: in a `.borderless`
+    /// button, the art alone lifts with a shadow, tilts with the remote and
+    /// catches the light; the name under it stays where it is, so it stays
+    /// legible. Other platforms keep their own treatment.
+    /// The name under a card's artwork slides clear of the lifted art while
+    /// the card is focused (Apple TV only).
+    @ViewBuilder
+    func appleTVCardCaptionFocus() -> some View {
+        #if os(tvOS)
+        modifier(AppleTVCardCaptionFocus())
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func appleTVCardArtworkFocus(cornerRadius: CGFloat) -> some View {
+        #if os(tvOS)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        self.clipShape(shape)
+            .contentShape(.hoverEffect, shape)
+            .hoverEffect(.highlight)
+        #else
+        self
         #endif
     }
 }
@@ -1821,6 +1851,7 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .appleRowTileLift(activeRowStyle?.platform == .mac)
+                .appleTVCardArtworkFocus(cornerRadius: cornerRadius)
                 .onChange(of: item.id) { _, _ in
                     failedArtworkURLs = []; fallbackArtwork = nil; artworkRetries = 0; artworkPlate = .none
                 }
@@ -1871,6 +1902,7 @@ struct AppleCatalogCard: View {
                     .hidden()
                     .overlay(alignment: .topLeading) { captionLines(reservingTitleLines: false) }
                     .frame(width: cardWidth, alignment: .leading)
+                    .appleTVCardCaptionFocus()
             }
         }
         .contentShape(Rectangle())
@@ -2108,6 +2140,8 @@ struct AppleCatalogItemDetailView: View {
     #endif
     #if os(tvOS)
     @FocusState private var tvDetailFocus: AppleTVDetailFocus?
+    /// When focus last left the title row for `nil` (`AppleTVDetailShelfEntry`).
+    @State private var tvTitleRowExit: ContinuousClock.Instant?
     /// Set once Play has held focus; see `AppleTVDetailOpeningFocus`.
     @State private var tvDetailOpeningSettled = false
     #endif
@@ -3038,10 +3072,16 @@ struct AppleCatalogItemDetailView: View {
         .defaultFocus($tvDetailFocus, tvOpeningFocusTarget, priority: .userInitiated)
         .task { await settleTVOpeningFocus() }
         .onChange(of: tvDetailFocus) { old, focus in
+            let leftTitleRowAgo = tvTitleRowExit.map { ContinuousClock.now - $0 }
+            tvTitleRowExit = old?.isOnTitleRow == true && focus == nil ? .now : nil
             guard !tvDetailOpeningSettled else {
                 if let correction = AppleTVDetailReturnFocus.correction(
                     from: old, to: focus, target: tvOpeningFocusTarget
+                ) ?? AppleTVDetailShelfEntry.correction(
+                    from: old, to: focus, leftTitleRowAgo: leftTitleRowAgo,
+                    firstSimilarID: suggestedItems.first?.id
                 ) {
+                    appleTrace("detail focus: \(String(describing: focus)) corrected to \(correction)")
                     tvDetailFocus = correction
                 }
                 return
@@ -3086,6 +3126,16 @@ struct AppleCatalogItemDetailView: View {
                     height: AppleTVDetailMetrics.screenSize.height
                 )
                 .clipped()
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: AppleTVDetailMetrics.backdropFadeStartFraction),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
                 .accessibilityHidden(true)
             tvOSHeroOverlay
                 .padding(.leading, AppleTVDetailMetrics.overlayLeadingInset)
@@ -3412,7 +3462,8 @@ struct AppleCatalogItemDetailView: View {
                         } label: {
                             AppleTVPosterCard(item: suggestion)
                         }
-                        .buttonStyle(AppleTVDetailCardStyle())
+                        .buttonStyle(.borderless)
+                        .focused($tvDetailFocus, equals: .similar(suggestion.id))
                         .accessibilityIdentifier("detail.similar.\(suggestion.id)")
                     }
                 }

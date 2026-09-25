@@ -7,6 +7,9 @@ struct AppleHomeTVHeroContext {
     let cycle: AppleHeroRotation.Cycle
     let focus: FocusState<AppleTVHeroPaging.Target?>.Binding
     let pagingEnabled: Bool
+    /// Called by a button that opens a page, so focus coming back from it
+    /// stays on that button (`AppleTVHeroPaging.entry`).
+    var willOpenPage: (AppleTVHeroPaging.Target) -> Void = { _ in }
 }
 
 #if os(tvOS)
@@ -18,8 +21,10 @@ struct AppleHomeTVHeroContext {
 /// hero has focus; left past the first button and right past the last turn the
 /// page (`AppleTVHeroPaging`).
 ///
-/// Only the hero is involved: up to the tab bar and down to the rows are the
-/// focus engine's own moves, untouched.
+/// The buttons are a focus section as wide as the screen, so Down from any
+/// tab and Up from any card reach them, and focus that arrives goes to Play,
+/// as the Apple TV app's does (`AppleTVHeroPaging.entry`). Up to the tab bar
+/// and down to the rows are the focus engine's own moves.
 struct AppleHomeTVHeroCarousel<Page: View>: View {
     let pages: [AppleHeroPageArt]
     let slots: AppleHeroPageSlots
@@ -27,6 +32,8 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
 
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @FocusState private var focus: AppleTVHeroPaging.Target?
+    /// The button whose page is open; focus coming back from it stays there.
+    @State private var returnTarget: AppleTVHeroPaging.Target?
     /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
     @State private var heroIsVisible = false
 
@@ -36,10 +43,20 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
             page(shown, wordmarkFailed, AppleHomeTVHeroContext(
                 cycle: cycle,
                 focus: $focus,
-                pagingEnabled: AppleTVHeroPaging.stopsAreFocusable(focused: focus, pageCount: cycle.count)
+                pagingEnabled: AppleTVHeroPaging.stopsAreFocusable(focused: focus, pageCount: cycle.count),
+                willOpenPage: { returnTarget = $0 }
             ))
         }
-        .onChange(of: focus) { _, target in
+        .onChange(of: focus) { old, target in
+            if old == nil, let target {
+                let settled = AppleTVHeroPaging.entry(arriving: target, returningTo: returnTarget)
+                appleTrace("hero focus: arrived on \(target), settles on \(settled)")
+                returnTarget = nil
+                if settled != target {
+                    focus = settled
+                    return
+                }
+            }
             guard let turn = AppleTVHeroPaging.turn(for: target) else { return }
             cycle.step(by: turn.offset, at: .now)
             focus = turn.refocus
@@ -92,6 +109,7 @@ struct AppleHomeTVHeroActions: View {
     let isInList: Bool
     let focus: FocusState<AppleTVHeroPaging.Target?>.Binding
     let pagingEnabled: Bool
+    var willOpenPage: (AppleTVHeroPaging.Target) -> Void = { _ in }
     let onPlay: () -> Void
     let onToggleList: () -> Void
     let onDetails: () -> Void
@@ -123,7 +141,10 @@ struct AppleHomeTVHeroActions: View {
             .accessibilityValue(isInList ? "Saved" : "Not saved")
             .accessibilityIdentifier("home.featured.my-list")
 
-            Button(action: onDetails) {
+            Button {
+                willOpenPage(.details)
+                onDetails()
+            } label: {
                 Label("Details", systemImage: "info")
                     .labelStyle(.iconOnly)
             }
@@ -134,6 +155,8 @@ struct AppleHomeTVHeroActions: View {
         }
         // The stops take no room: Play stays on the copy's leading edge.
         .padding(.horizontal, -(M.pillGap + M.pagingStopWidth))
+        .frame(width: M.actionsFocusWidth, alignment: .leading)
+        .focusSection()
     }
 
     /// An invisible stop that turns the page the moment it takes focus.

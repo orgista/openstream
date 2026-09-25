@@ -34,6 +34,22 @@ struct AppleTVHeroPagingTests {
         #expect(!AppleTVHeroPaging.stopsAreFocusable(focused: .play, pageCount: 0))
     }
 
+    /// N43: Down from the tab bar (or Up from a row) lands on the nearest
+    /// button; the Apple TV app's hero lands on its primary one.
+    @Test(arguments: [AppleTVHeroPaging.Target.play, .myList, .details])
+    func focusArrivingInTheHeroGoesToPlay(_ arriving: AppleTVHeroPaging.Target) {
+        #expect(AppleTVHeroPaging.entry(arriving: arriving, returningTo: nil) == .play)
+    }
+
+    @Test func closingThePageDetailsOpenedReturnsToDetails() {
+        #expect(AppleTVHeroPaging.entry(arriving: .details, returningTo: .details) == .details)
+    }
+
+    @Test func arrivingSomewhereElseThanTheOpenerStillGoesToPlay() {
+        #expect(AppleTVHeroPaging.entry(arriving: .myList, returningTo: .details) == .play)
+        #expect(AppleTVHeroPaging.entry(arriving: .play, returningTo: .details) == .play)
+    }
+
     @Test func theCycleHoldsOnlyWhileTheHeroHasFocus() {
         #expect(!AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false))
         #expect(AppleTVHeroPaging.cycleIsPaused(heroHasFocus: true))

@@ -16,6 +16,21 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         public let artworkURL: URL?
         public let displayURL: URL
         public let playURL: URL?
+        /// How far in, 0–1, for a title in Continue Watching; nil elsewhere.
+        /// The Top Shelf draws it as the bar under the tile, as the Apple TV
+        /// app does. Snapshots written before this field decode it as nil.
+        public let progress: Double?
+
+        public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
+                    progress: Double? = nil) {
+            self.id = id
+            self.title = title
+            self.kind = kind
+            self.artworkURL = artworkURL
+            self.displayURL = displayURL
+            self.playURL = playURL
+            self.progress = progress
+        }
     }
 
     public let version: Int
@@ -222,9 +237,9 @@ public actor AppleTopShelfSnapshotWriter {
         let snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
-            continueWatching: Array(continued.prefix(12)).map(Self.item),
-            recentlyAdded: Array(recent.prefix(20)).map(Self.item),
-            favorites: Array(favorites.prefix(12)).map(Self.item),
+            continueWatching: Array(continued.prefix(12)).map { Self.item($0, progress: $0.progress) },
+            recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
+            favorites: Array(favorites.prefix(12)).map { Self.item($0) },
             topPicks: Self.topPicks(from: sections)
         )
         let data = try JSONEncoder().encode(snapshot)
@@ -260,7 +275,7 @@ public actor AppleTopShelfSnapshotWriter {
         )
     }
 
-    private static func item(_ record: AppleMediaRecord) -> AppleTopShelfSnapshot.Item {
+    private static func item(_ record: AppleMediaRecord, progress: Double? = nil) -> AppleTopShelfSnapshot.Item {
         let display = URL(string: "openstream://media/\(record.id)?action=display")!
         let play = record.availability.count == 1
             ? URL(string: "openstream://media/\(record.id)?action=play")
@@ -271,7 +286,8 @@ public actor AppleTopShelfSnapshotWriter {
             kind: record.kind.rawValue,
             artworkURL: AppleSystemArtworkPolicy.publicURL(record.artworkURL),
             displayURL: display,
-            playURL: play
+            playURL: play,
+            progress: progress.map { min(max($0, 0), 1) }
         )
     }
 

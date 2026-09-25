@@ -79,3 +79,56 @@ struct AppleTVDetailReturnFocusTests {
         #expect(AppleTVDetailReturnFocus.correction(from: nil, to: nil, target: .play) == nil)
     }
 }
+
+/// N43: Down from Play on a movie landed on the third More Like This poster;
+/// the Apple TV app goes to the first item of the next row.
+@Suite("Apple TV title page focus going down to More Like This")
+struct AppleTVDetailShelfEntryTests {
+    @Test(arguments: [AppleTVDetailFocus.play, .myList, .rate, .rateChoice(1)])
+    func downFromTheTitleRowGoesToTheFirstCard(_ old: AppleTVDetailFocus) {
+        #expect(AppleTVDetailShelfEntry.correction(from: old, to: .similar("third"), firstSimilarID: "first")
+            == .similar("first"))
+    }
+
+    @Test func landingOnTheFirstCardNeedsNothing() {
+        #expect(AppleTVDetailShelfEntry.correction(from: .play, to: .similar("first"), firstSimilarID: "first") == nil)
+    }
+
+    @Test func movesAlongTheRowAreLeftAlone() {
+        #expect(AppleTVDetailShelfEntry.correction(from: .similar("first"), to: .similar("second"),
+                                                   firstSimilarID: "first") == nil)
+    }
+
+    /// The engine reports `nil` for a frame between Play and the card.
+    @Test func aBriefNilRightAfterTheTitleRowIsTheSameMove() {
+        #expect(AppleTVDetailShelfEntry.correction(from: nil, to: .similar("third"),
+                                                   leftTitleRowAgo: .milliseconds(16), firstSimilarID: "first")
+            == .similar("first"))
+    }
+
+    @Test func aLongStayBelowTheTitleRowIsAnotherMove() {
+        #expect(AppleTVDetailShelfEntry.correction(from: nil, to: .similar("third"),
+                                                   leftTitleRowAgo: .seconds(3), firstSimilarID: "first") == nil)
+    }
+
+    @Test func comingFromAnEpisodeIsLeftAlone() {
+        // An episode or the season picker holds focus as `nil`.
+        #expect(AppleTVDetailShelfEntry.correction(from: nil, to: .similar("third"), firstSimilarID: "first") == nil)
+    }
+
+    @Test func noSuggestionsNeedNothing() {
+        #expect(AppleTVDetailShelfEntry.correction(from: .play, to: .similar("third"), firstSimilarID: nil) == nil)
+        #expect(AppleTVDetailShelfEntry.correction(from: .play, to: .rate, firstSimilarID: "first") == nil)
+    }
+
+    @Test func upFromACardStillGoesToPlay() {
+        #expect(AppleTVDetailReturnFocus.correction(from: .similar("third"), to: .rate, target: .play) == .play)
+        #expect(AppleTVDetailReturnFocus.correction(from: .similar("third"), to: .play, target: .play) == nil)
+    }
+
+    @Test func aCardNeverTriggersTheOpeningOrReturnCorrections() {
+        #expect(AppleTVDetailOpeningFocus.correction(for: .similar("first"), hasHadAnyFocus: true) == nil)
+        #expect(AppleTVDetailReturnFocus.correction(from: nil, to: .similar("first"), target: .play) == nil)
+        #expect(AppleTVDetailReturnFocus.correction(from: .play, to: .similar("first"), target: .play) == nil)
+    }
+}

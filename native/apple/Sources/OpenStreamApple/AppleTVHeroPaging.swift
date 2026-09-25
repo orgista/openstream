@@ -3,8 +3,9 @@ import Foundation
 /// How the Apple TV Discover hero turns its pages with the Siri Remote, after
 /// the Apple TV app: while a hero button has focus, pressing (or swiping) left
 /// past the first button shows the previous page and right past the last shows
-/// the next, and focus stays on the button it left. Up and down are never
-/// touched, so the tab bar above and the rows below are reached as before.
+/// the next, and focus stays on the button it left. Up to the tab bar and
+/// down to the rows are the focus engine's own moves; focus coming back into
+/// the hero goes to Play (`entry(arriving:returningTo:)`).
 ///
 /// The hero does it with two invisible focus stops beside its buttons
 /// (`AppleHomeTVHeroActions`). They only accept focus while a hero button
@@ -39,6 +40,19 @@ public enum AppleTVHeroPaging {
     /// when there is another page to turn to.
     public static func stopsAreFocusable(focused: Target?, pageCount: Int) -> Bool {
         focused != nil && pageCount > 1
+    }
+
+    /// Where focus arriving in the hero from outside it (`nil` before) settles.
+    ///
+    /// The tab bar and the rows span the screen while the buttons sit at the
+    /// leading edge, so Down from a tab or Up from a card landed on whichever
+    /// button was nearest, or skipped the hero for a row (N41 survey: Discover
+    /// went to a Continue Watching card, Library to Details). The Apple TV
+    /// app's hero takes you to its primary button; so does this one. The one
+    /// exception is `returningTo`: the button that opened a page, which focus
+    /// comes back to when that page is closed.
+    public static func entry(arriving: Target, returningTo: Target?) -> Target {
+        arriving == returningTo ? arriving : .play
     }
 
     /// Whether the hero's cycle holds still: only while anything in the hero

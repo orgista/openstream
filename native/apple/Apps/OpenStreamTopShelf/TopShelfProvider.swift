@@ -16,6 +16,8 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             let artworkURL: URL?
             let displayURL: URL
             let playURL: URL?
+            /// 0–1 for a title in Continue Watching; absent in older snapshots.
+            let progress: Double?
         }
 
         let version: Int
@@ -79,6 +81,10 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             item.imageShape = .poster
             item.displayAction = TVTopShelfAction(url: value.displayURL)
             if let playURL = value.playURL { item.playAction = TVTopShelfAction(url: playURL) }
+            // The bar under a started title, as the Apple TV app draws it.
+            if let progress = value.progress, progress > 0 {
+                item.playbackProgress = min(progress, 1)
+            }
             if let imageURL = value.artworkURL,
                ["https", "http"].contains(imageURL.scheme?.lowercased()),
                imageURL.user == nil, imageURL.password == nil {
