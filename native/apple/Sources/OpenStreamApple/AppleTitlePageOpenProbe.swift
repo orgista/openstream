@@ -1,5 +1,8 @@
 #if DEBUG
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
 /// Review builds only: how long the main thread is busy after a title page is
 /// pushed (N47), measured in the app rather than by attaching a profiler.
@@ -11,7 +14,9 @@ import Foundation
 /// push (N45's window) and over 2 s, the longest busy streak (gaps ≤ 2 ms
 /// merged), when the page first appeared, and the busy spans themselves.
 /// With `-OpenStreamMainThreadSamples` the push is also sampled
-/// (`AppleMainThreadSampler`).
+/// (`AppleMainThreadSampler`). On the Mac each push also prints the window
+/// toolbar's items added and removed in those 2 s, and the items after it
+/// (`title-open <label> toolbar …`), to show what a push rebuilds (N50).
 @MainActor
 enum AppleTitlePageOpenProbe {
     static let isEnabled = UserDefaults.standard.bool(forKey: "OpenStreamTitlePageProbe")
@@ -21,6 +26,10 @@ enum AppleTitlePageOpenProbe {
     private static var intervals: [(start: CFAbsoluteTime, end: CFAbsoluteTime)] = []
     private static var windowStart: CFAbsoluteTime?
     private static var firstAppear: CFAbsoluteTime?
+    #if os(macOS)
+    private static var toolbarEvents: [String] = []
+    private static var toolbarObservers: [NSObjectProtocol] = []
+    #endif
 
     /// Call where the push is requested.
     static func pushed(_ label: String) {
@@ -35,6 +44,11 @@ enum AppleTitlePageOpenProbe {
         busySince = now
         intervals = []
         firstAppear = nil
+        #if os(macOS)
+        // What the pop back before this push did.
+        if !toolbarEvents.isEmpty { toolbarReport("\(label) (before, since the last report)") }
+        toolbarEvents = []
+        #endif
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(2100))
             report(label, start: now)
@@ -55,7 +69,30 @@ enum AppleTitlePageOpenProbe {
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         self.observer = observer
+        #if os(macOS)
+        for (name, sign) in [(NSToolbar.willAddItemNotification, "+"), (NSToolbar.didRemoveItemNotification, "-")] {
+            toolbarObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                // A main-actor class, so it may cross into the closure below.
+                let item = note.userInfo?["item"] as? NSToolbarItem
+                MainActor.assumeIsolated { toolbarEvents.append(sign + (item.map(describe) ?? "?")) }
+            })
+        }
+        #endif
     }
+
+    #if os(macOS)
+    private static func describe(_ item: NSToolbarItem) -> String {
+        let id = item.itemIdentifier.rawValue
+        let short = id.count > 24 ? String(id.suffix(24)) : id
+        return "\(short)@\(String(UInt(bitPattern: ObjectIdentifier(item).hashValue) & 0xFFFFF, radix: 16))"
+    }
+
+    private static func toolbarReport(_ label: String) {
+        let items = NSApp.windows.compactMap(\.toolbar).first?.items.map(describe) ?? []
+        let adds = toolbarEvents.filter { $0.hasPrefix("+") }.count
+        print("[OpenStream] title-open \(label) toolbar +\(adds) -\(toolbarEvents.count - adds) [\(toolbarEvents.joined(separator: " "))] now [\(items.joined(separator: " "))]")
+    }
+    #endif
 
     private static func runLoop(_ activity: CFRunLoopActivity) {
         guard windowStart != nil else { return }
@@ -98,6 +135,9 @@ enum AppleTitlePageOpenProbe {
             .map { "\(Int((($0.start - start) * 1000).rounded()))-\(Int((($0.end - start) * 1000).rounded()))" }
         print("[OpenStream] title-open \(label) loops [\(loops.joined(separator: " "))]")
         print("[OpenStream] title-open \(label) busy \(Int(short.total.rounded()))/600 ms longest \(Int(short.longest.rounded())) ms; busy \(Int(long.total.rounded()))/2000 ms; appear +\(appear) ms)")
+        #if os(macOS)
+        toolbarReport(label)
+        #endif
         fflush(stdout)
         windowStart = nil
         intervals = []

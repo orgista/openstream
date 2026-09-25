@@ -63,10 +63,29 @@ struct AppleTrailerPictureSettleTests {
         #expect(gate.record(nil, size: hero, at: at(3)) == .reveal(window: band, settled: false))
     }
 
-    @Test("Nothing measurable in 3 s reveals the whole raster")
+    @Test("An opening still blank at 3 s waits for its band: PHM's title-page trailer (N50)")
+    func blankOpeningWaitsForTheBand() {
+        var gate = AppleTrailerPictureSettle()
+        #expect(gate.record(nil, size: hero, at: at(0)) == .wait)
+        #expect(gate.record(nil, size: hero, at: at(3.05)) == .wait)
+        #expect(gate.record(band, size: hero, at: at(3.9)) == .wait)
+        #expect(gate.record(band, size: hero, at: at(4.25)) == .reveal(window: band, settled: true))
+    }
+
+    @Test("Nothing measurable in 8 s reveals the whole raster")
     func timesOutWithNothing() {
         var gate = AppleTrailerPictureSettle()
         #expect(gate.record(nil, size: hero, at: at(0)) == .wait)
-        #expect(gate.record(nil, size: hero, at: at(3.05)) == .reveal(window: nil, settled: false))
+        #expect(gate.record(nil, size: hero, at: at(3.05)) == .wait)
+        #expect(gate.record(nil, size: hero, at: at(8)) == .reveal(window: nil, settled: false))
+    }
+
+    @Test("A band first seen after a blank 3 s that never holds reveals at 8 s, at that band")
+    func blankOpeningThenUnstableBand() {
+        var gate = AppleTrailerPictureSettle()
+        #expect(gate.record(nil, size: hero, at: at(0)) == .wait)
+        #expect(gate.record(nil, size: hero, at: at(3.1)) == .wait)
+        #expect(gate.record(band, size: hero, at: at(7.9)) == .wait)
+        #expect(gate.record(nil, size: hero, at: at(8)) == .reveal(window: band, settled: false))
     }
 }

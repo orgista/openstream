@@ -2773,7 +2773,10 @@ struct AppleCatalogItemDetailView: View {
                 onTap: toggleTrailerPlayback,
                 onMute: { heroTrailer.muted.toggle() },
                 onReplay: restartTrailer,
-                controlTopInset: controlTopInset
+                controlTopInset: controlTopInset,
+                // Final crop before the art fades, as the hero's (N46b): the
+                // page revealed first and grew 1.35→1.80× in view (N50).
+                settlesPictureBeforeReveal: true
             )
                 .frame(maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
@@ -5575,9 +5578,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     /// Puts the mute/replay control this far from the top instead of at the
     /// bottom right (the iPhone title page draws its buttons over the bottom).
     var controlTopInset: CGFloat? = nil
-    /// Set by the iPhone and iPad hero: the art stays up until the trailer's
-    /// crop is final (`AppleTrailerPictureSettle`), and it is never
-    /// re-measured once seen. The title page keeps its reveal-then-remeasure.
+    /// Set by the iPhone and iPad hero and title page: the art stays up until
+    /// the trailer's crop is final (`AppleTrailerPictureSettle`), and it is
+    /// never re-measured once seen. Unset, it reveals and then re-measures.
     var settlesPictureBeforeReveal = false
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
@@ -6043,6 +6046,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         if settlesPictureBeforeReveal, let probe = AppleHeroTrailerProbeIOS.fromDefaults() {
             probe.container = container
             container.probe = probe
+        }
+        // `-OpenStreamHeroNoSettle YES`, as on the Mac: reveal, then
+        // re-measure, for a before/after run on one build.
+        if UserDefaults.standard.bool(forKey: "OpenStreamHeroNoSettle") {
+            container.settlesPictureBeforeReveal = false
         }
         #endif
         container.onTap = onTap

@@ -9,11 +9,17 @@ import Foundation
 /// been measured for `stableInterval`, and reveals at whatever was last
 /// measured after `timeout` rather than never. Nothing is measured again
 /// once the video shows, so the crop never changes while it is seen.
+/// The title page's PHM trailer opens dark for ~4 s (N50): with nothing
+/// measured by `timeout` it revealed uncropped for good, a looser crop than
+/// the band's, so an opening that is still blank then waits up to
+/// `blankTimeout` for a band that holds.
 struct AppleTrailerPictureSettle {
     /// The band must hold this long before the art fades (the Mac gate's).
     static let stableInterval: TimeInterval = 0.3
     /// Reveals anyway after this, rather than never show the trailer.
     static let timeout: TimeInterval = 3
+    /// The cap instead when nothing had measured by `timeout`.
+    static let blankTimeout: TimeInterval = 8
     /// How often a frame is measured while the art is up.
     static let pollInterval: TimeInterval = 0.1
     /// Raster fraction two measurements may differ by and still be the same
@@ -29,6 +35,8 @@ struct AppleTrailerPictureSettle {
     private var start: Date?
     private var candidate: (window: ClosedRange<CGFloat>, size: CGSize, since: Date)?
     private var lastMeasured: ClosedRange<CGFloat>?
+    /// Whether nothing had measured when `timeout` passed; nil before then.
+    private var openedBlank: Bool?
 
     /// One measurement of the current frame: `window` is nil for a frame
     /// that measures as nothing (a fade-in, a title card), which breaks the
@@ -36,6 +44,8 @@ struct AppleTrailerPictureSettle {
     mutating func record(_ window: ClosedRange<CGFloat>?, size: CGSize, at now: Date) -> Verdict {
         let start = start ?? now
         self.start = start
+        let elapsed = now.timeIntervalSince(start)
+        if openedBlank == nil, elapsed >= Self.timeout { openedBlank = lastMeasured == nil }
         if let window {
             lastMeasured = window
             if let candidate, candidate.size == size, Self.isSame(candidate.window, window) {
@@ -49,7 +59,7 @@ struct AppleTrailerPictureSettle {
         if let candidate, now.timeIntervalSince(candidate.since) >= Self.stableInterval {
             return .reveal(window: candidate.window, settled: true)
         }
-        if now.timeIntervalSince(start) >= Self.timeout {
+        if elapsed >= (openedBlank == true ? Self.blankTimeout : Self.timeout) {
             return .reveal(window: lastMeasured, settled: false)
         }
         return .wait
