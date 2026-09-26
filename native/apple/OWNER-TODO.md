@@ -7,9 +7,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-- [ ] **Remove the "New Episode" pill** (asked several times; 2026-09-26). Gone from the
-      iPhone, iPad, Mac and Apple TV heroes and from the title pages ("New Episode Every Wednesday"
-      / "New Season" too). Merging now.
+_(nothing open)_
 
 ## Waiting on an owner decision
 
@@ -23,6 +21,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Done
 
+- [x] **Remove the "New Episode" pill** (asked several times) — gone from every hero (iPhone,
+      iPad, Mac, Apple TV) and from the title pages ("New Season" / "New Episode Every …" too) —
+      c9010e7, installed 08:45; Apple TV Dark Matter hero checked without it.
 - [x] Discover row order is a setting (Settings → Discover Rows); Featured Movies / Shows can move
       above Your Library — 74a479e (N67).
 - [x] If a streaming service (e.g. TorBox) is down, fall back to the next best one — 74a479e (N68).
