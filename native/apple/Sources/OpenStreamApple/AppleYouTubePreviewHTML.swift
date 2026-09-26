@@ -30,7 +30,7 @@ enum AppleYouTubePreviewHTML {
     /// (`AppleTrailerPreviewPolicy.macLayoutScale`).
     static func document(
         embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true, allowsSound: Bool = false,
-        layoutScale: Int = 1
+        layoutScale: Int = 1, embedDrawsStartupChrome: Bool = AppleTrailerRevealPolicy.embedDrawsStartupChrome
     ) -> String {
         let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !allowsSound
         let effectiveMuted = requiresMutedPlayback || startsMuted
@@ -78,6 +78,10 @@ enum AppleYouTubePreviewHTML {
         var hasRevealed = false;
         var landscape = \(isLandscape ? "true" : "false");
         var playingSince = null;
+        // Media time when PLAYING was seen: the reveal waits for it to advance.
+        var playingMediaTime = null;
+        // AppleTrailerRevealPolicy: [minimum wait ms, media advance s, cap ms].
+        var revealRules = \(AppleTrailerRevealPolicy.javascriptRules(embedDrawsStartupChrome: embedDrawsStartupChrome));
         var playbackGeneration = 0;
         var previewCapTimer = null;
         var previewCapDeadlineTimer = null;
@@ -121,7 +125,7 @@ enum AppleYouTubePreviewHTML {
 
         function clearRevealTimers() {
           if (revealTimer) {
-            clearTimeout(revealTimer);
+            clearInterval(revealTimer);
             revealTimer = null;
           }
           if (revealWatchdogTimer) {
@@ -147,6 +151,7 @@ enum AppleYouTubePreviewHTML {
           hasRevealed = false;
           hasSeenPlaying = false;
           playingSince = null;
+          playingMediaTime = null;
           document.body.classList.remove('ready');
         }
 
@@ -158,9 +163,22 @@ enum AppleYouTubePreviewHTML {
           player.setSize(width, height);
         }
 
+        function currentMediaTime() {
+          return player && typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
+        }
+
+        // Past the cap, or past the minimum wait with the video really advancing.
+        function revealAllowed() {
+          var rule = landscape ? revealRules.landscape : revealRules.portrait;
+          var waited = Date.now() - playingSince;
+          if (waited >= rule[2]) return true;
+          if (waited < rule[0] || playingMediaTime === null) return false;
+          return currentMediaTime() - playingMediaTime >= rule[1];
+        }
+
         function revealPlayer(reason) {
           if (!desiredPlaying || !playerReady || hasRevealed || !hasSeenPlaying) return;
-          if (Date.now() - playingSince < (landscape ? 3200 : 900)) return;
+          if (!revealAllowed()) return;
           if (reason === 'watchdog') console.log('[OpenStream] trailer reveal watchdog: PLAYING was seen without a reveal');
           resizePlayer();
           document.body.classList.add('ready');
@@ -172,15 +190,11 @@ enum AppleYouTubePreviewHTML {
         function revealAfterPlaybackStarts() {
           if (!desiredPlaying || !playerReady || hasRevealed) return;
           if (revealTimer) return;
-          var reveal = function() {
+          if (playingMediaTime === null) playingMediaTime = currentMediaTime();
+          // Polled: revealPlayer clears it once the rule allows the reveal.
+          revealTimer = setInterval(function() {
             if (hasSeenPlaying) revealPlayer('playing-delay');
-            revealTimer = null;
-          };
-          if (landscape) {
-            revealTimer = setTimeout(reveal, 3200);
-          } else {
-            revealTimer = setTimeout(function() { reveal(); }, 900);
-          }
+          }, 50);
         }
 
         window.setTrailerLandscape = function(value) {
@@ -194,6 +208,7 @@ enum AppleYouTubePreviewHTML {
           notifyNative('concealed');
           if (hasSeenPlaying && desiredPlaying) {
             playingSince = Date.now();
+            playingMediaTime = null;
             revealAfterPlaybackStarts();
           }
         };

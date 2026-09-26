@@ -97,7 +97,10 @@ import Testing
     #expect(html.contains("player.setSize(width, height)"))
     #expect(html.contains("body.ready iframe"))
     #expect(html.contains("revealAfterPlaybackStarts"))
-    #expect(html.contains("}, 900);"))
+    // N70: the fixed 3200 / 900 ms timers are gone; the policy's rule decides.
+    #expect(html.contains("var revealRules = {landscape: ["))
+    #expect(html.contains("if (!revealAllowed()) return;"))
+    #expect(!html.contains("setTimeout(reveal, 3200)"))
     #expect(html.contains("revealWatchdogTimer"))
     #expect(html.contains("hasSeenPlaying"))
     #expect(html.contains("}, 6000);"))

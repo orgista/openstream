@@ -59,6 +59,22 @@ final class AppleMacHeroTrailerProbe {
         // drawn now, so nothing heavy runs on the main thread at the fade.
         writeArt(named: "\(number)-before-art.png")
         writeHero(named: "\(number)-before-still.png")
+        // The web view under the cover from its first frame (`-OpenStreamHeroTrailerProbeFilm YES`),
+        // every quarter second for 5 s: what the page draws before the art fades (N70).
+        if UserDefaults.standard.bool(forKey: "OpenStreamHeroTrailerProbeFilm") {
+            for step in 1...20 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(step) * 0.25) { [weak self] in
+                    guard let self else { return }
+                    let name = "\(self.number)-film-\(String(format: "%04d", step * 250))ms.png"
+                    self.container?.webView.evaluateJavaScript(
+                        "player && player.getCurrentTime ? player.getCurrentTime() + ' ' + player.getPlaybackQuality() : ''"
+                    ) { [weak self] value, _ in
+                        self?.lines.append("FILM \(name) media=\(value ?? "?")")
+                    }
+                    self.writeTrailer(named: name, wholePage: true)
+                }
+            }
+        }
         let still = UserDefaults.standard.double(forKey: "OpenStreamHeroTrailerProbeStill")
         if still > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + still) { [weak self] in self?.writeStill() }
@@ -210,10 +226,13 @@ final class AppleMacHeroTrailerProbe {
     }
 
     /// The hero's part of the web view, at the hero's size.
-    private func writeTrailer(named name: String) {
+    /// `wholePage` keeps the parts the hero crops away (the film: nothing
+    /// YouTube draws at the page's edges either).
+    private func writeTrailer(named name: String, wholePage: Bool = false) {
         guard let container else { return }
         let web = container.webView.frame
-        let visible = container.bounds.offsetBy(dx: -web.minX, dy: -web.minY)
+        let visible = wholePage ? CGRect(origin: .zero, size: web.size)
+            : container.bounds.offsetBy(dx: -web.minX, dy: -web.minY)
         let configuration = WKSnapshotConfiguration()
         configuration.afterScreenUpdates = false
         configuration.snapshotWidth = NSNumber(value: Double(web.width))
