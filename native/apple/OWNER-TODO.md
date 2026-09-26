@@ -7,8 +7,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-- [ ] **Refresh spinner too big / poor UX** (2026-09-26, Mac screenshot): the refresh button next to
-      Search turns into a large spinner while Discover reloads.
+_(nothing open)_
 
 ## Waiting on an owner decision
 
@@ -28,6 +27,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Done
 
+- [x] **Refresh spinner too big / poor UX** — the refresh arrow now stays the same size and turns
+      while the tab reloads (iPhone, iPad, Mac, Vision Pro) — e4b8dee, installed 2026-09-26.
 - [x] Crash report pasted 2026-09-26: **PosterBoard** (Apple's own screensaver process) in the Apple
       TV simulator, 01:09. Not OpenStream; it crashed inside Apple's framework while loading screensaver
       posters. No app change.
