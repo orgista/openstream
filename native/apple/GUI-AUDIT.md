@@ -1692,9 +1692,11 @@ order; this section grows as each lands.
       TB" ×4 and "…720p" ×2 — the title is the stripped provider tag plus quality, and the
       candidate's filename and size are not shown. For a *download* those are exactly what decides.
       Same rows as the playback sheet, so fixing the detail line fixes both. Next.
-- [ ] The episode row's ↓ control measures **12.7 × 16 pt** (from the test's frame print) — well
-      under the 44 pt minimum. Tap target, not layout.
-- [ ] **Bug 3: Discover posters slow or missing.**
+- [x] The episode row's ↓ control measures **12.7 × 16 pt** (from the test's frame print) — well
+      under the 44 pt minimum. Tap target, not layout. **Fixed** (6f807d7): the glyph sits in a
+      44 × 44 `contentShape(.rect)` frame (`episodeDownloadButton`); re-read 2026-09-26 at c5f8388.
+- [x] **Bug 3: Discover posters slow or missing.** Fixed by the poster disk cache (see
+      "faster posters" below); ticked 2026-09-26.
 - [F] **Bug 4: Live › All showed one channel for an M3U source.** One line:
       `channels = numbered.isEmpty ? selected : numbered.map(\.1)`. Under **All** with the default
       **Premier Guide** package, the list is only the channels that matched the owner's curated US
