@@ -94,7 +94,10 @@ struct AppleDiscoverRowsSettingsView: View {
             // cancels it, and the refresh publishes the shelves itself.
             guard let catalogStore else { return }
             appleTrace("discoverRows.catalogs sections=\(catalogStore.sections.count) loading=\(catalogStore.isLoading) sources=\(sourceStore.sources.count)")
-            guard catalogStore.sections.isEmpty, !catalogStore.isLoading else { return }
+            guard !catalogStore.isLoading,
+                  AppleDiscoverRowsCatalogPolicy.needsCachedLoad(sections: catalogStore.sections,
+                                                                 sources: sourceStore.sources)
+            else { return }
             await catalogStore.loadCachedSections(sources: sourceStore.sources)
             appleTrace("discoverRows.catalogs loaded=\(catalogStore.sections.count)")
         }
@@ -210,3 +213,17 @@ struct AppleTVFocusReadableText: View {
     }
 }
 #endif
+
+/// When Discover Rows should read the catalogue shelves from the cache: none
+/// are loaded, or the loaded ones no longer match the sources (a source was
+/// added, removed or reconfigured since Discover last loaded them).
+enum AppleDiscoverRowsCatalogPolicy {
+    static func needsCachedLoad(sections: [AppleCatalogSection], sources: [AppleSource]) -> Bool {
+        if sections.isEmpty { return true }
+        let configured = Dictionary(sources.map { ($0.id, AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: $0)) },
+                                    uniquingKeysWith: { first, _ in first })
+        if sections.contains(where: { configured[$0.sourceID] != $0.sourceConfigurationID }) { return true }
+        let loaded = Set(sections.map(\.sourceID))
+        return sources.contains { !AppleCatalogDiscoveryPolicy.catalogs(for: $0).isEmpty && !loaded.contains($0.id) }
+    }
+}

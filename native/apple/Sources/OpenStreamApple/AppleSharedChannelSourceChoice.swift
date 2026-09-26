@@ -11,7 +11,7 @@ public struct AppleSharedChannelSourceChoice: Identifiable, Equatable, Sendable 
     /// A row per candidate, named for its source (the channel's own name when
     /// the source is gone). Two sources with the same name, or one source
     /// carrying the channel twice, would read as identical rows, so those
-    /// rows add the channel's name.
+    /// rows add the channel's name, and rows still alike are numbered.
     public static func choices(for channels: [AppleIPTVChannel],
                                sourceNames: [UUID: String]) -> [AppleSharedChannelSourceChoice] {
         let bases = channels.map { channel -> String in
@@ -20,10 +20,21 @@ public struct AppleSharedChannelSourceChoice: Identifiable, Equatable, Sendable 
         }
         var counts: [String: Int] = [:]
         for base in bases { counts[base, default: 0] += 1 }
-        return zip(channels, bases).map { channel, base in
+        let titles = zip(channels, bases).map { channel, base in
             let collides = (counts[base] ?? 0) > 1 && base != channel.name
-            return AppleSharedChannelSourceChoice(channel: channel,
-                                                  title: collides ? "\(base) · \(channel.name)" : base)
+            return collides ? "\(base) · \(channel.name)" : base
+        }
+        // Rows can still match (the source is named for the channel, or two
+        // gone sources fall back to the same channel name): number those.
+        var titleCounts: [String: Int] = [:]
+        for title in titles { titleCounts[title, default: 0] += 1 }
+        var seen: [String: Int] = [:]
+        return zip(channels, titles).map { channel, title in
+            guard (titleCounts[title] ?? 0) > 1 else {
+                return AppleSharedChannelSourceChoice(channel: channel, title: title)
+            }
+            seen[title, default: 0] += 1
+            return AppleSharedChannelSourceChoice(channel: channel, title: "\(title) (\(seen[title]!))")
         }
     }
 }

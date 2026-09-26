@@ -49,6 +49,20 @@ struct AppleSharedChannelSourceChoiceTests {
         #expect(choices.map(\.title) == ["IPTV · News One", "IPTV · News One HD"])
     }
 
+    @Test("Rows still alike after adding the channel name are numbered")
+    func stillAlikeAreNumbered() {
+        let first = UUID(), second = UUID()
+        let gone = AppleSharedChannelSourceChoice.choices(
+            for: [channel("a", "News One", source: UUID()), channel("b", "News One", source: UUID())],
+            sourceNames: [:])
+        #expect(gone.map(\.title) == ["News One (1)", "News One (2)"])
+        let namedForChannel = AppleSharedChannelSourceChoice.choices(
+            for: [channel("a", "News One", source: first), channel("b", "News One", source: second),
+                  channel("c", "News Two", source: UUID())],
+            sourceNames: [first: "News One", second: "News One"])
+        #expect(namedForChannel.map(\.title) == ["News One (1)", "News One (2)", "News Two"])
+    }
+
     @Test("No candidates, no rows")
     func empty() {
         #expect(AppleSharedChannelSourceChoice.choices(for: [], sourceNames: [:]).isEmpty)
