@@ -2149,6 +2149,11 @@ struct AppleCatalogCard: View {
                     .frame(width: width * min(max(progress, 0), 1))
             }
             .frame(width: width, height: 3)
+            .background {
+                Capsule()
+                    .fill(AppleDesignTokens.artworkProgressBacking)
+                    .padding(-AppleDesignTokens.artworkProgressBackingOutset)
+            }
             .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
             .padding(.bottom, inset.bottom)
             .allowsHitTesting(false)

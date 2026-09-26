@@ -289,6 +289,11 @@ struct AppleStillProgressBar: View {
                     .frame(width: width * min(max(progress, 0), 1))
             }
             .frame(height: AppleDiscoverPhoneRowMetrics.progressHeight)
+            .background {
+                Rectangle()
+                    .fill(AppleDesignTokens.artworkProgressBacking)
+                    .padding(-AppleDesignTokens.artworkProgressBackingOutset)
+            }
             .shadow(color: AppleDesignTokens.artworkProgressShadow, radius: 1)
             .allowsHitTesting(false)
             .accessibilityHidden(true)

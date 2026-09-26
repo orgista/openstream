@@ -1117,6 +1117,57 @@ final class AppleTVFocusUITests: XCTestCase {
         for step in 1 ... 4 { press(.down, "settings-down-\(step)", wait: 1.0) }
     }
 
+    // MARK: - Watched tick under the focus lift (N66)
+
+    /// Opt-in: photographs the first episodes of the first series with the
+    /// in-memory watched fixture on, focused and unfocused, so the tick on a
+    /// watched still can be checked under the focus lift (N58 lost a bar on
+    /// the art's edge there). Frames go to `OPENSTREAM_EPISODE_TICK_DIR`.
+    /// Navigation only: nothing is selected, and the fixture writes nothing.
+    func testEpisodeTickSurvivesFocus() throws {
+        guard let dir = ProcessInfo.processInfo.environment["OPENSTREAM_EPISODE_TICK_DIR"] else {
+            throw XCTSkip("Set OPENSTREAM_EPISODE_TICK_DIR to photograph the watched tick.")
+        }
+        let folder = URL(fileURLWithPath: dir)
+        let seeds = (1...8).flatMap { season in (1...3).map { "\(season):\($0)" } }.joined(separator: ",")
+        app.launchArguments += ["-OpenStreamVisionScreen", "detail", "-OpenStreamTrace", "YES",
+                                "-OpenStreamDebugWatchedFixture", seeds,
+                                "-openstream.settings.trailer.autoplay.v1", "NO"]
+        app.launch()
+        XCTAssertTrue(wait(for: element("detail.play"), 40), "the title page never appeared")
+        let isEpisode = NSPredicate(format: "label BEGINSWITH %@", "Play S")
+        XCTAssertTrue(app.descendants(matching: .any).matching(isEpisode).firstMatch.waitForExistence(timeout: 30),
+                      "the episode rail never loaded")
+        Thread.sleep(forTimeInterval: 4)
+        func shoot(_ step: String) {
+            let f = focusedElement
+            let frame = f.frame
+            print("TICK \(step): label='\(f.label.prefix(40))' value='\(f.value ?? "")' "
+                  + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+            let screenshot = XCUIScreen.main.screenshot()
+            try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent("\(step).png"))
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = step
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        shoot("01-play-focused")
+        if element("detail.season").exists {
+            remote.press(.down)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        remote.press(.down)
+        XCTAssertTrue(focused(where: isEpisode).waitForExistence(timeout: 10),
+                      "expected an episode to hold focus, got '\(focusedElement.label)'")
+        Thread.sleep(forTimeInterval: 1.5)
+        shoot("02-episode1-focused")
+        for step in 3...5 {
+            remote.press(.right)
+            Thread.sleep(forTimeInterval: 1.5)
+            shoot(String(format: "%02d-episode%d-focused", step, step - 1))
+        }
+    }
+
     // MARK: - Title page fill timing (speed item D2)
 
     /// Opens the title pages listed in `OPENSTREAM_FILL_IDS` (media-index record

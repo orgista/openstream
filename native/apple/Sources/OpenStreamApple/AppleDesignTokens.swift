@@ -15,9 +15,27 @@ public enum AppleDesignTokens {
     /// tint, so on a bright still a white fill vanished (N49 #9). A mid-grey
     /// track darkens a bright still under the fill and still shows against a
     /// black one, where a plain black track disappeared.
-    public static let artworkProgressTrack = Color(white: 0.35).opacity(0.7)
+    public static let artworkProgressTrack = Color(white: artworkProgressTrackWhite).opacity(artworkProgressTrackOpacity)
+    static let artworkProgressTrackWhite = 0.35
+    static let artworkProgressTrackOpacity = 0.7
     /// Lifts the bar off artwork as bright as its fill.
     public static let artworkProgressShadow = Color.black.opacity(0.4)
+    /// A thin dark capsule behind the whole bar, `artworkProgressBackingOutset`
+    /// wider on every side. On a near-white still the track alone read as a
+    /// faint grey line (N60, "Toxic"); the backing darkens the track and rings
+    /// the bar, as the Apple TV app's bar does on bright stills. Black on
+    /// black, so the bar on dark art looks exactly as it did.
+    public static let artworkProgressBacking = Color.black.opacity(artworkProgressBackingOpacity)
+    static let artworkProgressBackingOpacity = 0.6
+    public static let artworkProgressBackingOutset: CGFloat = 1
+
+    /// The grey level (0 black, 1 white) the track shows over art of grey
+    /// level `art`, with the backing under it. For tests: the look on dark
+    /// art must not move, and on white art the track must read.
+    static func artworkProgressTrackLevel(overArt art: Double, backed: Bool = true) -> Double {
+        let under = backed ? art * (1 - artworkProgressBackingOpacity) : art
+        return artworkProgressTrackWhite * artworkProgressTrackOpacity + under * (1 - artworkProgressTrackOpacity)
+    }
 
     #if os(visionOS)
     public static let minimumActionSize: CGFloat = 60
