@@ -6015,6 +6015,13 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             let errorCode = payload["errorCode"] as? Int
             let mediaTime = payload["mediaTime"] as? Double ?? 0
             let quality = payload["quality"] as? String ?? ""
+            #if DEBUG && os(iOS)
+            if state == "chromeProbe" {
+                let items = payload["items"] as? [String] ?? []
+                appleTrace("trailer chrome t=\(payload["t"] as? Double ?? -1) n=\(items.count) \(items.joined(separator: " | "))")
+                return
+            }
+            #endif
             appleTrace("trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             #if DEBUG && os(iOS)
             if state == "playing" { container?.probe?.begin() }
@@ -6098,11 +6105,28 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false
             ))
-            configuration.userContentController.addUserScript(WKUserScript(
-                source: AppleYouTubePreviewHTML.playerChromeScript,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            ))
+            #if DEBUG && os(iOS)
+            // `-OpenStreamTrailerNoChromeCSS YES` (N75): without the chrome CSS, to film what it hides.
+            let injectsChromeCSS = !UserDefaults.standard.bool(forKey: "OpenStreamTrailerNoChromeCSS")
+            #else
+            let injectsChromeCSS = true
+            #endif
+            if injectsChromeCSS {
+                configuration.userContentController.addUserScript(WKUserScript(
+                    source: AppleYouTubePreviewHTML.playerChromeScript,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false
+                ))
+            }
+            #if DEBUG && os(iOS)
+            if UserDefaults.standard.bool(forKey: "OpenStreamHeroTrailerProbe") {
+                configuration.userContentController.addUserScript(WKUserScript(
+                    source: AppleHeroTrailerProbeIOS.frameChromeScript,
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: false
+                ))
+            }
+            #endif
             configuration.userContentController.add(messageHandler, name: "trailerState")
             webView = WKWebView(frame: .zero, configuration: configuration)
             super.init(frame: frame)

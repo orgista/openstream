@@ -30,7 +30,7 @@ enum AppleYouTubePreviewHTML {
     /// (`AppleTrailerPreviewPolicy.macLayoutScale`).
     static func document(
         embedURL: URL, startsPlaying: Bool, isLandscape: Bool = false, startsMuted: Bool = true, allowsSound: Bool = false,
-        layoutScale: Int = 1, embedDrawsStartupChrome: Bool = AppleTrailerRevealPolicy.embedDrawsStartupChrome
+        layoutScale: Int = 1, startupChromeCanShow: Bool = AppleTrailerRevealPolicy.startupChromeCanShow
     ) -> String {
         let requiresMutedPlayback = ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback && !allowsSound
         let effectiveMuted = requiresMutedPlayback || startsMuted
@@ -81,7 +81,7 @@ enum AppleYouTubePreviewHTML {
         // Media time when PLAYING was seen: the reveal waits for it to advance.
         var playingMediaTime = null;
         // AppleTrailerRevealPolicy: [minimum wait ms, media advance s, cap ms].
-        var revealRules = \(AppleTrailerRevealPolicy.javascriptRules(embedDrawsStartupChrome: embedDrawsStartupChrome));
+        var revealRules = \(AppleTrailerRevealPolicy.javascriptRules(startupChromeCanShow: startupChromeCanShow));
         var playbackGeneration = 0;
         var previewCapTimer = null;
         var previewCapDeadlineTimer = null;

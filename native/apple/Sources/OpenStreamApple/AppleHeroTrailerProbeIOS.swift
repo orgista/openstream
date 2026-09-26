@@ -66,12 +66,17 @@ final class AppleHeroTrailerProbeIOS {
         writeStill(named: "\(number)-before-still.png")
         writeCover(named: "\(number)-before-art.png")
         // The web view under the cover from its first frame (`-OpenStreamHeroTrailerProbeFilm YES`),
-        // every half second: when YouTube's title strip and link come and go.
+        // every half second (`-OpenStreamHeroTrailerProbeFilmStep` seconds, N75: 0.25) for 10 s: when
+        // YouTube's title strip and link come and go. `-raw-` frames are the whole web view, uncropped.
         if UserDefaults.standard.bool(forKey: "OpenStreamHeroTrailerProbeFilm") {
-            for step in 1...20 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(step) * 0.5) { [weak self] in
+            let configured = UserDefaults.standard.double(forKey: "OpenStreamHeroTrailerProbeFilmStep")
+            let step = configured > 0 ? configured : 0.5
+            for index in 1...Int((10 / step).rounded()) {
+                let milliseconds = Int((Double(index) * step * 1000).rounded())
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * step) { [weak self] in
                     guard let self else { return }
-                    self.writeTrailer(named: "\(self.number)-film-\(String(format: "%03d", step * 5))ds.png")
+                    self.writeTrailer(named: "\(self.number)-film-\(String(format: "%05d", milliseconds))ms.png")
+                    self.writeRawWebView(named: "\(self.number)-raw-\(String(format: "%05d", milliseconds))ms.png")
                 }
             }
         }
@@ -200,6 +205,64 @@ final class AppleHeroTrailerProbeIOS {
                                                      width: CGFloat(cg.width) * sx, height: CGFloat(cg.height) * sy))
             }
             try? output.pngData()?.write(to: directory.appending(path: name))
+        }
+    }
+
+    /// Injected into YouTube's own player frame when the probe is on (N75):
+    /// every 250 ms it lists the visible elements over the top quarter and
+    /// bottom fifth of the player (YouTube's title strip and link), with their
+    /// opacity, and the video's time, as `chromeProbe` messages.
+    static let frameChromeScript = """
+    (function() {
+      if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
+      var last = '', reported = false;
+      setInterval(function() {
+        var video = document.querySelector('video');
+        var h = innerHeight, w = innerWidth, items = [];
+        var all = document.body ? document.body.getElementsByTagName('*') : [];
+        for (var i = 0; i < all.length && items.length < 14; i++) {
+          var el = all[i];
+          if (el === video || el.children.length > 3) continue;
+          var r = el.getBoundingClientRect();
+          if (r.width < 4 || r.height < 4 || r.width * r.height > w * h * 0.5) continue;
+          if (!(r.top < h * 0.25 || r.bottom > h * 0.8)) continue;
+          var cs = getComputedStyle(el), op = 1, p = el;
+          if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+          while (p && p.nodeType === 1) { op *= parseFloat(getComputedStyle(p).opacity || '1'); p = p.parentElement; }
+          if (op < 0.02) continue;
+          var text = (el.childElementCount === 0 ? (el.textContent || '') : '').trim().slice(0, 16);
+          items.push(el.tagName.toLowerCase() + '.' + String(el.className || '').replace(/\\s+/g, '.').slice(0, 60)
+            + '@' + Math.round(r.top / h * 100) + '%h' + Math.round(r.height / h * 100) + ' op' + op.toFixed(2) + (text ? ' "' + text + '"' : ''));
+        }
+        if (!reported && video && video.currentTime > 0.1) {
+          reported = true;
+          var hidden = [];
+          var candidates = document.querySelectorAll('a, [class*="itle"], [class*="hannel"], [class*="VideoInfo"]');
+          for (var j = 0; j < candidates.length && hidden.length < 12; j++) {
+            var c = candidates[j], box = c.getBoundingClientRect(), host = c.closest('[class*="player-controls"]');
+            hidden.push('HIDDEN? ' + c.tagName.toLowerCase() + '.' + String(c.className || '').replace(/\\s+/g, '.').slice(0, 50)
+              + ' box=' + Math.round(box.width) + 'x' + Math.round(box.height)
+              + ' in=' + (host ? String(host.className).split(' ')[0] + ':' + getComputedStyle(host).display : 'none'));
+          }
+          items = items.concat(hidden);
+        }
+        var key = items.join('|');
+        var t = video ? video.currentTime : -1;
+        if (key === last && t > 0) return;
+        last = key;
+        try { window.webkit.messageHandlers.trailerState.postMessage({state: 'chromeProbe', t: t, items: items}); } catch (_) {}
+      }, 250);
+    })();
+    """
+
+    /// The whole web view as WebKit draws it, before the hero's crop.
+    private func writeRawWebView(named name: String) {
+        guard let webView = container?.webView else { return }
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = false
+        let directory = directory
+        webView.takeSnapshot(with: configuration) { image, _ in
+            try? image?.pngData()?.write(to: directory.appending(path: name))
         }
     }
 
