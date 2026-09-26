@@ -24,7 +24,6 @@ struct AppleHomePhoneHero<Actions: View>: View {
     let wordmark: URL?
     /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
     var wordmarkLookupPending: Bool? = nil
-    let badge: AppleHeroBadge?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
     let stage: AnyView
     /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
@@ -47,14 +46,6 @@ struct AppleHomePhoneHero<Actions: View>: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if let badge {
-                Text(badge.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .overlay { Capsule().strokeBorder(.white.opacity(0.6), lineWidth: 1) }
-            }
             // The title block is the way into the title page, as tapping the
             // hero is in the Apple TV app; Details is no longer a button of
             // its own.

@@ -52,11 +52,8 @@ enum AppleTVBillboardMetrics {
     /// Down from Discover skipped it for a Continue Watching card (N41 survey).
     static var actionsFocusWidth: CGFloat { screenSize.width - 2 * copyLeadingInset }
 
-    // Discover's "New Season" capsule and outlined rating, after the Apple TV
-    // app (N12, same shapes as the iPhone and Mac heroes at tvOS sizes).
-    static let badgeFontSize: CGFloat = 22
-    static let badgeHorizontalPadding: CGFloat = 16
-    static let badgeVerticalPadding: CGFloat = 6
+    // Discover's outlined rating, after the Apple TV app (N12, same shape as
+    // the iPhone and Mac heroes at tvOS sizes).
     static let ratingFontSize: CGFloat = 20
     static let ratingHorizontalPadding: CGFloat = 9
     static let ratingVerticalPadding: CGFloat = 2

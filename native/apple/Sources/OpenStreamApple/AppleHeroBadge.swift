@@ -3,6 +3,10 @@ import Foundation
 /// The small outlined capsule over the iPhone hero's title ("New Season",
 /// "New Episode"). Only ever drawn from the title's own episode list; a title
 /// with no recent episode gets no badge rather than a made-up one.
+///
+/// No hero or title page draws it any more: the owner asked, more than once,
+/// for the "New Episode" pill to go (2026-09-26). The rule stays, tested, in
+/// case it comes back; `Episode` and `releaseDate` are still read elsewhere.
 public enum AppleHeroBadge: String, Equatable, Sendable {
     case newSeason
     case newEpisode

@@ -100,9 +100,6 @@ struct AppleDiscoverView: View {
     /// Textless hero art, keyed by media id, once TMDB has been asked. Empty
     /// through first paint by design — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
-    /// The iPhone hero's "New Season" / "New Episode" capsule, keyed by media
-    /// id, from the episode dates in the same cached meta as the wordmarks.
-    @State private var heroBadges: [String: AppleHeroBadge] = [:]
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -968,10 +965,9 @@ struct AppleDiscoverView: View {
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
-                                 copyFadeLine: phoneHeroLayout.topInset,
-                                 badge: heroBadges[value.item.mediaID]) : nil,
+                                 copyFadeLine: phoneHeroLayout.topInset) : nil,
             mac: mac || pad ? .init(layout: pad ? padHeroLayout : macHeroLayout) : nil,
-            tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
+            tv: tv.map { .init(cycle: $0.cycle) }
         ) { button, perform in
             #if os(macOS)
             if mac {
@@ -1113,8 +1109,6 @@ struct AppleDiscoverView: View {
     /// looking for a logo it may not have.
     private func resolveHeroWordmarks(_ heroes: [IndexedCatalogItem]) async {
         var found: [String: URL] = [:]
-        var badges: [String: AppleHeroBadge] = [:]
-        let now = Date.now
         for hero in heroes {
             let key = AppleStremioPreviewAssetsCache.key(
                 type: hero.item.type, mediaID: hero.item.mediaID
@@ -1123,13 +1117,9 @@ struct AppleDiscoverView: View {
             if let logo = assets.logoURL {
                 found[hero.item.mediaID] = logo
             }
-            if let badge = AppleHeroBadge.select(type: hero.item.type, episodes: assets.episodes, now: now) {
-                badges[hero.item.mediaID] = badge
-            }
         }
         guard !Task.isCancelled else { return }
         if found != heroWordmarks { heroWordmarks = found }
-        if badges != heroBadges { heroBadges = badges }
     }
 
     /// The tvOS billboard is 1920 wide inside the safe-area column, so it is
@@ -5419,7 +5409,6 @@ struct AppleCatalogItemDetailView: View {
         episodeList.episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
         offlineState.downloadedEpisodeIDs = []
-        pageMetadata.scheduleBadge = Self.scheduleBadge(type: item.type, episodes: episodeList.episodes)
         episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
             ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodeList.episodes)?.season
             ?? upNextEpisode(in: episodeList.episodes)?.season
@@ -5456,7 +5445,6 @@ struct AppleCatalogItemDetailView: View {
         pageMetadata.previewAssets = nil
         pageMetadata.fallbackArtwork = nil
         episodeList.episodes = []
-        pageMetadata.scheduleBadge = nil
         episodeList.loadFinished = false
         episodeList.selectedSeason = nil
         episodeList.selectedEpisodeID = nil
@@ -6691,7 +6679,6 @@ private struct AppleTitlePageMetadataState {
     var rankedSuggestions: [AppleCatalogItem] = []
     /// The title page's schedule badge (iPhone and Mac), worked out once per
     /// episode list rather than on every redraw.
-    var scheduleBadge: String?
 }
 
 private struct AppleTitlePageEpisodeState {
@@ -7346,16 +7333,6 @@ extension AppleCatalogItemDetailView {
 
     private var phoneHero: some View {
         VStack(spacing: 12) {
-            if let titlePageScheduleBadge = pageMetadata.scheduleBadge {
-                Text(titlePageScheduleBadge)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .overlay { Capsule().strokeBorder(.white.opacity(0.6), lineWidth: 1) }
-                    .accessibilityIdentifier("detail.schedule")
-            }
             phoneTitleLockup
             phoneMetadataLine
             phoneActionRow
@@ -7716,15 +7693,6 @@ extension AppleCatalogItemDetailView {
             ? pageMetadata.details?.formatBadges ?? []
             : item.formatBadges ?? []
         return AppleTitlePagePolicy.capabilityChips(formatBadges: badges)
-    }
-
-    static func scheduleBadge(type: String, episodes: [AppleStremioEpisode]) -> String? {
-        let dated = episodes.compactMap { episode -> AppleHeroBadge.Episode? in
-            guard let season = episode.season, let number = episode.episode,
-                  let released = AppleHeroBadge.releaseDate(episode.releaseInfo) else { return nil }
-            return AppleHeroBadge.Episode(season: season, episode: number, released: released)
-        }
-        return AppleTitlePagePolicy.scheduleBadge(type: type, episodes: dated, now: .now)
     }
 
     // MARK: Episodes
@@ -8106,16 +8074,6 @@ extension AppleCatalogItemDetailView {
 
     private func macHero(layout: AppleTitlePageMacLayout, chips: [String]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let titlePageScheduleBadge = pageMetadata.scheduleBadge {
-                Text(titlePageScheduleBadge)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .overlay { Capsule().strokeBorder(.white.opacity(0.6), lineWidth: 1) }
-                    .padding(.bottom, 12)
-                    .accessibilityIdentifier("detail.schedule")
-            }
             macTitleLockup(layout: layout)
                 .padding(.bottom, 10)
             macMetadataLine

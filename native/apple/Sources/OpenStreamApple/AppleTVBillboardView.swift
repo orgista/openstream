@@ -23,11 +23,8 @@ struct AppleTVBillboard<Actions: View>: View {
     /// The stage's still, measured by `AppleHomeBillboard`. With no stage
     /// (Library) the billboard measures the still it draws itself.
     var artLuminance: AppleHeroLuminanceMap? = nil
-    /// Discover only (N12), after the Apple TV app: the "New Season" capsule
-    /// over the title when the title's episodes earn one…
-    var badge: AppleHeroBadge? = nil
-    /// …"TV Show · Thriller · Drama" with the outlined rating instead of
-    /// genres and year…
+    /// Discover only (N12), after the Apple TV app: "TV Show · Thriller ·
+    /// Drama" with the outlined rating instead of genres and year…
     var usesKindMetadata = false
     /// …and page dots driven by the carousel's cycle (they hold while it
     /// does) instead of the clock.
@@ -78,19 +75,6 @@ struct AppleTVBillboard<Actions: View>: View {
 
             VStack(alignment: .leading, spacing: M.copySpacing) {
                 VStack(alignment: .leading, spacing: M.copySpacing) {
-                    if let badge {
-                        Text(badge.title)
-                            .font(.system(size: M.badgeFontSize, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, M.badgeHorizontalPadding)
-                            .padding(.vertical, M.badgeVerticalPadding)
-                            .overlay { Capsule().strokeBorder(.white.opacity(0.8), lineWidth: 2) }
-                            // It sits highest, where the fade has barely begun:
-                            // on the brightest art (Dark Matter's sky) the bare
-                            // capsule measured 2.2:1. The same soft shadow the
-                            // other heroes' names carry, not a fill over the art.
-                            .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
-                    }
                     titleTreatment
                     if usesKindMetadata {
                         AppleTVBillboardKindMetadata(item: item)

@@ -41,7 +41,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// full-bleed hero (`AppleHomeMacHero`) over the same stage.
     var mac: Mac? = nil
     /// Set on the Apple TV's Discover: the Apple TV app's hero details over
-    /// the billboard (badge, kind line and rating, cycle-driven dots).
+    /// the billboard (kind line and rating, cycle-driven dots).
     var tv: TV? = nil
     /// Library's hero: the button its own policy chose, which knows the title
     /// plays from a file on disk. Nil lets the catalog policy below decide.
@@ -215,7 +215,6 @@ struct AppleHomeBillboard<Actions: View>: View {
     struct Phone {
         let artHeight: CGFloat
         let copyFadeLine: CGFloat
-        let badge: AppleHeroBadge?
     }
 
     struct Mac {
@@ -223,7 +222,6 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     struct TV {
-        let badge: AppleHeroBadge?
         let cycle: AppleHeroRotation.Cycle
     }
 
@@ -285,7 +283,7 @@ struct AppleHomeBillboard<Actions: View>: View {
             AppleTVBillboard(item: item, wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending,
                              rotationCount: rotationCount,
                              rotationIndex: rotationIndex, stage: stage, artLuminance: artLuminance,
-                             badge: tv.badge, usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
+                             usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
         } else {
             featuredBody
         }
@@ -299,7 +297,6 @@ struct AppleHomeBillboard<Actions: View>: View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
                                wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending,
-                               badge: phone.badge,
                                stage: stage, artLuminance: artLuminance,
                                onOpenDetails: onOpenDetails) { actionButtons }
         } else {
