@@ -1117,6 +1117,132 @@ final class AppleTVFocusUITests: XCTestCase {
         for step in 1 ... 4 { press(.down, "settings-down-\(step)", wait: 1.0) }
     }
 
+    // MARK: - Discover Rows (N71)
+
+    /// Opt-in: reaches Settings › Discover › Discover Rows with the remote,
+    /// opens one row's Move page and backs out of it with Menu (never a move,
+    /// so a viewer's order is left as it was), then shows Discover under the
+    /// in-memory `-OpenStreamDebugDiscoverOrder` and moves down from the hero.
+    /// Frames go to `OPENSTREAM_DISCOVER_ROWS_DIR`. Navigation only: Select is
+    /// pressed on the Discover Rows link and on one row, Play/Pause never.
+    func testDiscoverRowsSettingsWalk() throws {
+        guard let dir = ProcessInfo.processInfo.environment["OPENSTREAM_DISCOVER_ROWS_DIR"] else {
+            throw XCTSkip("Set OPENSTREAM_DISCOVER_ROWS_DIR to walk Settings › Discover › Discover Rows.")
+        }
+        let folder = URL(fileURLWithPath: dir)
+        var frameIndex = 0
+        func shoot(_ step: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            frameIndex += 1
+            try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent(String(format: "%02d-%@.png", frameIndex, step)))
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = step
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func log(_ step: String) {
+            let f = focusedElement
+            guard f.exists else { return print("ROWS \(step): nothing focused") }
+            let frame = f.frame
+            print("ROWS \(step): id='\(f.identifier)' label='\(f.label.prefix(60))' "
+                  + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+        }
+        func press(_ button: XCUIRemote.Button, _ step: String, wait: TimeInterval = 1.2) {
+            remote.press(button)
+            Thread.sleep(forTimeInterval: wait)
+            log(step)
+        }
+        func rowLabels() -> [String] {
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'settings.discover.row.'"))
+                .allElementsBoundByIndex.filter(\.exists)
+                .map { "\($0.identifier.dropFirst("settings.discover.row.".count))=\($0.label)" }
+        }
+
+        // Settings: down the sidebar to Discover, across into its pane, down to
+        // the Discover Rows link.
+        app.launchArguments = ["-OpenStreamVisionScreen", "settings", "-OpenStreamTrace", "YES"]
+        app.launch()
+        Thread.sleep(forTimeInterval: 10)
+        log("settings-open")
+        // Launch focus sits on the tab bar; down enters the Sources pane and
+        // left crosses to the sections list.
+        press(.down, "tabbar-down")
+        press(.left, "sidebar-left")
+        for step in 1 ... 8 where focusedElement.identifier != "settings.section.discover" {
+            let sections = ["sources", "channels", "liveTV"].map { "settings.section.\($0)" }
+            press(sections.contains(focusedElement.identifier) ? .down : .up, "sidebar-move-\(step)")
+        }
+        XCTAssertEqual(focusedElement.identifier, "settings.section.discover", "the sidebar never reached Discover")
+        press(.right, "pane-right")
+        // tvOS hands the focused Form row no identifier, so rows are matched
+        // by their titles here.
+        for step in 1 ... 5 where focusedElement.label != "Discover Rows" {
+            press(.down, "pane-down-\(step)")
+        }
+        shoot("discover-pane-link-focused")
+        XCTAssertEqual(focusedElement.label, "Discover Rows", "Discover Rows link never took focus")
+
+        // The page itself: where focus lands, the rows by name, Reset.
+        press(.select, "rows-open", wait: 2.5)
+        shoot("rows-page")
+        let before = rowLabels()
+        print("ROWS listed (\(before.count)): \(before.joined(separator: " | "))")
+        XCTAssertFalse(before.isEmpty, "Discover Rows listed no rows")
+        let titles = before.map { String($0.split(separator: "=", maxSplits: 1).last ?? "") }
+        XCTAssertTrue(titles.contains(focusedElement.label), "focus did not land on a row, got '\(focusedElement.label)'")
+        let reset = app.buttons["Reset to Default Order"]
+        print("ROWS reset exists=\(reset.exists) enabled=\(reset.exists && reset.isEnabled)")
+
+        // One row down, open its Move page, look, back out with Menu.
+        press(.down, "rows-down-1")
+        shoot("rows-second-focused")
+        press(.select, "move-menu-open", wait: 2)
+        shoot("move-menu")
+        let moveTitles = ["Move to Top", "Move Up", "Move Down", "Move to Bottom"].filter { app.buttons[$0].exists }
+        print("ROWS move menu buttons: \(moveTitles)")
+        XCTAssertFalse(moveTitles.isEmpty, "the Move page did not open")
+        XCTAssertTrue(moveTitles.contains(focusedElement.label), "focus did not land on a Move choice, got '\(focusedElement.label)'")
+        press(.menu, "move-menu-dismiss", wait: 2)
+        shoot("move-menu-dismissed")
+        XCTAssertTrue(["Move to Top", "Move Up", "Move Down", "Move to Bottom"].allSatisfy { !app.buttons[$0].exists },
+                      "Menu did not leave the Move page")
+        let after = rowLabels()
+        XCTAssertEqual(before, after, "leaving the Move page changed the order")
+
+        // To the bottom for Reset, then Menu back to the pane.
+        for step in 1 ... 16 where focusedElement.label != "Reset to Default Order" {
+            press(.down, "rows-bottom-\(step)", wait: 0.8)
+        }
+        print("ROWS all listed (\(rowLabels().count)): \(rowLabels().joined(separator: " | "))")
+        shoot("rows-bottom")
+        print("ROWS reset focused=\(focusedElement.label == "Reset to Default Order") enabled=\(reset.exists && reset.isEnabled)")
+        press(.menu, "rows-back", wait: 2)
+        shoot("rows-back-to-pane")
+
+        // Discover under the in-memory order: Featured first, then Library.
+        app.terminate()
+        app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+        let order = ProcessInfo.processInfo.environment["OPENSTREAM_DISCOVER_ROWS_ORDER"] ?? "featuredMovies,featuredShows,library"
+        app.launchArguments = ["-OpenStreamVisionScreen", "discover", "-OpenStreamTrace", "YES",
+                               "-openstream.settings.trailer.autoplay.v1", "NO",
+                               "-OpenStreamDebugDiscoverOrder", order]
+        app.launch()
+        XCTAssertTrue(wait(for: element("home.featured.play"), 60), "the Discover billboard never appeared")
+        Thread.sleep(forTimeInterval: 8)
+        log("discover-open")
+        shoot("discover-custom-order-hero")
+        for step in 1 ... 3 {
+            press(.down, "discover-down-\(step)", wait: 1.6)
+            let headers = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'discover.shelf.' OR identifier == 'home.your-library'"))
+                .allElementsBoundByIndex.prefix(6).filter(\.exists)
+                .map { "'\($0.label.prefix(40))'@\(Int($0.frame.minY))" }
+            print("ROWS discover-down-\(step) headers: \(headers)")
+            shoot("discover-custom-order-down-\(step)")
+        }
+    }
+
     // MARK: - Watched tick under the focus lift (N66)
 
     /// Opt-in: photographs the first episodes of the first series with the
