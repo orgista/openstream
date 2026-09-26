@@ -7,7 +7,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-_(nothing open)_
+- [ ] **Refresh spinner too big / poor UX** (2026-09-26, Mac screenshot): the refresh button next to
+      Search turns into a large spinner while Discover reloads.
 
 ## Waiting on an owner decision
 

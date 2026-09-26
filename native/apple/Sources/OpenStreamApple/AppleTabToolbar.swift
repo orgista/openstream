@@ -5,9 +5,11 @@ import SwiftUI
 /// set of controls, so Discover's and Library's toolbars cannot drift apart.
 struct AppleTabToolbar: ToolbarContent {
     let tab: OpenStreamTab
-    /// The spinner takes the glyph's place while the tab reloads. Dimming was
-    /// the only answer the button gave, and against cached content that is
-    /// over in a frame (button crawl, 2026-09-19).
+    /// The arrow turns while the tab reloads. Dimming was the only answer the
+    /// button gave, and against cached content that is over in a frame
+    /// (button crawl, 2026-09-19); a spinner in its place drew larger than
+    /// the Search glyph beside it (owner, 2026-09-26), so the glyph stays and
+    /// rotates instead.
     let isRefreshing: Bool
     let onSearch: () -> Void
     let onRefresh: () -> Void
@@ -21,7 +23,7 @@ struct AppleTabToolbar: ToolbarContent {
     var body: some ToolbarContent {
         // Refresh is a new item when it starts or stops: the Mac toolbar
         // caches an item's view by identity, so on a pushed page (a title
-        // page, N37) the spinner it was first given never went away.
+        // page, N37) the busy state it was first given never went away.
         ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(scope: scope, item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
             let item = slot.item
             ToolbarItem(placement: Self.placement) {
@@ -34,11 +36,8 @@ struct AppleTabToolbar: ToolbarContent {
                     .appleVisionActionTarget()
                 case .refresh:
                     Button(action: onRefresh) {
-                        if isRefreshing {
-                            ProgressView()
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isRefreshing)
                     }
                     .accessibilityLabel("Refresh")
                     .appleVisionActionTarget()
