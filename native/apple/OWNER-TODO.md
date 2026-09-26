@@ -27,6 +27,9 @@ _(nothing open)_
 
 ## Done
 
+- [x] Crash report pasted 2026-09-26: **PosterBoard** (Apple's own screensaver process) in the Apple
+      TV simulator, 01:09. Not OpenStream; it crashed inside Apple's framework while loading screensaver
+      posters. No app change.
 - [x] Narrow Mac windows: no decision needed any more. Since N62 the trailer covers the hero at
       every width; checked 2026-09-26 at 900 and 1100 pt wide on main ab12598, no black strip.
 - [x] **Remove the "New Episode" pill** (asked several times) — gone from every hero (iPhone,
