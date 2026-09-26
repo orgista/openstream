@@ -55,7 +55,14 @@ struct AppleMediaShelf<Content: View>: View {
 
     private var rail: some View {
         LazyHStack(alignment: .top, spacing: cardGap, content: content)
+            .appleShelfSnapTargets()
+            #if os(iOS)
+            // The inset is the scroll view's content margin on iOS, where
+            // the tiles snap to it (`AppleShelfSnapping`).
+            .padding(.vertical, verticalBleed)
+            #else
             .padding(.horizontal, horizontalInset).padding(.vertical, verticalBleed)
+            #endif
     }
 
     #if os(macOS)
@@ -76,7 +83,12 @@ struct AppleMediaShelf<Content: View>: View {
     private var railScrollView: some View {
         ScrollView(.horizontal) {
             rail
-        }.scrollIndicators(.never)
+        }
+        #if os(iOS)
+        .contentMargins(.horizontal, horizontalInset, for: .scrollContent)
+        #endif
+        .appleShelfTileSnapping()
+        .scrollIndicators(.never)
         #if DEBUG
         .scrollPosition($reviewScrollPosition)
         .task {
@@ -98,9 +110,10 @@ struct AppleMediaShelf<Content: View>: View {
     private var verticalBleed: CGFloat { AppleTVBillboardMetrics.rowVerticalBleed }
     #else
     // Discover on the iPhone (N11) and the Mac (N13): the row style's header
-    // and card gap, per the Figma; rails are not snapped, so the trailing
-    // tile stays clipped (A11). The Mac's rails start under the hero copy and
-    // leave room above and below for the hover lift.
+    // and card gap, per the Figma; the trailing tile stays clipped (A11),
+    // and on iOS a flick lands a whole tile on the inset (N65). The Mac's
+    // rails start under the hero copy and leave room above and below for the
+    // hover lift.
     private var titleFont: Font { rowStyle?.headerFont ?? .title.bold() }
     private var titleSpacing: CGFloat { rowStyle?.headerSpacing ?? 12 }
     private var horizontalInset: CGFloat { rowStyle?.horizontalInset ?? 16 }

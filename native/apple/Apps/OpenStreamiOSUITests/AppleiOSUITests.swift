@@ -4076,8 +4076,9 @@ final class AppleiOSUITests: XCTestCase {
         }
         if let shelfCard {
             // By coordinates at the row's height: once the row pages, the
-            // card itself is off screen.
-            let rowY = shelfCard.frame.midY / max(app.frame.height, 1)
+            // card itself is off screen. Its upper part: on the iPhone the
+            // card's middle sits under the floating tab bar (N65).
+            let rowY = (shelfCard.frame.minY + min(40, shelfCard.frame.height / 4)) / max(app.frame.height, 1)
             step("shelf-before-paging", wait: 0.5)
             for index in 1 ... 2 {
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: rowY))

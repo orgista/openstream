@@ -4698,11 +4698,19 @@ struct AppleCatalogItemDetailView: View {
                 HStack(alignment: .top, spacing: isLandscapeRegularLayout || horizontalSizeClass == .regular ? 10 : 8) {
                     suggestedCards()
                 }
+                .appleShelfSnapTargets()
                 .padding(.vertical, 8)
                 // Leading only: the first card lines up with the heading and the
                 // last one runs off the edge, which is what says "keep scrolling".
+                #if !os(iOS)
                 .padding(.leading, detailHorizontalInset)
+                #endif
             }
+            #if os(iOS)
+            // A content margin, which the whole-tile snap lands on (N65).
+            .contentMargins(.leading, detailHorizontalInset, for: .scrollContent)
+            #endif
+            .appleShelfTileSnapping()
             .scrollIndicators(.never)
         }
         .accessibilityIdentifier("detail.more-like-this")
@@ -7657,8 +7665,10 @@ extension AppleCatalogItemDetailView {
                         .id(episode.id)
                     }
                 }
+                .appleShelfSnapTargets()
             }
             .contentMargins(.horizontal, inset, for: .scrollContent)
+            .appleShelfTileSnapping()
             .scrollIndicators(.hidden)
             // Lands on the episode Play starts, as the Apple TV app does.
             .task(id: "\(episodeList.selectedSeason ?? -1):\(visibleEpisodes.count)") {
@@ -7704,8 +7714,10 @@ extension AppleCatalogItemDetailView {
                         }
                     }
                 }
+                .appleShelfSnapTargets()
             }
             .contentMargins(.horizontal, Self.phoneInset, for: .scrollContent)
+            .appleShelfTileSnapping()
             .scrollIndicators(.hidden)
         }
         .accessibilityElement(children: .contain)
@@ -7762,9 +7774,11 @@ extension AppleCatalogItemDetailView {
                         AppleTitlePageCreditPortrait(person: person)
                     }
                 }
+                .appleShelfSnapTargets()
             }
             // The portraits carry 8 pt either side, so the first lines up.
             .contentMargins(.horizontal, Self.phoneInset - 8, for: .scrollContent)
+            .appleShelfTileSnapping()
             .scrollIndicators(.hidden)
         }
         .accessibilityElement(children: .contain)
