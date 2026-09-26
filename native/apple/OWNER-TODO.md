@@ -17,8 +17,6 @@ _(nothing open)_
 - [ ] **Trailers with the title burned in.** Some trailers open on their own title card, so on the Mac
       hero a faint second wordmark shows behind ours (N57). Keep those trailers, or skip them?
 - [ ] **Apple TV row headers** are 76 pt, about twice the Apple TV app's 38 pt. Shrink to match?
-- [ ] **Narrow Mac windows:** thin black strip around the trailer, or stay on the art? (Possibly moot
-      since N62 made the trailer cover the hero; re-check before asking again.)
 - [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
 - [ ] **iPhone tab bar shrinking on scroll** — allow it (the system behaviour), or keep it fixed?
 - [ ] **Receipt check** (carried over from before 2026-09-25; details in older reports).
@@ -27,6 +25,8 @@ _(nothing open)_
 
 ## Done
 
+- [x] Narrow Mac windows: no decision needed any more. Since N62 the trailer covers the hero at
+      every width; checked 2026-09-26 at 900 and 1100 pt wide on main ab12598, no black strip.
 - [x] **Remove the "New Episode" pill** (asked several times) — gone from every hero (iPhone,
       iPad, Mac, Apple TV) and from the title pages ("New Season" / "New Episode Every …" too) —
       c9010e7, installed 08:45; Apple TV Dark Matter hero checked without it.
