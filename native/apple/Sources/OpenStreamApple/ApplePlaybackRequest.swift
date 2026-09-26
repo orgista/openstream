@@ -28,6 +28,9 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// synthesized master, which declares the CEA-608 the provider's
         /// manifest left out (`AppleLiveCaptionWrapPolicy`). Live channels only.
         public var declaresEmbeddedCaptions: Bool
+        /// The service an add-on stream belongs to (`AppleStreamServiceKey`),
+        /// so a service that is down can be skipped. Nil for everything else.
+        public var serviceKey: String?
 
         public init(
             notWebReady: Bool = false,
@@ -37,7 +40,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             addonMediaID: String? = nil,
             addonMediaType: String? = nil,
             nativeRemoteHLS: Bool = false,
-            declaresEmbeddedCaptions: Bool = false
+            declaresEmbeddedCaptions: Bool = false,
+            serviceKey: String? = nil
         ) {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
@@ -47,6 +51,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             self.addonMediaType = addonMediaType
             self.nativeRemoteHLS = nativeRemoteHLS
             self.declaresEmbeddedCaptions = declaresEmbeddedCaptions
+            self.serviceKey = serviceKey
         }
     }
 

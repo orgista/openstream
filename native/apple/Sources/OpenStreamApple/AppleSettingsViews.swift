@@ -7,6 +7,7 @@ enum AppleSettingsRoute: Hashable {
     case serverDownloads
     case trakt
     case watchProviders
+    case discoverRows
     case playback
     case playbackInfo
     case subtitleLanguages
@@ -55,6 +56,7 @@ struct AppleSettingsView: View {
     let sourceStore: AppleSourceStore
     let webManagement: any AppleWebManagementServing
     var backupController: AppleConfigurationController? = nil
+    var catalogStore: AppleCatalogStore? = nil
 
     var body: some View {
         #if os(tvOS)
@@ -89,6 +91,8 @@ struct AppleSettingsView: View {
             AppleTraktSettingsView(settings: settings)
         case .watchProviders:
             AppleWatchProviderSettingsView(settings: settings)
+        case .discoverRows:
+            AppleDiscoverRowsSettingsView(settings: settings, sourceStore: sourceStore, catalogStore: catalogStore)
         case .playback:
             ApplePlaybackSettingsView(settings: settings)
         case .playbackInfo:
@@ -129,6 +133,11 @@ struct AppleSettingsView: View {
                     .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
                 Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
+                NavigationLink(value: AppleSettingsRoute.discoverRows) {
+                    AppleTVNavigationLabel("Discover Rows")
+                }
+                .appleTVReadableFocus()
+                .accessibilityIdentifier("settings.discover.rows")
             }
 
             Section("Library") {
@@ -400,6 +409,11 @@ private struct AppleTVDiscoverPane: View {
                     .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
                 Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
+                NavigationLink(value: AppleSettingsRoute.discoverRows) {
+                    AppleTVNavigationLabel("Discover Rows")
+                }
+                .appleTVReadableFocus()
+                .accessibilityIdentifier("settings.discover.rows")
             }
 
             Section("Library") {

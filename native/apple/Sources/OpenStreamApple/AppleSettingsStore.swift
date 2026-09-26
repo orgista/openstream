@@ -488,6 +488,15 @@ public final class AppleSettingsStore {
         didSet { defaults.set(top10ListsEnabled, forKey: DefaultsKey.top10ListsEnabled) }
     }
 
+    /// The viewer's Discover row order (`AppleDiscoverRowOrder` ids), or nil
+    /// for the order Discover builds on its own.
+    public var discoverRowOrder: [String]? {
+        didSet {
+            if let discoverRowOrder { defaults.set(discoverRowOrder, forKey: DefaultsKey.discoverRowOrder) }
+            else { defaults.removeObject(forKey: DefaultsKey.discoverRowOrder) }
+        }
+    }
+
     public var liveChannelScope: AppleLiveChannelScope {
         didSet { defaults.set(liveChannelScope.rawValue, forKey: DefaultsKey.liveChannelScope) }
     }
@@ -586,6 +595,7 @@ public final class AppleSettingsStore {
         discoverEnabled = defaults.object(forKey: DefaultsKey.discoverEnabled) as? Bool ?? true
         libraryEnabled = defaults.object(forKey: DefaultsKey.libraryEnabled) as? Bool ?? true
         top10ListsEnabled = defaults.object(forKey: DefaultsKey.top10ListsEnabled) as? Bool ?? true
+        discoverRowOrder = defaults.stringArray(forKey: DefaultsKey.discoverRowOrder)
         liveChannelScope = defaults.string(forKey: DefaultsKey.liveChannelScope)
             .flatMap(AppleLiveChannelScope.init(rawValue:)) ?? .providerLineup
         liveChannelPackage = defaults.string(forKey: DefaultsKey.liveChannelPackage)
@@ -688,6 +698,7 @@ public final class AppleSettingsStore {
             DefaultsKey.discoverEnabled,
             DefaultsKey.libraryEnabled,
             DefaultsKey.top10ListsEnabled,
+            DefaultsKey.discoverRowOrder,
             DefaultsKey.liveChannelScope,
             DefaultsKey.liveChannelPackage,
             DefaultsKey.showPayPerViewChannels,
@@ -753,6 +764,7 @@ public final class AppleSettingsStore {
         discoverEnabled = restored.discoverEnabled
         libraryEnabled = restored.libraryEnabled
         top10ListsEnabled = restored.top10ListsEnabled
+        discoverRowOrder = restored.discoverRowOrder
         liveChannelScope = restored.liveChannelScope
         liveChannelPackage = restored.liveChannelPackage
         customChannelPackage = restored.customChannelPackage
@@ -829,6 +841,7 @@ public final class AppleSettingsStore {
         static let discoverEnabled = "openstream.settings.discover.enabled.v1"
         static let libraryEnabled = "openstream.settings.library.enabled.v1"
         static let top10ListsEnabled = "openstream.settings.discover.top10Lists.v1"
+        static let discoverRowOrder = "openstream.settings.discover.rowOrder.v1"
         static let liveChannelScope = "openstream.settings.live.scope.v1"
         static let liveChannelPackage = "openstream.settings.live.package.v1"
         static let showPayPerViewChannels = "openstream.settings.live.showPPV.v1"

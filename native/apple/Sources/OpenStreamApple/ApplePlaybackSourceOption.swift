@@ -5,6 +5,10 @@ struct ApplePlaybackSourceOption: Identifiable {
     let id: URL
     /// Nil for a local file and for a stream that names no resolution.
     let tier: AppleStreamQualityTier?
+    /// The service this source belongs to (`AppleStreamServiceKey`), nil for
+    /// a local file. The automatic-fallback loop tries other services first
+    /// when this one is down.
+    var serviceKey: String? = nil
     /// Builds the player for this source, starting at `resume` when given —
     /// how a quality switch keeps the viewer's place — or else at the saved
     /// position. Local files always start at their saved position.

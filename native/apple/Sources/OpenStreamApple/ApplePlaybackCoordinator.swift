@@ -39,10 +39,19 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
 
     public let kind: Kind
     public let message: String
+    /// The HTTP status the origin answered with, when the failure carries one.
+    /// `AppleStreamServiceFailureScope` reads it to tell a service that is down
+    /// (5xx) from one missing file (404/410).
+    public let httpStatus: Int?
+    /// The URL loading error underneath, when there was one (no route to the
+    /// host, DNS failure, timeout).
+    public let networkCode: URLError.Code?
 
-    public init(kind: Kind, message: String) {
+    public init(kind: Kind, message: String, httpStatus: Int? = nil, networkCode: URLError.Code? = nil) {
         self.kind = kind
         self.message = message
+        self.httpStatus = httpStatus
+        self.networkCode = networkCode
     }
 
     public var errorDescription: String? { message }
@@ -100,9 +109,10 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
         if let stremio = error as? AppleStremioPlaybackError {
             switch stremio {
             case .requestFailed(let status) where status == 401 || status == 403:
-                return .init(kind: .authentication, message: "The stream add-on rejected this request (HTTP \(status)).")
+                return .init(kind: .authentication, message: "The stream add-on rejected this request (HTTP \(status)).",
+                             httpStatus: status)
             case .requestFailed(let status):
-                return .init(kind: .network, message: "The stream add-on returned HTTP \(status).")
+                return .init(kind: .network, message: "The stream add-on returned HTTP \(status).", httpStatus: status)
             case .invalidPayload, .invalidMediaIdentity, .invalidSource:
                 return .init(kind: .unavailable, message: stremio.localizedDescription)
             case .nonHTTPResponse, .insecureRedirect, .responseTooLarge:
@@ -134,19 +144,23 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
             case .userAuthenticationRequired, .noPermissionsToReadFile:
                 return .init(
                     kind: .authentication,
-                    message: "The media server rejected the account or request headers."
+                    message: "The media server rejected the account or request headers.",
+                    networkCode: urlError.code
                 )
             case .timedOut:
-                return .init(kind: .timedOut, message: "Playback timed out while waiting for the media server.")
+                return .init(kind: .timedOut, message: "Playback timed out while waiting for the media server.",
+                             networkCode: urlError.code)
             case .unsupportedURL, .cannotDecodeContentData, .cannotDecodeRawData:
                 return .init(
                     kind: .unsupportedMedia,
-                    message: "This media format cannot be played directly. Try another source."
+                    message: "This media format cannot be played directly. Try another source.",
+                    networkCode: urlError.code
                 )
             default:
                 return .init(
                     kind: .network,
-                    message: "OpenStream could not reach the media server. Check the server and network, then try again."
+                    message: "OpenStream could not reach the media server. Check the server and network, then try again.",
+                    networkCode: urlError.code
                 )
             }
         }
@@ -262,6 +276,8 @@ public final class ApplePlaybackCoordinator {
     private var fallbackAttempted = 0
     private var fallbackTotal = 0
     private var fallbackTitle: String? = nil
+    /// Which stream services failed as a whole recently. Injected by tests.
+    var serviceHealth: AppleStreamServiceHealth = .shared
 
     // MARK: - Display sleep
 
@@ -554,7 +570,10 @@ public final class ApplePlaybackCoordinator {
             ApplePlaybackFailureHistory.shared.record(lastRequest.url)
             onSourceFailure?(lastRequest)
         }
-        if shouldFallBack(for: failure), let next = nextFallbackCandidate() {
+        if let lastRequest { noteServiceFailure(failure, request: lastRequest) }
+        // A service that is down fails every one of its streams the same way,
+        // so the next attempt goes to another service while one is left.
+        if shouldFallBack(for: failure), let next = nextFallbackCandidate(where: isServiceHealthy) {
             cancelTimeout()
             cancelObservation()
             showFallbackNotice()
@@ -569,6 +588,10 @@ public final class ApplePlaybackCoordinator {
                 if let next {
                     showFallbackNotice()
                     await beginAttempt(next)
+                } else if let next = nextFallbackCandidate(where: { !ApplePlaybackFailureHistory.shared.contains($0.url) }) {
+                    // Only streams from a service that is down are left.
+                    showFallbackNotice()
+                    await beginAttempt(next)
                 } else {
                     fail(failure)
                 }
@@ -577,6 +600,12 @@ public final class ApplePlaybackCoordinator {
             } catch {
                 fail(error)
             }
+        } else if shouldFallBack(for: failure), let next = nextFallbackCandidate(where: { _ in true }) {
+            // Only streams from a service that is down are left; still try them.
+            cancelTimeout()
+            cancelObservation()
+            showFallbackNotice()
+            await beginAttempt(next)
         } else if fallbackTotal > 1, shouldFallBack(for: failure) {
             cancelTimeout()
             let total = fallbackTotal
@@ -607,13 +636,29 @@ public final class ApplePlaybackCoordinator {
         }
     }
 
-    /// Returns the next candidate to try and advances the attempt count, or
-    /// nil if the list is exhausted.
-    private func nextFallbackCandidate() -> ApplePlaybackRequest? {
-        guard !fallbackCandidates.isEmpty else { return nil }
-        let next = fallbackCandidates.removeFirst()
+    /// Returns the first remaining candidate that passes `include` and
+    /// advances the attempt count, or nil if none does. Candidates it passes
+    /// over stay in the list for a later call.
+    private func nextFallbackCandidate(where include: (ApplePlaybackRequest) -> Bool) -> ApplePlaybackRequest? {
+        guard let index = fallbackCandidates.firstIndex(where: include) else { return nil }
+        let next = fallbackCandidates.remove(at: index)
         fallbackAttempted += 1
         return next
+    }
+
+    private func isServiceHealthy(_ request: ApplePlaybackRequest) -> Bool {
+        !serviceHealth.isUnhealthy(request.hints.serviceKey)
+    }
+
+    /// A failure that says the whole service is down (not one missing file,
+    /// not a codec) marks that service, so its other streams wait until every
+    /// other service has had a turn, here and on the next play.
+    private func noteServiceFailure(_ failure: ApplePlaybackFailure, request: ApplePlaybackRequest) {
+        guard let key = request.hints.serviceKey, AppleStreamServiceFailureScope.of(failure) == .service else { return }
+        serviceHealth.recordFailure(key)
+        let waiting = fallbackCandidates.count(where: { $0.hints.serviceKey == key })
+        appleTrace("service \(AppleStreamServiceKey.traceName(key)) looks down (\(failure.kind)); "
+            + "\(waiting) more of its streams wait behind other services")
     }
 
     private func clearFallback() {

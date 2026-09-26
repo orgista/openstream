@@ -179,12 +179,18 @@ extension AppleStremioCandidateRanking {
     /// - for a named tier, the other tiers after it, nearest first, so a
     ///   failure falls to the closest picture rather than to anything;
     /// - candidates this device cannot present properly, last of all.
+    ///
+    /// Among the candidates this device can play, those from a service in
+    /// `unhealthyServices` (`AppleStreamServiceHealth`) go after every other
+    /// service's, so a service that is down is still tried, but only once
+    /// nothing else is left.
     public static func playbackOrder(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         choice: AppleStreamQualityChoice,
         device: AppleStreamDeviceCapabilities,
         episode: (season: Int, episode: Int)? = nil,
-        title: String? = nil
+        title: String? = nil,
+        unhealthyServices: Set<String> = []
     ) -> [AppleStremioHTTPPlaybackCandidate] {
         let tierRank: (AppleStreamQualityTier?) -> Int = { tier in
             switch choice {
@@ -202,12 +208,14 @@ extension AppleStremioCandidateRanking {
             let traits = traits(of: candidate)
             let contradicts = (title.map { !$0.isEmpty && contradictsTitle(candidate, title: $0) } ?? false)
                 || (episode.map { contradictsEpisode(candidate, season: $0.season, episode: $0.episode) } ?? false)
+            let down = candidate.serviceKey.map(unhealthyServices.contains) ?? false
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),
-                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device))
+                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down)
         }
         .sorted { a, b in
             if a.2 != b.2 { return !a.2 }
             if a.3 != b.3 { return a.3 }
+            if a.7 != b.7 { return !a.7 }
             if a.4 != b.4 { return a.4 < b.4 }
             if a.5 != b.5 { return a.5 < b.5 }
             if a.6 != b.6 { return a.6 > b.6 }

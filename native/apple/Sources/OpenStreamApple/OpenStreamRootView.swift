@@ -618,7 +618,8 @@ public struct OpenStreamRootView: View {
                 settings: settingsStore,
                 sourceStore: sourceStore,
                 webManagement: webManagement,
-                backupController: backupController
+                backupController: backupController,
+                catalogStore: catalogStore
             )
             .appleAlignedTabTitle(tab.title)
         }
@@ -695,6 +696,7 @@ public struct OpenStreamRootView: View {
         "server-downloads": .serverDownloads,
         "trakt": .trakt,
         "watch-providers": .watchProviders,
+        "discover-rows": .discoverRows,
         "privacy": .privacy,
         "storage": .storage,
         "about": .about,

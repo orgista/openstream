@@ -124,7 +124,8 @@ extension AppleStremioHTTPPlaybackCandidate {
                 proxyHeaders: requestHeaders,
                 filename: filename,
                 addonMediaID: addonMediaID,
-                addonMediaType: addonMediaType
+                addonMediaType: addonMediaType,
+                serviceKey: serviceKey
             )
         )
     }

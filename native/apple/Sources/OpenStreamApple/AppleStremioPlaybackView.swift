@@ -316,7 +316,12 @@ struct AppleStremioPlayerView: View {
             }
             coordinator.nextAutomaticSource = {
                 try await loadOtherSources()
-                for option in otherSources where !triedSources.contains(option.id) && !ApplePlaybackFailureHistory.shared.contains(option.id) {
+                // Another service's best source before more of one that is down.
+                let untried = otherSources.filter {
+                    !triedSources.contains($0.id) && !ApplePlaybackFailureHistory.shared.contains($0.id)
+                }
+                for option in coordinator.serviceHealth.healthyFirst(untried, key: \.serviceKey)
+                where !triedSources.contains(option.id) {
                     triedSources.insert(option.id)
                     do {
                         let next = try await option.prepare(nil)

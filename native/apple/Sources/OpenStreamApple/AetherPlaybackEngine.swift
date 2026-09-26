@@ -825,12 +825,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     private static func classify(_ info: PlaybackErrorInfo, hasReachedPlaying: Bool) -> ApplePlaybackFailure {
         let code = info.underlyingCode
+        // `sourceRefused` / `sourceRateLimited` carry the origin's HTTP status;
+        // a URL loading error names why the host could not be reached. Both
+        // tell a service that is down from one file that is not there.
+        let httpStatus = info.underlyingDomain == nil ? code.flatMap { (100...599).contains($0) ? $0 : nil } : nil
+        let networkCode = info.underlyingDomain == NSURLErrorDomain ? code.map(URLError.Code.init(rawValue:)) : nil
         // An HTTP 401/403 from the origin is authentication regardless of the
         // engine's own kind token (`sourceRefused` carries the status in `underlyingCode`).
         if code == 401 || code == 403 {
             return ApplePlaybackFailure(
                 kind: .authentication,
-                message: "The provider rejected the account or request headers (HTTP \(code!)."
+                message: "The provider rejected the account or request headers (HTTP \(code!).",
+                httpStatus: code
             )
         }
         // After playback has rolled, surface the engine's own message as a
@@ -868,8 +874,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .audioSessionFailed,
         ]
         if networkKinds.contains(info.kind) {
-            return ApplePlaybackFailure(kind: .network, message: info.message)
+            return ApplePlaybackFailure(kind: .network, message: info.message,
+                                        httpStatus: httpStatus, networkCode: networkCode)
         }
-        return ApplePlaybackFailure(kind: .player, message: info.message)
+        return ApplePlaybackFailure(kind: .player, message: info.message, networkCode: networkCode)
     }
 }

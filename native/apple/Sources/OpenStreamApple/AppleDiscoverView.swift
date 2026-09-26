@@ -655,6 +655,31 @@ struct AppleDiscoverView: View {
         case top10StaleNote
         case catalog(String)
         var id: Self { self }
+
+        /// The stable id the Discover Rows setting stores for this rail.
+        var rowID: String {
+            switch self {
+            case .continueWatching: AppleDiscoverRowOrder.continueWatching
+            case .library: AppleDiscoverRowOrder.library
+            case .mediaServer: AppleDiscoverRowOrder.mediaServers
+            case .topPicks: AppleDiscoverRowOrder.topPicks
+            case .top10(let type): type == "movie" ? AppleDiscoverRowOrder.top10Movies : AppleDiscoverRowOrder.top10Shows
+            case .top10StaleNote: "top10StaleNote"
+            case .catalog(let id): AppleDiscoverRowOrder.catalogID(id)
+            }
+        }
+    }
+
+    /// The saved Discover Rows order; review builds can stand in one from
+    /// `-OpenStreamDebugDiscoverOrder` without writing settings.
+    private var customRowOrder: [String]? {
+        #if DEBUG
+        if let tokens = UserDefaults.standard.string(forKey: "OpenStreamDebugDiscoverOrder"), !tokens.isEmpty {
+            return AppleDiscoverRowOrder.debugOrder(
+                tokens, catalogTitles: visibleSections.map { ($0.id, $0.shelfTitle ?? AppleCatalogShelfPolicy.title(for: $0.catalog)) })
+        }
+        #endif
+        return settings.discoverRowOrder
     }
 
     /// Continue Watching as the shelf shows it. Review builds can stand in an
@@ -682,9 +707,21 @@ struct AppleDiscoverView: View {
             let isRanked = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
             rails.append((.catalog(section.id), isRanked ? .still : .poster))
         }
-        var ordered = discoverRowStyle != nil
-            ? AppleDiscoverRailRhythm.order(rails.map(\.1)).map { rails[$0].0 }
-            : rails.map(\.0)
+        var ordered: [DiscoverRail]
+        if let custom = customRowOrder {
+            // The viewer's order wins over the A4 rhythm. Media-server
+            // shelves share one id and move together, in their own order.
+            let ids = rails.map { $0.0.rowID }
+            var unique: [String] = []
+            for id in ids where !unique.contains(id) { unique.append(id) }
+            ordered = AppleDiscoverRowOrder.resolve(available: unique, custom: custom).flatMap { id in
+                rails.map(\.0).filter { $0.rowID == id }
+            }
+        } else {
+            ordered = discoverRowStyle != nil
+                ? AppleDiscoverRailRhythm.order(rails.map(\.1)).map { rails[$0].0 }
+                : rails.map(\.0)
+        }
         if settings.top10ListsEnabled, top10Week?.isStale == true {
             let lastTop10 = ordered.lastIndex { if case .top10 = $0 { true } else { false } }
             ordered.insert(.top10StaleNote, at: lastTop10.map { $0 + 1 } ?? ordered.count)
@@ -5023,7 +5060,8 @@ struct AppleCatalogItemDetailView: View {
             let partID = AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)
             @MainActor func option(_ candidate: AppleStremioHTTPPlaybackCandidate) -> ApplePlaybackSourceOption {
                 ApplePlaybackSourceOption(id: candidate.sourceURL,
-                    tier: AppleStremioCandidateRanking.traits(of: candidate).tier) { resume in
+                    tier: AppleStremioCandidateRanking.traits(of: candidate).tier,
+                    serviceKey: candidate.serviceKey) { resume in
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
                             addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type), settings: settings)
@@ -5032,7 +5070,8 @@ struct AppleCatalogItemDetailView: View {
             let device = AppleStreamDeviceCapabilities.current
             @MainActor func order(_ choice: AppleStreamQualityChoice) -> [ApplePlaybackSourceOption] {
                 AppleStremioCandidateRanking.playbackOrder(streams, choice: choice, device: device,
-                    episode: episode, title: selectedItem.name).map(option)
+                    episode: episode, title: selectedItem.name,
+                    unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys()).map(option)
             }
             let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
             return ApplePlaybackSourceOptions(
@@ -5176,7 +5215,8 @@ struct AppleCatalogItemDetailView: View {
                 ranked, choice: chosen.map(AppleStreamQualityChoice.tier) ?? .automatic,
                 device: AppleStreamDeviceCapabilities.current,
                 episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
-                title: item.name)
+                title: item.name,
+                unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys())
             let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
             let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
