@@ -42,6 +42,9 @@ struct AppleLiveTVView: View {
     @State private var sharePlay = AppleSharePlaySessionStore.shared
     @State private var sharedChannelChoices: [AppleIPTVChannel] = []
     @State private var showsSharedChannelChoices = false
+    #if DEBUG
+    @State private var debugSharedChoicesShown = false
+    #endif
     @State private var showsSearch = false
     @State private var healthStore = AppleChannelHealthStore.shared
     /// This lineup's health, rebuilt when the snapshot or the history moves —
@@ -308,14 +311,39 @@ struct AppleLiveTVView: View {
         .task(id: "shareplay:\(sharePlay.revision):\(channelsRevision)") {
             resolveSharedChannel()
         }
-        .confirmationDialog("Choose the source for this channel", isPresented: $showsSharedChannelChoices, titleVisibility: .visible) {
-            ForEach(sharedChannelChoices) { channel in
-                Button(sourceStore.sources.first(where: { $0.id == channel.sourceID })?.name ?? channel.name) {
+        #if os(tvOS)
+        // A page, not the dialog: tvOS drew the dialog's focused choice white
+        // on white (N72). Menu pops it, which leaves as the dialog's Cancel did.
+        .navigationDestination(isPresented: Binding(
+            get: { showsSharedChannelChoices },
+            set: { presented in
+                guard !presented, showsSharedChannelChoices else { return }
+                showsSharedChannelChoices = false
+                sharePlay.leave()
+            }
+        )) {
+            AppleTVSharedSourceChoicePage(
+                choices: sharedSourceChoices,
+                onChoose: { channel in
+                    showsSharedChannelChoices = false
                     startChannel(channel, shareSelection: false)
+                },
+                onLeave: {
+                    showsSharedChannelChoices = false
+                    sharePlay.leave()
+                }
+            )
+        }
+        #else
+        .confirmationDialog("Choose the source for this channel", isPresented: $showsSharedChannelChoices, titleVisibility: .visible) {
+            ForEach(sharedSourceChoices) { choice in
+                Button(choice.title) {
+                    startChannel(choice.channel, shareSelection: false)
                 }
             }
             Button("Leave SharePlay", role: .cancel) { sharePlay.leave() }
         }
+        #endif
         .alert("SharePlay", isPresented: Binding(
             get: { sharePlay.message != nil },
             set: { if !$0 { sharePlay.message = nil } }
@@ -338,6 +366,12 @@ struct AppleLiveTVView: View {
         // The full-screen player owns the failure alert (Retry/Close). A second
         // alert here, bound to the same coordinator phase, collided with the
         // fullScreenCover and dismissed the player silently (2026-09-03).
+    }
+
+    private var sharedSourceChoices: [AppleSharedChannelSourceChoice] {
+        AppleSharedChannelSourceChoice.choices(
+            for: sharedChannelChoices,
+            sourceNames: Dictionary(sourceStore.sources.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// macOS: hands the channel to the window's full player and stops the
@@ -474,6 +508,20 @@ struct AppleLiveTVView: View {
             }
             #endif
         }
+        #if DEBUG
+        // `OpenStreamDebugSharedChannelChoices YES` opens the SharePlay
+        // "Choose the source for this channel" dialog over the first two
+        // channels, so it can be photographed without a real SharePlay
+        // session. Nothing is chosen; Menu leaves it as Leave SharePlay does.
+        // Once per launch: the lineup loads twice (cache, then network), and a
+        // second pass re-opened the prompt the viewer had just left.
+        if UserDefaults.standard.bool(forKey: "OpenStreamDebugSharedChannelChoices"),
+           !debugSharedChoicesShown, !sharePlay.isActive, channels.count > 1 {
+            debugSharedChoicesShown = true
+            sharedChannelChoices = Array(channels.prefix(2))
+            showsSharedChannelChoices = true
+        }
+        #endif
     }
 
     #if os(tvOS) && DEBUG

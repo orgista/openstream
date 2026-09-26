@@ -1243,6 +1243,68 @@ final class AppleTVFocusUITests: XCTestCase {
         }
     }
 
+    // MARK: - SharePlay source dialog (N72)
+
+    /// Opt-in: opens Live with `-OpenStreamDebugSharedChannelChoices`, which
+    /// shows the SharePlay "Choose the source for this channel" prompt (a
+    /// pushed page on tvOS since N72) over the first two channels, photographs
+    /// the focused choice and leaves with Menu. Nothing is chosen (a choice
+    /// would start a channel), so no channel plays. Frames go to
+    /// `OPENSTREAM_DIALOG_DIR`.
+    func testSharePlaySourceDialogFocus() throws {
+        guard let dir = ProcessInfo.processInfo.environment["OPENSTREAM_DIALOG_DIR"] else {
+            throw XCTSkip("Set OPENSTREAM_DIALOG_DIR to photograph the SharePlay source dialog.")
+        }
+        let folder = URL(fileURLWithPath: dir)
+        let prefix = ProcessInfo.processInfo.environment["OPENSTREAM_DIALOG_PREFIX"] ?? "shareplay"
+        var frameIndex = 0
+        func shoot(_ step: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            frameIndex += 1
+            let name = String(format: "%@-%02d-%@.png", prefix, frameIndex, step)
+            try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent(name))
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = step
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func log(_ step: String) {
+            let f = focusedElement
+            guard f.exists else { return print("DIALOG \(step): nothing focused") }
+            let frame = f.frame
+            print("DIALOG \(step): id='\(f.identifier)' label='\(f.label.prefix(60))' "
+                  + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+        }
+
+        app.launchArguments = ["-OpenStreamVisionScreen", "live", "-OpenStreamTrace", "YES",
+                               "-OpenStreamDebugSharedChannelChoices", "YES"]
+        app.launch()
+        let leave = app.buttons["Leave SharePlay"]
+        XCTAssertTrue(wait(for: leave, 90), "the SharePlay source dialog never appeared")
+        Thread.sleep(forTimeInterval: 2)
+        log("dialog-open")
+        // The page opens under the tab bar, which keeps launch focus there;
+        // the dialog took focus itself. One Down reaches the first choice.
+        if focusedElement.exists, focusedElement.label == "Live" {
+            remote.press(.down)
+            Thread.sleep(forTimeInterval: 1.2)
+            log("dialog-first-choice")
+        }
+        shoot("source-dialog-focused")
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.2)
+        log("dialog-down")
+        shoot("source-dialog-second-focused")
+        remote.press(.menu)
+        Thread.sleep(forTimeInterval: 2)
+        log("dialog-dismissed")
+        shoot("source-dialog-dismissed")
+        for _ in 0 ..< 8 where leave.exists { Thread.sleep(forTimeInterval: 1) }
+        log("dialog-dismissed-settled")
+        shoot("source-dialog-dismissed-settled")
+        XCTAssertFalse(leave.exists, "Menu did not close the SharePlay source dialog")
+    }
+
     // MARK: - Watched tick under the focus lift (N66)
 
     /// Opt-in: photographs the first episodes of the first series with the
