@@ -51,6 +51,67 @@ struct AppleMacHeroArtMatchedTrailerTests {
         #expect(abs(trailer.height / art.height - 1) < 0.0001)
     }
 
+    /// N62 (owner): a 2.37:1 trailer (band 0.125...0.875, as the probe
+    /// measured at 1280 × 684) played with black above and below it. The
+    /// band must cover the hero at every window size, with no gap.
+    @Test("A measured letterboxed band covers the hero, no black bands",
+          arguments: heroes + [CGSize(width: 1_286, height: 674), CGSize(width: 1_280, height: 684),
+                               CGSize(width: 3_440, height: 1_136), CGSize(width: 900, height: 424)])
+    func letterboxedBandCoversTheHero(hero: CGSize) {
+        for band: ClosedRange<CGFloat> in [0.125...0.875, 0.1...0.9, 0.2...0.8, 0.12...0.86] {
+            let trailer = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop, pictureWindow: band)
+            let top = trailer.minY + trailer.height * band.lowerBound
+            let bottom = trailer.minY + trailer.height * band.upperBound
+            #expect(top <= 0.001 && bottom >= hero.height - 0.001)
+            #expect(trailer.minX <= 0.001 && trailer.maxX >= hero.width - 0.001)
+            #expect(abs(trailer.width / trailer.height - 16.0 / 9.0) < 0.0001)
+            #expect(abs(trailer.midX - hero.width / 2) < 0.001)
+            // No larger than it must be: the art's frame, or the band exactly the hero's height.
+            let art = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop)
+            #expect(trailer.height <= max(art.height, hero.height / (band.upperBound - band.lowerBound)) + 0.001)
+        }
+    }
+
+    @Test("The owner's window: the band grows to the hero's height, centred on it")
+    func ownersWindow() {
+        let hero = CGSize(width: 1_280, height: 684)
+        let trailer = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop, pictureWindow: 0.125...0.875)
+        #expect(abs(trailer.height - 912) < 0.001)
+        #expect(abs(trailer.minY - -114) < 0.001)
+        #expect(abs(trailer.minX - -170.667) < 0.001)
+    }
+
+    @Test("No still decoded yet: a letterboxed band still covers the hero", arguments: heroes)
+    func noStillBandCovers(hero: CGSize) {
+        let band: ClosedRange<CGFloat> = 0.125...0.875
+        let trailer = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: nil, pictureWindow: band)
+        #expect(trailer.minY + trailer.height * band.lowerBound <= 0.001)
+        #expect(trailer.minY + trailer.height * band.upperBound >= hero.height - 0.001)
+    }
+
+    @Test("A band that already covers the hero keeps the art's frame (no zoom)")
+    func coveringBandKeepsTheArtFrame() {
+        let hero = CGSize(width: 3_440, height: 1_136)
+        let art = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop)
+        let trailer = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop, pictureWindow: 0.125...0.875)
+        #expect(isClose(trailer, art))
+        // Unletterboxed, or no band measured yet: always the art's frame.
+        for hero in Self.heroes {
+            #expect(isClose(AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop, pictureWindow: 0...1),
+                            AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop)))
+        }
+    }
+
+    @Test("A tall enough band off the hero's centre moves only as far as it must")
+    func offCentreBandShifts() {
+        let hero = CGSize(width: 3_440, height: 1_136)
+        let art = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop)
+        let band: ClosedRange<CGFloat> = 0.24...0.9
+        let trailer = AppleTrailerPreviewLayout.artMatchedFrame(in: hero, art: Self.backdrop, pictureWindow: band)
+        #expect(abs(trailer.height - art.height) < 0.001 && abs(trailer.minX - art.minX) < 0.001)
+        #expect(abs(trailer.minY + trailer.height * band.lowerBound) < 0.001)
+    }
+
     @Test("Over a still that is not 16:9 the trailer covers the still, centred on it",
           arguments: [CGSize(width: 2_000, height: 1_000), CGSize(width: 1_600, height: 1_200),
                       CGSize(width: 1_850, height: 1_000)])

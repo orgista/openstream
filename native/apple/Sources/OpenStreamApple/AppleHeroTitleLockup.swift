@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// A home hero's title slot: the wordmark when it has drawn, otherwise the
-/// name — never nothing (`AppleHeroTitlePolicy`). Each hero supplies its own
+/// A home hero's title slot: the wordmark, its slot held empty while it
+/// loads, or the name when it is missing, failed or slow
+/// (`AppleHeroTitlePolicy`). Each hero supplies its own
 /// mark and name styling; this owns only which of the two is on screen.
 struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
     /// The page being shown; the loading grace restarts when it changes.
@@ -24,18 +25,14 @@ struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
             wordmark: wordmark, loaded: loadedWordmark, failed: failedWordmark, graceExpired: graceExpiredPage == pageID
         )
         ZStack(alignment: alignment) {
-            if presentation.showsName {
-                name()
-            }
             if let url = presentation.wordmarkURL {
+                // Holds its slot empty until the mark draws, so the lockup
+                // never moves when it lands (N62).
                 mark(url) { loaded in
                     if loaded { loadedWordmark = url } else { failedWordmark = url }
                 }
-                // While the name stands in, the mark keeps loading unseen: the
-                // two never draw over each other, even if a load result is late.
-                .opacity(presentation.showsName ? 0 : 1)
-                // Only one of the two is the title for VoiceOver.
-                .accessibilityHidden(presentation.showsName)
+            } else {
+                name()
             }
         }
         .task(id: pageID) {

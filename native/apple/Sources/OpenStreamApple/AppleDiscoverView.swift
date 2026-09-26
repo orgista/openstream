@@ -2809,6 +2809,7 @@ struct AppleCatalogItemDetailView: View {
 
             if !isLandscapeLayout, !usesPadPortraitHero, case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                 AppleTrimmedTitleLogo(url: logoURL) { loaded in
+                    guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
                     titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
@@ -3080,6 +3081,7 @@ struct AppleCatalogItemDetailView: View {
             if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                 ZStack(alignment: .leading) {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
+                    guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
                     titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
@@ -3290,6 +3292,7 @@ struct AppleCatalogItemDetailView: View {
         if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
             ZStack(alignment: .leading) {
                 AppleTrimmedTitleLogo(url: logoURL, alignment: .leading) { loaded in
+                    guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
                     titleWordmark.loadResult = loaded
                     if loaded { fillTimeline.mark(.wordmark) }
                     #if DEBUG
@@ -6332,14 +6335,45 @@ enum AppleTrailerPreviewLayout {
     /// its trailer never reads as a zoom. It was sized to crop a letterboxed
     /// trailer's mattes off the hero, which drew
     /// the picture 11–13 % larger than the art it replaced in a window under
-    /// ~1,600 pt wide: the "grow" the owner still saw after N31. Such a
-    /// trailer now keeps its own mattes where the hero is taller than its
-    /// picture. No still yet: as a 16:9 still would be drawn (`coverFrame`).
-    static func artMatchedFrame(in size: CGSize, art: CGSize?) -> CGRect {
-        guard let art, art.width > 0, art.height > 0 else { return coverFrame(in: size) }
+    /// ~1,600 pt wide: the "grow" the owner still saw after N31. A letterboxed
+    /// trailer's band is then made to cover the hero (N62). No still yet: as a 16:9 still would be drawn (`coverFrame`).
+    /// A measured `pictureWindow` (the band inside the raster, mattes
+    /// outside it) must still cover the hero: see `coveringPicture`.
+    static func artMatchedFrame(in size: CGSize, art: CGSize?,
+                                pictureWindow: ClosedRange<CGFloat> = 0...1) -> CGRect {
+        guard let art, art.width > 0, art.height > 0 else {
+            return coveringPicture(coverFrame(in: size), in: size, pictureWindow: pictureWindow)
+        }
         let drawn = aspectFillFrame(of: art, in: size)
         let player = aspectFillFrame(of: CGSize(width: 16, height: 9), in: drawn.size)
-        return player.offsetBy(dx: drawn.minX, dy: drawn.minY)
+        return coveringPicture(player.offsetBy(dx: drawn.minX, dy: drawn.minY), in: size, pictureWindow: pictureWindow)
+    }
+
+    /// N62 (owner): a letterboxed trailer played as a band with black above
+    /// and below it in the hero, because its mattes are baked into the 16:9
+    /// raster. The picture band must cover the hero like the art does. The
+    /// raster keeps the art's frame when its band already covers the hero
+    /// (a tall window, a full-width 3440 one); it moves up or down only as
+    /// far as needed when the band is tall enough but off-centre; otherwise
+    /// it grows just enough for the band to fill the hero's height, the
+    /// band centred on the hero, the raster centred across it.
+    static func coveringPicture(_ raster: CGRect, in size: CGSize,
+                                pictureWindow: ClosedRange<CGFloat>) -> CGRect {
+        let fraction = pictureWindow.upperBound - pictureWindow.lowerBound
+        guard fraction > 0, fraction < 1, raster.height > 0, size.height > 0 else { return raster }
+        let bandTop = raster.minY + raster.height * pictureWindow.lowerBound
+        let bandBottom = raster.minY + raster.height * pictureWindow.upperBound
+        if bandTop <= 0, bandBottom >= size.height { return raster }
+        if raster.height * fraction >= size.height {
+            let lowest = size.height - raster.height * pictureWindow.upperBound
+            let highest = -raster.height * pictureWindow.lowerBound
+            return CGRect(x: raster.minX, y: min(max(raster.minY, lowest), highest),
+                          width: raster.width, height: raster.height)
+        }
+        let height = size.height / fraction
+        let width = raster.width * height / raster.height
+        let y = size.height / 2 - height * (pictureWindow.lowerBound + fraction / 2)
+        return CGRect(x: raster.midX - width / 2, y: y, width: width, height: height)
     }
 
     /// The same aspect-fill rect for a still of `imageSize` — what the hero's
@@ -7212,6 +7246,7 @@ extension AppleCatalogItemDetailView {
             ZStack {
                 if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .center) { loaded in
+                        guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
                         titleWordmark.loadResult = loaded
                         if loaded { fillTimeline.mark(.wordmark) }
                     }
@@ -7984,6 +8019,7 @@ extension AppleCatalogItemDetailView {
             ZStack(alignment: .bottomLeading) {
                 if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
                     AppleTrimmedTitleLogo(url: logoURL, alignment: .bottomLeading) { loaded in
+                        guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
                         titleWordmark.loadResult = loaded
                         if loaded { fillTimeline.mark(.wordmark) }
                     }

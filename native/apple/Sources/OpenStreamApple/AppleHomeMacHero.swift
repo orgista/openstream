@@ -100,8 +100,8 @@ struct AppleHomeMacHero<Actions: View>: View {
         }
     }
 
-    /// The wordmark when it has drawn, otherwise the name in black weight —
-    /// never nothing (`AppleHeroTitlePolicy`).
+    /// The wordmark, its slot held empty while it loads; the name in black
+    /// weight when it fails, is slow or there is none (`AppleHeroTitlePolicy`).
     private var title: some View {
         AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .leading) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading, onLoadResult: onLoadResult)

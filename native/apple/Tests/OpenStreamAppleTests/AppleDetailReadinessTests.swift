@@ -39,12 +39,17 @@ struct AppleDetailReadinessTests {
             AppleTitleLogoPolicy.resolvedState(validated: true, loadResult: nil, elapsed: 2)
                 == .hidden
         )
+        // N62 widened it again to five seconds.
         #expect(
-            AppleTitleLogoPolicy.resolvedState(validated: nil, loadResult: nil, elapsed: 3)
+            AppleTitleLogoPolicy.resolvedState(validated: nil, loadResult: nil, elapsed: 4)
+                == .hidden
+        )
+        #expect(
+            AppleTitleLogoPolicy.resolvedState(validated: nil, loadResult: nil, elapsed: 5)
                 == .text
         )
         #expect(
-            AppleTitleLogoPolicy.resolvedState(validated: true, loadResult: nil, elapsed: 4)
+            AppleTitleLogoPolicy.resolvedState(validated: true, loadResult: nil, elapsed: 6)
                 == .text
         )
         // A wordmark that arrives inside the grace window never flashes text.

@@ -56,8 +56,9 @@ struct AppleHeroCandidateArtTests {
     }
 }
 
-/// The hero's title slot is never empty.
-@Suite("Hero title is always shown")
+/// The hero's title slot: the wordmark, its slot held while it loads, or
+/// the name when it is missing, failed or slow (owner, N62).
+@Suite("Hero title: no swap from name to wordmark")
 struct AppleHeroTitlePolicyTests {
     private let mark = URL(string: "https://fixture.example/logo.png")!
     private let other = URL(string: "https://fixture.example/other.png")!
@@ -77,26 +78,39 @@ struct AppleHeroTitlePolicyTests {
         #expect(!shown.showsName)
     }
 
-    @Test func aSlowWordmarkGetsTheNameOnceTheGraceIsOver() {
+    @Test("While the wordmark loads there is no name: its slot is held empty")
+    func aLoadingWordmarkHoldsItsSlot() {
         let early = AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: false)
         #expect(early == .wordmark(mark))
+        #expect(!early.showsName)
+        #expect(early.wordmarkURL == mark)
+    }
+
+    @Test("Not loaded within the grace: the name takes the slot and keeps it")
+    func aSlowWordmarkFallsBackToTheName() {
         let late = AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: true)
-        #expect(late == .nameWhileLoading(mark))
-        #expect(late.showsName)
-        // …and the mark keeps loading, to take over when it lands.
-        #expect(late.wordmarkURL == mark)
+        #expect(late == .name)
+        // The mark stops loading, so it cannot land later and swap in.
+        #expect(late.wordmarkURL == nil)
     }
 
     @Test func anotherPagesResultsDoNotCount() {
-        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: other, failed: nil, graceExpired: true)
-            == .nameWhileLoading(mark))
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: other, failed: nil, graceExpired: true) == .name)
         #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: other, graceExpired: false)
             == .wordmark(mark))
     }
 
-    @Test func theGraceIsShort() {
-        #expect(AppleHeroTitlePolicy.loadingGrace > 0)
-        #expect(AppleHeroTitlePolicy.loadingGrace < 1)
+    @Test("A mark that lands inside the grace is kept after it, never swapped for the name")
+    func aMarkLoadedInTimeStays() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: mark, failed: nil, graceExpired: false) == .wordmark(mark))
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: mark, failed: nil, graceExpired: true) == .wordmark(mark))
+        // A failure reported after it had drawn for another page does not count.
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: mark, failed: other, graceExpired: true) == .wordmark(mark))
+    }
+
+    @Test("The grace is five seconds (owner, N62)")
+    func theGraceIsFiveSeconds() {
+        #expect(AppleHeroTitlePolicy.loadingGrace == 5)
     }
 }
 

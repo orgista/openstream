@@ -2,26 +2,21 @@ import Foundation
 
 /// What a home hero's title slot draws.
 enum AppleHeroTitlePresentation: Equatable, Sendable {
-    /// The wordmark: drawn, or inside the short grace while it loads.
+    /// The wordmark: drawn, or its slot held empty while it loads, so
+    /// nothing moves when it lands (owner, N62).
     case wordmark(URL)
-    /// The name, while the wordmark keeps loading underneath; it takes over
-    /// the slot the moment it lands.
-    case nameWhileLoading(URL)
-    /// The name: there is no wordmark, or it failed.
+    /// The name: there is no wordmark, it failed, or it did not load within
+    /// the grace. The name then keeps the slot; a mark that lands later
+    /// does not replace it.
     case name
 
-    /// The wordmark the slot keeps loading, if any.
+    /// The wordmark the slot is loading or drawing, if any.
     var wordmarkURL: URL? {
-        switch self {
-        case .wordmark(let url), .nameWhileLoading(let url): url
-        case .name: nil
-        }
+        if case .wordmark(let url) = self { return url }
+        return nil
     }
 
-    var showsName: Bool {
-        if case .wordmark = self { return false }
-        return true
-    }
+    var showsName: Bool { self == .name }
 }
 
 /// The hero always shows its title (owner/driver 2026-09-23: a Binnelanders
@@ -32,13 +27,13 @@ enum AppleHeroTitlePresentation: Equatable, Sendable {
 /// with a backdrop (`AppleHeroRotation.hasBackdrop`), and when none has one
 /// the name still goes over whatever art there is.
 enum AppleHeroTitlePolicy {
-    /// How long a page shows an empty slot while its wordmark loads. Short:
-    /// long enough that a mark already in the caches (the page gate and the
-    /// iPhone preload warm them) lands without the name flashing first, short
-    /// enough that a slow mark never leaves a page without a title. The title
-    /// page's 3 s grace (`AppleTitleLogoPolicy`) is for a page the viewer
-    /// chose; a rotating page may only be up for a few seconds.
-    static let loadingGrace: TimeInterval = 0.3
+    /// How long a page holds its wordmark's slot empty while the mark
+    /// loads. Owner, N62: the hero showed the name, then swapped to the logo
+    /// and the layout jumped. While the logo loads there is no title and its
+    /// space stays reserved; the name stands in only when the logo is
+    /// missing, fails, or has not loaded within five seconds. The page gate
+    /// and the iPhone preload warm the marks, so one normally lands at once.
+    static let loadingGrace: TimeInterval = 5.0
 
     /// - Parameters:
     ///   - wordmark: the page's wordmark URL, if it has one.
@@ -48,6 +43,6 @@ enum AppleHeroTitlePolicy {
     static func presentation(wordmark: URL?, loaded: URL?, failed: URL?, graceExpired: Bool) -> AppleHeroTitlePresentation {
         guard let wordmark, wordmark != failed else { return .name }
         if wordmark == loaded || !graceExpired { return .wordmark(wordmark) }
-        return .nameWhileLoading(wordmark)
+        return .name
     }
 }

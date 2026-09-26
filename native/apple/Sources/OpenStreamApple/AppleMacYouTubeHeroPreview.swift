@@ -125,9 +125,9 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
 
         /// Looks for a real picture first: a frame that measures as nothing
         /// (a fade-in, a title card) is looked at again a second later, up
-        /// to three times, with the art still up. The band it finds is not
-        /// cropped to — that drew a letterboxed trailer larger than its art
-        /// (N44). Then it waits for YouTube to lay its video out at the web
+        /// to three times, with the art still up. The web view is laid
+        /// out again so the band it finds covers the hero (N62: the owner
+        /// saw a letterboxed trailer's mattes as black bands). Then it waits for YouTube to lay its video out at the web
         /// view's size and hold it, so the geometry is settled before the
         /// video is seen and never changes under it.
         private func reveal(then revealed: @escaping () -> Void) {
@@ -207,8 +207,12 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         let webView: WKWebView
         private let cover = CoverView()
         /// The picture band last measured inside the 16:9 raster (the
-        /// trailer's own mattes outside it). Traced, never cropped to.
-        var pictureWindow: ClosedRange<CGFloat> = 0...1
+        /// trailer's own mattes outside it). The web view is laid out so
+        /// the band covers the hero: no black bands above and below a
+        /// letterboxed trailer (N62).
+        var pictureWindow: ClosedRange<CGFloat> = 0...1 {
+            didSet { if pictureWindow != oldValue { needsLayout = true } }
+        }
         var hasMeasuredPicture = false
         /// How many times the web view's size the page lays YouTube out at.
         var layoutScale = 1
@@ -271,7 +275,8 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            webView.frame = AppleTrailerPreviewLayout.artMatchedFrame(in: bounds.size, art: cover.imageSize)
+            webView.frame = AppleTrailerPreviewLayout.artMatchedFrame(
+                in: bounds.size, art: cover.imageSize, pictureWindow: pictureWindow)
             cover.frame = bounds
         }
 

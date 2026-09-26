@@ -125,9 +125,9 @@ struct AppleHomePhoneHero<Actions: View>: View {
 
     private static var coordinateSpaceName: String { "AppleHomePhoneHero" }
 
-    /// The wordmark when it has drawn, otherwise the name in black-weight
-    /// capitals — while it loads, when it fails, when there is none, and over
-    /// any art (`AppleHeroTitlePolicy`). The page never shows no title.
+    /// The wordmark, its slot held empty while it loads; the name in
+    /// black-weight capitals when it fails, is slow or there is none, over
+    /// any art (`AppleHeroTitlePolicy`).
     private var title: some View {
         AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .center) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .center, onLoadResult: onLoadResult)
