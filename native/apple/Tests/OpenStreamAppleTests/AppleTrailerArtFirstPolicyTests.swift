@@ -61,4 +61,15 @@ import Testing
         #expect(Policy.crossfadeDuration(reduceMotion: false) == 0.6)
         #expect(Policy.crossfadeDuration(reduceMotion: true) == 0)
     }
+
+    @Test func aPressedCardSaysItIsLoadingUntilItsVideoIsOnScreen() {
+        #expect(Policy.pressedCardIsLoading(cardKey: "abc123", pressedKey: "abc123", videoIsOnScreen: false))
+        #expect(Policy.pressedCardIsLoading(cardKey: "abc123", pressedKey: "abc123", videoIsOnScreen: true) == false)
+    }
+
+    @Test func onlyThePressedCardSaysItIsLoading() {
+        #expect(Policy.pressedCardIsLoading(cardKey: "other1", pressedKey: "abc123", videoIsOnScreen: false) == false)
+        // An autoplaying trailer was pressed on no card.
+        #expect(Policy.pressedCardIsLoading(cardKey: "abc123", pressedKey: nil, videoIsOnScreen: false) == false)
+    }
 }

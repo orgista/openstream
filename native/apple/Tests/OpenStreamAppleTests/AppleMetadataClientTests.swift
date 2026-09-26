@@ -220,6 +220,29 @@ private func makeLogoPNG(edgeAlpha: UInt8) throws -> Data {
     ))
 }
 
+@Test(arguments: [AppleTrailerPreviewPolicy.TitlePageDevice.phoneOrPad, .vision, .mac])
+func titlePageTrailerAutoplaysWithTheSettingOnAndReduceMotionOff(device: AppleTrailerPreviewPolicy.TitlePageDevice) {
+    #expect(AppleTrailerPreviewPolicy.titlePageAutoplays(on: device, setting: true, reduceMotion: false))
+    #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(on: device, setting: false, reduceMotion: false))
+    #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(on: device, setting: true, reduceMotion: true))
+}
+
+@Test func macTitlePageTrailerAutoplaysLikeItsDiscoverHero() {
+    // N69 (owner 2026-09-25): the Mac title page no longer waits for a press.
+    #expect(AppleTrailerPreviewPolicy.titlePageAutoplays(on: .mac, setting: true, reduceMotion: false))
+}
+
+@Test func onlyThePhoneAndPadTitlePageFollowSystemVideoAutoplay() {
+    #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(
+        on: .phoneOrPad, setting: true, reduceMotion: false, systemVideoAutoplayEnabled: false))
+    #expect(AppleTrailerPreviewPolicy.titlePageAutoplays(
+        on: .mac, setting: true, reduceMotion: false, systemVideoAutoplayEnabled: false))
+}
+
+@Test func appleTVTitlePageNeverAutoplaysATrailer() {
+    #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(on: .tv, setting: true, reduceMotion: false))
+}
+
 @Test func trailerFrameProbeURLUsesYtimgFrame0() {
     #expect(AppleTrailerPreviewPolicy.frameProbeURL(for: "abc123")?.absoluteString
         == "https://i.ytimg.com/vi/abc123/frame0.jpg")

@@ -537,6 +537,8 @@ struct AppleTitlePageTrailerCard: View {
     let key: String
     let caption: String
     let width: CGFloat
+    /// Pressed, and loading in the hero (N69).
+    var isLoading = false
     let onPlay: () -> Void
 
     var body: some View {
@@ -545,6 +547,13 @@ struct AppleTitlePageTrailerCard: View {
                 AppleRemoteImage(url: AppleTitlePagePolicy.trailerThumbnailURL(for: key), placeholderSystemImage: "play.rectangle")
                     .frame(width: width, height: width * 9 / 16)
                     .background(.white.opacity(0.09))
+                    .overlay {
+                        if isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        }
+                    }
                     .clipShape(.rect(cornerRadius: 10))
                     .appleRowTileLift(true)
                 Text(caption)
@@ -557,6 +566,10 @@ struct AppleTitlePageTrailerCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Play \(caption)")
+        .accessibilityValue(isLoading ? "Loading" : "")
+        #if DEBUG
+        .onChange(of: isLoading) { _, loading in appleTrace("title trailer card \(caption) loading=\(loading)") }
+        #endif
         .accessibilityIdentifier("detail.trailer.\(key)")
     }
 }

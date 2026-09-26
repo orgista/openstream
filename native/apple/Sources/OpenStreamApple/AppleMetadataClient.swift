@@ -151,6 +151,30 @@ public enum AppleTrailerPreviewPolicy {
         !reduceMotion && systemVideoAutoplayEnabled
     }
 
+    /// The devices a title page's hero trailer can autoplay on.
+    public enum TitlePageDevice: Sendable {
+        case phoneOrPad, vision, mac, tv
+    }
+
+    /// Whether a title page's hero trailer plays by itself: with Autoplay
+    /// Trailers on and Reduce Motion off, as each Discover hero does. The
+    /// iPhone and iPad also honour the system's video autoplay setting; the
+    /// Mac autoplays like its Discover hero (N69, owner 2026-09-25); the
+    /// Apple TV plays no trailer at all.
+    public static func titlePageAutoplays(
+        on device: TitlePageDevice,
+        setting: Bool,
+        reduceMotion: Bool,
+        systemVideoAutoplayEnabled: Bool = true
+    ) -> Bool {
+        guard setting, !reduceMotion else { return false }
+        switch device {
+        case .phoneOrPad: return systemVideoAutoplayEnabled
+        case .vision, .mac: return true
+        case .tv: return false
+        }
+    }
+
     public static func validYouTubeKey(_ value: String?) -> String? {
         guard let value else { return nil }
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)

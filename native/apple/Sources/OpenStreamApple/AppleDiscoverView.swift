@@ -2608,7 +2608,8 @@ struct AppleCatalogItemDetailView: View {
             // A pressed Play Trailer got there first.
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
             guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: heroTrailer.candidateIndex) else { return }
-            guard !Task.isCancelled else { return }
+            // …or while its first candidate was being probed.
+            guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
             heroTrailer.candidateIndex = playableIndex
             guard prepareTrailerAudio() else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
@@ -2617,6 +2618,14 @@ struct AppleCatalogItemDetailView: View {
             }
         }
         .onChange(of: settings.autoMuteTrailer) { _, muted in heroTrailer.muted = muted }
+        // A pressed trailer that never comes on screen stops saying it is
+        // loading after the same wait the Discover hero gives it.
+        .task(id: heroTrailer.pressedKey) {
+            guard heroTrailer.pressedKey != nil else { return }
+            try? await Task.sleep(for: .seconds(AppleTrailerArtFirstPolicy.pressedTrailerGiveUp))
+            guard !Task.isCancelled else { return }
+            heroTrailer.pressedKey = nil
+        }
         .task(id: "title-logo:\(titleLogoURL?.absoluteString ?? "")") {
             titleWordmark.loadResult = nil
             guard let logoURL = titleLogoURL else {
@@ -3758,18 +3767,21 @@ struct AppleCatalogItemDetailView: View {
     }
 
     /// Never on the Apple TV, which plays no trailer — so its title page
-    /// never probes or resolves one either. Nor on the Mac, whose title page
-    /// plays a trailer only when one is chosen.
+    /// never probes or resolves one either. The Mac's plays by itself as its
+    /// Discover hero does (N69, owner 2026-09-25).
     private var allowsTrailerAutoplay: Bool {
         #if os(visionOS)
-        settings.autoPlayTrailer && !reduceMotion
+        AppleTrailerPreviewPolicy.titlePageAutoplays(on: .vision, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #elseif os(iOS)
-        settings.autoPlayTrailer && AppleTrailerPreviewPolicy.shouldAutoplay(
-            reduceMotion: reduceMotion,
+        AppleTrailerPreviewPolicy.titlePageAutoplays(
+            on: .phoneOrPad, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion,
             systemVideoAutoplayEnabled: systemVideoAutoplayEnabled
         )
+        #elseif os(macOS)
+        usesMacTitlePage
+            && AppleTrailerPreviewPolicy.titlePageAutoplays(on: .mac, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #else
-        false
+        AppleTrailerPreviewPolicy.titlePageAutoplays(on: .tv, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #endif
     }
 
@@ -3829,6 +3841,7 @@ struct AppleCatalogItemDetailView: View {
         }
         let shouldPlay = !heroTrailer.isActive
         if shouldPlay, !prepareTrailerAudio() { return }
+        if !shouldPlay { heroTrailer.pressedKey = nil }
         heroTrailer.hasStarted = true
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             heroTrailer.isActive = shouldPlay
@@ -3862,6 +3875,14 @@ struct AppleCatalogItemDetailView: View {
         // Rotation can briefly report a stale frame. Stop only after the
         // hero has actually scrolled above the viewport.
         if frame != .zero, frame.maxY <= 0, heroTrailer.isActive { pauseTrailerPreview() }
+        // At the top the hero runs up under the toolbar, by the top inset.
+        let atTop = frame.minY >= -pageGeometry.safeAreaInsets.top - 1
+        if frame != .zero, atTop != heroTrailer.heroAtTop {
+            #if DEBUG
+            appleTrace("title hero minY=\(Int(frame.minY)) atTop=\(atTop)")
+            #endif
+            heroTrailer.heroAtTop = atTop
+        }
         #endif
     }
 
@@ -3916,6 +3937,7 @@ struct AppleCatalogItemDetailView: View {
         heroTrailer.muted = muted
         if state == "revealed", heroTrailer.isActive {
             heroTrailer.isPlaying = true
+            heroTrailer.pressedKey = nil
         } else if state == "concealed" {
             heroTrailer.isPlaying = false
         } else if state == "paused" {
@@ -3937,6 +3959,7 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.isActive = false
         }
         heroTrailer.isPlaying = false
+        heroTrailer.pressedKey = nil
         heroTrailer.interactionGeneration &+= 1
         heroTrailer.interactionGlyph = nil
     }
@@ -6510,6 +6533,11 @@ private struct AppleTitlePageTrailerState {
     var replayGeneration = 0
     var interactionGlyph: String?
     var interactionGeneration = 0
+    /// The Trailers card last pressed; its card shows it is loading until
+    /// the video is on screen (N69).
+    var pressedKey: String?
+    /// The hero is at the top of the page, so a press needs no scroll first.
+    var heroAtTop = true
 }
 
 private struct AppleTitlePageHeroStill {
@@ -7753,7 +7781,8 @@ extension AppleCatalogItemDetailView {
                         AppleTitlePageTrailerCard(
                             key: key,
                             caption: number == 1 ? "Trailer" : "Trailer \(number)",
-                            width: phoneCardWidth
+                            width: phoneCardWidth,
+                            isLoading: trailerCardIsLoading(key)
                         ) {
                             if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
                         }
@@ -7769,25 +7798,42 @@ extension AppleCatalogItemDetailView {
         .accessibilityIdentifier("detail.trailers")
     }
 
+    private func trailerCardIsLoading(_ key: String) -> Bool {
+        AppleTrailerArtFirstPolicy.pressedCardIsLoading(
+            cardKey: key, pressedKey: heroTrailer.pressedKey, videoIsOnScreen: heroTrailer.isPlaying
+        )
+    }
+
     /// Plays trailer `index` in the hero, scrolling back up to it first.
     private func playTrailerInHero(at index: Int) {
         #if os(iOS) || os(visionOS) || os(macOS)
         guard trailerCandidates.indices.contains(index) else { return }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
-            detailScrollPosition.scrollTo(edge: .top)
+        let scrolls = !heroTrailer.heroAtTop
+        appleTrace("title trailer press \(item.name) index=\(index) scrolls=\(scrolls) top=\(Int(pageGeometry.safeAreaInsets.top))")
+        // The card says it is loading at once; the art stays in the hero.
+        heroTrailer.pressedKey = trailerCandidates[index]
+        if scrolls {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
+                detailScrollPosition.scrollTo(edge: .top)
+            }
         }
         Task { @MainActor in
             // Started after the scroll, or the hero's off-screen pause
-            // (the frame preference) would stop it straight away.
-            try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
+            // (the frame preference) would stop it straight away. A hero
+            // already at the top starts its trailer's load straight away.
+            if scrolls {
+                try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
+            }
             if index == heroTrailer.candidateIndex, heroTrailer.hasStarted {
                 restartTrailer()
                 return
             }
             guard prepareTrailerAudio() else { return }
             heroTrailer.candidateIndex = index
-            heroTrailer.hasStarted = true
+            // One transaction: a web view first made paused loads its page
+            // with autoplay off and waits on a second message to start.
             withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
+                heroTrailer.hasStarted = true
                 heroTrailer.isActive = true
                 heroTrailer.isPlaying = false
             }
@@ -8045,6 +8091,10 @@ extension AppleCatalogItemDetailView {
                 AppleMacYouTubeHeroPreview(url: embedURL, artworkImage: heroStill.image,
                                            isPlaying: heroTrailer.isActive, isMuted: heroTrailer.muted,
                                            onStateChange: handleTrailerState)
+                    // A card pressed again replays from the start: the Mac
+                    // web view has no replay message, so it is made afresh
+                    // (the still covers it again until the video is up).
+                    .id(heroTrailer.replayGeneration)
                     // Only the frame offered, never the web view's own size
                     // (the zero-minimum lesson, 2026-09-22).
                     .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -8067,7 +8117,30 @@ extension AppleCatalogItemDetailView {
                     .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
             }
         }
+        #if DEBUG
+        // What holds a started trailer's web view back, for the N69 timeline.
+        .onChange(of: trailerGateTrace, initial: true) { _, gate in appleTrace("title trailer gate \(gate)") }
+        // `-OpenStreamDebugPlayTrailer YES` presses the first Trailers card
+        // 6 s after the page has one, so a headless sweep can photograph a
+        // trailer playing in the hero. Hung on the hero, not on the lazily
+        // built Trailers row: a series' row is not built until it scrolls
+        // in, so the press there came late or never (N69).
+        .task(id: titlePageTrailerKeys.first) {
+            guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPlayTrailer"),
+                  titlePageTrailerKeys.first != nil else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled, let key = titlePageTrailerKeys.first,
+                  let index = trailerCandidates.firstIndex(of: key) else { return }
+            playTrailerInHero(at: index)
+        }
+        #endif
     }
+
+    #if DEBUG
+    private var trailerGateTrace: String {
+        "started=\(heroTrailer.hasStarted) active=\(heroTrailer.isActive) url=\(trailerEmbedURL != nil) art=\(heroStill.art) busy=\(playbackCoordinator.phase.isBusy) presented=\(playbackUI.presentation != nil) shown=\(trailerPreviewIsShown)"
+    }
+    #endif
 
     /// The wordmark once it has drawn, otherwise the name in black weight;
     /// the slot is held while the wordmark resolves.
@@ -8320,7 +8393,8 @@ extension AppleCatalogItemDetailView {
                 AppleTitlePageTrailerCard(
                     key: key,
                     caption: number == 1 ? "Trailer" : "Trailer \(number)",
-                    width: width
+                    width: width,
+                    isLoading: trailerCardIsLoading(key)
                 ) {
                     if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
                 }
@@ -8328,18 +8402,6 @@ extension AppleCatalogItemDetailView {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("detail.trailers")
-        #if DEBUG
-        // `-OpenStreamDebugPlayTrailer YES` presses the first card once the
-        // page has filled, so a headless sweep can photograph a trailer
-        // playing in the hero.
-        .task {
-            guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPlayTrailer") else { return }
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled, let key = titlePageTrailerKeys.first,
-                  let index = trailerCandidates.firstIndex(of: key) else { return }
-            playTrailerInHero(at: index)
-        }
-        #endif
     }
 
     // MARK: About and reference

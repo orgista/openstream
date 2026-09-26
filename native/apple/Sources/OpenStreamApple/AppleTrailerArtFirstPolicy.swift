@@ -33,6 +33,14 @@ public enum AppleTrailerArtFirstPolicy {
         }
     }
 
+    /// Whether a pressed Trailers card shows it is loading (N69): from the
+    /// press until its video is on screen, it fails, or the page lets go.
+    /// A trailer that autoplays, or one playing already, marks no card. The
+    /// hero itself stays art-first and says nothing.
+    public static func pressedCardIsLoading(cardKey: String, pressedKey: String?, videoIsOnScreen: Bool) -> Bool {
+        pressedKey == cardKey && !videoIsOnScreen
+    }
+
     /// What a player state message does to the video layer.
     public enum VideoLayerChange: Equatable, Sendable {
         /// Crossfade the art away over the live video.
