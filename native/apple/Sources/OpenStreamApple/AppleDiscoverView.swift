@@ -7811,7 +7811,8 @@ extension AppleCatalogItemDetailView {
         let scrolls = !heroTrailer.heroAtTop
         appleTrace("title trailer press \(item.name) index=\(index) scrolls=\(scrolls) top=\(Int(pageGeometry.safeAreaInsets.top))")
         // The card says it is loading at once; the art stays in the hero.
-        heroTrailer.pressedKey = trailerCandidates[index]
+        let key = trailerCandidates[index]
+        heroTrailer.pressedKey = key
         if scrolls {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
                 detailScrollPosition.scrollTo(edge: .top)
@@ -7823,6 +7824,9 @@ extension AppleCatalogItemDetailView {
             // already at the top starts its trailer's load straight away.
             if scrolls {
                 try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
+                // A later press won while this one waited for the scroll
+                // (review of 28f7fb7).
+                guard heroTrailer.pressedKey == key else { return }
             }
             if index == heroTrailer.candidateIndex, heroTrailer.hasStarted {
                 restartTrailer()
