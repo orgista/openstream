@@ -1305,6 +1305,63 @@ final class AppleTVFocusUITests: XCTestCase {
         XCTAssertFalse(leave.exists, "Menu did not close the SharePlay source dialog")
     }
 
+    // MARK: - Download Options prompts (N73)
+
+    /// Opt-in: opens a film's title page with `-OpenStreamDebugDownloadOptions
+    /// title`, then a series' with `season`, each of which shows its download
+    /// prompt with the choices of a running download but no download behind
+    /// it. Photographs the focused choice and leaves with Menu; nothing is
+    /// chosen and Play is never pressed. Frames go to `OPENSTREAM_DIALOG_DIR`.
+    func testDownloadOptionsDialogFocus() throws {
+        guard let dir = ProcessInfo.processInfo.environment["OPENSTREAM_DIALOG_DIR"] else {
+            throw XCTSkip("Set OPENSTREAM_DIALOG_DIR to photograph the Download Options prompts.")
+        }
+        let folder = URL(fileURLWithPath: dir)
+        let prefix = ProcessInfo.processInfo.environment["OPENSTREAM_DIALOG_PREFIX"] ?? "download-options"
+        var frameIndex = 0
+        func shoot(_ step: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            frameIndex += 1
+            let name = String(format: "%@-%02d-%@.png", prefix, frameIndex, step)
+            try? screenshot.pngRepresentation.write(to: folder.appendingPathComponent(name))
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = step
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func log(_ step: String) {
+            let f = focusedElement
+            guard f.exists else { return print("DIALOG \(step): nothing focused") }
+            let frame = f.frame
+            print("DIALOG \(step): id='\(f.identifier)' label='\(f.label.prefix(60))' "
+                  + "frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+        }
+
+        for (screen, which, cancelTitle) in [("detail-movie", "title", "Cancel Download"),
+                                             ("detail", "season", "Cancel Season Download")] {
+            app.terminate()
+            app.launchArguments = ["-OpenStreamVisionScreen", screen, "-OpenStreamTrace", "YES",
+                                   "-OpenStreamDebugDownloadOptions", which,
+                                   "-openstream.settings.trailer.autoplay.v1", "NO"]
+            app.launch()
+            let cancel = app.buttons[cancelTitle]
+            XCTAssertTrue(wait(for: cancel, 90), "the \(which) download prompt never appeared")
+            Thread.sleep(forTimeInterval: 2)
+            log("\(which)-open")
+            shoot("\(which)-first-focused")
+            remote.press(.down)
+            Thread.sleep(forTimeInterval: 1.2)
+            log("\(which)-down")
+            shoot("\(which)-second-focused")
+            remote.press(.menu)
+            Thread.sleep(forTimeInterval: 2)
+            for _ in 0 ..< 8 where cancel.exists { Thread.sleep(forTimeInterval: 1) }
+            log("\(which)-dismissed")
+            shoot("\(which)-dismissed")
+            XCTAssertFalse(cancel.exists, "Menu did not close the \(which) download prompt")
+        }
+    }
+
     // MARK: - Watched tick under the focus lift (N66)
 
     /// Opt-in: photographs the first episodes of the first series with the

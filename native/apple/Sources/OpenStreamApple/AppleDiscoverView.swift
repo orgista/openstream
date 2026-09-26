@@ -2410,6 +2410,29 @@ struct AppleCatalogItemDetailView: View {
                     try? await Task.sleep(for: .milliseconds(400))
                 }
             }
+            // `OpenStreamDebugDownloadOptions title|season` opens the title's
+            // Download Options (or Season Download Options) once the page has
+            // settled, showing the choices of a running download. Nothing is
+            // downloaded and a choice only closes it, so the prompt can be
+            // photographed and left with Menu.
+            .task {
+                let which = UserDefaults.standard.string(forKey: "OpenStreamDebugDownloadOptions") ?? ""
+                guard which == "title" || which == "season" else { return }
+                try? await Task.sleep(for: .seconds(6))
+                guard !Task.isCancelled else { return }
+                prompts.optionsPreview = true
+                if which == "season" {
+                    prompts.seasonDownloadActions = true
+                } else {
+                    prompts.downloadActions = true
+                }
+                // Left with Menu or Cancel: the page's real prompts again.
+                while prompts.downloadActions || prompts.seasonDownloadActions {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                }
+                prompts.optionsPreview = false
+            }
             #else
             detailContent
             #endif
@@ -2540,25 +2563,35 @@ struct AppleCatalogItemDetailView: View {
         } message: {
             Text(prompts.arrFeedback ?? "")
         }
+        #if os(tvOS)
+        // Pages, not dialogs: tvOS drew a focused Pause or Resume white on the
+        // white focus fill (N73). Menu pops them, as the dialogs' Cancel did.
+        .navigationDestination(isPresented: $prompts.downloadActions) {
+            AppleTVDownloadOptionsPage(
+                title: "Download Options",
+                message: downloadActionMessage,
+                choices: downloadOptionChoices(season: false),
+                onChoose: performDownloadOption
+            )
+        }
+        .navigationDestination(isPresented: $prompts.seasonDownloadActions) {
+            AppleTVDownloadOptionsPage(
+                title: "Season Download Options",
+                message: seasonDownloadMessage,
+                choices: downloadOptionChoices(season: true),
+                onChoose: performDownloadOption
+            )
+        }
+        #else
         .confirmationDialog(
             "Download Options",
             isPresented: $prompts.downloadActions,
             titleVisibility: .visible
         ) {
-            switch downloadCoordinator.state {
-            case .downloading where downloadCoordinator.supportsPauseResume:
-                Button("Pause") { downloadCoordinator.pause() }
-            case .paused:
-                Button("Resume") { downloadCoordinator.resume() }
-            default:
-                EmptyView()
-            }
-            if downloadCoordinator.state.ownsDownload {
-                // Named for what it cancels. A confirmation dialog always
-                // carries its own Cancel, so "Cancel" here gave the viewer two
-                // buttons with one word between them and no way to tell which
-                // one stopped the download (button crawl, 2026-09-19).
-                Button("Cancel Download", role: .destructive) { downloadCoordinator.cancel() }
+            ForEach(downloadOptionChoices(season: false)) { choice in
+                Button(choice.title, role: choice.isDestructive ? .destructive : nil) {
+                    performDownloadOption(choice)
+                }
             }
         } message: {
             Text(downloadActionMessage)
@@ -2568,21 +2601,15 @@ struct AppleCatalogItemDetailView: View {
             isPresented: $prompts.seasonDownloadActions,
             titleVisibility: .visible
         ) {
-            switch downloadCoordinator.state {
-            case .downloading where downloadCoordinator.supportsPauseResume:
-                Button("Pause") { downloadCoordinator.pause() }
-            case .paused:
-                Button("Resume") { downloadCoordinator.resume() }
-            default:
-                EmptyView()
-            }
-            Button("Cancel Season Download", role: .destructive) {
-                seasonDownloads.cancel()
-                downloadCoordinator.cancel()
+            ForEach(downloadOptionChoices(season: true)) { choice in
+                Button(choice.title, role: choice.isDestructive ? .destructive : nil) {
+                    performDownloadOption(choice)
+                }
             }
         } message: {
             Text(seasonDownloadMessage)
         }
+        #endif
         .sheet(isPresented: $prompts.streamPicker) {
             streamPicker
                 #if os(visionOS)
@@ -4115,6 +4142,42 @@ struct AppleCatalogItemDetailView: View {
             return "\(title) is paused\(downloadPercent(received: received, expected: expected))."
         case .resuming(let title, _, _, _): return "Resuming \(title)."
         default: return "Choose an action for this download."
+        }
+    }
+
+    /// The Download Options / Season Download Options choices for the
+    /// current download (`AppleDownloadOptionChoice.choices`).
+    private func downloadOptionChoices(season: Bool) -> [AppleDownloadOptionChoice] {
+        #if DEBUG
+        if prompts.optionsPreview {
+            return AppleDownloadOptionChoice.choices(
+                for: .downloading(item: item.name, destination: "", received: 0, expected: nil),
+                supportsPauseResume: true, season: season)
+        }
+        #endif
+        return AppleDownloadOptionChoice.choices(
+            for: downloadCoordinator.state,
+            supportsPauseResume: downloadCoordinator.supportsPauseResume,
+            season: season)
+    }
+
+    private func performDownloadOption(_ choice: AppleDownloadOptionChoice) {
+        prompts.downloadActions = false
+        prompts.seasonDownloadActions = false
+        #if DEBUG
+        // The preview has no download behind it: a choice only closes it.
+        if prompts.optionsPreview {
+            prompts.optionsPreview = false
+            return
+        }
+        #endif
+        switch choice {
+        case .pause: downloadCoordinator.pause()
+        case .resume: downloadCoordinator.resume()
+        case .cancelDownload: downloadCoordinator.cancel()
+        case .cancelSeasonDownload:
+            seasonDownloads.cancel()
+            downloadCoordinator.cancel()
         }
     }
 
@@ -6560,6 +6623,11 @@ private struct AppleTitlePageGeometry {
 private struct AppleTitlePagePrompts {
     var downloadActions = false
     var seasonDownloadActions = false
+    #if DEBUG
+    /// `OpenStreamDebugDownloadOptions`: the prompt shows the choices of a
+    /// running download with no download behind it (N73).
+    var optionsPreview = false
+    #endif
     var streamPicker = false
     var arrRequestKind: AppleArrKind?
     var arrFeedback: String?
