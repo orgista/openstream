@@ -14,10 +14,16 @@ _(nothing open)_
 - [ ] **YouTube attribution.** The trailer frame CSS (N49) hides YouTube's title, channel and link;
       the fast iPhone/iPad trailer start (a130f96) relies on it. YouTube's API terms may require
       showing it. Keep it, or go back to the fixed wait on iPhone/iPad?
-- [ ] Trailer with its title burned into the video: keep, or skip those trailers?
-- [ ] Apple TV row header size.
-- [ ] Mac narrow-window strip.
-- [ ] Search: show the add-on's name on results?
+- [ ] **Trailers with the title burned in.** Some trailers open on their own title card, so on the Mac
+      hero a faint second wordmark shows behind ours (N57). Keep those trailers, or skip them?
+- [ ] **Apple TV row headers** are 76 pt, about twice the Apple TV app's 38 pt. Shrink to match?
+- [ ] **Narrow Mac windows:** thin black strip around the trailer, or stay on the art? (Possibly moot
+      since N62 made the trailer cover the hero; re-check before asking again.)
+- [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
+- [ ] **iPhone tab bar shrinking on scroll** — allow it (the system behaviour), or keep it fixed?
+- [ ] **Receipt check** (carried over from before 2026-09-25; details in older reports).
+- [ ] **ServerPlus 3090:** reboot + power limit (`nvidia-smi -pl 250-280`) and check the riser/power
+      cable. The free local model workers are down until then.
 
 ## Done
 
