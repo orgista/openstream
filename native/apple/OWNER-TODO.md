@@ -19,7 +19,9 @@ _(nothing open)_
 - [ ] **Apple TV row headers** are 76 pt, about twice the Apple TV app's 38 pt. Shrink to match?
 - [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
 - [ ] **iPhone tab bar shrinking on scroll** — allow it (the system behaviour), or keep it fixed?
-- [ ] **Receipt check** (carried over from before 2026-09-25; details in older reports).
+- [ ] **Receipt check (N39 F1).** The app tells TestFlight builds apart (to turn tracing on) with
+      Apple's deprecated receipt URL, the last build warning. Its replacement is async and can put an
+      App Store sign-in prompt on the Mac. Keep the deprecated check (recommended), or switch?
 - [ ] **ServerPlus 3090:** reboot + power limit (`nvidia-smi -pl 250-280`) and check the riser/power
       cable. The free local model workers are down until then.
 
