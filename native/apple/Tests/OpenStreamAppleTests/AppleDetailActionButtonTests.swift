@@ -6,7 +6,7 @@ import Testing
     let layouts: [(AppleDetailLayout, CGFloat, CGFloat)] = [
         (.portraitPhone, 390, 174),
         (.portraitIPad, 834, 180),
-        (.landscapeIPad, 1_192, 140),
+        (.landscapeIPad, 1_192, 180),
     ]
 
     #expect(AppleDetailMetrics.actionButtonHeight == 36)

@@ -5626,7 +5626,7 @@ struct AppleDetailActionButtonLabel: View {
         AppleDetailMetrics.actionButtonHeight
 
     var body: some View {
-            HStack(spacing: 6) {
+            HStack(spacing: AppleDetailMetrics.actionButtonGlyphSpacing) {
                 switch glyph {
                 case .systemImage(let name):
                     Image(systemName: name)
@@ -5641,15 +5641,15 @@ struct AppleDetailActionButtonLabel: View {
                     // accessibility threshold the button hugs its content and
                     // the label may take a second line.
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(AppleDetailMetrics.actionButtonLabelMinimumScale)
                     .allowsTightening(true)
             }
             .foregroundStyle(kind.foreground)
             .padding(.horizontal, AppleDetailMetrics.actionButtonHorizontalPadding)
             .frame(
-                width: dynamicTypeSize.isAccessibilitySize
-                    ? nil
-                    : (width ?? AppleDetailMetrics.defaultActionButtonWidth)
+                width: AppleDetailMetrics.actionButtonLabelFrameWidth(
+                    width, isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
+                )
             )
             .frame(minHeight: buttonHeight)
             .background(
@@ -6597,6 +6597,8 @@ struct AppleDetailMetrics {
     /// `(width − 32 − 10) / 2` ≈ 180 and the same label fits there, so the
     /// smaller device had the larger button. This is that number, made explicit.
     static let portraitIPadActionButtonWidth: CGFloat = 180
+    /// The featured hero's landscape pair (Play / Details). The detail page's
+    /// landscape pair uses `portraitIPadActionButtonWidth`.
     #if os(visionOS)
     static let landscapeIPadActionButtonWidth: CGFloat = 180
     #else
@@ -6720,11 +6722,32 @@ struct AppleDetailMetrics {
         case .portraitPhone:
             let column = max(0, screenWidth - 2 * portraitColumnInset)
             return max(0, (column - actionButtonGap) / 2)
-        case .portraitIPad:
+        case .portraitIPad, .landscapeIPad:
+            // Landscape takes the portrait pill too. At 140 pt "Download
+            // Season 1" truncated to "Download Se…" even at the smallest
+            // scale the label allows (N60 iPad walk, 2026-09-25); 180 is the
+            // width portrait already proved it fits in.
             return portraitIPadActionButtonWidth
-        case .landscapeIPad:
-            return landscapeIPadActionButtonWidth
         }
+    }
+
+    /// The smallest a pill's label may scale before it would truncate.
+    static let actionButtonLabelMinimumScale: CGFloat = 0.8
+    /// Between a pill's glyph and its label.
+    static let actionButtonGlyphSpacing: CGFloat = 6
+
+    /// The narrowest pill that shows a label `labelWidth` wide (at full size)
+    /// without truncating, given the scale-down the label allows.
+    static func actionButtonWidthFitting(labelWidth: CGFloat, glyphWidth: CGFloat) -> CGFloat {
+        labelWidth * actionButtonLabelMinimumScale + actionButtonGlyphSpacing + glyphWidth
+            + 2 * actionButtonHorizontalPadding
+    }
+
+    /// The fixed width a pill's label is drawn at, or `nil` to hug the label.
+    /// At accessibility sizes no fixed width holds the label, so the pill
+    /// hugs it and the label may take a second line instead of truncating.
+    static func actionButtonLabelFrameWidth(_ width: CGFloat?, isAccessibilitySize: Bool) -> CGFloat? {
+        isAccessibilitySize ? nil : (width ?? defaultActionButtonWidth)
     }
 
     /// The narrowest viewport that is a tablet rather than a phone in portrait.

@@ -442,32 +442,14 @@ struct AppleLocalTitleShelf: View {
                                                openSettings: openSettings, tabToolbar: tabToolbar)
                         .environment(\.appleDiscoverRows, nil)
                 } label: {
-                    #if os(tvOS)
-                    // On Apple TV a linear ProgressView in a card label drew
-                    // as a dot under the poster (N41 survey), so the bar goes
-                    // on the artwork, as on Discover's Continue Watching.
+                    // The bar goes on the artwork, as on Discover's Continue
+                    // Watching. On Apple TV a linear ProgressView in a card
+                    // label drew as a dot under the poster (N41 survey); on an
+                    // iPad in landscape one under the title and year sat just
+                    // below the screen edge (N60 walk), where portrait still
+                    // had room for it. On the artwork it is in view with the
+                    // poster, and a progress card drops its year line.
                     AppleCatalogCard(item: library.catalogItem(for: group), progress: progressFraction(group))
-                    #else
-                    VStack(alignment: .leading, spacing: 8) {
-                        AppleCatalogCard(item: library.catalogItem(for: group))
-                        if showsProgress, let value = library.progress[group.id] {
-                            // Same two faults the Discover shelf had and had
-                            // fixed; this copy was missed. A fixed 140 pt is
-                            // wider than a 100 pt phone poster and less than
-                            // half a 300 pt TV one, so the bar sat short and
-                            // off to one side — the owner's "these progress
-                            // bars are not symetrical" (2026-09-15). And
-                            // `position / duration` is NaN when the duration
-                            // has not been read yet, which renders as an empty
-                            // track rather than the position.
-                            ProgressView(value: AppleWatchProgress.fraction(
-                                position: value.position, duration: value.duration
-                            ))
-                            .frame(maxWidth: .infinity)
-                            .tint(.white)
-                        }
-                    }
-                    #endif
                 }.appleCatalogCardButtonStyle().accessibilityIdentifier("library.title.\(group.parsed.title)")
                 .task(id: group.id) { await library.resolve(group, sourceStore: sourceStore, settings: settings) }
             }
@@ -478,12 +460,10 @@ struct AppleLocalTitleShelf: View {
         .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
     }
 
-    #if os(tvOS)
     private func progressFraction(_ group: AppleLibrarySeries) -> Double? {
         guard showsProgress, let value = library.progress[group.id] else { return nil }
         return AppleWatchProgress.fraction(position: value.position, duration: value.duration)
     }
-    #endif
 }
 
 struct AppleLocalTitleDestination: View {
