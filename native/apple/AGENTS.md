@@ -98,7 +98,8 @@ except the full-screen player, which follows the device orientation and also pla
 
 ## 6. Where to write things down — and nowhere else
 The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDOFF-NEXT-SESSION.md`,
-`DELIVERIES.md`, and the references under `design/*.md`. Everything else is trash.
+`DELIVERIES.md`, `OWNER-TODO.md` (the owner's feedback checklist, asked for 2026-09-26), and the
+references under `design/*.md`. Everything else is trash.
 - **If a driver dispatched you** (your task says "Report: AGENTS.md §7"), do NOT edit any markdown —
   the driver verifies on the simulators and writes the records. The two bullets below are for a
   standalone session with no driver.
