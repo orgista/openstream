@@ -8,15 +8,16 @@ import Testing
 @Suite("AppleLaunchWorkPolicy Tests — edge cases")
 struct AppleLaunchWorkPolicyEdgeTests {
 
-    @Test("shouldRescan is false exactly at the 10-minute boundary (age == 600s)")
-    func testExactlyAtTheBoundaryCountsAsFresh() {
+    // Half a second inside: the stored Double cannot hold an exact 600 s age.
+    @Test("shouldRescan is false just inside the 10-minute boundary")
+    func testJustInsideTheBoundaryCountsAsFresh() {
         let now = Date()
         let suiteName = "testExactlyAtTheBoundary.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
 
         let digest = "digest-boundary"
-        AppleLaunchWorkPolicy.recordScan(sourceDigest: digest, date: now.addingTimeInterval(-600), defaults: defaults)
+        AppleLaunchWorkPolicy.recordScan(sourceDigest: digest, date: now.addingTimeInterval(-599.5), defaults: defaults)
         #expect(AppleLaunchWorkPolicy.shouldRescan(published: true, sourceDigest: digest, now: now, defaults: defaults) == false)
     }
 
@@ -32,12 +33,10 @@ struct AppleLaunchWorkPolicyEdgeTests {
         #expect(AppleLaunchWorkPolicy.shouldRescan(published: true, sourceDigest: digest, now: now, defaults: defaults) == true)
     }
 
-    /// A recorded scan that is (incorrectly) later than `now` — e.g. clock
-    /// skew — yields a negative age, which passes the `age <= 600` check and
-    /// reports the index as fresh. Documenting current behaviour; this looks
-    /// like a plausible edge-case bug worth a second look (see report).
-    @Test("a scan timestamp in the future is treated as fresh, not rescanned")
-    func testAFutureScanTimestampIsTreatedAsFresh() {
+    /// A recorded scan later than `now` (the clock moved back) is not taken
+    /// as fresh: the library rescans instead of waiting for the clock.
+    @Test("a scan timestamp in the future triggers a rescan")
+    func testAFutureScanTimestampTriggersARescan() {
         let now = Date()
         let suiteName = "testAFutureScanTimestamp.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -45,7 +44,7 @@ struct AppleLaunchWorkPolicyEdgeTests {
 
         let digest = "digest-future"
         AppleLaunchWorkPolicy.recordScan(sourceDigest: digest, date: now.addingTimeInterval(3600), defaults: defaults)
-        #expect(AppleLaunchWorkPolicy.shouldRescan(published: true, sourceDigest: digest, now: now, defaults: defaults) == false)
+        #expect(AppleLaunchWorkPolicy.shouldRescan(published: true, sourceDigest: digest, now: now, defaults: defaults) == true)
     }
 
     /// If the stored dictionary's values do not match `[String: TimeInterval]`

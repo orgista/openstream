@@ -13,7 +13,10 @@ public enum AppleLaunchWorkPolicy: Sendable {
         if let timestamp = dict?[sourceDigest] {
             let lastScan = Date(timeIntervalSince1970: timestamp)
             let age = now.timeIntervalSince(lastScan)
-            if age <= 600 {
+            // A scan stamped in the future (the clock moved back) is not
+            // fresh: rescan rather than trust it until the clock catches up
+            // (a second of slack for the round trip through the stored Double).
+            if age >= -1, age <= 600 {
                 appleTrace("library scan skipped: index is \(Int(age)) s old")
                 return false
             }
