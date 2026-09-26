@@ -9,7 +9,7 @@ struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
     let pageID: String
     let wordmark: URL?
     /// Whether the page's wordmark lookup is still running, for a hero that
-    /// tracks it (the iPhone's; `nil` elsewhere). While it runs a nil
+    /// tracks it (the Discover heroes; `nil` elsewhere). While it runs a nil
     /// `wordmark` may still become one, so the slot is held empty until it
     /// does or the grace runs out; and once the name has drawn it keeps the
     /// slot, so a wordmark found later never swaps in.

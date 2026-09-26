@@ -15,6 +15,8 @@ struct AppleHomeMacHero<Actions: View>: View {
     let item: AppleCatalogItem
     let layout: AppleMacHeroLayout
     let wordmark: URL?
+    /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
+    var wordmarkLookupPending: Bool? = nil
     /// The still and the inline trailer, from `AppleHomeBillboard`.
     let stage: AnyView
     /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
@@ -103,7 +105,8 @@ struct AppleHomeMacHero<Actions: View>: View {
     /// The wordmark, its slot held empty while it loads; the name in black
     /// weight when it fails, is slow or there is none (`AppleHeroTitlePolicy`).
     private var title: some View {
-        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .leading) { url, onLoadResult in
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark,
+                             wordmarkLookupPending: wordmarkLookupPending, alignment: .leading) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .bottomLeading, onLoadResult: onLoadResult)
                 .frame(width: AppleMacHeroLayout.wordmarkSize.width, height: AppleMacHeroLayout.wordmarkSize.height, alignment: .bottomLeading)
                 // Drawn larger in a taller hero, but decoded at its fixed

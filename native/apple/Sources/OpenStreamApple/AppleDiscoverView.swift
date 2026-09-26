@@ -925,12 +925,14 @@ struct AppleDiscoverView: View {
             settings: settings,
             viewportSize: viewportSize,
             wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
+            wordmarkLookupPending: AppleHeroTitlePolicy.wordmarkLookupPending(
+                mediaID: value.item.mediaID, resolved: heroWordmarksResolved, wordmarkFailed: wordmarkFailed
+            ),
             rotationCount: rotationCount,
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  copyFadeLine: phoneHeroLayout.topInset,
-                                 badge: heroBadges[value.item.mediaID],
-                                 wordmarkLookupPending: !heroWordmarksResolved.contains(value.item.mediaID)) : nil,
+                                 badge: heroBadges[value.item.mediaID]) : nil,
             mac: mac || pad ? .init(layout: pad ? padHeroLayout : macHeroLayout) : nil,
             tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
         ) { button, perform in

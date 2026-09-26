@@ -121,6 +121,31 @@ struct AppleHeroTitlePolicyTests {
                                                   lookupPending: true) == .holding)
     }
 
+    @Test("Every Discover hero waits for its own page's wordmark lookup, not the other pages' (N64)")
+    func lookupPendingUntilThePageIsResolved() {
+        #expect(AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: [], wordmarkFailed: false))
+        #expect(AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: ["tt2"], wordmarkFailed: false))
+        #expect(!AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: ["tt1", "tt2"], wordmarkFailed: false))
+    }
+
+    @Test func aPageWhoseMarkFailedHasNoLookupToWaitFor() {
+        #expect(!AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: [], wordmarkFailed: true))
+        let presentation = AppleHeroTitlePolicy.presentation(
+            wordmark: nil, loaded: nil, failed: nil, graceExpired: false,
+            lookupPending: AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: [], wordmarkFailed: true)
+        )
+        #expect(presentation == .name)
+    }
+
+    @Test func anUnresolvedPageHoldsItsSlotThenDrawsTheMarkTheLookupFinds() {
+        let pending = AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: [], wordmarkFailed: false)
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false,
+                                                  lookupPending: pending) == .holding)
+        let done = AppleHeroTitlePolicy.wordmarkLookupPending(mediaID: "tt1", resolved: ["tt1"], wordmarkFailed: false)
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: false,
+                                                  lookupPending: done) == .wordmark(mark))
+    }
+
     @Test func heldSlotNeitherShowsTheNameNorLoadsAMark() {
         #expect(!AppleHeroTitlePresentation.holding.showsName)
         #expect(AppleHeroTitlePresentation.holding.wordmarkURL == nil)

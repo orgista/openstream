@@ -59,4 +59,17 @@ enum AppleHeroTitlePolicy {
         if wordmark == loaded || !graceExpired { return .wordmark(wordmark) }
         return .name
     }
+
+    /// Whether a Discover hero's wordmark lookup is still running, for every
+    /// hero (iPhone, iPad, Mac, Apple TV, the rotating one): until the page's
+    /// lookup has finished it holds the slot rather than drawing the name a
+    /// found logo would replace (N64). A page whose mark the page gate saw
+    /// fail has nothing to wait for.
+    /// - Parameters:
+    ///   - mediaID: the hero's media id.
+    ///   - resolved: the media ids whose lookup has finished.
+    ///   - wordmarkFailed: the page gate saw this page's wordmark fail.
+    static func wordmarkLookupPending(mediaID: String, resolved: Set<String>, wordmarkFailed: Bool) -> Bool {
+        !wordmarkFailed && !resolved.contains(mediaID)
+    }
 }

@@ -29,6 +29,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     let settings: AppleSettingsStore
     let viewportSize: CGSize
     let wordmark: URL?
+    /// The hero's wordmark lookup has not finished yet (`AppleHeroTitleLockup`);
+    /// `nil` for a hero that does not track it.
+    var wordmarkLookupPending: Bool? = nil
     let rotationCount: Int
     let rotationIndex: Int
     /// Set on an iPhone in portrait: draw the Apple TV app's hero
@@ -213,8 +216,6 @@ struct AppleHomeBillboard<Actions: View>: View {
         let artHeight: CGFloat
         let copyFadeLine: CGFloat
         let badge: AppleHeroBadge?
-        /// The hero's wordmark lookup has not finished yet.
-        var wordmarkLookupPending: Bool? = nil
     }
 
     struct Mac {
@@ -266,7 +267,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder private var heroBody: some View {
         #if os(macOS) || os(iOS)
         if let mac {
-            AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark, stage: stage,
+            AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark,
+                             wordmarkLookupPending: wordmarkLookupPending, stage: stage,
                              artLuminance: artLuminance, onOpenDetails: onOpenDetails) { actionButtons }
         } else {
             standardBody
@@ -280,7 +282,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var standardBody: some View {
         #if os(tvOS)
         if let tv {
-            AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
+            AppleTVBillboard(item: item, wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending,
+                             rotationCount: rotationCount,
                              rotationIndex: rotationIndex, stage: stage, artLuminance: artLuminance,
                              badge: tv.badge, usesKindMetadata: true, cycle: tv.cycle) { actionButtons }
         } else {
@@ -295,7 +298,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
-                               wordmark: wordmark, wordmarkLookupPending: phone.wordmarkLookupPending,
+                               wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending,
                                badge: phone.badge,
                                stage: stage, artLuminance: artLuminance,
                                onOpenDetails: onOpenDetails) { actionButtons }
@@ -304,6 +307,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                 item: item,
                 viewportSize: viewportSize,
                 wordmark: wordmark,
+                wordmarkLookupPending: wordmarkLookupPending,
                 rotationCount: rotationCount,
                 rotationIndex: rotationIndex,
                 stage: stage,

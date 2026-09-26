@@ -9,6 +9,8 @@ struct AppleTVBillboard<Actions: View>: View {
     /// The title's wordmark art, when the preview-assets cache has it. The
     /// billboard used to have no way to show one at all.
     var wordmark: URL? = nil
+    /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
+    var wordmarkLookupPending: Bool? = nil
     /// How many billboards the screen rotates through, and which is showing.
     /// One (or fewer) draws no indicator: there is nothing to cycle to.
     var rotationCount: Int = 0
@@ -132,7 +134,7 @@ struct AppleTVBillboard<Actions: View>: View {
     /// The wordmark once it has drawn, otherwise the name — never nothing
     /// (`AppleHeroTitlePolicy`).
     private var titleTreatment: some View {
-        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark) { url, onLoadResult in
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .leading, onLoadResult: onLoadResult)
                 // One view per wordmark: the logo view keeps its image while a
                 // new URL loads, which left the last title's mark over the next

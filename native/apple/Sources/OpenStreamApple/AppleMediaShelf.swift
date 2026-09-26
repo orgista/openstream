@@ -116,6 +116,8 @@ struct AppleFeaturedHero<Actions: View>: View {
     /// platform's hero uses it: the lockup over the art is the shape the owner
     /// asked for on the iPad as well as the Apple TV (2026-09-18 references).
     var wordmark: URL? = nil
+    /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
+    var wordmarkLookupPending: Bool? = nil
     /// How many heroes the screen rotates through, and which is showing. One
     /// (or fewer) draws no indicator: there is nothing to cycle to.
     var rotationCount: Int = 0
@@ -262,7 +264,7 @@ struct AppleFeaturedHero<Actions: View>: View {
     /// The wordmark lockup when it has drawn, otherwise the name — never
     /// nothing, as on the Apple TV billboard (`AppleHeroTitlePolicy`).
     private var titleTreatment: some View {
-        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark) { url, onLoadResult in
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending) { url, onLoadResult in
             // A definite height, not `maxHeight`: the wordmark is drawn inside
             // a GeometryReader, and in a scroll view an upper bound leaves the
             // height proposal unresolved, which collapsed the mark to a few
