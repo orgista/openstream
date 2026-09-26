@@ -19,7 +19,7 @@ struct AppleTVDownloadOptionsPage: View {
                     Button {
                         onChoose(choice)
                     } label: {
-                        AppleTVFocusReadableText(choice.title)
+                        AppleTVFocusReadableText(choice.title, isDestructive: choice.isDestructive)
                     }
                     .accessibilityIdentifier("detail.download.option.\(choice.id)")
                 }

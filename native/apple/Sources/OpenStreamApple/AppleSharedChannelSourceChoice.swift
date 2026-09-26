@@ -27,3 +27,25 @@ public struct AppleSharedChannelSourceChoice: Identifiable, Equatable, Sendable 
         }
     }
 }
+
+/// A row of the source prompt: start the channel from one source, or leave
+/// SharePlay. Leaving is the prompt's only destructive row (red on Apple TV's
+/// page, as the dialog it replaced drew it).
+public enum AppleSharedSourcePromptAction: Equatable, Sendable {
+    case choose(AppleSharedChannelSourceChoice)
+    case leave
+
+    public var title: String {
+        switch self {
+        case .choose(let choice): choice.title
+        case .leave: "Leave SharePlay"
+        }
+    }
+
+    public var isDestructive: Bool {
+        switch self {
+        case .choose: false
+        case .leave: true
+        }
+    }
+}

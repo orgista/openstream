@@ -53,4 +53,13 @@ struct AppleSharedChannelSourceChoiceTests {
     func empty() {
         #expect(AppleSharedChannelSourceChoice.choices(for: [], sourceNames: [:]).isEmpty)
     }
+
+    @Test("Only Leave SharePlay is destructive; a source row is not")
+    func onlyLeaveIsDestructive() {
+        let choices = AppleSharedChannelSourceChoice.choices(
+            for: [channel("a", "News One", source: UUID())], sourceNames: [:])
+        let actions = choices.map(AppleSharedSourcePromptAction.choose) + [.leave]
+        #expect(actions.filter(\.isDestructive) == [.leave])
+        #expect(actions.map(\.title) == ["News One", "Leave SharePlay"])
+    }
 }

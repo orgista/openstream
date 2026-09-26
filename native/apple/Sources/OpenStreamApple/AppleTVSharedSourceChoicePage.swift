@@ -18,14 +18,16 @@ struct AppleTVSharedSourceChoicePage: View {
                     Button {
                         onChoose(choice.channel)
                     } label: {
-                        AppleTVFocusReadableText(choice.title)
+                        AppleTVFocusReadableText(choice.title,
+                                                 isDestructive: AppleSharedSourcePromptAction.choose(choice).isDestructive)
                     }
                     .accessibilityIdentifier("live.shareplay.source.\(index)")
                 }
             }
             Section {
                 Button(action: onLeave) {
-                    AppleTVFocusReadableText("Leave SharePlay")
+                    AppleTVFocusReadableText(AppleSharedSourcePromptAction.leave.title,
+                                             isDestructive: AppleSharedSourcePromptAction.leave.isDestructive)
                 }
                 .accessibilityIdentifier("live.shareplay.leave")
             }
