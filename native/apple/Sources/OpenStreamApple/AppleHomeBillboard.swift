@@ -213,6 +213,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         let artHeight: CGFloat
         let copyFadeLine: CGFloat
         let badge: AppleHeroBadge?
+        /// The hero's wordmark lookup has not finished yet.
+        var wordmarkLookupPending: Bool? = nil
     }
 
     struct Mac {
@@ -293,7 +295,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
-                               wordmark: wordmark, badge: phone.badge,
+                               wordmark: wordmark, wordmarkLookupPending: phone.wordmarkLookupPending,
+                               badge: phone.badge,
                                stage: stage, artLuminance: artLuminance,
                                onOpenDetails: onOpenDetails) { actionButtons }
         } else {

@@ -22,6 +22,8 @@ struct AppleHomePhoneHero<Actions: View>: View {
     /// `AppleHomePhoneHeroLayout.topInset`.
     let copyFadeLine: CGFloat
     let wordmark: URL?
+    /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
+    var wordmarkLookupPending: Bool? = nil
     let badge: AppleHeroBadge?
     /// The still and the inline trailer, from `AppleHomeBillboard`.
     let stage: AnyView
@@ -129,7 +131,8 @@ struct AppleHomePhoneHero<Actions: View>: View {
     /// black-weight capitals when it fails, is slow or there is none, over
     /// any art (`AppleHeroTitlePolicy`).
     private var title: some View {
-        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark, alignment: .center) { url, onLoadResult in
+        AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark,
+                             wordmarkLookupPending: wordmarkLookupPending, alignment: .center) { url, onLoadResult in
             AppleTrimmedTitleLogo(url: url, alignment: .center, onLoadResult: onLoadResult)
                 .frame(maxWidth: 280)
                 .frame(height: dynamicTypeSize.isAccessibilitySize ? 120 : 96)

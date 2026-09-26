@@ -93,6 +93,10 @@ struct AppleDiscoverView: View {
     /// the billboard simply never asked, which is why heroes only ever showed
     /// text (owner 2026-09-15).
     @State private var heroWordmarks: [String: URL] = [:]
+    /// The heroes (media ids) whose wordmark lookup has finished; until then
+    /// a hero with no wordmark yet holds its title slot empty rather than
+    /// drawing the name a found logo would replace (N63).
+    @State private var heroWordmarksResolved: Set<String> = []
     /// Textless hero art, keyed by media id, once TMDB has been asked. Empty
     /// through first paint by design — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
@@ -231,6 +235,8 @@ struct AppleDiscoverView: View {
                                 await resolveHeroWordmarks(heroes)
                                 try? await Task.sleep(for: .seconds(2))
                                 await resolveHeroWordmarks(heroes)
+                                guard !Task.isCancelled else { return }
+                                heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
                                 // Last, and only after the billboard has long
                                 // since drawn: the textless backdrop is an
                                 // upgrade, never something first paint waits on.
@@ -923,7 +929,8 @@ struct AppleDiscoverView: View {
             rotationIndex: rotationIndex,
             phone: phone ? .init(artHeight: phoneHeroLayout.artHeight,
                                  copyFadeLine: phoneHeroLayout.topInset,
-                                 badge: heroBadges[value.item.mediaID]) : nil,
+                                 badge: heroBadges[value.item.mediaID],
+                                 wordmarkLookupPending: !heroWordmarksResolved.contains(value.item.mediaID)) : nil,
             mac: mac || pad ? .init(layout: pad ? padHeroLayout : macHeroLayout) : nil,
             tv: tv.map { .init(badge: heroBadges[value.item.mediaID], cycle: $0.cycle) }
         ) { button, perform in

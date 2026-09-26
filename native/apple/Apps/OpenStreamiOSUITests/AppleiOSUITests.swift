@@ -4029,6 +4029,14 @@ final class AppleiOSUITests: XCTestCase {
 
         XCUIDevice.shared.orientation = .portrait
 
+        // The hero's first seconds: its title must hold its slot for the
+        // wordmark, never showing text that a late logo then replaces (N62).
+        relaunch(nil, settle: 0.5)
+        for second in [1, 2, 3, 4, 6, 9] {
+            Thread.sleep(forTimeInterval: second == 1 ? 0.5 : second == 6 || second == 9 ? 2.5 : 0.8)
+            shoot("hero-early-\(second)s")
+        }
+
         // Discover, top to bottom; Continue Watching scrolled sideways and its ⋯ menu opened.
         relaunch(nil, settle: 22)
         step("discover-top", wait: 0)
@@ -4183,6 +4191,16 @@ final class AppleiOSUITests: XCTestCase {
                     field.typeText("star")
                     step("landscape-search-results", wait: 8)
                 }
+            }
+            XCUIDevice.shared.orientation = .portrait
+        } else {
+            // iPhone: only the title pages turn to landscape.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            for route in ["detail", "detail-movie"] {
+                relaunch(route, settle: 10)
+                step("landscape-\(route)-top", wait: 0)
+                scrollUp()
+                step("landscape-\(route)-scroll-1")
             }
             XCUIDevice.shared.orientation = .portrait
         }

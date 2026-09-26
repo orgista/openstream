@@ -68,6 +68,65 @@ struct AppleHeroTitlePolicyTests {
         #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: true) == .name)
     }
 
+    @Test("No wordmark yet while its lookup runs: the slot is held empty, not filled with the name (N63)")
+    func aPendingLookupHoldsTheSlot() {
+        let early = AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false,
+                                                      lookupPending: true)
+        #expect(early == .holding)
+        #expect(!early.showsName)
+        #expect(early.wordmarkURL == nil)
+        // The lookup found one in time: it is drawn, no name first.
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: false,
+                                                  lookupPending: true) == .wordmark(mark))
+        // The lookup is still running when the grace runs out: the name.
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: true,
+                                                  lookupPending: true) == .name)
+    }
+
+    @Test("Once the name has been on screen, a wordmark that arrives or loads later never replaces it (N63)")
+    func theNameKeepsTheSlotOnceShown() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: false,
+                                                  nameShown: true) == .name)
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: mark, failed: nil, graceExpired: false,
+                                                  nameShown: true) == .name)
+    }
+
+    @Test func aFinishedLookupWithNoWordmarkDrawsTheNameAtOnce() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false,
+                                                  lookupPending: false) == .name)
+    }
+
+    @Test func aFailedWordmarkDrawsTheNameEvenWhileTheLookupRuns() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: mark, graceExpired: false,
+                                                  lookupPending: true) == .name)
+    }
+
+    @Test func theNameLatchWinsOverAPendingLookup() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false,
+                                                  lookupPending: true, nameShown: true) == .name)
+    }
+
+    @Test func aMarkFoundByTheLookupAndDrawnInTimeStaysAfterTheGrace() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: mark, failed: nil, graceExpired: true,
+                                                  lookupPending: true) == .wordmark(mark))
+    }
+
+    @Test func aMarkFoundByTheLookupAfterTheGraceIsNotDrawn() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: nil, graceExpired: true,
+                                                  lookupPending: false) == .name)
+    }
+
+    @Test func anotherPagesLoadedMarkDoesNotEndTheHold() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: other, failed: nil, graceExpired: false,
+                                                  lookupPending: true) == .holding)
+    }
+
+    @Test func heldSlotNeitherShowsTheNameNorLoadsAMark() {
+        #expect(!AppleHeroTitlePresentation.holding.showsName)
+        #expect(AppleHeroTitlePresentation.holding.wordmarkURL == nil)
+        #expect(AppleHeroTitlePresentation.holding != .name)
+    }
+
     @Test func aFailedWordmarkDrawsTheName() {
         #expect(AppleHeroTitlePolicy.presentation(wordmark: mark, loaded: nil, failed: mark, graceExpired: false) == .name)
     }

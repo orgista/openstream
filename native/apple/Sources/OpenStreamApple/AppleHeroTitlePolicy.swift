@@ -5,6 +5,11 @@ enum AppleHeroTitlePresentation: Equatable, Sendable {
     /// The wordmark: drawn, or its slot held empty while it loads, so
     /// nothing moves when it lands (owner, N62).
     case wordmark(URL)
+    /// No wordmark yet, but the page's lookup for one is still running: the
+    /// slot is held empty, as for a loading mark, so a mark found in time
+    /// is not preceded by the name (N63: iPhone showed the name for about a
+    /// second at launch, then swapped to the logo).
+    case holding
     /// The name: there is no wordmark, it failed, or it did not load within
     /// the grace. The name then keeps the slot; a mark that lands later
     /// does not replace it.
@@ -40,8 +45,17 @@ enum AppleHeroTitlePolicy {
     ///   - loaded: the wordmark URL that has drawn, if any.
     ///   - failed: the wordmark URL that failed to load, if any.
     ///   - graceExpired: whether `loadingGrace` has passed since the page was shown.
-    static func presentation(wordmark: URL?, loaded: URL?, failed: URL?, graceExpired: Bool) -> AppleHeroTitlePresentation {
-        guard let wordmark, wordmark != failed else { return .name }
+    ///   - lookupPending: the page's wordmark is not known yet because the
+    ///     lookup for it has not finished.
+    ///   - nameShown: the name has already been on screen for this page; it
+    ///     then keeps the slot, so a mark that arrives later never swaps in.
+    static func presentation(
+        wordmark: URL?, loaded: URL?, failed: URL?, graceExpired: Bool,
+        lookupPending: Bool = false, nameShown: Bool = false
+    ) -> AppleHeroTitlePresentation {
+        if nameShown { return .name }
+        guard let wordmark else { return lookupPending && !graceExpired ? .holding : .name }
+        guard wordmark != failed else { return .name }
         if wordmark == loaded || !graceExpired { return .wordmark(wordmark) }
         return .name
     }
