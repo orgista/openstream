@@ -39,7 +39,8 @@ enum AppleSubtitleCueLayerPolicy {
         route == .avPlayer
     }
 
-    /// Every cue overlapping `position`, in the engine's order. Plural because
+    /// Every cue overlapping `position`, in the engine's order. Pass the
+    /// engine's `presentationTime`, not its scrub `position`. Plural because
     /// a PGS composition is one cue per object: a sign at the top and the line
     /// of dialogue at the bottom are on screen together, and `.first` used to
     /// drop one of them (Q4a8 §4). The engine empties its cue list when no
@@ -124,7 +125,7 @@ final class AppleStockPlayerSubtitles {
         // Nothing over AVKit's placeholder while PiP or AirPlay has the picture.
         let drawsHere = (engine as? AetherPlaybackEngine)?.captionHandoff.appDrawsCaptions ?? true
         let next = drawsHere
-            ? AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.position) : []
+            ? AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.presentationTime) : []
         if next != cues { cues = next }
         // Same persisted list the overlay model reads, so both menus agree.
         let chosen = UserDefaults.standard.stringArray(forKey: AppleSubtitleLanguages.defaultsKey)

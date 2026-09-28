@@ -178,6 +178,10 @@ public final class AppleTransportOverlayModel {
     /// the overlay to render on either video route.
     public private(set) var subtitleCues: [AppleSubtitleCue] = []
 
+    /// The engine's `presentationTime`: the frame on screen, which cues follow.
+    /// Kept apart from `position`, the scrub clock, which the engine can hold.
+    public private(set) var cueTime: Double = 0
+
     /// The subtitle track the user selected through the overlay, tracked locally
     /// so the CC button reflects the selection immediately (before the engine
     /// confirms it) and so the model test can assert it without a live engine.
@@ -208,6 +212,7 @@ public final class AppleTransportOverlayModel {
         // Seed from the engine's current synchronous state so the first render
         // is correct before any event has been emitted.
         self.position = coordinator.engine.position
+        self.cueTime = coordinator.engine.presentationTime
         self.duration = coordinator.engine.duration
         self.audioTracks = coordinator.engine.audioTracks
         self.subtitleTracks = coordinator.engine.subtitleTracks
@@ -386,11 +391,11 @@ public final class AppleTransportOverlayModel {
     /// Audio & Subtitles bubble fills while it is set).
     public var isCCActive: Bool { AppleCaptionsToggle.isOn(selected: selectedSubtitleID) }
 
-    /// The cues active at the current position on either video route. Empty
+    /// The cues active at the frame on screen on either video route. Empty
     /// when no track is selected or no cue overlaps the position. Stock and
     /// inline players use the same policy through `AppleStockPlayerSubtitles`.
     public var activeSubtitleCues: [AppleSubtitleCue] {
-        AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: position)
+        AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: cueTime)
     }
 
     // MARK: - Route-derived secondary actions
@@ -526,6 +531,8 @@ public final class AppleTransportOverlayModel {
             // invalidated on every position tick.
             let cues = coordinator.engine.subtitleCues
             if subtitleCues != cues { subtitleCues = cues }
+            let presented = coordinator.engine.presentationTime
+            if cueTime != presented { cueTime = presented }
         case .duration(let seconds):
             guard duration != seconds else { break }
             duration = seconds

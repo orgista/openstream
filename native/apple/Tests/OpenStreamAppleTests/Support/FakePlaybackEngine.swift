@@ -22,6 +22,9 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
     var phase: ApplePlaybackEnginePhase = .idle
     var route: ApplePlaybackPresentationRoute { scriptedRoute }
     var position: Double = 0
+    /// Scripted when a test needs the picture clock apart from the scrub clock.
+    var scriptedPresentationTime: Double?
+    var presentationTime: Double { scriptedPresentationTime ?? position }
     var duration: Double? = nil
     var audioTracks: [ApplePlaybackTrack] = []
     var subtitleTracks: [ApplePlaybackTrack] = []

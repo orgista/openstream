@@ -48,6 +48,30 @@ struct AppleSubtitleCueLayerTests {
         #expect(entries.map(\.isSelected) == [false, true, false])
     }
 
+    // MARK: - Cue clock
+
+    @Test("Cues follow the frame on screen when the scrub clock is held")
+    func cuesFollowPresentationTimeNotScrubPosition() {
+        let engine = FakePlaybackEngine()
+        engine.scriptedRoute = .avPlayer
+        engine.position = 100
+        engine.scriptedPresentationTime = 104
+        engine.subtitleCues = [
+            AppleSubtitleCue(id: 1, startTime: 99, endTime: 101, body: .text("HELD SCRUB CLOCK")),
+            AppleSubtitleCue(id: 2, startTime: 103, endTime: 105, body: .text("ON SCREEN NOW")),
+        ]
+        let subtitles = AppleStockPlayerSubtitles()
+        subtitles.refresh(from: engine)
+        #expect(subtitles.cues.map(\.id) == [2])
+    }
+
+    @Test("Engines with one clock pace cues from position")
+    func presentationTimeDefaultsToPosition() {
+        let engine = ChapterFakeEngine()
+        engine.position = 42
+        #expect(engine.presentationTime == 42)
+    }
+
     // MARK: - Cue → content
 
     @Test func textCuesDrawTheirText() {

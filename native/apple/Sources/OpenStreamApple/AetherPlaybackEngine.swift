@@ -34,6 +34,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var captionHandoffEligible = false
     private var captionHandoffReload: Task<Void, Never>?
     private var lastPositionUpdate = Date.distantPast
+    private var lastCueClockTrace = Date.distantPast
     /// Latest values published by `aether.$duration` / `aether.$isLive`. Used by
     /// `refreshDuration` because `@Published` sinks fire on `willSet`, when the
     /// engine's own stored properties still hold the previous value.
@@ -79,6 +80,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
     }
     public private(set) var position: Double = 0
+    /// `aether.clock.sourceTime`: the source PTS of the frame on screen. The
+    /// engine documents it as the clock hosts pace cues from; `position`
+    /// follows `currentTime`, which it holds through live rebases.
+    public private(set) var presentationTime: Double = 0
     /// The picture's display size, so the cue layer fits bitmap subtitles to
     /// the picture rather than to an assumed 16:9 (a 2.39:1 film letterboxes).
     /// The software route reports what it renders; the AVPlayer routes use the
@@ -453,6 +458,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         clearExternalSubtitles()
         hasReachedPlaying = false
         position = 0
+        presentationTime = 0
         lastPositionUpdate = .distantPast
     }
 
@@ -663,6 +669,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.clock.$currentTime
             .sink { [weak self] seconds in self?.applyPosition(seconds) }
             .store(in: &cancellables)
+        aether.clock.$sourceTime
+            .sink { [weak self] seconds in self?.applyPresentationTime(seconds) }
+            .store(in: &cancellables)
     }
 
     /// Aether can select at startup or when live 608 is discovered. Its
@@ -717,6 +726,24 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         lastPositionUpdate = now
         position = max(0, seconds)
         emit(.position(position))
+    }
+
+    private func applyPresentationTime(_ seconds: Double) {
+        guard seconds.isFinite else { return }
+        presentationTime = max(0, seconds)
+        guard activeSubtitleTrackID != nil else { return }
+        let now = Date()
+        // Cue readers re-read on position ticks. While the scrub clock is held
+        // those stop, so tick them off the picture instead.
+        if now.timeIntervalSince(lastPositionUpdate) >= 0.5 {
+            lastPositionUpdate = now
+            emit(.position(position))
+        }
+        if now.timeIntervalSince(lastCueClockTrace) >= 5 {
+            lastCueClockTrace = now
+            let gap = ((aether.clock.currentTime - presentationTime) * 100).rounded() / 100
+            appleTrace("cue clock: scrub minus picture \(gap)s")
+        }
     }
 
     private func refreshDuration() {

@@ -173,6 +173,12 @@ public protocol ApplePlaybackEngine: AnyObject {
     var phase: ApplePlaybackEnginePhase { get }
     var route: ApplePlaybackPresentationRoute { get }
     var position: Double { get }
+    /// The source time of the frame on screen, the clock subtitle cues are
+    /// paced from. `position` is the scrub clock: the OpenStream engine holds
+    /// it through live rebases and seek recovery while the picture keeps
+    /// moving, so live captions drawn against it lagged the picture. Engines
+    /// without a separate presentation clock report `position`.
+    var presentationTime: Double { get }
     var duration: Double? { get }
     var audioTracks: [ApplePlaybackTrack] { get }
     var subtitleTracks: [ApplePlaybackTrack] { get }
@@ -226,6 +232,8 @@ public protocol ApplePlaybackEngine: AnyObject {
 
 public extension ApplePlaybackEngine {
     func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {}
+    /// One clock for everything on engines that have only one.
+    var presentationTime: Double { position }
     /// Engines that cannot report their selection say nothing, and the overlay
     /// falls back to the last track it selected itself.
     var activeSubtitleTrackID: Int? { nil }

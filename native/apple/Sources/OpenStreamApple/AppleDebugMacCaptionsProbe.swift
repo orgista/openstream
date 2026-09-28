@@ -266,7 +266,7 @@ enum AppleDebugMacCaptionsProbe {
             selected = item.currentMediaSelection.selectedMediaOption(in: group)?.displayName ?? "none"
             options = group.options.map { "\($0.displayName)[\($0.extendedLanguageTag ?? "-")]" }
         }
-        let cues = AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.position)
+        let cues = AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.presentationTime)
         let handoff = (engine as? AetherPlaybackEngine)?.captionHandoff
         return ["CAPTIONS-PROBE [\(label)] handoff=\(handoff.map { "\($0.stage)" } ?? "-") "
                 + "pictureAway=\(handoff?.pictureIsAway.description ?? "-") appDraws=\(handoff?.appDrawsCaptions.description ?? "-") "

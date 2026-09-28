@@ -447,6 +447,26 @@ import Testing
         coordinator.stop()
     }
 
+    // MARK: - Cue clock
+
+    @Test func overlayCuesFollowPresentationTimeWhileScrubClockIsHeld() async throws {
+        let engine = FakePlaybackEngine()
+        engine.position = 100
+        engine.subtitleCues = [
+            AppleSubtitleCue(id: 1, startTime: 99, endTime: 101, body: .text("HELD SCRUB CLOCK")),
+            AppleSubtitleCue(id: 2, startTime: 103, endTime: 105, body: .text("ON SCREEN NOW")),
+        ]
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(isLive: true))
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: true)
+        await coordinator.begin(makeRequest(isLive: true))
+        engine.scriptedPresentationTime = 104
+        engine.emit(.position(100))
+        for _ in 0..<50 where model.cueTime != 104 { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.position == 100)
+        #expect(model.activeSubtitleCues.map(\.id) == [2])
+        coordinator.stop()
+    }
+
     // MARK: - Observation guard (repeated position ticks must not thrash the
     // track-selection menu — an open `Menu` observing unrelated state gets
     // torn down and rebuilt on every write, dropping taps).
