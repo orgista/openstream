@@ -7,6 +7,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
+      sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
+      bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
+      backup/import easy to find from the empty state.
+- [ ] **iOS trailers don't play** (2026-09-28, build 14).
+- [ ] **iOS Live TV subtitles are out of sync — they appear too late** (2026-09-28, build 14; they show up now).
+- [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
 - [ ] **Let "Continue Watching" be removed/hidden** from Discover (2026-09-28). Today it's the one row that
       can't be hidden in Settings → Discover Rows.
 - [ ] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
