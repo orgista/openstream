@@ -37,10 +37,32 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     /// The Apple TV has no switch, so the policy answers for it: its
     /// credentials are read from the synchronizing keychain the phone wrote.
     private var synchronizable: Bool {
-        AppleConfigurationSyncPolicy.isEnabled(
-            storedPreference: UserDefaults.standard.bool(forKey: Self.syncPreferenceKey)
+        Self.adoptDefaultSyncPreference()
+        return AppleConfigurationSyncPolicy.isEnabled(
+            storedPreference: AppleConfigurationSyncPolicy.storedPreference()
         )
     }
+
+    /// Sync is on by default (2026-09-28), but an install that never touched
+    /// the switch still holds its credentials ThisDeviceOnly, where a
+    /// synchronizable query cannot see them. Before the first keychain access
+    /// in the process, move them over and record the choice, so the stored
+    /// value is what `setSynchronizationEnabled` migrates from. If the move
+    /// fails, record off: the credentials stay readable where they are.
+    static func adoptDefaultSyncPreference() { _ = defaultSyncAdoption }
+
+    private static let defaultSyncAdoption: Void = {
+        let defaults = UserDefaults.standard
+        guard AppleConfigurationSyncPolicy.offersToggle(), testMemory == nil, !isBypassedForReview,
+              defaults.object(forKey: syncPreferenceKey) == nil else { return }
+        do {
+            try migrateSynchronization(to: true)
+            appleTrace("configuration sync: default on, keychain moved to synchronizing")
+        } catch {
+            defaults.set(false, forKey: syncPreferenceKey)
+            appleTrace("configuration sync: default on failed to move the keychain, left off")
+        }
+    }()
     private var accessibility: CFString {
         synchronizable ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }
@@ -131,8 +153,15 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     /// Change accessibility and sync together; ThisDeviceOnly is incompatible with sync.
     /// Roll back migrated services if a later update fails, leaving the toggle unchanged.
     static func setSynchronizationEnabled(_ enabled: Bool) throws {
+        adoptDefaultSyncPreference()
+        try migrateSynchronization(to: enabled)
+    }
+
+    private static func migrateSynchronization(to enabled: Bool) throws {
         let previous = UserDefaults.standard.bool(forKey: syncPreferenceKey)
-        guard previous != enabled, !isBypassedForReview else { return }
+        guard !isBypassedForReview else { return }
+        // Unset reads as on, so an unset "off" still has to be written down.
+        guard previous != enabled else { UserDefaults.standard.set(enabled, forKey: syncPreferenceKey); return }
         // Tests keep items in memory, which has no sync attribute to migrate.
         if testMemory != nil { UserDefaults.standard.set(enabled, forKey: syncPreferenceKey); return }
         var changed: [String] = []

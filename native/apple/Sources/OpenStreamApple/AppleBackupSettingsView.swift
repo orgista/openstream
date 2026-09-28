@@ -24,15 +24,8 @@ struct AppleBackupSettingsView: View {
     @State private var document: AppleConfigurationDocument?
     @State private var exporting = false
     @State private var importing = false
-    @State private var pendingImport: PendingImport?
     @State private var signingIn: AppleSource?
     @State private var syncAvailability = AppleICloudSyncAvailability.available
-
-    private struct PendingImport: Identifiable {
-        let id = UUID()
-        let data: Data
-        let file: AppleConfigurationFile
-    }
 
     var body: some View {
         Form {
@@ -94,20 +87,7 @@ struct AppleBackupSettingsView: View {
             }
             document = nil
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
-            do {
-                let url = try result.get()
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= 10_000_000 else { throw AppleConfigurationError.tooLarge }
-                let data = try Data(contentsOf: url)
-                pendingImport = try PendingImport(data: data, file: AppleConfigurationFile.inspect(data))
-            } catch { controller.setResult("Could not open configuration") }
-        }
-        .sheet(item: $pendingImport) { pending in
-            AppleBackupImportView(controller: controller, data: pending.data, file: pending.file)
-        }
+        .appleConfigurationImport(isPresented: $importing, controller: controller)
         .sheet(item: $signingIn) { source in
             if source.kind == .mediaServer {
                 NavigationStack { AppleAddMediaServerView(sourceStore: controller.sources) }
@@ -138,6 +118,81 @@ struct AppleBackupSettingsView: View {
         }
         .accessibilityIdentifier("backup.import")
     }
+}
+
+/// "Import Configuration…": pick a file, then confirm what it restores. Shared
+/// by the Backup page and Discover's No Sources page.
+@MainActor
+private struct AppleConfigurationImport: ViewModifier {
+    @Binding var isPresented: Bool
+    let controller: AppleConfigurationController
+    @State private var pendingImport: PendingImport?
+
+    private struct PendingImport: Identifiable {
+        let id = UUID()
+        let data: Data
+        let file: AppleConfigurationFile
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .fileImporter(isPresented: $isPresented, allowedContentTypes: [.json]) { result in
+                do {
+                    let url = try result.get()
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard size <= 10_000_000 else { throw AppleConfigurationError.tooLarge }
+                    let data = try Data(contentsOf: url)
+                    pendingImport = try PendingImport(data: data, file: AppleConfigurationFile.inspect(data))
+                } catch { controller.setResult("Could not open configuration") }
+            }
+            .sheet(item: $pendingImport) { pending in
+                AppleBackupImportView(controller: controller, data: pending.data, file: pending.file)
+            }
+    }
+}
+
+extension View {
+    func appleConfigurationImport(isPresented: Binding<Bool>, controller: AppleConfigurationController) -> some View {
+        modifier(AppleConfigurationImport(isPresented: isPresented, controller: controller))
+    }
+}
+
+/// Discover's No Sources on a device with Backup & Sync: "Restore from iCloud"
+/// where iCloud can be reached, "Import Backup", then Settings to add one.
+@MainActor
+struct AppleDiscoverRestoreEmptyState: View {
+    let title: String
+    let controller: AppleConfigurationController
+    let offersICloud: Bool
+    let openSettings: () -> Void
+    @State private var importing = false
+
+    var body: some View {
+        Group {
+            if offersICloud {
+                AppleSourceEmptyState(
+                    title: title, systemImage: OpenStreamTab.home.systemImage,
+                    actionTitle: "Restore from iCloud", action: restoreFromICloud,
+                    secondaryActionTitle: "Import Backup", secondaryAction: importBackup,
+                    tertiaryActionTitle: "Open Settings", tertiaryAction: openSettings)
+            } else {
+                AppleSourceEmptyState(
+                    title: title, systemImage: OpenStreamTab.home.systemImage,
+                    actionTitle: "Open Settings", action: openSettings,
+                    secondaryActionTitle: "Import Backup", secondaryAction: importBackup)
+            }
+        }
+        .appleConfigurationImport(isPresented: $importing, controller: controller)
+    }
+
+    private func restoreFromICloud() {
+        appleTrace("discover: restore from iCloud")
+        Task { await controller.restoreFromCloud() }
+    }
+
+    private func importBackup() { importing = true }
 }
 
 @MainActor

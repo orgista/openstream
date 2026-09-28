@@ -301,6 +301,10 @@ public struct AppleSourceEmptyState: View {
     /// under "Try Again" when its catalogs could not be read.
     public let secondaryActionTitle: String?
     public let secondaryAction: (() -> Void)?
+    /// A third, as quiet as the second: No Sources keeps "Open Settings"
+    /// under "Restore from iCloud" and "Import Backup".
+    public let tertiaryActionTitle: String?
+    public let tertiaryAction: (() -> Void)?
 
     public init(
         title: String,
@@ -308,7 +312,9 @@ public struct AppleSourceEmptyState: View {
         actionTitle: String,
         action: @escaping () -> Void,
         secondaryActionTitle: String? = nil,
-        secondaryAction: (() -> Void)? = nil
+        secondaryAction: (() -> Void)? = nil,
+        tertiaryActionTitle: String? = nil,
+        tertiaryAction: (() -> Void)? = nil
     ) {
         self.title = title
         self.systemImage = systemImage
@@ -316,6 +322,8 @@ public struct AppleSourceEmptyState: View {
         self.action = action
         self.secondaryActionTitle = secondaryActionTitle
         self.secondaryAction = secondaryAction
+        self.tertiaryActionTitle = tertiaryActionTitle
+        self.tertiaryAction = tertiaryAction
     }
 
     /// Title only. For a dead end an action cannot open: a button that runs and
@@ -327,6 +335,8 @@ public struct AppleSourceEmptyState: View {
         self.action = nil
         self.secondaryActionTitle = nil
         self.secondaryAction = nil
+        self.tertiaryActionTitle = nil
+        self.tertiaryAction = nil
     }
 
     public var body: some View {
@@ -367,6 +377,10 @@ public struct AppleSourceEmptyState: View {
             }
             if let secondaryActionTitle, let secondaryAction {
                 Button(secondaryActionTitle, action: secondaryAction)
+                    .buttonStyle(.brandSecondary)
+            }
+            if let tertiaryActionTitle, let tertiaryAction {
+                Button(tertiaryActionTitle, action: tertiaryAction)
                     .buttonStyle(.brandSecondary)
             }
         }

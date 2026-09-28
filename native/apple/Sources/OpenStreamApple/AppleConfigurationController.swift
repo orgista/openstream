@@ -14,6 +14,10 @@ final class AppleConfigurationController {
     private let defaults: UserDefaults
     private let cloud: AppleCloudKeyValueStore
     private var pendingWrite: Task<Void, Never>?
+    private var keychainRetry: Task<Void, Never>?
+    /// Whether this device has had any source since launch. See
+    /// `AppleConfigurationSyncPolicy.mayPublish`.
+    private var heldSources = false
     private var lastContent: Data?
     private var applying = false
     private var started = false
@@ -29,8 +33,9 @@ final class AppleConfigurationController {
         self.cloud = cloud
         // The Apple TV has no switch to read, so the policy answers for it:
         // always on, and read-only. See `AppleConfigurationSyncPolicy`.
+        AppleKeychainStore.adoptDefaultSyncPreference()
         syncEnabled = AppleConfigurationSyncPolicy.isEnabled(
-            storedPreference: defaults.bool(forKey: AppleKeychainStore.syncPreferenceKey)
+            storedPreference: AppleConfigurationSyncPolicy.storedPreference(in: defaults)
         )
     }
 
@@ -38,6 +43,7 @@ final class AppleConfigurationController {
         guard !started else { return }
         await mediaIndex.load()
         started = true
+        heldSources = !sources.sources.isEmpty
         lastContent = try? contentFingerprint()
         // A device that syncs without ever being asked still has to move its
         // existing credentials into the synchronizing keychain. They were
@@ -57,8 +63,17 @@ final class AppleConfigurationController {
         appleTrace("configuration sync start: enabled=\(syncEnabled) publishes=\(AppleConfigurationSyncPolicy.publishesChanges())")
         if syncEnabled {
             cloud.synchronize()
-            await readCloud()
+            await readCloud(fillingEmptyLocal: true)
         }
+    }
+
+    /// No Sources' "Restore from iCloud". Turns sync on if the viewer had
+    /// turned it off, then pulls what iCloud holds into the empty device.
+    func restoreFromCloud() async {
+        if !syncEnabled { await setSyncEnabled(true) }
+        guard syncEnabled else { return }
+        cloud.synchronize()
+        await readCloud(fillingEmptyLocal: true)
     }
 
     func export(passphrase: String) async throws -> Data {
@@ -107,6 +122,7 @@ final class AppleConfigurationController {
 
     func localChanged() {
         guard started, !applying else { return }
+        if !sources.sources.isEmpty { heldSources = true }
         do {
             let content = try contentFingerprint()
             guard content != lastContent else { return }
@@ -122,7 +138,10 @@ final class AppleConfigurationController {
         } catch { result = "Could not prepare configuration" }
     }
 
-    func readCloud() async {
+    /// `fillingEmptyLocal`: apply a snapshot with sources to a device that has
+    /// none even when it is not newer (launch, iCloud's own change, Restore).
+    func readCloud(fillingEmptyLocal: Bool = false) async {
+        defer { scheduleKeychainRetry() }
         guard started, syncEnabled, !applying else {
             appleTrace("configuration sync read skipped: started=\(started) enabled=\(syncEnabled) applying=\(applying)")
             return
@@ -134,7 +153,8 @@ final class AppleConfigurationController {
             applying = false
             let decision = try AppleCloudConfigurationRead.decide(
                 data: cloud.data(forKey: Self.cloudKey),
-                localSavedAt: defaults.object(forKey: Self.savedAtKey) as? Date
+                localSavedAt: defaults.object(forKey: Self.savedAtKey) as? Date,
+                localIsEmpty: fillingEmptyLocal && sources.sources.isEmpty
             )
             guard case .apply(let snapshot) = decision else {
                 appleTrace("configuration sync read: \(decision.traceDescription)")
@@ -144,12 +164,39 @@ final class AppleConfigurationController {
             try await apply(snapshot, secrets: nil, mergeSources: false)
             defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
+            if !sources.sources.isEmpty { heldSources = true }
             appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
             result = "Synced with iCloud"
         } catch { applying = false; result = "Could not restore iCloud configuration" }
     }
 
     func setResult(_ value: String) { result = value }
+
+    /// A restored source waits signed out for credentials iCloud Keychain has
+    /// not delivered yet. Becoming active and iCloud's own changes look again
+    /// (`readCloud`); this also looks a few times on its own, because the
+    /// keychain can arrive with neither.
+    private func scheduleKeychainRetry() {
+        guard syncEnabled, keychainRetry == nil, hasSourcesAwaitingKeychain else { return }
+        keychainRetry = Task { [weak self] in
+            for delay in AppleConfigurationSyncPolicy.keychainRetryDelays {
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self else { return }
+                guard self.syncEnabled, self.hasSourcesAwaitingKeychain else { break }
+                guard !self.applying else { continue }
+                self.applying = true
+                do { try self.sources.refreshConfigurationKeychain() }
+                catch { appleTrace("configuration sync: keychain look failed") }
+                self.applying = false
+                if !self.hasSourcesAwaitingKeychain { appleTrace("configuration sync: restored sources signed in from iCloud Keychain") }
+            }
+            self?.keychainRetry = nil
+        }
+    }
+
+    private var hasSourcesAwaitingKeychain: Bool {
+        sources.sources.contains { $0.needsSignIn && $0.kind != .library }
+    }
 
     private func capture(savedAt: Date? = nil) throws -> AppleConfigurationSnapshot {
         var values = try settings.configurationValues()
@@ -207,6 +254,14 @@ final class AppleConfigurationController {
             catch { return }
             guard let self, self.syncEnabled, !Task.isCancelled else { return }
             do {
+                let stored = self.cloud.data(forKey: Self.cloudKey)
+                    .flatMap { try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: $0) }
+                guard AppleConfigurationSyncPolicy.mayPublish(
+                    localSourceCount: self.sources.sources.count, heldSourcesSinceLaunch: self.heldSources,
+                    storedSourceCount: stored?.sources.count ?? 0) else {
+                    appleTrace("configuration sync: kept iCloud's sources, this device has none yet")
+                    return
+                }
                 let data = try self.capture().cloudData()
                 try self.sources.prepareConfigurationKeychain()
                 try self.settings.prepareConfigurationKeychain()
@@ -239,7 +294,7 @@ struct AppleConfigurationSync: ViewModifier {
                 controller?.localChanged()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
-                Task { await controller?.readCloud() }
+                Task { await controller?.readCloud(fillingEmptyLocal: true) }
             }
             .onChange(of: mediaIndex.records.filter(\.isFavorite)) { _, _ in controller?.localChanged() }
             .onChange(of: scenePhase) { _, phase in

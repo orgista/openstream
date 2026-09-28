@@ -1722,7 +1722,7 @@ public final class AppleSourceStore {
                 let reference = restored.id.uuidString.lowercased()
                 try keychain.set(value, for: reference)
                 restored.credentialReference = reference
-            } else if AppleConfigurationSyncPolicy.isEnabled(storedPreference: UserDefaults.standard.bool(forKey: AppleKeychainStore.syncPreferenceKey)), restored.kind != .library {
+            } else if AppleConfigurationSyncPolicy.isEnabled(storedPreference: AppleConfigurationSyncPolicy.storedPreference()), restored.kind != .library {
                 // Stable accounts reconnect independently arriving iCloud Keychain items.
                 let reference = restored.id.uuidString.lowercased()
                 if try keychain.string(for: reference) != nil { restored.credentialReference = reference }

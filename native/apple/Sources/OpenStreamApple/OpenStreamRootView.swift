@@ -593,7 +593,8 @@ public struct OpenStreamRootView: View {
                 mediaServerLibrary: mediaServerLibrary,
                 router: router,
                 settings: settingsStore,
-                openSettings: { selectedTab = .settings }
+                openSettings: { selectedTab = .settings },
+                backupController: backupController
             )
             .appleAlignedTabTitle(tab.title)
         case .library:

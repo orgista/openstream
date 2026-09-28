@@ -108,6 +108,9 @@ struct AppleDiscoverView: View {
     let router: AppleAppRouter
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    /// Backup & Sync, for No Sources' restore and import. Nil until the root
+    /// view has made it.
+    let backupController: AppleConfigurationController?
     private let playbackResolver: AppleStremioPlaybackResolver
 
     private struct IndexedCatalogItem: Identifiable {
@@ -125,6 +128,7 @@ struct AppleDiscoverView: View {
         router: AppleAppRouter,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
+        backupController: AppleConfigurationController? = nil,
         playbackResolver: AppleStremioPlaybackResolver = AppleStremioPlaybackResolver()
     ) {
         self.catalogStore = catalogStore
@@ -134,6 +138,7 @@ struct AppleDiscoverView: View {
         self.router = router
         self.settings = settings
         self.openSettings = openSettings
+        self.backupController = backupController
         self.playbackResolver = playbackResolver
     }
 
@@ -1296,13 +1301,29 @@ struct AppleDiscoverView: View {
                 secondaryAction: openSettings
             )
         } else {
-            AppleSourceEmptyState(
-                title: state.title,
-                systemImage: OpenStreamTab.home.systemImage,
-                actionTitle: "Open Settings",
-                action: openSettings
-            )
+            #if os(tvOS)
+            openSettingsEmptyState(state)
+            #else
+            // No Sources with Backup & Sync at hand: restore or import first.
+            if state == .noSources, let backupController {
+                AppleDiscoverRestoreEmptyState(
+                    title: state.title, controller: backupController,
+                    offersICloud: state.offersICloudRestore(AppleICloudSyncProbe.current()),
+                    openSettings: openSettings)
+            } else {
+                openSettingsEmptyState(state)
+            }
+            #endif
         }
+    }
+
+    private func openSettingsEmptyState(_ state: AppleDiscoverEmptyState) -> some View {
+        AppleSourceEmptyState(
+            title: state.title,
+            systemImage: OpenStreamTab.home.systemImage,
+            actionTitle: "Open Settings",
+            action: openSettings
+        )
     }
 
     private func refresh() {

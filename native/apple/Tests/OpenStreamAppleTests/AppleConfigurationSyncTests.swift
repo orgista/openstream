@@ -113,6 +113,98 @@ struct AppleConfigurationSyncTests {
         }
     }
 
+    // MARK: - Sync is on unless the viewer turned it off
+
+    @Test func anUnsetPreferenceMeansSyncIsOn() {
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(nil))
+        #expect(AppleConfigurationSyncPolicy.isEnabled(
+            storedPreference: AppleConfigurationSyncPolicy.resolvedPreference(nil), mode: .viewerChoice))
+    }
+
+    @Test func anExplicitOffStaysOff() {
+        #expect(!AppleConfigurationSyncPolicy.resolvedPreference(false))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(true))
+        #expect(!AppleConfigurationSyncPolicy.isEnabled(
+            storedPreference: AppleConfigurationSyncPolicy.resolvedPreference(false), mode: .viewerChoice))
+    }
+
+    @Test func theStoredPreferenceIsReadWithTheDefault() throws {
+        let name = "configuration-sync-tests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(AppleConfigurationSyncPolicy.storedPreference(in: defaults))
+        defaults.set(false, forKey: AppleKeychainStore.syncPreferenceKey)
+        #expect(!AppleConfigurationSyncPolicy.storedPreference(in: defaults))
+    }
+
+    // MARK: - A device with no sources
+
+    /// A new device stamps a local edit before iCloud delivers anything, so
+    /// the phone's snapshot is "older" and was never applied.
+    @Test func anEmptyDeviceTakesTheSnapshotEvenWhenItIsNotNewer() throws {
+        let data = try cloudData(savedAt: epoch, sources: [source(name: "From the iPhone")])
+        let later = epoch.addingTimeInterval(60)
+        let decision = try AppleCloudConfigurationRead.decide(data: data, localSavedAt: later, localIsEmpty: true)
+        guard case .apply(let snapshot) = decision else {
+            Issue.record("expected the empty device to take the snapshot, got \(decision)")
+            return
+        }
+        #expect(snapshot.sources.map(\.name) == ["From the iPhone"])
+        #expect(try AppleCloudConfigurationRead.decide(data: data, localSavedAt: later) == .notNewer)
+    }
+
+    @Test func anEmptyDeviceIgnoresAnOlderSnapshotWithNoSources() throws {
+        let data = try cloudData(savedAt: epoch, sources: [])
+        #expect(try AppleCloudConfigurationRead.decide(
+            data: data, localSavedAt: epoch.addingTimeInterval(60), localIsEmpty: true) == .notNewer)
+    }
+
+    /// A new install must not publish its empty list over the phone's.
+    @Test func aDeviceThatNeverHadSourcesDoesNotReplaceSomeWithNone() {
+        #expect(!AppleConfigurationSyncPolicy.mayPublish(localSourceCount: 0, heldSourcesSinceLaunch: false, storedSourceCount: 3))
+        #expect(AppleConfigurationSyncPolicy.mayPublish(localSourceCount: 0, heldSourcesSinceLaunch: true, storedSourceCount: 3))
+        #expect(AppleConfigurationSyncPolicy.mayPublish(localSourceCount: 0, heldSourcesSinceLaunch: false, storedSourceCount: 0))
+        #expect(AppleConfigurationSyncPolicy.mayPublish(localSourceCount: 1, heldSourcesSinceLaunch: false, storedSourceCount: 3))
+    }
+
+    @Test func keychainRetriesAreFewAndGrow() {
+        let delays = AppleConfigurationSyncPolicy.keychainRetryDelays
+        #expect(!delays.isEmpty && delays.count <= 6)
+        #expect(delays == delays.sorted())
+    }
+
+    /// iCloud Keychain delivers a restored source's credentials after the
+    /// snapshot. When they land, the source signs itself back in.
+    @MainActor @Test func aRestoredSourceSignsInWhenItsKeychainItemsArrive() throws {
+        #expect(AppleConfigurationSyncPolicy.storedPreference(), "this test needs sync on in the test process")
+        let phoneName = "configuration-sync-phone.\(UUID())"
+        let padName = "configuration-sync-pad.\(UUID())"
+        let phoneDefaults = try #require(UserDefaults(suiteName: phoneName))
+        let padDefaults = try #require(UserDefaults(suiteName: padName))
+        defer {
+            phoneDefaults.removePersistentDomain(forName: phoneName)
+            padDefaults.removePersistentDomain(forName: padName)
+        }
+        let phoneKeychain = SyncTestCredentials()
+        let padKeychain = SyncTestCredentials()
+        let phone = AppleSourceStore(defaults: phoneDefaults, keychain: phoneKeychain)
+        let added = try phone.addIPTV(name: "Provider", type: .xtream,
+            endpoint: "https://fixture.example", username: "fixture-user", password: "fixture-password")
+        try phone.prepareConfigurationKeychain()
+
+        let pad = AppleSourceStore(defaults: padDefaults, keychain: padKeychain)
+        try pad.restoreConfigurationSources(phone.sources, secrets: nil, merge: false)
+        let waiting = try #require(pad.sources.first { $0.id == added.id })
+        #expect(waiting.needsSignIn)
+        #expect(!waiting.isEnabled)
+
+        padKeychain.values = phoneKeychain.values
+        try pad.refreshConfigurationKeychain()
+        let signedIn = try #require(pad.sources.first { $0.id == added.id })
+        #expect(!signedIn.needsSignIn)
+        #expect(signedIn.isEnabled)
+    }
+
     // MARK: - The injectable store
 
     /// The controller talks to a protocol, so a fake can stand in for iCloud.
@@ -145,4 +237,12 @@ final class FakeCloudStore: AppleCloudKeyValueStore, @unchecked Sendable {
         synchronizeCount += 1
         return true
     }
+}
+
+/// A keychain the test can hand from one device to the other.
+private final class SyncTestCredentials: AppleCredentialStoring {
+    var values: [String: String] = [:]
+    func string(for account: String) throws -> String? { values[account] }
+    func set(_ value: String, for account: String) throws { values[account] = value }
+    func remove(_ account: String) throws { values.removeValue(forKey: account) }
 }

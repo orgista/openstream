@@ -33,6 +33,31 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         mode == .automaticReadOnly || storedPreference
     }
 
+    /// The Backup screen's switch as stored. Sync is on unless the viewer
+    /// turned it off (owner, 2026-09-28): an install that never touched the
+    /// switch reads as on, and an explicit off stays off.
+    public static func resolvedPreference(_ stored: Bool?) -> Bool {
+        stored ?? true
+    }
+
+    /// `resolvedPreference` read from `defaults`.
+    static func storedPreference(in defaults: UserDefaults = .standard) -> Bool {
+        resolvedPreference(defaults.object(forKey: AppleKeychainStore.syncPreferenceKey) as? Bool)
+    }
+
+    /// May a snapshot with no sources replace one that has some? Not from a
+    /// device that has held no source since launch: a new install can reach
+    /// its first write before iCloud has delivered anything, and every other
+    /// device would then apply its empty list over theirs.
+    public static func mayPublish(localSourceCount: Int, heldSourcesSinceLaunch: Bool, storedSourceCount: Int) -> Bool {
+        localSourceCount > 0 || heldSourcesSinceLaunch || storedSourceCount == 0
+    }
+
+    /// How long to wait between looks for credentials iCloud Keychain has not
+    /// delivered yet. A restored source waits on them signed out; after the
+    /// last look it stays that way until the viewer signs in.
+    public static let keychainRetryDelays: [Duration] = [.seconds(5), .seconds(15), .seconds(30), .seconds(60), .seconds(120)]
+
     /// May this device publish its own configuration to iCloud?
     public static func publishesChanges(mode: AppleConfigurationSyncMode = current) -> Bool {
         mode != .automaticReadOnly
@@ -85,14 +110,19 @@ public enum AppleCloudConfigurationRead: Equatable, Sendable {
     /// Throws `AppleConfigurationError.tooLarge` for an oversized payload and
     /// whatever decoding or validation reports for a corrupt one, so the caller
     /// surfaces the same message it always has.
-    public static func decide(data: Data?, localSavedAt: Date?) throws -> AppleCloudConfigurationRead {
+    ///
+    /// `localIsEmpty`: this device has no sources. A snapshot that has some is
+    /// applied even when it is not newer, because an empty device can stamp a
+    /// local edit (a setting, a watched mark) before iCloud delivers anything.
+    public static func decide(data: Data?, localSavedAt: Date?, localIsEmpty: Bool = false) throws -> AppleCloudConfigurationRead {
         guard let data else { return .nothingStored }
         guard data.count <= AppleConfigurationSnapshot.maximumCloudBytes else {
             throw AppleConfigurationError.tooLarge
         }
         let snapshot = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
         try snapshot.validate()
-        guard snapshot.savedAt > (localSavedAt ?? .distantPast) else { return .notNewer }
+        let isNewer = snapshot.savedAt > (localSavedAt ?? .distantPast)
+        guard isNewer || (localIsEmpty && !snapshot.sources.isEmpty) else { return .notNewer }
         return .apply(snapshot)
     }
 }

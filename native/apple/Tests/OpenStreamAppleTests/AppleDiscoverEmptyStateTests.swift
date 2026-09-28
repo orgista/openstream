@@ -31,4 +31,13 @@ struct AppleDiscoverEmptyStateTests {
         #expect(state.title == "Nothing to Show")
         #expect(state.offersRetry == false)
     }
+
+    @Test("Only No Sources offers Restore from iCloud, and only where iCloud can be reached")
+    func iCloudRestoreIsOfferedOnNoSources() {
+        #expect(AppleDiscoverEmptyState.noSources.offersICloudRestore(.available))
+        #expect(AppleDiscoverEmptyState.noSources.offersICloudRestore(.signedOut))
+        #expect(!AppleDiscoverEmptyState.noSources.offersICloudRestore(.notEntitled))
+        #expect(!AppleDiscoverEmptyState.couldNotLoad.offersICloudRestore(.available))
+        #expect(!AppleDiscoverEmptyState.nothingToShow.offersICloudRestore(.available))
+    }
 }

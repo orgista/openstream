@@ -36,4 +36,10 @@ public enum AppleDiscoverEmptyState: Equatable, Sendable {
     /// Only a failure is worth retrying; reloading an empty or missing
     /// catalog would leave the page exactly as it was.
     public var offersRetry: Bool { self == .couldNotLoad }
+
+    /// A device with no sources may have a configuration waiting in iCloud.
+    /// Not offered where this build cannot reach iCloud at all.
+    public func offersICloudRestore(_ availability: AppleICloudSyncAvailability) -> Bool {
+        self == .noSources && availability != .notEntitled
+    }
 }
