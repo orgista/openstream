@@ -59,6 +59,7 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 - Never create files or folders outside the paths your task names (no `scratch_store`, no `REPORT.md`);
   use `/tmp` for scratch.
 - Uploads are the driver's job only, by the runbook in `HANDOFF-NEXT-SESSION.md §9`, after "ship N".
+  Before any upload, every line of `SHIP-CHECKLIST.md` must pass (owner rule 2026-09-28).
 
 ## 4. Owner UI rules (do not relitigate)
 Stock Apple look. Nothing blue except the brand mark (accent #FF3366). No gradients, scrims or

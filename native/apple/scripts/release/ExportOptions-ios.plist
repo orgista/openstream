@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>destination</key>
+	<string>export</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.orgista.openstream</key>
+		<string>OpenStream App Store SharePlay 2026-09-10</string>
+		<key>com.orgista.openstream.messages</key>
+		<string>OpenStream App Store messages 2026-09-28</string>
+		<key>com.orgista.openstream.watchkitapp</key>
+		<string>OpenStream App Store watchkitapp</string>
+		<key>com.orgista.openstream.widgets</key>
+		<string>OpenStream App Store widgets 2026-09-17</string>
+	</dict>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>teamID</key>
+	<string>2VQ74PD5YG</string>
+	<key>uploadSymbols</key>
+	<true/>
+</dict>
+</plist>

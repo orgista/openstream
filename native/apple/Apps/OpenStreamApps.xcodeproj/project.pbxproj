@@ -1090,7 +1090,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_ENTITLEMENTS = OpenStreamMessages/OpenStreamMessages.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream App Store messages 2026-09-28";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1211,7 +1213,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Shared/OpenStreamiOS.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream App Store SharePlay 2026-09-10";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1484,7 +1488,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.orgista.openstream.topshelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "OpenStream tvOS TopShelf";
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream tvOS TopShelf 2026-09-28";
 				SDKROOT = appletvos;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
@@ -1524,7 +1528,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = OpenStreamWidgets/OpenStreamWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream App Store widgets 2026-09-17";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1571,7 +1577,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream App Store watchkitapp";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2VQ74PD5YG;
 				GENERATE_INFOPLIST_FILE = NO;
