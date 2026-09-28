@@ -787,8 +787,9 @@ Closes the "iMessage: no target exists" item in §7c. Not committed (driver comm
 - **Owner actions before any TestFlight build:** (1) App Store Connect needs an App ID for
   `com.orgista.openstream.messages` with the App Groups capability, plus a provisioning profile — an
   archive/upload will fail without it, and signing was deliberately left untouched here. (2) The iMessage
-  app icon is a **placeholder**: the existing 1024 app icon centre-cropped to 4:3. It is legible but was
-  not designed at these sizes; replace before shipping.
+  app icon placeholder (a centre-crop of the 1024 app icon) was **replaced 2026-09-28**: every size is now
+  rendered from `Apps/Shared/AppIcon.icon` (glyph.svg bars centred on the icon.json gradient, extended to
+  the full 4:3 canvas; opaque sRGB). Generator: `~/Developer/openstream-build/specs/imessage-icon.py`.
 
 ## 7e. State 2026-09-20 13:20 (Claude session) — live skip-back reads the real seekable range
 Closes "live skip-back does nothing" (owner, GUI audit 2026-09-19). Not committed (driver commits).
