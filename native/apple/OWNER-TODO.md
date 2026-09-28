@@ -7,7 +7,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-_(nothing open)_
+- [ ] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
+      works but isn't friendly for long moves (about 25 rows). Make it drag-and-drop (or similar) on
+      every platform, keeping a non-drag way for Apple TV and accessibility.
 
 ## Waiting on an owner decision
 
@@ -22,8 +24,9 @@ _(nothing open)_
 - [ ] **Receipt check (N39 F1).** The app tells TestFlight builds apart (to turn tracing on) with
       Apple's deprecated receipt URL, the last build warning. Its replacement is async and can put an
       App Store sign-in prompt on the Mac. Keep the deprecated check (recommended), or switch?
-- [ ] **ServerPlus 3090:** reboot + power limit (`nvidia-smi -pl 250-280`) and check the riser/power
-      cable. The free local model workers are down until then.
+- [ ] **ServerPlus 3090:** passed a full overnight bench test on Windows (2026-09-27, 350 W, 0 errors), so it may
+      be the DEG1/OCuLink path at 3090 power. The server runs a 2080 Ti for now (11 GB: the 27B local
+      model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
 
 ## Done
 
