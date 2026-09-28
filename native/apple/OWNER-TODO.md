@@ -10,9 +10,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
       sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
       bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
-      backup/import easy to find from the empty state.
-- [ ] **iOS trailers don't play** (2026-09-28, build 14).
+      backup/import easy to find from the empty state. **Fix committed 66e2d46** (sync on by default, fresh
+      device pulls, keychain retry, Restore/Import buttons on No Sources) — tick once installed (build 15).
+- [ ] **iOS trailers don't play** (2026-09-28, build 14). Failures are silent by design; asked the owner whether
+      Auto-Play Video Previews is on and whether Play Trailer on a title page fails too.
 - [ ] **iOS Live TV subtitles are out of sync — they appear too late** (2026-09-28, build 14; they show up now).
+      **Fix committed 1f3f9f0** (cues follow the on-screen frame, not the scrub clock) — tick once installed.
 - [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
 - [ ] **Let "Continue Watching" be removed/hidden** from Discover (2026-09-28). Today it's the one row that
       can't be hidden in Settings → Discover Rows.
