@@ -7,6 +7,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Let "Continue Watching" be removed/hidden** from Discover (2026-09-28). Today it's the one row that
+      can't be hidden in Settings → Discover Rows.
 - [ ] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
       works but isn't friendly for long moves (about 25 rows). Make it drag-and-drop (or similar) on
       every platform, keeping a non-drag way for Apple TV and accessibility.
