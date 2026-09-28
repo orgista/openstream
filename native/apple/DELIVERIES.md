@@ -1,5 +1,25 @@
 # Deliveries
 
+## OpenStream build 14 TestFlight delivery — September 28, 2026 (iOS, tvOS, visionOS)
+
+Owner said "ship 14" for all platforms with tracing. Source a6298a7, built in local worktree
+`~/Developer/openstream-build/wt-b14` (Release signing pins uncommitted). Gate: 2247 tests / 263 suites.
+Uploaded with `asc publish testflight … --group "Internal,TraceEnabled" --submit --confirm`; all three
+processed VALID and were submitted for beta app review. Tracing is on by default for TestFlight installs
+(AppleInteractionTrace.swift:70-87, AppleBuildChannel.swift:8,12).
+
+| Platform | Build ID |
+|---|---|
+| iOS 14 | 1e1dac6d-54a4-4005-bc73-2daea3ea1a2a |
+| tvOS 14 | 026379c2-1a59-4a37-83ed-6b342b959420 |
+| visionOS 14 | 976b69bf-b3a0-4337-9997-b7c342ad9af8 |
+
+New App Store profiles created for this build: `OpenStream App Store messages 2026-09-28` (83NM7K83NK,
+iMessage extension, which still has a placeholder icon) and `OpenStream tvOS TopShelf 2026-09-28`
+(454CV739UU; the old TopShelf profile 85WVPQ4SA5 was INVALID). macOS not uploaded: App Store Connect
+already has Mac build 13, so a Mac upload needs build ≥ 14 (owner to confirm).
+
+
 ## Apple build 12 source publication — September 17, 2026
 
 Published to https://github.com/orgista/openstream-apple, branch main and tag build-12, commit
