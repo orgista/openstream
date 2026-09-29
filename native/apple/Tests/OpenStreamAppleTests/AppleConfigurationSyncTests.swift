@@ -128,6 +128,38 @@ struct AppleConfigurationSyncTests {
             storedPreference: AppleConfigurationSyncPolicy.resolvedPreference(false), mode: .viewerChoice))
     }
 
+    /// A launch argument (`-openstream.backup.icloud.enabled.v1 NO`) lands in
+    /// the argument domain as a String; the UI tests turn sync off that way.
+    @Test(arguments: ["NO", "no", "false", "FALSE", "0", " No "])
+    func aLaunchArgumentTurnsSyncOff(value: String) {
+        #expect(!AppleConfigurationSyncPolicy.resolvedPreference(storedValue: value))
+    }
+
+    @Test(arguments: ["YES", "yes", "true", "True", "1"])
+    func aLaunchArgumentTurnsSyncOn(value: String) {
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: value))
+    }
+
+    @Test func boolsNumbersAndUnreadableValuesResolve() {
+        #expect(!AppleConfigurationSyncPolicy.resolvedPreference(storedValue: false))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: true))
+        #expect(!AppleConfigurationSyncPolicy.resolvedPreference(storedValue: NSNumber(value: 0)))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: NSNumber(value: 1)))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: nil))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: "maybe"))
+        #expect(AppleConfigurationSyncPolicy.resolvedPreference(storedValue: Data()))
+    }
+
+    @Test func aStringInDefaultsIsReadAsTheSwitch() throws {
+        let name = "configuration-sync-tests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("NO", forKey: AppleKeychainStore.syncPreferenceKey)
+        #expect(!AppleConfigurationSyncPolicy.storedPreference(in: defaults))
+        defaults.set("YES", forKey: AppleKeychainStore.syncPreferenceKey)
+        #expect(AppleConfigurationSyncPolicy.storedPreference(in: defaults))
+    }
+
     @Test func theStoredPreferenceIsReadWithTheDefault() throws {
         let name = "configuration-sync-tests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))

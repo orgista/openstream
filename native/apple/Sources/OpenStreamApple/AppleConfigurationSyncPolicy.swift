@@ -40,9 +40,30 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         stored ?? true
     }
 
+    /// The stored value as a Bool, whatever form it arrived in: the switch
+    /// writes a Bool (an NSNumber once stored), and a launch argument such as
+    /// `-openstream.backup.icloud.enabled.v1 NO` arrives as a String. Anything
+    /// unreadable counts as unset, so sync stays on.
+    static func resolvedPreference(storedValue: Any?) -> Bool {
+        switch storedValue {
+        case let value as Bool:
+            return resolvedPreference(value)
+        case let value as NSNumber:
+            return resolvedPreference(value.boolValue)
+        case let value as String:
+            switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "yes", "true", "1": return resolvedPreference(true)
+            case "no", "false", "0": return resolvedPreference(false)
+            default: return resolvedPreference(nil)
+            }
+        default:
+            return resolvedPreference(nil)
+        }
+    }
+
     /// `resolvedPreference` read from `defaults`.
     static func storedPreference(in defaults: UserDefaults = .standard) -> Bool {
-        resolvedPreference(defaults.object(forKey: AppleKeychainStore.syncPreferenceKey) as? Bool)
+        resolvedPreference(storedValue: defaults.object(forKey: AppleKeychainStore.syncPreferenceKey))
     }
 
     /// May a snapshot with no sources replace one that has some? Not from a
