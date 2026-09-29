@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
+      an explicit Play Trailer press unmutes.
+- [ ] **Streaming services: keep the quiet "Also available on …" line only (owner chose option a), but make it
+      easier to spot** — no Play replacement, no service rows.
 - [ ] **Subtitles menu still lists every language instead of defaulting to English (asked again)**
       (2026-09-28, build 14). The earlier fix (FEEDBACK.md "A picked language was not the only option")
       only filters strictly when a language was explicitly picked; with device defaults and no exact match it
