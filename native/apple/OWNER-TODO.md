@@ -52,8 +52,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **iOS Live TV subtitles are out of sync — they appear too late** (2026-09-28, build 14; they show up now).
       **Fix committed 1f3f9f0** (cues follow the on-screen frame, not the scrub clock) — tick once installed.
 - [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
-- [ ] **Let "Continue Watching" be removed/hidden** from Discover (2026-09-28). Today it's the one row that
-      can't be hidden in Settings → Discover Rows.
+- [ ] **Remove a specific title from Continue Watching** (2026-09-28; clarified 2026-09-29: per title like Netflix,
+      not hiding the whole row). Progress is kept; it comes back if played again.
 - [ ] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
       works but isn't friendly for long moves (about 25 rows). Make it drag-and-drop (or similar) on
       every platform, keeping a non-drag way for Apple TV and accessibility.
