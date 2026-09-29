@@ -142,19 +142,16 @@ public enum AppleSubtitleLanguages {
             .caseInsensitiveCompare(subtitlesResource) == .orderedSame }
     }
 
-    /// English plus the device's preferred languages as canonical codes,
-    /// English first, capped at `maximumSelection` and de-duplicated. Most
-    /// add-on subtitles are English, so it is always worth listing.
+    /// The device's primary language as a canonical code: the first of the
+    /// device's preferred languages the picker knows, else English. This is
+    /// the whole preference until the viewer picks languages in Settings.
     public static func deviceDefaults(
         preferredLanguages: [String] = Locale.preferredLanguages
     ) -> [String] {
-        var codes: [String] = ["eng"]
         for language in preferredLanguages {
-            guard let code = normalized(language), !codes.contains(code) else { continue }
-            codes.append(code)
-            if codes.count >= maximumSelection { break }
+            if let code = normalized(language) { return [code] }
         }
-        return codes
+        return ["eng"]
     }
 
     /// Toggles one code in the preference list, refusing to grow it beyond

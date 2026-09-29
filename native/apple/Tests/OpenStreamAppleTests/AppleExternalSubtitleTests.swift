@@ -139,7 +139,9 @@ private func subtitleSource(
             // No `subtitles` resource, so it is never asked.
             subtitleSource(host: "streams.example", name: "Streams", resources: ["stream"]),
             subtitleSource(host: "off.example", name: "Off", enabled: false),
-        ]
+        ],
+        // Named outright: an empty list now means the device's language only.
+        preferredLanguages: ["eng", "fra", "spa"]
     )
 
     #expect(tracks.map(\.languageCode) == ["eng", "fra", "spa"])

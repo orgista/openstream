@@ -72,9 +72,11 @@ enum AppleSubtitleCueLayerPolicy {
         languagesAreExplicit: Bool,
         activeTrackID: Int?
     ) -> [MenuEntry] {
+        // A stream whose subtitles are all in other languages still gets
+        // "Off" alone, so the viewer can see there is nothing to pick.
+        guard !tracks.isEmpty else { return [] }
         let choices = AppleSubtitleTrackFilter.menuChoices(
             tracks, preferredLanguages: preferredLanguages, activeTrackID: activeTrackID)
-        guard !choices.isEmpty else { return [] }
         return [MenuEntry(trackID: nil, title: "Off", isSelected: activeTrackID == nil)]
             + choices.map { choice in
                 MenuEntry(trackID: choice.track.id, title: choice.title,

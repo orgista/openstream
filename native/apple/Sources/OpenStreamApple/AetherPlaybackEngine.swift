@@ -149,8 +149,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// The viewer's chosen subtitle languages. Auto-selection picks the first
     /// track in these rather than the first track in the file: a remux lists
     /// its tracks in whatever order the muxer used, so "first" was routinely a
-    /// language the viewer does not read (owner 2026-09-14). Empty means no
-    /// preference, and then the first track stands.
+    /// language the viewer does not read (owner 2026-09-14). Empty means the
+    /// device's primary language (`AppleSubtitleTrackFilter.effectiveLanguages`).
     public var preferredSubtitleLanguages: [String] =
         UserDefaults.standard.stringArray(forKey: AppleSubtitleLanguages.defaultsKey) ?? []
     /// True when `preferredSubtitleLanguages` is a language the viewer picked
@@ -769,10 +769,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                   preferredLanguages: preferredSubtitleLanguages,
                   isExplicitChoice: subtitleLanguagesAreExplicit
               ).first else { return }
-        if !captionsPreference.autoSelectsAnyTrack {
-            let wanted = preferredSubtitleLanguages.map(AppleSubtitleTrackFilter.normalized)
-            guard wanted.contains(AppleSubtitleTrackFilter.normalized(first.language ?? "")) else { return }
-        }
+        // `visible` is the language rule: a preferred-language track, or an
+        // untagged closed caption when the stream has none.
         applySubtitleSelection(id: first.id)
     }
 

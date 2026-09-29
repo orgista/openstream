@@ -448,13 +448,9 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             guard let first = visible.first else { return }
             applySubtitleSelection(id: first.id)
         default:
-            // A language preference only selects a track that actually matches
-            // it; `visible` falls back to every track when nothing does, so
-            // check the match rather than trusting the fallback.
-            let wanted = preferredSubtitleLanguages.map(AppleSubtitleTrackFilter.normalized)
-            guard let match = visible.first(where: {
-                wanted.contains(AppleSubtitleTrackFilter.normalized($0.language ?? ""))
-            }) else { return }
+            // `visible` is the language rule: a preferred-language track, or
+            // an untagged closed caption when the stream has none.
+            guard let match = visible.first else { return }
             applySubtitleSelection(id: match.id)
         }
     }

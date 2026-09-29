@@ -20,7 +20,7 @@ struct AppleCaptionMenuLabelTests {
     ]
 
     @Test func eachLanguageAndKindIsOneHumanNamedRow() {
-        let choices = AppleSubtitleTrackFilter.menuChoices(Self.messy, preferredLanguages: ["en"])
+        let choices = AppleSubtitleTrackFilter.menuChoices(Self.messy, preferredLanguages: ["en", "fr", "es"])
         #expect(choices.map(\.title) == ["English", "English (SDH)", "English (Forced)", "French", "Spanish"])
     }
 
@@ -29,7 +29,7 @@ struct AppleCaptionMenuLabelTests {
             ApplePlaybackTrack(id: 20, title: "Subtitle 2", language: "de"),
             ApplePlaybackTrack(id: 21, title: "Track 3 (subrip)", language: "it", codec: "subrip"),
         ]
-        let titles = AppleSubtitleCueLayerPolicy.menuEntries(tracks: odd, preferredLanguages: [],
+        let titles = AppleSubtitleCueLayerPolicy.menuEntries(tracks: odd, preferredLanguages: ["en", "fr", "es"],
             languagesAreExplicit: false, activeTrackID: nil).map(\.title)
         #expect(titles.first == "Off")
         for title in titles {
@@ -46,13 +46,13 @@ struct AppleCaptionMenuLabelTests {
         let english = AppleSubtitleTrackFilter.menuChoices(Self.messy, preferredLanguages: ["en"]).first
         #expect(english?.track.id == 2)
         #expect(Set(english?.memberIDs ?? []) == [2, 6, 1_000_000, 1_000_001])
-        let spanish = AppleSubtitleTrackFilter.menuChoices(Self.messy, preferredLanguages: [])
+        let spanish = AppleSubtitleTrackFilter.menuChoices(Self.messy, preferredLanguages: ["es"])
             .first { $0.title == "Spanish" }
         // PGS 7 against the add-on's text file: text wins even from an add-on.
         #expect(spanish?.track.id == 1_000_002)
         let addOnsOnly = [ApplePlaybackTrack(id: 1_000_004, title: "English (B)", language: "en"),
                           ApplePlaybackTrack(id: 1_000_003, title: "English (A)", language: "en")]
-        #expect(AppleSubtitleTrackFilter.menuChoices(addOnsOnly, preferredLanguages: []).map(\.track.id) == [1_000_003])
+        #expect(AppleSubtitleTrackFilter.menuChoices(addOnsOnly, preferredLanguages: ["en"]).map(\.track.id) == [1_000_003])
     }
 
     /// Whatever the engine picked by itself stays the ticked row, even when
@@ -71,18 +71,19 @@ struct AppleCaptionMenuLabelTests {
 
     @Test func aVariantAloneIsJustItsLanguage() {
         let sdhOnly = [ApplePlaybackTrack(id: 1, title: "English SDH", language: "en", isHearingImpaired: true)]
-        #expect(AppleSubtitleTrackFilter.menuChoices(sdhOnly, preferredLanguages: []).map(\.title) == ["English"])
+        #expect(AppleSubtitleTrackFilter.menuChoices(sdhOnly, preferredLanguages: ["en"]).map(\.title) == ["English"])
         let withCC = [ApplePlaybackTrack(id: 1, title: "English", language: "en", codec: "subrip"),
                       ApplePlaybackTrack(id: 2, title: "CC1", language: "en", codec: "eia_608")]
-        #expect(AppleSubtitleTrackFilter.menuChoices(withCC, preferredLanguages: []).map(\.title) == ["English", "English (CC)"])
+        #expect(AppleSubtitleTrackFilter.menuChoices(withCC, preferredLanguages: ["en"]).map(\.title) == ["English", "English (CC)"])
     }
 
     @Test func aTitleNamesTheLanguageWhenTheContainerDoesNot() {
         let tracks = [ApplePlaybackTrack(id: 0, title: "English", codec: "subrip"),
                       ApplePlaybackTrack(id: 1, title: "German", codec: "subrip"),
                       ApplePlaybackTrack(id: 2, title: "Subtitle 3", codec: "subrip")]
-        #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: []).map(\.title)
-            == ["English", "German", "Subtitles"])
+        // "Subtitle 3" names no language, so it is not listed (owner 2026-09-28).
+        #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["en", "de"]).map(\.title)
+            == ["English", "German"])
     }
 
     /// The app draws the Mac's captions now; a 12 pt cue under a 700 pt

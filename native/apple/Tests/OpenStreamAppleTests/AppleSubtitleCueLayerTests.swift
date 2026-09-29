@@ -37,15 +37,16 @@ struct AppleSubtitleCueLayerTests {
         }
     }
 
-    @Test func inlineMenuRanksThePreferredLanguageAndOffersAllTracksAndOff() {
+    /// Owner 2026-09-28: the preferred language is the only entry beside Off.
+    @Test func inlineMenuOffersOffAndOnlyThePreferredLanguage() {
         let tracks = [
             ApplePlaybackTrack(id: 1, title: "English", language: "en"),
             ApplePlaybackTrack(id: 2, title: "French", language: "fr"),
         ]
         let entries = AppleSubtitleCueLayerPolicy.menuEntries(
             tracks: tracks, preferredLanguages: ["fr"], languagesAreExplicit: true, activeTrackID: 2)
-        #expect(entries.map(\.trackID) == [nil, 2, 1])
-        #expect(entries.map(\.isSelected) == [false, true, false])
+        #expect(entries.map(\.trackID) == [nil, 2])
+        #expect(entries.map(\.isSelected) == [false, true])
     }
 
     // MARK: - Cue clock

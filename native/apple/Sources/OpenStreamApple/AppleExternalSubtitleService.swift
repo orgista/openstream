@@ -165,14 +165,17 @@ public actor AppleExternalSubtitleService {
 
     /// Keeps only the tracks whose language is in `preferredLanguages`, in
     /// preference order first and add-on order within a language. An empty
-    /// preference list keeps everything, so a viewer who has cleared the list
-    /// still sees whatever the add-ons offer.
+    /// preference list means the device's primary language, the same rule
+    /// as the captions menu (`AppleSubtitleTrackFilter.effectiveLanguages`).
     static func filtered(
         _ tracks: [AppleExternalSubtitleTrack],
-        preferredLanguages: [String]
+        preferredLanguages: [String],
+        deviceLanguages: [String] = Locale.preferredLanguages
     ) -> [AppleExternalSubtitleTrack] {
-        let preferred = AppleSubtitleLanguages.sanitized(preferredLanguages)
-        guard !preferred.isEmpty else { return tracks }
+        var preferred = AppleSubtitleLanguages.sanitized(preferredLanguages)
+        if preferred.isEmpty {
+            preferred = AppleSubtitleLanguages.deviceDefaults(preferredLanguages: deviceLanguages)
+        }
         var result: [AppleExternalSubtitleTrack] = []
         for code in preferred {
             for track in tracks where AppleSubtitleLanguages.normalized(track.languageCode) == code {

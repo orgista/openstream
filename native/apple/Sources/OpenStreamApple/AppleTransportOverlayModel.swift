@@ -154,8 +154,9 @@ public final class AppleTransportOverlayModel {
     /// captions menu lists.
     public private(set) var subtitleTracks: [ApplePlaybackTrack] = []
 
-    /// The viewer's chosen subtitle languages, used to rank the menu.
-    /// Empty means "no preference", which lists every track.
+    /// The viewer's chosen subtitle languages; the menu lists only these.
+    /// Empty means the device's primary language
+    /// (`AppleSubtitleTrackFilter.effectiveLanguages`).
     public var preferredSubtitleLanguages: [String] = []
     /// See `AetherPlaybackEngine.subtitleLanguagesAreExplicit`.
     public var subtitleLanguagesAreExplicit = false
@@ -168,7 +169,7 @@ public final class AppleTransportOverlayModel {
             isExplicitChoice: subtitleLanguagesAreExplicit)
     }
 
-    /// All manual choices, including other languages and SDH variants.
+    /// The manual choices in the viewer's languages, SDH and forced variants included.
     public var menuSubtitleTracks: [ApplePlaybackTrack] {
         AppleSubtitleTrackFilter.menu(subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
                                       activeTrackID: selectedSubtitleID)

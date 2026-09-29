@@ -27,12 +27,13 @@ import Testing
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
     let video = folder.appendingPathComponent("Movie.mkv")
-    let subtitle = folder.appendingPathComponent("Movie.es.srt")
+    // English, the only language the menu lists when none was picked.
+    let subtitle = folder.appendingPathComponent("Movie.en.srt")
     try Data("1\n00:00:00,000 --> 00:02:00,000\nHOLA DESDE ESPANA\n".utf8).write(to: subtitle)
     let cache = AppleLibrarySubtitleService()
     let first = await cache.tracks(for: video)
-    #expect(first.map(\.displayName) == ["Spanish"])
-    try Data().write(to: folder.appendingPathComponent("Movie.en.srt"))
+    #expect(first.map(\.displayName) == ["English"])
+    try Data().write(to: folder.appendingPathComponent("Movie.fr.srt"))
     #expect(await cache.tracks(for: video) == first)
     let data = try await AppleExternalSubtitleService.liveDataLoader(subtitle)
     #expect(AppleSubtitleTextParser.cues(from: data).first?.text == "HOLA DESDE ESPANA")
@@ -46,7 +47,7 @@ import Testing
         #expect(track.id >= 1_000_000)
         let menu = AppleStockPlayerSubtitles()
         menu.select(track.id, on: player)
-        #expect(menu.menuEntries.first(where: { $0.title == "Spanish" })?.isSelected == true)
+        #expect(menu.menuEntries.first(where: { $0.title == "English" })?.isSelected == true)
         let cueDeadline = ContinuousClock.now.advanced(by: .seconds(2))
         while player.subtitleCues.isEmpty, ContinuousClock.now < cueDeadline {
             try await Task.sleep(for: .milliseconds(10))
@@ -73,7 +74,7 @@ import Testing
     await coordinator.begin(request)
     let deadline = ContinuousClock.now.advanced(by: .seconds(2))
     while engine.externalSubtitleTracks.count < 3, ContinuousClock.now < deadline { await Task.yield() }
-    #expect(engine.externalSubtitleTracks.map(\.displayName) == ["English", "Spanish", "English (Fixture)"])
+    #expect(engine.externalSubtitleTracks.map(\.displayName) == ["English", "French", "English (Fixture)"])
     coordinator.stop()
     request.isLive = true
     await coordinator.begin(request)
