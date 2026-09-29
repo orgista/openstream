@@ -7,6 +7,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **When a trailer ends it should go back to the movie art** (2026-09-28, owner) — today it stays on the
+      finished video.
+- [ ] **iPhone crash: UINavigationBar layout assertion** (TestFlight crashes on builds 10 and 12, iOS 18.7, 4 of 4
+      readable reports; one tester comment "Search"). Owner shared another crash on build 14 today — not yet
+      in App Store Connect; read it when it appears.
 - [ ] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
       sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
       bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
