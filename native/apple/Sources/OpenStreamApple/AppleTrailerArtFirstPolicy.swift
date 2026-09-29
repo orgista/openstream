@@ -73,6 +73,15 @@ public enum AppleTrailerArtFirstPolicy {
         state == "error" || state == "autoplay-blocked" || state == webContentTerminatedState
     }
 
+    /// Whether the page takes the video layer away once the art has
+    /// crossfaded back: a trailer that has finished, as well as one that
+    /// failed (owner, 2026-09-28: "when trailer is done it doesn't go back to
+    /// movie art and it should"). Unlike a failure, a finished trailer can be
+    /// started again from the art.
+    public static func leavesForTheArt(forPlayerState state: String) -> Bool {
+        state == "ended" || dropsVideoLayer(forPlayerState: state)
+    }
+
     public static let crossfadeDuration: Double = 0.6
 
     /// The art ↔ video crossfade; an instant swap with Reduce Motion.

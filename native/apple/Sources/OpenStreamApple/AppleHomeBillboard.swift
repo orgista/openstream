@@ -429,6 +429,11 @@ private struct AppleHomeHeroPreview: View {
     @State private var isVisible = false
     @State private var isPresented = false
     @State private var embedURL: URL?
+    /// Every key the metadata named, and the one playing: a refused video
+    /// moves on to the next (`AppleTrailerKeyFallbackPolicy`).
+    @State private var trailerKeys: [String] = []
+    @State private var trailerKeyIndex = 0
+    @State private var trailerQuality: String?
     @State private var isPlaying = false
     /// The video is on screen, past the art (`AppleTrailerArtFirstPolicy`).
     @State private var isRevealed = false
@@ -578,8 +583,9 @@ private struct AppleHomeHeroPreview: View {
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
-        guard !Task.isCancelled, shouldPreview,
-              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first else { return }
+        let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
+            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
+        guard !Task.isCancelled, shouldPreview, trailerRequest == nil || requestedTrailerKey != nil, let key = keys.first else { return }
         // The best stream the hero can show pixel for pixel, never a default:
         // measured on the 16:9 player the video is drawn at (it overhangs
         // the hero and is cropped), in device pixels, at the size the page
@@ -590,6 +596,9 @@ private struct AppleHomeHeroPreview: View {
             * Double(AppleMacYouTubeHeroPreview.layoutScale(displayScale: displayScale))
         let quality = AppleTrailerPreviewPolicy.quality(forPixelHeight: pixelHeight)
         guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality) else { return }
+        trailerKeys = keys
+        trailerKeyIndex = 0
+        trailerQuality = quality
         // Always starts muted, as it does on the iPhone; the round button
         // top-right turns the sound on (the Mac has no audio session to lose).
         isMuted = trailerRequest == nil
@@ -601,9 +610,13 @@ private struct AppleHomeHeroPreview: View {
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
-        guard !Task.isCancelled, shouldPreview,
-              let key = trailerRequest != nil ? requestedTrailerKey : assets?.trailerYouTubeKeys.first,
+        let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
+            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
+        guard !Task.isCancelled, shouldPreview, trailerRequest == nil || requestedTrailerKey != nil, let key = keys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
+        trailerKeys = keys
+        trailerKeyIndex = 0
+        trailerQuality = nil
         isMuted = trailerRequest == nil && settings.autoMuteTrailer
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
         appleTrace("hero trailer start \(item.name)")
@@ -613,6 +626,8 @@ private struct AppleHomeHeroPreview: View {
     }
 
     private func stop() {
+        trailerKeys = []
+        trailerKeyIndex = 0
         isPlaying = false
         if isRevealed { onTrailerOnScreen(false) }
         isRevealed = false
@@ -621,18 +636,41 @@ private struct AppleHomeHeroPreview: View {
 
     private func handleState(_ state: String, muted: Bool, errorCode: Int?) {
         isMuted = muted
+        if state == "error", playNextTrailerKey(errorCode: errorCode) { return }
         if let change = AppleTrailerArtFirstPolicy.videoLayerChange(forPlayerState: state) {
             isRevealed = change == .reveal
             onTrailerOnScreen(isRevealed)
         }
-        if AppleTrailerArtFirstPolicy.dropsVideoLayer(forPlayerState: state) {
+        if AppleTrailerArtFirstPolicy.leavesForTheArt(forPlayerState: state) {
             // Nothing to say: the art crossfades back over whatever the
-            // player showed, and stays.
+            // player showed, and stays. A finished trailer leaves the same way.
+            if state == "ended" { appleTrace("hero trailer ended: back to the art (\(item.name))") }
             withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
                 stop()
             }
         }
         if state == "ended" || state == "paused" { isPlaying = false }
+    }
+
+    /// Loads the next key after YouTube refused this one (blocked embedding
+    /// or gone), the art staying up meanwhile. False when there is none.
+    private func playNextTrailerKey(errorCode: Int?) -> Bool {
+        let code = errorCode.map(String.init) ?? "none"
+        guard let next = AppleTrailerKeyFallbackPolicy.nextKeyIndex(
+            after: trailerKeyIndex, errorCode: errorCode, keyCount: trailerKeys.count) else {
+            appleTrace("hero trailer error=\(code) key \(trailerKeyIndex + 1)/\(trailerKeys.count): giving up (\(item.name))")
+            return false
+        }
+        let url = trailerQuality.map { AppleTrailerPreviewPolicy.embedURL(for: trailerKeys[next], quality: $0) }
+            ?? AppleTrailerPreviewPolicy.embedURL(for: trailerKeys[next])
+        guard let url else { return false }
+        appleTrace("hero trailer error=\(code) key \(trailerKeyIndex + 1)/\(trailerKeys.count): trying key \(next + 1) (\(item.name))")
+        if isRevealed { onTrailerOnScreen(false) }
+        isRevealed = false
+        trailerKeyIndex = next
+        embedURL = url
+        isPlaying = true
+        return true
     }
 }
 #endif

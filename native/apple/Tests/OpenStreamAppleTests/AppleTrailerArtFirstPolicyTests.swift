@@ -53,6 +53,16 @@ import Testing
         #expect(Policy.dropsVideoLayer(forPlayerState: state) == false)
     }
 
+    @Test(arguments: ["ended", "error", "autoplay-blocked", Policy.webContentTerminatedState])
+    func aFinishedOrDeadTrailerLeavesTheArtOnScreen(state: String) {
+        #expect(Policy.leavesForTheArt(forPlayerState: state))
+    }
+
+    @Test(arguments: ["ready", "playing", "revealed", "paused", "concealed", "muted"])
+    func aLiveOrPausedTrailerKeepsItsLayer(state: String) {
+        #expect(Policy.leavesForTheArt(forPlayerState: state) == false)
+    }
+
     @Test func theTerminationStateIsNotOneThePageSends() {
         #expect(Policy.webContentTerminatedState == "web-content-terminated")
     }

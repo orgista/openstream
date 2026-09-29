@@ -25,6 +25,15 @@ public enum AppleDiscoverEmptyState: Equatable, Sendable {
         }
     }
 
+    /// Whether an empty Discover is still waiting for its catalogs rather
+    /// than empty: sources exist and either a load is running or the
+    /// current sources have not finished their first refresh yet. After a
+    /// restore from iCloud or a relaunch the page said "Nothing to Show" for
+    /// a while before the rows came (2026-09-28).
+    public static func isStillLoading(sourceCount: Int, isLoading: Bool, hasSettled: Bool) -> Bool {
+        sourceCount > 0 && (isLoading || !hasSettled)
+    }
+
     public var title: String {
         switch self {
         case .noSources: "No Sources"

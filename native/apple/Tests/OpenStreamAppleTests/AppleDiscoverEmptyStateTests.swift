@@ -32,6 +32,18 @@ struct AppleDiscoverEmptyStateTests {
         #expect(state.offersRetry == false)
     }
 
+    @Test("With sources, an empty page is loading until their first refresh has finished")
+    func loadingUntilSettled() {
+        #expect(AppleDiscoverEmptyState.isStillLoading(sourceCount: 2, isLoading: false, hasSettled: false))
+        #expect(AppleDiscoverEmptyState.isStillLoading(sourceCount: 2, isLoading: true, hasSettled: true))
+        #expect(!AppleDiscoverEmptyState.isStillLoading(sourceCount: 2, isLoading: false, hasSettled: true))
+    }
+
+    @Test("No sources is never a loading state", arguments: [false, true])
+    func noSourcesIsNotLoading(isLoading: Bool) {
+        #expect(!AppleDiscoverEmptyState.isStillLoading(sourceCount: 0, isLoading: isLoading, hasSettled: false))
+    }
+
     @Test("Only No Sources offers Restore from iCloud, and only where iCloud can be reached")
     func iCloudRestoreIsOfferedOnNoSources() {
         #expect(AppleDiscoverEmptyState.noSources.offersICloudRestore(.available))

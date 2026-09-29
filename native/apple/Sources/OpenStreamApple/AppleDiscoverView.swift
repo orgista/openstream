@@ -66,6 +66,9 @@ struct AppleDiscoverView: View {
     /// come back at once, so a press on Refresh is visible as a refresh.
     @State private var isRefreshing = false
     @State private var loadedCache = false
+    /// The source configuration whose catalog refresh last finished; until it
+    /// matches the current one an empty page is loading, not empty.
+    @State private var settledCatalogIdentity: String?
     @State private var showsSearch = false
     @State private var selectedHero: IndexedCatalogItem?
     @State private var selectedHeroAutoPlay = false
@@ -161,7 +164,15 @@ struct AppleDiscoverView: View {
         let picks = topPicks(continueWatching: localContinueWatching)
         let heroes = featuredCandidates(continueWatching: localContinueWatching, picks: picks)
         Group {
-            if visibleSections.isEmpty && library.groups.isEmpty {
+            if visibleSections.isEmpty && library.groups.isEmpty && catalogIsStillLoading {
+                ProgressView()
+                    .controlSize(.large)
+                    .accessibilityLabel("Loading")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    #if os(tvOS)
+                    .background(Color.black.ignoresSafeArea())
+                    #endif
+            } else if visibleSections.isEmpty && library.groups.isEmpty {
                 discoverEmptyState
                 // The black ground was on the populated branch only, so an
                 // empty Discover fell through to the tvOS system material —
@@ -319,7 +330,8 @@ struct AppleDiscoverView: View {
             }
         }
         .overlay(alignment: .top) {
-            if catalogStore.isLoading {
+            // Not over the centred loading state, which already says it.
+            if catalogStore.isLoading, !(visibleSections.isEmpty && library.groups.isEmpty) {
                 ProgressView()
                     .padding()
             }
@@ -469,6 +481,9 @@ struct AppleDiscoverView: View {
                 }
             }
             await catalogStore.refresh(sources: sourceStore.sources)
+            if !Task.isCancelled {
+                settledCatalogIdentity = catalogConfigurationIdentity(sourceStore.sources)
+            }
             #if DEBUG
             AppleInteractionTrace.record(.network,
                 "catalog review sources=\(sourceStore.sources.count) credentialError=\(sourceStore.credentialError != nil) sections=\(catalogStore.sections.count) failures=\(catalogStore.partialErrors.count)")
@@ -1280,6 +1295,14 @@ struct AppleDiscoverView: View {
     private var tabToolbarContext: AppleTabToolbarContext {
         AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing || catalogStore.isLoading },
                                onSearch: { showsSearch = true }, onRefresh: refresh)
+    }
+
+    private var catalogIsStillLoading: Bool {
+        AppleDiscoverEmptyState.isStillLoading(
+            sourceCount: sourceStore.sources.count,
+            isLoading: catalogStore.isLoading,
+            hasSettled: settledCatalogIdentity == catalogConfigurationIdentity(sourceStore.sources)
+        )
     }
 
     /// No Sources, a catalog that couldn't be read (Try Again, then
@@ -3954,18 +3977,23 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.muted = settings.autoMuteTrailer
             let nextIndex = heroTrailer.candidateIndex + 1
             let candidates = trailerCandidates
+            let code = errorCode.map(String.init) ?? "none"
+            let failed = heroTrailer.candidateIndex + 1
             if nextIndex < candidates.count {
                 Task { @MainActor in
                     guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: nextIndex) else {
+                        appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): no playable key left, giving up")
                         heroTrailer.candidateIndex = candidates.count
                         showTrailerArtworkOnly()
                         logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
                         return
                     }
+                    appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): trying key \(playableIndex + 1)")
                     heroTrailer.candidateIndex = playableIndex
                     heroTrailer.isActive = true
                 }
             } else {
+                appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): giving up")
                 heroTrailer.candidateIndex = candidates.count
                 showTrailerArtworkOnly()
                 logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
@@ -3981,11 +4009,12 @@ struct AppleCatalogItemDetailView: View {
         } else if state == "paused" {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
-        } else if state == "ended" {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
-                heroTrailer.isActive = false
-                heroTrailer.isPlaying = false
-            }
+        } else if AppleTrailerArtFirstPolicy.leavesForTheArt(forPlayerState: state) {
+            // Finished: the art crossfades back and the video layer goes, so
+            // the page's own still is what stays. Pressing the art plays the
+            // same trailer again.
+            appleTrace("title trailer ended: back to the art (\(item.name))")
+            showTrailerArtworkOnly()
         }
     }
 
