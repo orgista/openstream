@@ -297,7 +297,7 @@ public struct AppleTMDBClient: Sendable {
             configuration: configuration,
             as: AppleWatchProviderResponse.DirectoryEnvelope.self
         )
-        return AppleWatchProviderResponse.directory(in: envelope)
+        return AppleWatchProviderResponse.directory(in: envelope, region: region)
     }
 
     /// Where a title can be watched in `region`, as TMDB reports it.

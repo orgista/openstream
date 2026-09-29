@@ -3369,6 +3369,11 @@ final class AppleiOSUITests: XCTestCase {
 
     private func crawlPolicySkip(_ target: CrawlTarget, route: String, scene: CrawlScene) -> String? {
         let name = (target.label + " " + target.identifier.replacingOccurrences(of: ".", with: " ")).lowercased()
+        // An Add Service menu item saves a streaming service, and its open menu
+        // arrives as a collection, so this is checked before the card rule.
+        if target.identifier.hasPrefix("settings.watchProviders.add.") {
+            return "would add a streaming service to saved settings (policy)"
+        }
         // A card in a shelf is a place to go, not an action, and its label is
         // somebody's title: one of Netflix's carried the word "send" in it and
         // was reported as a destructive control.

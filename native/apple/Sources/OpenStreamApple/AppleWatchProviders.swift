@@ -118,6 +118,30 @@ public enum AppleWatchProviderPolicy: Sendable {
     public static func replacesPlay(hasLocalOrAddonSource: Bool, visibleProviders: [AppleWatchProvider]) -> Bool {
         !hasLocalOrAddonSource && !visibleProviders.isEmpty
     }
+
+    /// How many services the Add Service menu offers (owner 2026-09-28:
+    /// "only include the top 10 by popularity").
+    public static let addableLimit = 10
+
+    /// The services the viewer has added, in `directory` order. An id the
+    /// region's directory does not list stays stored but has no row.
+    public static func added(_ directory: [AppleWatchProvider], enabledProviderIDs: Set<Int>) -> [AppleWatchProvider] {
+        var seen = Set<Int>()
+        return directory.filter { enabledProviderIDs.contains($0.id) && seen.insert($0.id).inserted }
+    }
+
+    /// The Add Service menu: the most popular services not yet added, at most
+    /// `limit`. `directory` is already in popularity order.
+    public static func addable(
+        _ directory: [AppleWatchProvider],
+        enabledProviderIDs: Set<Int>,
+        limit: Int = addableLimit
+    ) -> [AppleWatchProvider] {
+        var seen = Set<Int>()
+        return Array(directory
+            .filter { !enabledProviderIDs.contains($0.id) && seen.insert($0.id).inserted }
+            .prefix(limit))
+    }
 }
 
 
@@ -196,13 +220,25 @@ public extension AppleWatchProviderResponse {
         public let provider_name: String
         public let logo_path: String?
         public let display_priority: Int?
+        /// Per-region rank, keyed by ISO 3166-1 alpha-2. Lower is more popular.
+        public let display_priorities: [String: Int]?
     }
 
-    /// Ordered as TMDB ranks them for the region, so the services a viewer is
-    /// most likely to have appear first rather than alphabetically.
-    static func directory(in envelope: DirectoryEnvelope) -> [AppleWatchProvider] {
-        (envelope.results ?? [])
-            .sorted { ($0.display_priority ?? .max) < ($1.display_priority ?? .max) }
+    /// Ordered as TMDB ranks them for the region (`display_priorities`, then
+    /// `display_priority`), so the most popular services come first. Entries
+    /// with no rank keep TMDB's order, after the ranked ones.
+    static func directory(in envelope: DirectoryEnvelope, region: String? = nil) -> [AppleWatchProvider] {
+        let key = region?.uppercased()
+        func rank(_ entry: DirectoryEntry) -> Int {
+            key.flatMap { entry.display_priorities?[$0] } ?? entry.display_priority ?? .max
+        }
+        return (envelope.results ?? [])
+            .enumerated()
+            .sorted { lhs, rhs in
+                let a = rank(lhs.element), b = rank(rhs.element)
+                return a == b ? lhs.offset < rhs.offset : a < b
+            }
+            .map(\.element)
             .map {
                 AppleWatchProvider(
                     id: $0.provider_id,
