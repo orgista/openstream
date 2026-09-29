@@ -45,6 +45,10 @@ struct AppleWatchedHistory {
 
 public enum AppleConfigurationError: Error, Equatable, LocalizedError {
     case unsupportedVersion, passphraseRequired, wrongPassphrase, invalidFile, tooLarge
+    /// A backup sealed with an iCloud Keychain key this device does not hold.
+    case otherAppleAccount
+    /// No iCloud Keychain backup key could be saved, so export needs a passphrase.
+    case backupKeyUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -53,6 +57,8 @@ public enum AppleConfigurationError: Error, Equatable, LocalizedError {
         case .wrongPassphrase: "Incorrect passphrase or damaged file."
         case .invalidFile: "Invalid configuration file."
         case .tooLarge: "Configuration exceeds the iCloud limit."
+        case .otherAppleAccount: "This backup was made on another Apple Account."
+        case .backupKeyUnavailable: "Add a passphrase to export."
         }
     }
 }
@@ -212,18 +218,31 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         return parts.url ?? URL(string: "https://source.invalid/")!
     }
 
+    /// An unconfigured add-on's manifest URL is the same for everyone, so it
+    /// travels whole and restores signed in (`AppleAddonURLSecretPolicy`).
+    static func keepsFullAddress(_ source: AppleSource) -> Bool {
+        source.kind == .stremio && !source.needsSignIn && source.credentialReference == nil
+            && source.epgURL == nil && !AppleAddonURLSecretPolicy.isSecret(source.url)
+    }
+
     static func portableSource(_ source: AppleSource) -> AppleSource {
         var copy = source
-        copy.url = publicAddress(source.url)
-        copy.needsSignIn = source.needsSignIn || source.credentialReference != nil
-            || source.transportReference != nil || source.url != copy.url || source.epgURL != nil
+        if keepsFullAddress(source) {
+            copy.needsSignIn = false
+        } else {
+            copy.url = publicAddress(source.url)
+            copy.needsSignIn = source.needsSignIn || source.credentialReference != nil
+                || source.transportReference != nil || source.url != copy.url || source.epgURL != nil
+        }
         copy.credentialReference = nil
         copy.transportReference = nil
         copy.bookmarkData = nil
         copy.legacyUsername = nil
         copy.legacyPassword = nil
         copy.epgURL = nil
-        copy.logoURL = nil
+        // The add-on's logo shows on the restored row; one served from under a
+        // configured add-on's secret path stays behind.
+        if let logo = source.logoURL, AppleAddonURLSecretPolicy.isSecretAsset(logo) { copy.logoURL = nil }
         copy.validationSummary = nil
         copy.validationFailureSummary = nil
         return copy

@@ -34,9 +34,12 @@ public protocol AppleCredentialStoring {
 public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
     static let syncPreferenceKey = "openstream.backup.icloud.enabled.v1"
     private let service: String
+    /// The backup key is iCloud Keychain whatever the sync switch says.
+    private let alwaysSynchronizable: Bool
     /// The Apple TV has no switch, so the policy answers for it: its
     /// credentials are read from the synchronizing keychain the phone wrote.
     private var synchronizable: Bool {
+        if alwaysSynchronizable { return true }
         Self.adoptDefaultSyncPreference()
         return AppleConfigurationSyncPolicy.isEnabled(
             storedPreference: AppleConfigurationSyncPolicy.storedPreference()
@@ -64,11 +67,13 @@ public struct AppleKeychainStore: AppleCredentialStoring, Sendable {
         }
     }()
     private var accessibility: CFString {
-        synchronizable ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        if alwaysSynchronizable { return kSecAttrAccessibleAfterFirstUnlock }
+        return synchronizable ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }
 
-    public init(service: String = "com.orgista.openstream.settings") {
+    public init(service: String = "com.orgista.openstream.settings", alwaysSynchronizable: Bool = false) {
         self.service = service
+        self.alwaysSynchronizable = alwaysSynchronizable
     }
 
     #if DEBUG
@@ -214,6 +219,10 @@ final class AppleKeychainTestMemory: Sendable {
 
     func set(_ value: String?, service: String, account: String) {
         items.withLock { $0[service + "\u{0}" + account] = value }
+    }
+
+    func removeAll(service: String) {
+        items.withLock { $0 = $0.filter { !$0.key.hasPrefix(service + "\u{0}") } }
     }
 }
 

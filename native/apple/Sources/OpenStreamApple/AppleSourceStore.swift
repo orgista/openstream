@@ -856,6 +856,7 @@ public final class AppleSourceStore {
     private let managedImportsDirectory: URL
     private let manifestClient: AppleManifestClient
     private let logoBackfillDelay: Duration
+    @ObservationIgnored private var restoredManifestRefresh: Task<Void, Never>?
     private var protectsStoredBlobWhenEmpty: Bool
     private var preservedUnknownSourcePayloads: [Data]
     private var pendingCredentialCleanupReferences: [String]
@@ -1096,6 +1097,24 @@ public final class AppleSourceStore {
             return true
         } catch {
             return false
+        }
+    }
+
+    /// After a restore: fetch each restored add-on's manifest again in the
+    /// background so its logo, name, version and catalogs are current. At most
+    /// 40, one at a time; a newer restore cancels the older pass.
+    func refreshRestoredManifests(ids: [AppleSource.ID]) {
+        restoredManifestRefresh?.cancel()
+        let wanted = Set(ids)
+        let pending = sources.filter { wanted.contains($0.id) && $0.kind == .stremio && !$0.needsSignIn }
+            .prefix(40).map(\.id)
+        guard !pending.isEmpty else { return }
+        restoredManifestRefresh = Task { [weak self, delay = logoBackfillDelay] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            for id in pending {
+                guard let self, !Task.isCancelled else { return }
+                await self.refreshManifest(id: id)
+            }
         }
     }
 
@@ -1625,7 +1644,9 @@ public final class AppleSourceStore {
         if didMigrate { persist() }
     }
 
-    private var logoBackfillKey: String { storageKey + ".logo-backfill" }
+    /// v2: a second pass for add-ons whose first answer was recorded while
+    /// their manifest logo still went unused (2026-09-29).
+    private var logoBackfillKey: String { storageKey + ".logo-backfill.v2" }
 
     /// One-time fill for add-ons saved before plain `http://` logos were
     /// accepted: fetch each logo-less manifest in the background and store
@@ -1705,7 +1726,8 @@ public final class AppleSourceStore {
             var restored = AppleConfigurationSnapshot.portableSource(portable)
             let existing = sources.first { $0.id == restored.id }
             if let existing, existing.kind == restored.kind,
-               AppleConfigurationSnapshot.publicAddress(existing.url) == restored.url {
+               AppleConfigurationSnapshot.publicAddress(existing.url) == restored.url
+                || AppleConfigurationSnapshot.portableSource(existing).url == restored.url {
                 restored.bookmarkData = existing.bookmarkData
                 restored.credentialReference = existing.credentialReference
                 restored.transportReference = existing.transportReference

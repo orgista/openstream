@@ -515,7 +515,8 @@ private struct AppleSourceRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.secondary.opacity(0.15))
 
-            if source.kind == .stremio, let logoURL = source.logoURL, !logoIsWordmark, !logoFailed {
+            if source.kind == .stremio, let logoURL = source.logoURL.flatMap(AppleAddonLogoURLPolicy.displayURL(for:)),
+               !logoIsWordmark, !logoFailed {
                 AppleRemoteImage(
                     url: logoURL,
                     contentMode: .fit,
@@ -637,7 +638,19 @@ private struct AppleSourceDetailView: View {
                                 LabeledContent("Failure", value: failure)
                             }
                         }
-                        Toggle("Enabled", isOn: enabled)
+                        switch AppleSourceEnableControl.control(for: source) {
+                        case .toggle:
+                            Toggle("Enabled", isOn: enabled)
+                        case .signIn:
+                            // It cannot be switched on until it is signed in.
+                            NavigationLink {
+                                AppleSourceSignInDestination(source: source, store: sourceStore)
+                            } label: {
+                                AppleTVNavigationLabel("Sign In")
+                            }
+                            .appleTVReadableFocus()
+                            .accessibilityIdentifier("source.detail.signIn")
+                        }
                     }
 
                     if source.kind == .nas {

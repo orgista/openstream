@@ -82,7 +82,7 @@ public struct AppleConfigurationFile: Codable, Sendable {
         try decode(data, passphrase: passphrase)
     }
 
-    private static func deriveKey(_ passphrase: String, salt: Data) throws -> SymmetricKey {
+    static func deriveKey(_ passphrase: String, salt: Data) throws -> SymmetricKey {
         let password = Array(passphrase.utf8)
         var key = [UInt8](repeating: 0, count: 32)
         let status = password.withUnsafeBytes { passwordBytes in

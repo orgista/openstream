@@ -142,6 +142,11 @@ struct AppleStorageSettingsView: View {
                         .foregroundStyle(statusMessage == "Done" ? Color.primary : Color.red)
                 }
             }
+
+            #if os(tvOS)
+            // Apple TV has no Backup & Sync page, so Reset lives here.
+            Section { AppleResetEntry() }
+            #endif
         }
         .appleSettingsPane("Storage", embedded: embeddedInSplit)
         .task {

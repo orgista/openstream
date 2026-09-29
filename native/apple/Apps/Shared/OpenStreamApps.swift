@@ -16,10 +16,14 @@ struct OpenStreamPlatformApp: App {
     @State private var webManagement = AppleWebManagementController()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    #if DEBUG && os(macOS)
+    #if DEBUG
     init() {
+        // `-OpenStreamResetOnLaunch YES`: Reset OpenStream before any store loads.
+        AppleDeviceReset.performIfRequestedAtLaunch()
+        #if os(macOS)
         // Before any view exists, so a stall early in launch is caught too.
         AppleDebugMainThreadWatchdog.startIfRequested()
+        #endif
     }
     #endif
 

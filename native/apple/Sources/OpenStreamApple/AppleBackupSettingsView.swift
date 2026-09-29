@@ -24,8 +24,8 @@ struct AppleBackupSettingsView: View {
     @State private var document: AppleConfigurationDocument?
     @State private var exporting = false
     @State private var importing = false
-    @State private var signingIn: AppleSource?
     @State private var syncAvailability = AppleICloudSyncAvailability.available
+    @FocusState private var passphraseFocused: Bool
 
     var body: some View {
         Form {
@@ -41,8 +41,10 @@ struct AppleBackupSettingsView: View {
                 .accessibilityIdentifier("backup.sync")
             }
             Section {
-                SecureField("Export passphrase (optional)", text: $passphrase)
+                SecureField("Passphrase for another Apple Account", text: $passphrase)
                     .textContentType(.password)
+                    .focused($passphraseFocused)
+                    .accessibilityIdentifier("backup.passphrase")
                 #if !os(macOS)
                 exportButton
                 importButton
@@ -59,13 +61,19 @@ struct AppleBackupSettingsView: View {
             if !controller.sources.sources.filter(\.needsSignIn).isEmpty {
                 Section("Needs sign-in") {
                     ForEach(controller.sources.sources.filter(\.needsSignIn)) { source in
-                        Button(source.name) { signingIn = source }
+                        NavigationLink {
+                            AppleSourceSignInDestination(source: source, store: controller.sources)
+                        } label: {
+                            Text(source.name)
+                        }
+                        .accessibilityIdentifier("backup.signIn.\(source.id.uuidString)")
                     }
                 }
             }
             if let result = controller.result {
                 Section { Text(result) }
             }
+            Section { AppleResetEntry() }
         }
         .appleSettingsPage(AppleSettingsRootEntry.backup.title)
         .scrollIndicators(.hidden)
@@ -88,13 +96,6 @@ struct AppleBackupSettingsView: View {
             document = nil
         }
         .appleConfigurationImport(isPresented: $importing, controller: controller)
-        .sheet(item: $signingIn) { source in
-            if source.kind == .mediaServer {
-                NavigationStack { AppleAddMediaServerView(sourceStore: controller.sources) }
-            } else {
-                AppleBackupSourceSignInView(source: source, store: controller.sources)
-            }
-        }
     }
 
     private var exportButton: some View {
@@ -104,6 +105,10 @@ struct AppleBackupSettingsView: View {
                     document = try await AppleConfigurationDocument(data: controller.export(passphrase: passphrase))
                     passphrase = ""
                     exporting = true
+                } catch AppleConfigurationError.backupKeyUnavailable {
+                    // No iCloud Keychain key here: a passphrase seals the file instead.
+                    controller.setResult(AppleConfigurationError.backupKeyUnavailable.errorDescription ?? "")
+                    passphraseFocused = true
                 } catch { controller.setResult("Could not export configuration") }
             }
         } label: {
@@ -131,7 +136,7 @@ private struct AppleConfigurationImport: ViewModifier {
     private struct PendingImport: Identifiable {
         let id = UUID()
         let data: Data
-        let file: AppleConfigurationFile
+        let preview: AppleBackupPreview
     }
 
     func body(content: Content) -> some View {
@@ -144,11 +149,11 @@ private struct AppleConfigurationImport: ViewModifier {
                     let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                     guard size <= 10_000_000 else { throw AppleConfigurationError.tooLarge }
                     let data = try Data(contentsOf: url)
-                    pendingImport = try PendingImport(data: data, file: AppleConfigurationFile.inspect(data))
+                    pendingImport = try PendingImport(data: data, preview: controller.inspectBackup(data))
                 } catch { controller.setResult("Could not open configuration") }
             }
             .sheet(item: $pendingImport) { pending in
-                AppleBackupImportView(controller: controller, data: pending.data, file: pending.file)
+                AppleBackupImportView(controller: controller, data: pending.data, preview: pending.preview)
             }
     }
 }
@@ -199,7 +204,7 @@ struct AppleDiscoverRestoreEmptyState: View {
 private struct AppleBackupImportView: View {
     let controller: AppleConfigurationController
     let data: Data
-    let file: AppleConfigurationFile
+    let preview: AppleBackupPreview
     @Environment(\.dismiss) private var dismiss
     @State private var passphrase = ""
     @State private var error: String?
@@ -207,20 +212,26 @@ private struct AppleBackupImportView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Merge") {
-                    LabeledContent("Sources", value: file.snapshot.sources.count.formatted())
-                    LabeledContent("Watched", value: file.snapshot.watchedHistory.count.formatted())
+                if let snapshot = preview.snapshot {
+                    Section("Merge") {
+                        LabeledContent("Sources", value: snapshot.sources.count.formatted())
+                        LabeledContent("Watched", value: snapshot.watchedHistory.count.formatted())
+                    }
+                    Section("Replace") {
+                        Text("Settings and channel selections")
+                        LabeledContent("Playback progress", value: snapshot.playbackProgress.count.formatted())
+                        LabeledContent("My List", value: snapshot.watchlist.count.formatted())
+                        LabeledContent("Ratings", value: snapshot.ratings.count.formatted())
+                    }
                 }
-                Section("Replace") {
-                    Text("Settings and channel selections")
-                    LabeledContent("Playback progress", value: file.snapshot.playbackProgress.count.formatted())
-                    LabeledContent("My List", value: file.snapshot.watchlist.count.formatted())
-                    LabeledContent("Ratings", value: file.snapshot.ratings.count.formatted())
+                if preview.needsPassphrase {
+                    Section {
+                        SecureField("Passphrase", text: $passphrase)
+                            .textContentType(.password)
+                            .accessibilityIdentifier("backup.import.passphrase")
+                    }
                 }
-                if file.isEncrypted {
-                    Section { SecureField("Passphrase", text: $passphrase).textContentType(.password) }
-                }
-                if let error { Section { Text(error) } }
+                if let message = error ?? preview.failure?.errorDescription { Section { Text(message) } }
             }
             .navigationTitle("Import Configuration")
             .scrollIndicators(.hidden)
@@ -237,7 +248,7 @@ private struct AppleBackupImportView: View {
                             } catch { self.error = (error as? AppleConfigurationError)?.localizedDescription ?? "Could not import configuration" }
                         }
                     }
-                    .disabled(controller.isBusy || (file.isEncrypted && passphrase.isEmpty))
+                    .disabled(controller.isBusy || preview.failure != nil || (preview.needsPassphrase && passphrase.isEmpty))
                 }
             }
             .interactiveDismissDisabled(controller.isBusy)
@@ -245,73 +256,4 @@ private struct AppleBackupImportView: View {
     }
 }
 
-@MainActor
-private struct AppleBackupSourceSignInView: View {
-    let source: AppleSource
-    let store: AppleSourceStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var choosingFolder = false
-    @State private var address = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var error: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if source.kind != .library {
-                    TextField("Source address", text: $address)
-                        .textContentType(.URL)
-                }
-                if source.iptvType == .xtream || source.kind == .nas {
-                    TextField("Username", text: $username).textContentType(.username)
-                    SecureField("Password", text: $password).textContentType(.password)
-                }
-                #if os(macOS)
-                if let error { Text(error) }
-                AppleFormActionSection { signInButton }
-                #else
-                signInButton
-                if let error { Text(error) }
-                #endif
-            }
-            .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
-                do {
-                    let url = try result.get()
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    #if os(macOS)
-                    let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-                    #else
-                    let bookmark = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
-                    #endif
-                    store.reconnectConfigurationFolder(id: source.id, url: url, bookmark: bookmark)
-                    dismiss()
-                } catch { self.error = "Could not open folder" }
-            }
-            .navigationTitle(source.name)
-            .scrollIndicators(.hidden)
-            .appleMacFormFields()
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }
-    }
-
-    @ViewBuilder
-    private var signInButton: some View {
-        if source.kind == .library {
-            Button("Choose Folder…") { choosingFolder = true }
-        } else {
-            Button("Sign In") {
-                do {
-                    guard let url = URL(string: address),
-                          ["http", "https", "smb"].contains(url.scheme?.lowercased() ?? ""),
-                          url.host != nil else { throw AppleConfigurationError.invalidFile }
-                    try store.restoreSourceSignIn(id: source.id, address: url, username: username, password: password)
-                    dismiss()
-                } catch { self.error = "Could not restore source" }
-            }
-            .appleMacFormPrimaryAction()
-        }
-    }
-}
 #endif

@@ -13,6 +13,7 @@ final class AppleConfigurationController {
     private let mediaIndex: AppleMediaIndexStore
     private let defaults: UserDefaults
     private let cloud: AppleCloudKeyValueStore
+    private let backupKeys: any AppleBackupKeyStoring
     private var pendingWrite: Task<Void, Never>?
     private var keychainRetry: Task<Void, Never>?
     /// Whether this device has had any source since launch. See
@@ -25,12 +26,14 @@ final class AppleConfigurationController {
     private static let savedAtKey = "openstream.backup.savedAt.v1"
 
     init(sources: AppleSourceStore, settings: AppleSettingsStore, mediaIndex: AppleMediaIndexStore,
-         defaults: UserDefaults = .standard, cloud: AppleCloudKeyValueStore = NSUbiquitousKeyValueStore.default) {
+         defaults: UserDefaults = .standard, cloud: AppleCloudKeyValueStore = NSUbiquitousKeyValueStore.default,
+         backupKeys: any AppleBackupKeyStoring = AppleICloudBackupKeychain()) {
         self.sources = sources
         self.settings = settings
         self.mediaIndex = mediaIndex
         self.defaults = defaults
         self.cloud = cloud
+        self.backupKeys = backupKeys
         // The Apple TV has no switch to read, so the policy answers for it:
         // always on, and read-only. See `AppleConfigurationSyncPolicy`.
         AppleKeychainStore.adoptDefaultSyncPreference()
@@ -70,32 +73,72 @@ final class AppleConfigurationController {
     /// No Sources' "Restore from iCloud". Turns sync on if the viewer had
     /// turned it off, then pulls what iCloud holds into the empty device.
     func restoreFromCloud() async {
+        // After Reset OpenStream this tap is what lets iCloud back in.
+        defaults.removeObject(forKey: AppleDeviceReset.cloudRestoreHeldKey)
         if !syncEnabled { await setSyncEnabled(true) }
         guard syncEnabled else { return }
         cloud.synchronize()
         await readCloud(fillingEmptyLocal: true)
     }
 
+    /// A full backup, sign-ins included, always sealed: with this Apple
+    /// Account's iCloud Keychain backup key, or with `passphrase` when one is
+    /// given (for a device on another Apple Account). Throws
+    /// `backupKeyUnavailable` when there is no passphrase and no key can be kept.
     func export(passphrase: String) async throws -> Data {
         isBusy = true
         defer { isBusy = false }
         let snapshot = try capture()
-        var secrets = AppleConfigurationSecrets()
-        if !passphrase.isEmpty {
-            secrets = try sources.configurationSecrets()
-            secrets.settingsCredentials = try settings.configurationCredentials()
-            secrets.privateSettings = try settings.configurationValues().filter {
-                AppleSettingsStore.configurationURLKeys.contains($0.key)
+        var secrets = try sources.configurationSecrets()
+        secrets.settingsCredentials = try settings.configurationCredentials()
+        secrets.privateSettings = try settings.configurationValues().filter {
+            AppleSettingsStore.configurationURLKeys.contains($0.key)
+        }
+        let payload = AppleBackupEnvelope.Payload(snapshot: snapshot, secrets: secrets)
+        let data = passphrase.isEmpty
+            ? try AppleBackupEnvelope.seal(payload, key: backupKeys.exportKey())
+            : try await AppleBackupEnvelope.sealData(payload, passphrase: passphrase)
+        appleTrace("backup export: \(snapshot.sources.count) sources, secrets=included")
+        return data
+    }
+
+    /// What the import sheet can show before Import: the snapshot when the
+    /// file is readable now, whether it wants a passphrase, or why it cannot
+    /// be opened on this device.
+    func inspectBackup(_ data: Data) throws -> AppleBackupPreview {
+        guard data.count <= 10_000_000 else { throw AppleConfigurationError.tooLarge }
+        if let envelope = AppleBackupEnvelope.header(of: data) {
+            switch envelope.mode {
+            case .passphrase:
+                return AppleBackupPreview(snapshot: nil, needsPassphrase: true, failure: nil)
+            case .iCloudKey:
+                do {
+                    let payload = try envelope.open(key: try? backupKeys.existingKey(), passphrase: "")
+                    return AppleBackupPreview(snapshot: payload.snapshot, needsPassphrase: false, failure: nil)
+                } catch let error as AppleConfigurationError {
+                    return AppleBackupPreview(snapshot: nil, needsPassphrase: false, failure: error)
+                }
             }
         }
-        return try await AppleConfigurationFile.exportData(snapshot: snapshot, secrets: secrets, passphrase: passphrase)
+        let file = try AppleConfigurationFile.inspect(data)
+        return AppleBackupPreview(snapshot: file.snapshot, needsPassphrase: file.isEncrypted, failure: nil)
     }
 
     func restore(_ data: Data, passphrase: String) async throws {
         isBusy = true
         defer { isBusy = false }
-        let decoded = try await AppleConfigurationFile.importData(data, passphrase: passphrase)
+        let decoded: (snapshot: AppleConfigurationSnapshot, secrets: AppleConfigurationSecrets?)
+        if let envelope = AppleBackupEnvelope.header(of: data) {
+            let key = envelope.mode == .iCloudKey ? try? backupKeys.existingKey() : nil
+            let payload = try await envelope.openData(key: key, passphrase: passphrase)
+            decoded = (payload.snapshot, payload.secrets)
+        } else {
+            decoded = try await AppleConfigurationFile.importData(data, passphrase: passphrase)
+        }
         try await apply(decoded.snapshot, secrets: decoded.secrets)
+        let ids = Set(decoded.snapshot.sources.map(\.id))
+        let waiting = sources.sources.filter { ids.contains($0.id) && $0.needsSignIn }.count
+        appleTrace("backup import: \(ids.count - waiting) restored, \(waiting) need sign-in")
         // A deliberate file restore is a new local edit, regardless of the file's date.
         defaults.set(Date.now, forKey: Self.savedAtKey)
         lastContent = try contentFingerprint()
@@ -144,6 +187,10 @@ final class AppleConfigurationController {
         defer { scheduleKeychainRetry() }
         guard started, syncEnabled, !applying else {
             appleTrace("configuration sync read skipped: started=\(started) enabled=\(syncEnabled) applying=\(applying)")
+            return
+        }
+        guard !cloudRestoreHeld else {
+            appleTrace("configuration sync read held: reset, waiting for Restore from iCloud")
             return
         }
         do {
@@ -237,6 +284,7 @@ final class AppleConfigurationController {
         applying = true
         defer { applying = false }
         try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
+        sources.refreshRestoredManifests(ids: snapshot.sources.map(\.id))
         try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
         if let secrets { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
         ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
@@ -246,8 +294,13 @@ final class AppleConfigurationController {
         try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist)
     }
 
+    /// Reset OpenStream leaves this device out of iCloud, both ways, until
+    /// the viewer taps Restore from iCloud: an empty device must not publish
+    /// over the other devices' configuration, nor refill itself on its own.
+    private var cloudRestoreHeld: Bool { defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey) }
+
     private func scheduleWrite() {
-        guard AppleConfigurationSyncPolicy.publishesChanges() else { return }
+        guard AppleConfigurationSyncPolicy.publishesChanges(), !cloudRestoreHeld else { return }
         pendingWrite?.cancel()
         pendingWrite = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(2)) }
