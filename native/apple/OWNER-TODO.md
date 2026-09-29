@@ -11,6 +11,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       passphrase, which silently drops all credentials AND the addon URL paths, so even public addons (Cinemeta,
       OpenSubtitles) arrive broken. Fix: public addons keep working without a passphrase; exporting makes the
       passphrase choice explicit; Needs Sign-In rows are tappable to fix.
+      **Owner direction 2026-09-29:** the backup always contains everything (passwords included), encrypted so only
+      OpenStream on their own devices can read it (key in iCloud Keychain; passphrase only for another Apple Account),
+      and restores with no Needs Sign-In. Also: the Enabled toggle on imported sources can't be turned on — fix.
 - [ ] **Hero title logos (word art) not showing — plain text title instead** (2026-09-29, iOS 18 sim screenshot:
       "JEOPARDY!" in bold text over the backdrop).
 - [ ] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
