@@ -1213,6 +1213,15 @@ private struct AppleAboutView: View {
                     AppleTVNavigationLabel("Third-Party Notices", systemImage: "doc.text")
                 }
             }
+
+            #if !os(tvOS)
+            Section {
+                ShareLink(item: AppleDiagnosticsFile(), preview: SharePreview("OpenStream Diagnostics")) {
+                    Text("Share Diagnostics")
+                }
+                .accessibilityIdentifier("settings.about.shareDiagnostics")
+            }
+            #endif
         }
         .appleSettingsPane("About", embedded: embeddedInSplit)
     }
