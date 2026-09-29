@@ -82,6 +82,7 @@ public final class AppleWatchCompanion: NSObject {
     
     // Throttles trace output while inactive
     private var lastTracedActivationState: Int?
+    private var tracedUnsupported = false
 
     public func detach() {
         engine = nil
@@ -100,8 +101,14 @@ public final class AppleWatchCompanion: NSObject {
     /// the phase actually changed: `refreshRemoteCommands`, the one method that
     /// would have, had no callers at all.
     public func publish(force: Bool = false) {
+        // No watch link on this device (an iPad): said once per launch. The
+        // player's bind timer calls this several times a second, which wrote
+        // hundreds of identical lines a minute into the trace.
         guard WCSession.isSupported() else {
-            appleTrace("watch link: WCSession unsupported")
+            if !tracedUnsupported {
+                tracedUnsupported = true
+                appleTrace("watch link: WCSession unsupported")
+            }
             return
         }
         let session = WCSession.default
