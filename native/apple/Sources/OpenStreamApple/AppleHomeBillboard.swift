@@ -494,6 +494,7 @@ private struct AppleHomeHeroPreview: View {
                     url: embedURL, artworkURL: item.backgroundURL ?? item.posterURL,
                     artworkImage: artworkImage,
                     isLandscape: true, isPlaying: $isPlaying, isMuted: $isMuted,
+                    allowsSound: trailerRequest != nil,
                     replayGeneration: $replayGeneration, showsReplay: !isPlaying,
                     coverSize: artFrameSize,
                     onStateChange: handleState,
@@ -618,7 +619,8 @@ private struct AppleHomeHeroPreview: View {
         trailerKeyIndex = 0
         trailerQuality = nil
         isMuted = trailerRequest == nil && settings.autoMuteTrailer
-        guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+        guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: trailerRequest != nil) else { return }
+        if trailerRequest != nil { appleTrace("trailer unmuted (explicit press)") }
         appleTrace("hero trailer start \(item.name)")
         embedURL = url
         isPlaying = true

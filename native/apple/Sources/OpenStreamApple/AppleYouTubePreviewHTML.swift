@@ -9,6 +9,16 @@ enum AppleTrailerSoundBridge {
         "window.setTrailerMuted(\(isMuted ? "true" : "false"));"
     }
 
+    /// Lifts (or reinstates) the muted-only rule on an already-loaded page —
+    /// an explicit "Play Trailer" press, after the preview autoplayed muted
+    /// (`requiresMutedWebPlayback`, which the document bakes in at load time
+    /// unless `allowsSound` was already true). Carries the desired mute state
+    /// alongside it so the two never race: `window.setTrailerMuted` alone,
+    /// called first or second, could still be clamped mute by the stale flag.
+    static func allowsSoundJavascriptCommand(allowsSound: Bool, isMuted: Bool) -> String {
+        "window.setTrailerAllowsSound(\(allowsSound ? "true" : "false"), \(isMuted ? "true" : "false"));"
+    }
+
     static func accessibilityLabel(isMuted: Bool) -> String {
         isMuted ? "Turn trailer sound on" : "Mute trailer"
     }
@@ -63,7 +73,9 @@ enum AppleYouTubePreviewHTML {
         <iframe id="player" src="\(safeSource)" allow="autoplay; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe>
         <script>
         var player = null;
-        const requiresMutedPlayback = \(requiresMutedPlayback ? "true" : "false");
+        // Mutable: an explicit press can lift it after the page has already
+        // loaded muted for autoplay (`window.setTrailerAllowsSound`).
+        var requiresMutedPlayback = \(requiresMutedPlayback ? "true" : "false");
         var desiredMuted = \(effectiveMuted ? "true" : "false");
         var lastPlayerWidth = 0, lastPlayerHeight = 0;
         var layoutScale = \(scale);
@@ -269,6 +281,19 @@ enum AppleYouTubePreviewHTML {
           // The IFrame API updates its internal mute state asynchronously.
           // Report the requested state here so native UI does not immediately
           // overwrite a user's tap with the previous player state.
+          notifyNative(desiredMuted ? 'muted' : 'unmuted', desiredMuted);
+          return desiredMuted;
+        };
+
+        // An explicit "Play Trailer" press: lifts (or reinstates) the
+        // muted-only rule and applies the mute state that goes with it in
+        // the same call, so the two flags this depends on can never be seen
+        // half-updated regardless of call order.
+        window.setTrailerAllowsSound = function(allows, isMuted) {
+          requiresMutedPlayback = !Boolean(allows);
+          desiredMuted = requiresMutedPlayback || Boolean(isMuted);
+          applyAudioPreference();
+          refreshAudioState();
           notifyNative(desiredMuted ? 'muted' : 'unmuted', desiredMuted);
           return desiredMuted;
         };

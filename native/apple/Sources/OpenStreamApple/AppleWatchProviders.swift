@@ -71,6 +71,14 @@ public struct AppleWatchProvider: Equatable, Sendable, Identifiable {
         guard let label = offer.label else { return name }
         return "\(name) · \(label)"
     }
+
+    /// TMDB's small logo for this provider, at `w92` — one of the thumbnail
+    /// sizes the app already validates and caches (`AppleTitlePagePolicy`),
+    /// plenty for an 18–28 pt row icon.
+    public var logoURL: URL? {
+        guard let logoPath, logoPath.hasPrefix("/") else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/w92\(logoPath)")
+    }
 }
 
 /// What the title page is allowed to show, from everything TMDB returned.
@@ -99,6 +107,13 @@ public enum AppleWatchProviderPolicy: Sendable {
             // wins so a subscription is never shown as "free with ads".
             .sorted { rank($0.offer) < rank($1.offer) }
             .filter { seen.insert($0.id).inserted }
+    }
+
+    /// The logos shown before the sentence — capped the same way the
+    /// sentence itself is, so the row never grows past a quiet line of icons
+    /// plus text.
+    public static func logos(_ providers: [AppleWatchProvider], limit: Int = 3) -> [AppleWatchProvider] {
+        Array(providers.prefix(limit))
     }
 
     private static func rank(_ offer: AppleWatchProviderOffer) -> Int {

@@ -37,6 +37,26 @@ import JavaScriptCore
         #expect(html.contains("desiredMuted = requiresMutedPlayback || Boolean(isMuted);"))
     }
 
+    /// An explicit "Play Trailer" press lifts the muted-only rule
+    /// independently of autoplay's `startsMuted` guess, and the two flags
+    /// travel together so a caller can never send one without the other.
+    @Test func explicitPressAllowsSoundIndependentlyOfAutoplayGuess() throws {
+        let embed = try #require(URL(string: "https://fixture.example/embed/trailer"))
+        // Autoplay: no press, no sound allowed — muted regardless of the caller's guess.
+        let autoplay = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true, startsMuted: false)
+        #expect(autoplay.contains("var requiresMutedPlayback = true;"))
+        // Pressed: sound allowed even though the page still opens with the
+        // viewer's last mute preference, which may itself be muted.
+        let pressed = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true,
+                                                        startsMuted: true, allowsSound: true)
+        #expect(pressed.contains("var requiresMutedPlayback = false;"))
+        #expect(pressed.contains("window.setTrailerAllowsSound = function"))
+        #expect(AppleTrailerSoundBridge.allowsSoundJavascriptCommand(allowsSound: true, isMuted: false)
+                == "window.setTrailerAllowsSound(true, false);")
+        #expect(AppleTrailerSoundBridge.allowsSoundJavascriptCommand(allowsSound: false, isMuted: true)
+                == "window.setTrailerAllowsSound(false, true);")
+    }
+
     #if canImport(JavaScriptCore)
     @Test func trailerScriptClearsExistingAndRejectsNewMediaSessionHandlers() throws {
         let context = try #require(JSContext())

@@ -52,14 +52,21 @@ enum ApplePlaybackSessionPolicy: Equatable, Sendable {
     #if os(iOS) || os(tvOS) || os(visionOS)
     @MainActor static var activeAudioPolicy: Self?
 
-    @MainActor static func prepareTrailerAudio() -> Bool {
+    /// `pressed` is an explicit "Play Trailer": it takes `.playback` instead
+    /// of the trailer's usual `.ambient`, so the silent switch does not mute
+    /// the sound the viewer just asked for. Autoplay never passes it — an
+    /// unrequested preview must stay silenceable exactly as the ringer
+    /// switch expects.
+    @MainActor static func prepareTrailerAudio(pressed: Bool = false) -> Bool {
         let policy = Self.trailer
         let session = AVAudioSession.sharedInstance()
         do {
             // Drain pending long-form preparation/deactivation before taking over.
             // Otherwise that queued work can overwrite ambient after this returns.
             try AppleAudioSessionWorkQueue.shared.performSynchronously {
-                let category: AVAudioSession.Category = policy.audioCategory == .ambient ? .ambient : .playback
+                let category: AVAudioSession.Category = pressed
+                    ? .playback
+                    : (policy.audioCategory == .ambient ? .ambient : .playback)
                 try session.setCategory(category, mode: .default, options: [])
                 #if os(visionOS)
                 try session.setIsNowPlayingCandidate(policy.publishesNowPlaying)

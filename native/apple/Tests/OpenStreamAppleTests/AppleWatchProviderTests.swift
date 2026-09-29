@@ -83,6 +83,26 @@ struct AppleWatchProviderTests {
             hasLocalOrAddonSource: false, visibleProviders: []))
     }
 
+    // MARK: Logos
+
+    @Test func logoURLBuildsFromTheTMDBPath() {
+        let netflixWithLogo = AppleWatchProvider(id: 8, name: "Netflix", offer: .subscription, logoPath: "/9A1JSVmSxsyaBK4SUFsYVqbAYfW.jpg")
+        #expect(netflixWithLogo.logoURL?.absoluteString == "https://image.tmdb.org/t/p/w92/9A1JSVmSxsyaBK4SUFsYVqbAYfW.jpg")
+    }
+
+    @Test func logoURLIsNilWithoutAPath() {
+        #expect(netflix.logoURL == nil)
+    }
+
+    /// A title on nine services must not turn into nine logos either.
+    @Test func logosAreCappedTheSameAsTheSentence() {
+        let many = ["Netflix", "Max", "Hulu", "Peacock", "Paramount+"].map {
+            AppleWatchProvider(id: abs($0.hashValue % 10_000), name: $0, offer: .subscription)
+        }
+        #expect(AppleWatchProviderPolicy.logos(many).count == 3)
+        #expect(AppleWatchProviderPolicy.logos(many).map(\.name) == ["Netflix", "Max", "Hulu"])
+    }
+
     /// The TMDB bucket names, since the whole filter depends on them.
     @Test func theTMDBKeysAreTheOnesTMDBUses() {
         #expect(AppleWatchProviderOffer.subscription.tmdbKey == "flatrate")

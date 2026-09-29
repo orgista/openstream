@@ -153,10 +153,10 @@ struct AppleMacHeroLayoutTests {
         let embed = try #require(URL(string: "https://fixture.example/embed/trailer"))
         let mac = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true, isLandscape: true,
                                                    startsMuted: true, allowsSound: true)
-        #expect(mac.contains("const requiresMutedPlayback = false;"))
+        #expect(mac.contains("var requiresMutedPlayback = false;"))
         #expect(mac.contains("mute=1"))
         let other = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true, startsMuted: false)
-        #expect(other.contains("const requiresMutedPlayback = true;"))
+        #expect(other.contains("var requiresMutedPlayback = true;"))
     }
 
     #if DEBUG && os(macOS)

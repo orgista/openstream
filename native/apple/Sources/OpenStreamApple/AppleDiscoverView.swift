@@ -2659,6 +2659,7 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.isPlaying = false
             heroTrailer.hasStarted = false
             heroTrailer.muted = settings.autoMuteTrailer
+            heroTrailer.allowsSound = false
         }
         // Art-first: the autoplaying trailer is not even looked for until the
         // hero still is on screen, and at low priority behind the page.
@@ -2720,6 +2721,7 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
             heroTrailer.muted = settings.autoMuteTrailer
+            heroTrailer.allowsSound = false
             titleWordmark.loadResult = nil
             titleWordmark.graceExpired = false
             #if DEBUG
@@ -3014,6 +3016,7 @@ struct AppleCatalogItemDetailView: View {
                 isLandscape: viewportSize.width > viewportSize.height,
                 isPlaying: $heroTrailer.isActive,
                 isMuted: $heroTrailer.muted,
+                allowsSound: heroTrailer.allowsSound,
                 replayGeneration: $heroTrailer.replayGeneration,
                 showsReplay: !heroTrailer.isActive,
                 onStateChange: handleTrailerState,
@@ -3552,6 +3555,11 @@ struct AppleCatalogItemDetailView: View {
 
     var tvOSBelowFold: some View {
         VStack(alignment: .leading, spacing: AppleTVDetailMetrics.sectionSpacing) {
+            // Directly under the hero's Play/icon row above, in secondary
+            // text, competing with nothing — easier to spot than buried in
+            // the synopsis, but still not a second Play (owner 2026-09-28).
+            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+                .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             if let summary = AppleMetadataPresentationPolicy.synopsis(
                 catalog: item.summary,
                 enriched: pageMetadata.details?.overview
@@ -3559,10 +3567,6 @@ struct AppleCatalogItemDetailView: View {
                 AppleTVFocusableParagraph(text: summary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             }
-            // Sits with the synopsis, in secondary text, competing with
-            // nothing. It is a line of prose rather than a second Play.
-            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
-                .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             if item.type == "series" {
                 tvOSEpisodeShelf
                     .id("vision-episodes")
@@ -3915,7 +3919,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func restartTrailer() {
-        guard trailerEmbedURL != nil, prepareTrailerAudio() else { return }
+        guard trailerEmbedURL != nil, prepareTrailerAudio(pressed: heroTrailer.allowsSound) else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
             heroTrailer.isActive = true
             heroTrailer.isPlaying = false
@@ -3947,9 +3951,9 @@ struct AppleCatalogItemDetailView: View {
         #endif
     }
 
-    private func prepareTrailerAudio() -> Bool {
+    private func prepareTrailerAudio(pressed: Bool = false) -> Bool {
         #if os(iOS) || os(visionOS)
-        ApplePlaybackSessionPolicy.prepareTrailerAudio()
+        ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: pressed)
         #elseif os(macOS)
         // No audio session to set up; the Mac title page's hero plays it.
         usesMacTitlePage
@@ -3975,6 +3979,7 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
             heroTrailer.muted = settings.autoMuteTrailer
+            heroTrailer.allowsSound = false
             let nextIndex = heroTrailer.candidateIndex + 1
             let candidates = trailerCandidates
             let code = errorCode.map(String.init) ?? "none"
@@ -4318,6 +4323,11 @@ struct AppleCatalogItemDetailView: View {
             if hasPrimaryActionRow {
                 primaryActionButtons
             }
+            // Directly under Play/Trailer, in secondary text — easier to
+            // spot than buried in the synopsis, but still not a second Play
+            // (owner 2026-09-28).
+            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+                .padding(.top, hasPrimaryActionRow ? AppleDetailMetrics.buttonsToIconRowSpacing : 0)
             seasonDownloadStatus
             secondaryActionRow
                 .padding(.top, hasPrimaryActionRow ? AppleDetailMetrics.buttonsToIconRowSpacing : 0)
@@ -5886,6 +5896,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let isLandscape: Bool
     @Binding var isPlaying: Bool
     @Binding var isMuted: Bool
+    /// Set by an explicit "Play Trailer" press, never by autoplay: lifts the
+    /// document's muted-only rule so `isMuted` can actually take the caller
+    /// to audible (`ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback`).
+    var allowsSound = false
     @Binding var replayGeneration: Int
     let showsReplay: Bool
     /// The frame the caller's still fills, when this view is laid out
@@ -5910,6 +5924,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var loadedURL: URL?
         var loadedLandscape: Bool?
         var lastMuted = true
+        var lastAllowsSound = false
         var lastPlaying = true
         var lastReplayGeneration = 0
         var onStateChange: ((String, Bool, Int?) -> Void)?
@@ -6384,6 +6399,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     func makeUIView(context: Context) -> PlayerContainer {
         context.coordinator.onStateChange = onStateChange
         context.coordinator.lastMuted = isMuted
+        context.coordinator.lastAllowsSound = allowsSound
         context.coordinator.lastReplayGeneration = replayGeneration
         context.coordinator.setPlaybackIntent(isPlaying)
         let container = PlayerContainer(frame: .zero, messageHandler: context.coordinator, artworkURL: artworkURL)
@@ -6450,7 +6466,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             view.webView.evaluateJavaScript("window.setTrailerLandscape(\(isLandscape ? "true" : "false"));", completionHandler: nil)
         }
         if context.coordinator.lastPlaying != isPlaying {
-            if isPlaying, !ApplePlaybackSessionPolicy.prepareTrailerAudio() { return }
+            if isPlaying, !ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) { return }
             context.coordinator.lastPlaying = isPlaying
             if isPlaying {
                 context.coordinator.prepareForPlayback()
@@ -6463,15 +6479,20 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             )
         }
         if context.coordinator.lastReplayGeneration != replayGeneration {
-            guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+            guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) else { return }
             context.coordinator.lastReplayGeneration = replayGeneration
             context.coordinator.prepareForPlayback()
             view.webView.evaluateJavaScript("window.restartTrailer();", completionHandler: nil)
         }
-        guard context.coordinator.lastMuted != isMuted else { return }
+        guard context.coordinator.lastMuted != isMuted || context.coordinator.lastAllowsSound != allowsSound else { return }
         context.coordinator.lastMuted = isMuted
+        context.coordinator.lastAllowsSound = allowsSound
+        // One call, carrying both flags: `allowsSound` and `isMuted` can
+        // change together (a press unmutes and unlocks sound in the same
+        // beat), and two separate bridge calls would race on which one the
+        // page saw first.
         view.webView.evaluateJavaScript(
-            AppleTrailerSoundBridge.javascriptCommand(isMuted: isMuted),
+            AppleTrailerSoundBridge.allowsSoundJavascriptCommand(allowsSound: allowsSound, isMuted: isMuted),
             completionHandler: nil
         )
     }
@@ -6487,14 +6508,16 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     }
 
     private func load(_ url: URL, in view: WKWebView, context: Context) {
-        guard ApplePlaybackSessionPolicy.prepareTrailerAudio() else { return }
+        guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) else { return }
         context.coordinator.loadedURL = url
         context.coordinator.loadedLandscape = isLandscape
+        context.coordinator.lastAllowsSound = allowsSound
         let html = AppleYouTubePreviewHTML.document(
             embedURL: url,
             startsPlaying: isPlaying,
             isLandscape: isLandscape,
-            startsMuted: isMuted
+            startsMuted: isMuted,
+            allowsSound: allowsSound
         )
         view.loadHTMLString(html, baseURL: URL(string: "https://openstream.app"))
     }
@@ -6652,6 +6675,10 @@ private struct AppleTitlePageTrailerState {
     var isPlaying = false
     var hasStarted = false
     var muted = false
+    /// An explicit press, not autoplay's guess — lifts the web player's
+    /// muted-only rule so `muted` can actually go false
+    /// (`ApplePlaybackSessionPolicy`, `AppleYouTubePreviewHTML`).
+    var allowsSound = false
     var candidateIndex = 0
     var portraitKeys: Set<String> = []
     var landscapeKeys: Set<String> = []
@@ -7699,6 +7726,10 @@ extension AppleCatalogItemDetailView {
     /// any download status.
     private func phoneHeroFooter(chips: [String]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Directly under the hero's action row above, in secondary
+            // text — easier to spot than buried in the synopsis, but still
+            // not a second Play (owner 2026-09-28).
+            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
             if item.type == "series", let episode = selectedEpisode,
                let heading = AppleTitlePagePolicy.nextEpisodeHeading(episode) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -7923,6 +7954,10 @@ extension AppleCatalogItemDetailView {
         // The card says it is loading at once; the art stays in the hero.
         let key = trailerCandidates[index]
         heroTrailer.pressedKey = key
+        // An explicit press starts with sound — autoplay never does.
+        heroTrailer.muted = false
+        heroTrailer.allowsSound = true
+        appleTrace("trailer unmuted (explicit press)")
         if scrolls {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
                 detailScrollPosition.scrollTo(edge: .top)
@@ -7942,7 +7977,7 @@ extension AppleCatalogItemDetailView {
                 restartTrailer()
                 return
             }
-            guard prepareTrailerAudio() else { return }
+            guard prepareTrailerAudio(pressed: true) else { return }
             heroTrailer.candidateIndex = index
             // One transaction: a web view first made paused loads its page
             // with autoplay off and waits on a second message to start.
