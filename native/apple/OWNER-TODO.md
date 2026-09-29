@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Subtitles menu still lists every language instead of defaulting to English (asked again)**
+      (2026-09-28, build 14). The earlier fix (FEEDBACK.md "A picked language was not the only option")
+      only filters strictly when a language was explicitly picked; with device defaults and no exact match it
+      still falls back to every track. English should be the default and the only entry.
 - [ ] **Streaming services setting: an "Add" menu instead of the long list, top 10 by popularity only**
       (2026-09-28). Owner also asks what turning one on does — toggling Netflix on showed no visible difference.
 - [ ] **When a trailer ends it should go back to the movie art** (2026-09-28, owner) — today it stays on the
