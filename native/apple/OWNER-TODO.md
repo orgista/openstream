@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Import Backup leaves every source "Needs Sign-In"** (2026-09-29, iOS 18 sim). The file was exported without a
+      passphrase, which silently drops all credentials AND the addon URL paths, so even public addons (Cinemeta,
+      OpenSubtitles) arrive broken. Fix: public addons keep working without a passphrase; exporting makes the
+      passphrase choice explicit; Needs Sign-In rows are tappable to fix.
 - [ ] **Hero title logos (word art) not showing — plain text title instead** (2026-09-29, iOS 18 sim screenshot:
       "JEOPARDY!" in bold text over the backdrop).
 - [ ] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
