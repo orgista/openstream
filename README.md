@@ -1,79 +1,100 @@
-# OpenStream.orgista.com
+<p align="center">
+  <img alt="OpenStream icon" src="docs/assets/icon.png" width="96">
+</p>
 
-OpenStream is an independent, tvOS-first media application under the Orgista development umbrella. It combines local, NAS, cloud, and add-on discovery with capability-aware playback, request/download-manager handoff, and immersive media routes.
+<h1 align="center">OpenStream</h1>
+
+<h3 align="center">A media player for your NAS, add-ons, and headsets</h3>
+
+<p align="center">
+  <a href="#build-from-source">Build</a> ·
+  <a href="docs/architecture/media-capability-matrix.md">Capability matrix</a> ·
+  <a href="https://orgista.com">orgista.com</a>
+</p>
+
+<p align="center">
+  <a href="native/android-xr"><img alt="Platform: Android" src="https://img.shields.io/badge/platform-Android%20%7C%20Android%20XR-1c1e20?style=flat-square"></a>
+  <a href="native/apple"><img alt="Platform: Apple" src="https://img.shields.io/badge/playback%20core-macOS%20%7C%20tvOS%20%7C%20visionOS-1c1e20?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <img alt="OpenStream Discover screen on a 16:9 display" src="design/qa-automated/discover-desktop.png" width="720">
+</p>
+
+## Features
+
+- Plays from SMB shares on your network, Stremio add-on streams, Jellyfin, and Google Drive connections.
+- Direct play first. When a device cannot decode a format, the local gateway transcodes with ffmpeg, capped at the device's resolution and never upscaling.
+- Reads real codec and display capabilities (HDR10, HDR10+, HLG, Dolby Vision, HEVC, AV1) and does not claim support from file metadata alone.
+- Kids Mode: a rating cap, a title and word blocklist, and no way to turn it off from inside the app.
+- Discover, Library, Live, Search, Activity, and Connections screens built for remote control focus, with pointer and keyboard input as well.
+- Request handoff to Radarr, Sonarr, SABnzbd, and NZBGet.
+- Immersive viewer for spatial media, using signed, one-time media handoffs.
+- Redacted daily JSONL logs, so a test session can be replayed from one file.
 
 ## Kids Mode
 
-First launch asks who watches on the device. Choosing **Kids Mode** walks a guardian through a rating cap (Little kids G/TV-Y, Big kids PG/TV-PG, or Teens PG-13/TV-14), an optional blocklist of titles or words, and an explicit irreversible confirmation. Once enabled:
+First launch asks who is watching. Choosing Kids Mode walks a guardian through a rating cap (Little kids G/TV-Y, Big kids PG/TV-PG, or Teens PG-13/TV-14), an optional blocklist of titles or words, and an explicit confirmation that it cannot be undone.
 
-- Titles above the cap, blocklisted matches, and all unrated content never appear in Discover, Library, Live, or Search, and refuse to play.
+- Titles above the cap, blocklist matches, and all unrated content are hidden from Discover, Library, Live, and Search, and refuse to play.
 - Connections, activity, request handoff, and add-on management are hidden.
-- There is no PIN, setting, or hidden exit. The kids lock lives with the app data; deleting or editing the stored profile only fails closed to the strictest cap. The only reset is uninstalling OpenStream (removing its app data) and setting it up again.
+- There is no PIN, setting, or hidden exit. The lock lives in the app data. Editing or deleting the stored profile makes the app fall back to the strictest cap. The only reset is uninstalling OpenStream and setting it up again.
 
-## NAS folders & local transcoding
+## Download
 
-A **NAS folder** connection points the loopback gateway at a directory this machine already mounts (for example an SMB share under `/Volumes`). Files stream with HTTP Range support for instant seeking. When the device cannot direct-play a format, the gateway transcodes locally with ffmpeg — VideoToolbox hardware encoders when available — always capped at the device's probed resolution and never upscaling. Playback falls back to the transcode route automatically when a direct route fails, and the player offers a manual Transcode control. Stremio add-on streams proxied by the gateway can be transcoded the same way.
+There are no tagged releases yet. Build from source below.
 
-## Logging
+## Platforms
 
-The gateway writes redacted JSONL logs (one file per day, `logs/` by default, `OPENSTREAM_LOG_DIR` to override) covering every request, connection test, transcode lifecycle, and errors the browser ships to `POST /api/logs`. Uncaught client errors are captured automatically, so a test session can be replayed end to end from one log file.
+| Platform | Minimum | Notes |
+| --- | --- | --- |
+| Android, Android XR | Android 8.0 (API 26) | Native Kotlin and Jetpack Compose app on Media3. Direct SMB playback, Stremio add-ons, Kids Mode. See [native/android-xr](native/android-xr/README.md). |
+| macOS, tvOS, visionOS | macOS 15, tvOS 18, visionOS 2 | Swift package with the playback and capability layer. The full Apple apps live in [orgista/openstream-apple](https://github.com/orgista/openstream-apple). |
+| Web (tvOS-first UI) | Node and pnpm | React UI with a loopback gateway for NAS access and local transcoding. Run from source. |
 
-## Design handoff
+## Build from source
 
-- Editable Figma file: https://www.figma.com/design/A8dE5NRzjGjwAMVSfdaeBW
-- Figma canvas: `00 Design Foundations`, `01 Discover`, `02 Library & NAS`, `03 Title Details`, and `04 Sources & Add-ons`
-- Local concept board and verified 1920x1080 renders: `design/`
-- Product and interoperability research: `docs/research/`
-- Capability matrix and audit reports: `docs/architecture/` and `docs/audits/`
-- OSS design editor: OpenPencil 0.13.2, installed at `/Applications/OpenPencil.app`
-- OpenPencil Make-style test: `design/openpencil-lab/`
-- Conversational design agent: `design/make-agent/`
-
-## Screens
-
-- `?screen=discover`
-- `?screen=library`
-- `?screen=details`
-- `?screen=live`
-- `?screen=connections`
-- `?screen=search`
-- `?screen=activity`
-- `?screen=settings`
-- `?screen=player`
-- `/xr/viewer`
-
-## Local development
+Web UI and gateway (needs Node and pnpm):
 
 ```bash
 pnpm install
-pnpm dev
-pnpm qa
+pnpm dev     # starts Vite and the loopback gateway
 pnpm test
-pnpm build
-pnpm openpencil:smoke
-pnpm make:new -- "Design a tvOS media dashboard"
-pnpm make -- "Make the focused card more obvious"
-node scripts/live-smoke.mjs "<secure launch url>" "<nas folder>"   # live E2E: onboarding, NAS, direct play, transcode
 ```
 
-On this workstation the Vite cache must live off the project volume: run dev with `OPENSTREAM_VITE_CACHE_DIR="$HOME/Library/Application Support/Orgista/OpenStream/vite-cache"`. `pnpm qa` audits every screen plus the onboarding/Kids Mode flow (rating filter, irreversibility, tamper fail-closed) and needs `CHROME_FOR_TESTING_PATH`.
+`pnpm dev` prints a one-time secure launch URL. Open it to start a per-origin browser session. The gateway keeps connection credentials and LAN access out of browser state.
 
-`pnpm dev` starts both Vite and the loopback gateway. Open the one-time secure launch URL printed in the terminal; it establishes a per-origin browser session, removes the launch capability from the address bar, and never creates a host-wide loopback cookie. Standalone gateway launches are intended for controlled integrations and require an explicit high-entropy `OPENSTREAM_GATEWAY_TOKEN` shared only with their trusted proxy.
+Android (needs JDK 17 and the Android SDK):
 
-The responsive application supports remote/keyboard focus, pointer input, and compact mobile/XR browser layouts. The loopback gateway keeps connection credentials and LAN service access out of browser state. Signed XR media locators use one-time, owner-bound handoffs; viewer navigation contains only an opaque fragment identifier.
-The OpenPencil smoke test requires the desktop app to be open. It produces an editable `.fig`,
-a verified PNG, round-trip JSX, and a machine-readable report.
-Both OpenPencil workflows verify the listener's operating-system owner and bind its process to a
-publisher-verified, pinned application parent chain plus the expected MCP package version and
-entrypoint digest before sending MCP traffic. A verified OpenPencil upgrade therefore requires
-reviewing and updating the app and MCP pins in `scripts/openpencil-security.mjs`.
+```bash
+cd native/android-xr
+gradle test assembleDebug
+```
 
-## Native targets
+Apple playback core:
 
-- `native/apple`: Swift package for macOS, tvOS, and visionOS using public AVFoundation/AVKit APIs.
-- `native/android-xr`: Android/Android XR compatibility target using Media3, runtime HDR/decoder probes, and standards-based immersive handoff.
-- Debug APK: `native/android-xr/dist/openstream-android-xr-debug.apk`
+```bash
+cd native/apple
+swift test
+```
 
-## Security boundary
+| Command | Description |
+| --- | --- |
+| `pnpm build` | Typecheck and build the web UI |
+| `pnpm gateway` | Run the gateway on its own (needs `OPENSTREAM_GATEWAY_TOKEN`) |
+| `pnpm qa` | Audit every screen and the Kids Mode flow (see [development notes](docs/development.md)) |
 
-OpenStream does not bypass DRM, extract protected media or keys, or claim playback support from metadata alone. Private-network connections require explicit consent. The development server uses a one-time launch capability and HttpOnly browser session, its proxy authenticates to the loopback-only gateway with a separate launch secret, and gateway records and media capabilities are owner-bound. Credentials remain server-side.
+## Security
+
+OpenStream does not bypass DRM or extract protected media or keys. Private-network connections need explicit consent, credentials stay on the gateway side, and gateway records and media capabilities are bound to their owner.
+
+## Documentation
+
+- [Media capability matrix](docs/architecture/media-capability-matrix.md)
+- [Functional audit](docs/audits/functional-audit-2026-07-16.md) and [design audit](docs/audits/design-audit-2026-07-16.md)
+- [Development notes](docs/development.md): NAS and transcoding, logging, QA, design tooling
+- Design renders and QA captures: [design/](design/)
+
+## Contributing
+
+Issues and pull requests are welcome. Run `pnpm test` and `pnpm qa` before opening a pull request.
