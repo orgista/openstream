@@ -16,6 +16,25 @@ enum AppleTabToolbarPolicy {
         }
     }
 
+    /// The toolbar item's identity. Only the Mac rekeys Refresh when it starts or
+    /// stops (its toolbar caches an item's view by identity, N37). On iOS the
+    /// same rekey added and removed a bar item while the tab appeared and its
+    /// catalog began loading, and UIKit asserts in UINavigationBar layout when
+    /// the bar changes mid-transition (TestFlight 10/12, iOS 18.7).
+    static func slotID(scope: String, item: Item, isRefreshing: Bool,
+                       rekeysBusyItem: Bool = rekeysBusyItemOnPlatform) -> String {
+        let busy = rekeysBusyItem && item == .refresh && isRefreshing
+        return "\(scope).\(item.rawValue)\(busy ? ".busy" : "")"
+    }
+
+    static var rekeysBusyItemOnPlatform: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     static var isTVPlatform: Bool {
         #if os(tvOS)
         true

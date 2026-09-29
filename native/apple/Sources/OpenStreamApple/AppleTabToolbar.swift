@@ -21,9 +21,10 @@ struct AppleTabToolbar: ToolbarContent {
     var scope = "tab"
 
     var body: some ToolbarContent {
-        // Refresh is a new item when it starts or stops: the Mac toolbar
+        // On the Mac, Refresh is a new item when it starts or stops: its toolbar
         // caches an item's view by identity, so on a pushed page (a title
-        // page, N37) the busy state it was first given never went away.
+        // page, N37) the busy state it was first given never went away. iOS
+        // keeps one identity (`AppleTabToolbarPolicy.slotID`).
         ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(scope: scope, item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
             let item = slot.item
             ToolbarItem(placement: Self.placement) {
@@ -51,7 +52,7 @@ struct AppleTabToolbar: ToolbarContent {
         let scope: String
         let item: AppleTabToolbarPolicy.Item
         let isRefreshing: Bool
-        var id: String { "\(scope).\(item.rawValue)\(isRefreshing ? ".busy" : "")" }
+        var id: String { AppleTabToolbarPolicy.slotID(scope: scope, item: item, isRefreshing: isRefreshing) }
     }
 
     private static var placement: ToolbarItemPlacement {

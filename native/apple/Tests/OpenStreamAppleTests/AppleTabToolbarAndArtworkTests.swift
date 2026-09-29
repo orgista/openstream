@@ -27,6 +27,18 @@ struct AppleTabToolbarAndArtworkTests {
         }
     }
 
+    @Test func refreshKeepsOneIdentityWhileLoadingOffTheMac() {
+        let idle = AppleTabToolbarPolicy.slotID(scope: "tab", item: .refresh, isRefreshing: false, rekeysBusyItem: false)
+        let busy = AppleTabToolbarPolicy.slotID(scope: "tab", item: .refresh, isRefreshing: true, rekeysBusyItem: false)
+        #expect(idle == busy)
+    }
+
+    @Test func macRekeysOnlyTheBusyRefreshItem() {
+        #expect(AppleTabToolbarPolicy.slotID(scope: "tab", item: .refresh, isRefreshing: true, rekeysBusyItem: true) == "tab.refresh.busy")
+        #expect(AppleTabToolbarPolicy.slotID(scope: "tab", item: .refresh, isRefreshing: false, rekeysBusyItem: true) == "tab.refresh")
+        #expect(AppleTabToolbarPolicy.slotID(scope: "tab", item: .search, isRefreshing: true, rekeysBusyItem: true) == "tab.search")
+    }
+
     @MainActor
     @Test func libraryAndDiscoverShareOneTMDBConfiguration() {
         let name = "openstream.tests.artwork.\(UUID().uuidString)"

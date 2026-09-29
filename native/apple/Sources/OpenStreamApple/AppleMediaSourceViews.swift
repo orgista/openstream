@@ -1791,54 +1791,60 @@ private struct AppleLiveSearchModifier<Results: View>: ViewModifier {
         #if os(tvOS)
         content
         #else
-        if isEnabled {
-            content
-                .toolbar {
+        // The toolbar item and the destination stay attached whether or not channels have
+        // loaded yet: adding/removing them while the tab appears relayouts the navigation bar
+        // mid-transition, which trips a UINavigationBar layoutSubviews assertion on iOS 18.
+        content
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    searchButton
+                }
+                #else
+                ToolbarItem(placement: .primaryAction) {
+                    searchButton
+                }
+                #endif
+            }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { showsSearch = false }
+            }
+            .navigationDestination(isPresented: $showsSearch) {
+                results()
+                    .searchable(text: $query, prompt: "Channels and groups")
+                    .searchFocused($searchFocused)
+                    .onChange(of: selectionRevision) { _, _ in
+                        searchFocused = false
+                        showsSearch = false
+                    }
+                    .onAppear {
+                        // Focus search field automatically when pushing the screen
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(250))
+                            searchFocused = true
+                        }
+                    }
+                    .navigationTitle("Search")
                     #if os(iOS)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showsSearch = true
-                        } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                        .accessibilityLabel("Search")
-                    }
-                    #else
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showsSearch = true
-                        } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                        .accessibilityLabel("Search")
-                    }
+                    .navigationBarTitleDisplayMode(.inline)
                     #endif
-                }
-                .navigationDestination(isPresented: $showsSearch) {
-                    results()
-                        .searchable(text: $query, prompt: "Channels and groups")
-                        .searchFocused($searchFocused)
-                        .onChange(of: selectionRevision) { _, _ in
-                            searchFocused = false
-                            showsSearch = false
-                        }
-                        .onAppear {
-                            // Focus search field automatically when pushing the screen
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(250))
-                                searchFocused = true
-                            }
-                        }
-                        .navigationTitle("Search")
-                        #if os(iOS)
-                        .navigationBarTitleDisplayMode(.inline)
-                        #endif
-                }
-        } else {
-            content
-        }
+            }
         #endif
     }
+
+    #if !os(tvOS)
+    private var searchButton: some View {
+        Button {
+            showsSearch = true
+        } label: {
+            Label("Search", systemImage: "magnifyingglass")
+        }
+        .accessibilityLabel("Search")
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0)
+        .accessibilityHidden(!isEnabled)
+    }
+    #endif
 }
 
 #if os(tvOS)
