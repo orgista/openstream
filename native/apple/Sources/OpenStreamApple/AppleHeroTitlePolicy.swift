@@ -60,6 +60,16 @@ enum AppleHeroTitlePolicy {
         return .name
     }
 
+    /// The name latch after the hero moves from page `old` to page `new`.
+    /// A latch belongs to one showing of one page: a wordmark found while
+    /// the name stood in is not swapped in under the viewer, but the next
+    /// time the page comes round it draws with its mark (owner 2026-09-29:
+    /// heroes stayed on the name all session). Carousels that give each page
+    /// its own view start clean anyway; this covers the ones that reuse it.
+    static func nameLatch(_ latched: String?, from old: String, to new: String) -> String? {
+        old == new ? latched : nil
+    }
+
     /// Whether a Discover hero's wordmark lookup is still running, for every
     /// hero (iPhone, iPad, Mac, Apple TV, the rotating one): until the page's
     /// lookup has finished it holds the slot rather than drawing the name a

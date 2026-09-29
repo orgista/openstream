@@ -243,17 +243,28 @@ struct AppleDiscoverView: View {
                                 #endif
                             }
                             .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
-                                // The prefetch lands after the first pass, so
-                                // look again shortly rather than only once.
-                                await resolveHeroWordmarks(heroes)
-                                try? await Task.sleep(for: .seconds(2))
-                                await resolveHeroWordmarks(heroes)
+                                // What the cache already knows draws at once;
+                                // the rest is asked for now that the billboard
+                                // has drawn, first page first. Two fixed cache
+                                // peeks left a fresh install on the names for
+                                // the whole session (owner 2026-09-29).
+                                var unanswered = await resolveHeroWordmarks(heroes)
+                                unanswered = await fetchHeroWordmarks(unanswered)
                                 guard !Task.isCancelled else { return }
                                 heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
                                 // Last, and only after the billboard has long
                                 // since drawn: the textless backdrop is an
                                 // upgrade, never something first paint waits on.
                                 await upgradeHeroArtwork(heroes)
+                                // An add-on that could not be reached is asked
+                                // again, a bounded number of times.
+                                var retry = 1
+                                while !unanswered.isEmpty, let delay = AppleHeroWordmarkFetch.retryDelay(retry) {
+                                    try? await Task.sleep(for: delay)
+                                    guard !Task.isCancelled else { return }
+                                    unanswered = await fetchHeroWordmarks(unanswered)
+                                    retry += 1
+                                }
                             }
                         }
 
@@ -496,19 +507,11 @@ struct AppleDiscoverView: View {
         .task(id: catalogLookupIdentity) {
             await rebuildCatalogLookup()
         }
-        // Fetch, while the viewer is still on the home screen, what a content
-        // page would otherwise wait 1.36 s for (owner: "preload metadata like
-        // wordmark art so that it loads basically instantly"). Keyed on the
-        // set of billboard titles, so it re-runs when the set changes, not
-        // when the rotation moves through it.
-        .task(id: heroes.map(\.item.mediaID).joined(separator: "\u{1f}")) {
-            await AppleMetadataPrefetcher.warm(
-                heroes.map {
-                    AppleMetadataPrefetcher.Title(type: $0.item.type, mediaID: $0.item.mediaID)
-                },
-                sources: sourceStore.sources
-            )
-        }
+        // The billboard titles' preview assets, which a content page would
+        // otherwise wait 1.36 s for (owner: "preload metadata like wordmark
+        // art so that it loads basically instantly"), are fetched by the
+        // hero's own task (`fetchHeroWordmarks`), which also draws each
+        // wordmark as it lands. A second warm here asked every add-on twice.
         .task(id: settings.top10ListsEnabled) {
             guard settings.top10ListsEnabled else { return }
             loadTop10()
@@ -1124,22 +1127,123 @@ struct AppleDiscoverView: View {
         }
     }
 
-    /// Reads whatever the prefetcher has already cached for the heroes. Cache
-    /// only — never a fetch — so the home screen cannot be made slower by
-    /// looking for a logo it may not have.
-    private func resolveHeroWordmarks(_ heroes: [IndexedCatalogItem]) async {
+    /// Reads whatever is already cached for the heroes. Cache only — never a
+    /// fetch — so the first draw cannot be made slower by looking for a logo.
+    /// A hero the cache has answered is resolved; the rest are returned, in
+    /// page order, for `fetchHeroWordmarks`.
+    private func resolveHeroWordmarks(_ heroes: [IndexedCatalogItem]) async -> [IndexedCatalogItem] {
         var found: [String: URL] = [:]
+        var answered: Set<String> = []
+        var unanswered: [IndexedCatalogItem] = []
         for hero in heroes {
             let key = AppleStremioPreviewAssetsCache.key(
                 type: hero.item.type, mediaID: hero.item.mediaID
             )
-            guard let assets = await AppleStremioPreviewAssetsCache.shared.entry(for: key)?.assets else { continue }
-            if let logo = assets.logoURL {
+            guard let entry = await AppleStremioPreviewAssetsCache.shared.entry(for: key) else {
+                unanswered.append(hero)
+                continue
+            }
+            answered.insert(hero.item.mediaID)
+            if let logo = entry.assets?.logoURL {
                 found[hero.item.mediaID] = logo
             }
         }
-        guard !Task.isCancelled else { return }
-        if found != heroWordmarks { heroWordmarks = found }
+        guard !Task.isCancelled else { return [] }
+        let merged = heroWordmarks.merging(found) { _, new in new }
+        if merged != heroWordmarks { heroWordmarks = merged }
+        heroWordmarksResolved.formUnion(answered)
+        return unanswered
+    }
+
+    /// Asks the add-ons for the preview assets of the heroes the cache could
+    /// not answer, in page order and at most
+    /// `AppleMetadataPrefetcher.maximumConcurrent` at a time, and draws each
+    /// wordmark as it arrives. This is also what warms the cache for the
+    /// title pages the heroes open. Returns the heroes no add-on could be
+    /// reached for, so they can be asked again.
+    ///
+    /// A page already showing its name keeps it
+    /// (`AppleHeroTitlePolicy`, N62/N63: the title never swaps under the
+    /// viewer); the found mark is drawn the next time that page comes round.
+    private func fetchHeroWordmarks(_ heroes: [IndexedCatalogItem]) async -> [IndexedCatalogItem] {
+        let requests = heroes.map {
+            HeroWordmarkRequest(mediaID: $0.item.mediaID, type: $0.item.type, title: $0.item.name,
+                                preferredSourceID: $0.source.id)
+        }
+        guard !requests.isEmpty else { return [] }
+        let sources = sourceStore.sources
+        var unanswered: Set<String> = []
+        await withTaskGroup(of: HeroWordmarkAnswer.self) { group in
+            var next = 0
+            var inFlight = 0
+            while true {
+                // At most `maximumConcurrent` asks at a time: add-ons are
+                // someone else's server.
+                while inFlight < AppleMetadataPrefetcher.maximumConcurrent, next < requests.count {
+                    let request = requests[next]
+                    next += 1
+                    inFlight += 1
+                    group.addTask { await Self.askHeroWordmark(request, sources: sources) }
+                }
+                guard let answer = await group.next() else { break }
+                inFlight -= 1
+                if Task.isCancelled {
+                    group.cancelAll()
+                    return
+                }
+                AppleInteractionTrace.record(.network, AppleHeroWordmarkFetch.traceLine(
+                    title: answer.request.title, outcome: answer.outcome, milliseconds: answer.milliseconds
+                ))
+                switch answer.outcome {
+                case .found(let logo):
+                    heroWordmarks[answer.request.mediaID] = logo
+                case .none:
+                    break
+                case .transient:
+                    unanswered.insert(answer.request.mediaID)
+                }
+                // The lookup has finished either way: a page with no mark
+                // stops holding its slot and draws the name.
+                heroWordmarksResolved.insert(answer.request.mediaID)
+            }
+        }
+        guard !Task.isCancelled else { return [] }
+        return heroes.filter { unanswered.contains($0.item.mediaID) }
+    }
+
+    private struct HeroWordmarkRequest: Sendable {
+        let mediaID: String
+        let type: String
+        let title: String
+        let preferredSourceID: AppleSource.ID
+    }
+
+    private struct HeroWordmarkAnswer: Sendable {
+        let request: HeroWordmarkRequest
+        let outcome: AppleHeroWordmarkFetch.Outcome
+        let milliseconds: Int
+    }
+
+    /// One hero's ask, off the main actor. `previewAssets` caches every
+    /// answer, so an empty cache afterwards means no add-on was reached.
+    private nonisolated static func askHeroWordmark(
+        _ request: HeroWordmarkRequest, sources: [AppleSource]
+    ) async -> HeroWordmarkAnswer {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let assets = await AppleStremioMetadataClient().previewAssets(
+            sources: sources, preferredSourceID: request.preferredSourceID,
+            type: request.type, mediaID: request.mediaID
+        )
+        let key = AppleStremioPreviewAssetsCache.key(type: request.type, mediaID: request.mediaID)
+        let answered = await AppleStremioPreviewAssetsCache.shared.entry(for: key) != nil
+        let elapsed = (clock.now - start).components
+        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
+        return HeroWordmarkAnswer(
+            request: request,
+            outcome: AppleHeroWordmarkFetch.outcome(assets: assets, answered: answered),
+            milliseconds: milliseconds
+        )
     }
 
     /// The tvOS billboard is 1920 wide inside the safe-area column, so it is

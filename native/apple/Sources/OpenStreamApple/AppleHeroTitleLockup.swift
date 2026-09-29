@@ -43,7 +43,9 @@ struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
                 }
             } else if presentation.showsName {
                 name()
-                    .onAppear { nameShownPage = pageID }
+                    // Keyed on the page, so a carousel that reuses this view
+                    // for the next page latches that page too.
+                    .task(id: pageID) { nameShownPage = pageID }
             } else {
                 // Held: the name's space, unseen and unread, so the copy
                 // around it does not move while the lookup runs.
@@ -51,6 +53,9 @@ struct AppleHeroTitleLockup<Mark: View, Name: View>: View {
                     .hidden()
                     .accessibilityHidden(true)
             }
+        }
+        .onChange(of: pageID) { old, new in
+            nameShownPage = AppleHeroTitlePolicy.nameLatch(nameShownPage, from: old, to: new)
         }
         .task(id: pageID) {
             try? await Task.sleep(for: .seconds(AppleHeroTitlePolicy.loadingGrace))

@@ -612,16 +612,25 @@ public struct AppleStremioMetadataClient: Sendable {
         if Self.isIMDBIdentifier(mediaID), !hasDefaultSource {
             candidates.append(Self.defaultMetadataSource)
         }
+        // Whether an add-on could not be reached (timeout, offline, dropped
+        // connection) rather than answering. Such a walk is not "this title
+        // has no wordmark", so it is not remembered as one: the next ask goes
+        // to the network again (owner 2026-09-29, heroes stuck on the name).
+        var unreachable = false
         for source in candidates {
             if Task.isCancelled { return nil }
-            if let assets = try? await previewAssets(source: source, type: type, mediaID: mediaID),
-               assets.trailerYouTubeKey != nil || assets.logoURL != nil {
-                await AppleStremioPreviewAssetsCache.shared.store(assets, for: cacheKey)
-                return assets
-            }
+            do {
+                let assets = try await previewAssets(source: source, type: type, mediaID: mediaID)
+                if assets.trailerYouTubeKey != nil || assets.logoURL != nil {
+                    await AppleStremioPreviewAssetsCache.shared.store(assets, for: cacheKey)
+                    return assets
+                }
+            } catch is URLError {
+                unreachable = true
+            } catch {}
         }
         // A cancelled walk is not an answer and must not be remembered.
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, !unreachable else { return nil }
         await AppleStremioPreviewAssetsCache.shared.store(nil, for: cacheKey)
         return nil
     }
