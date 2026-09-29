@@ -141,6 +141,15 @@ public final class AppleChannelHealthStore {
         sweepTask?.cancel()
     }
 
+    /// Reset OpenStream: the history on disk is gone, so is this copy.
+    func discardAfterReset() {
+        sweepTask?.cancel()
+        results = [:]
+        lineup = []
+        didLoad = false
+        revision &+= 1
+    }
+
     private func startSweep(channels: [AppleIPTVChannel]) {
         guard sweepTask == nil, !channels.isEmpty, !isFixture else { return }
         let history = history

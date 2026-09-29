@@ -41,6 +41,19 @@ final class AppleLocalLibraryStore {
         let items: [Item]
     }
 
+    /// Reset OpenStream: the saved index is gone, so is this copy.
+    func discardAfterReset() {
+        groups = []
+        sources = []
+        metadata = [:]
+        isLoading = false
+        errorMessage = nil
+        progress = [:]
+        offlineIDs = [:]
+        lastScan = nil
+        contentDidChange()
+    }
+
     func publishPersistedIndex(activeSources: [AppleSource]) async -> Bool {
         let activeSourceIDs = Set(activeSources.map(\.id))
         

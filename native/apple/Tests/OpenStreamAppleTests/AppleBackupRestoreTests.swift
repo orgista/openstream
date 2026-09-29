@@ -278,6 +278,42 @@ struct AppleDeviceResetTests {
         #expect(device.sources.sources.map(\.name) == ["Public"])
         #expect(!device.defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey))
     }
+
+    /// The app never quits itself (App Review, HIG): the reset wipes, drops
+    /// the in-memory copies, then moves the generation the root view is keyed
+    /// on. This test process still running afterwards is part of the proof.
+    @MainActor @Test func resetStartsOverInPlaceWithoutQuitting() {
+        let generation = AppleResetGeneration()
+        var steps: [String] = []
+
+        AppleDeviceReset.restart(
+            erase: { steps.append("erase"); return AppleDeviceReset.Report(removedItems: 3) },
+            discardInMemoryState: { steps.append("discard") },
+            generation: generation
+        )
+
+        #expect(steps == ["erase", "discard"])
+        #expect(generation.value == 1)
+    }
+
+    /// What the new root sees: stores created again from the wiped defaults
+    /// start at No Sources.
+    @MainActor @Test func storesCreatedAfterTheWipeStartAtNoSources() throws {
+        let device = try BackupTestDevice(keys: MemoryBackupKeys())
+        defer { device.tearDown() }
+        let url = try #require(URL(string: "https://public.fixture.example/manifest.json"))
+        try device.sources.addStremio(manifestURL: url, name: "Public")
+        let failures = ApplePlaybackFailureHistory()
+        failures.record(url)
+
+        _ = AppleDeviceReset.wipe(defaults: device.defaults, domain: device.suite, directories: [])
+        failures.removeAll()
+
+        let recreated = AppleSourceStore(defaults: device.defaults, keychain: BackupTestCredentials(),
+                                         logoBackfillDelay: .seconds(3_600))
+        #expect(recreated.sources.isEmpty)
+        #expect(!failures.contains(url))
+    }
 }
 
 /// One device's stores on throwaway defaults, keychain and index file.

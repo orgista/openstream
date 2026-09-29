@@ -14,10 +14,14 @@ struct OpenStreamPlatformApp: App {
     @State private var launchCoverShownAt: ContinuousClock.Instant?
     @State private var router = AppleAppRouter()
     @State private var webManagement = AppleWebManagementController()
+    @State private var resetGeneration = AppleResetGeneration.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     #if DEBUG
     init() {
+        // `-OpenStreamDevSources <path>`: read and delete the file first, so
+        // the reset below cannot empty it out from under the import.
+        AppleDevSourcesImport.captureIfRequested()
         // `-OpenStreamResetOnLaunch YES`: Reset OpenStream before any store loads.
         AppleDeviceReset.performIfRequestedAtLaunch()
         #if os(macOS)
@@ -78,11 +82,18 @@ struct OpenStreamPlatformApp: App {
             // non-focusable launch overlay after startup can leave the Siri
             // Remote without a default focus candidate.
             OpenStreamRootView(webManagement: webManagement, router: router)
+                // Reset OpenStream: a new root, so every store it owns is
+                // created again from the emptied storage (no app exit).
+                .id(resetGeneration.value)
                 .tint(.white)
                 .onOpenURL { router.open($0) }
+                .onChange(of: resetGeneration.value) { Task { await webManagement.stop() } }
         #else
             ZStack {
                 OpenStreamRootView(webManagement: webManagement, router: router)
+                    // Reset OpenStream: a new root, so every store it owns is
+                    // created again from the emptied storage (no app exit).
+                    .id(resetGeneration.value)
                     .transition(.opacity)
                 if showLaunch {
                     AppleOpenStreamLaunchView()
@@ -96,6 +107,7 @@ struct OpenStreamPlatformApp: App {
             // it." Green toggles stay (system on/off), red stays destructive.
             .tint(.white)
             .onOpenURL { router.open($0) }
+            .onChange(of: resetGeneration.value) { Task { await webManagement.stop() } }
             // The cover lifts as soon as the Discover billboard has drawn,
             // held just long enough for the mark to read, and never longer
             // than the fixed timer it used to be (`AppleLaunchCoverPolicy`).

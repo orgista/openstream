@@ -1,8 +1,20 @@
 import Foundation
+import Observation
 import Security
-#if os(macOS)
-import AppKit
-#endif
+
+/// Moves once per in-app Reset. The app's root view is keyed on it, so every
+/// store the root owns (sources, settings, catalog, media index) is created
+/// again from the storage the reset just emptied.
+@MainActor
+@Observable
+public final class AppleResetGeneration {
+    public static let shared = AppleResetGeneration()
+    public private(set) var value = 0
+
+    init() {}
+
+    func advance() { value &+= 1 }
+}
 
 /// Reset OpenStream: erases everything the app keeps on this device and
 /// starts it again at first run (No Sources).
@@ -32,14 +44,35 @@ public enum AppleDeviceReset {
         var failedItems = 0
     }
 
-    /// Erases everything, then starts the app again: a relaunch on the Mac;
-    /// on iPhone, iPad, Apple TV and Vision Pro the app closes and opens at
-    /// first run.
+    /// Erases everything, then brings the app back at first run (No Sources)
+    /// in place, on every platform. The app never quits itself: App Review
+    /// and the HIG both rule that out on iPhone, iPad, Apple TV and Vision Pro.
     @MainActor
-    public static func eraseThisDeviceAndRelaunch() {
-        let report = eraseThisDevice()
+    public static func eraseThisDeviceAndRestart() {
+        restart(erase: eraseThisDevice, discardInMemoryState: discardInMemoryState, generation: .shared)
+    }
+
+    /// The wipe, then the in-memory copies, then a new root. Parameters are
+    /// for the tests.
+    @MainActor
+    static func restart(erase: () -> Report, discardInMemoryState: () -> Void, generation: AppleResetGeneration) {
+        let report = erase()
         appleTrace("reset: this device only, downloads=deleted (\(report.removedItems) items, \(report.failedItems) failed)")
-        relaunch()
+        discardInMemoryState()
+        generation.advance()
+        appleTrace("reset: back to first run in place (generation \(generation.value))")
+    }
+
+    /// Shared objects that outlive the root view and hold what the wipe just
+    /// removed from disk.
+    @MainActor
+    static func discardInMemoryState() {
+        AppleLocalLibraryStore.shared.discardAfterReset()
+        AppleChannelHealthStore.shared.discardAfterReset()
+        ApplePlaybackFailureHistory.shared.removeAll()
+        ApplePlaybackProgressFeed.shared.storeDidChange()
+        AppleRemoteImageCache.shared.removeAllCached()
+        Task { await AppleStremioPreviewAssetsCache.shared.removeAll() }
     }
 
     /// `-OpenStreamResetOnLaunch YES`: the same wipe, before any store loads,
@@ -152,18 +185,5 @@ public enum AppleDeviceReset {
         [library,
          library.appendingPathComponent("Caches", isDirectory: true),
          library.appendingPathComponent("Application Support", isDirectory: true)]
-    }
-
-    @MainActor
-    private static func relaunch() {
-        #if os(macOS)
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
-        }
-        #else
-        exit(0)
-        #endif
     }
 }

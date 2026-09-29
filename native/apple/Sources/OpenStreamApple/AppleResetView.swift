@@ -39,7 +39,7 @@ struct AppleResetView: View {
             }
             Section {
                 AppleHoldToConfirmButton(title: "Hold to Reset", confirmationTitle: "Reset OpenStream?") {
-                    AppleDeviceReset.eraseThisDeviceAndRelaunch()
+                    AppleDeviceReset.eraseThisDeviceAndRestart()
                 }
             }
         }

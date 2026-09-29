@@ -279,6 +279,12 @@ actor AppleRemoteImageCache {
         cache.totalCostLimit = 160 * 1_024 * 1_024
     }
 
+    /// Reset OpenStream empties the decoded artwork too. `NSCache` is
+    /// thread-safe.
+    nonisolated func removeAllCached() {
+        cache.removeAllObjects()
+    }
+
     /// The decoded image if it is already in memory, without waiting on the
     /// actor. `NSCache` is thread-safe.
     nonisolated func cachedImage(url: URL, maximumPixelDimension: Int) -> CGImage? {

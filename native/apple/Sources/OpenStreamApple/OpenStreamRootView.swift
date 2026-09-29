@@ -337,6 +337,9 @@ public struct OpenStreamRootView: View {
         .task {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()
+            // `-OpenStreamDevSources <path>`: the owner's test sources, added
+            // through the normal store calls once per launch.
+            Task { await AppleDevSourcesImport.importPendingIfNeeded(sourceStore: sourceStore, settings: settingsStore) }
             let playbackFixture = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL").flatMap(URL.init(string:))
             if !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"), playbackFixture?.isFileURL != true {
                 Task { await sourceStore.seedTestCatalogsIfNeeded() }
