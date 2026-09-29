@@ -7,7 +7,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-- [ ] **Reset: delete every source, setting and saved data in one step** (2026-09-29) — for starting fresh / testing.
+- [ ] **Reset: a total wipe of the app on this device** (2026-09-29) — everything incl. downloads; the last step is
+      holding the final button for 5 seconds. Open question: should it also erase iCloud (other devices + backup key)?
 - [ ] **Rework the Live GUI — "still not great", wants something better and fresh** (2026-09-29). Start with design
       directions for the owner to pick from before building.
 - [ ] **Test fixture: auto-import the owner's sources into every simulator/app for testing** (2026-09-29) — one private
