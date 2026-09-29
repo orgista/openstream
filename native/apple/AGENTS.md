@@ -41,7 +41,8 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 - Never upload to TestFlight/App Store, run `asc publish`, `asc builds upload`, `xcodebuild
   -exportArchive`, or `git push`. Never add a build to a TestFlight group.
 - Never erase, delete, reset, or create simulators. The four persistent sims are: iPhone 16 Pro
-  `6A037503…`, iPad `CC634933…`, Apple TV `B251C620…`, Vision Pro `F598603A…`. Boot ONE at a time.
+  `6A037503…`, iPad `CC634933…`, Apple TV `B251C620…`, Vision Pro `F598603A…`, and (owner OK 2026-09-29, for the iOS 18 nav-bar crash) iPhone 16 on
+  iOS 18.6 "OpenStream iOS 18" `5CFC965C-D761-44D2-8613-AFB42D58CE90`. Boot ONE at a time.
   Never leave test data on them (a source, a download, a playlist you added — remove it).
 - Never use Computer Use / screen control / osascript UI automation — the owner is using this Mac.
 - Never create LaunchAgents, cron, routines, background workers.
