@@ -22,6 +22,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **iPhone crash: UINavigationBar layout assertion** (TestFlight crashes on builds 10 and 12, iOS 18.7, 4 of 4
       readable reports; one tester comment "Search"). Owner shared another crash on build 14 today — not yet
       in App Store Connect; read it when it appears.
+      **Build 14 crash read 2026-09-29** (AMKnSe6teuQS5qAin8cixtU, iPhone 15 Pro Max iOS 18.7.8, "Just scrolling the
+      app"): same assertion, reached from a layout pass while scrolling Discover, with loadTop10 running. 305af48
+      (not in build 14) removes the Discover Refresh item flip; hardening the scroll-driven hero layout too.
 - [ ] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
       sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
       bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
