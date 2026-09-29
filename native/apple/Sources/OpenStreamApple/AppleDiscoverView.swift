@@ -65,6 +65,9 @@ struct AppleDiscoverView: View {
     /// Held up for `AppleProgressVisibility.minimum` even when the catalogues
     /// come back at once, so a press on Refresh is visible as a refresh.
     @State private var isRefreshing = false
+    /// Moves when the viewer removes a title from Continue Watching, so the
+    /// row redraws without it (the store itself is not observed here).
+    @State private var continueWatchingRemovalRevision = 0
     @State private var loadedCache = false
     /// The source configuration whose catalog refresh last finished; until it
     /// matches the current one an empty page is loading, not empty.
@@ -162,7 +165,7 @@ struct AppleDiscoverView: View {
         // first draw at launch.
         let localContinueWatching = continueWatching
         let picks = topPicks(continueWatching: localContinueWatching)
-        let heroes = featuredCandidates(continueWatching: localContinueWatching, picks: picks)
+        let heroes = featuredCandidates(continueWatching: withoutRemoved(localContinueWatching), picks: picks)
         Group {
             if visibleSections.isEmpty && library.groups.isEmpty && catalogIsStillLoading {
                 ProgressView()
@@ -593,6 +596,20 @@ struct AppleDiscoverView: View {
             .map { $0 }
     }
 
+    /// Continue Watching less the titles the viewer removed and has not
+    /// played since. Top Picks still reads the full list as viewing history.
+    private func withoutRemoved(_ values: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
+        _ = continueWatchingRemovalRevision
+        let store = ApplePlaybackStore()
+        return values.filter { !store.isRemovedFromContinueWatching(mediaID: $0.record.id) }
+    }
+
+    private func removeFromContinueWatching(_ value: IndexedCatalogItem) {
+        appleTrace("discover.continue.remove id=\(value.record.id)")
+        ApplePlaybackStore().removeFromContinueWatching(mediaID: value.record.id)
+        continueWatchingRemovalRevision &+= 1
+    }
+
     private func mergedContinueWatching(local: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         let serverItems = mediaServerLibrary.continueWatching
         // Once per pass: `continueWatching` filters the whole media index, and
@@ -706,7 +723,7 @@ struct AppleDiscoverView: View {
     /// in-memory fixture (`-OpenStreamDebugContinueWatching YES`) when the
     /// simulator has no progress; it is never written anywhere.
     private func continueWatchingShelf(local: [IndexedCatalogItem]) -> (values: [IndexedCatalogItem], isFixture: Bool) {
-        let merged = mergedContinueWatching(local: local)
+        let merged = withoutRemoved(mergedContinueWatching(local: local))
         #if DEBUG
         if merged.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
         #endif
@@ -813,7 +830,8 @@ struct AppleDiscoverView: View {
                     info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
                     isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
                     onOpenTitle: { selectHero(value, autoPlay: false) },
-                    onToggleList: { toggleHeroInList(value) }
+                    onToggleList: { toggleHeroInList(value) },
+                    onRemove: { removeFromContinueWatching(value) }
                 ) {
                     detail(value)
                 }
@@ -1310,7 +1328,15 @@ struct AppleDiscoverView: View {
                         progress: showsProgress ? (AppleContinueWatchingResolver.progress(
                             isSeries: value.item.type == "series", saved: store.progress(for: value.record.id),
                             recordProgress: value.record.progress) ?? 0) : nil)
-                }.accessibilityIdentifier("home.\(identifier).\(value.id)")
+                }
+                .contextMenu {
+                    if showsProgress {
+                        Button("Remove from Continue Watching", systemImage: "xmark.circle") {
+                            removeFromContinueWatching(value)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("home.\(identifier).\(value.id)")
             }
         }
     }

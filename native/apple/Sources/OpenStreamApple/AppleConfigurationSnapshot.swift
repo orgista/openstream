@@ -78,16 +78,21 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     public var watchedTombstones: [String: Date]
     public var watchlist: [AppleMediaRecord]
     public var ratings: [String: Int]
+    /// Titles taken off Continue Watching, and when, keyed like
+    /// `playbackProgress`. Older snapshots have none.
+    public var continueWatchingRemovals: [String: Date]
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchedTombstones, watchlist, ratings
+        case continueWatchingRemovals
     }
 
     public init(savedAt: Date = .now, sources: [AppleSource] = [], settings: [String: Data] = [:],
                 playbackProgress: [String: ApplePlaybackProgress] = [:],
                 watchedHistory: [String: Date] = [:],
                 watchedTombstones: [String: Date] = [:],
-                watchlist: [AppleMediaRecord] = [], ratings: [String: Int] = [:]) {
+                watchlist: [AppleMediaRecord] = [], ratings: [String: Int] = [:],
+                continueWatchingRemovals: [String: Date] = [:]) {
         formatVersion = 1
         self.savedAt = savedAt
         self.sources = sources.map(Self.portableSource)
@@ -103,6 +108,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             return copy
         }
         self.ratings = ratings
+        self.continueWatchingRemovals = continueWatchingRemovals
     }
 
     public init(from decoder: Decoder) throws {
@@ -119,6 +125,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         watchedTombstones = history.tombstones
         watchlist = try container.decode([AppleMediaRecord].self, forKey: .watchlist)
         ratings = try container.decode([String: Int].self, forKey: .ratings)
+        continueWatchingRemovals = try container.decodeIfPresent([String: Date].self,
+                                                                 forKey: .continueWatchingRemovals) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -132,6 +140,9 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         if !watchedTombstones.isEmpty { try container.encode(watchedTombstones, forKey: .watchedTombstones) }
         try container.encode(watchlist, forKey: .watchlist)
         try container.encode(ratings, forKey: .ratings)
+        if !continueWatchingRemovals.isEmpty {
+            try container.encode(continueWatchingRemovals, forKey: .continueWatchingRemovals)
+        }
     }
 
     public func validate() throws {
@@ -152,6 +163,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         history.merge(watched: incoming.watchedHistory, tombstones: incoming.watchedTombstones)
         result.watchedHistory = history.watched
         result.watchedTombstones = history.tombstones
+        result.continueWatchingRemovals = AppleContinueWatchingRemovalPolicy.merged(
+            continueWatchingRemovals, incoming.continueWatchingRemovals)
         return result
     }
 
@@ -167,6 +180,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             .newest(Self.cloudEntryLimit)
         copy.watchedHistory = newestWatched.watched
         copy.watchedTombstones = newestWatched.tombstones
+        copy.continueWatchingRemovals = ApplePlaybackStore.boundedWatchedHistory(
+            continueWatchingRemovals, limit: Self.cloudEntryLimit)
         var data = try Self.encoder.encode(copy)
         // Large episode identifiers can still exceed the quota with fewer
         // than 500 entries. The oldest entry of either list goes first.

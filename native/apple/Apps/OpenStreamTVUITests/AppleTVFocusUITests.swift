@@ -1194,21 +1194,29 @@ final class AppleTVFocusUITests: XCTestCase {
         let reset = app.buttons["Reset to Default Order"]
         print("ROWS reset exists=\(reset.exists) enabled=\(reset.exists && reset.isEnabled)")
 
-        // One row down, open its Move page, look, back out with Menu.
+        // One row down, pick it up with Select, carry it down one, put it
+        // down with Select; then carry it back up so the order is as it was.
         press(.down, "rows-down-1")
         shoot("rows-second-focused")
-        press(.select, "move-menu-open", wait: 2)
-        shoot("move-menu")
-        let moveTitles = ["Move to Top", "Move Up", "Move Down", "Move to Bottom"].filter { app.buttons[$0].exists }
-        print("ROWS move menu buttons: \(moveTitles)")
-        XCTAssertFalse(moveTitles.isEmpty, "the Move page did not open")
-        XCTAssertTrue(moveTitles.contains(focusedElement.label), "focus did not land on a Move choice, got '\(focusedElement.label)'")
-        press(.menu, "move-menu-dismiss", wait: 2)
-        shoot("move-menu-dismissed")
-        XCTAssertTrue(["Move to Top", "Move Up", "Move Down", "Move to Bottom"].allSatisfy { !app.buttons[$0].exists },
-                      "Menu did not leave the Move page")
+        let carried = focusedElement.label
+        press(.select, "carry-pick-up", wait: 1.5)
+        shoot("carry-picked-up")
+        press(.down, "carry-down", wait: 1.5)
+        shoot("carry-moved-down")
+        XCTAssertEqual(focusedElement.label, carried, "focus did not stay on the carried row")
+        press(.select, "carry-put-down", wait: 1.5)
+        let moved = rowLabels()
+        XCTAssertEqual(moved.count, before.count)
+        if before.count > 2 {
+            XCTAssertEqual(moved[2], before[1], "the carried row did not move down one")
+            XCTAssertEqual(moved[1], before[2], "the row below did not move up one")
+        }
+        press(.select, "carry-pick-up-again", wait: 1.5)
+        press(.up, "carry-up", wait: 1.5)
+        press(.menu, "carry-put-down-menu", wait: 1.5)
+        XCTAssertTrue(titles.contains(focusedElement.label), "Menu left the page instead of putting the row down")
         let after = rowLabels()
-        XCTAssertEqual(before, after, "leaving the Move page changed the order")
+        XCTAssertEqual(before, after, "carrying the row back did not restore the order")
 
         // To the bottom for Reset, then Menu back to the pane.
         for step in 1 ... 16 where focusedElement.label != "Reset to Default Order" {

@@ -90,6 +90,13 @@ public final class ApplePlaybackStore {
     private var unwatchedCachedData: Data?
     /// The newest this many finished titles are kept.
     nonisolated public static let watchedHistoryLimit = 5_000
+    /// Titles the viewer took off Continue Watching, and when. The progress
+    /// stays; the row leaves the title out until it is played again.
+    private let continueWatchingRemovedKey = "openstream.playback.continueWatchingRemoved.v1"
+    private var removedCache: [String: Date]?
+    private var removedCachedData: Data?
+    /// The newest this many removals are kept.
+    nonisolated public static let continueWatchingRemovalLimit = 500
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -156,6 +163,24 @@ public final class ApplePlaybackStore {
         }
     }
 
+    /// "Remove from Continue Watching": leaves the progress and the watched
+    /// history alone, and hides the title from the row until it is played
+    /// again (a later progress save).
+    public func removeFromContinueWatching(mediaID: String, at date: Date = .now) {
+        guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        var removed = continueWatchingRemovals()
+        removed[storageKey] = date
+        persistRemovals(removed)
+    }
+
+    /// Whether the viewer took `mediaID` off Continue Watching and has not
+    /// played it since.
+    public func isRemovedFromContinueWatching(mediaID: String) -> Bool {
+        guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
+        return AppleContinueWatchingRemovalPolicy.isRemoved(
+            removedAt: continueWatchingRemovals()[storageKey], lastPlayedAt: entries()[storageKey]?.updatedAt)
+    }
+
     public func progress(for url: URL) -> ApplePlaybackProgress? {
         entries()[ApplePlaybackIdentity.storageKey(for: url)]
     }
@@ -197,6 +222,9 @@ public final class ApplePlaybackStore {
         } else {
             current[storageKey] = progress
         }
+        // Playing it again brings a removed title back to Continue Watching.
+        var removed = continueWatchingRemovals()
+        if removed.removeValue(forKey: storageKey) != nil { persistRemovals(removed, notify: false) }
         persist(current)
     }
 
@@ -296,6 +324,41 @@ public final class ApplePlaybackStore {
 
     func configurationProgress() -> [String: ApplePlaybackProgress] { entries() }
 
+    func configurationContinueWatchingRemovals() -> [String: Date] { continueWatchingRemovals() }
+
+    /// Merges a backup's or another device's removals into this one: the
+    /// newest removal per title wins.
+    func restoreConfigurationContinueWatchingRemovals(_ incoming: [String: Date]) {
+        guard !incoming.isEmpty else { return }
+        var normalized: [String: Date] = [:]
+        for (key, date) in incoming {
+            guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            normalized[storageKey] = max(normalized[storageKey] ?? date, date)
+        }
+        let current = continueWatchingRemovals()
+        let merged = AppleContinueWatchingRemovalPolicy.merged(current, normalized)
+        guard merged != current else { return }
+        persistRemovals(merged)
+    }
+
+    private func continueWatchingRemovals() -> [String: Date] {
+        let storedData = defaults.data(forKey: continueWatchingRemovedKey)
+        if let removedCache, removedCachedData == storedData { return removedCache }
+        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        removedCache = decoded
+        removedCachedData = storedData
+        return decoded
+    }
+
+    private func persistRemovals(_ removals: [String: Date], notify: Bool = true) {
+        let bounded = Self.boundedWatchedHistory(removals, limit: Self.continueWatchingRemovalLimit)
+        removedCache = bounded
+        removedCachedData = bounded.isEmpty ? nil : try? JSONEncoder().encode(bounded)
+        if let removedCachedData { defaults.set(removedCachedData, forKey: continueWatchingRemovedKey) }
+        else { defaults.removeObject(forKey: continueWatchingRemovedKey) }
+        if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
+    }
+
     func restoreConfigurationProgress(_ entries: [String: ApplePlaybackProgress]) {
         persist(entries)
     }
@@ -331,6 +394,20 @@ public final class ApplePlaybackStore {
         cachedData = try? JSONEncoder().encode(entries)
         defaults.set(cachedData, forKey: key)
         ApplePlaybackProgressFeed.shared.storeDidChange()
+    }
+}
+
+/// Continue Watching's "Remove" rule: a removed title stays off the row
+/// until it is played after the removal. Progress and history are untouched.
+enum AppleContinueWatchingRemovalPolicy {
+    static func isRemoved(removedAt: Date?, lastPlayedAt: Date?) -> Bool {
+        guard let removedAt else { return false }
+        return (lastPlayedAt ?? .distantPast) <= removedAt
+    }
+
+    /// The newest removal per title, from two devices or a backup.
+    static func merged(_ current: [String: Date], _ incoming: [String: Date]) -> [String: Date] {
+        current.merging(incoming) { max($0, $1) }
     }
 }
 

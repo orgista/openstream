@@ -52,6 +52,28 @@ enum AppleDiscoverRowOrder {
         return result
     }
 
+    /// `ids` after a drag: the rows at `offsets` land before the row that was
+    /// at `destination` (the offsets `List.onMove` hands over).
+    static func moved(_ ids: [String], fromOffsets offsets: IndexSet, toOffset destination: Int) -> [String] {
+        let valid = offsets.filter { ids.indices.contains($0) }
+        guard !valid.isEmpty else { return ids }
+        let moving = valid.map { ids[$0] }
+        var rest = ids.indices.filter { !valid.contains($0) }.map { ids[$0] }
+        let target = min(max(destination, 0), ids.count) - valid.filter { $0 < destination }.count
+        rest.insert(contentsOf: moving, at: min(max(target, 0), rest.count))
+        return rest
+    }
+
+    /// `ids` with `id` moved to `target` (Move Up, Move Down, Move to Top, a
+    /// step of the Apple TV's carried row), or nil when that changes nothing.
+    static func moved(_ ids: [String], id: String, to target: Int) -> [String]? {
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(target), target != index else { return nil }
+        var result = ids
+        result.remove(at: index)
+        result.insert(id, at: target)
+        return result
+    }
+
     /// `-OpenStreamDebugDiscoverOrder featuredMovies,library,…`: a review
     /// build can show a custom order without writing the viewer's settings.
     /// Each token is a row id, or a catalogue shelf title with spaces and case

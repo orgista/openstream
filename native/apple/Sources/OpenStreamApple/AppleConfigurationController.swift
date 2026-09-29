@@ -260,7 +260,8 @@ final class AppleConfigurationController {
             watchedHistory: ApplePlaybackStore(defaults: defaults).configurationWatchedHistory(),
             watchedTombstones: ApplePlaybackStore(defaults: defaults).configurationWatchedTombstones(),
             watchlist: mediaIndex.records.filter(\.isFavorite),
-            ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue))
+            ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue),
+            continueWatchingRemovals: ApplePlaybackStore(defaults: defaults).configurationContinueWatchingRemovals())
     }
 
     private func contentFingerprint() throws -> Data {
@@ -290,6 +291,8 @@ final class AppleConfigurationController {
         ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
         ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(
             snapshot.watchedHistory, tombstones: snapshot.watchedTombstones)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationContinueWatchingRemovals(
+            snapshot.continueWatchingRemovals)
         AppleTitleRatingStore(defaults: defaults).restoreConfigurationRatings(snapshot.ratings)
         try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist)
     }

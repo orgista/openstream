@@ -143,13 +143,14 @@ struct AppleContinueWatchingTileInfo: Equatable {
 
 /// A2: a 16:9 still with the pill and bar on it, and under it the title, the
 /// "Continue · S1, E3" line and a ⋯ menu of the actions the app already has
-/// (on the Mac the same actions are also the tile's right-click menu).
+/// (the same actions are also the tile's long-press and right-click menu).
 struct AppleContinueWatchingTile<Destination: View>: View {
     let item: AppleCatalogItem
     let info: AppleContinueWatchingTileInfo
     let isInList: Bool
     let onOpenTitle: () -> Void
     let onToggleList: () -> Void
+    let onRemove: () -> Void
     @ViewBuilder let destination: () -> Destination
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.appleDiscoverRows) private var rowStyle
@@ -162,9 +163,7 @@ struct AppleContinueWatchingTile<Destination: View>: View {
                                  remainingLabel: info.remainingLabel)
             }
             .accessibilityValue([info.remainingLabel?.capitalized, info.subtitle].compactMap { $0 }.joined(separator: ", "))
-            #if os(macOS)
             .contextMenu { actions }
-            #endif
             HStack(alignment: .top, spacing: 4) {
                 VStack(alignment: .leading, spacing: 2) {
                     AppleWordClampedText(text: item.name, lines: dynamicTypeSize.isAccessibilitySize ? 3 : 1)
@@ -198,6 +197,7 @@ struct AppleContinueWatchingTile<Destination: View>: View {
                action: onOpenTitle)
         Button(isInList ? "Remove from My List" : "Add to My List",
                systemImage: isInList ? "checkmark" : "plus", action: onToggleList)
+        Button("Remove from Continue Watching", systemImage: "xmark.circle", action: onRemove)
     }
 }
 

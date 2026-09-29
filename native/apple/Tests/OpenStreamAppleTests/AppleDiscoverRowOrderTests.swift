@@ -71,6 +71,44 @@ struct AppleDiscoverRowOrderTests {
         #expect(settings.discoverRowOrder == custom)
         #expect(AppleSettingsStore(defaults: defaults, keychain: RowOrderTestCredentials()).discoverRowOrder == custom)
     }
+
+    // MARK: Reordering
+
+    @Test func dragMovesRowsToTheListsDestinationOffset() {
+        let ids = ["a", "b", "c", "d"]
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [0], toOffset: 3) == ["b", "c", "a", "d"])
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [0], toOffset: 4) == ["b", "c", "d", "a"])
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [3], toOffset: 0) == ["d", "a", "b", "c"])
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [0, 2], toOffset: 4) == ["b", "d", "a", "c"])
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [1], toOffset: 1) == ids)
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [1], toOffset: 2) == ids)
+        #expect(AppleDiscoverRowOrder.moved(ids, fromOffsets: [9], toOffset: 0) == ids)
+    }
+
+    @Test func singleStepMovesAndMoveToTop() {
+        let ids = ["a", "b", "c"]
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "b", to: 0) == ["b", "a", "c"])
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "b", to: 2) == ["a", "c", "b"])
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "c", to: 0) == ["c", "a", "b"])
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "a", to: -1) == nil)
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "c", to: 3) == nil)
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "b", to: 1) == nil)
+        #expect(AppleDiscoverRowOrder.moved(ids, id: "missing", to: 0) == nil)
+    }
+
+    @MainActor @Test func movingARowSavesTheWholeOrderAndSurvivesRelaunch() throws {
+        let name = "discover-row-order-tests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = AppleSettingsStore(defaults: defaults, keychain: RowOrderTestCredentials())
+        let rows = defaultOrder.map { AppleDiscoverRowsSettingsView.Row(id: $0, title: $0) }
+        AppleDiscoverRowsSettingsView.move(rows[4], to: 0, in: rows, settings: settings)
+        let expected = [featuredMovies] + defaultOrder.filter { $0 != featuredMovies }
+        #expect(settings.discoverRowOrder == expected)
+        #expect(AppleSettingsStore(defaults: defaults, keychain: RowOrderTestCredentials()).discoverRowOrder == expected)
+        AppleDiscoverRowsSettingsView.move(rows[0], to: -1, in: rows, settings: settings)
+        #expect(settings.discoverRowOrder == expected)
+    }
 }
 
 private final class RowOrderTestCredentials: AppleCredentialStoring {

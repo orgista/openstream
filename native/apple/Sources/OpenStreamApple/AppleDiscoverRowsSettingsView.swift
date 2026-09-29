@@ -1,14 +1,20 @@
 import SwiftUI
 
 /// Settings › Discover Rows: the rows on Discover, in the order they are
-/// drawn, which the viewer can rearrange. iPhone, iPad and Vision Pro drag
-/// them in edit mode, the Mac has Move Up/Move Down beside each row, and the
-/// Apple TV opens a row and picks where it goes on a small pushed page.
+/// drawn, which the viewer can rearrange. iPhone, iPad, Vision Pro and the Mac
+/// drag them (the list is always in reorder mode); the Apple TV picks a row up
+/// with Select, carries it with up and down, and puts it down with Select or
+/// Menu. Every row also has Move Up, Move Down and Move to Top for VoiceOver.
 @MainActor
 struct AppleDiscoverRowsSettingsView: View {
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
     let catalogStore: AppleCatalogStore?
+    #if os(tvOS)
+    /// The row the remote is carrying, if any.
+    @State private var carriedRowID: String?
+    @FocusState private var focusedRowID: String?
+    #endif
 
     struct Row: Identifiable, Hashable {
         let id: String
@@ -36,10 +42,7 @@ struct AppleDiscoverRowsSettingsView: View {
     }
 
     static func move(_ row: Row, to target: Int, in rows: [Row], settings: AppleSettingsStore) {
-        guard let index = rows.firstIndex(of: row), rows.indices.contains(target) else { return }
-        var ids = rows.map(\.id)
-        ids.remove(at: index)
-        ids.insert(row.id, at: target)
+        guard let ids = AppleDiscoverRowOrder.moved(rows.map(\.id), id: row.id, to: target) else { return }
         settings.discoverRowOrder = ids
     }
 
@@ -49,42 +52,14 @@ struct AppleDiscoverRowsSettingsView: View {
 
     var body: some View {
         let rows = rows
-        Form {
-            Section {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    rowView(row, index: index, count: rows.count)
-                }
-                .onMove { source, destination in
-                    var ids = rows.map(\.id)
-                    ids.move(fromOffsets: source, toOffset: destination)
-                    settings.discoverRowOrder = ids
-                }
-            }
-            Section {
-                Button {
-                    settings.discoverRowOrder = nil
-                } label: {
-                    #if os(tvOS)
-                    AppleTVFocusReadableText("Reset to Default Order")
-                    #else
-                    Text("Reset to Default Order")
-                    #endif
-                }
-                .disabled(settings.discoverRowOrder == nil)
-                .accessibilityIdentifier("settings.discover.rows.reset")
-            }
-        }
+        list(rows)
         #if os(iOS) || os(visionOS)
-        .toolbar { EditButton() }
+        // Always reordering: the stock drag handles, no Edit button to find.
+        .environment(\.editMode, .constant(.active))
         #endif
         #if os(tvOS)
-        // A confirmationDialog drew its focused choice white on the white
-        // focus fill (N71 capture) and takes no label styling, so the Apple
-        // TV pushes a page of choices instead.
-        .navigationDestination(for: AppleTVDiscoverRowMoveRoute.self) { route in
-            AppleTVDiscoverRowMovePage(row: route.row, settings: settings, sourceStore: sourceStore,
-                                       catalogStore: catalogStore)
-        }
+        .onChange(of: focusedRowID) { _, focused in carry(to: focused) }
+        .onExitCommand(perform: carriedRowID == nil ? nil : { carriedRowID = nil })
         #endif
         .appleSettingsPage("Discover Rows")
         .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
@@ -104,25 +79,60 @@ struct AppleDiscoverRowsSettingsView: View {
     }
 
     @ViewBuilder
-    private func rowView(_ row: Row, index: Int, count: Int) -> some View {
+    private func list(_ rows: [Row]) -> some View {
         #if os(tvOS)
-        // A link, not a Button: the Form's links flip to black text on the
-        // white focus fill, its Buttons kept the app's white tint (N71).
-        NavigationLink(value: AppleTVDiscoverRowMoveRoute(row: row)) {
-            AppleTVNavigationLabel(row.title)
+        Form { sections(rows) }
+        #else
+        List { sections(rows) }
+        #endif
+    }
+
+    @ViewBuilder
+    private func sections(_ rows: [Row]) -> some View {
+        Section {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                rowView(row)
+                    .accessibilityActions { moveActions(row, index: index, rows: rows) }
+            }
+            #if !os(tvOS)
+            .onMove { source, destination in
+                settings.discoverRowOrder = AppleDiscoverRowOrder.moved(rows.map(\.id), fromOffsets: source,
+                                                                       toOffset: destination)
+            }
+            #endif
         }
-        .accessibilityIdentifier("settings.discover.row.\(row.id)")
-        #elseif os(macOS)
-        HStack {
-            Text(row.title)
-            Spacer()
-            Button("Move Up", systemImage: "chevron.up") { move(row, to: index - 1, in: rows) }
-                .disabled(index == 0)
-            Button("Move Down", systemImage: "chevron.down") { move(row, to: index + 1, in: rows) }
-                .disabled(index == count - 1)
+        Section {
+            Button {
+                settings.discoverRowOrder = nil
+            } label: {
+                #if os(tvOS)
+                AppleTVFocusReadableText("Reset to Default Order")
+                #else
+                Text("Reset to Default Order")
+                #endif
+            }
+            .disabled(settings.discoverRowOrder == nil)
+            .accessibilityIdentifier("settings.discover.rows.reset")
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: Row) -> some View {
+        #if os(tvOS)
+        Button {
+            carriedRowID = carriedRowID == row.id ? nil : row.id
+            appleTrace("discoverRows.carry id=\(row.id) carrying=\(carriedRowID != nil)")
+        } label: {
+            HStack {
+                AppleTVFocusReadableText(row.title)
+                Spacer()
+                if carriedRowID == row.id {
+                    AppleTVCarriedRowGlyph()
+                }
+            }
+        }
+        .focused($focusedRowID, equals: row.id)
+        .accessibilityValue(carriedRowID == row.id ? "Moving" : "")
         .accessibilityIdentifier("settings.discover.row.\(row.id)")
         #else
         Text(row.title)
@@ -130,54 +140,54 @@ struct AppleDiscoverRowsSettingsView: View {
         #endif
     }
 
-    private func move(_ row: Row, to target: Int, in rows: [Row]) {
-        Self.move(row, to: target, in: rows, settings: settings)
+    @ViewBuilder
+    private func moveActions(_ row: Row, index: Int, rows: [Row]) -> some View {
+        // In reorder mode iOS and visionOS already give each row Move Up and
+        // Move Down; only Move to Top is added there.
+        #if os(iOS) || os(visionOS)
+        let addsSteps = false
+        #else
+        let addsSteps = true
+        #endif
+        if index > 0 {
+            if addsSteps {
+                Button("Move Up") { Self.move(row, to: index - 1, in: rows, settings: settings) }
+            }
+            Button("Move to Top") { Self.move(row, to: 0, in: rows, settings: settings) }
+        }
+        if addsSteps, index < rows.count - 1 {
+            Button("Move Down") { Self.move(row, to: index + 1, in: rows, settings: settings) }
+        }
     }
+
+    #if os(tvOS)
+    /// Up and down move focus to the next row as usual; while a row is
+    /// carried, it takes that row's place and focus comes back to it, so a
+    /// long swipe carries it several rows at once. Focus leaving the rows
+    /// (Reset, the sidebar, the tab bar) puts it down where it is.
+    private func carry(to focused: String?) {
+        guard let carried = carriedRowID, focused != carried else { return }
+        let rows = rows
+        guard let focused, let target = rows.firstIndex(where: { $0.id == focused }),
+              let row = rows.first(where: { $0.id == carried }) else {
+            carriedRowID = nil
+            return
+        }
+        Self.move(row, to: target, in: rows, settings: settings)
+        focusedRowID = carried
+    }
+    #endif
 }
 
 #if os(tvOS)
-struct AppleTVDiscoverRowMoveRoute: Hashable {
-    let row: AppleDiscoverRowsSettingsView.Row
-}
-
-/// "Move <Row>": where the picked row goes. A choice moves it and pops back
-/// to the list, Menu leaves the order as it was.
-@MainActor
-private struct AppleTVDiscoverRowMovePage: View {
-    let row: AppleDiscoverRowsSettingsView.Row
-    let settings: AppleSettingsStore
-    let sourceStore: AppleSourceStore
-    let catalogStore: AppleCatalogStore?
-    @Environment(\.dismiss) private var dismiss
+/// The carried row's mark, black on the white focus fill like its title.
+private struct AppleTVCarriedRowGlyph: View {
+    @Environment(\.isFocused) private var isFocused
 
     var body: some View {
-        let rows = AppleDiscoverRowsSettingsView.rows(settings: settings, sourceStore: sourceStore,
-                                                      catalogStore: catalogStore)
-        let index = rows.firstIndex(of: row)
-        Form {
-            Section {
-                if let index, index > 0 {
-                    choice("Move to Top", id: "top", to: 0, in: rows)
-                    choice("Move Up", id: "up", to: index - 1, in: rows)
-                }
-                if let index, index < rows.count - 1 {
-                    choice("Move Down", id: "down", to: index + 1, in: rows)
-                    choice("Move to Bottom", id: "bottom", to: rows.count - 1, in: rows)
-                }
-            }
-        }
-        .appleSettingsPage("Move \(row.title)")
-    }
-
-    private func choice(_ title: String, id: String, to target: Int,
-                        in rows: [AppleDiscoverRowsSettingsView.Row]) -> some View {
-        Button {
-            AppleDiscoverRowsSettingsView.move(row, to: target, in: rows, settings: settings)
-            dismiss()
-        } label: {
-            AppleTVFocusReadableText(title)
-        }
-        .accessibilityIdentifier("settings.discover.move.\(id)")
+        Image(systemName: "arrow.up.arrow.down")
+            .foregroundStyle(isFocused ? Color.black : Color.white)
+            .accessibilityHidden(true)
     }
 }
 
