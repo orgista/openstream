@@ -7,6 +7,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Hero title logos (word art) not showing — plain text title instead** (2026-09-29, iOS 18 sim screenshot:
+      "JEOPARDY!" in bold text over the backdrop).
 - [ ] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
       an explicit Play Trailer press unmutes.
 - [ ] **Streaming services: keep the quiet "Also available on …" line only (owner chose option a), but make it
