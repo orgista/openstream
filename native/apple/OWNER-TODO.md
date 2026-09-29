@@ -8,11 +8,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 ## Open
 
 - [ ] **Reset: a total wipe of the app on this device** (2026-09-29) — everything incl. downloads; the last step is
-      holding the final button for 5 seconds. Open question: should it also erase iCloud (other devices + backup key)?
+      holding the final button for 5 seconds. Owner: device-only; tell the viewer iCloud data must be deleted manually.
 - [ ] **Rework the Live GUI — "still not great", wants something better and fresh** (2026-09-29). Start with design
       directions for the owner to pick from before building.
 - [ ] **Test fixture: auto-import the owner's sources into every simulator/app for testing** (2026-09-29) — one private
       file on this Mac (never in the repo or OSArchive) + a Debug-only import-at-launch hook + a seed script.
+      `scripts/dev-sources.py` (interactive; can pull every add-on from the Stremio account) writes
+      ~/Developer/openstream-build/signing/dev-sources.json. Still to build: the app hook + scripts/seed-sim.sh.
 - [ ] **Import Backup leaves every source "Needs Sign-In"** (2026-09-29, iOS 18 sim). The file was exported without a
       passphrase, which silently drops all credentials AND the addon URL paths, so even public addons (Cinemeta,
       OpenSubtitles) arrive broken. Fix: public addons keep working without a passphrase; exporting makes the
