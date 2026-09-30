@@ -66,6 +66,23 @@ extension AppleHeroRotation {
             show(index + offset, at: now)
         }
 
+        /// The page to draw and the page to preload when `pageCount` ids are
+        /// on hand, or nil when the page on screen is gone.
+        ///
+        /// The carousels draw once with the new ids before their `onChange`
+        /// restarts the cycle, so a list that just shrank (5 heroes → 1 when
+        /// a row with little backdrop art becomes the first shelf) met a cycle
+        /// still counting 5: `(index + 1) % count` then subscripted past the
+        /// end of the ids and trapped. Both indices are bounded by the ids
+        /// actually there, never by `count` alone.
+        public func pages(available pageCount: Int) -> (shown: Int, next: Int?)? {
+            guard count > 0, index < pageCount else { return nil }
+            let span = min(count, pageCount)
+            guard span > 1 else { return (index, nil) }
+            let next = (index + 1) % span
+            return (index, next == index ? nil : next)
+        }
+
         /// Moves to the next page when its timer has run out. True when it moved.
         @discardableResult
         public mutating func advanceIfDue(at now: Date) -> Bool {

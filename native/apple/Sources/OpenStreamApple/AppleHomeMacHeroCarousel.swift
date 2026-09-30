@@ -28,9 +28,9 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ZStack {
-                if cycle.count > 0, cycle.index < pageIDs.count {
-                    page(cycle.index)
-                        .id(pageIDs[cycle.index])
+                if let shown = cycle.pages(available: pageIDs.count)?.shown {
+                    page(shown)
+                        .id(pageIDs[shown])
                         .transition(reduceMotion ? .opacity : .push(from: incomingEdge))
                 }
             }
@@ -38,8 +38,7 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
             .frame(height: layout.height)
             .clipped()
             .background {
-                if cycle.count > 1, cycle.index < pageIDs.count {
-                    let next = (cycle.index + 1) % cycle.count
+                if let next = cycle.pages(available: pageIDs.count)?.next {
                     preload(next)
                         .id(pageIDs[next])
                         .opacity(0)

@@ -122,7 +122,17 @@ public struct AppleStremioPreviewAssets: Equatable, Sendable {
 }
 
 public struct AppleRuntimeMinutesParser {
+    /// A week of runtime. An add-on's free-text field above this (or one
+    /// whose hours would overflow `Int` when turned into minutes, which
+    /// trapped) is not a runtime, so it reads as unknown.
+    static let maximumMinutes = 10_080
+
     public static func parse(_ value: String?) -> Int? {
+        guard let minutes = unboundedParse(value), (0 ... maximumMinutes).contains(minutes) else { return nil }
+        return minutes
+    }
+
+    private static func unboundedParse(_ value: String?) -> Int? {
         guard let value else { return nil }
         let clean = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if let exact = Int(clean) { return exact }
@@ -133,6 +143,7 @@ public struct AppleRuntimeMinutesParser {
         if let hRange = clean.range(of: "h") {
             let hStr = clean[..<hRange.lowerBound].trimmingCharacters(in: .whitespaces)
             if let h = Int(hStr) {
+                guard (0 ... maximumMinutes).contains(h) else { return nil }
                 total += h * 60
                 hasValue = true
             }
@@ -142,6 +153,7 @@ public struct AppleRuntimeMinutesParser {
                                 .replacingOccurrences(of: "m", with: "")
                                 .trimmingCharacters(in: .whitespaces)
             if let m = Int(mStr) {
+                guard (0 ... maximumMinutes).contains(m) else { return nil }
                 total += m
                 hasValue = true
             }
@@ -150,6 +162,7 @@ public struct AppleRuntimeMinutesParser {
                             .replacingOccurrences(of: "m", with: "")
                             .trimmingCharacters(in: .whitespaces)
             if let m = Int(mStr) {
+                guard (0 ... maximumMinutes).contains(m) else { return nil }
                 total += m
                 hasValue = true
             }

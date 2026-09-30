@@ -60,7 +60,7 @@ if [[ "$STATE" != "Booted" ]]; then
     echo "$OTHERS" | sed 's/^/  /' >&2
     exit 1
   fi
-  echo "Booting $UDID…"
+  echo "Booting ${UDID}…"
   xcrun simctl boot "$UDID"
   xcrun simctl bootstatus "$UDID" -b >/dev/null
 fi

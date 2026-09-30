@@ -432,7 +432,10 @@ public struct AppleStremioPlaybackClient: Sendable {
     private static func safeProxyHeaders(_ values: [String: String]?) -> [String: String] {
         guard let values else { return [:] }
         let allowed = Set(["user-agent", "referer", "origin", "cookie", "authorization"])
-        return Dictionary(uniqueKeysWithValues: values.prefix(16).compactMap { name, value in
+        // Trimming can fold two names an add-on sent ("Referer" and
+        // " Referer ") into one, so duplicates keep the first rather than
+        // trapping in `Dictionary(uniqueKeysWithValues:)`.
+        let pairs = values.sorted { $0.key < $1.key }.prefix(16).compactMap { name, value -> (String, String)? in
             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard allowed.contains(cleanName.lowercased()),
@@ -442,7 +445,8 @@ public struct AppleStremioPlaybackClient: Sendable {
                 return nil
             }
             return (cleanName, cleanValue)
-        })
+        }
+        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
     }
 
     private static func safeHTTPURL(_ value: String) -> URL? {
