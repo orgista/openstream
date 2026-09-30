@@ -87,7 +87,7 @@ START_INODE="$(trace_inode)"
 START_SIZE="$(trace_size)"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-ARGS=(-OpenStreamTrace YES -OpenStreamDevSources "$DEST")
+ARGS=(-OpenStreamTrace YES -OpenStreamMuteAudio YES -OpenStreamDevSources "$DEST")
 if [[ $RESET -eq 1 ]]; then ARGS+=(-OpenStreamResetOnLaunch YES); fi
 xcrun simctl launch "$UDID" "$BUNDLE_ID" "${ARGS[@]}" >/dev/null
 echo "Launched OpenStream on $UDID$([[ $RESET -eq 1 ]] && echo " (reset first)"); importing…"

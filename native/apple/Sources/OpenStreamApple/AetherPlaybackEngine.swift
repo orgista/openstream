@@ -210,6 +210,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public init() throws {
         aether = try AetherEngine()
+        if AppleTestAudioMute.isActive { aether.volume = 0 }
         // The app owns the system Now Playing card; the engine must not take it
         // from AVKit. The default is already `false`, set it explicitly so the
         // intent survives an engine-side default change.

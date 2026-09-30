@@ -77,6 +77,8 @@ enum AppleYouTubePreviewHTML {
         // loaded muted for autoplay (`window.setTrailerAllowsSound`).
         var requiresMutedPlayback = \(requiresMutedPlayback ? "true" : "false");
         var desiredMuted = \(effectiveMuted ? "true" : "false");
+        // Debug `-OpenStreamMuteAudio`: silent whatever the page asks for.
+        var testMuteAll = \(AppleTestAudioMute.isActive ? "true" : "false");
         var lastPlayerWidth = 0, lastPlayerHeight = 0;
         var layoutScale = \(scale);
         var desiredPlaying = \(safeDesiredPlaying);
@@ -121,7 +123,7 @@ enum AppleYouTubePreviewHTML {
 
         function applyAudioPreference() {
           if (!player || typeof player.setVolume !== 'function') return;
-          if (desiredMuted) {
+          if (desiredMuted || testMuteAll) {
             if (typeof player.mute === 'function') player.mute();
             player.setVolume(0);
           } else {
