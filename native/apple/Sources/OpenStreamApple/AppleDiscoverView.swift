@@ -73,6 +73,8 @@ struct AppleDiscoverView: View {
     /// matches the current one an empty page is loading, not empty.
     @State private var settledCatalogIdentity: String?
     @State private var showsSearch = false
+    /// The router revision Discover last acted on (see its `router.revision` `onChange`).
+    @State private var handledRouteRevision = 0
     @State private var selectedHero: IndexedCatalogItem?
     @State private var selectedHeroAutoPlay = false
     @State private var showsSelectedHero = false
@@ -458,20 +460,29 @@ struct AppleDiscoverView: View {
             if enabled { loadTop10() }
             else { top10Week = nil; top10Error = nil }
         }
-        .task(id: router.revision) {
-            switch router.route {
-            case .search:
-                // On a platform with its own Search tab the route already
-                // selected it; pushing here would stack a second one.
-                if AppleSearchRoutePolicy.discoverPushesSearch(
-                    hasDedicatedSearchTab: AppleSearchRoutePolicy.platformHasDedicatedSearchTab) {
-                    showsSearch = true
-                }
-            case .media:
-                showsSearch = true
-            case .continueWatching, .none:
-                break
-            }
+        // A deep link, widget, Spotlight result or App Intent moves Discover's
+        // own navigation state. The stack itself keeps its identity: it used
+        // to be rebuilt for every route, and replacing the visible navigation
+        // controller inside the tab bar crashes iOS 18. On a platform with its
+        // own Search tab the route already selected it, so a search route does
+        // not push a second one here (`AppleSearchRoutePolicy`).
+        //
+        // `onChange`, not `task(id:)`: a task only runs while Discover is on
+        // screen, so a route that arrived with a page pushed over Discover sat
+        // unapplied until the viewer went back. `initial` picks up a route that
+        // arrived before Discover first appeared.
+        .onChange(of: router.revision, initial: true) {
+            guard let route = router.route,
+                  AppleSearchRoutePolicy.discoverHandlesRoute(
+                    revision: router.revision, handledRevision: handledRouteRevision) else { return }
+            handledRouteRevision = router.revision
+            showsSelectedHero = false
+            showsCatalog = false
+            #if DEBUG
+            visionReviewDetail = false
+            #endif
+            showsSearch = AppleSearchRoutePolicy.discoverShowsSearch(
+                for: route, hasDedicatedSearchTab: AppleSearchRoutePolicy.platformHasDedicatedSearchTab)
         }
         .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
             await mediaIndex.load()

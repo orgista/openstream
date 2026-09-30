@@ -49,6 +49,12 @@ public final class AppleAppRouter {
 
     public func open(_ url: URL) {
         guard let value = AppleAppRoute(url: url) else { return }
+        open(value)
+    }
+
+    /// A route that did not come from a URL: an App Intent (Siri, Shortcuts,
+    /// Spotlight) handed over through `AppleAppIntentHandoff`.
+    public func open(_ value: AppleAppRoute) {
         route = value
         if case .search(let query) = value { searchQuery = query }
         revision &+= 1

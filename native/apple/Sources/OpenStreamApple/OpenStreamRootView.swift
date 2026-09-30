@@ -114,7 +114,6 @@ enum OpenStreamTabReselection {
 public struct OpenStreamRootView: View {
     @State private var selectedTab = OpenStreamTab.home
     @State private var navigationPaths: [OpenStreamTab: NavigationPath] = [:]
-    @State private var rootResets: [OpenStreamTab: Int] = [:]
     #if os(iOS)
     @State private var rootViewportSize: CGSize = .zero
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -151,7 +150,15 @@ public struct OpenStreamRootView: View {
     }
 
     /// Tapping the tab that is already showing goes back to its root, the way
-    /// every stock iOS app behaves.
+    /// every stock iOS app behaves. The system tab bar does the popping (and
+    /// the scroll to top) itself; this only empties the value path to match.
+    ///
+    /// The stacks keep one identity for their whole life. Re-selecting used to
+    /// bump a counter folded into each stack's `.id`, which made SwiftUI throw
+    /// away the visible navigation controller inside the tab bar controller
+    /// and build a new one. iOS 18 asserts on that ("Layout requested for
+    /// visible navigation bar … when the top item belongs to a different
+    /// navigation bar") and the app crashed on every re-tap of a tab.
     private var tabSelection: Binding<OpenStreamTab> {
         Binding(
             get: { selectedTab },
@@ -159,7 +166,6 @@ public struct OpenStreamRootView: View {
                 #if os(iOS)
                 if OpenStreamTabReselection.popsToRoot(current: selectedTab, selected: tab) {
                     navigationPaths[tab] = NavigationPath()
-                    rootResets[tab, default: 0] += 1
                 }
                 #endif
                 selectedTab = tab
@@ -192,7 +198,6 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
-                .id(navigationIdentity(for: tab))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
                 #elseif os(iOS)
@@ -207,7 +212,6 @@ public struct OpenStreamRootView: View {
                         // scheme of our own.
                         .toolbar(iPadTabBarIsHidden ? .hidden : .automatic, for: .tabBar)
                 }
-                .id(navigationIdentity(for: tab))
                 .tabItem {
                     Label(tab.title, systemImage: tab.systemImage)
                 }
@@ -219,7 +223,6 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
-                .id(navigationIdentity(for: tab))
                 .tabItem {
                     if tab.showsTitleInTabBar {
                         Label(tab.title, systemImage: tab.systemImage)
@@ -249,7 +252,6 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
-                .id(navigationIdentity(for: tab))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
                 #endif
@@ -271,13 +273,6 @@ public struct OpenStreamRootView: View {
             && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
     }
     #endif
-
-    private func navigationIdentity(for tab: OpenStreamTab) -> String {
-        let reset = rootResets[tab] ?? 0
-        return tab == .home
-            ? "home:\(router.revision):\(intentHandoff.revision):\(reset)"
-            : "\(tab.rawValue):\(reset)"
-    }
 
     public var body: some View {
         tabs
@@ -493,9 +488,12 @@ public struct OpenStreamRootView: View {
             guard let route = router.route else { return }
             Task { @MainActor in await apply(route) }
         }
+        // Siri, Shortcuts and Spotlight arrive here and go through the same
+        // router as a deep link, so Discover moves its own navigation state
+        // (Search, a title page) instead of the whole stack being rebuilt.
         .onChange(of: intentHandoff.revision) {
             guard let route = intentHandoff.route else { return }
-            Task { @MainActor in await apply(route) }
+            router.open(route)
         }
         .task {
             if let route = intentHandoff.route { await apply(route) }
