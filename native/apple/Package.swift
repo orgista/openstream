@@ -37,6 +37,9 @@ let package = Package(
                 .copy("Resources/Badges"),
             ]
         ),
+        // Release tool, not shipped: headless Stremio add-on compatibility sweep.
+        // `swift run --scratch-path … OpenStreamAddonProbe sweep`
+        .executableTarget(name: "OpenStreamAddonProbe", dependencies: ["OpenStreamApple"]),
         .testTarget(name: "OpenStreamAppleTests", dependencies: ["OpenStreamApple"]),
     ]
 )
