@@ -10,6 +10,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **Test every public Stremio add-on (FMHY + r/StremioAddons + community catalogue)** (2026-09-30) — list, a
       headless harness using the app's own add-on code (manifest/catalog/meta/stream/subtitles), then in-app
       spot checks of flagged + top 20; harness kept for every release.
+      **First sweep 2026-09-30 (17d6a4e): 594 probed, 0 crashes.** App fixes found: only movie/series catalogs used
+      (78 add-ons show nothing: tv/anime/channel types); 2 MB catalog limit rejects TMDB's 12 MB shelf; catalog items
+      without a name dropped (poster-only tiles in Stremio); meta requires an exact id match (Stravo mx→tt) and rejects
+      redirects; 12-catalog cap hides catalogs; manifests with no resources accepted (unconfigured AIO Metadata);
+      AppleAddonURLSecretPolicy flags 14 public add-ons as secret; 100-item shelves; one subtitle track per language.
 - [ ] **Crash reported: the stravio.site add-on crashes the app** (2026-09-30, tester report).
 - [ ] **Full-test bugs (iPad iOS 27, 2026-09-30):**
       1. HIGH: after Search → open result → Play, the player's controls/tap area are squeezed into the top 458 pt
