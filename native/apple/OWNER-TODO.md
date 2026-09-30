@@ -7,6 +7,16 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Full-test bugs (iPad iOS 27, 2026-09-30):**
+      1. HIGH: after Search → open result → Play, the player's controls/tap area are squeezed into the top 458 pt
+         (keyboard height left over); rotating fixes it.
+      2. Audio & Subtitles menu closes itself after 2-3 s (auto-hide of the controls closes it).
+      3. "Also available on" never appears on iPad with Metadata on + Apple TV/Netflix added (no provider trace).
+      4. Hail Mary title page shows text while its Discover hero shows the logo.
+      UX: player controls vanish over bright video (no shadow), small 44 pt buttons on a big screen; Settings is one
+      stretched list in landscape (no split view); Library hero ~200 pt with the logo touching the edge; title-page
+      margins 40 vs 16 pt; duplicate raw audio labels "ENG (eac3) (eng)"; Radarr profile shows raw `7 = "…"`; import
+      sheet pushed into the tab bar by the keyboard; unlabeled Search field, key fields and Radarr/Sonarr fields.
 - [ ] **Full-test bugs (iPhone iOS 27, 2026-09-30; details in the test report):**
       1. Wrong show plays: SNL S1E1 (1975) plays "Saturday Night Live UK" — stream candidates not filtered by title/year.
       2. Chapters found by the engine (16 for Top Gun: Maverick) never appear in the player/scrubber; Quality item does nothing.
