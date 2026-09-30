@@ -7,6 +7,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Crash reported: the stravio.site add-on crashes the app** (2026-09-30, tester report).
 - [ ] **Full-test bugs (iPad iOS 27, 2026-09-30):**
       1. HIGH: after Search → open result → Play, the player's controls/tap area are squeezed into the top 458 pt
          (keyboard height left over); rotating fixes it.
