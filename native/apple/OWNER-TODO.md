@@ -7,6 +7,17 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Full-test bugs (iPhone iOS 27, 2026-09-30; details in the test report):**
+      1. Wrong show plays: SNL S1E1 (1975) plays "Saturday Night Live UK" — stream candidates not filtered by title/year.
+      2. Chapters found by the engine (16 for Top Gun: Maverick) never appear in the player/scrubber; Quality item does nothing.
+      3. Watch link retries "publish failed — not paired" every 250 ms forever (1,433 lines/25 min).
+      4. Library shows "No Videos" when the share refuses access — show the error instead.
+      5. Dev seed applies the TMDB key but leaves Use Metadata APIs off.
+      UX: portrait title-hero trailer is a blurry crop; See All has no posters; search ranks the 2016 Stranger Things
+      3rd; Add Service top 10 is odd (JustWatch TV, Amazon Video; no HBO Max/Paramount+/Peacock); "Metadata Is Off"
+      dead end; number pad has no Done; subtitle menu check indent; raw add-on names in row headers
+      ("AIOMetadata  | ElfHosted"); Top 10 row pops in above Airing Today; can't clear a rating; Subtitle Languages
+      first row under the nav bar; no-backdrop title is a big black area.
 - [ ] **Reset: a total wipe of the app on this device** (2026-09-29) — everything incl. downloads; the last step is
       holding the final button for 5 seconds. Owner: device-only; tell the viewer iCloud data must be deleted manually.
 - [ ] **Rework the Live GUI — "still not great", wants something better and fresh** (2026-09-29). Start with design
