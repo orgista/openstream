@@ -27,6 +27,8 @@ enum AppleTVDetailFocus: Hashable, Sendable {
     case play
     /// "Start from Beginning", beside Resume.
     case startFromBeginning
+    /// "Skip to Movie", beside Play Disc.
+    case skipToMovie
     case myList
     case rate
     /// One of the three choices Rate expands into.
@@ -78,7 +80,7 @@ enum AppleTVDetailOpeningFocus {
                            target: AppleTVDetailFocus = .play) -> AppleTVDetailFocus? {
         switch focus {
         case let focus? where focus == target: nil
-        case .play, .startFromBeginning, .myList, .rate, .rateChoice: target
+        case .play, .startFromBeginning, .skipToMovie, .myList, .rate, .rateChoice: target
         case .similar: nil
         case nil: hasHadAnyFocus ? nil : target
         }

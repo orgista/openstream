@@ -221,7 +221,10 @@ struct AppleStremioPlayerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
         .overlay {
-            if showsTVLoadingSpinner {
+            if showsTVLoadingSpinner, request.hints.disc != nil {
+                AppleDiscSpinner(size: 60)
+                    .accessibilityIdentifier("player.connecting")
+            } else if showsTVLoadingSpinner {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .tint(.white)
@@ -608,9 +611,9 @@ struct AppleStremioPlayerView: View {
             List {
                 if isLoadingSources { ProgressView().tint(.white) }
                 if let sourceError { Text(sourceError) }
-                qualityRow(.automatic, title: "Automatic")
+                qualityRow(.automatic, title: "Automatic", badges: sourceOptions?.rowBadges(for: .automatic) ?? [])
                 ForEach(sourceOptions?.tiers ?? [], id: \.self) { tier in
-                    qualityRow(.tier(tier), title: tier.title)
+                    qualityRow(.tier(tier), title: tier.title, badges: sourceOptions?.rowBadges(for: .tier(tier)) ?? [])
                 }
             }
             .scrollIndicators(.hidden)
@@ -636,13 +639,15 @@ struct AppleStremioPlayerView: View {
         .tint(.primary)
     }
 
-    private func qualityRow(_ choice: AppleStreamQualityChoice, title: String) -> some View {
+    private func qualityRow(_ choice: AppleStreamQualityChoice, title: String,
+                            badges: [AppleStreamFormatBadge] = []) -> some View {
         Button {
             qualitySwitch?.cancel()
             qualitySwitch = Task { await switchQuality(to: choice) }
         } label: {
             HStack {
                 Text(title)
+                if !badges.isEmpty { AppleStreamFormatBadgeInline(badges: badges) }
                 Spacer()
                 if quality == choice { Image(systemName: "checkmark").accessibilityHidden(true) }
             }

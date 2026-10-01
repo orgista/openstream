@@ -2106,6 +2106,7 @@ struct AppleCatalogCard: View {
     @State private var artworkPlate = AppleCatalogArtworkPolicy.Plate.none
     /// How the loaded art sits in the card (`AppleCatalogArtworkPolicy.framing`).
     @State private var artworkFraming = AppleCatalogArtworkPolicy.Framing.fill
+    private let discCatalog = AppleDiscCatalog.shared
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
          progress: Double? = nil, remainingLabel: String? = nil) {
@@ -2228,8 +2229,12 @@ struct AppleCatalogCard: View {
                     }
                 }
                 .overlay(alignment: .topLeading) {
-                    if let activeRowStyle, let remainingLabel {
-                        AppleRemainingTimePill(label: remainingLabel, fontSize: activeRowStyle.pillFontSize)
+                    HStack(spacing: 0) {
+                        if let activeRowStyle, let remainingLabel {
+                            AppleRemainingTimePill(label: remainingLabel, fontSize: activeRowStyle.pillFontSize)
+                        }
+                        // A disc image (ISO, VIDEO_TS, BDMV) in the library.
+                        if discCatalog.contains(item) { AppleDiscBadge() }
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -2521,6 +2526,56 @@ struct AppleCatalogItemDetailView: View {
     private var localFiles: [AppleLibraryItem] {
         library.localFiles(for: item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID), group: localGroup,
             episode: episodeList.episodes.first { $0.id == episodeList.selectedEpisodeID })
+    }
+
+    /// The disc image among this title's files: the page offers Play Disc
+    /// and Skip to Movie, and its titles.
+    private var discFile: AppleLibraryItem? { library.discFile(in: localFiles) }
+    private var isDiscTitle: Bool { discFile != nil }
+
+    /// The disc's titles, from the engine's read of the local image or from
+    /// the last play of it; empty for one title.
+    private var discTitles: [AppleDiscTitle] {
+        guard let discFile else { return [] }
+        return AppleDiscTitle.rowTitles(AppleDiscCatalog.shared.titles[discFile.url] ?? [])
+    }
+
+    /// Play Disc (the disc's menu, the main title until the engine has one),
+    /// Skip to Movie (the main feature), or one title from the Titles row.
+    private func startDisc(_ start: AppleDiscPlaybackStart, titleID: Int? = nil) {
+        guard canStartPlayback else { return }
+        playbackUI.disc = AppleDiscPlaybackChoice(start: start, titleID: titleID)
+        // The menu and a chosen title start from the top; Skip to Movie
+        // resumes where the film was left.
+        if start == .menu || titleID != nil { playbackUI.startsFromBeginning = true }
+        appleTrace("title page disc: \(start.rawValue)\(titleID.map { " title \($0)" } ?? "")")
+        playbackUI.request = UUID()
+    }
+
+    /// Format badges for this title: the local file's probe (or name), else
+    /// the stream Automatic would play, once streams are known. No network.
+    private var titlePageStreamBadges: [AppleStreamFormatBadge] {
+        if let file = localFiles.first {
+            return playbackUI.localInspection?.badges ?? AppleStreamFormatBadge.parse(file.name)
+        }
+        guard !playbackUI.streamChoices.isEmpty else { return [] }
+        let first = AppleStremioCandidateRanking.playbackOrder(
+            playbackUI.streamChoices, choice: .automatic, device: .current,
+            title: item.name, year: item.year).first
+        return first.map { AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0)) } ?? []
+    }
+
+    /// The badges a Quality row shows for `choice`: those of the stream it
+    /// would play, less the resolution the row already names.
+    private func qualityRowBadges(_ choice: AppleStreamQualityChoice) -> [AppleStreamFormatBadge] {
+        // Automatic plays this title's own file first when there is one.
+        if choice == .automatic, !localFiles.isEmpty {
+            return AppleStreamFormatBadge.rowBadges(titlePageStreamBadges)
+        }
+        let first = AppleStremioCandidateRanking.playbackOrder(
+            playbackUI.streamChoices, choice: choice, device: .current,
+            title: item.name, year: item.year).first
+        return first.map { AppleStreamFormatBadge.rowBadges(AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0))) } ?? []
     }
 
     @State private var playbackCoordinator = ApplePlaybackCoordinator()
@@ -2873,6 +2928,12 @@ struct AppleCatalogItemDetailView: View {
             guard playbackUI.ledger.consume(playbackUI.request) else { return }
             await resolvePlayback()
         }
+        // The local file's format and, for a disc image, its titles: read by
+        // the engine from the file itself, once per page.
+        .task(id: localFiles.first?.id) {
+            guard let file = discFile ?? localFiles.first else { return }
+            playbackUI.localInspection = await library.inspection(for: file)
+        }
         .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
@@ -3156,6 +3217,10 @@ struct AppleCatalogItemDetailView: View {
         // iPad page with 139 pt of black beside it, which reads as a
         // rendering fault rather than "there is more to the right"
         // (measured 2026-09-17). It carries its own leading inset.
+        if !discTitles.isEmpty {
+            AppleDiscTitlesRow(titles: discTitles, horizontalInset: detailHorizontalInset) { startDisc(.mainTitle, titleID: $0.id) }
+                .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
+        }
         if !suggestedItems.isEmpty {
             moreLikeThisSection(title: "More Like This")
                 .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
@@ -3673,6 +3738,9 @@ struct AppleCatalogItemDetailView: View {
                     tvOSWatchOnButton(watchOnAction)
                 } else if tvOSShowsPlay {
                     tvOSPlayButton
+                    if isDiscTitle {
+                        tvOSSkipToMovieButton
+                    }
                     if offersStartFromBeginning {
                         tvOSStartFromBeginningButton
                     }
@@ -3773,10 +3841,12 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSPlayButton: some View {
         Button {
             guard canStartPlayback else { return }
-            playbackUI.request = UUID()
+            if isDiscTitle { startDisc(.menu) } else { playbackUI.request = UUID() }
         } label: {
             HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
-                if tvOSPlayIsBusy {
+                if tvOSPlayIsBusy, isDiscTitle {
+                    AppleDiscSpinner(tint: .black, size: AppleTVDetailMetrics.pillGlyphSize)
+                } else if tvOSPlayIsBusy {
                     ProgressView().tint(.black)
                 } else {
                     Image(systemName: "play.fill")
@@ -3803,6 +3873,25 @@ struct AppleCatalogItemDetailView: View {
                 Task { await chooseStreams() }
             }
         }
+    }
+
+    /// Beside Play Disc, a quieter pill: the main feature, past the menu.
+    private var tvOSSkipToMovieButton: some View {
+        Button { startDisc(.mainTitle) } label: {
+            HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
+                Image(systemName: "forward.end.fill")
+                    .font(.system(size: AppleTVDetailMetrics.pillGlyphSize, weight: .semibold))
+                Text("Skip to Movie")
+            }
+        }
+        .buttonStyle(AppleTVPillStyle(
+            isSelected: false,
+            minimumSize: AppleTVDetailMetrics.pillSize,
+            fontSize: AppleTVDetailMetrics.pillFontSize
+        ))
+        .focused($tvDetailFocus, equals: .skipToMovie)
+        .disabled(tvOSPlayIsBusy)
+        .accessibilityIdentifier("detail.disc.skipToMovie")
     }
 
     /// Beside Resume, a quieter pill: the title or episode from the top.
@@ -3893,6 +3982,12 @@ struct AppleCatalogItemDetailView: View {
             if item.type == "series" {
                 tvOSEpisodeShelf
                     .id("vision-episodes")
+            }
+            if !discTitles.isEmpty {
+                AppleDiscTitlesRow(titles: discTitles, horizontalInset: AppleTVDetailMetrics.overlayLeadingInset) {
+                    startDisc(.mainTitle, titleID: $0.id)
+                }
+                .focusSection()
             }
             if !suggestedItems.isEmpty {
                 tvOSMoreLikeThisShelf
@@ -4213,14 +4308,14 @@ struct AppleCatalogItemDetailView: View {
                 Button {
                     choosePlaybackQuality(nil)
                 } label: {
-                    Text("Automatic").frame(maxWidth: .infinity, alignment: .leading)
+                    qualityRowLabel("Automatic", badges: qualityRowBadges(.automatic))
                 }
                 .accessibilityIdentifier("detail.quality.automatic")
                 ForEach(tiers, id: \.self) { tier in
                     Button {
                         choosePlaybackQuality(tier)
                     } label: {
-                        Text(tier.title).frame(maxWidth: .infinity, alignment: .leading)
+                        qualityRowLabel(tier.title, badges: qualityRowBadges(.tier(tier)))
                     }
                     .accessibilityIdentifier("detail.quality.\(tier.title)")
                 }
@@ -4245,6 +4340,16 @@ struct AppleCatalogItemDetailView: View {
         .frame(width: 360, height: 300)
         #endif
         .presentationDetents([.medium])
+    }
+
+    /// A Quality row: the resolution, then the format badges of the stream
+    /// it plays (Dolby Vision, Atmos, 5.1, Remux).
+    private func qualityRowLabel(_ title: String, badges: [AppleStreamFormatBadge]) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+            if !badges.isEmpty { AppleStreamFormatBadgeInline(badges: badges) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func choosePlaybackQuality(_ tier: AppleStreamQualityTier?) {
@@ -4470,6 +4575,9 @@ struct AppleCatalogItemDetailView: View {
             ForEach(Array(titleMetadataBadges.enumerated()), id: \.offset) { _, badge in
                 AppleFormatBadge(badge)
             }
+            ForEach(titleMetadataStreamBadges, id: \.self) { badge in
+                AppleFormatBadge(text: badge)
+            }
         }
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
             .minimumScaleFactor(0.68)
@@ -4496,6 +4604,11 @@ struct AppleCatalogItemDetailView: View {
             formatBadges: pageMetadata.details?.formatBadges ?? item.formatBadges ?? [],
             limit: AppleDetailMetrics.maxBadgeCount
         )
+    }
+
+    /// The stream's format badges after the catalog's own, none twice.
+    private var titleMetadataStreamBadges: [String] {
+        AppleStreamFormatBadge.titles(titlePageStreamBadges, excludingCatalogBadges: titleMetadataBadges)
     }
 
     private var titleMetadataTextValues: [String] {
@@ -4698,10 +4811,21 @@ struct AppleCatalogItemDetailView: View {
     /// phone's button already says; the Apple TV page said Play after
     /// watching (Apple TV regression 2026-10-01).
     private var regularPlayTitle: String {
+        if isDiscTitle { return "Play Disc" }
         if case .resume? = titlePagePrimaryAction, let titlePagePrimaryAction {
             return titlePagePrimaryAction.title
         }
         return downloadCoordinator.state.isCompleted ? "Play Offline" : "Play"
+    }
+
+    /// Beside Play Disc: straight into the main feature, past the menu.
+    private var skipToMovieButton: some View {
+        AppleDetailActionButton(title: "Skip to Movie", glyph: .systemImage("forward.end.fill"),
+                                kind: .download, width: actionButtonWidth) {
+            startDisc(.mainTitle)
+        }
+        .disabled(!canStartPlayback || playbackCoordinator.phase.isBusy)
+        .accessibilityIdentifier("detail.disc.skipToMovie")
     }
 
     private var regularPlayButton: some View {
@@ -4709,11 +4833,12 @@ struct AppleCatalogItemDetailView: View {
             title: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
                 ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading")
                 : regularPlayTitle,
-            glyph: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing ? .progress : .systemImage("play.fill"),
+            glyph: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
+                ? (isDiscTitle ? .disc : .progress) : .systemImage("play.fill"),
             kind: .play,
             width: actionButtonWidth
         ) {
-            playbackUI.request = UUID()
+            if isDiscTitle { startDisc(.menu) } else { playbackUI.request = UUID() }
         }
         .disabled(!canStartPlayback)
         .accessibilityLabel(
@@ -4828,6 +4953,9 @@ struct AppleCatalogItemDetailView: View {
     private func primaryActionRow(_ layout: AnyLayout) -> some View {
         layout {
             primaryPlayButton
+            if isDiscTitle, watchOnAction == nil {
+                skipToMovieButton
+            }
             if showsDownloadAction {
                 downloadActionButton
             }
@@ -5679,7 +5807,8 @@ struct AppleCatalogItemDetailView: View {
             @MainActor func option(_ candidate: AppleStremioHTTPPlaybackCandidate) -> ApplePlaybackSourceOption {
                 ApplePlaybackSourceOption(id: candidate.sourceURL,
                     tier: AppleStremioCandidateRanking.traits(of: candidate).tier,
-                    serviceKey: candidate.serviceKey) { resume in
+                    serviceKey: candidate.serviceKey,
+                    badges: AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: candidate))) { resume in
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
                             addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
@@ -5769,6 +5898,8 @@ struct AppleCatalogItemDetailView: View {
         let fromBeginning = playbackUI.startsFromBeginning
         playbackUI.startsFromBeginning = false
         playbackUI.pressFromBeginning = fromBeginning
+        let discChoice = playbackUI.disc
+        playbackUI.disc = nil
         if fromBeginning { appleTrace("title page: start from beginning") }
         playbackUI.unavailableMessage = nil
         playbackCoordinator.beginResolving()
@@ -5803,7 +5934,7 @@ struct AppleCatalogItemDetailView: View {
                     do {
                         let presentation = try await library.presentation(for: file,
                             sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings,
-                            fromBeginning: fromBeginning)
+                            fromBeginning: fromBeginning, disc: discChoice)
                         playbackCoordinator = presentation.coordinator
                         playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
                         return
@@ -6345,6 +6476,8 @@ struct AppleCatalogItemDetailView: View {
 enum AppleDetailActionButtonGlyph: Sendable {
     case systemImage(String)
     case progress
+    /// The turning disc, while a disc item opens.
+    case disc
 }
 
 enum AppleDetailActionButtonKind: Sendable {
@@ -6431,6 +6564,8 @@ struct AppleDetailActionButtonLabel: View {
                 case .progress:
                     ProgressView()
                         .tint(kind.foreground)
+                case .disc:
+                    AppleDiscSpinner(tint: kind.foreground, size: glyphSize)
                 }
                 Text(title)
                     .font(.system(size: labelFontSize, weight: .semibold))
@@ -7382,6 +7517,12 @@ private struct AppleTitlePagePlaybackState {
     /// The press under way started from the top, so its OpenStream fallback
     /// does too.
     var pressFromBeginning = false
+    /// A disc page's Play Disc / Skip to Movie / Titles choice for the next
+    /// press. Used once.
+    var disc: AppleDiscPlaybackChoice?
+    /// What the engine read from this title's local file (format badges,
+    /// disc titles), once per page.
+    var localInspection: AppleLocalFileInspection?
 }
 
 private struct AppleTitlePageMetadataState {
@@ -7842,6 +7983,13 @@ struct AppleFormatBadge: View {
         kind = AppleFormatBadgeKind.resolve(value)
     }
 
+    /// A badge that draws `text` as given, in the same grey outline: the
+    /// stream format badges ("Dolby Vision", "Atmos", "5.1") are words, never
+    /// the wordmark art `resolve` maps some of them to.
+    init(text: String) {
+        kind = .text(text)
+    }
+
     @ViewBuilder
     var body: some View {
         switch kind {
@@ -8027,6 +8175,10 @@ extension AppleCatalogItemDetailView {
             // Lazy: the push builds only the sections on screen; the rest
             // are built as they scroll in, as Discover's shelves are (N47).
             LazyVStack(alignment: .leading, spacing: 0) {
+                if !discTitles.isEmpty {
+                    AppleDiscTitlesRow(titles: discTitles, horizontalInset: Self.phoneInset) { startDisc(.mainTitle, titleID: $0.id) }
+                        .padding(.top, Self.phoneSectionSpacing)
+                }
                 if !titlePageTrailerKeys.isEmpty {
                     phoneTrailersSection
                         .padding(.top, Self.phoneSectionSpacing)
@@ -8275,6 +8427,7 @@ extension AppleCatalogItemDetailView {
                     .buttonStyle(.plain)
             } else if let state = titlePagePrimaryButtonState {
                 phonePrimaryButton(state)
+                if isDiscTitle, !state.isTrailer { phoneSkipToMovieButton }
             }
             HStack(spacing: 12) {
                 Button(action: toggleFavorite) {
@@ -8315,6 +8468,8 @@ extension AppleCatalogItemDetailView {
         let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || pageMetadata.isPreparing)
         let title: String = if isBusy {
             playbackCoordinator.phase.isBusy ? "Preparing" : "Loading"
+        } else if !isTrailer, isDiscTitle {
+            "Play Disc"
         } else {
             action.displayTitle(hasCompletedDownload: downloadCoordinator.state.isCompleted)
         }
@@ -8323,7 +8478,8 @@ extension AppleCatalogItemDetailView {
     }
 
     private var offersStartFromBeginning: Bool {
-        AppleTitlePagePolicy.offersStartFromBeginning(titlePagePrimaryAction) && watchOnAction == nil
+        // A disc's Play Disc already starts from the top.
+        AppleTitlePagePolicy.offersStartFromBeginning(titlePagePrimaryAction) && watchOnAction == nil && !isDiscTitle
     }
 
     /// The title (or the episode Resume names) from the top; its saved
@@ -8338,6 +8494,9 @@ extension AppleCatalogItemDetailView {
     /// iPad, Mac and Vision Pro, beside Quality.
     @ViewBuilder
     private var playButtonMenuItems: some View {
+        if isDiscTitle {
+            Button("Skip to Movie", systemImage: "forward.end.fill") { startDisc(.mainTitle) }
+        }
         if offersStartFromBeginning {
             Button("Start from Beginning", systemImage: "arrow.counterclockwise", action: startFromBeginning)
                 .accessibilityIdentifier("detail.startOver")
@@ -8351,6 +8510,8 @@ extension AppleCatalogItemDetailView {
     fileprivate func performTitlePagePrimaryAction() {
         if titlePagePrimaryButtonState?.isTrailer == true {
             playTrailerInHero(at: heroTrailer.candidateIndex)
+        } else if isDiscTitle {
+            startDisc(.menu)
         } else {
             playbackUI.request = UUID()
         }
@@ -8373,12 +8534,37 @@ extension AppleCatalogItemDetailView {
         .contentShape(.rect(cornerRadius: 12, style: .continuous))
     }
 
+    /// The phone's Skip to Movie, the same size as Play Disc, quieter.
+    private var phoneSkipToMovieButton: some View {
+        Button { startDisc(.mainTitle) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "forward.end.fill")
+                    .accessibilityHidden(true)
+                Text("Skip to Movie")
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.8)
+            }
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(.white.opacity(0.14), in: .rect(cornerRadius: 12, style: .continuous))
+            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canStartPlayback || playbackCoordinator.phase.isBusy)
+        .accessibilityIdentifier("detail.disc.skipToMovie")
+    }
+
     private func phonePrimaryButton(_ state: TitlePagePrimaryButtonState) -> some View {
         let isBusy = state.isBusy
         let title = state.title
         return Button(action: performTitlePagePrimaryAction) {
             HStack(spacing: 8) {
-                if isBusy {
+                if isBusy, isDiscTitle {
+                    AppleDiscSpinner(tint: .black)
+                } else if isBusy {
                     ProgressView().tint(.black)
                 } else {
                     Image(systemName: "play.fill")
@@ -8410,7 +8596,7 @@ extension AppleCatalogItemDetailView {
     private var phoneDownloadButton: some View {
         Button(action: performDownloadAction) {
             switch downloadGlyph {
-            case .progress:
+            case .progress, .disc:
                 AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
             case .systemImage(let name):
                 AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: name)
@@ -8484,6 +8670,9 @@ extension AppleCatalogItemDetailView {
             if !chips.isEmpty {
                 AppleTitlePageChipRow(chips: chips)
             }
+            if !titlePageStreamBadgesBesideChips(chips).isEmpty {
+                AppleStreamFormatBadgeRow(badges: titlePageStreamBadgesBesideChips(chips))
+            }
             if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
                 Text(downloadButtonLabel)
                     .font(.footnote)
@@ -8494,6 +8683,12 @@ extension AppleCatalogItemDetailView {
             seasonDownloadStatus
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The stream badges the chip row does not already show.
+    private func titlePageStreamBadgesBesideChips(_ chips: [String]) -> [AppleStreamFormatBadge] {
+        let titles = Set(AppleStreamFormatBadge.titles(titlePageStreamBadges, excludingCatalogBadges: chips))
+        return titlePageStreamBadges.filter { titles.contains($0.title) }
     }
 
     private var titlePageSynopsis: String? {
@@ -9095,7 +9290,9 @@ extension AppleCatalogItemDetailView {
             } else if let state = titlePagePrimaryButtonState {
                 Button(action: performTitlePagePrimaryAction) {
                     HStack(spacing: 8) {
-                        if state.isBusy {
+                        if state.isBusy, isDiscTitle {
+                            AppleDiscSpinner(tint: Color(white: 0.07), size: 13)
+                        } else if state.isBusy {
                             ProgressView()
                                 .controlSize(.small)
                                 .tint(Color(white: 0.07))
@@ -9133,7 +9330,7 @@ extension AppleCatalogItemDetailView {
             if showsDownloadAction {
                 Button(action: performDownloadAction) {
                     switch downloadGlyph {
-                    case .progress:
+                    case .progress, .disc:
                         AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
                     case .systemImage(let name):
                         AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: name)
@@ -9189,6 +9386,9 @@ extension AppleCatalogItemDetailView {
             }
             if !chips.isEmpty {
                 AppleTitlePageChipRow(chips: chips)
+            }
+            if !titlePageStreamBadgesBesideChips(chips).isEmpty {
+                AppleStreamFormatBadgeRow(badges: titlePageStreamBadgesBesideChips(chips))
             }
             if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
                 Text(downloadButtonLabel)

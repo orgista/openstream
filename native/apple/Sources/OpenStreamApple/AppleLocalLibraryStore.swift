@@ -101,6 +101,58 @@ final class AppleLocalLibraryStore {
     private func contentDidChange() {
         contentRevision &+= 1
         sortedCache.removeAll(keepingCapacity: true)
+        publishDiscKeys()
+    }
+
+    /// Groups holding a disc image (`AppleDiscImagePolicy`), worked out once
+    /// per scan rather than on every metadata change.
+    @ObservationIgnored private var discGroupIDs: Set<String> = []
+    @ObservationIgnored private var discGroupSignature = -1
+
+    /// The catalog keys whose posters carry the disc badge: each disc
+    /// group's own card and the title it resolved to, so Discover, Search and
+    /// Library all mark it.
+    private func publishDiscKeys() {
+        let signature = groups.count &+ groups.reduce(0) { $0 &+ $1.items.count }
+        if signature != discGroupSignature {
+            discGroupSignature = signature
+            discGroupIDs = Set(groups.filter { $0.items.contains(where: AppleDiscImagePolicy.isDiscImage) }.map(\.id))
+        }
+        var keys = Set<String>()
+        for group in groups where discGroupIDs.contains(group.id) {
+            let item = catalogItem(for: group)
+            keys.insert(item.id)
+            keys.insert(AppleDiscCatalog.matchKey(item))
+        }
+        AppleDiscCatalog.shared.replaceKeys(keys)
+    }
+
+    /// The disc file among a title's files, if any.
+    func discFile(in files: [AppleLibraryItem]) -> AppleLibraryItem? {
+        files.first(where: AppleDiscImagePolicy.isDiscImage)
+    }
+
+    /// What a local file is, read once per file: the engine's probe for the
+    /// format badges, and for a disc image the titles on it. Only files on
+    /// this device (a folder or a download), never a share: no network.
+    @ObservationIgnored private var inspections: [String: AppleLocalFileInspection] = [:]
+
+    func inspection(for file: AppleLibraryItem) async -> AppleLocalFileInspection? {
+        if let cached = inspections[file.id] { return cached }
+        guard file.url.isFileURL, let source = sources.first(where: { $0.id == file.sourceID }),
+              source.kind == .library else { return nil }
+        let root = file.sourceID == Self.downloadsID ? nil : try? AppleLibraryBookmark.resolve(source)
+        let url = file.url
+        let isDisc = AppleDiscImagePolicy.isDiscImage(file)
+        let result = await Task.detached(priority: .utility) { () -> AppleLocalFileInspection in
+            let access = root.map { AppleSecurityScopedAccess(url: $0) }
+            defer { withExtendedLifetime(access) {} }
+            return AppleLocalFileInspection.inspect(url: url, isDisc: isDisc)
+        }.value
+        inspections[file.id] = result
+        if !result.discTitles.isEmpty { AppleDiscCatalog.shared.record(result.discTitles, for: url) }
+        appleTrace("local inspect \(url.lastPathComponent.suffix(40)): badges=\(result.badges.map(\.title)) discTitles=\(result.discTitles.count)")
+        return result
     }
 
     static func matches(_ lhs: AppleCatalogItem, _ rhs: AppleCatalogItem) -> Bool {
@@ -408,7 +460,11 @@ final class AppleLocalLibraryStore {
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
     func presentation(for file: AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore,
-                      fromBeginning: Bool = false) async throws -> AppleStremioPlayerPresentation {
+                      fromBeginning: Bool = false,
+                      disc: AppleDiscPlaybackChoice? = nil) async throws -> AppleStremioPlayerPresentation {
+        // A disc image always opens through one start choice (Play Disc
+        // unless the page said otherwise), carried to the engine.
+        let disc = AppleDiscImagePolicy.isDiscImage(file) ? disc ?? AppleDiscPlaybackChoice(start: .menu, titleID: nil) : nil
         let resume = AppleTitlePagePolicy.startPosition(
             saved: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, fromBeginning: fromBeginning)
         guard let source = sources.first(where: { $0.id == file.sourceID }) else { throw AppleLibrarySourceError.unavailable }
@@ -418,14 +474,17 @@ final class AppleLocalLibraryStore {
             let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials, sizeBytes: file.sizeBytes)
             var request = AppleSMBPlaybackRequestFactory.make(source: source, item: file, playbackURL: url)
             request.resumePosition = resume
+            request.hints.disc = disc
             return tracked(AppleStremioPlayerPresentation(request: request, settings: settings), file: file)
         }
         let root = file.sourceID == Self.downloadsID ? nil : try AppleLibraryBookmark.resolve(source)
         let access = root.map { AppleSecurityScopedAccess(url: $0) }
         defer { withExtendedLifetime(access) {} }
         let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: settings.playbackEngine)
+        var hints = ApplePlaybackRequest.Hints(libraryFileURL: file.url)
+        hints.disc = disc
         return tracked(AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
-            resumePosition: resume, mediaID: playbackID(file), title: title, sourceKind: .files, hints: .init(libraryFileURL: file.url)), settings: settings, securityScopedURL: root), file: file)
+            resumePosition: resume, mediaID: playbackID(file), title: title, sourceKind: .files, hints: hints), settings: settings, securityScopedURL: root), file: file)
     }
     private func tracked(_ presentation: AppleStremioPlayerPresentation, file: AppleLibraryItem) -> AppleStremioPlayerPresentation {
         let store = ApplePlaybackStore()

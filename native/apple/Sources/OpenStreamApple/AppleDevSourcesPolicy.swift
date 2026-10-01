@@ -15,6 +15,9 @@ enum AppleDevSource: Equatable, Sendable {
     case smb(name: String, host: String, port: Int, share: String, path: String,
              username: String, password: String, domain: String)
     case mediaServer(kind: AppleMediaServerKind, name: String, url: String, credential: Credential)
+    /// A folder on this device (a simulator's container path), added as a
+    /// Library folder: how a fixture such as a disc image reaches Library.
+    case folder(name: String, path: String)
 
     /// The file's `kind` value.
     var kindName: String {
@@ -24,13 +27,14 @@ enum AppleDevSource: Equatable, Sendable {
         case .m3u: "m3u"
         case .smb: "smb"
         case .mediaServer: "mediaServer"
+        case .folder: "folder"
         }
     }
 
     var name: String {
         switch self {
         case .stremio(let name, _), .xtream(let name, _, _, _, _), .m3u(let name, _, _),
-             .smb(let name, _, _, _, _, _, _, _), .mediaServer(_, let name, _, _):
+             .smb(let name, _, _, _, _, _, _, _), .mediaServer(_, let name, _, _), .folder(let name, _):
             name
         }
     }
@@ -46,6 +50,7 @@ enum AppleDevSource: Equatable, Sendable {
         case .smb(_, _, _, _, _, let username, let password, _): values = [username, password]
         case .mediaServer(_, _, let url, .password(let username, let password)): values = [url, username, password]
         case .mediaServer(_, _, let url, .token(let token)): values = [url, token]
+        case .folder: values = []
         }
         return values.filter { !$0.isEmpty }
     }
@@ -140,6 +145,9 @@ enum AppleDevSourcesPolicy {
                 $0.kind == .mediaServer && $0.serverKind == kind
                     && $0.url.host?.lowercased() == url.host?.lowercased() && $0.url.port == url.port
             }
+        case .folder(_, let path):
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            return existing.contains { $0.kind == .library && $0.url.standardizedFileURL == url }
         }
     }
 
@@ -212,6 +220,8 @@ enum AppleDevSourcesPolicy {
                 ? .token(required("token"))
                 : .password(username: required("username"), password: string(entry["password"]))
             source = .mediaServer(kind: serverKind, name: name, url: url, credential: credential)
+        case "folder":
+            source = .folder(name: name, path: required("path"))
         case "":
             file.problems.append("source \(index + 1): missing kind")
             return

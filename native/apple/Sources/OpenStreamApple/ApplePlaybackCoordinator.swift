@@ -309,6 +309,13 @@ public final class ApplePlaybackCoordinator {
     private var fallbackAttempted = 0
     private var fallbackTotal = 0
     private var fallbackTitle: String? = nil
+    /// Candidates this press already reopened once after an engine open
+    /// failure (`AppleEngineOpenRetryPolicy`).
+    private var openRetriedURLs: Set<URL> = []
+    /// Whether a failed open is retried on the same candidate. On for the
+    /// OpenStream engine itself; tests switch it on for a fake engine.
+    @ObservationIgnored var retriesFailedEngineOpen: Bool
+    @ObservationIgnored var engineOpenRetryDelay: Duration = AppleEngineOpenRetryPolicy.delay
     /// The attempt (`generation`) already turned away as an error clip, so it
     /// is failed once however many events report its length.
     private var placeholderRejectedAttempt: Int?
@@ -334,6 +341,7 @@ public final class ApplePlaybackCoordinator {
         wakeLock: ApplePlaybackWakeLock = .shared
     ) {
         self.engine = engine
+        self.retriesFailedEngineOpen = engine is AetherPlaybackEngine
         self.timeoutDuration = timeout
         self.retryDelay = retryDelay
         self.progressInterval = progressInterval
@@ -421,6 +429,7 @@ public final class ApplePlaybackCoordinator {
         fallbackTask?.cancel()
         streamsSkippedForEngine = 0
         triedSourceURLs = []
+        openRetriedURLs = []
         librarySubtitles = AppleLibrarySubtitleService()
         fallbackCandidates = []
         fallbackAttempted = 0
@@ -439,6 +448,7 @@ public final class ApplePlaybackCoordinator {
     ) async {
         fallbackTask?.cancel()
         triedSourceURLs = []
+        openRetriedURLs = []
         librarySubtitles = AppleLibrarySubtitleService()
         hasShownFallbackNotice = false
         // The head of the list, with what decides the stock player's order.
@@ -706,6 +716,22 @@ public final class ApplePlaybackCoordinator {
                 appleTrace("playback: the file ends before its container says it should — incomplete download")
                 failure = ApplePlaybackFailure(kind: .network, message: AppleTruncatedMediaProbe.message)
             }
+        }
+        // An engine open that failed before the first frame gets one more go
+        // on the same candidate before the next one is tried.
+        if let request = lastRequest, AppleEngineOpenRetryPolicy.shouldRetry(
+            failure: failure, isLive: request.isLive, reachedFirstFrame: attemptCountedStart,
+            alreadyRetried: openRetriedURLs.contains(request.url),
+            engineIsOpenStream: retriesFailedEngineOpen) {
+            openRetriedURLs.insert(request.url)
+            appleTrace("engine open retry \(failure.kind) host=\(request.url.host() ?? "?") in \(engineOpenRetryDelay)")
+            cancelTimeout()
+            cancelObservation()
+            let attempt = generation
+            try? await Task.sleep(for: engineOpenRetryDelay)
+            guard !Task.isCancelled, generation == attempt else { return }
+            await beginAttempt(request)
+            return
         }
         appleTraceFailure("playback \(failure.kind): \(failure.message) — \(shouldFallBack(for: failure) ? "falling back" : "final")")
         if shouldFallBack(for: failure), let lastRequest {

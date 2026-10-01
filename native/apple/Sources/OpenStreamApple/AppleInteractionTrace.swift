@@ -32,6 +32,8 @@ public enum AppleInteractionTrace {
         case network
         /// Something failed in a way the viewer can see.
         case failure
+        /// A line from the playback engine's own log (`AppleEngineLogBridge`).
+        case engine
     }
 
     /// Enough to cover a reproduction without holding a session's worth.

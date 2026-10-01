@@ -9,6 +9,9 @@ struct ApplePlaybackSourceOption: Identifiable {
     /// a local file. The automatic-fallback loop tries other services first
     /// when this one is down.
     var serviceKey: String? = nil
+    /// The stream's format badges for the Quality rows (`AppleStreamFormatBadge`);
+    /// empty for a local file.
+    var badges: [AppleStreamFormatBadge] = []
     /// Builds the player for this source, starting at `resume` when given —
     /// how a quality switch keeps the viewer's place — or else at the saved
     /// position. Local files always start at their saved position.
@@ -33,5 +36,11 @@ struct ApplePlaybackSourceOptions {
         case .automatic: automatic
         case .tier(let tier): byTier[tier] ?? automatic
         }
+    }
+
+    /// What a Quality row shows beside its resolution: the badges of the
+    /// stream that choice plays first.
+    func rowBadges(for choice: AppleStreamQualityChoice) -> [AppleStreamFormatBadge] {
+        AppleStreamFormatBadge.rowBadges(order(for: choice).first?.badges ?? [])
     }
 }

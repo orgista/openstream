@@ -454,7 +454,14 @@ public struct OpenStreamRootView: View {
         // drew one (macOS sweep, 2026-09-21).
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         #endif
-        .task { sharePlay.startListening(); mediaServerLibrary.loadPersisted() }
+        .task {
+            sharePlay.startListening()
+            mediaServerLibrary.loadPersisted()
+            // The engine's own log in the trace (scrubbed), while tracing is on.
+            AppleEngineLogBridge.install()
+            // Add-ons saved before catalog paging pick up `skip` (once a day each).
+            sourceStore.scheduleDailyManifestRefresh()
+        }
         .onChange(of: sharePlay.revision) {
             if sharePlay.channel != nil { selectedTab = .live }
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }

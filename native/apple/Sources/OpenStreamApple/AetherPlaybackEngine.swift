@@ -39,6 +39,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// `refreshDuration` because `@Published` sinks fire on `willSet`, when the
     /// engine's own stored properties still hold the previous value.
     private var lastPublishedDuration: Double = 0
+    /// The disc file this load plays, so the titles the engine finds on it
+    /// fill the title page's Titles row (`AppleDiscCatalog`).
+    private var discFileURL: URL?
     private var lastPublishedIsLive: Bool = false
 
     /// Subtitle tracks demuxed from the media, kept apart from the add-on
@@ -280,11 +283,16 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         if captionHandoff.loadStarted(eligible: captionHandoffEligible) { options.prepareNativeSubtitles = true }
         // The title page's title, not the file's own tags (`AppleStockPlayerMetadata`).
         if !request.isLive { aether.setExternalMetadata(AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear)) }
+        // A disc image starts from one choice (`AppleDiscPlaybackStart`); the
+        // engine's menu option is the one line in `engineTitleID` once it lands.
+        if let disc = request.hints.disc { appleTrace(disc.traceLine) }
+        discFileURL = request.hints.disc != nil ? (request.hints.libraryFileURL ?? request.url) : nil
         do {
             _ = try await aether.load(
                 url: sourceURL,
                 startPosition: request.resumePosition,
-                options: options
+                options: options,
+                discTitleID: request.hints.disc?.engineTitleID
             )
         } catch {
             if generation == loadGeneration { performCaptionHandoff(captionHandoff.reloadFinished(succeeded: false)) }
@@ -639,6 +647,14 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .store(in: &cancellables)
         aether.$mediaChapters
             .sink { [weak self] infos in self?.chapters = infos.map(Self.mapChapter) }
+            .store(in: &cancellables)
+        aether.$discTitles
+            .sink { [weak self] titles in
+                guard let self, let url = self.discFileURL, !titles.isEmpty else { return }
+                AppleDiscCatalog.shared.record(titles.map {
+                    AppleDiscTitle(id: $0.id, durationSeconds: $0.durationSeconds, chapterCount: $0.chapterCount)
+                }, for: url)
+            }
             .store(in: &cancellables)
         aether.$subtitleTracks
             .sink { [weak self] tracks in

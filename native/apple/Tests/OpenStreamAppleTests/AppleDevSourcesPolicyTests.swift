@@ -9,6 +9,20 @@ struct AppleDevSourcesPolicyTests {
         try AppleDevSourcesPolicy.decode(Data(json.utf8))
     }
 
+    @Test func folderKindAddsALibraryFolderByPath() throws {
+        let file = try decode("""
+        {"version": 1, "sources": [
+          {"kind": "folder", "name": "Disc Fixture", "path": "/tmp/disc-fixture"},
+          {"kind": "folder", "name": "No Path"}
+        ]}
+        """)
+        #expect(file.sources == [.folder(name: "Disc Fixture", path: "/tmp/disc-fixture")])
+        #expect(file.problems == ["folder No Path: missing path"])
+        let saved = AppleSource(kind: .library, name: "Disc Fixture", url: URL(fileURLWithPath: "/tmp/disc-fixture"))
+        #expect(AppleDevSourcesPolicy.alreadyAdded(.folder(name: "x", path: "/tmp/disc-fixture"), in: [saved]))
+        #expect(AppleDevSource.folder(name: "x", path: "/tmp/a").secrets.isEmpty)
+    }
+
     @Test func schemaV1DecodesEveryKindAndTheServiceKeys() throws {
         let file = try decode("""
         {"version": 1, "sources": [

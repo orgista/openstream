@@ -35,6 +35,9 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// stream far shorter than this is a provider's error clip
         /// (`AppleStreamPlaceholderPolicy`). Nil when unknown.
         public var expectedRuntime: Double?
+        /// A disc image: how it starts (Play Disc, Skip to Movie) or which of
+        /// its titles plays. Nil for everything that is not a disc.
+        public var disc: AppleDiscPlaybackChoice?
 
         public init(
             notWebReady: Bool = false,

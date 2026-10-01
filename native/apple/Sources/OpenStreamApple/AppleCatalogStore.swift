@@ -988,15 +988,18 @@ public final class AppleCatalogStore {
               let section = sections.first(where: { $0.id == sectionID }),
               let source = sources.first(where: { $0.id == section.sourceID }) else { return }
         let state = paging[sectionID] ?? AppleCatalogPaging.State(pageSize: section.items.count)
+        // The add-on's catalog as stored now: a shelf cached before the
+        // launch's manifest refresh still holds the old copy without `skip`.
+        let catalog = AppleCatalogPaging.liveCatalog(section.catalog, in: source)
         guard let skip = AppleCatalogPaging.nextSkip(
-            catalog: section.catalog, loadedCount: section.items.count, state: state) else { return }
+            catalog: catalog, loadedCount: section.items.count, state: state) else { return }
         let generation = refreshGeneration
         pagesInFlight.insert(sectionID)
         defer { pagesInFlight.remove(sectionID) }
         appleTrace("catalog page \(section.catalog.type)/\(section.catalog.id) skip=\(skip)")
         let page: AppleCatalogPage
         do {
-            page = try await client.loadPage(source: source, catalog: section.catalog, skip: skip)
+            page = try await client.loadPage(source: source, catalog: catalog, skip: skip)
         } catch {
             // A failed page is not the end of the catalog; the next scroll retries.
             return
@@ -1008,7 +1011,7 @@ public final class AppleCatalogStore {
         paging[sectionID] = AppleCatalogPaging.State(pageSize: state.pageSize, isExhausted: merged.isExhausted)
         appleTrace("catalog page \(section.catalog.type)/\(section.catalog.id) +\(merged.items.count - section.items.count) → \(merged.items.count)\(merged.isExhausted ? " end" : "")")
         guard merged.items.count != section.items.count else { return }
-        var next = AppleCatalogSection(source: source, catalog: section.catalog, items: merged.items)
+        var next = AppleCatalogSection(source: source, catalog: catalog, items: merged.items)
         next.shelfTitle = sections[index].shelfTitle
         sections[index] = next
     }

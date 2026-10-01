@@ -159,6 +159,9 @@ struct AppleTVPosterCard: View {
         VStack(alignment: .leading, spacing: 12) {
             AppleCatalogArtwork(url: posterURL)
                 .frame(width: AppleTVDetailMetrics.posterSize.width, height: AppleTVDetailMetrics.posterSize.height)
+                .overlay(alignment: .topLeading) {
+                    if AppleDiscCatalog.shared.contains(item) { AppleDiscBadge() }
+                }
                 .appleTVCardArtworkFocus(cornerRadius: AppleTVDetailMetrics.cardCornerRadius)
                 .task(id: item.id) {
                     guard item.posterURL == nil else { return }

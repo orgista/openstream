@@ -513,10 +513,15 @@ struct AppleTransportOverlay: View {
     /// label.
     private var waitingIndicator: some View {
         VStack(spacing: AppleDesignTokens.spacingMedium) {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(.white)
-                .controlSize(.large)
+            if request.hints.disc != nil {
+                // A disc item opens with the disc turning.
+                AppleDiscSpinner(size: 36)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .controlSize(.large)
+            }
             // A stalled live channel says it is coming back.
             if model.showsReconnecting {
                 Text("Reconnecting…")

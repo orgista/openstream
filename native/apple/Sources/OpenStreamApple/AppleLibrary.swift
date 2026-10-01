@@ -93,6 +93,8 @@ public final class AppleSecurityScopedAccess {
 public actor AppleLibraryScanner {
     public static let supportedExtensions: Set<String> = [
         "mp4", "m4v", "mov", "mkv", "webm", "ts", "m2ts", "avi", "wmv",
+        // Disc images: the engine plays them through its disc adapter.
+        "iso",
     ]
 
     private let fileManager: FileManager

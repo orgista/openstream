@@ -54,9 +54,55 @@ enum AppleCatalogPaging {
         return (merged, isExhausted)
     }
 
+    /// The source's current copy of `catalog` (same type and id), whose
+    /// flags may be newer than a cached shelf's.
+    static func liveCatalog(_ catalog: AppleStremioCatalog, in source: AppleSource) -> AppleStremioCatalog {
+        source.catalogs.first { $0.type == catalog.type && $0.id == catalog.id } ?? catalog
+    }
+
     /// Whether `itemID` showing should ask for the next page.
     static func isNearEnd(itemID: String, in items: [AppleCatalogItem]) -> Bool {
         guard let index = items.lastIndex(where: { $0.id == itemID }) else { return false }
         return index >= items.count - prefetchDistance
+    }
+}
+
+/// Add-ons saved before catalog paging (40e9350) stored their catalogs
+/// without the `skip` flag, so their shelves never page. Each add-on's
+/// manifest is fetched again in the background at launch, at most once per
+/// add-on per day, and the stored catalogs take the manifest's flags.
+enum AppleManifestRefreshPolicy {
+    static let interval: TimeInterval = 24 * 60 * 60
+    /// A launch refreshes at most this many, one at a time.
+    static let maximumPerLaunch = 40
+
+    /// The add-ons due a refresh: enabled Stremio add-ons with catalogs,
+    /// signed in, last tried a day or more ago (or never).
+    static func due(sources: [AppleSource], lastAttempt: [String: Double], now: Date) -> [AppleSource.ID] {
+        sources.filter { source in
+            guard source.kind == .stremio, source.isEnabled, !source.needsSignIn, !source.catalogs.isEmpty else { return false }
+            guard let last = lastAttempt[source.id.uuidString] else { return true }
+            return now.timeIntervalSince1970 - last >= interval || last > now.timeIntervalSince1970
+        }
+        .prefix(maximumPerLaunch)
+        .map(\.id)
+    }
+
+    /// Attempt times for add-ons that still exist.
+    static func pruned(_ lastAttempt: [String: Double], liveIDs: Set<String>) -> [String: Double] {
+        lastAttempt.filter { liveIDs.contains($0.key) }
+    }
+
+    /// The stored catalogs, same set and order, with each one's flags
+    /// (`skip`, `search`, required input) taken from the manifest's catalog of
+    /// the same type and id. Catalogs the manifest no longer lists are kept as
+    /// they are; new ones are not added here.
+    static func refreshedCatalogs(stored: [AppleStremioCatalog], manifest: [AppleStremioCatalog]) -> [AppleStremioCatalog] {
+        stored.map { catalog in
+            guard let fresh = manifest.first(where: { $0.type == catalog.type && $0.id == catalog.id }) else { return catalog }
+            return AppleStremioCatalog(type: catalog.type, id: catalog.id, name: catalog.name,
+                                       requiresInput: fresh.requiresInput, supportsSearch: fresh.supportsSearch,
+                                       supportsSkip: fresh.supportsSkip)
+        }
     }
 }

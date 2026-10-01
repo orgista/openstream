@@ -681,7 +681,10 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
                 id: value.id,
                 name: value.name,
                 requiresInput: value.requiresInput,
-                supportsSearch: value.supportsSearch
+                supportsSearch: value.supportsSearch,
+                // Dropped here before, so no add-on — new or old — ever
+                // stored `skip` and catalog paging never ran.
+                supportsSkip: value.supportsSkip
             )
             let key = "\(catalog.type):\(catalog.id)"
             guard AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
@@ -1100,6 +1103,9 @@ public final class AppleSourceStore {
         if let logoURL = clean.logoURL { updated.logoURL = logoURL }
         updated.resources = clean.resources
         updated.capabilities = boundedCapabilities(clean.resources.map { $0.capitalized })
+        // The catalogs' flags (`skip` above all) as the add-on declares them
+        // now; the stored set and order stay (`AppleManifestRefreshPolicy`).
+        updated.catalogs = AppleManifestRefreshPolicy.refreshedCatalogs(stored: updated.catalogs, manifest: clean.catalogs)
         guard updated != sources[index] else { return false }
         sources[index] = updated
         persist()
@@ -1192,6 +1198,34 @@ public final class AppleSourceStore {
             for id in pending {
                 guard let self, !Task.isCancelled else { return }
                 await self.refreshManifest(id: id)
+            }
+        }
+    }
+
+    private var manifestRefreshKey: String { storageKey + ".manifest-refresh.v1" }
+    @ObservationIgnored private var dailyManifestRefresh: Task<Void, Never>?
+
+    /// At launch: fetch each add-on's manifest again in the background, at
+    /// most once per add-on per day, so add-ons saved before catalog paging
+    /// pick up the `skip` flag without being added again. One at a time,
+    /// after a short delay; nothing is shown. The attempt is recorded whether
+    /// or not the add-on answered, so one that is down is not asked again
+    /// until tomorrow.
+    func scheduleDailyManifestRefresh(now: Date = Date()) {
+        guard dailyManifestRefresh == nil else { return }
+        let stored = defaults.dictionary(forKey: manifestRefreshKey) as? [String: Double] ?? [:]
+        let pending = AppleManifestRefreshPolicy.due(sources: sources, lastAttempt: stored, now: now)
+        guard !pending.isEmpty else { return }
+        dailyManifestRefresh = Task { [weak self, delay = logoBackfillDelay] in
+            do { try await Task.sleep(for: delay * 3) } catch { return }
+            for id in pending {
+                guard let self, !Task.isCancelled else { return }
+                let changed = await self.refreshManifest(id: id)
+                var attempts = self.defaults.dictionary(forKey: self.manifestRefreshKey) as? [String: Double] ?? [:]
+                attempts[id.uuidString] = Date().timeIntervalSince1970
+                attempts = AppleManifestRefreshPolicy.pruned(attempts, liveIDs: Set(self.sources.map(\.id.uuidString)))
+                self.defaults.set(attempts, forKey: self.manifestRefreshKey)
+                appleTrace("manifest refresh \(self.sources.first { $0.id == id }?.name ?? "?"): \(changed ? "updated" : "unchanged")")
             }
         }
     }

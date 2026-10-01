@@ -90,6 +90,13 @@ public enum AppleDevSourcesImport {
                 let finalName = AppleMediaServerFormPolicy.defaultName(kind: kind, typedName: name,
                                                                        publicInfo: info, host: baseURL.host)
                 _ = try store.addMediaServer(kind: kind, name: finalName, session: session)
+            case .folder(let name, let path):
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    return .failed("the folder does not exist")
+                }
+                try store.addLibraryFolder(name: name.isEmpty ? "Folder" : name,
+                                           url: URL(fileURLWithPath: path, isDirectory: true), bookmarkData: nil)
             }
             return .added
         } catch {
