@@ -519,7 +519,14 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
                 case .playing:
                     phase = .playing
                 case .paused:
-                    phase = .paused
+                    // Paused on the last frame is the end, not a pause. The
+                    // pause that AVPlayer makes at the end landed after
+                    // `.ended` and replaced it before the view saw it, and
+                    // some streams stop there without posting
+                    // DidPlayToEndTime, so the stock route never advanced to
+                    // the next episode (Apple TV regression 2026-10-01).
+                    phase = Self.isAtEnd(position: player.currentTime().seconds,
+                                         duration: item.duration.seconds) ? .ended : .paused
                 case .waitingToPlayAtSpecifiedRate:
                     phase = .rebuffering
                 @unknown default:
@@ -542,6 +549,13 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     private func handleEnd() {
         isSeeking = false
         phase = .ended
+    }
+
+    /// Within `AppleNextEpisodePolicy.endTolerance` of a known, finite
+    /// duration. Never true for live (indefinite duration).
+    nonisolated static func isAtEnd(position: Double, duration: Double) -> Bool {
+        guard position.isFinite, duration.isFinite, duration > 0 else { return false }
+        return position >= duration - AppleNextEpisodePolicy.endTolerance
     }
 
     private func applyItemFailure() {

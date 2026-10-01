@@ -63,6 +63,10 @@ private struct AppleTVChoicePage<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [AppleTVChoicePicker<Value>.Option]
     @Environment(\.dismiss) private var dismiss
+    /// The page opens on the checked option, as the stock Settings app does
+    /// (Show Captions opened on "Off" whatever was checked, Apple TV
+    /// regression 2026-10-01).
+    @FocusState private var focusedValue: Value?
 
     var body: some View {
         Form {
@@ -73,9 +77,11 @@ private struct AppleTVChoicePage<Value: Hashable>: View {
                 } label: {
                     AppleTVChoiceOptionLabel(title: option.title, isSelected: option.value == selection)
                 }
+                .focused($focusedValue, equals: option.value)
                 .accessibilityAddTraits(option.value == selection ? .isSelected : [])
             }
         }
+        .defaultFocus($focusedValue, selection)
         .appleSettingsPage(title)
         .tint(.white)
         // One level back, never out of the app: the tab's own handler pops

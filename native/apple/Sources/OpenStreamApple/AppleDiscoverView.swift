@@ -4581,11 +4581,21 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    /// "Resume" (with the episode) once there is a saved position, as the
+    /// phone's button already says; the Apple TV page said Play after
+    /// watching (Apple TV regression 2026-10-01).
+    private var regularPlayTitle: String {
+        if case .resume? = titlePagePrimaryAction, let titlePagePrimaryAction {
+            return titlePagePrimaryAction.title
+        }
+        return downloadCoordinator.state.isCompleted ? "Play Offline" : "Play"
+    }
+
     private var regularPlayButton: some View {
         AppleDetailActionButton(
             title: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
                 ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading")
-                : (downloadCoordinator.state.isCompleted ? "Play Offline" : "Play"),
+                : regularPlayTitle,
             glyph: playbackCoordinator.phase.isBusy || pageMetadata.isPreparing ? .progress : .systemImage("play.fill"),
             kind: .play,
             width: actionButtonWidth
@@ -4596,7 +4606,7 @@ struct AppleCatalogItemDetailView: View {
         .accessibilityLabel(
             playbackCoordinator.phase.isBusy || pageMetadata.isPreparing
                 ? "Preparing playback"
-                : (downloadCoordinator.state.isCompleted ? "Play Offline" : "Play")
+                : regularPlayTitle
         )
         .accessibilityIdentifier("detail.play")
         .contextMenu {

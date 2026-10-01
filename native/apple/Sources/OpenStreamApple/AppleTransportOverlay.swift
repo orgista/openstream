@@ -55,6 +55,10 @@ struct AppleTransportOverlay: View {
     /// The Next Episode card's height while it is up, so captions sit above
     /// it instead of under it (iPad v2 re-run).
     @State private var nextEpisodeCardHeight: CGFloat = 0
+    /// Top edges of the bottom bar and the Next Episode card on screen
+    /// (global space), so captions clear them whatever the letterboxing.
+    @State private var bottomBarTop: CGFloat?
+    @State private var nextEpisodeCardTop: CGFloat?
     @State private var isMuted = false
 
     /// Task 9: on Apple TV the surface overlay keeps only the scrubber and one
@@ -230,6 +234,9 @@ struct AppleTransportOverlay: View {
                         .onGeometryChange(for: CGFloat.self) { proxy in
                             proxy.size.height
                         } action: { nextEpisodeCardHeight = $0 }
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .global).minY
+                        } action: { nextEpisodeCardTop = $0 }
                 }
             }
             .padding(nextEpisodeCardInset)
@@ -241,12 +248,19 @@ struct AppleTransportOverlay: View {
             if model.showsWaitingIndicator { waitingIndicator }
             // Cues sit against the **picture**, not the screen; the same
             // layer is mounted over the stock player on `.avPlayer`.
+            // With the bar measured on screen, the cue clears its real top
+            // edge (`clearance`); the height sum is the fallback before the
+            // first layout pass.
             AppleSubtitleCueLayer(cues: model.activeSubtitleCues, videoSize: coordinator.engine.videoSize,
-                                  textBottomLift: AppleSubtitleCueLift.lift(
-                                      controlsVisible: model.controlsVisible, bottomBarHeight: bottomBarHeight,
-                                      promptTop: model.nextEpisodePrompt == nil ? 0
-                                          : bottomBarHeight + AppleDesignTokens.spacingMedium
-                                              + nextEpisodeCardInset + nextEpisodeCardHeight))
+                                  textBottomLift: bottomBarTop == nil
+                                      ? AppleSubtitleCueLift.lift(
+                                          controlsVisible: model.controlsVisible, bottomBarHeight: bottomBarHeight,
+                                          promptTop: model.nextEpisodePrompt == nil ? 0
+                                              : bottomBarHeight + AppleDesignTokens.spacingMedium
+                                                  + nextEpisodeCardInset + nextEpisodeCardHeight)
+                                      : AppleSubtitleCueLift.hidden,
+                                  controlsTop: model.controlsVisible ? bottomBarTop : nil,
+                                  promptTop: model.nextEpisodePrompt == nil ? nil : nextEpisodeCardTop)
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -315,6 +329,9 @@ struct AppleTransportOverlay: View {
             bottomBar
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     bottomBarHeight = $0
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+                    bottomBarTop = $0
                 }
         }
         .padding()
@@ -1001,5 +1018,19 @@ enum AppleSubtitleCueLift {
     static func lift(controlsVisible: Bool, bottomBarHeight: CGFloat, promptTop: CGFloat = 0) -> CGFloat {
         let base = controlsVisible ? max(minimumVisible, bottomBarHeight + gapAboveControls) : hidden
         return promptTop > 0 ? max(base, promptTop + gapAbovePrompt) : base
+    }
+
+    /// How far a text cue must rise inside a layer whose bottom edge is at
+    /// `layerBottom` to clear the controls and the Next Episode card, all in
+    /// one (global) coordinate space. Measured against the screen, not the
+    /// picture: a letterboxed 2.39:1 movie used to put the cue on the
+    /// scrubber line because the lift was added to a video-rect inset worked
+    /// out in a different frame (Apple TV regression 2026-10-01).
+    /// `nil` means that obstacle is not on screen.
+    static func clearance(layerBottom: CGFloat, controlsTop: CGFloat?, promptTop: CGFloat?) -> CGFloat {
+        var rise: CGFloat = 0
+        if let controlsTop { rise = max(rise, layerBottom - controlsTop + gapAboveControls) }
+        if let promptTop { rise = max(rise, layerBottom - promptTop + gapAbovePrompt) }
+        return rise
     }
 }

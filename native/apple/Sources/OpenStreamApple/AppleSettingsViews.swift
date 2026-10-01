@@ -810,6 +810,20 @@ private struct AppleChannelManagerView: View {
             errorMessage = nil
             return
         }
+        // The saved lineup goes up at once, as on the Live tab: with the
+        // panel down, My Channels spun until the deadline (Apple TV
+        // regression 2026-10-01). A dead Xtream panel now fails its login
+        // probe in `AppleIPTVClient.accountProbeTimeout` and says so.
+        if channels.isEmpty {
+            var cached: [AppleIPTVChannel] = []
+            for source in sources {
+                cached += await AppleIPTVChannelCache.shared.snapshot(for: source.id)?.channels ?? []
+            }
+            if !cached.isEmpty {
+                channels = cached
+                channelsRevision &+= 1
+            }
+        }
         isLoading = true
         let started = ContinuousClock.now
         defer { isLoading = false }
@@ -829,6 +843,8 @@ private struct AppleChannelManagerView: View {
                 return
             } catch {
                 errors.append(AppleChannelManagerLoad.message(sourceName: source.name, error: error))
+                // Its saved copy stays, with the error under it.
+                loaded += await AppleIPTVChannelCache.shared.snapshot(for: source.id)?.channels ?? []
             }
         }
         channels = loaded
@@ -1346,8 +1362,29 @@ struct AppleWorkingButtonLabel: View {
             }
             .animation(nil, value: isWorking)
         }
+        #if os(tvOS)
+        // A focused Settings row turns white and the form's white tint drew
+        // "Clear Cache" white on it (Apple TV regression 2026-10-01).
+        .modifier(AppleTVFocusedLabelInk())
+        #endif
     }
 }
+
+#if os(tvOS)
+/// Black ink on the white focus fill; untouched otherwise, so a destructive
+/// role keeps its own colour.
+struct AppleTVFocusedLabelInk: ViewModifier {
+    @Environment(\.isFocused) private var isFocused
+
+    func body(content: Content) -> some View {
+        if isFocused {
+            content.foregroundStyle(Color.black)
+        } else {
+            content
+        }
+    }
+}
+#endif
 
 /// Loading the lineup for the Channel Manager.
 enum AppleChannelManagerLoad {

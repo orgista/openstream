@@ -296,6 +296,11 @@ final class AppleCatalogSearchStore {
         defer {
             if generation == currentGeneration { isSearching = false }
         }
+        // The rows on screen re-rank against what is typed now, before the
+        // add-ons answer: "saturday night live" sat under the
+        // "saturday night li" list (Life, Lights, then Live) until the slow
+        // search came back (Apple TV regression 2026-10-01).
+        results = Self.mergedResults(results, matching: value, limit: maximumResults)
 
         let clock = ContinuousClock()
         let debounceStart = clock.now

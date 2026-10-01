@@ -462,6 +462,11 @@ public struct AppleIPTVClient: Sendable {
     /// under what the bytes could ever deliver.
     public static let maximumChannels = 25_000
 
+    /// The Xtream login probe is a few hundred bytes from a live panel, so it
+    /// fails fast: a dead panel held the Live tab ~21 s on the 20 s timeout
+    /// the channel downloads keep (Apple TV regression 2026-10-01).
+    static let accountProbeTimeout: TimeInterval = 7
+
     private let loader: Loader
     private let protectedPlaybackURL: ProtectedPlaybackURL
 
@@ -625,7 +630,7 @@ public struct AppleIPTVClient: Sendable {
     ) async throws -> String? {
         let accountURL = try Self.xtreamAPIURL(baseURL: source.url, credentials: credentials, action: nil)
         var request = URLRequest(url: accountURL)
-        request.timeoutInterval = 20
+        request.timeoutInterval = Self.accountProbeTimeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
 

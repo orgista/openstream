@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import OpenStreamApple
 
@@ -1288,4 +1289,24 @@ func channelHTTPFailuresDoNotMasqueradeAsAccountRejection(status: Int) async thr
     let result = try await probe.validate(channel: channel)
     #expect(result.statusCode == 200)
     #expect(result.mediaKind == .hlsPlaylist)
+}
+
+@Test func xtreamLoginProbeFailsFastOnADeadPanel() async throws {
+    let source = AppleSource(
+        kind: .liveTV,
+        name: "Native Xtream",
+        url: URL(string: "http://tv.example:8080")!,
+        iptvType: .xtream
+    )
+    let timeouts = Mutex<[TimeInterval]>([])
+    let client = AppleIPTVClient { request in
+        timeouts.withLock { $0.append(request.timeoutInterval) }
+        throw URLError(.timedOut)
+    }
+
+    await #expect(throws: AppleIPTVError.self) {
+        try await client.channels(source: source, credentials: .init(username: "viewer", password: "secret"))
+    }
+    #expect(timeouts.withLock { $0 } == [AppleIPTVClient.accountProbeTimeout])
+    #expect(AppleIPTVClient.accountProbeTimeout <= 8)
 }

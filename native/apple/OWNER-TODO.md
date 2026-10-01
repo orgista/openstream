@@ -7,16 +7,14 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-- [ ] **Apple TV regression on the overnight code (2026-10-01 morning):** 9 pass (logos, long series open, pickers,
-      toggles, audio labels, subtitle More…, Remove from CW, search). Open:
-      1. Captions run into the scrubber on widescreen (2.39:1) movies when the scrubber stays up.
-      2. Stock tvOS player (Player = Native) doesn't advance to the next episode at the end (SNL S1E1).
-      3. Dead IPTV panel still blocks Live ~21 s before the error.
-      4. Long-running series stop at 1,000 episodes (Goede Tijden opens on Season 20 / 2009; recent seasons missing).
-      5. Settings › Storage › Clear Cache label blank when focused.
-      6. Search "saturday night live" ranks near matches above the exact title.
-      Minor: Show Captions opens focused on "Off" not the checked value; My Channels spinner endless; title page says
-      Play not Resume after watching.
+- [ ] **Apple TV regression on the overnight code (2026-10-01 morning):** fixes committed 2026-10-01 (gate 2519/303).
+      Done, checked on the sim: 3 dead IPTV panel (error + Retry by ~9 s, was ~21 s), 5 Clear Cache label, 6 search
+      exact title first (stale half-typed results re-ranked), Show Captions opens on the checked value, My Channels
+      spinner. Done, unit-tested only (needs a real-stream check on the Apple TV): 1 captions stay above the
+      scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
+      last 20 s), Resume label. Still open:
+      4. Long series now load every episode (Goede Tijden 7,333, was 1,000), but the tvOS title page still opens on
+         Season 1 instead of the latest season.
 - [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
       chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
       1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,

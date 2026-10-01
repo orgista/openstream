@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import OpenStreamApple
 
@@ -27,5 +28,31 @@ struct AppleEpisodeOrderTests {
             episode("early", 1, 5, aired: "1984-09-10T00:00:00.000Z"),
         ]
         #expect(AppleStremioEpisodePolicy.episodes(in: 1, from: episodes).map(\.id) == ["early", "late", "undated"])
+    }
+
+    /// Apple TV regression 2026-10-01: Goede tijden, slechte tijden (7,301
+    /// episodes, 37 seasons) stopped at 1,000 episodes and opened in the past.
+    @Test func aDailySoapKeepsEverySeasonAndOpensOnTheLatest() async throws {
+        var videos: [String] = []
+        for season in 1 ... 37 {
+            for number in 1 ... 200 {
+                videos.append(#"{"id":"tt0096597:\#(season):\#(number)","title":"Aflevering \#(number)","season":\#(season),"episode":\#(number),"overview":"\#(String(repeating: "x", count: 900))"}"#)
+            }
+        }
+        let payload = Data(#"{"meta":{"id":"tt0096597","type":"series","name":"GTST","videos":[\#(videos.joined(separator: ","))]}}"#.utf8)
+        let client = AppleStremioMetadataClient(loader: { request in
+            let url = try #require(request.url)
+            return (payload, try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        })
+        let source = AppleSource(kind: .stremio, name: "Fixture",
+            url: try #require(URL(string: "https://fixture.example/manifest.json")), resources: ["meta"])
+        let episodes = try await client.episodes(source: source, mediaID: "tt0096597")
+        #expect(episodes.count == 37 * 200)
+        #expect(AppleStremioEpisodePolicy.seasons(in: episodes).last == 37)
+        #expect(episodes.allSatisfy { ($0.overview?.count ?? 0) <= AppleStremioMetadataClient.maximumEpisodeOverviewCharacters })
+        #expect(AppleStremioEpisodePolicy.initialSeason(in: episodes) == 37)
+        // An ordinary series still opens on season 1.
+        let short = [episode("a", 2, 1), episode("b", 1, 1)]
+        #expect(AppleStremioEpisodePolicy.initialSeason(in: short) == 1)
     }
 }

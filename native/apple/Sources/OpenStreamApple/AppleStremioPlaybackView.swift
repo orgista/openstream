@@ -200,6 +200,14 @@ struct AppleStremioPlayerView: View {
                     .accessibilityIdentifier("player.connecting")
             }
         }
+        .background {
+            if coordinator.route == .avPlayer, let nextEpisode {
+                AppleTVStockNextEpisodeAction(
+                    engine: coordinator.engine, controller: host.viewController,
+                    nextTitle: nextEpisode.title, isLive: request.isLive,
+                    start: { _ = startNextEpisodeFromStockRoute(manual: true) })
+            }
+        }
         .onChange(of: stockSubtitles.menuEntries) { installSourceMenu() }
         .onChange(of: stockSubtitles.moreEntries) { installSourceMenu() }
         .onChange(of: coordinator.route) { _, route in
@@ -588,9 +596,11 @@ struct AppleStremioPlayerView: View {
     /// The stock player has no Next Episode card, so its end hands over the
     /// way the custom overlay's countdown does: the title page starts the
     /// next episode and swaps this player for it (tvOS stock route never
-    /// advanced, iPad v2 re-run). Off when auto-play is off.
-    private func startNextEpisodeFromStockRoute() -> Bool {
-        let autoPlay = UserDefaults.standard.object(forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
+    /// advanced, iPad v2 re-run). Off when auto-play is off, unless the
+    /// viewer picked the tvOS "Next Episode" action (`manual`).
+    private func startNextEpisodeFromStockRoute(manual: Bool = false) -> Bool {
+        let autoPlay = manual
+            || UserDefaults.standard.object(forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
         guard let nextEpisode, !stockRouteHandedOff, !coordinator.isPlaceholderPlayback,
               AppleNextEpisodePolicy.handsOffAtEnd(hasNext: true, isLive: request.isLive,
                                                    isDismissed: false, isEnabled: autoPlay) else { return false }
@@ -699,5 +709,33 @@ private struct AppleStremioPlayerControllerRepresentable: UIViewControllerRepres
 
     func makeUIViewController(context: Context) -> AVPlayerViewController { viewController }
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {}
+}
+#endif
+
+#if os(tvOS)
+/// Apple's "Next Episode" contextual action on the stock tvOS player, offered
+/// in the same closing window as the custom overlay's card. A child view so
+/// the position ticks re-render only this, not the whole player.
+private struct AppleTVStockNextEpisodeAction: View {
+    let engine: any ApplePlaybackEngine
+    let controller: AVPlayerViewController
+    let nextTitle: String
+    let isLive: Bool
+    let start: () -> Void
+
+    private var isOffered: Bool {
+        AppleNextEpisodePolicy.prompt(position: engine.position, duration: engine.duration,
+                                      nextTitle: nextTitle, isLive: isLive) != nil
+    }
+
+    var body: some View {
+        Color.clear
+            .onChange(of: isOffered, initial: true) { _, offered in
+                controller.contextualActions = offered
+                    ? [UIAction(title: "Next Episode", image: UIImage(systemName: "forward.end.fill")) { _ in start() }]
+                    : []
+            }
+            .onDisappear { controller.contextualActions = [] }
+    }
 }
 #endif

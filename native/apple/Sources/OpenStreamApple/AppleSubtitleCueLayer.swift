@@ -239,10 +239,15 @@ struct AppleSubtitleCueLayer: View {
     let cues: [AppleSubtitleCue]
     let videoSize: CGSize?
     var textBottomLift: CGFloat = 0
+    /// Global y of the controls' and the Next Episode card's top edges while
+    /// they are on screen. Text cues stay above both.
+    var controlsTop: CGFloat? = nil
+    var promptTop: CGFloat? = nil
 
     var body: some View {
         ZStack {
-            AppleSubtitleTextCues(cues: cues.filter { $0.text != nil }, videoSize: videoSize)
+            AppleSubtitleTextCues(cues: cues.filter { $0.text != nil }, videoSize: videoSize,
+                                  controlsTop: controlsTop, promptTop: promptTop)
                 .padding(.bottom, textBottomLift)
             AppleSubtitleBitmapCues(cues: cues.filter { $0.text == nil }, videoSize: videoSize)
                 // The video ignores the safe area, so its rect is the screen's.
@@ -267,6 +272,8 @@ private struct AppleSubtitleTextCues: View {
     #endif
     let cues: [AppleSubtitleCue]
     let videoSize: CGSize?
+    var controlsTop: CGFloat? = nil
+    var promptTop: CGFloat? = nil
 
     var body: some View {
         // On Apple TV the video is full-bleed so the inset adds nothing; on a
@@ -291,10 +298,12 @@ private struct AppleSubtitleTextCues: View {
                     // the cue within it — which is why the first attempt
                     // built, passed its geometry tests and changed nothing
                     // on screen (2026-09-16).
-                    .padding(.bottom, AppleVideoFitting.captionBottomInset(
-                        container: proxy.size,
-                        videoSize: videoSize
-                    ))
+                    .padding(.bottom, max(
+                        AppleVideoFitting.captionBottomInset(container: proxy.size, videoSize: videoSize),
+                        AppleSubtitleCueLift.clearance(
+                            layerBottom: proxy.frame(in: .global).maxY,
+                            controlsTop: controlsTop,
+                            promptTop: promptTop)))
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)

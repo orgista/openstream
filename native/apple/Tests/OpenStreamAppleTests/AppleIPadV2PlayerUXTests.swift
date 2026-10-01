@@ -38,6 +38,28 @@ import Testing
         #expect(AppleSubtitleCueLift.lift(controlsVisible: true, bottomBarHeight: 60, promptTop: 230) >= 230)
     }
 
+    @Test func captionsClearTheScrubberMeasuredOnScreen() {
+        // Apple TV, 1080 pt screen, bar top at 900: the cue layer's bottom
+        // sits at the screen edge whatever the picture's letterboxing.
+        let rise = AppleSubtitleCueLift.clearance(layerBottom: 1056, controlsTop: 900, promptTop: nil)
+        #expect(1056 - rise <= 900 - AppleSubtitleCueLift.gapAboveControls)
+        // The higher of bar and card wins; nothing on screen means no rise.
+        #expect(AppleSubtitleCueLift.clearance(layerBottom: 1056, controlsTop: 900, promptTop: 700)
+            == 1056 - 700 + AppleSubtitleCueLift.gapAbovePrompt)
+        #expect(AppleSubtitleCueLift.clearance(layerBottom: 1056, controlsTop: nil, promptTop: nil) == 0)
+        // A layer already above the bar does not move.
+        #expect(AppleSubtitleCueLift.clearance(layerBottom: 600, controlsTop: 900, promptTop: nil) == 0)
+    }
+
+    @Test func theStockEnginePausedOnTheLastFrameHasEnded() {
+        // A 1:05:37 episode paused at its end reads as `.ended`, so the stock
+        // route hands over to the next episode (Apple TV regression).
+        #expect(NativePlaybackEngine.isAtEnd(position: 3937, duration: 3937.2))
+        #expect(!NativePlaybackEngine.isAtEnd(position: 3900, duration: 3937.2))
+        #expect(!NativePlaybackEngine.isAtEnd(position: 120, duration: .nan))
+        #expect(!NativePlaybackEngine.isAtEnd(position: 0, duration: 0))
+    }
+
     // MARK: - Live stall
 
     @Test func aStalledLiveChannelSaysReconnectingOnTheStockRoute() async {

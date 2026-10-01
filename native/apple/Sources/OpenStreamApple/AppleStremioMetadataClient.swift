@@ -173,8 +173,15 @@ public struct AppleRuntimeMinutesParser {
 }
 
 public enum AppleStremioEpisodePolicy {
+    /// Above this many episodes a series is a daily soap whose first season
+    /// is decades old, so it opens on its latest season instead.
+    static let latestSeasonFirstEpisodeCount = 1_000
+
     public static func initialSeason(in episodes: [AppleStremioEpisode]) -> Int? {
         let available = seasons(in: episodes)
+        if episodes.count > latestSeasonFirstEpisodeCount, let latest = available.last, latest > 0 {
+            return latest
+        }
         return available.first(where: { $0 > 0 }) ?? available.first
     }
 
@@ -308,8 +315,30 @@ public struct AppleStremioMetadataClient: Sendable {
         resources: ["meta"]
     )
 
+    /// Every episode of a daily soap, bounded. Goede tijden, slechte tijden
+    /// is 7,301 episodes over 37 seasons; the old 1,000 cap stopped the list
+    /// years short (Apple TV regression 2026-10-01). Each episode is kept as a
+    /// compact summary (overview clipped) so the list stays a few MB at most.
+    static let maximumEpisodes = 20_000
+    static let maximumEpisodeOverviewCharacters = 400
+    /// A meta answer listing thousands of episodes: Cinemeta's for Goede
+    /// tijden is 4.96 MB, over the 2 MB the stream answers are held to.
+    static let maximumMetaResponseBytes = 8_000_000
+
+    static func liveMetaLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await AppleBoundedHTTPDataLoader.load(
+                request,
+                maximumBytes: maximumMetaResponseBytes,
+                redirectPolicy: .secureHTTPOnly
+            )
+        } catch AppleBoundedHTTPError.responseTooLarge {
+            throw AppleStremioPlaybackError.responseTooLarge
+        }
+    }
+
     public init() {
-        self.loader = AppleStremioPlaybackClient.liveLoader
+        self.loader = Self.liveMetaLoader
         self.metadataCache = .shared
         self.mergeGrace = .seconds(1)
     }
@@ -412,7 +441,7 @@ public struct AppleStremioMetadataClient: Sendable {
             let (data, response) = try await loader(request)
             // A redirect is followed as for episodes, as long as it ends on
             // a plain https address.
-            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+            guard data.count <= Self.maximumMetaResponseBytes,
                   let http = response as? HTTPURLResponse,
                   http.url.map(Self.isAcceptableMetaResponseURL) == true,
                   (200 ... 299).contains(http.statusCode) else {
@@ -476,10 +505,11 @@ public struct AppleStremioMetadataClient: Sendable {
                     episode: identity.episode,
                     releaseInfo: value.releaseInfo ?? value.released,
                     runtimeMinutes: value.runtime?.boundedRuntime,
-                    overview: value.description ?? value.overview,
+                    overview: (value.description ?? value.overview)
+                        .map { String($0.prefix(Self.maximumEpisodeOverviewCharacters)) },
                     thumbnailURL: value.thumbnail.flatMap(URL.init(string:))
                 )
-            }.prefix(1_000).map { $0 }
+            }.prefix(Self.maximumEpisodes).map { $0 }
         }
 
         @Sendable func fetch() async throws -> Data {
@@ -488,7 +518,7 @@ public struct AppleStremioMetadataClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await loader(request)
-            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes else {
+            guard data.count <= Self.maximumMetaResponseBytes else {
                 throw AppleStremioPlaybackError.responseTooLarge
             }
             guard let http = response as? HTTPURLResponse else { throw AppleStremioPlaybackError.nonHTTPResponse }
@@ -768,7 +798,7 @@ public struct AppleStremioMetadataClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await loader(request)
-        guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+        guard data.count <= Self.maximumMetaResponseBytes,
               let http = response as? HTTPURLResponse,
               http.url?.scheme?.lowercased() == "https",
               (200 ... 299).contains(http.statusCode),
@@ -814,7 +844,7 @@ public struct AppleStremioMetadataClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await loader(request)
-            guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
+            guard data.count <= Self.maximumMetaResponseBytes,
                   let http = response as? HTTPURLResponse,
                   http.url?.scheme?.lowercased() == "https",
                   (200 ... 299).contains(http.statusCode) else {
