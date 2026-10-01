@@ -7,6 +7,17 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
+      chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
+      1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,
+         though they can't play catalog titles).
+      2. HIGH: debrid placeholder clips ("Debrid failed to split torrent… only rar") play as the episode and
+         auto-advance through the season; SNL then drops out of Continue Watching.
+      3. Live tab waits ~35 s on one unreachable IPTV panel before showing other playlists.
+      4. Still open: Hail Mary title page text instead of logo; title-page margins 40/16; Settings not split in
+         landscape; text fields with only placeholders (no labels).
+      UX: player icons vanish over bright video; subtitle cue drawn 3× over the Next Episode card; title name doesn't
+      scale at accessibility sizes; live stall shows a frozen frame + Play icon; duplicate Paramount+/Peacock tiers.
 - [ ] **iPhone 27 re-run (v2, 2026-10-01 dawn):** most fixes since 09-30 hold (chapters, Quality, Also available on,
       watch-link spam gone, row names, metadata on after seed, Stranger Things #1, audio labels + checkmark, subtitle
       More…, menus stay open, long series open fast, encrypted backup). Still broken / new:
