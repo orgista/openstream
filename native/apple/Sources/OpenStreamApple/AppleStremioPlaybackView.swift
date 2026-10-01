@@ -100,6 +100,8 @@ struct AppleStremioPlayerView: View {
     @State private var securityAccess: AppleSecurityScopedAccess?
     /// Cues and the app subtitle menu for both engines on the stock player.
     @State private var stockSubtitles = AppleStockPlayerSubtitles()
+    /// The stock player has started the next episode once already.
+    @State private var stockRouteHandedOff = false
 
     private let request: ApplePlaybackRequest
     private let fallbackCandidates: [ApplePlaybackRequest]
@@ -367,6 +369,7 @@ struct AppleStremioPlayerView: View {
                 // The transport is starting the next episode; the title page
                 // swaps this player for it, so closing here would drop it.
                 if coordinator.handsOffAtEnd, coordinator.route == .surface { return }
+                if coordinator.route != .surface, startNextEpisodeFromStockRoute() { return }
                 closePlayer()
             }
         }
@@ -582,6 +585,24 @@ struct AppleStremioPlayerView: View {
     /// Plays the best candidate for `choice` from where the viewer is, and
     /// makes its order the fallback for a later failure. Nothing restarts
     /// when that candidate is the one already playing.
+    /// The stock player has no Next Episode card, so its end hands over the
+    /// way the custom overlay's countdown does: the title page starts the
+    /// next episode and swaps this player for it (tvOS stock route never
+    /// advanced, iPad v2 re-run). Off when auto-play is off.
+    private func startNextEpisodeFromStockRoute() -> Bool {
+        let autoPlay = UserDefaults.standard.object(forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
+        guard let nextEpisode, !stockRouteHandedOff, !coordinator.isPlaceholderPlayback,
+              AppleNextEpisodePolicy.handsOffAtEnd(hasNext: true, isLive: request.isLive,
+                                                   isDismissed: false, isEnabled: autoPlay) else { return false }
+        stockRouteHandedOff = true
+        appleTrace("next episode (stock route) → \(nextEpisode.title)")
+        let engine = coordinator.engine
+        nextEpisode.start(AppleTrackCarryOver.capture(
+            audioTracks: engine.audioTracks, activeAudioID: engine.activeAudioTrackID,
+            subtitleTracks: engine.subtitleTracks, activeSubtitleID: engine.activeSubtitleTrackID))
+        return true
+    }
+
     private func switchQuality(to choice: AppleStreamQualityChoice) async {
         guard let options = sourceOptions else { return }
         let order = options.order(for: choice)

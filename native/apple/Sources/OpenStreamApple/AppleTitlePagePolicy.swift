@@ -86,9 +86,13 @@ public enum AppleTitlePagePolicy {
         }
     }
 
-    /// Shared by title pages and every Discover hero. Metadata-only add-ons
-    /// are not playback routes. Local media and completed downloads work even
-    /// when the catalog has no episode list or streaming add-on.
+    /// Shared by title pages and every Discover hero. A route is a source that
+    /// can play THIS title: a Stremio add-on that serves streams, a media-server
+    /// item, local or network-share files matched to the title
+    /// (`hasLocalGroup`), or a finished download. An IPTV playlist, a network
+    /// share or a media server merely being added is not one — counting them
+    /// hid "Watch on <service>" on every catalog title (iPad v2, 2026-10-01).
+    /// Metadata-only add-ons are not routes either.
     public static func hasPlaybackRoute(
         item: AppleCatalogItem,
         sources: [AppleSource],
@@ -100,8 +104,8 @@ public enum AppleTitlePagePolicy {
         if hasCompletedDownload { return true }
         if item.type == "series", episodesUnavailable { return false }
         return sources.contains { source in
-            source.isEnabled && (source.kind != .stremio
-                || source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame })
+            source.isEnabled && source.kind == .stremio
+                && source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame }
         }
     }
 
@@ -111,8 +115,10 @@ public enum AppleTitlePagePolicy {
     /// its title page offered Play and Download Season (N17e) — so the hero
     /// falls back to the source check instead of saying Details.
     public static func heroHasPlaybackRoute(item: AppleCatalogItem, sources: [AppleSource],
+                                             hasLocalGroup: Bool = false,
                                              hasCompletedDownload: Bool = false) -> Bool {
-        hasPlaybackRoute(item: item, sources: sources, hasCompletedDownload: hasCompletedDownload)
+        hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
+                         hasCompletedDownload: hasCompletedDownload)
     }
 
     /// Whether the title page's Play is enabled. It needs a playback route

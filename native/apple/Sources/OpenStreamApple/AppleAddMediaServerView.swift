@@ -142,6 +142,7 @@ struct AppleAddMediaServerView: View {
     
     private var nameField: some View {
         TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+            .accessibilityLabel("Name")
             .appleTVFieldOutline()
             .textContentType(.name)
             .appleSourceFieldStyle()
@@ -149,6 +150,7 @@ struct AppleAddMediaServerView: View {
     
     private var urlField: some View {
         TextField("Server URL", text: $url, prompt: appleSecondaryFieldPrompt("Server URL"))
+            .accessibilityLabel("Server URL")
             .appleTVFieldOutline()
             .textContentType(.URL)
             .appleSourceFieldStyle()
@@ -164,6 +166,7 @@ struct AppleAddMediaServerView: View {
     
     private var usernameField: some View {
         TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
+            .accessibilityLabel("Username")
             .appleTVFieldOutline()
             .textContentType(.username)
             .appleSourceFieldStyle()
@@ -179,6 +182,7 @@ struct AppleAddMediaServerView: View {
     
     private var embyEmailField: some View {
         TextField("Email", text: $embyEmail, prompt: appleSecondaryFieldPrompt("Email"))
+            .accessibilityLabel("Email")
             .appleTVFieldOutline()
             .textContentType(.emailAddress)
             .appleSourceFieldStyle()

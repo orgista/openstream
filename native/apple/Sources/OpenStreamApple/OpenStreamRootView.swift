@@ -201,16 +201,25 @@ public struct OpenStreamRootView: View {
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
                 #elseif os(iOS)
-                NavigationStack(path: Binding(
+                let path = Binding(
                     get: { navigationPaths[tab] ?? NavigationPath() },
                     set: { navigationPaths[tab] = $0 }
-                )) {
-                    content(for: tab)
-                        // The system tab bar as each OS draws it (owner,
-                        // 2026-09-17): the floating glass bar on iOS 26, the
-                        // classic bar on iOS 18 — no background or colour
-                        // scheme of our own.
-                        .toolbar(iPadTabBarIsHidden ? .hidden : .automatic, for: .tabBar)
+                )
+                Group {
+                    if tab == .settings, settingsUsesSplitView {
+                        // Settings brings its own split view: a stack around
+                        // it cannot hold one (iPad v2, landscape).
+                        content(for: tab, settingsSplitPath: path)
+                    } else {
+                        NavigationStack(path: path) {
+                            content(for: tab)
+                                // The system tab bar as each OS draws it (owner,
+                                // 2026-09-17): the floating glass bar on iOS 26, the
+                                // classic bar on iOS 18 — no background or colour
+                                // scheme of our own.
+                                .toolbar(iPadTabBarIsHidden ? .hidden : .automatic, for: .tabBar)
+                        }
+                    }
                 }
                 .tabItem {
                     Label(tab.title, systemImage: tab.systemImage)
@@ -270,6 +279,14 @@ public struct OpenStreamRootView: View {
     private var iPadTabBarIsHidden: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
             && horizontalSizeClass == .compact
+            && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
+    }
+
+    /// Settings as a sidebar and a pane on a regular-width iPad in
+    /// landscape; a single pushed stack everywhere else.
+    private var settingsUsesSplitView: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+            && horizontalSizeClass == .regular
             && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
     }
     #endif
@@ -574,7 +591,7 @@ public struct OpenStreamRootView: View {
     }
 
     @ViewBuilder
-    private func content(for tab: OpenStreamTab) -> some View {
+    private func content(for tab: OpenStreamTab, settingsSplitPath: Binding<NavigationPath>? = nil) -> some View {
         switch tab {
         case .search:
             AppleSearchView(
@@ -621,7 +638,8 @@ public struct OpenStreamRootView: View {
                 sourceStore: sourceStore,
                 webManagement: webManagement,
                 backupController: backupController,
-                catalogStore: catalogStore
+                catalogStore: catalogStore,
+                splitPath: settingsSplitPath
             )
             .appleAlignedTabTitle(tab.title)
         }

@@ -48,8 +48,29 @@ enum AppleSubtitleCueLayerPolicy {
     /// of dialogue at the bottom are on screen together, and `.first` used to
     /// drop one of them (Q4a8 §4). The engine empties its cue list when no
     /// track is selected, so "no track" reads as empty here too.
+    ///
+    /// Text cues that say the same thing are drawn once: roll-up captions
+    /// repeat a line as it scrolls ("GOOD EVENING", "GOOD EVENING."), and three
+    /// copies were stacked on screen (iPad v2 re-run). Of two lines where one
+    /// is the start of the other, the longer one stays.
     static func activeCues(in cues: [AppleSubtitleCue], at position: Double) -> [AppleSubtitleCue] {
-        cues.filter { position >= $0.startTime && position < $0.endTime }
+        let active = cues.filter { position >= $0.startTime && position < $0.endTime }
+        guard active.count > 1 else { return active }
+        let keys = active.map { cue in cue.text.map(dedupeKey) }
+        return active.indices.compactMap { index in
+            guard let key = keys[index], !key.isEmpty else { return active[index] }
+            let covered = keys.indices.contains { other in
+                guard other != index, let otherKey = keys[other] else { return false }
+                if otherKey == key { return other > index } // keep the last copy
+                return key.count >= 8 && otherKey.count > key.count && otherKey.hasPrefix(key)
+            }
+            return covered ? nil : active[index]
+        }
+    }
+
+    /// A cue's words alone: case, spaces and punctuation do not make it new.
+    private static func dedupeKey(_ text: String) -> String {
+        String(text.lowercased().unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(Character.init))
     }
 
     /// The Mac's text cue size for a picture this tall. The 12 pt base is

@@ -2530,6 +2530,11 @@ struct AppleCatalogItemDetailView: View {
     /// Scrolls the page back to the hero when a trailer is chosen below it.
     @State private var detailScrollPosition = ScrollPosition(edge: .top)
     @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
+    // The text title and its metadata line grow with Dynamic Type; fixed
+    // point sizes stayed small at the accessibility sizes (iPad v2 re-run).
+    @ScaledMetric(relativeTo: .title3) private var scaledLandscapeTitleSize: CGFloat = AppleDetailMetrics.landscapeTitleFontSize
+    @ScaledMetric(relativeTo: .headline) private var scaledPortraitTitleSize: CGFloat = AppleDetailMetrics.portraitTitleFontSize
+    @ScaledMetric(relativeTo: .subheadline) private var scaledMetadataSize: CGFloat = AppleDetailMetrics.metadataFontSize
     private let playbackStore = ApplePlaybackStore()
     private let ratingStore = AppleTitleRatingStore()
 
@@ -2871,9 +2876,10 @@ struct AppleCatalogItemDetailView: View {
             guard !Task.isCancelled else { return }
             heroTrailer.pressedKey = nil
         }
-        .task(id: "title-logo:\(titleLogoURL?.absoluteString ?? "")") {
+        .task(id: "title-logo:" + titleLogoCandidates.map(\.absoluteString).joined(separator: "|")) {
             titleWordmark.loadResult = nil
-            guard let logoURL = titleLogoURL else {
+            let candidates = titleLogoCandidates
+            guard !candidates.isEmpty else {
                 titleWordmark.state = .unavailable
                 return
             }
@@ -2881,14 +2887,20 @@ struct AppleCatalogItemDetailView: View {
             #if DEBUG
             AppleLaunchClock.mark("detail.logoURL")
             #endif
-            guard await AppleTransparentPNGLogoValidator.isValid(url: logoURL), !Task.isCancelled else {
-                if !Task.isCancelled { titleWordmark.state = .unavailable }
-                return
+            // The first wordmark that is a clean transparent PNG. TMDB's pick
+            // can fail it (an SVG, an opaque plate) where the add-on's logo the
+            // Discover hero draws passes (Project Hail Mary, iPad v2).
+            for logoURL in candidates {
+                guard !Task.isCancelled else { return }
+                if await AppleTransparentPNGLogoValidator.isValid(url: logoURL), !Task.isCancelled {
+                    #if DEBUG
+                    AppleLaunchClock.mark("detail.validated")
+                    #endif
+                    titleWordmark.state = .valid(logoURL)
+                    return
+                }
             }
-            #if DEBUG
-            AppleLaunchClock.mark("detail.validated")
-            #endif
-            titleWordmark.state = .valid(logoURL)
+            if !Task.isCancelled { titleWordmark.state = .unavailable }
         }
         // Keyed by the item only: a wordmark URL that arrives late must not
         // hide a text title that is already on screen; the text stays until
@@ -3015,8 +3027,8 @@ struct AppleCatalogItemDetailView: View {
                         .padding(.top, heroTrailer.isPlaying ? AppleDetailMetrics.heroToTitleSpacing : 0)
                 } else {
                     Text(displayTitle)
-                        .font(.system(size: 17, weight: .semibold))
-                        .lineLimit(1)
+                        .font(.system(size: scaledPortraitTitleSize, weight: .semibold))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, AppleDetailMetrics.heroToTitleSpacing)
@@ -3086,7 +3098,9 @@ struct AppleCatalogItemDetailView: View {
         // none, so its portraits were nowhere (N37).
         let credits = titlePageCredits
         if !credits.isEmpty {
-            phoneCastSection(credits)
+            // The page's margin, the one the synopsis and More Like This
+            // use: 40 pt in a wide iPad layout, not the phone's 16 (iPad v2).
+            phoneCastSection(credits, inset: detailHorizontalInset)
                 .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
         }
         #endif
@@ -3447,8 +3461,8 @@ struct AppleCatalogItemDetailView: View {
 
     private var trailerTitleText: some View {
         Text(displayTitle)
-            .font(.system(size: isLandscapeLayout ? AppleDetailMetrics.landscapeTitleFontSize : AppleDetailMetrics.portraitTitleFontSize, weight: .semibold))
-            .lineLimit(1)
+            .font(.system(size: isLandscapeLayout ? scaledLandscapeTitleSize : scaledPortraitTitleSize, weight: .semibold))
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
             .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
@@ -3986,8 +4000,19 @@ struct AppleCatalogItemDetailView: View {
         return clean.isEmpty ? nil : clean
     }
 
+    /// The wordmark that passed validation, once one has.
     private var titleLogoURL: URL? {
-        pageMetadata.details?.logoURL ?? pageMetadata.previewAssets?.logoURL
+        if case .valid(let url) = titleWordmark.state { return url }
+        return nil
+    }
+
+    /// Every wordmark this title has, best first: TMDB's, the add-on's (the
+    /// one the Discover hero draws), then the catalog record's.
+    private var titleLogoCandidates: [URL] {
+        var seen = Set<URL>()
+        return [pageMetadata.details?.logoURL, pageMetadata.previewAssets?.logoURL, item.logoURL]
+            .compactMap { $0 }
+            .filter { seen.insert($0).inserted }
     }
 
     private var trailerEmbedURL: URL? {
@@ -4333,10 +4358,10 @@ struct AppleCatalogItemDetailView: View {
                 AppleFormatBadge(badge)
             }
         }
-            .lineLimit(1)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
             .minimumScaleFactor(0.68)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .font(.system(size: AppleDetailMetrics.metadataFontSize, weight: .regular))
+            .font(.system(size: scaledMetadataSize, weight: .regular))
             .foregroundStyle(titleMetadataColor)
             .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
             .accessibilityElement(children: .combine)
@@ -5445,6 +5470,7 @@ struct AppleCatalogItemDetailView: View {
         let mediaID = recordID
         let title = selectedEpisodeSelection?.displayTitle ?? item.name
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
+        let runtime = expectedRuntime
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
                 ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
@@ -5466,7 +5492,8 @@ struct AppleCatalogItemDetailView: View {
                     serviceKey: candidate.serviceKey) { resume in
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
-                            addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type), settings: settings)
+                            addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
+                            expectedRuntime: runtime), settings: settings)
                     }
             }
             let device = AppleStreamDeviceCapabilities.current
@@ -5638,11 +5665,13 @@ struct AppleCatalogItemDetailView: View {
             playbackUI.preferredServiceKey = nil
             let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
+            let runtime = expectedRuntime
             let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
                 candidate.playbackRequest(mediaID: mediaID, title: title,
                     resume: AppleDetailResume.position(mediaID: mediaID,
                         partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
-                    addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type)
+                    addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
+                    expectedRuntime: runtime)
             }
             playbackUI.selectedQuality = nil
             guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }
@@ -7941,12 +7970,24 @@ extension AppleCatalogItemDetailView {
         return episodeList.episodes.first { $0.id == selectedEpisodeID }
     }
 
+    /// The selected episode's runtime (or the title's), in seconds, so a
+    /// provider's error clip can be told from the title at playback.
+    private var expectedRuntime: Double? {
+        let minutes = item.type == "series"
+            ? selectedEpisode?.runtimeMinutes ?? pageMetadata.details?.runtimeMinutes
+            : pageMetadata.details?.runtimeMinutes
+        return minutes.map { Double($0) * 60 }
+    }
+
     /// Whether anything on this page can start: a media-server or library
-    /// title, a finished download, or an enabled source that serves streams —
-    /// and, for a series, an episode list to play from.
+    /// title, files on a share matched to this title, a finished download, or
+    /// an enabled add-on that serves streams — and, for a series, an episode
+    /// list to play from.
     private var hasPlaybackRoute: Bool {
-        AppleTitlePagePolicy.hasPlaybackRoute(
-            item: item, sources: playbackSources, hasLocalGroup: localGroup != nil,
+        let matched = item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID)
+        return AppleTitlePagePolicy.hasPlaybackRoute(
+            item: item, sources: playbackSources,
+            hasLocalGroup: localGroup != nil || !library.matchingGroups(matched).isEmpty,
             hasCompletedDownload: downloadCoordinator.state.isCompleted,
             episodesUnavailable: episodeListPresentation == .unavailable
         )
@@ -8410,10 +8451,10 @@ extension AppleCatalogItemDetailView {
         )
     }
 
-    private func phoneCastSection(_ people: [AppleCreditPerson]) -> some View {
+    private func phoneCastSection(_ people: [AppleCreditPerson], inset: CGFloat = Self.phoneInset) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             AppleTitlePageSectionTitle("Cast & Crew")
-                .padding(.horizontal, Self.phoneInset)
+                .padding(.horizontal, inset)
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 4) {
                     ForEach(people) { person in
@@ -8423,7 +8464,7 @@ extension AppleCatalogItemDetailView {
                 .appleShelfSnapTargets()
             }
             // The portraits carry 8 pt either side, so the first lines up.
-            .contentMargins(.horizontal, Self.phoneInset - 8, for: .scrollContent)
+            .contentMargins(.horizontal, inset - 8, for: .scrollContent)
             .appleShelfTileSnapping()
             .scrollIndicators(.hidden)
         }

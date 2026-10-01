@@ -291,6 +291,9 @@ public final class ApplePlaybackCoordinator {
     private var fallbackAttempted = 0
     private var fallbackTotal = 0
     private var fallbackTitle: String? = nil
+    /// The attempt (`generation`) already turned away as an error clip, so it
+    /// is failed once however many events report its length.
+    private var placeholderRejectedAttempt: Int?
     /// Which stream services failed as a whole recently. Injected by tests.
     var serviceHealth: AppleStreamServiceHealth = .shared
 
@@ -574,6 +577,38 @@ public final class ApplePlaybackCoordinator {
         }
     }
 
+    // MARK: - Error clips
+
+    /// Whether what is playing is a provider's error clip rather than the
+    /// title: far shorter than the title's known runtime. The transport
+    /// overlay reads this so it never offers or starts the next episode.
+    public var isPlaceholderPlayback: Bool {
+        guard let request = lastRequest, !request.isLive else { return false }
+        return AppleStreamPlaceholderPolicy.isPlaceholder(duration: engine.duration,
+                                                          expectedRuntime: request.hints.expectedRuntime)
+    }
+
+    /// The runtime is known but the stream's length is not yet.
+    private func awaitsPlaceholderCheck(_ request: ApplePlaybackRequest) -> Bool {
+        !request.isLive && request.hints.expectedRuntime != nil && engine.duration == nil
+    }
+
+    /// Turns an error clip away as a failed source, once per attempt: its
+    /// progress is dropped unsaved and the next candidate is tried.
+    private func rejectsPlaceholder(_ request: ApplePlaybackRequest) -> Bool {
+        guard isPlaceholderPlayback, lastRequest == request else { return false }
+        if placeholderRejectedAttempt == generation { return true }
+        placeholderRejectedAttempt = generation
+        appleTrace("playback: \(Int(engine.duration ?? 0)) s stream for a \(Int((request.hints.expectedRuntime ?? 0) / 60)) min title — error clip, trying the next source")
+        progressCoordinator?.stopObserving(saveCurrentProgress: false)
+        progressCoordinator = nil
+        surfaceProgressIdentity = nil
+        engine.pause()
+        cancelTimeout()
+        scheduleFailure(ApplePlaybackFailure(kind: .player, message: AppleStreamPlaceholderPolicy.failureMessage))
+        return true
+    }
+
     // MARK: - Candidate fallback
 
     /// On an `.unsupportedMedia` or HTTP/network failure, advance to the next
@@ -734,7 +769,10 @@ public final class ApplePlaybackCoordinator {
         case .tracks:
             applyTrackCarryOver()
         case .duration:
-            break
+            if rejectsPlaceholder(request) { return }
+            // The length is known and is the title's: from here a failure is
+            // the stream's, not a reason to try another source.
+            if phase == .playing { clearFallback() }
         case .failure(let failure):
             if let failure {
                 scheduleFailure(failure)
@@ -776,10 +814,13 @@ public final class ApplePlaybackCoordinator {
             // The first frame. Everything before this is the wait the owner
             // sees as a spinner, so it is the one timestamp worth having.
             if case .playing = phase {} else { appleTrace("first frame, route=\(route)") }
+            if rejectsPlaceholder(request) { return }
             let isResume = (phase == .paused)
             setPhase(.playing)
             cancelTimeout()
-            clearFallback()
+            // An error clip shows its length only once it plays; keep the
+            // other sources until it does.
+            if !awaitsPlaceholderCheck(request) { clearFallback() }
             if isResume, request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .progress)
             }
@@ -806,6 +847,9 @@ public final class ApplePlaybackCoordinator {
     }
 
     private func handleEnded(request: ApplePlaybackRequest) {
+        // An error clip that ran out is a failed source, never the end of an
+        // episode: no next-episode handover from it.
+        if rejectsPlaceholder(request) { return }
         guard request.isLive else {
             cancelTimeout()
             setPhase(.ended)
@@ -923,6 +967,8 @@ public final class ApplePlaybackCoordinator {
 
     private func handlePosition(_ position: Double) {
         lastKnownPosition = position
+        // An error clip's position is not the title's: never saved as watched.
+        if isPlaceholderPlayback { return }
 
         if let req = lastRequest, req.sourceKind == .mediaServer {
             if !remoteProgressStarted {

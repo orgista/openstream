@@ -215,9 +215,12 @@ extension AppleStremioCandidateRanking {
             let down = candidate.serviceKey.map(unhealthyServices.contains) ?? false
             let preferred = preferredService != nil && candidate.serviceKey == preferredService
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),
-                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down, preferred)
+                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down, preferred,
+                    AppleStreamPlaceholderPolicy.isPlaceholder(candidate))
         }
         .sorted { a, b in
+            // A provider's error clip goes last, below even another title.
+            if a.9 != b.9 { return !a.9 }
             if a.2 != b.2 { return !a.2 }
             if a.3 != b.3 { return a.3 }
             if a.7 != b.7 { return !a.7 }

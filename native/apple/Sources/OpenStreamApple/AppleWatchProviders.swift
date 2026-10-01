@@ -158,8 +158,14 @@ public enum AppleWatchProviderPolicy: Sendable {
         limit: Int = addableLimit
     ) -> [AppleWatchProvider] {
         var seen = Set<Int>()
+        // One row per service: Paramount+ Essential and Premium, Peacock
+        // Premium and Premium Plus were each listed (iPad v2 re-run). The
+        // first, most popular tier stands for the service, and a service
+        // already added in any tier is not offered again.
+        var families = Set(directory.filter { enabledProviderIDs.contains($0.id) }.map { serviceFamily($0.name) })
         let services = directory.filter {
             !enabledProviderIDs.contains($0.id) && isStreamingService($0.name) && seen.insert($0.id).inserted
+                && families.insert(serviceFamily($0.name)).inserted
         }
         let major = services.filter { isMajorSubscription($0.name) }
         let rest = services.filter { !isMajorSubscription($0.name) }
@@ -174,6 +180,18 @@ public enum AppleWatchProviderPolicy: Sendable {
                         "microsoft", "rakuten", "itunes"]
         if excluded.contains(where: lowered.contains) { return false }
         return lowered != "youtube"
+    }
+
+    /// A service's name without its tier: "Paramount+ Premium" and
+    /// "Paramount Plus Essential" are both "paramount", "Peacock Premium Plus"
+    /// is "peacock", "Netflix Standard with Ads" is "netflix".
+    static func serviceFamily(_ name: String) -> String {
+        let tiers: Set<String> = ["plus", "premium", "essential", "standard", "basic", "with", "ads"]
+        var words = name.lowercased()
+            .replacingOccurrences(of: "+", with: " plus")
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        while words.count > 1, let last = words.last, tiers.contains(last) { words.removeLast() }
+        return words.joined(separator: " ")
     }
 
     /// The subscription services most viewers have, by TMDB's names.

@@ -244,7 +244,7 @@ public struct AppleStremioPlaybackClient: Sendable {
                         filename: cleanFilename(value.behaviorHints?.filename),
                         requestHeaders: headers,
                         requiresGateway: notWebReady,
-                        qualityDescription: [value.name, value.title].compactMap { $0 }.joined(separator: " "),
+                        qualityDescription: [value.name, value.title, value.description].compactMap { $0 }.joined(separator: " "),
                         sizeBytes: value.behaviorHints?.videoSize
                     ))
                 }
@@ -615,6 +615,7 @@ private struct RawStream: Decodable {
 
     let title: String?
     let name: String?
+    let description: String?
     let url: String?
     let externalURL: String?
     let youtubeID: String?
@@ -624,7 +625,7 @@ private struct RawStream: Decodable {
     let behaviorHints: BehaviorHints?
 
     private enum CodingKeys: String, CodingKey {
-        case title, name, url, externalURL = "externalUrl", youtubeID = "ytId", infoHash
+        case title, name, description, url, externalURL = "externalUrl", youtubeID = "ytId", infoHash
         case fileIndex = "fileIdx", sources
         case behaviorHints
     }
@@ -633,6 +634,7 @@ private struct RawStream: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         title = try? container.decode(String.self, forKey: .title)
         name = try? container.decode(String.self, forKey: .name)
+        description = try? container.decode(String.self, forKey: .description)
         url = try? container.decode(String.self, forKey: .url)
         externalURL = try? container.decode(String.self, forKey: .externalURL)
         youtubeID = try? container.decode(String.self, forKey: .youtubeID)

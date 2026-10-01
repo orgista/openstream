@@ -452,7 +452,9 @@ public struct AppleTMDBClient: Sendable {
         let spoken = (value.spokenLanguages ?? []).compactMap { language in
             AppleTitlePagePolicy.languageName(language.code) ?? bounded(language.englishName, limit: 60)
         }
+        // An SVG wordmark does not decode as an image here; skip it.
         let logoPath = value.images?.logos
+            .filter { $0.filePath?.lowercased().hasSuffix(".svg") != true }
             .sorted { lhs, rhs in
                 let lhsEnglish = lhs.language?.caseInsensitiveCompare("en") == .orderedSame
                 let rhsEnglish = rhs.language?.caseInsensitiveCompare("en") == .orderedSame

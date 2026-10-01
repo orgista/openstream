@@ -61,7 +61,12 @@ public enum AppleStremioCandidateRanking {
         year: Int? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
         let mismatched = titleMismatches(candidates, title: title, year: year, season: episode?.season)
+        let placeholders = candidates.map(AppleStreamPlaceholderPolicy.isPlaceholder)
         return candidates.enumerated().sorted { lhs, rhs in
+            // A provider's error clip ("only rar is available") is never the
+            // title, so it sorts below everything that might be.
+            let lp = placeholders[lhs.offset], rp = placeholders[rhs.offset]
+            if lp != rp { return !lp }
             // Demoted rather than dropped: if every candidate contradicts, the
             // viewer still gets something to play rather than nothing.
             // A different show is worse than a different episode, so it sorts first.
@@ -124,7 +129,8 @@ extension AppleStremioHTTPPlaybackCandidate {
         title: String?,
         resume: Double?,
         addonMediaID: String? = nil,
-        addonMediaType: String? = nil
+        addonMediaType: String? = nil,
+        expectedRuntime: Double? = nil
     ) -> ApplePlaybackRequest {
         ApplePlaybackRequest(
             url: sourceURL,
@@ -141,7 +147,8 @@ extension AppleStremioHTTPPlaybackCandidate {
                 filename: filename,
                 addonMediaID: addonMediaID,
                 addonMediaType: addonMediaType,
-                serviceKey: serviceKey
+                serviceKey: serviceKey,
+                expectedRuntime: expectedRuntime
             )
         )
     }

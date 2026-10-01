@@ -31,6 +31,10 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// The service an add-on stream belongs to (`AppleStreamServiceKey`),
         /// so a service that is down can be skipped. Nil for everything else.
         public var serviceKey: String?
+        /// How long the title runs, in seconds, when its metadata says. A
+        /// stream far shorter than this is a provider's error clip
+        /// (`AppleStreamPlaceholderPolicy`). Nil when unknown.
+        public var expectedRuntime: Double?
 
         public init(
             notWebReady: Bool = false,
@@ -41,7 +45,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             addonMediaType: String? = nil,
             nativeRemoteHLS: Bool = false,
             declaresEmbeddedCaptions: Bool = false,
-            serviceKey: String? = nil
+            serviceKey: String? = nil,
+            expectedRuntime: Double? = nil
         ) {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
@@ -52,6 +57,7 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             self.nativeRemoteHLS = nativeRemoteHLS
             self.declaresEmbeddedCaptions = declaresEmbeddedCaptions
             self.serviceKey = serviceKey
+            self.expectedRuntime = expectedRuntime
         }
     }
 

@@ -76,6 +76,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var hasPlaybackRoute: Bool {
         AppleTitlePagePolicy.heroHasPlaybackRoute(
             item: item, sources: sources,
+            hasLocalGroup: !AppleLocalLibraryStore.shared.matchingGroups(item).isEmpty,
             hasCompletedDownload: downloadCoordinator.state.isCompleted
         )
     }

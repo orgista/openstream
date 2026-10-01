@@ -142,7 +142,8 @@ public final class AppleTransportOverlayModel {
 
     /// The end-of-episode card, or nil when there is nothing to offer yet.
     public var nextEpisodePrompt: AppleNextEpisodePrompt? {
-        guard nextEpisode != nil else { return nil }
+        // A provider's error clip is not the episode ending.
+        guard nextEpisode != nil, !coordinator.isPlaceholderPlayback else { return nil }
         return AppleNextEpisodePolicy.prompt(
             position: position,
             duration: duration,
@@ -303,14 +304,24 @@ public final class AppleTransportOverlayModel {
     /// (`.resolving` / `.loading`) or while it is buffering / reconnecting
     /// (`.waiting`). On `.avPlayer` routes the system player shows its own
     /// spinner, so this is always `false`.
+    ///
+    /// A live channel shows it on either route: a stalled channel otherwise
+    /// sat on its last frame under a Play glyph (iPad v2 re-run).
     public var showsWaitingIndicator: Bool {
-        guard route == .surface else { return false }
+        guard route == .surface || isLive else { return false }
         switch coordinator.phase {
         case .resolving, .loading, .waiting:
             return true
         default:
             return false
         }
+    }
+
+    /// A live channel that stalled and is being reconnected: the overlay
+    /// says so under the spinner instead of offering Play.
+    public var showsReconnecting: Bool {
+        guard isLive, case .waiting = coordinator.phase else { return false }
+        return true
     }
 
     /// Text for the waiting indicator's accessibility label. The spinner has
@@ -478,7 +489,7 @@ public final class AppleTransportOverlayModel {
     /// Starts the next episode once this one has run out, unless the viewer
     /// turned auto-play off or dismissed the card.
     private func advanceToNextEpisodeIfDue(hasEnded: Bool = false) {
-        guard !hasAdvancedToNextEpisode, let nextEpisode else { return }
+        guard !hasAdvancedToNextEpisode, let nextEpisode, !coordinator.isPlaceholderPlayback else { return }
         guard AppleNextEpisodePolicy.shouldAutoAdvance(
             position: position,
             duration: duration ?? coordinator.engine.duration,

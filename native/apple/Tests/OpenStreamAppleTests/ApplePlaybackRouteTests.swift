@@ -28,8 +28,26 @@ struct ApplePlaybackRouteTests {
         #expect(AppleTitlePagePolicy.hasPlaybackRoute(item: movie, sources: [source(resources: ["stream"], enabled: false)]) == false)
     }
 
-    @Test func nonStremioSourceIsPlayable() {
-        #expect(AppleTitlePagePolicy.hasPlaybackRoute(item: movie, sources: [source(.library)]))
+    /// iPad v2 (2026-10-01): an IPTV playlist, a network share, a library
+    /// folder or a media server being added is no route to a catalog title.
+    /// Only files matched to the title (`hasLocalGroup`) are.
+    @Test(arguments: [AppleSourceKind.library, .liveTV, .nas, .mediaServer, .youtube])
+    func aNonStremioSourceAloneIsNoRoute(kind: AppleSourceKind) {
+        #expect(AppleTitlePagePolicy.hasPlaybackRoute(item: movie, sources: [source(kind)]) == false)
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: [source(kind)]) == false)
+    }
+
+    @Test func filesMatchedToTheTitleAreARoute() {
+        #expect(AppleTitlePagePolicy.hasPlaybackRoute(item: movie, sources: [source(.nas)], hasLocalGroup: true))
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: [], hasLocalGroup: true))
+    }
+
+    @Test func watchOnShowsWithIPTVAndAShareButNoStreamAddOn() {
+        let sources = [source(.liveTV), source(.nas), source(resources: ["catalog", "meta"])]
+        let route = AppleTitlePagePolicy.hasPlaybackRoute(item: movie, sources: sources)
+        let netflix = AppleWatchProvider(id: 8, name: "Netflix", offer: .subscription)
+        #expect(route == false)
+        #expect(AppleWatchOnPolicy.action(hasInAppSource: route, visibleProviders: [netflix]) != nil)
     }
 
     @Test func mediaServerItemNeedsNoAddOn() {

@@ -347,6 +347,7 @@ private struct AppleAddFilesView: View {
                 .appleTVReadableFocus()
                 .alert("Direct URL", isPresented: $showingDirectURL) {
                     TextField("URL", text: $directURL, prompt: appleSecondaryFieldPrompt("URL"))
+                        .accessibilityLabel("URL")
                         #if os(iOS) || os(tvOS) || os(visionOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -1073,6 +1074,7 @@ struct AppleRevealableSecureField: View {
     private var field: some View {
         if isRevealed {
             TextField(title, text: $text, prompt: appleSecondaryFieldPrompt(title))
+                .accessibilityLabel(Text(title))
                 .appleTVFieldOutline()
                 .textContentType(.password)
                 #if os(iOS) || os(tvOS) || os(visionOS)
@@ -1150,6 +1152,7 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var nameField: some View {
         TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+            .accessibilityLabel("Name")
             .appleTVFieldOutline()
             .textContentType(.name)
             .appleSourceFieldStyle()
@@ -1157,6 +1160,7 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var endpointField: some View {
         TextField(endpointTitle, text: $endpoint, prompt: appleSecondaryFieldPrompt(endpointTitle))
+            .accessibilityLabel(Text(endpointTitle))
             .appleTVFieldOutline()
             .textContentType(.URL)
             .appleSourceFieldStyle()
@@ -1172,6 +1176,7 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var usernameField: some View {
         TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
+            .accessibilityLabel("Username")
             .appleTVFieldOutline()
             .textContentType(.username)
             .appleSourceFieldStyle()

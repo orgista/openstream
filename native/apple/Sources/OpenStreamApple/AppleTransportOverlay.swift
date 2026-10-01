@@ -52,6 +52,9 @@ struct AppleTransportOverlay: View {
 
     @State private var model: AppleTransportOverlayModel
     @State private var bottomBarHeight: CGFloat = 0
+    /// The Next Episode card's height while it is up, so captions sit above
+    /// it instead of under it (iPad v2 re-run).
+    @State private var nextEpisodeCardHeight: CGFloat = 0
     @State private var isMuted = false
 
     /// Task 9: on Apple TV the surface overlay keeps only the scrubber and one
@@ -224,6 +227,9 @@ struct AppleTransportOverlay: View {
                 HStack {
                     Spacer()
                     nextEpisodeCard
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.size.height
+                        } action: { nextEpisodeCardHeight = $0 }
                 }
             }
             .padding(nextEpisodeCardInset)
@@ -237,7 +243,10 @@ struct AppleTransportOverlay: View {
             // layer is mounted over the stock player on `.avPlayer`.
             AppleSubtitleCueLayer(cues: model.activeSubtitleCues, videoSize: coordinator.engine.videoSize,
                                   textBottomLift: AppleSubtitleCueLift.lift(
-                                      controlsVisible: model.controlsVisible, bottomBarHeight: bottomBarHeight))
+                                      controlsVisible: model.controlsVisible, bottomBarHeight: bottomBarHeight,
+                                      promptTop: model.nextEpisodePrompt == nil ? 0
+                                          : bottomBarHeight + AppleDesignTokens.spacingMedium
+                                              + nextEpisodeCardInset + nextEpisodeCardHeight))
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -299,7 +308,9 @@ struct AppleTransportOverlay: View {
             Spacer()
             // No play/pause or skip glyphs on Apple TV: Select, the
             // Play/Pause button and the clickpad edges carry them.
-            if chrome.showsPlayPauseGlyph { centerRow }
+            // Not while waiting: the spinner is in the middle then, and a
+            // Play glyph over a stalled live frame read as "paused".
+            if chrome.showsPlayPauseGlyph, !model.showsWaitingIndicator { centerRow }
             Spacer()
             bottomBar
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
@@ -482,11 +493,22 @@ struct AppleTransportOverlay: View {
     /// The coordinator's waiting message is exposed only as an accessibility
     /// label.
     private var waitingIndicator: some View {
-        ProgressView()
-            .progressViewStyle(.circular)
-            .tint(.white)
-            .controlSize(.large)
-            .accessibilityLabel(model.waitingText)
+        VStack(spacing: AppleDesignTokens.spacingMedium) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+                .controlSize(.large)
+            // A stalled live channel says it is coming back.
+            if model.showsReconnecting {
+                Text("Reconnecting…")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .appleTransportGlyphLegibility()
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.showsReconnecting ? "Reconnecting" : model.waitingText)
     }
 
     // MARK: - Skip intro
@@ -627,13 +649,15 @@ struct AppleTransportOverlay: View {
     /// Big centered play/pause flanked by 10 s skip buttons.
     private var centerRow: some View {
         HStack(spacing: 48) {
-            if model.canSkip { skipButton(seconds: -10, systemName: "gobackward.10") }
+            // No ±10 s on live: the LIVE scrubber is how a channel rewinds.
+            if model.canSkip, !model.isLive { skipButton(seconds: -10, systemName: "gobackward.10") }
             Button {
                 model.togglePlayPause()
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 34))
                     .foregroundStyle(.white)
+                    .appleTransportGlyphLegibility()
                     .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
                     .contentShape(.rect)
             }
@@ -646,7 +670,7 @@ struct AppleTransportOverlay: View {
             .focusable()
             #endif
 
-            if model.canSkip { skipButton(seconds: 10, systemName: "goforward.10") }
+            if model.canSkip, !model.isLive { skipButton(seconds: 10, systemName: "goforward.10") }
         }
     }
 
@@ -658,6 +682,7 @@ struct AppleTransportOverlay: View {
             Image(systemName: systemName)
                 .font(.system(size: 34))
                 .foregroundStyle(.white)
+                .appleTransportGlyphLegibility()
                 .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
                 .contentShape(.rect)
         }
@@ -728,12 +753,14 @@ private struct AppleTransportScrubberRow: View {
         Text(model.positionText)
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white)
+            .appleTransportGlyphLegibility()
     }
 
     private var remainingLabel: some View {
         Text(remainingText)
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white)
+            .appleTransportGlyphLegibility()
     }
 
     #if !os(tvOS)
@@ -951,13 +978,28 @@ enum AppleTVSkipIntroFocusPolicy {
 /// row is taller and the cue was drawn across the scrubber line (full test
 /// 2026-10-01). While the controls show, the cue clears the measured bottom
 /// bar plus a gap; hidden, it rests near the bottom.
+extension View {
+    /// A soft shadow on a transport glyph or time, so it stays readable over
+    /// bright video (iPad v2 re-run: icons vanished over a light frame). On
+    /// the glyph only: no scrim or gradient over the picture (AGENTS.md §4).
+    func appleTransportGlyphLegibility() -> some View {
+        shadow(color: .black.opacity(0.6), radius: 3, x: 0, y: 1)
+    }
+}
+
 enum AppleSubtitleCueLift {
     static let hidden: CGFloat = 24
     static let minimumVisible: CGFloat = 100
     static let gapAboveControls: CGFloat = 40
 
-    static func lift(controlsVisible: Bool, bottomBarHeight: CGFloat) -> CGFloat {
-        guard controlsVisible else { return hidden }
-        return max(minimumVisible, bottomBarHeight + gapAboveControls)
+    /// The gap between a caption and a card drawn under it.
+    static let gapAbovePrompt: CGFloat = 12
+
+    /// `promptTop` is how far above the bottom the Next Episode card's top
+    /// edge sits, or 0 with no card. Captions clear it whether or not the
+    /// controls are showing.
+    static func lift(controlsVisible: Bool, bottomBarHeight: CGFloat, promptTop: CGFloat = 0) -> CGFloat {
+        let base = controlsVisible ? max(minimumVisible, bottomBarHeight + gapAboveControls) : hidden
+        return promptTop > 0 ? max(base, promptTop + gapAbovePrompt) : base
     }
 }

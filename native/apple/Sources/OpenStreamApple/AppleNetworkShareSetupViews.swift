@@ -428,6 +428,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var addressField: some View {
         TextField("Server or IP", text: $setup.address, prompt: appleSecondaryFieldPrompt("Server or IP"))
+            .accessibilityLabel("Server or IP")
             .appleTVFieldOutline()
             .textContentType(.URL)
             #if os(iOS) || os(tvOS) || os(visionOS)
@@ -442,6 +443,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var portField: some View {
         TextField("Port", text: $setup.port, prompt: appleSecondaryFieldPrompt("445"))
+            .accessibilityLabel("Port")
             .appleTVFieldOutline()
             #if os(iOS) || os(visionOS)
             .keyboardType(.numberPad)
@@ -451,6 +453,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var usernameField: some View {
         TextField("Username", text: $setup.username, prompt: appleSecondaryFieldPrompt("Username"))
+            .accessibilityLabel("Username")
             .appleTVFieldOutline()
             .textContentType(.username)
             #if os(iOS) || os(tvOS) || os(visionOS)
@@ -467,6 +470,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var domainField: some View {
         TextField("Domain", text: $setup.domain, prompt: appleSecondaryFieldPrompt("Domain"))
+            .accessibilityLabel("Domain")
             .appleTVFieldOutline()
             #if os(iOS) || os(tvOS) || os(visionOS)
             .textInputAutocapitalization(.never)

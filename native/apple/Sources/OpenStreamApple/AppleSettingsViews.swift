@@ -58,6 +58,11 @@ struct AppleSettingsView: View {
     let webManagement: any AppleWebManagementServing
     var backupController: AppleConfigurationController? = nil
     var catalogStore: AppleCatalogStore? = nil
+    /// Set on a regular-width iPad in landscape: Settings draws its own split
+    /// view, sections on the left and the chosen page on the right, with this
+    /// as the right column's stack. Nil pushes everything on one stack.
+    var splitPath: Binding<NavigationPath>? = nil
+    @State private var splitSelection: AppleSettingsRoute = .sources
 
     var body: some View {
         #if os(tvOS)
@@ -66,12 +71,50 @@ struct AppleSettingsView: View {
                 destination(for: route)
             }
         #else
-        rootForm
-            .navigationDestination(for: AppleSettingsRoute.self) { route in
-                destination(for: route)
+        if let splitPath {
+            NavigationSplitView {
+                rootForm
+            } detail: {
+                NavigationStack(path: splitPath) {
+                    destination(for: splitSelection)
+                        .navigationDestination(for: AppleSettingsRoute.self) { route in
+                            destination(for: route)
+                        }
+                }
             }
+            .navigationSplitViewStyle(.balanced)
+        } else {
+            rootForm
+                .navigationDestination(for: AppleSettingsRoute.self) { route in
+                    destination(for: route)
+                }
+        }
         #endif
     }
+
+    #if !os(tvOS)
+    /// A row that opens a settings page: pushed on the stack, or shown in the
+    /// split view's right column with the row marked as the one showing.
+    @ViewBuilder
+    private func settingsLink<Label: View>(_ route: AppleSettingsRoute, @ViewBuilder label: () -> Label) -> some View {
+        if let splitPath {
+            let isSelected = splitSelection == route
+            Button {
+                splitSelection = route
+                splitPath.wrappedValue = NavigationPath()
+            } label: {
+                label()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+            }
+            .foregroundStyle(.primary)
+            .listRowBackground(isSelected ? Color.secondary.opacity(0.3) : nil)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+        } else {
+            NavigationLink(value: route, label: label)
+        }
+    }
+    #endif
 
     @ViewBuilder
     private func destination(for route: AppleSettingsRoute) -> some View {
@@ -121,7 +164,7 @@ struct AppleSettingsView: View {
             ForEach(AppleSettingsRootEntry.leadingSections, id: \.self) { entries in
                 Section {
                     ForEach(entries, id: \.self) { entry in
-                        NavigationLink(value: entry.route) {
+                        settingsLink(entry.route) {
                             AppleTVNavigationLabel(entry.title, systemImage: entry.systemImage)
                         }
                         .appleTVReadableFocus()
@@ -134,7 +177,7 @@ struct AppleSettingsView: View {
                     .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
                 Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
-                NavigationLink(value: AppleSettingsRoute.discoverRows) {
+                settingsLink(AppleSettingsRoute.discoverRows) {
                     AppleTVNavigationLabel("Discover Rows")
                 }
                 .appleTVReadableFocus()
@@ -155,44 +198,44 @@ struct AppleSettingsView: View {
             }
 
             Section("Services") {
-                NavigationLink(value: AppleSettingsRoute.metadata) {
+                settingsLink(AppleSettingsRoute.metadata) {
                     AppleTVNavigationLabel("Metadata", systemImage: "photo.on.rectangle.angled")
                 }
                 .appleTVReadableFocus()
-                NavigationLink(value: AppleSettingsRoute.watchProviders) {
+                settingsLink(AppleSettingsRoute.watchProviders) {
                     AppleTVNavigationLabel("Streaming Services", systemImage: "rectangle.stack.badge.play")
                 }
                 .appleTVReadableFocus()
-                NavigationLink(value: AppleSettingsRoute.serverDownloads) {
+                settingsLink(AppleSettingsRoute.serverDownloads) {
                     AppleTVNavigationLabel("Radarr & Sonarr", systemImage: "arrow.down.circle")
                 }
                 .appleTVReadableFocus()
-                NavigationLink(value: AppleSettingsRoute.trakt) {
+                settingsLink(AppleSettingsRoute.trakt) {
                     AppleTVNavigationLabel("Trakt", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .appleTVReadableFocus()
             }
 
             Section("Playback") {
-                NavigationLink(value: AppleSettingsRoute.playback) {
+                settingsLink(AppleSettingsRoute.playback) {
                     AppleTVNavigationLabel("Playback", systemImage: "play.circle")
                 }
                 .appleTVReadableFocus()
             }
 
             Section("Privacy") {
-                NavigationLink(value: AppleSettingsRoute.privacy) {
+                settingsLink(AppleSettingsRoute.privacy) {
                     AppleTVNavigationLabel("Privacy", systemImage: "hand.raised")
                 }
                 .appleTVReadableFocus()
             }
 
             Section {
-                NavigationLink(value: AppleSettingsRoute.storage) {
+                settingsLink(AppleSettingsRoute.storage) {
                     AppleTVNavigationLabel("Storage", systemImage: "internaldrive")
                 }
                 .appleTVReadableFocus()
-                NavigationLink(value: AppleSettingsRoute.about) {
+                settingsLink(AppleSettingsRoute.about) {
                     AppleTVNavigationLabel("About", systemImage: "info.circle")
                 }
                 .appleTVReadableFocus()

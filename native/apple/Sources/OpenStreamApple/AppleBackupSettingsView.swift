@@ -42,6 +42,7 @@ struct AppleBackupSettingsView: View {
             }
             Section {
                 SecureField("Passphrase for another Apple Account", text: $passphrase)
+                    .accessibilityLabel("Passphrase for another Apple Account")
                     .textContentType(.password)
                     .focused($passphraseFocused)
                     .accessibilityIdentifier("backup.passphrase")
@@ -227,6 +228,7 @@ private struct AppleBackupImportView: View {
                 if preview.needsPassphrase {
                     Section {
                         SecureField("Passphrase", text: $passphrase)
+                            .accessibilityLabel("Passphrase")
                             .textContentType(.password)
                             .accessibilityIdentifier("backup.import.passphrase")
                     }

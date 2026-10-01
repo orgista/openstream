@@ -26,6 +26,8 @@ struct AppleLiveTVView: View {
     @State private var channelsRevision = 0
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// Playlists that failed while others loaded; shown inline with Retry.
+    @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
     @State private var query = ""
     @State private var selectedCategory = "All"
     @State private var selectedChannel: AppleIPTVChannel?
@@ -211,6 +213,27 @@ struct AppleLiveTVView: View {
                     // Not an explainer: the count is the whole message, and the
                     // way to narrow it is the package picker the viewer already
                     // has. Silent truncation was the thing to avoid.
+                    // A playlist that failed while the others loaded: its
+                    // error in place, with Retry, not a blocked tab.
+                    ForEach(sourceFailures) { failure in
+                        HStack(spacing: AppleDesignTokens.spacingMedium) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .accessibilityHidden(true)
+                            Text(failure.text)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Retry") { Task { await reload() } }
+                                .buttonStyle(.bordered)
+                                .accessibilityLabel("Retry \(failure.sourceName)")
+                        }
+                        .font(AppleDesignTokens.fontCaption)
+                        .foregroundStyle(AppleDesignTokens.textSecondary)
+                        .padding(.horizontal, AppleDesignTokens.spacingMedium)
+                        .padding(.vertical, 6)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("live.sourceError")
+                    }
+
                     if channelSnapshot.hiddenCount > 0 {
                         Text("Showing \(channelSnapshot.channels.count) of \(channelSnapshot.channels.count + channelSnapshot.hiddenCount) channels")
                             .font(AppleDesignTokens.fontCaption)
@@ -434,6 +457,7 @@ struct AppleLiveTVView: View {
             channelGroups = []
             channelsRevision &+= 1
             errorMessage = nil
+            sourceFailures = []
             return
         }
         isLoading = true
@@ -443,55 +467,89 @@ struct AppleLiveTVView: View {
         // channels took 2137 ms before the guide could draw anything
         // (2026-09-15); a lineup changes rarely, so the saved copy goes up at
         // once and the network answer replaces it underneath.
-        if channels.isEmpty {
-            var cached: [AppleIPTVChannel] = []
-            for source in sources {
-                if let snapshot = await AppleIPTVChannelCache.shared.snapshot(for: source.id) {
-                    cached.append(contentsOf: snapshot.channels)
-                }
+        var cached: [UUID: [AppleIPTVChannel]] = [:]
+        for source in sources {
+            if let snapshot = await AppleIPTVChannelCache.shared.snapshot(for: source.id) {
+                cached[source.id] = snapshot.channels
             }
-            if !cached.isEmpty, !Task.isCancelled {
-                channelIndex = AppleIPTVChannelIndex(cached)
-                channelsRevision &+= 1
-                #if DEBUG
-                AppleLaunchClock.mark("live.cached(\(cached.count))")
-                #endif
-            }
+        }
+        var load = AppleLiveSourceLoad(sources: sources, cached: cached)
+        if channels.isEmpty, !load.channels.isEmpty, !Task.isCancelled {
+            channelIndex = AppleIPTVChannelIndex(load.channels)
+            channelsRevision &+= 1
+            #if DEBUG
+            AppleLaunchClock.mark("live.cached(\(load.channels.count))")
+            #endif
         }
 
-        var loaded: [AppleIPTVChannel] = []
-        var errors: [String] = []
+        // Every playlist at once: a dead panel's timeout no longer holds up
+        // the others, and each one's channels go up as it answers.
+        let iptvClient = client
+        var requests: [(source: AppleSource, credentials: AppleIPTVCredentials?)] = []
         for source in sources {
             do {
-                let sourceChannels = try await client.channels(
-                    source: source,
-                    credentials: try sourceStore.iptvCredentials(for: source)
-                )
-                loaded.append(contentsOf: sourceChannels)
-                await AppleIPTVChannelCache.shared.store(sourceChannels, for: source.id)
-                sourceStore.recordValidationSuccess(
-                    id: source.id,
-                    summary: "Connected · \(sourceChannels.count) channels",
-                    discoveredItemCount: sourceChannels.count,
-                    capabilities: ["Live channels", "Playback"]
-                )
-                try? await mediaIndex.replace(
-                    instanceID: source.id,
-                    with: AppleMediaIngestion.channelRecords(source: source, channels: sourceChannels)
-                )
-            } catch is CancellationError {
-                return
+                requests.append((source, try sourceStore.iptvCredentials(for: source)))
             } catch {
                 sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
-                errors.append("\(source.name): \(error.localizedDescription)")
+                load.failed(source.id, message: error.localizedDescription)
             }
         }
-        channelIndex = AppleIPTVChannelIndex(loaded)
+        let cancelled = await withTaskGroup(of: (AppleSource, Result<[AppleIPTVChannel], any Error>).self) { group in
+            for request in requests {
+                group.addTask {
+                    do {
+                        return (request.source, .success(try await iptvClient.channels(
+                            source: request.source, credentials: request.credentials)))
+                    } catch {
+                        return (request.source, .failure(error))
+                    }
+                }
+            }
+            for await (source, result) in group {
+                switch result {
+                case .success(let sourceChannels):
+                    load.succeeded(source.id, channels: sourceChannels)
+                    await AppleIPTVChannelCache.shared.store(sourceChannels, for: source.id)
+                    sourceStore.recordValidationSuccess(
+                        id: source.id,
+                        summary: "Connected · \(sourceChannels.count) channels",
+                        discoveredItemCount: sourceChannels.count,
+                        capabilities: ["Live channels", "Playback"]
+                    )
+                    try? await mediaIndex.replace(
+                        instanceID: source.id,
+                        with: AppleMediaIngestion.channelRecords(source: source, channels: sourceChannels)
+                    )
+                case .failure(let error):
+                    if error is CancellationError || Task.isCancelled {
+                        group.cancelAll()
+                        return true
+                    }
+                    sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
+                    load.failed(source.id, message: error.localizedDescription)
+                }
+                channelIndex = AppleIPTVChannelIndex(load.channels)
+                channelsRevision &+= 1
+                sourceFailures = load.failures
+                if !load.channels.isEmpty { isLoading = false }
+                startFirstChannelIfNeeded()
+            }
+            return false
+        }
+        guard !cancelled else { return }
+        channelIndex = AppleIPTVChannelIndex(load.channels)
         channelsRevision &+= 1
         #if DEBUG
-        AppleLaunchClock.mark("live.channels(\(loaded.count))")
+        AppleLaunchClock.mark("live.channels(\(load.channels.count))")
         #endif
-        errorMessage = errors.first
+        sourceFailures = load.failures
+        errorMessage = load.failures.first?.text
+        startFirstChannelIfNeeded()
+    }
+
+    /// Fills the player with the last-watched channel (or the first) once
+    /// any playlist has answered, rather than after the slowest one.
+    private func startFirstChannelIfNeeded() {
         if selectedChannel == nil, !sharePlay.isActive, let channel = lastWatchedChannel ?? channels.first {
             // On Apple TV this only fills the Now Playing strip; playback
             // starts from the guide, never on its own.
@@ -1868,6 +1926,7 @@ struct AppleTVChannelSearchEditor: View {
         Form {
             Section {
                 TextField("Channel or group", text: $query)
+                    .accessibilityLabel("Search channels or groups")
             }
             if !query.isEmpty {
                 Section {
