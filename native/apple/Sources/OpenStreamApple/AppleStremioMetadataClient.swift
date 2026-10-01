@@ -236,11 +236,16 @@ public enum AppleStremioEpisodePolicy {
         let ordered = episodes(in: nil, from: allEpisodes)
         let regular = ordered.filter { $0.season != 0 }
         let candidates = regular.isEmpty ? ordered : regular
+        // Nothing watched (or all watched): a daily soap starts at its latest
+        // season, any other show at its first episode.
+        let start = initialSeason(in: allEpisodes)
+            .flatMap { season in candidates.first { $0.season == season } }
+            ?? candidates.first
         guard let last = candidates.lastIndex(where: { completedIDs.contains($0.id) }) else {
-            return candidates.first
+            return start
         }
         return candidates[candidates.index(after: last)...].first { !completedIDs.contains($0.id) }
-            ?? candidates.first
+            ?? start
     }
 
     /// The episode the title page selects in `season`: Up Next when it is in

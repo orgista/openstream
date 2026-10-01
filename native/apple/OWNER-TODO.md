@@ -12,9 +12,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       exact title first (stale half-typed results re-ranked), Show Captions opens on the checked value, My Channels
       spinner. Done, unit-tested only (needs a real-stream check on the Apple TV): 1 captions stay above the
       scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
-      last 20 s), Resume label. Still open:
-      4. Long series now load every episode (Goede Tijden 7,333, was 1,000), but the tvOS title page still opens on
-         Season 1 instead of the latest season.
+      last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
+      nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
       chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
       1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,

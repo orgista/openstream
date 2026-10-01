@@ -55,4 +55,15 @@ struct AppleEpisodeOrderTests {
         let short = [episode("a", 2, 1), episode("b", 1, 1)]
         #expect(AppleStremioEpisodePolicy.initialSeason(in: short) == 1)
     }
+
+    @Test func dailySoapUpNextStartsInLatestSeasonUnlessWatched() {
+        let soap: [AppleStremioEpisode] = (1...37).flatMap { (season: Int) in
+            (1...30).map { (number: Int) in episode("s\(season)e\(number)", season, number) }
+        }
+        #expect(AppleStremioEpisodePolicy.upNext(from: soap, completedIDs: [])?.season == 37)
+        // A watched episode still wins: Up Next follows it.
+        #expect(AppleStremioEpisodePolicy.upNext(from: soap, completedIDs: ["s1e1"])?.id == "s1e2")
+        let short = [episode("a", 1, 1), episode("b", 2, 1)]
+        #expect(AppleStremioEpisodePolicy.upNext(from: short, completedIDs: [])?.season == 1)
+    }
 }
