@@ -55,7 +55,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       changes are published; keep rebased on upstream). Phase 1 DONE (disc menu structure, button highlights, the
       DVD menu "brain", 70 tests, test disc) on branch dvd-menus in ~/Developer/openstream-build/AetherEngine-fork —
       NOT pushed: pushing was blocked by permissions. Owner: run `cd ~/Developer/openstream-build/AetherEngine-fork &&
-      git push -u origin dvd-menus` or allow it. Phase 2 (menus on screen + remote) running, ~4–6 days.
+      git push -u origin dvd-menus` or allow it. Phase 2 DONE (6 commits on dvd-menus): menus play on screen with
+      button highlights, remote/touch/pointer input, stills, setup menus, Play Disc (`.menu`) vs Skip to Movie;
+      97 DVD tests incl. an end-to-end menu → title → back-to-menu test. Open: menus are silent, resume restarts
+      the cell, tiny gap on looping menus, multi-angle, no real-disc/Apple TV test yet. Phase 3 (wire into the app)
+      needs the fork pushed so the app can depend on it.
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
