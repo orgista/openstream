@@ -26,9 +26,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       verify (specs/full-test-checklist-v3.md). Top gaps being fixed now: subtitle delay/frame-rate fix, preferred
       audio language, Spotlight opens the title, add-on catalog paging, Now Playing artwork/episode info, DV MP4
       mislabelled "truncated". 20 more Muse jobs queued on ServerPlus (disc menus, DV, subtitles, IPTV, App Review…).
-- [ ] **ISO / disc images (owner 2026-10-01):** today ISOs (DVD + Blu-ray, decrypted) play the main title only — no
-      menus. Want: (1) at minimum real DVD menu playback for ISOs; (2) distinguish disc images in the library, maybe a
-      small DVD spinner — research other apps' looks first, owner picks before we build. Research running.
+- [ ] **ISO / disc images (owner 2026-10-01):** today ISOs play the main title only. DECIDED: Apple disc symbol in the
+      poster corner (A2) + that symbol spinning while the disc opens (S1); "Play Disc" opens the real DVD menu first,
+      "Skip to Movie" plays the main title (D2) — menus are part of the experience; Disc Menu button in the player (P1).
+      Engine forked (github.com/cyberbanksy/AetherEngine, public — LGPL-3.0 + App Store exception, so our engine
+      changes are published; keep rebased on upstream). DVD menu player phase 1 (disc structure + menu logic) running.
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
