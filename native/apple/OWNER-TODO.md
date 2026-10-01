@@ -16,8 +16,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **iPad regression of today's fixes (2026-10-01):** 10/11 pass (Resume, latest season, next episode, captions,
       IPTV error ~9 s, configure-first, Remove from CW, rotation, search, 0 crashes). Open:
-      1. HIGH: switching tabs and back to an open title page starts playback by itself ~2 s later; for a series it
-         plays the wrong episode (Friends S1E2 → a season-9 file) and wipes that episode's Resume. Fix running.
+      1. FIXED (sim-checked on iPad): switching tabs back to a title page no longer starts playback by itself
+         (it replayed ~2 s later; series played a wrong episode and wiped Resume). Likely in builds since 09-25.
       2. Question: after Remove from Continue Watching the title page still says Resume (progress kept). Intended?
 - [ ] **Apple TV check of 630db1d (2026-10-01):** pass: Goede Tijden opens on Season 37, stock player advances to the
       next episode, widescreen captions clear the scrubber, SNL 1975 first, Clear Cache readable, 0 crashes.
