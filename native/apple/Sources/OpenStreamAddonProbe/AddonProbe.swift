@@ -54,7 +54,7 @@ struct AddonProbe {
         }
         if info.rawCatalogCount > 0, info.appCatalogCount == AppleStremioManifest.maximumCatalogs,
            info.rawCatalogCount - info.ignoredCatalogTypes.values.reduce(0, +) > AppleStremioManifest.maximumCatalogs {
-            result.notes.append("12-catalog cap hides catalogs")
+            result.notes.append("100-catalog manifest cap hides catalogs")
         }
         if let raw, !manifest.resources.isEmpty, raw.resourceNames.isEmpty == false,
            Set(raw.resourceNames.map { $0.lowercased() }) != Set(manifest.resources) {
@@ -302,7 +302,7 @@ struct AddonProbe {
         do {
             let details = try await withStageTimeout(.seconds(20)) {
                 try await client.details(source: source, type: target.type, mediaID: target.id,
-                                         isListingSource: target.fromCatalog)
+                                         isListingSource: target.fromCatalog, fallbackName: ownItem?.name)
             }
             probe.httpStatus = recorder.lastResponse?.status
             probe.outcome = .init(status: .pass, detail: details.title.map { _ in "details ok" } ?? "details (no title)")

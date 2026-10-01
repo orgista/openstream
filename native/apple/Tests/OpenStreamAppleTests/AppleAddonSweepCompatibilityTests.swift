@@ -168,7 +168,7 @@ struct AppleNamelessCatalogItemTests {
         let body = #"""
         {"metas":[
           {"id":"tmdb:31132","type":"series","poster":"https://img.fixture.example/p.jpg"},
-          {"id":"tt0000002","type":"series"},
+          {"id":"tmdb:2","type":"series"},
           {"id":"tmdb:15260","type":"series","name":"  ","poster":"https://img.fixture.example/q.jpg"},
           {"id":"tmdb:1","type":"series","name":"Named"}
         ]}
@@ -326,5 +326,126 @@ struct AppleUnconfiguredManifestTests {
         let manifest = try #require(URL(string: "https://addon.fixture.example/manifest.json"))
         #expect(AppleManifestURLPolicy.configureURL(forManifest: manifest)?.absoluteString
             == "https://addon.fixture.example/configure")
+    }
+}
+
+// MARK: - Add-on sweep 2026-10-01 gaps
+
+@Suite("Sweep 2026-10-01: other catalog types end to end")
+struct AppleOtherCatalogTypeEndToEndTests {
+    @Test func anEventsItemBrowsesOpensAndAsksForStreamsUnderItsType() async throws {
+        let events = AppleStremioCatalog(type: "events", id: "today")
+        let source = SweepFixture.source(resources: ["catalog", "meta", "stream"], catalogs: [events])
+        let items = try await SweepFixture.catalogClient(
+            #"{"metas":[{"id":"ev:1","name":"Final","poster":"https://img.fixture.example/e.png"}]}"#
+        ).load(source: source, catalog: events)
+        let item = try #require(items.first)
+        #expect(item.type == "events")
+
+        let meta = AppleStremioMetadataClient(loader: { request in
+            #expect(request.url?.path.hasPrefix("/meta/events/") == true)
+            return (Data(#"{"meta":{"id":"ev:1","type":"events","name":"Final"}}"#.utf8), SweepFixture.response(request))
+        })
+        let details = try await meta.details(source: source, type: item.type, mediaID: item.mediaID, isListingSource: true)
+        #expect(details.title == "Final")
+
+        let playback = AppleStremioPlaybackClient(loader: { request in
+            #expect(request.url?.path.hasPrefix("/stream/events/") == true)
+            return (Data(#"{"streams":[{"url":"https://media.fixture.example/e.m3u8","title":"Live"}]}"#.utf8),
+                    SweepFixture.response(request))
+        })
+        let streams = try await playback.streams(source: source, type: item.type, mediaID: item.mediaID)
+        #expect(streams.httpCandidates.count == 1)
+    }
+
+    @Test func catalogsHaveAtLeastTheMetaAnswerCap() {
+        #expect(AppleStremioCatalogClient.maximumResponseBytes >= AppleStremioMetadataClient.maximumMetaResponseBytes)
+        #expect(AppleStremioCatalogClient.maximumResponseBytes > AppleStremioPlaybackClient.maximumResponseBytes)
+    }
+}
+
+@Suite("Sweep 2026-10-01: entries with only an id")
+struct AppleIDOnlyCatalogItemTests {
+    /// TorrentFreaks Top-10: every entry is `{type, id}` and the add-on
+    /// serves no meta; IMDb ids are filled from Cinemeta's art and meta.
+    @Test func bareIMDbEntriesAreKeptWithoutACaption() async throws {
+        let catalog = AppleStremioCatalog(type: "movie", id: "torrentfreak-movies")
+        let source = SweepFixture.source(catalogs: [catalog])
+        let items = try await SweepFixture.catalogClient(
+            #"{"metas":[{"type":"movie","id":"tt0000101"},{"type":"movie","id":"tt0000102"},{"type":"movie","id":"x:1"}]}"#
+        ).load(source: source, catalog: catalog)
+        #expect(items.map(\.mediaID) == ["tt0000101", "tt0000102"])
+        #expect(items.allSatisfy { $0.name.isEmpty && $0.posterURL == nil })
+        #expect(items.first?.accessibilityTitle == "Movie tt0000101")
+    }
+
+    @Test func anAddOnWithMetaKeepsItsOwnIDOnlyEntries() async throws {
+        let catalog = AppleStremioCatalog(type: "series", id: "own")
+        let body = #"{"metas":[{"type":"series","id":"own:1"}]}"#
+        let withMeta = SweepFixture.source(resources: ["catalog", "meta"], catalogs: [catalog])
+        let withoutMeta = SweepFixture.source(catalogs: [catalog])
+        #expect(try await SweepFixture.catalogClient(body).load(source: withMeta, catalog: catalog).map(\.mediaID) == ["own:1"])
+        #expect(try await SweepFixture.catalogClient(body).load(source: withoutMeta, catalog: catalog).isEmpty)
+    }
+}
+
+@Suite("Sweep 2026-10-01: lenient meta answers")
+struct AppleLenientMetaTests {
+    private let source = SweepFixture.source(resources: ["catalog", "meta"], catalogs: [])
+
+    private func client(_ body: String) -> AppleStremioMetadataClient {
+        AppleStremioMetadataClient(loader: { request in (Data(body.utf8), SweepFixture.response(request)) })
+    }
+
+    @Test func aMetaObjectAtTheRootIsTheMeta() async throws {
+        let details = try await client(#"{"id":"tmdb:1","type":"movie","name":"Root Film","description":"Plot"}"#)
+            .details(source: source, type: "movie", mediaID: "tmdb:1")
+        #expect(details.title == "Root Film")
+        #expect(details.overview == "Plot")
+    }
+
+    @Test func aMetaWithoutAnIDAnswersForTheRequestedID() async throws {
+        let details = try await client(#"{"meta":{"type":"series","name":"No ID"}}"#)
+            .details(source: source, type: "series", mediaID: "tt0000201")
+        #expect(details.mediaID == "tt0000201")
+        #expect(details.title == "No ID")
+    }
+
+    @Test func aMetaWithoutANameTakesTheCatalogItemsName() async throws {
+        let body = #"{"meta":{"id":"tt0000301","type":"movie","description":"Plot"}}"#
+        let details = try await client(body)
+            .details(source: source, type: "movie", mediaID: "tt0000301", fallbackName: "From Catalog")
+        #expect(details.title == "From Catalog")
+        await #expect(throws: AppleStremioPlaybackError.invalidPayload) {
+            try await client(body).details(source: source, type: "movie", mediaID: "tt0000301")
+        }
+    }
+
+    @Test(arguments: [#"{"meta":null}"#, #"{"meta":{}}"#, #"{"metas":[]}"#, #"{"err":"not found"}"#, "[]"])
+    func anAnswerWithNoMetaIsStillRefused(_ body: String) async {
+        await #expect(throws: AppleStremioPlaybackError.invalidPayload) {
+            try await client(body).details(source: source, type: "movie", mediaID: "tt0000401", fallbackName: "Name")
+        }
+    }
+
+    @Test func anotherAddOnsMetaUnderADifferentIDIsStillRefused() async {
+        await #expect(throws: AppleStremioPlaybackError.invalidPayload) {
+            try await client(#"{"id":"tt9999999","name":"Wrong"}"#)
+                .details(source: source, type: "movie", mediaID: "tt0000501")
+        }
+    }
+}
+
+@Suite("Sweep 2026-10-01: many catalogs on Discover")
+struct AppleManyCatalogRowsTests {
+    @Test func upToFortyRowsPerAddOn() {
+        let catalogs = (0 ..< 60).map { AppleStremioCatalog(type: "tvgarden", id: "c\($0)") }
+        var source = SweepFixture.source(catalogs: catalogs)
+        #expect(AppleCatalogDiscoveryPolicy.hardMaximumCatalogs == 40)
+        #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source).count == AppleCatalogDiscoveryPolicy.defaultMaximumCatalogs)
+        #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source, maximumCatalogs: 100).count == 40)
+        source.catalogChoices = Dictionary(uniqueKeysWithValues: catalogs.map { (AppleCatalogDiscoveryPolicy.choiceKey($0), true) })
+        #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source).map(\.id) == (0 ..< 40).map { "c\($0)" })
+        #expect(AppleCatalogDiscoveryPolicy.maximumConcurrentRequests <= 4)
     }
 }

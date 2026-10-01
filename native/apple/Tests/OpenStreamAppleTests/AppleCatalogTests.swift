@@ -176,7 +176,7 @@ func catalogClientAcceptsCinemetaImdbIDPayloads() async throws {
     let discoveryCatalogs = AppleCatalogDiscoveryPolicy.catalogs(for: source)
     #expect(discoveryCatalogs.count == 8)
     #expect(discoveryCatalogs.map(\.requiresInput) == Array(repeating: false, count: 8))
-    #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source, maximumCatalogs: 100).count == 12)
+    #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source, maximumCatalogs: 100).count == 14)
 
     let client = AppleStremioCatalogClient { request in
         Issue.record("No request should be made for an unadvertised catalog: \(request)")

@@ -5890,6 +5890,7 @@ struct AppleCatalogItemDetailView: View {
         let preferredSourceID = source.id
         let type = item.type
         let catalogID = item.mediaID
+        let itemName = item.name
         let configuration = metadataConfiguration
         // The episodeList.episodes and details requests go out before this task gets
         // the main actor back: the page is still being built then, and
@@ -5916,7 +5917,8 @@ struct AppleCatalogItemDetailView: View {
                     preferredSourceID: preferredSourceID,
                     type: type,
                     mediaID: mediaID,
-                    configuration: configuration
+                    configuration: configuration,
+                    fallbackName: itemName
                 ))
             }
         }

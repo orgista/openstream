@@ -370,11 +370,16 @@ public struct AppleStremioMetadataClient: Sendable {
     /// the request even under another id (Stravo asked `mx:…` answers `tt…`,
     /// Raccoonmendations asked `tmdb:…` answers the bare number); the result
     /// keeps the requested id.
+    ///
+    /// `fallbackName`: the catalog item's name, for a meta that comes
+    /// without one. A meta object at the root (no `meta` key) is read as the
+    /// meta, and one without an `id` answers for the requested id.
     public func details(
         source: AppleSource,
         type: String,
         mediaID: String,
-        isListingSource: Bool = false
+        isListingSource: Bool = false,
+        fallbackName: String? = nil
     ) async throws -> AppleTMDBDetails {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -389,13 +394,14 @@ public struct AppleStremioMetadataClient: Sendable {
         let endpoint = try Self.endpoint(source: source, type: cleanType, mediaID: cleanID)
 
         @Sendable func decode(data: Data) throws -> AppleTMDBDetails {
-            guard let envelope = try? JSONDecoder().decode(DetailsEnvelope.self, from: data) else {
+            guard let value = (try? JSONDecoder().decode(DetailsEnvelope.self, from: data))?.meta,
+                  value.id != nil || value.name != nil else {
                 throw AppleStremioPlaybackError.invalidPayload
             }
-            let value = envelope.meta
             let responseID = value.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let title = value.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard Self.metaAnswers(requestedID: cleanID, responseID: responseID, isListingSource: isListingSource),
+            let title = Self.nonEmpty(value.name) ?? Self.nonEmpty(fallbackName) ?? ""
+            guard responseID.isEmpty
+                    || Self.metaAnswers(requestedID: cleanID, responseID: responseID, isListingSource: isListingSource),
                   !title.isEmpty else {
                 throw AppleStremioPlaybackError.invalidPayload
             }
@@ -936,8 +942,30 @@ public struct AppleStremioMetadataClient: Sendable {
         let meta: Metadata
     }
 
+    /// `{"meta":{…}}`, or the meta object itself at the root (Cartoon
+    /// Network, Nickelodeon, Viva Max: add-on sweep 2026-10-01). A `meta`
+    /// key that is null or not an object leaves `meta` nil.
     private struct DetailsEnvelope: Decodable {
-        let meta: DetailsMeta
+        let meta: DetailsMeta?
+
+        private struct Key: CodingKey {
+            let stringValue: String
+            var intValue: Int? { nil }
+            init(_ value: String) { stringValue = value }
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Key.self)
+            if container.contains(Key("meta")) {
+                meta = try? container.decode(DetailsMeta.self, forKey: Key("meta"))
+            } else if container.contains(Key("id")) || container.contains(Key("name")) {
+                meta = try? DetailsMeta(from: decoder)
+            } else {
+                meta = nil
+            }
+        }
     }
 
     private struct DetailsMeta: Decodable {

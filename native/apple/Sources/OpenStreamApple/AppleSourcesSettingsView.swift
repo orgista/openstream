@@ -844,10 +844,11 @@ private struct AppleAddManifestSourceView: View {
 
             if let errorMessage {
                 Section {
+                    // "Configure first" is a state, not a failure: plain text.
                     Text(errorMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(configureURL == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                     if let configureURL {
-                        Link("Open Configure Page", destination: configureURL)
+                        Link("Open Configuration", destination: configureURL)
                             .accessibilityIdentifier("sources.catalog.configure")
                     }
                 }

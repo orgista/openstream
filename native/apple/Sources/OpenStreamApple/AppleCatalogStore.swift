@@ -3,9 +3,12 @@ import Observation
 
 public enum AppleCatalogDiscoveryPolicy {
     public static let defaultMaximumCatalogs = 8
-    public static let hardMaximumCatalogs = 12
+    /// The most rows one add-on can put on Discover. TVGardenio lists 172
+    /// catalogs; 12 hid most of them (add-on sweep 2026-10-01). Fetches still
+    /// go out `maximumConcurrentRequests` at a time.
+    public static let hardMaximumCatalogs = 40
     public static let maximumConcurrentRequests = 4
-    public static let maximumTotalRequests = 48
+    public static let maximumTotalRequests = 64
     public static let maximumItemsPerCatalog = 100
     public static let cacheFreshness: TimeInterval = 6 * 60 * 60
 
@@ -23,10 +26,11 @@ public enum AppleCatalogDiscoveryPolicy {
         let browsable = browsableCatalogs(for: source)
         guard !source.catalogChoices.isEmpty else { return Array(browsable.prefix(limit)) }
         let defaults = Set(browsable.prefix(limit).map(choiceKey))
-        return browsable.filter { catalog in
+        let chosen = browsable.filter { catalog in
             let key = choiceKey(catalog)
             return source.catalogChoices[key] ?? defaults.contains(key)
         }
+        return Array(chosen.prefix(hardMaximumCatalogs))
     }
 
     /// The `type:id` key a catalog choice is stored under.
@@ -428,6 +432,10 @@ public struct AppleStremioCatalogClient: Sendable {
         guard data.count <= Self.maximumResponseBytes else { throw AppleStremioCatalogError.responseTooLarge }
         let metas = try Self.decodeMetas(data)
 
+        // An entry with neither a name nor a poster can still be filled in:
+        // from the add-on's own meta, or for an IMDb id from Cinemeta's art
+        // and meta (TorrentFreaks Top-10 lists bare `{type, id}` entries).
+        let servesMeta = source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         var seen = Set<String>()
         var items: [AppleCatalogItem] = []
         items.reserveCapacity(min(metas.count, AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog))
@@ -443,11 +451,13 @@ public struct AppleStremioCatalogClient: Sendable {
                 ? AppleCatalogDiscoveryPolicy.isTitleType(type)
                 : AppleCatalogDiscoveryPolicy.isShelfType(type)
             // An entry with a poster but no name (Cartoon Network, Viva Max)
-            // is a poster-only tile; one with neither has nothing to draw.
+            // is a poster-only tile; one with neither is kept only when meta
+            // can fill it in, else it has nothing to draw.
             let posterURL = webURL(meta.poster)
             guard typeFits,
                   !mediaID.isEmpty,
-                  !name.isEmpty || posterURL != nil,
+                  !name.isEmpty || posterURL != nil || servesMeta
+                    || AppleStremioMetadataClient.isIMDBIdentifier(mediaID),
                   seen.insert(identity).inserted else {
                 continue
             }

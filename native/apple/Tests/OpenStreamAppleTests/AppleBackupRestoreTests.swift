@@ -21,6 +21,13 @@ struct AppleAddonURLSecretPolicyTests {
         "https://pages.fixture.example/stremio-dragonball-es-catalog/manifest.json",
         "https://pages.fixture.example/selecta-vision-stremio/manifest.json",
         "https://dev.fixture.example/stremio/archive.org-addon/manifest.json",
+        // Add-on sweep 2026-10-01: options with no key in them (Playlistio,
+        // DubbedAnimeFeed, HdHub shapes), as JSON text or base64 JSON.
+        "https://fixture.example/%7B%7D/manifest.json",
+        "https://fixture.example/%7B%22tmdbKey%22%3A%22%22%7D/manifest.json",
+        "https://fixture.example/eyJ0b3Jib3giOiJ1bnNldCIsInNvcnQiOiJkZXNjIn0/manifest.json",
+        "https://fixture.baby-beamup.club/eyJjYXRhbG9ncyI6WyJuZngiLCJobnAiXX0/manifest.json",
+        "https://fixture.example/eyJwcm92aWRlciI6ImRpcmVjdCIsIm0zdVVybCI6Imh0dHBzOi8vbGlzdHMuZml4dHVyZS5leGFtcGxlL2lwdHYvaW5kZXgubTN1IiwiZW5hYmxlRXBnIjpmYWxzZX0/manifest.json",
     ])
     func unconfiguredAddonsArePublic(_ text: String) throws {
         #expect(!AppleAddonURLSecretPolicy.isSecret(try url(text)))
@@ -29,13 +36,15 @@ struct AppleAddonURLSecretPolicyTests {
     @Test(arguments: [
         "https://torrentio.strem.fun/realdebrid=FIXTUREKEY%7Csort=qualitysize/manifest.json",
         "https://torrentio.strem.fun/sort=qualitysize|realdebrid=FIXTUREKEY/manifest.json",
-        "https://fixture.baby-beamup.club/eyJjYXRhbG9ncyI6WyJuZngiLCJobnAiXX0/manifest.json",
         "https://fixture.baby-beamup.club/%7B%22key%22%3A%22fixture%22%7D/manifest.json",
+        // A key, a signed-in playlist or an instance id inside JSON options.
+        "https://fixture.example/eyJ0b3Jib3giOiJmaXh0dXJlS2V5MDEyMzQ1Njc4OWFiY2RlZiJ9/manifest.json",
+        "https://fixture.example/eyJwcm92aWRlciI6ImRpcmVjdCIsIm0zdVVybCI6Imh0dHBzOi8vbGlzdHMuZml4dHVyZS5leGFtcGxlL2dldC5waHA_dXNlcm5hbWU9dSZwYXNzd29yZD1wIn0/manifest.json",
+        "https://fixture.example/eyJpbnN0YW5jZUlkIjoiMWI0ZTI4YmEtMmZhMS0xMWQyLTg4M2YtMDAxNmQzY2NhNDI3In0/manifest.json",
+        "https://fixture.example/%7B%22realdebrid%22%3A%22FIXTUREKEY%22%7D/manifest.json",
         "https://addon.fixture.example/manifest.json?token=fixture-token",
         "https://user:pass@addon.fixture.example/manifest.json",
         "https://addon.fixture.example/",
-        "https://fixture.example/eyJ0b3Jib3giOiJ1bnNldCIsInNvcnQiOiJkZXNjIn0/manifest.json",
-        "https://fixture.example/%7B%7D/manifest.json",
         "https://fixture.example/0f1e2d3c4b5a69788796a5b4c3d2e1f0/manifest.json",
         "https://fixture.example/1b4e28ba-2fa1-11d2-883f-0016d3cca427/manifest.json",
         "https://fixture.example/QWERTYUIOPASDFGH/manifest.json",

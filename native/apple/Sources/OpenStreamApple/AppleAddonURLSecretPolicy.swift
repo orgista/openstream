@@ -43,6 +43,10 @@ public enum AppleAddonURLSecretPolicy {
     /// public add-ons were sealed for their repository names).
     static func isConfigurationSegment(_ segment: String) -> Bool {
         let decoded = segment.removingPercentEncoding ?? segment
+        // Options as JSON, plain or base64: secret only when a value is.
+        // `{}`, `{"tmdbKey":""}` and `{"torbox":"unset","sort":"desc"}` hold
+        // no key (add-on sweep 2026-10-01: 4 public add-ons were sealed).
+        if let options = jsonOptions(decoded) { return containsSecret(options, key: "") }
         let markers = CharacterSet(charactersIn: "=|{}[]:;,&%\"'+~!@$*()")
         if segment.rangeOfCharacter(from: markers) != nil || decoded.rangeOfCharacter(from: markers) != nil {
             return true
@@ -68,6 +72,58 @@ public enum AppleAddonURLSecretPolicy {
             return letters.count < 6 || letters.lowercased().contains(where: { "aeiouy".contains($0) })
         }
     }
+
+    /// The segment's options when it is a JSON object, as text or as
+    /// base64 (standard or URL-safe) of one.
+    static func jsonOptions(_ value: String) -> [String: Any]? {
+        guard value.utf8.count <= 8_192 else { return nil }
+        if value.hasPrefix("{") {
+            return (try? JSONSerialization.jsonObject(with: Data(value.utf8))) as? [String: Any]
+        }
+        guard value.utf8.count >= 4,
+              value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-_+/=".contains($0)) }) else {
+            return nil
+        }
+        var base64 = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        base64 = base64.trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
+        guard let data = Data(base64Encoded: base64), data.first == UInt8(ascii: "{") else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// Whether a JSON option holds a secret: a non-empty value under a key
+    /// or service name, a value shaped like a key (long base64 or hex, a
+    /// UUID), or an address with sign-in, a query or a configuration path.
+    private static func containsSecret(_ value: Any, key: String) -> Bool {
+        switch value {
+        case let object as [String: Any]:
+            return object.contains { containsSecret($0.value, key: $0.key) }
+        case let list as [Any]:
+            return list.contains { containsSecret($0, key: key) }
+        case let text as String:
+            let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if clean.isEmpty || placeholders.contains(clean.lowercased()) { return false }
+            let name = key.lowercased()
+            if (keyNames + optionKeyNames).contains(where: { name.contains($0) }) { return true }
+            // Any address in the options is treated as private: playlist and
+            // panel addresses often carry the sign-in in their path
+            // (http://host/user/pass/playlist.m3u).
+            if let url = URL(string: clean), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+                return true
+            }
+            return clean.count >= 16
+                && clean.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-_+/=.".contains($0)) })
+                && !isPlainWords(clean)
+        default:
+            return false
+        }
+    }
+
+    /// Values that mean "not set" in add-on options.
+    private static let placeholders: Set<String> = ["unset", "none", "null", "false", "true", "no", "off", "disabled"]
+
+    /// Option names that hold a key or a sign-in.
+    private static let optionKeyNames = ["key", "user", "pass", "pw", "pin", "cred", "login", "email", "cookie", "session", "uuid"]
 
     private static let keyNames = [
         "debrid", "premiumize", "torbox", "offcloud", "putio", "easynews",

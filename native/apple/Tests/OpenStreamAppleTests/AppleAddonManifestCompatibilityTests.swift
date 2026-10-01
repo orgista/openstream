@@ -189,7 +189,9 @@ private let tmdbManifestURL =
     #expect(AppleManifestClientError.manifestMissingField("id").errorDescription
         == "The manifest has no \"id\".")
     #expect(AppleManifestClientError.manifestNeedsConfiguration.errorDescription
-        == "Configure this add-on on its own site first, then paste the address it gives you.")
+        == "Configure this add-on first.")
+    #expect(AppleManifestClientError.manifestNeedsSetup(configureURL: nil).errorDescription
+        == "Configure this add-on first.")
 }
 
 @Test func installLinksFromAddOnDirectoriesAreAccepted() throws {

@@ -700,7 +700,8 @@ public struct AppleMetadataResolver: Sendable {
         preferredSourceID: AppleSource.ID? = nil,
         type: String,
         mediaID: String,
-        configuration: AppleTMDBConfiguration? = nil
+        configuration: AppleTMDBConfiguration? = nil,
+        fallbackName: String? = nil
     ) async throws -> AppleTMDBDetails? {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -741,7 +742,8 @@ public struct AppleMetadataResolver: Sendable {
                     do {
                         return (index, try await bounded(timeout: timeout) {
                             try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID,
-                                                           isListingSource: source.id == preferredSourceID)
+                                                           isListingSource: source.id == preferredSourceID,
+                                                           fallbackName: fallbackName)
                         })
                     } catch is CancellationError {
                         throw CancellationError()

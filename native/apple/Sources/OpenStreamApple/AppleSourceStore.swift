@@ -769,10 +769,8 @@ public enum AppleManifestClientError: Swift.Error, Equatable, LocalizedError, Se
         case .manifestMissingField(let field): "The manifest has no \"\(field)\"."
         case .manifestFieldWrongType(let field, let expected):
             "The manifest's \"\(field)\" is not \(expected)."
-        case .manifestNeedsConfiguration:
-            "Configure this add-on on its own site first, then paste the address it gives you."
-        case .manifestNeedsSetup:
-            "This add-on needs to be configured first."
+        case .manifestNeedsConfiguration, .manifestNeedsSetup:
+            "Configure this add-on first."
         }
     }
 }
