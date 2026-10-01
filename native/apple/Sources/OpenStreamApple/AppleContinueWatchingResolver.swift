@@ -55,12 +55,18 @@ enum AppleContinueWatchingResolver {
     }
 
     /// Records the viewer is part-way into, most recently watched first.
+    ///
+    /// A series whose saved position is a finished episode stays: its card
+    /// opens on the next one (`isUpNext`). It used to drop out the moment an
+    /// episode ended (C15, iPhone 27 v2 re-run).
     static func inProgress(
         _ records: [AppleMediaRecord],
+        saved: (AppleMediaRecord) -> ApplePlaybackProgress? = { _ in nil },
         watchedAt: (AppleMediaRecord) -> Date
     ) -> [AppleMediaRecord] {
         let unfinished = records.filter {
-            ($0.progress ?? 0) > 0 && ($0.progress ?? 1) < ApplePlaybackProgress.completionFraction
+            (($0.progress ?? 0) > 0 && ($0.progress ?? 1) < ApplePlaybackProgress.completionFraction)
+                || isUpNext($0, saved: saved($0))
         }
         let dates = Dictionary(unfinished.map { ($0.id, watchedAt($0)) }, uniquingKeysWith: max)
         return unfinished.sorted { lhs, rhs in
@@ -68,6 +74,14 @@ enum AppleContinueWatchingResolver {
             let rhsDate = dates[rhs.id] ?? .distantPast
             return lhsDate == rhsDate ? lhs.id < rhs.id : lhsDate > rhsDate
         }
+    }
+
+    /// A series whose saved position is the end of one of its episodes: the
+    /// viewer finished an episode and the next is up.
+    static func isUpNext(_ record: AppleMediaRecord, saved: ApplePlaybackProgress?) -> Bool {
+        guard record.kind == .series, let saved, saved.isComplete,
+              let partID = saved.partID else { return false }
+        return AppleStremioSeriesInfo(mediaID: partID) != nil
     }
 
     /// How far along a Continue Watching card's bar is, 0...1, or nil for

@@ -24,13 +24,14 @@ public enum AppleStremioCandidateRanking {
     static func titleMismatches(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         title: String?,
-        year: Int? = nil
+        year: Int? = nil,
+        season: Int? = nil
     ) -> [Bool] {
         guard let title, !title.isEmpty else { return candidates.map { _ in false } }
         let texts = candidates.map { candidate in
             [candidate.filename ?? "", candidate.title, candidate.sourceURL.lastPathComponent].joined(separator: " ")
         }
-        return AppleStremioTitleMatch.mismatches(texts, title: title, year: year)
+        return AppleStremioTitleMatch.mismatches(texts, title: title, year: year, season: season)
     }
 
     /// Whether this candidate is named for a different title altogether.
@@ -59,7 +60,7 @@ public enum AppleStremioCandidateRanking {
         title: String? = nil,
         year: Int? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
-        let mismatched = titleMismatches(candidates, title: title, year: year)
+        let mismatched = titleMismatches(candidates, title: title, year: year, season: episode?.season)
         return candidates.enumerated().sorted { lhs, rhs in
             // Demoted rather than dropped: if every candidate contradicts, the
             // viewer still gets something to play rather than nothing.

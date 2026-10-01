@@ -267,7 +267,8 @@ public actor AppleTopShelfSnapshotWriter {
         }
 
         let eligible = records.filter { !$0.availability.isEmpty && !$0.isPrivate }
-        let continued = AppleContinueWatchingResolver.inProgress(eligible) { watchedAt[$0.id] ?? $0.lastVerified }
+        let continued = AppleContinueWatchingResolver.inProgress(eligible,
+            saved: { savedProgress?[$0.id] }) { watchedAt[$0.id] ?? $0.lastVerified }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
         let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)

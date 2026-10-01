@@ -147,15 +147,44 @@ public enum AppleWatchProviderPolicy: Sendable {
 
     /// The Add Service menu: the most popular services not yet added, at most
     /// `limit`. `directory` is already in popularity order.
+    ///
+    /// Stores, add-on channels and aggregators are left out, and the big
+    /// subscription services come first: TMDB's US top ten was JustWatch TV,
+    /// Amazon Video, Apple TV Store and "HBO Max Amazon Channel", with HBO
+    /// Max, Paramount+ and Peacock nowhere (iPhone 27 v2 re-run).
     public static func addable(
         _ directory: [AppleWatchProvider],
         enabledProviderIDs: Set<Int>,
         limit: Int = addableLimit
     ) -> [AppleWatchProvider] {
         var seen = Set<Int>()
-        return Array(directory
-            .filter { !enabledProviderIDs.contains($0.id) && seen.insert($0.id).inserted }
-            .prefix(limit))
+        let services = directory.filter {
+            !enabledProviderIDs.contains($0.id) && isStreamingService($0.name) && seen.insert($0.id).inserted
+        }
+        let major = services.filter { isMajorSubscription($0.name) }
+        let rest = services.filter { !isMajorSubscription($0.name) }
+        return Array((major + rest).prefix(limit))
+    }
+
+    /// False for a store (rent or buy), a channel sold inside another
+    /// service, or an aggregator: none of them is a service to subscribe to.
+    static func isStreamingService(_ name: String) -> Bool {
+        let lowered = name.lowercased()
+        let excluded = ["channel", "store", "amazon video", "justwatch", "google play", "fandango", "vudu",
+                        "microsoft", "rakuten", "itunes"]
+        if excluded.contains(where: lowered.contains) { return false }
+        return lowered != "youtube"
+    }
+
+    /// The subscription services most viewers have, by TMDB's names.
+    static func isMajorSubscription(_ name: String) -> Bool {
+        let key = name.lowercased()
+            .replacingOccurrences(of: "+", with: " plus")
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: " ")
+        let major = ["netflix", "hulu", "amazon prime video", "disney plus", "max", "hbo max", "apple tv",
+                     "apple tv plus", "paramount plus", "paramount plus premium", "paramount plus essential",
+                     "peacock", "peacock premium", "peacock premium plus"]
+        return major.contains(key)
     }
 }
 

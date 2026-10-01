@@ -11,6 +11,19 @@ import Foundation
 /// reported as a network failure, which offers Retry.
 enum AppleTruncatedMediaProbe {
     static let message = "The video ended before it finished downloading. Check the connection and try again."
+
+    /// What the viewer reads for a demuxer or engine failure: the engine's
+    /// own text ("HLSVideoEngine: open failed (Demuxer: open failed (Invalid
+    /// data found when processing input (-1094995529)))") reached the alert
+    /// for a truncated file (iPhone 27 v2 re-run). Anything else passes as is.
+    static let droppedMessage = "The file ended early or the connection dropped. Try again or choose another source."
+
+    static func readableEngineMessage(_ raw: String) -> String {
+        let markers = ["open failed", "demuxer", "invalid data found", "end of file", "input/output error",
+                       "hlsvideoengine", "avformat", "averror"]
+        let lowered = raw.lowercased()
+        return markers.contains(where: lowered.contains) ? droppedMessage : raw
+    }
     /// Bytes read from the start of the file; enough for the header boxes.
     static let headLength = 65_536
 

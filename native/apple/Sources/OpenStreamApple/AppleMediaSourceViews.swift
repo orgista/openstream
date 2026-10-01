@@ -92,9 +92,20 @@ struct AppleLiveTVView: View {
         Group {
             if isLoading, channels.isEmpty {
                 ProgressView()
+            } else if channels.isEmpty, let errorMessage {
+                // A panel that timed out may answer next time: Retry first,
+                // the settings that fix a wrong address under it.
+                AppleSourceEmptyState(
+                    title: errorMessage,
+                    systemImage: OpenStreamTab.live.systemImage,
+                    actionTitle: "Retry",
+                    action: { Task { await reload() } },
+                    secondaryActionTitle: "Open Settings",
+                    secondaryAction: openSettings
+                )
             } else if channels.isEmpty {
                 AppleSourceEmptyState(
-                    title: errorMessage ?? "No Live Channels",
+                    title: "No Live Channels",
                     systemImage: OpenStreamTab.live.systemImage,
                     actionTitle: "Open Settings",
                     action: openSettings

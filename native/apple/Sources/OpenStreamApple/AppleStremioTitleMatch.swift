@@ -64,10 +64,31 @@ public enum AppleStremioTitleMatch {
         case unknown
     }
 
+    /// "U K", "U.K." and "U.S.A." arrive as single letters once split; they
+    /// are the same country tags as "UK" and "USA" (iPhone 27 v2 re-run:
+    /// "Saturday Night Live U K S01E01" still won S1 E1 of the 1975 show).
+    static func joiningSpelledTags(_ words: [String]) -> [String] {
+        var result: [String] = []
+        var index = 0
+        while index < words.count {
+            var end = index
+            while end < words.count, words[end].count == 1, words[end].first?.isLetter == true { end += 1 }
+            let joined = words[index..<end].joined()
+            if end - index >= 2, editionQualifiers.contains(joined) {
+                result.append(joined)
+                index = end
+            } else {
+                result.append(words[index])
+                index += 1
+            }
+        }
+        return result
+    }
+
     static func tail(of text: String, title: String) -> Tail {
-        let words = normalize(text)
-        let full = normalize(title)
-        let candidates = [full] + title.split(separator: ":").map { normalize(String($0)) }
+        let words = joiningSpelledTags(normalize(text))
+        let full = joiningSpelledTags(normalize(title))
+        let candidates = [full] + title.split(separator: ":").map { joiningSpelledTags(normalize(String($0))) }
         for titleWords in candidates where titleWords.count >= 1 && titleWords.joined().count >= 3 {
             guard let start = firstRun(of: titleWords, in: words) else { continue }
             let nextIndex = start + titleWords.count
@@ -100,24 +121,44 @@ public enum AppleStremioTitleMatch {
     /// - a country tag straight after the title, **but only when another
     ///   name has the title untagged** — with nothing to compare against
     ///   ("The Office UK" vs "The Office US") the tag says nothing about
-    ///   which one was asked for, so nothing is demoted.
-    public static func mismatches(_ texts: [String], title: String, year: Int? = nil) -> [Bool] {
+    ///   which one was asked for, so nothing is demoted;
+    /// - for an episode (`season` known), any year in the name that season
+    ///   could not have aired in (`airYearConflicts`).
+    public static func mismatches(_ texts: [String], title: String, year: Int? = nil, season: Int? = nil) -> [Bool] {
         let tails = texts.map { tail(of: $0, title: title) }
+        let airYears = texts.map { airYearConflicts($0, year: year, season: season) }
         func yearConflicts(_ found: Int) -> Bool { year.map { abs($0 - found) > 1 } ?? false }
-        let hasUntagged = tails.contains { tail in
+        let hasUntagged = zip(tails, airYears).contains { tail, airYear in
+            guard !airYear else { return false }
             switch tail {
-            case .bare: true
-            case .year(let found): !yearConflicts(found)
-            default: false
+            case .bare: return true
+            case .year(let found): return !yearConflicts(found)
+            default: return false
             }
         }
-        return zip(texts, tails).map { text, tail in
+        return zip(zip(texts, tails), airYears).map { pair, airYear in
+            let (text, tail) = pair
             if contradicts(text, title: title) { return true }
+            if airYear { return true }
             switch tail {
             case .qualifier: return hasUntagged
             case .year(let found): return yearConflicts(found)
             case .bare, .unknown: return false
             }
+        }
+    }
+
+    /// True when `text` names a year season `season` of a show first aired in
+    /// `year` cannot have aired in: before the year before it, or after
+    /// `year + season + 1`. "Saturday Night Live U K S01E01 … March 21 2026"
+    /// is not season 1 of the 1975 show. Daily shows numbered by year
+    /// (season 2024) and anything without a year or season say nothing.
+    static func airYearConflicts(_ text: String, year: Int?, season: Int?) -> Bool {
+        guard let year, let season, (1...200).contains(season) else { return false }
+        let earliest = year - 1, latest = year + season + 1
+        return normalize(text).contains { word in
+            guard word.count == 4, let found = Int(word), (1920...2100).contains(found) else { return false }
+            return found < earliest || found > latest
         }
     }
 }

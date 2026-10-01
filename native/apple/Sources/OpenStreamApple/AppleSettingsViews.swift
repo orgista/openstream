@@ -1098,9 +1098,9 @@ struct AppleSubtitleLanguagesView: View {
         // 2026-09-14, U5).
         ScrollViewReader { proxy in
             list.onAppear {
-                guard let first = AppleSubtitleLanguages.all
-                    .first(where: { settings.subtitleLanguages.contains($0.code) }) else { return }
-                proxy.scrollTo(first.code, anchor: .center)
+                guard let target = AppleSubtitleLanguages.initialScrollTarget(
+                    selected: settings.subtitleLanguages) else { return }
+                proxy.scrollTo(target, anchor: .center)
             }
         }
     }

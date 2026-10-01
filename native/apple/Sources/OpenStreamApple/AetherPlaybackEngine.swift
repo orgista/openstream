@@ -579,7 +579,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             // froze the player; do it off the main actor and hop back only
             // to publish the cues.
             let cues = await Task.detached(priority: .userInitiated) {
-                AppleSubtitleTextParser.cues(from: data)
+                AppleSubtitleTextParser.cues(from: data, language: track.languageCode)
             }.value
             guard let self, !Task.isCancelled, self.activeExternalSubtitleID == id else { return }
             self.subtitleCues = cues
@@ -893,7 +893,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // After playback has rolled, surface the engine's own message as a
         // mid-playback player failure rather than reclassifying the load.
         if hasReachedPlaying {
-            return ApplePlaybackFailure(kind: .player, message: info.message)
+            return ApplePlaybackFailure(kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message))
         }
         let unsupportedKinds: Set<PlaybackErrorKind> = [
             .noPlayableTrackWithinBudget,
@@ -925,9 +925,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .audioSessionFailed,
         ]
         if networkKinds.contains(info.kind) {
-            return ApplePlaybackFailure(kind: .network, message: info.message,
+            return ApplePlaybackFailure(kind: .network, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message),
                                         httpStatus: httpStatus, networkCode: networkCode)
         }
-        return ApplePlaybackFailure(kind: .player, message: info.message, networkCode: networkCode)
+        return ApplePlaybackFailure(kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message),
+                                    networkCode: networkCode)
     }
 }

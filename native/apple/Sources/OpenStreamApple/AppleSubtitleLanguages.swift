@@ -154,6 +154,19 @@ public enum AppleSubtitleLanguages {
         return ["eng"]
     }
 
+    /// Rows the Subtitle Languages page shows from the top on any iPhone.
+    static let firstScreenRows = 12
+
+    /// The row the page scrolls to on opening: the first chosen language,
+    /// only when it is below the first screen. Scrolling to one already on it
+    /// centred the list and pushed "Arabic" under the navigation bar
+    /// (iPhone 27 v2 re-run).
+    public static func initialScrollTarget(selected: [String]) -> String? {
+        guard let index = all.firstIndex(where: { selected.contains($0.code) }),
+              index >= firstScreenRows else { return nil }
+        return all[index].code
+    }
+
     /// Toggles one code in the preference list, refusing to grow it beyond
     /// `maximumSelection`.
     public static func toggling(_ code: String, in current: [String]) -> [String] {

@@ -183,7 +183,8 @@ extension AppleStremioCandidateRanking {
     /// Among the candidates this device can play, those from a service in
     /// `unhealthyServices` (`AppleStreamServiceHealth`) go after every other
     /// service's, so a service that is down is still tried, but only once
-    /// nothing else is left.
+    /// nothing else is left. Within a tier, `preferredService` (the service
+    /// the previous episode played from) goes first.
     public static func playbackOrder(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         choice: AppleStreamQualityChoice,
@@ -191,9 +192,10 @@ extension AppleStremioCandidateRanking {
         episode: (season: Int, episode: Int)? = nil,
         title: String? = nil,
         year: Int? = nil,
-        unhealthyServices: Set<String> = []
+        unhealthyServices: Set<String> = [],
+        preferredService: String? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
-        let mismatched = titleMismatches(candidates, title: title, year: year)
+        let mismatched = titleMismatches(candidates, title: title, year: year, season: episode?.season)
         let tierRank: (AppleStreamQualityTier?) -> Int = { tier in
             switch choice {
             case .automatic:
@@ -211,14 +213,18 @@ extension AppleStremioCandidateRanking {
             let contradicts = mismatched[offset]
                 || (episode.map { contradictsEpisode(candidate, season: $0.season, episode: $0.episode) } ?? false)
             let down = candidate.serviceKey.map(unhealthyServices.contains) ?? false
+            let preferred = preferredService != nil && candidate.serviceKey == preferredService
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),
-                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down)
+                    playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down, preferred)
         }
         .sorted { a, b in
             if a.2 != b.2 { return !a.2 }
             if a.3 != b.3 { return a.3 }
             if a.7 != b.7 { return !a.7 }
             if a.4 != b.4 { return a.4 < b.4 }
+            // The next episode keeps to the service the last one played from,
+            // within the same picture tier.
+            if a.8 != b.8 { return a.8 }
             if a.5 != b.5 { return a.5 < b.5 }
             if a.6 != b.6 { return a.6 > b.6 }
             return a.1 < b.1

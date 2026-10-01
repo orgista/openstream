@@ -349,6 +349,13 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
     case streamRequestFailed(Int)
     case invalidStreamResponse
 
+    /// "The request timed out." without its final full stop.
+    static func trimmingFinalPeriod(_ text: String) -> String {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix(".") { value.removeLast() }
+        return value
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidEndpoint: "Enter an HTTP or HTTPS IPTV address."
@@ -362,7 +369,9 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
                 "The IPTV provider rejected the account (auth=0). Check the username and password, including capitalization."
             }
         case .unreachable(let reason):
-            "Could not reach the IPTV panel: \(reason). Check the network and that the address includes the port."
+            // URLError reasons end in their own full stop ("The request timed
+            // out."), which read as ".." here (iPhone 27 v2 re-run).
+            "Could not reach the IPTV panel: \(AppleIPTVError.trimmingFinalPeriod(reason)). Check the network and that the address includes the port."
         case .httpStatus(let code):
             "The IPTV panel answered HTTP \(code) instead of account data."
         case .unexpectedResponse(let contentType):

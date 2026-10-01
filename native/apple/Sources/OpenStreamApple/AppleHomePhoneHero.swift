@@ -66,6 +66,10 @@ struct AppleHomePhoneHero<Actions: View>: View {
             actions
                 .padding(.top, 4)
         }
+        // Chrome over art: past accessibility 2 the wordmark, the metadata
+        // and the buttons outgrew the hero and rose into the large title and
+        // its buttons (iPhone 27 v2 re-run, AX-XXXL).
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         // Faded out is gone: no taps and no VoiceOver on buttons nobody can
         // see. The action runs only when the copy crosses the fade line, so
         // scrolling still costs no per-frame state change.
@@ -94,6 +98,9 @@ struct AppleHomePhoneHero<Actions: View>: View {
         .padding(.horizontal, 20)
         // Room for the carousel's page dots, which sit over the art.
         .padding(.bottom, AppleHomePhoneHeroLayout.copyBottomInset)
+        // At the accessibility sizes the copy never rises under the large
+        // title and its buttons; a taller block grows the hero downwards.
+        .padding(.top, dynamicTypeSize.isAccessibilitySize ? copyFadeLine + 12 : 0)
         .frame(maxWidth: .infinity)
         .frame(minHeight: artHeight, alignment: .bottom)
         .background(alignment: .top) {

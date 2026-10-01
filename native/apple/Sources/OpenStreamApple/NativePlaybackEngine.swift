@@ -378,7 +378,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
                 guard self != nil, !Task.isCancelled, let data else { return }
                 // Match Aether's path: inflate/parse off the main actor.
                 let cues = await Task.detached(priority: .userInitiated) {
-                    AppleSubtitleTextParser.cues(from: data)
+                    AppleSubtitleTextParser.cues(from: data, language: track.languageCode)
                 }.value
                 guard let self, !Task.isCancelled, self.activeSubtitleTrackID == id else { return }
                 self.subtitleCues = cues

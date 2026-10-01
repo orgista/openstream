@@ -364,6 +364,9 @@ struct AppleStremioPlayerView: View {
         }
         .onChange(of: coordinator.phase) { _, newPhase in
             if case .ended = newPhase {
+                // The transport is starting the next episode; the title page
+                // swaps this player for it, so closing here would drop it.
+                if coordinator.handsOffAtEnd, coordinator.route == .surface { return }
                 closePlayer()
             }
         }
@@ -542,6 +545,14 @@ struct AppleStremioPlayerView: View {
             #if os(macOS)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { showsOtherSources = false } }
+            }
+            #elseif os(iOS) || os(visionOS)
+            // A way out besides swiping the sheet down (iPhone 27 v2 re-run).
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsOtherSources = false }
+                        .accessibilityIdentifier("player.quality.done")
+                }
             }
             #endif
             .task {

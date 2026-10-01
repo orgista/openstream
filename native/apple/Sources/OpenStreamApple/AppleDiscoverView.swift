@@ -597,7 +597,8 @@ struct AppleDiscoverView: View {
     /// off-main build lands, when it knows no sources and everything fails.
     private var continueWatching: [IndexedCatalogItem] {
         let store = ApplePlaybackStore()
-        let ordered = AppleContinueWatchingResolver.inProgress(mediaIndex.records) {
+        let ordered = AppleContinueWatchingResolver.inProgress(mediaIndex.records,
+            saved: { store.progress(for: $0.id) }) {
             store.progress(for: $0.id)?.updatedAt ?? $0.lastVerified
         }
         let entries = AppleContinueWatchingResolver.entries(ordered, in: [catalogLookup])
@@ -1730,7 +1731,9 @@ struct AppleSearchView: View {
                 .clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 4) {
                 Text(record.title).font(.headline)
-                Text(sourceName).font(.caption).foregroundStyle(.secondary)
+                // The same name the row headings show ("AIOMetadata", not
+                // "AIOMetadata  | ElfHosted").
+                Text(AppleCatalogShelfPolicy.displaySourceName(sourceName)).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text(record.kind.rawValue.capitalized)
                     if let year = record.year { Text(String(year)) }
@@ -4088,6 +4091,12 @@ struct AppleCatalogItemDetailView: View {
             .navigationTitle("Quality")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { prompts.streamPicker = false }
+                        .accessibilityIdentifier("detail.quality.done")
+                }
+            }
             #elseif os(macOS)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { prompts.streamPicker = false } }
@@ -5426,6 +5435,8 @@ struct AppleCatalogItemDetailView: View {
         // Every path that opens the player from this page comes through here,
         // so wiring the next episode once covers all of them.
         result.nextEpisode = nextEpisodeContext()
+        result.coordinator.trackCarryOver = playbackUI.trackCarryOver
+        playbackUI.trackCarryOver = nil
         let files = localFiles
         let library = library
         let settings = settings
@@ -5477,19 +5488,34 @@ struct AppleCatalogItemDetailView: View {
     ///
     /// Selecting it and re-running `resolvePlayback()` is exactly what
     /// choosing that episode by hand does, so the next episode resolves its own
-    /// sources, resume position and subtitles rather than inheriting this
-    /// one's. Nil for a movie, for a series with nothing selected, and for the
-    /// last episode of the last season.
+    /// sources and resume position. It prefers the service the ending episode
+    /// played from and takes its audio and subtitle choices along. Nil for a
+    /// movie, for a series with nothing selected, and for the last episode of
+    /// the last season.
+    ///
+    /// The ending player stays up while the next one resolves and is then
+    /// replaced in one step. Closing it first and presenting the next a moment
+    /// later raced the cover's dismissal: the new player was never shown and
+    /// the viewer was left on the title page (iPhone 27 v2 re-run, 2/2).
     private func nextEpisodeContext() -> AppleNextEpisodeContext? {
         guard let selectedEpisodeID = episodeList.selectedEpisodeID,
               let current = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }),
               let next = AppleStremioEpisodePolicy.following(current, in: episodeList.episodes) else { return nil }
-        return AppleNextEpisodeContext(title: next.displayTitle) {
+        return AppleNextEpisodeContext(title: next.displayTitle) { carryOver in
             Task { @MainActor in
+                // One handover per episode, however many times it is asked for.
+                guard self.episodeList.selectedEpisodeID != next.id else { return }
                 appleTrace("next episode → \(next.displayTitle)")
-                self.playbackUI.presentation = nil
+                let ending = self.playbackUI.presentation?.id
+                self.playbackUI.preferredServiceKey = self.playbackCoordinator.currentRequest?.hints.serviceKey
+                self.playbackUI.trackCarryOver = carryOver.isEmpty ? nil : carryOver
                 self.episodeList.selectedEpisodeID = next.id
+                // The ending player keeps its own coordinator; the page
+                // resolves on a fresh one so a failure lands here, not on it.
+                self.playbackCoordinator = ApplePlaybackCoordinator()
                 await self.resolvePlayback()
+                // Nothing replaced it: close it, and the page's alert says why.
+                if self.playbackUI.presentation?.id == ending { self.playbackUI.presentation = nil }
             }
         }
     }
@@ -5607,7 +5633,9 @@ struct AppleCatalogItemDetailView: View {
                 device: AppleStreamDeviceCapabilities.current,
                 episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
                 title: item.name, year: item.year,
-                unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys())
+                unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
+                preferredService: playbackUI.preferredServiceKey)
+            playbackUI.preferredServiceKey = nil
             let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
             let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
@@ -7059,6 +7087,11 @@ private struct AppleTitlePagePlaybackState {
     var selectedQuality: AppleStreamQualityTier?
     var selectedLocalFile: AppleLibraryItem?
     var pickingStreams = false
+    /// The service the previous episode played from, preferred for the next
+    /// one (`AppleStremioCandidateRanking.playbackOrder`). Used once.
+    var preferredServiceKey: String?
+    /// The previous episode's audio and subtitle choices. Used once.
+    var trackCarryOver: AppleTrackCarryOver?
 }
 
 private struct AppleTitlePageMetadataState {
@@ -7758,8 +7791,16 @@ extension AppleCatalogItemDetailView {
             phoneActionRow
                 .padding(.top, 4)
         }
+        // Past accessibility 2 the header ran under the back and search
+        // buttons, Play was clipped and the round buttons hit the screen
+        // edges (iPhone 27 v2 re-run, AX-XXXL). The episode text below the
+        // hero still follows the full size.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.horizontal, Self.phoneInset)
         .padding(.bottom, 14)
+        // Clear of the status bar and the navigation buttons at the
+        // accessibility sizes; the hero grows downwards instead.
+        .padding(.top, dynamicTypeSize.isAccessibilitySize ? pageGeometry.safeAreaInsets.top + 56 : 0)
         .frame(maxWidth: .infinity)
         // The copy is laid out in the flow, anchored to the bottom of the art:
         // at the accessibility sizes it grows the hero downwards rather than
@@ -8019,6 +8060,8 @@ extension AppleCatalogItemDetailView {
                 Text(title)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .minimumScaleFactor(0.8)
+                    // Two lines get their height rather than being clipped.
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .font(.body.weight(.semibold))
             .foregroundStyle(.black)

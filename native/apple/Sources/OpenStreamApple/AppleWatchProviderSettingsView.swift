@@ -133,7 +133,11 @@ struct AppleWatchProviderSettingsView: View {
                     .accessibilityIdentifier("settings.watchProviders.add.\(provider.id)")
             }
         } label: {
+            // The whole row opens the menu, not just the words (iPhone 27 v2
+            // re-run).
             Label("Add Service", systemImage: "plus")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
         }
         .accessibilityIdentifier("watchprovider.add")
         #endif

@@ -207,6 +207,15 @@ public final class ApplePlaybackCoordinator {
     /// The audio track picked in the transport that the engine has not
     /// confirmed yet; outlives one overlay (`AppleTransportOverlayModel`).
     @ObservationIgnored var pendingAudioPick: Int?
+    /// The previous episode's audio and subtitle choices, applied once this
+    /// stream's tracks are known (`AppleTrackCarryOver`). Each half clears
+    /// itself when applied.
+    @ObservationIgnored var trackCarryOver: AppleTrackCarryOver?
+    /// Set by the transport while the end of this stream will start the next
+    /// episode; the player then stays open at `.ended` for the handover.
+    @ObservationIgnored var handsOffAtEnd = false
+    /// The next episode has been started from this stream; once is enough.
+    @ObservationIgnored var hasAdvancedToNextEpisode = false
     public let engine: any ApplePlaybackEngine
     var sharePlayChannel: AppleSharePlayChannel?
     weak var sharedPlayback: AppleSharePlayPlaybackBinding?
@@ -231,6 +240,9 @@ public final class ApplePlaybackCoordinator {
     public private(set) var fallbackNoticeGeneration = 0
     private var hasShownFallbackNotice = false
     private var lastRequest: ApplePlaybackRequest?
+    /// The request playing (or last tried), for the next episode to prefer
+    /// its service.
+    var currentRequest: ApplePlaybackRequest? { lastRequest }
     private var observationTask: Task<Void, Never>?
     private var loadTask: Task<Void, any Error>?
     private var fallbackTask: Task<Void, Never>?
@@ -719,13 +731,39 @@ public final class ApplePlaybackCoordinator {
             setupProgress(for: request)
         case .position(let position):
             handlePosition(position)
-        case .duration, .tracks:
+        case .tracks:
+            applyTrackCarryOver()
+        case .duration:
             break
         case .failure(let failure):
             if let failure {
                 scheduleFailure(failure)
             }
         }
+    }
+
+    /// Applies whatever part of `trackCarryOver` this stream's tracks can
+    /// satisfy. Subtitles from add-ons arrive in a later `.tracks` pass, so a
+    /// language not found yet stays pending.
+    private func applyTrackCarryOver() {
+        guard var carry = trackCarryOver else { return }
+        let audio = engine.audioTracks
+        if carry.audioLanguage != nil, !audio.isEmpty {
+            if let id = carry.audioTrackID(in: audio), id != engine.activeAudioTrackID {
+                appleTrace("carry-over audio → \(id)")
+                pendingAudioPick = id
+                engine.selectAudioTrack(id: id)
+            }
+            carry.audioLanguage = nil
+        }
+        if let selection = carry.subtitleSelection(in: engine.subtitleTracks) {
+            if selection != engine.activeSubtitleTrackID {
+                appleTrace("carry-over subtitle → \(selection.map(String.init) ?? "off")")
+                engine.selectSubtitleTrack(id: selection)
+            }
+            carry.subtitle = .unchanged
+        }
+        trackCarryOver = carry.isEmpty ? nil : carry
     }
 
     private func applyEnginePhase(_ enginePhase: ApplePlaybackEnginePhase, request: ApplePlaybackRequest) {
@@ -762,7 +800,8 @@ public final class ApplePlaybackCoordinator {
             handleEnded(request: request)
         case .error(let message):
             cancelTimeout()
-            scheduleFailure(engine.failure ?? ApplePlaybackFailure(kind: .player, message: message))
+            scheduleFailure(engine.failure ?? ApplePlaybackFailure(
+                kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(message)))
         }
     }
 

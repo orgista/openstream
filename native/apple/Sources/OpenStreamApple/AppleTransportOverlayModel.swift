@@ -45,19 +45,25 @@ public final class AppleTransportOverlayModel {
 
     /// Starts the next episode. Set by whatever presented the player and knows
     /// the season; nil for a movie, a live channel or the last episode.
-    public var nextEpisode: (() -> Void)? = nil
+    public var nextEpisode: (() -> Void)? = nil { didSet { syncEndHandOff() } }
     /// The next episode's `displayTitle`, for the card to name it. Set
     /// alongside `nextEpisode`; one without the other offers nothing.
-    public var nextEpisodeTitle: String? = nil
+    public var nextEpisodeTitle: String? = nil { didSet { syncEndHandOff() } }
     /// The viewer's "Auto Play Next Episode" setting. With it off the card
     /// still appears and still works — only the unattended start stops.
-    public var autoPlayNextEpisode: Bool = true
+    public var autoPlayNextEpisode: Bool = true { didSet { syncEndHandOff() } }
     /// Set when the viewer dismisses the card, which also stops the
     /// auto-advance for the rest of the episode. Cleared on the next load.
-    public private(set) var nextEpisodeDismissed = false
+    public private(set) var nextEpisodeDismissed = false { didSet { syncEndHandOff() } }
     /// Guards against firing the advance twice: the position observer ticks
     /// four times a second and the end can be reported more than once.
-    @ObservationIgnored private var hasAdvancedToNextEpisode = false
+    /// Held by the coordinator, like `pendingAudioPick`: SwiftUI can build
+    /// more than one model for the same player, and each one fired the advance
+    /// (2-3 starts per episode on the iPhone 27 sim).
+    private var hasAdvancedToNextEpisode: Bool {
+        get { coordinator.hasAdvancedToNextEpisode }
+        set { coordinator.hasAdvancedToNextEpisode = newValue }
+    }
 
     /// The stream's opening sequence, from its own chapter markers. Nil for
     /// content that carries none, which is most of it — see
@@ -153,10 +159,21 @@ public final class AppleTransportOverlayModel {
         bumpActivity()
     }
 
+    /// Tells the player whether `.ended` hands over to the next episode
+    /// (stay open) or closes it.
+    private func syncEndHandOff() {
+        coordinator.handsOffAtEnd = AppleNextEpisodePolicy.handsOffAtEnd(
+            hasNext: nextEpisode != nil && nextEpisodeTitle != nil, isLive: isLive,
+            isDismissed: nextEpisodeDismissed, isEnabled: autoPlayNextEpisode)
+    }
+
     /// Starts the next episode now, from the card.
     public func playNextEpisode() {
         guard let nextEpisode else { return }
         hasAdvancedToNextEpisode = true
+        // This one stays on screen until the next is ready; it must not keep
+        // talking over the wait.
+        coordinator.userPause()
         nextEpisode()
     }
 
@@ -460,15 +477,16 @@ public final class AppleTransportOverlayModel {
 
     /// Starts the next episode once this one has run out, unless the viewer
     /// turned auto-play off or dismissed the card.
-    private func advanceToNextEpisodeIfDue() {
+    private func advanceToNextEpisodeIfDue(hasEnded: Bool = false) {
         guard !hasAdvancedToNextEpisode, let nextEpisode else { return }
         guard AppleNextEpisodePolicy.shouldAutoAdvance(
             position: position,
-            duration: duration,
+            duration: duration ?? coordinator.engine.duration,
             nextTitle: nextEpisodeTitle,
             isLive: isLive,
             isDismissed: nextEpisodeDismissed,
-            isEnabled: autoPlayNextEpisode
+            isEnabled: autoPlayNextEpisode,
+            hasEnded: hasEnded
         ) else { return }
         hasAdvancedToNextEpisode = true
         appleTrace("next episode auto-advance → \(nextEpisodeTitle ?? "?")")
@@ -591,6 +609,7 @@ public final class AppleTransportOverlayModel {
             }
             // A load boundary replaces the item and with it the window.
             refreshSeekableRange()
+            if phase == .ended { advanceToNextEpisodeIfDue(hasEnded: true) }
             // Phase is otherwise read directly from the coordinator;
             // re-evaluate auto-hide.
             scheduleAutoHide()

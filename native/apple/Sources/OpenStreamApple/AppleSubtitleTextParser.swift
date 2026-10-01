@@ -18,9 +18,11 @@ public enum AppleSubtitleTextParser {
     static let maximumInflatedBytes = 32_000_000
 
 
-    public static func cues(from data: Data) -> [AppleSubtitleCue] {
+    /// `language` is the file's declared language (the add-on's `lang`), the
+    /// best hint for a legacy code page (`AppleSubtitleTextEncoding`).
+    public static func cues(from data: Data, language: String? = nil) -> [AppleSubtitleCue] {
         let payload = decompressedIfNeeded(data)
-        guard let text = decodeText(payload) else { return [] }
+        guard let text = decodeText(payload, language: language) else { return [] }
         return cues(from: text)
     }
 
@@ -117,12 +119,10 @@ public enum AppleSubtitleTextParser {
         AppleHTMLEntities.decoded(value)
     }
 
-    /// UTF-8 first, then the legacy single-byte encodings older SubRip files
-    /// still use. A byte-order mark is dropped by the UTF-8 decoder.
-    static func decodeText(_ data: Data) -> String? {
-        if let utf8 = String(data: data, encoding: .utf8) { return utf8 }
-        if let cp1252 = String(data: data, encoding: .windowsCP1252) { return cp1252 }
-        return String(data: data, encoding: .isoLatin1)
+    /// Unicode with or without a byte-order mark, then the legacy code page
+    /// of the declared language (`AppleSubtitleTextEncoding`).
+    static func decodeText(_ data: Data, language: String? = nil) -> String? {
+        AppleSubtitleTextEncoding.decode(data, language: language)
     }
 
     // MARK: - gzip

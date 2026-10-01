@@ -104,7 +104,15 @@ struct AppleTransportOverlay: View {
             isLive: request.isLive
         )
         if let nextEpisode {
-            model.nextEpisode = nextEpisode.start
+            // The choices made in this episode go with it to the next.
+            model.nextEpisode = { [weak model, coordinator] in
+                let engine = coordinator.engine
+                nextEpisode.start(AppleTrackCarryOver.capture(
+                    audioTracks: engine.audioTracks,
+                    activeAudioID: model?.selectedAudioID ?? engine.activeAudioTrackID,
+                    subtitleTracks: engine.subtitleTracks,
+                    activeSubtitleID: engine.activeSubtitleTrackID))
+            }
             model.nextEpisodeTitle = nextEpisode.title
             model.autoPlayNextEpisode = UserDefaults.standard.object(
                 forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
@@ -684,29 +692,63 @@ private struct AppleTransportScrubberRow: View {
     let onMoveDown: () -> Void
     #endif
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
+        #if os(tvOS)
         HStack(spacing: 12) {
-            Text(model.positionText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.white)
-            #if os(tvOS)
+            positionLabel
             tvosScrubber
-            #else
-            Slider(value: Binding(
-                get: { model.progress },
-                set: { fraction in Task { await model.scrub(to: fraction) } }
-            ), in: 0...1)
-            .tint(.white)
-            .overlay { chapterMarks(height: 10) }
-            .appleVisionActionTarget()
-            .accessibilityLabel("Playback position")
-            .accessibilityValue(model.positionText)
-            #endif
-            Text(remainingText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.white)
+            remainingLabel
         }
+        #else
+        // At the accessibility sizes the times took most of the row and
+        // squeezed the scrubber to a stub (iPhone 27 v2 re-run, AX-XXXL):
+        // there the scrubber gets the full width and the times a row under it.
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 4) {
+                slider
+                HStack {
+                    positionLabel
+                    Spacer(minLength: 12)
+                    remainingLabel
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                positionLabel
+                slider
+                remainingLabel
+            }
+        }
+        #endif
     }
+
+    private var positionLabel: some View {
+        Text(model.positionText)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white)
+    }
+
+    private var remainingLabel: some View {
+        Text(remainingText)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white)
+    }
+
+    #if !os(tvOS)
+    private var slider: some View {
+        Slider(value: Binding(
+            get: { model.progress },
+            set: { fraction in Task { await model.scrub(to: fraction) } }
+        ), in: 0...1)
+        .tint(.white)
+        .overlay { chapterMarks(height: 10) }
+        .appleVisionActionTarget()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue(model.positionText)
+    }
+    #endif
 
     /// A thin mark at each chapter start, as in the Apple TV app's scrubber.
     /// Drawn over the track and never hit-tested, so scrubbing is unchanged.
