@@ -51,6 +51,20 @@ struct ApplePlayRequestLedgerTests {
     }
 }
 
+@Suite("One-shot requests run once")
+struct AppleOneShotRequestLedgerTests {
+    @Test func aConnectPressRunsOnceAcrossReappears() {
+        var ledger = AppleOneShotRequestLedger()
+        let press = UUID()
+        let first = ledger.consume(press)
+        let reappear = ledger.consume(press)
+        let next = ledger.consume(UUID())
+        #expect(first)
+        #expect(!reappear)
+        #expect(next)
+    }
+}
+
 @Suite("Series progress needs an episode")
 struct AppleSeriesProgressGuardTests {
     private let suiteName = "series-progress-guard-tests.\(UUID())"

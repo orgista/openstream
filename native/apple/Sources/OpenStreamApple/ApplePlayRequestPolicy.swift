@@ -1,6 +1,7 @@
 import Foundation
 
-/// A press of Play resolves exactly once.
+/// A press of Play (or Connect, Save, Test) resolves exactly once.
+/// `ApplePlayRequestLedger` is the Play-page name for the same type.
 ///
 /// The title page starts playback from `.task(id: request)`. SwiftUI runs a
 /// `.task` again every time its view reappears, so a request that was never
@@ -9,7 +10,7 @@ import Foundation
 /// a series it resolved without the episode the press named (iPad, 2026-10-01:
 /// Friends S1E2 → Settings → Discover played a season-9 file and saved its
 /// position over S1E2's). The same holds for the page's one automatic play.
-public struct ApplePlayRequestLedger: Equatable, Sendable {
+public struct AppleOneShotRequestLedger: Equatable, Sendable {
     /// The last request that was resolved (or deliberately dropped).
     public private(set) var consumed: UUID?
     /// Whether the page's opening auto-play has already been asked for.
@@ -32,6 +33,8 @@ public struct ApplePlayRequestLedger: Equatable, Sendable {
         return true
     }
 }
+
+public typealias ApplePlayRequestLedger = AppleOneShotRequestLedger
 
 /// A series keeps one progress entry under the show and names the episode in
 /// `partID`. A save that names no episode must never replace one that does:

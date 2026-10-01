@@ -928,6 +928,12 @@ private enum AppleInstanceConnectionAction: Equatable {
     case test(UUID)
     case save(UUID)
 
+    var requestID: UUID {
+        switch self {
+        case .test(let id), .save(let id): return id
+        }
+    }
+
     var shouldSave: Bool {
         if case .save = self { return true }
         return false
@@ -1123,6 +1129,8 @@ private struct AppleAddLiveTVSourceView: View {
     @State private var message: String?
     @State private var isError = false
     @State private var connectionAction: AppleInstanceConnectionAction?
+    /// Each press runs once; a task rerun on reappear must not repeat it.
+    @State private var actionLedger = AppleOneShotRequestLedger()
 
     /// File imports join the existing local playlist only when Save is pressed.
     @State private var pastedPlaylist = ""
@@ -1302,7 +1310,7 @@ private struct AppleAddLiveTVSourceView: View {
         .defaultFocus($focusedField, .name)
         .appleSettingsPageTitle("Add Live TV")
         .task(id: connectionAction) {
-            guard let connectionAction else { return }
+            guard let connectionAction, actionLedger.consume(connectionAction.requestID) else { return }
             await perform(connectionAction)
         }
     }
@@ -1390,7 +1398,7 @@ private struct AppleAddLiveTVSourceView: View {
             }
         }
         .task(id: connectionAction) {
-            guard let connectionAction else { return }
+            guard let connectionAction, actionLedger.consume(connectionAction.requestID) else { return }
             await perform(connectionAction)
         }
     }

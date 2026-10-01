@@ -231,6 +231,8 @@ private struct AppleNetworkShareConnectForm: View {
     let onConnected: () -> Void
 
     @State private var connectRequest: UUID?
+    /// A connect runs once per press, not again when the page reappears.
+    @State private var connectLedger = AppleOneShotRequestLedger()
     @State private var isPasswordRevealed = false
     @State private var showingAdvanced = false
     @FocusState private var focus: Field?
@@ -246,7 +248,7 @@ private struct AppleNetworkShareConnectForm: View {
                 if await setup.connectWithSavedCredentials() { onConnected() }
             }
             .task(id: connectRequest) {
-                guard connectRequest != nil else { return }
+                guard connectLedger.consume(connectRequest) else { return }
                 if await setup.connect() { onConnected() }
             }
     }

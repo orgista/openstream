@@ -68,6 +68,12 @@ private enum AppleInstanceConnectionAction: Equatable {
     case signIn(UUID)
     case connect(UUID)
     
+    var requestID: UUID {
+        switch self {
+        case .test(let id), .save(let id), .signIn(let id), .connect(let id): return id
+        }
+    }
+
     var shouldSave: Bool {
         if case .save = self { return true }
         if case .signIn = self { return true }
@@ -113,6 +119,8 @@ struct AppleAddMediaServerView: View {
     @State private var message: String?
     @State private var isError: Bool = false
     @State private var connectionAction: AppleInstanceConnectionAction?
+    /// Each press runs once; a task rerun on reappear must not repeat it.
+    @State private var actionLedger = AppleOneShotRequestLedger()
     
     @State private var ticket: AppleQuickConnectTicket?
     @State private var quickConnectTask: Task<Void, Never>?
@@ -412,7 +420,7 @@ struct AppleAddMediaServerView: View {
         .defaultFocus($focusedField, .name)
         .appleSettingsPageTitle("Add Media Server")
         .task(id: connectionAction) {
-            guard let connectionAction else { return }
+            guard let connectionAction, actionLedger.consume(connectionAction.requestID) else { return }
             await perform(connectionAction)
         }
         .onChange(of: kind) { _, _ in 
@@ -588,7 +596,7 @@ struct AppleAddMediaServerView: View {
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .appleSettingsPage("Add Media Server")
         .task(id: connectionAction) {
-            guard let connectionAction else { return }
+            guard let connectionAction, actionLedger.consume(connectionAction.requestID) else { return }
             await perform(connectionAction)
         }
         .onChange(of: kind) { _, _ in 

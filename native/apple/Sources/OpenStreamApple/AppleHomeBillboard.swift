@@ -245,6 +245,9 @@ struct AppleHomeBillboard<Actions: View>: View {
                 guard !Task.isCancelled, !trailerIsOnScreen else { return }
                 trailerRequest = nil
             }
+            // A press belongs to the visit: leaving for another tab and
+            // coming back must not start the trailer again by itself.
+            .onDisappear { trailerRequest = nil }
             #if DEBUG
             // `-OpenStreamDebugPlayTrailer YES` presses Play Trailer once the
             // hero's lookups have found one, as on the title page, so a
