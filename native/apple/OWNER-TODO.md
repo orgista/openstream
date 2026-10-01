@@ -20,7 +20,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       tvOS "Configure this add-on first." is plain text; stock player shows the real title (not "2023"); with
       Player = Native, MP4 sources come before MKV for the next episode; seeded sims no longer get the test catalogs
       (AIOMetadata is seeded on purpose in Debug/TestFlight). Still open:
-      3. Stock player: after a seek the picture freezes until pause/play (Apple's own player seeks; needs a sim trace).
+      3. FIXED e8b60ec (sim-checked): stock player froze after a seek (AVPlayer stuck waiting with media buffered);
+         it now plays what's buffered after 4 s.
+      5. Re-check of 5298e1c on the sim: Resume… still shows Play (from Search and Continue Watching); stock player
+         still shows "2023" as the small line above the title; Native next episode tried 3 sources with "no video
+         track" and closed before reaching the MP4. Fix batch running.
       4. DECIDE: when no source plays in the Native player, hand over to the OpenStream player? (today the Native
          choice is kept on purpose, so it shows Playback Failed).
 - [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
