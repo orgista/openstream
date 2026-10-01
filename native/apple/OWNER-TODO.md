@@ -16,7 +16,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **Owner decisions 2026-10-01 (afternoon):**
       1. FINAL: "native player with our engine" — remove the Player choice; always the OpenStream engine shown in
-         Apple's player (Infuse-style). Native stays as a hidden debug override only. (in progress)
+         Apple's player (Infuse-style). Native stays as a hidden debug override only. DONE 4440c97 (sim-checked).
+         Kept on tvOS: an MP4 still opens straight in AVPlayer first — moving it onto the engine made a Dolby
+         Vision MP4 (Mad Max) fail in the engine's demuxer ("Invalid data"); if the direct play fails, the engine
+         takes over automatically. Engine bug to report/fix: DV x265 MP4 demux failure.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
 - [ ] **ISO / disc images (owner 2026-10-01):** today ISOs (DVD + Blu-ray, decrypted) play the main title only — no
