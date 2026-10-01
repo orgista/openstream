@@ -163,15 +163,10 @@ struct AppleTransportOverlay: View {
                         if model.nextEpisodePrompt != nil {
                             tvFocus = .nextEpisode
                         } else if model.showsSkipIntro {
-                            // After the reveal lands: written in the same
-                            // update, Skip Intro was still non-interactive and
-                            // the write was dropped (Apple TV verification
-                            // 2026-10-01).
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(100))
-                                guard model.showsSkipIntro else { return }
-                                tvFocus = .skipIntro
-                            }
+                            // Hidden chrome is not a geometric target, so the
+                            // reveal and the focus write share this update,
+                            // as the scrubber's does.
+                            tvFocus = .skipIntro
                         } else {
                             tvFocus = model.isScrubbable ? .scrubber : .captions
                         }
@@ -206,10 +201,14 @@ struct AppleTransportOverlay: View {
                 HStack {
                     Spacer()
                     #if os(tvOS)
+                    // Faded with the controls but still a focus target, so a
+                    // Down on the picture with the controls hidden can move
+                    // here in the same update that reveals them. At opacity 0
+                    // it left the focus chain and the write was dropped
+                    // (Apple TV verification 2026-10-01). Being a focus
+                    // target, it stays an accessibility element too.
                     skipIntroButton
-                        .opacity(model.controlsVisible ? 1 : 0)
-                        .allowsHitTesting(model.controlsVisible)
-                        .accessibilityHidden(!model.controlsVisible)
+                        .opacity(model.controlsVisible ? 1 : AppleTVSkipIntroFocusPolicy.hiddenOpacity)
                     #else
                     if model.controlsVisible { skipIntroButton.transition(.opacity) }
                     #endif
@@ -255,33 +254,26 @@ struct AppleTransportOverlay: View {
             onControlsVisibilityChanged?(isVisible)
             // Focus returns to the invisible surface when the controls hide,
             // so nothing is drawn as focused during playback.
-            if !isVisible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
+            if AppleTVSkipIntroFocusPolicy.returnsFocusToSurfaceOnHide(
+                isVisible: isVisible,
+                hidesFocusDuringPlayback: chrome.hidesFocusDuringPlayback,
+                skipIntroIsFocused: tvFocus == .skipIntro
+            ) { tvFocus = .surface }
         }
         .onChange(of: tvFocus) { old, new in
-            // A focused Skip Intro holds the controls up, as an open menu
-            // does: the three-second auto-hide used to take the focus back
-            // to the picture a moment after it landed (Apple TV
-            // verification 2026-10-01).
-            if new == .skipIntro, old != .skipIntro { model.menuItemAppeared() }
-            if old == .skipIntro, new != .skipIntro { model.menuItemDisappeared() }
-            // With the controls up, Down from the picture is a geometric move
-            // the engine makes itself (the surface's move command never runs),
-            // and it lands on the scrubber row below Skip Intro (full test
-            // 2026-10-01). While Skip Intro is offered it is the first stop.
-            if AppleTVSkipIntroFocusPolicy.redirects(
-                fromSurface: old == .surface,
-                toBottomBar: new == .scrubber || new == .captions,
-                showsSkipIntro: model.showsSkipIntro
+            // The player opens with nothing focused and the engine's first
+            // pick is Skip Intro, not the picture (`defaultFocus` is not
+            // consulted). Only the viewer's own move should land there.
+            if AppleTVSkipIntroFocusPolicy.returnsInitialFocusToSurface(
+                cameFromNowhere: old == nil, landedOnSkipIntro: new == .skipIntro
             ) {
-                // Deferred: a focus write made inside the focus engine's own
-                // move is dropped, and focus stayed on the scrubber (Apple TV
-                // verification 2026-10-01).
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(100))
-                    guard model.showsSkipIntro else { return }
-                    tvFocus = .skipIntro
-                }
+                tvFocus = .surface
+                return
             }
+            // A focused Skip Intro holds the controls up: the three-second
+            // auto-hide took the focus back to the picture a moment after it
+            // landed (Apple TV verification 2026-10-01).
+            model.focusedPromptHoldsControls = new == .skipIntro
         }
         .onPlayPauseCommand { model.togglePlayPause() }
         .onExitCommand {
@@ -504,12 +496,6 @@ struct AppleTransportOverlay: View {
                 .focused($tvFocus, equals: .skipIntro)
                 .onDisappear {
                     if tvFocus == .skipIntro { tvFocus = .surface }
-                }
-                .onMoveCommand { direction in
-                    if direction == .down {
-                        model.bumpActivity()
-                        tvFocus = model.isScrubbable ? .scrubber : .captions
-                    }
                 }
                 #endif
                 .accessibilityIdentifier("player.skipIntro")
@@ -759,7 +745,10 @@ private struct AppleTransportScrubberRow: View {
                 chapterMarks(height: height)
             }
             .frame(height: height)
-            .focusable()
+            // Stands down while Skip Intro is offered, so Down from the
+            // picture cannot land on it first (Apple TV verification
+            // 2026-10-01). Captions stays reachable below Skip Intro.
+            .focusable(AppleTVSkipIntroFocusPolicy.scrubberIsFocusable(showsSkipIntro: model.showsSkipIntro))
             .focused(tvFocus, equals: .scrubber)
             .onMoveCommand { direction in
                 switch direction {
@@ -888,10 +877,29 @@ private extension View {
 }
 
 /// Down from the picture reaches Skip Intro before the scrubber row while it
-/// is offered; moves from anywhere else are the viewer's own.
+/// is offered, and the auto-hide never takes the focus off it.
 enum AppleTVSkipIntroFocusPolicy {
-    static func redirects(fromSurface: Bool, toBottomBar: Bool, showsSkipIntro: Bool) -> Bool {
-        fromSurface && toBottomBar && showsSkipIntro
+    /// Skip Intro's opacity while the controls are hidden: invisible over the
+    /// picture, yet above the focus engine's cut-off (about 0.01), below
+    /// which a view cannot take focus.
+    static let hiddenOpacity: Double = 0.02
+
+    /// The scrubber row is not a focus target while Skip Intro is offered.
+    static func scrubberIsFocusable(showsSkipIntro: Bool) -> Bool {
+        !showsSkipIntro
+    }
+
+    /// Focus that lands on Skip Intro from nowhere is the focus engine's
+    /// first pick as the player opens, not the viewer's: it goes to the
+    /// picture, so the controls can hide.
+    static func returnsInitialFocusToSurface(cameFromNowhere: Bool, landedOnSkipIntro: Bool) -> Bool {
+        cameFromNowhere && landedOnSkipIntro
+    }
+
+    /// Whether hiding the controls hands the focus back to the picture.
+    static func returnsFocusToSurfaceOnHide(isVisible: Bool, hidesFocusDuringPlayback: Bool,
+                                            skipIntroIsFocused: Bool) -> Bool {
+        !isVisible && hidesFocusDuringPlayback && !skipIntroIsFocused
     }
 }
 

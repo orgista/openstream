@@ -98,6 +98,24 @@ enum AppleCatalogArtworkPolicy {
         return values.first { $0 != showing }
     }
 
+    /// How loaded art sits in its card. A portrait poster in a 16:9 card
+    /// (a Top 10 match found by search arrives with a poster and no
+    /// backdrop) was filled to the card's width and pinned to its top, so the
+    /// card showed the poster's top third: a dark box for "Wonka's The Golden
+    /// Ticket" (Apple TV, 2026-10-01). It is drawn whole, centred over a
+    /// blurred fill of itself, instead.
+    enum Framing: Equatable, Sendable {
+        case fill
+        /// Width over height of the poster.
+        case posterInFrame(aspect: Double)
+    }
+
+    static func framing(landscapeCard: Bool, imageWidth: Int, imageHeight: Int) -> Framing {
+        guard landscapeCard, imageWidth > 0, imageHeight > 0 else { return .fill }
+        let aspect = Double(imageWidth) / Double(imageHeight)
+        return aspect < 1 ? .posterInFrame(aspect: aspect) : .fill
+    }
+
     static func retryDelay(afterRetries retries: Int) -> Duration? {
         switch retries {
         case 0: .seconds(3)

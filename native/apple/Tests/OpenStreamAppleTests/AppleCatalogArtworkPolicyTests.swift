@@ -31,4 +31,18 @@ struct AppleCatalogArtworkPolicyTests {
         let item = AppleCatalogItem(mediaID: "unresolved-rank-2", type: "movie", name: "Fixture")
         #expect(AppleCatalogArtworkPolicy.candidates(item: item, landscape: true).isEmpty)
     }
+
+    /// Wonka's The Golden Ticket, Apple TV Top 10 (2026-10-01): a poster and
+    /// no backdrop showed the poster's dark top third as a box.
+    @Test func aPortraitPosterInASixteenByNineCardIsDrawnWhole() {
+        #expect(AppleCatalogArtworkPolicy.framing(landscapeCard: true, imageWidth: 500, imageHeight: 750)
+            == .posterInFrame(aspect: 500.0 / 750.0))
+    }
+
+    @Test func wideArtAndPosterCardsStillFill() {
+        #expect(AppleCatalogArtworkPolicy.framing(landscapeCard: true, imageWidth: 1280, imageHeight: 720) == .fill)
+        #expect(AppleCatalogArtworkPolicy.framing(landscapeCard: true, imageWidth: 720, imageHeight: 720) == .fill)
+        #expect(AppleCatalogArtworkPolicy.framing(landscapeCard: false, imageWidth: 500, imageHeight: 750) == .fill)
+        #expect(AppleCatalogArtworkPolicy.framing(landscapeCard: true, imageWidth: 0, imageHeight: 0) == .fill)
+    }
 }

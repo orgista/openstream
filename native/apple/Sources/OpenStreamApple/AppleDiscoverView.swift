@@ -2077,6 +2077,8 @@ struct AppleCatalogCard: View {
     @State private var artworkRetries = 0
     /// The loaded art is a logo on a plate (`AppleCatalogArtworkPolicy.plate`).
     @State private var artworkPlate = AppleCatalogArtworkPolicy.Plate.none
+    /// How the loaded art sits in the card (`AppleCatalogArtworkPolicy.framing`).
+    @State private var artworkFraming = AppleCatalogArtworkPolicy.Framing.fill
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
          progress: Double? = nil, remainingLabel: String? = nil) {
@@ -2151,15 +2153,28 @@ struct AppleCatalogCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AppleCatalogArtwork(url: resolvedPosterURL, onFailure: artworkDidFail, onImageLoad: { image in
+            AppleCatalogArtwork(url: resolvedPosterURL, contentMode: posterAspect == nil ? .fill : .fit,
+                                onFailure: artworkDidFail, onImageLoad: { image in
                 artworkPlate = AppleCatalogArtworkPolicy.plate(of: image)
+                artworkFraming = AppleCatalogArtworkPolicy.framing(
+                    landscapeCard: isLandscapeCard, imageWidth: image.width, imageHeight: image.height)
             })
+                // A portrait poster in a 16:9 card is drawn whole, centred.
+                .frame(width: posterAspect.map { cardHeight * $0 } ?? cardWidth, height: cardHeight)
                 // A black plate lets the tile through where it is black; the
                 // logo itself is brighter than the tile and draws unchanged.
-                .blendMode(artworkPlate == .black ? .lighten : .normal)
+                .blendMode(artworkPlate == .black && posterAspect == nil ? .lighten : .normal)
                 .frame(width: cardWidth, height: cardHeight)
                 .background {
-                    if artworkPlate != .none {
+                    if posterAspect != nil {
+                        // The poster's own colours, blurred, extend it to the
+                        // card's edges: no dark bands, no scrim.
+                        AppleCatalogArtwork(url: resolvedPosterURL)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .blur(radius: 24, opaque: true)
+                            .clipped()
+                            .accessibilityHidden(true)
+                    } else if artworkPlate != .none {
                         ZStack {
                             Color(white: 0.12)
                             if let plateBackdropURL {
@@ -2203,6 +2218,7 @@ struct AppleCatalogCard: View {
                 .appleTVCardArtworkFocus(cornerRadius: cornerRadius)
                 .onChange(of: item.id) { _, _ in
                     failedArtworkURLs = []; fallbackArtwork = nil; artworkRetries = 0; artworkPlate = .none
+                    artworkFraming = .fill
                 }
                 .task(id: failedArtworkURLs.count) {
                     // Out of art after a failure: try the candidates again
@@ -2292,6 +2308,12 @@ struct AppleCatalogCard: View {
     }
 
     private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching || sizing == .ranked }
+
+    /// The poster's width over height when it is drawn whole in a 16:9 card.
+    private var posterAspect: Double? {
+        if case .posterInFrame(let aspect) = artworkFraming { return aspect }
+        return nil
+    }
 
     private var showsTitle: Bool {
         if sizing == .ranked || sizing == .portraitPromo { return false }
@@ -2400,6 +2422,7 @@ enum AppleCatalogCardSizing {
 
 struct AppleCatalogArtwork: View {
     let url: URL?
+    var contentMode: AppleRemoteImageContentMode = .fill
     /// Billboards pass `AppleDesignTokens.surface`; shelf posters keep the
     /// near-invisible default. See `AppleRemoteImage.loadingFill`.
     var loadingFill: Color = .white.opacity(0.025)
@@ -2416,7 +2439,7 @@ struct AppleCatalogArtwork: View {
     var onImageLoad: ((CGImage) -> Void)? = nil
 
     var body: some View {
-        AppleRemoteImage(url: url, placeholderSystemImage: "",
+        AppleRemoteImage(url: url, contentMode: contentMode, placeholderSystemImage: "",
                          onLoad: onLoad == nil && onImageLoad == nil ? nil : { [onLoad, onImageLoad] image in
                              onLoad?()
                              onImageLoad?(image)

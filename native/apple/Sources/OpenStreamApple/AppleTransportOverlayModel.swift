@@ -537,6 +537,16 @@ public final class AppleTransportOverlayModel {
         if openMenuItems == 0 { scheduleAutoHide() }
     }
 
+    /// Apple TV: true while Skip Intro holds focus. The auto-hide stands down
+    /// until focus leaves it: hiding the chrome took the focus back to the
+    /// picture a moment after it landed (Apple TV verification 2026-10-01).
+    public var focusedPromptHoldsControls = false {
+        didSet {
+            guard focusedPromptHoldsControls != oldValue else { return }
+            scheduleAutoHide()
+        }
+    }
+
     // MARK: - Formatting
 
     /// `m:ss` for streams under an hour, `h:mm:ss` once ≥ 1 h. Pure static so
@@ -642,8 +652,9 @@ public final class AppleTransportOverlayModel {
 
     private func scheduleAutoHide() {
         hideTask?.cancel()
-        guard case .playing = coordinator.phase else {
-            // Keep controls visible while paused / buffering / failed.
+        guard case .playing = coordinator.phase, !focusedPromptHoldsControls else {
+            // Keep controls visible while paused / buffering / failed, and
+            // while a focused prompt holds them.
             controlsVisible = true
             return
         }

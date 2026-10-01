@@ -326,6 +326,21 @@ import Testing
         coordinator.stop()
     }
 
+    @Test func aFocusedSkipIntroHoldsTheControlsPastTheAutoHide() async {
+        let engine = FakePlaybackEngine()
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        await coordinator.begin(makeRequest())
+        engine.emit(.phase(.playing))
+        #expect(await waitUntil { if case .playing = coordinator.phase { true } else { false } })
+        model.focusedPromptHoldsControls = true
+        try? await Task.sleep(for: .milliseconds(3600))
+        #expect(model.controlsVisible)
+        model.focusedPromptHoldsControls = false
+        #expect(await waitUntil { !model.controlsVisible })
+        coordinator.stop()
+    }
+
     @Test func surfaceRouteShowsOverlay() {
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)
