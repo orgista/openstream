@@ -1073,6 +1073,11 @@ struct AppleTVGuideCellStyle: ButtonStyle {
             configuration.label
                 .foregroundStyle(isFocused ? Color.black : (isGap ? AppleDesignTokens.textSecondary : Color.white))
                 .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                // The white fill alone read as weak beside the brighter
+                // on-now tiles (full test 2026-10-01); a shadow lifts the
+                // focused cell off the grid. No scale: cells abut, and a
+                // scaled cell would slide under its neighbour.
+                .shadow(color: .black.opacity(isFocused ? 0.6 : 0), radius: 10, y: 4)
                 .opacity(configuration.isPressed ? 0.85 : 1)
                 .animation(.easeOut(duration: 0.12), value: isFocused)
                 #if DEBUG
@@ -1105,7 +1110,14 @@ struct AppleTVGuideRailStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .background(Color.white.opacity(isFocused ? 0.22 : 0), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .background(Color.white.opacity(isFocused ? 0.3 : 0), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                // A ring as well as the tile: a 22% tile alone was easy to
+                // lose on the guide (full test 2026-10-01). Not a solid white
+                // fill, which would swallow white logos.
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(isFocused ? 0.9 : 0), lineWidth: 3)
+                }
                 .opacity(configuration.isPressed ? 0.85 : 1)
                 .animation(.easeOut(duration: 0.12), value: isFocused)
                 #if DEBUG

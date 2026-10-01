@@ -18,5 +18,6 @@ struct AppleLiveInlineCueLayer: View {
         .allowsHitTesting(false)
         .task(id: ObjectIdentifier(engine)) { await subtitles.follow(engine) }
         .onChange(of: subtitles.menuEntries, initial: true) { _, _ in onMenuChange() }
+        .onChange(of: subtitles.moreEntries) { _, _ in onMenuChange() }
     }
 }

@@ -3469,7 +3469,7 @@ struct AppleCatalogItemDetailView: View {
             tvTitleRowExit = old?.isOnTitleRow == true && focus == nil ? .now : nil
             guard !tvDetailOpeningSettled else {
                 if let correction = AppleTVDetailReturnFocus.correction(
-                    from: old, to: focus, target: tvOpeningFocusTarget
+                    from: old, to: focus, leftTitleRowAgo: leftTitleRowAgo, target: tvOpeningFocusTarget
                 ) ?? AppleTVDetailShelfEntry.correction(
                     from: old, to: focus, leftTitleRowAgo: leftTitleRowAgo,
                     firstSimilarID: suggestedItems.first?.id
@@ -7429,6 +7429,13 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         #else
         content.fullScreenCover(item: $presentation) {
             AppleStremioPlayerView(presentation: $0)
+                #if os(tvOS)
+                // A player opened from a settings page (a share, a pasted
+                // URL) inherited the form's white tint, and its "Playback
+                // Failed" alert drew Retry white on the white focus fill
+                // (full test 2026-10-01). The system tint flips with focus.
+                .tint(nil)
+                #endif
                 #if os(iOS)
                 // Opened from Search the keyboard's safe-area inset was still
                 // applied under the cover, so the transport and its tap area

@@ -11,7 +11,9 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     #if os(visionOS)
     Text(title).foregroundStyle(.white)
     #elseif os(tvOS)
-    Text(title).italic().foregroundStyle(.tertiary)
+    // Tertiary italic on black could not be read from the couch (full test
+    // 2026-10-01); secondary is the contrast tvOS gives its own placeholders.
+    Text(title).foregroundStyle(.secondary)
     #elseif os(iOS)
     Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
     #else
@@ -140,12 +142,14 @@ struct AppleAddMediaServerView: View {
     
     private var nameField: some View {
         TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+            .appleTVFieldOutline()
             .textContentType(.name)
             .appleSourceFieldStyle()
     }
     
     private var urlField: some View {
         TextField("Server URL", text: $url, prompt: appleSecondaryFieldPrompt("Server URL"))
+            .appleTVFieldOutline()
             .textContentType(.URL)
             .appleSourceFieldStyle()
             .tint(.primary)
@@ -160,6 +164,7 @@ struct AppleAddMediaServerView: View {
     
     private var usernameField: some View {
         TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
+            .appleTVFieldOutline()
             .textContentType(.username)
             .appleSourceFieldStyle()
             #if os(iOS) || os(tvOS) || os(visionOS)
@@ -174,6 +179,7 @@ struct AppleAddMediaServerView: View {
     
     private var embyEmailField: some View {
         TextField("Email", text: $embyEmail, prompt: appleSecondaryFieldPrompt("Email"))
+            .appleTVFieldOutline()
             .textContentType(.emailAddress)
             .appleSourceFieldStyle()
             #if os(iOS) || os(tvOS) || os(visionOS)

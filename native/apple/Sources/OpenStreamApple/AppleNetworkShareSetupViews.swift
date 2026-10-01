@@ -10,7 +10,9 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     #if os(visionOS)
     Text(title).foregroundStyle(.white)
     #elseif os(tvOS)
-    Text(title).italic().foregroundStyle(.tertiary)
+    // Tertiary italic on black could not be read from the couch (full test
+    // 2026-10-01); secondary is the contrast tvOS gives its own placeholders.
+    Text(title).foregroundStyle(.secondary)
     #elseif os(iOS)
     Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
     #else
@@ -426,6 +428,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var addressField: some View {
         TextField("Server or IP", text: $setup.address, prompt: appleSecondaryFieldPrompt("Server or IP"))
+            .appleTVFieldOutline()
             .textContentType(.URL)
             #if os(iOS) || os(tvOS) || os(visionOS)
             .textInputAutocapitalization(.never)
@@ -439,6 +442,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var portField: some View {
         TextField("Port", text: $setup.port, prompt: appleSecondaryFieldPrompt("445"))
+            .appleTVFieldOutline()
             #if os(iOS) || os(visionOS)
             .keyboardType(.numberPad)
             #endif
@@ -447,6 +451,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var usernameField: some View {
         TextField("Username", text: $setup.username, prompt: appleSecondaryFieldPrompt("Username"))
+            .appleTVFieldOutline()
             .textContentType(.username)
             #if os(iOS) || os(tvOS) || os(visionOS)
             .textInputAutocapitalization(.never)
@@ -462,6 +467,7 @@ private struct AppleNetworkShareConnectForm: View {
 
     private var domainField: some View {
         TextField("Domain", text: $setup.domain, prompt: appleSecondaryFieldPrompt("Domain"))
+            .appleTVFieldOutline()
             #if os(iOS) || os(tvOS) || os(visionOS)
             .textInputAutocapitalization(.never)
             #endif
@@ -678,6 +684,7 @@ struct AppleNetworkShareConfirmView: View {
             VStack(alignment: .leading, spacing: metrics.groupSpacing) {
                 AppleTVFormGroup("Name") {
                     TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+                        .appleTVFieldOutline()
                         .accessibilityIdentifier("sources.smb.name")
                     Text("\(setup.server?.name ?? "") · \(folderLabel)")
                         .font(.caption)
@@ -705,6 +712,7 @@ struct AppleNetworkShareConfirmView: View {
         Form {
             Section("Name") {
                 TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+                    .appleTVFieldOutline()
                             .onSubmit(save)
                     #if os(macOS)
                     .labelsHidden()

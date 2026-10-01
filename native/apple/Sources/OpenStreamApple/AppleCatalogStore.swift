@@ -119,6 +119,10 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
     public let director: String?
     public let writers: [String]?
     public let year: Int?
+    /// The title's IMDb id when the add-on keys it by another scheme
+    /// (`tmdb:…`) but sends `imdb_id` too, so search can merge the TMDB and
+    /// Cinemeta rows for one title (full test 2026-10-01).
+    public let imdbID: String?
 
     public init(
         mediaID: String,
@@ -136,7 +140,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
         director: String? = nil,
         writers: [String]? = nil,
         year: Int? = nil,
-        logoURL: URL? = nil
+        logoURL: URL? = nil,
+        imdbID: String? = nil
     ) {
         let normalizedType = String(type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(40))
         let normalizedMediaID = String(mediaID.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
@@ -167,6 +172,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
         self.director = cleanDirector.isEmpty ? nil : String(cleanDirector.prefix(80))
         self.writers = Self.cleanedList(writers, limit: 8, maximumLength: 80)
         self.year = year.flatMap { (1_870 ... 2_200).contains($0) ? $0 : nil }
+        let cleanIMDbID = imdbID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.imdbID = cleanIMDbID.flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
     }
 
     /// Rehydrates a cached item through the memberwise initialiser.
@@ -195,7 +202,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             director: try container.decodeIfPresent(String.self, forKey: .director),
             writers: try container.decodeIfPresent([String].self, forKey: .writers),
             year: try container.decodeIfPresent(Int.self, forKey: .year),
-            logoURL: try container.decodeIfPresent(URL.self, forKey: .logoURL)
+            logoURL: try container.decodeIfPresent(URL.self, forKey: .logoURL),
+            imdbID: try container.decodeIfPresent(String.self, forKey: .imdbID)
         )
     }
 
@@ -241,7 +249,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             director: director,
             writers: writers,
             year: year,
-            logoURL: logoURL
+            logoURL: logoURL,
+            imdbID: imdbID
         )
     }
 
@@ -267,7 +276,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             director: director,
             writers: writers,
             year: year,
-            logoURL: logoURL ?? self.logoURL
+            logoURL: logoURL ?? self.logoURL,
+            imdbID: imdbID
         )
     }
 
@@ -290,7 +300,8 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             director: director ?? details.director,
             writers: writers ?? (details.writers.isEmpty ? nil : details.writers),
             year: year ?? details.year,
-            logoURL: logoURL ?? details.logoURL
+            logoURL: logoURL ?? details.logoURL,
+            imdbID: imdbID
         )
     }
 }
@@ -455,7 +466,8 @@ public struct AppleStremioCatalogClient: Sendable {
                 cast: meta.cast,
                 director: meta.director,
                 writers: meta.writers,
-                year: meta.year
+                year: meta.year,
+                imdbID: meta.imdbID
             ))
             if items.count == AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog { break }
         }
@@ -568,6 +580,8 @@ public struct AppleStremioCatalogClient: Sendable {
         let director: String?
         let writers: [String]?
         let year: Int?
+        /// `imdb_id` when `id` is another scheme; nil when it is the id.
+        let imdbID: String?
 
         private enum CodingKeys: String, CodingKey {
             case id, imdbID = "imdb_id", type, name, poster, background, description, releaseInfo, imdbRating, contentRating, badges, formats
@@ -580,6 +594,7 @@ public struct AppleStremioCatalogClient: Sendable {
             // other catalog add-ons commonly return the canonical `id` key.
             id = try container.decodeIfPresent(String.self, forKey: .id)
                 ?? (try container.decode(String.self, forKey: .imdbID))
+            imdbID = try? container.decode(String.self, forKey: .imdbID)
             type = try? container.decode(String.self, forKey: .type)
             name = (try? container.decode(String.self, forKey: .name)) ?? ""
             poster = try? container.decode(String.self, forKey: .poster)

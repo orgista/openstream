@@ -40,6 +40,7 @@ extension View {
                     .frame(maxWidth: AppleTVSettingsMetrics.standard.formColumnWidth, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .tint(.white)
+                    .toggleStyle(.tvReadable)
             }
         } else {
             appleSettingsPage(title)
@@ -521,7 +522,20 @@ private struct AppleChannelManagerView: View {
                     ProgressView()
                 } else if channels.isEmpty {
                     Text(errorMessage ?? emptyLineupMessage)
-                        .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("channels.empty")
+                    if errorMessage != nil {
+                        Button {
+                            Task { await reload() }
+                        } label: {
+                            #if os(tvOS)
+                            AppleTVFocusReadableText("Retry")
+                            #else
+                            Text("Retry")
+                            #endif
+                        }
+                        .accessibilityIdentifier("channels.retry")
+                    }
                 } else {
                     NavigationLink {
                         channelPicker
@@ -542,7 +556,7 @@ private struct AppleChannelManagerView: View {
                             }
                             Spacer(minLength: 8)
                             #if os(tvOS)
-                            Button("Remove") { toggle(channel.id) }
+                            Button { toggle(channel.id) } label: { AppleTVFocusReadableText("Remove") }
                             #else
                             Button { toggle(channel.id) } label: {
                                 Image(systemName: "minus.circle").foregroundStyle(.secondary)
@@ -744,14 +758,18 @@ private struct AppleChannelManagerView: View {
         var errors: [String] = []
         for source in sources {
             do {
-                loaded += try await client.channels(
-                    source: source,
-                    credentials: try sourceStore.iptvCredentials(for: source)
-                )
+                let credentials = try sourceStore.iptvCredentials(for: source)
+                let client = client
+                // A panel that is down can hold the request open well past
+                // its idle timeout; My Channels then spun for good (full test
+                // 2026-10-01). Each source gets a deadline, then says so.
+                loaded += try await AppleChannelManagerLoad.withDeadline(AppleChannelManagerLoad.deadline) {
+                    try await client.channels(source: source, credentials: credentials)
+                }
             } catch is CancellationError {
                 return
             } catch {
-                errors.append("\(source.name): \(error.localizedDescription)")
+                errors.append(AppleChannelManagerLoad.message(sourceName: source.name, error: error))
             }
         }
         channels = loaded
@@ -1255,6 +1273,36 @@ struct AppleWorkingButtonLabel: View {
                     .contentTransition(.identity)
             }
             .animation(nil, value: isWorking)
+        }
+    }
+}
+
+/// Loading the lineup for the Channel Manager.
+enum AppleChannelManagerLoad {
+    /// Longer than one request's idle timeout (20 s), shorter than patience.
+    static let deadline: Duration = .seconds(30)
+
+    static func message(sourceName: String, error: Error) -> String {
+        if (error as? URLError)?.code == .timedOut {
+            return "\(sourceName) is not responding."
+        }
+        return "\(sourceName): \(error.localizedDescription)"
+    }
+
+    static func withDeadline<Value: Sendable>(
+        _ duration: Duration,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try Task.checkCancellation()
+        return try await withThrowingTaskGroup(of: Value.self) { group in
+            defer { group.cancelAll() }
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: duration)
+                throw URLError(.timedOut)
+            }
+            guard let value = try await group.next() else { throw CancellationError() }
+            return value
         }
     }
 }

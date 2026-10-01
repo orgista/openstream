@@ -290,3 +290,43 @@ public struct AppleBrandToggleStyle: ToggleStyle {
 public extension ToggleStyle where Self == AppleBrandToggleStyle {
     static var brandSwitch: AppleBrandToggleStyle { AppleBrandToggleStyle() }
 }
+
+#if os(tvOS)
+/// Apple TV draws a Toggle as a row that turns white when focused, and the
+/// settings forms' white tint drew its title white on that fill: the focused
+/// Enabled and catalog rows read as a blank capsule with only "On" left
+/// (full test 2026-10-01). The title is black while focused, white otherwise,
+/// as `AppleTVFocusReadableText` does for buttons. The inner Toggle takes the
+/// platform style, so this style is not applied to itself again.
+public struct AppleTVReadableToggleStyle: ToggleStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        Toggle(isOn: configuration.$isOn) {
+            AppleTVFocusReadableLabel { configuration.label }
+        }
+        .toggleStyle(.automatic)
+    }
+}
+
+public extension ToggleStyle where Self == AppleTVReadableToggleStyle {
+    static var tvReadable: AppleTVReadableToggleStyle { AppleTVReadableToggleStyle() }
+}
+
+/// Any label inside a focusable tvOS row: black on the white focus fill,
+/// white (or secondary when disabled) otherwise.
+struct AppleTVFocusReadableLabel<Content: View>: View {
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.isEnabled) private var isEnabled
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .foregroundStyle(isFocused ? Color.black : (isEnabled ? Color.white : Color.secondary))
+    }
+}
+#endif

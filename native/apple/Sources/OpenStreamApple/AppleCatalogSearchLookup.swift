@@ -359,6 +359,7 @@ final class AppleCatalogSearchStore {
             let lhsRank = relevance(lhs, query: normalizedQuery)
             let rhsRank = relevance(rhs, query: normalizedQuery)
             if lhsRank != rhsRank { return lhsRank < rhsRank }
+            if lhsRank == 0, let exactOrder = exactMatchOrder(lhs, rhs) { return exactOrder }
             let lhsTitle = normalized(lhs.title)
             let rhsTitle = normalized(rhs.title)
             if lhsTitle != rhsTitle { return lhsTitle < rhsTitle }
@@ -384,6 +385,25 @@ final class AppleCatalogSearchStore {
         if record.aliases.contains(where: { normalized($0) == query }) { return 0 }
         if title.hasPrefix(query) { return 1 }
         return 2
+    }
+
+    /// Among titles that all match the query exactly, which comes first.
+    ///
+    /// "stranger things" put the 2013 film above the 2016 series, because
+    /// exact matches then fell back to alphabetical order and the id (full
+    /// test 2026-10-01). The title more sources carry is the one people mean
+    /// (the merged rows are the popularity signal there is), then the newer
+    /// one, then a show or film ahead of a bare library file. Nil when none
+    /// of those tells them apart.
+    nonisolated static func exactMatchOrder(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> Bool? {
+        let lhsSources = Set(lhs.availability.map(\.instanceID)).count
+        let rhsSources = Set(rhs.availability.map(\.instanceID)).count
+        if lhsSources != rhsSources { return lhsSources > rhsSources }
+        if let lhsYear = lhs.year, let rhsYear = rhs.year, lhsYear != rhsYear { return lhsYear > rhsYear }
+        let lhsTitled = lhs.kind == .series || lhs.kind == .movie
+        let rhsTitled = rhs.kind == .series || rhs.kind == .movie
+        if lhsTitled != rhsTitled { return lhsTitled }
+        return nil
     }
 
     /// One row per title: the normalised name and the year.

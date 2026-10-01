@@ -44,6 +44,8 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     /// Return cannot press the page's Play button again underneath it.
     var takesKeyboardFocus = false
     var subtitleEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
+    /// The "More…" submenu: the stream's other subtitle languages.
+    var moreSubtitleEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
     var showsSubtitleMenu = false
     var onSelectSubtitle: (Int?) -> Void = { _ in }
     var onOtherSources: (() -> Void)?
@@ -71,7 +73,8 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
         // Rebuilt only when what it lists changes: replacing the menu while
         // it is open would close it under the pointer.
         let signature = MenuSignature(otherSources: onOtherSources != nil,
-                                      subtitles: showsSubtitleMenu ? subtitleEntries : [])
+                                      subtitles: showsSubtitleMenu ? subtitleEntries : [],
+                                      moreSubtitles: showsSubtitleMenu ? moreSubtitleEntries : [])
         guard signature != context.coordinator.menuSignature else { return }
         context.coordinator.menuSignature = signature
         nsView.actionPopUpButtonMenu = actionMenu(coordinator: context.coordinator)
@@ -80,6 +83,7 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     struct MenuSignature: Equatable {
         let otherSources: Bool
         let subtitles: [AppleSubtitleCueLayerPolicy.MenuEntry]
+        var moreSubtitles: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
     }
 
     private func actionMenu(coordinator: Coordinator) -> NSMenu? {
@@ -93,13 +97,21 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
         }
         if showsSubtitleMenu, !subtitleEntries.isEmpty {
             let tracks = NSMenu(title: "Subtitles")
-            for entry in subtitleEntries {
+            func subtitleItem(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> NSMenuItem {
                 let item = NSMenuItem(title: entry.title, action: #selector(Coordinator.selectSubtitle(_:)),
                                       keyEquivalent: "")
                 item.target = coordinator
                 item.representedObject = entry.trackID
                 item.state = entry.isSelected ? .on : .off
-                tracks.addItem(item)
+                return item
+            }
+            for entry in subtitleEntries { tracks.addItem(subtitleItem(entry)) }
+            if !moreSubtitleEntries.isEmpty {
+                let more = NSMenu(title: AppleSubtitleCueLayerPolicy.moreMenuTitle)
+                for entry in moreSubtitleEntries { more.addItem(subtitleItem(entry)) }
+                let moreItem = NSMenuItem(title: AppleSubtitleCueLayerPolicy.moreMenuTitle, action: nil, keyEquivalent: "")
+                moreItem.submenu = more
+                tracks.addItem(moreItem)
             }
             let item = NSMenuItem(title: "Subtitles", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "captions.bubble", accessibilityDescription: nil)

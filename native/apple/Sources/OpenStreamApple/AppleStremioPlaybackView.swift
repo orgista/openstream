@@ -199,6 +199,7 @@ struct AppleStremioPlayerView: View {
             }
         }
         .onChange(of: stockSubtitles.menuEntries) { installSourceMenu() }
+        .onChange(of: stockSubtitles.moreEntries) { installSourceMenu() }
         .onChange(of: coordinator.route) { _, route in
             if route != .none {
                 hasRouted = true
@@ -224,19 +225,17 @@ struct AppleStremioPlayerView: View {
                     if showsAppSubtitleMenu {
                         Menu("Subtitles", systemImage: "captions.bubble") {
                             ForEach(stockSubtitles.menuEntries) { entry in
-                                Button {
-                                    selectStockSubtitle(entry.trackID)
-                                } label: {
-                                    if entry.isSelected {
-                                        Label(entry.title, systemImage: "checkmark")
-                                    } else {
-                                        Text(entry.title)
+                                stockSubtitleButton(entry)
+                            }
+                            if !stockSubtitles.moreEntries.isEmpty {
+                                Menu(AppleSubtitleCueLayerPolicy.moreMenuTitle) {
+                                    ForEach(stockSubtitles.moreEntries) { entry in
+                                        stockSubtitleButton(entry)
                                     }
                                 }
-                                .accessibilityLabel(entry.title)
-                                .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
                                 .onAppear { nativeMenuOpenItems += 1 }
                                 .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
+                                .accessibilityIdentifier("player.subtitles.more")
                             }
                         }
                         .onAppear { nativeMenuOpenItems += 1 }
@@ -447,6 +446,24 @@ struct AppleStremioPlayerView: View {
                 stockPlayerListsCaptions: stockSubtitles.stockPlayerListsCaptions)
     }
 
+    #if os(iOS) || os(visionOS)
+    private func stockSubtitleButton(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> some View {
+        Button {
+            selectStockSubtitle(entry.trackID)
+        } label: {
+            if entry.isSelected {
+                Label(entry.title, systemImage: "checkmark")
+            } else {
+                Text(entry.title)
+            }
+        }
+        .accessibilityLabel(entry.title)
+        .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
+        .onAppear { nativeMenuOpenItems += 1 }
+        .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
+    }
+    #endif
+
     private func selectStockSubtitle(_ id: Int?) {
         #if os(iOS)
         // Through the host, so AVKit's CC menu and this one agree.
@@ -487,10 +504,10 @@ struct AppleStremioPlayerView: View {
                     title: "Subtitles",
                     image: UIImage(systemName: "captions.bubble"),
                     options: .singleSelection,
-                    children: entries.map { entry in
-                        UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in
-                            subtitles.select(entry.trackID, on: engine)
-                        }
+                    children: AppleSubtitleCueLayerPolicy.uiMenuChildren(
+                        entries: entries, more: subtitles.moreEntries
+                    ) { id in
+                        subtitles.select(id, on: engine)
                     }
                 ))
             }
@@ -587,6 +604,7 @@ struct AppleStremioPlayerView: View {
             zoomToFill: macCommands.zoomToFill,
             takesKeyboardFocus: true,
             subtitleEntries: stockSubtitles.menuEntries,
+            moreSubtitleEntries: stockSubtitles.moreEntries,
             showsSubtitleMenu: AppleStockSubtitleMenuPolicy.showsAppMenu(
                 tracks: coordinator.engine.subtitleTracks,
                 stockPlayerListsCaptions: stockSubtitles.stockPlayerListsCaptions),

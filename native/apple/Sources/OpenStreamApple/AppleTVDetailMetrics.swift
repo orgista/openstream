@@ -91,10 +91,20 @@ enum AppleTVDetailOpeningFocus {
 /// title page). The Apple TV app goes back to its primary action; so does
 /// this page. `nil` and `.similar` are focus below the title row; moves along
 /// the row are the user's and are left alone.
+///
+/// Opening Rate replaces the button with its choices, so focus reports `nil`
+/// for a frame between Rate and the first choice; read as "coming up from
+/// below" that sent the viewer back to Play (B22 again, full test
+/// 2026-10-01). A `nil` that left the title row within
+/// `AppleTVDetailShelfEntry.sameMoveWindow` is the same move along the row.
 enum AppleTVDetailReturnFocus {
     static func correction(from old: AppleTVDetailFocus?, to new: AppleTVDetailFocus?,
+                           leftTitleRowAgo: Duration? = nil,
                            target: AppleTVDetailFocus) -> AppleTVDetailFocus? {
         guard old?.isOnTitleRow != true, let new, new.isOnTitleRow, new != target else { return nil }
+        if old == nil, let leftTitleRowAgo, leftTitleRowAgo <= AppleTVDetailShelfEntry.sameMoveWindow {
+            return nil
+        }
         return target
     }
 }

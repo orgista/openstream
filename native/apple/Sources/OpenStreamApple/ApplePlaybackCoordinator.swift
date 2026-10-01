@@ -565,6 +565,18 @@ public final class ApplePlaybackCoordinator {
     /// ranked candidate. When the list is exhausted, report a single
     /// `.unsupportedMedia` failure naming how many streams were tried.
     private func handleFailure(_ failure: ApplePlaybackFailure) async {
+        var failure = failure
+        // A file cut short opens like an unplayable format; it is an
+        // incomplete download, which Retry (or another source) can fix.
+        if failure.kind == .unsupportedMedia, let request = lastRequest, !request.isLive {
+            let attempt = generation
+            let endsEarly = await AppleTruncatedMediaProbe.endsEarly(request.url)
+            guard !Task.isCancelled, generation == attempt else { return }
+            if endsEarly {
+                appleTrace("playback: the file ends before its container says it should — incomplete download")
+                failure = ApplePlaybackFailure(kind: .network, message: AppleTruncatedMediaProbe.message)
+            }
+        }
         appleTraceFailure("playback \(failure.kind): \(failure.message) — \(shouldFallBack(for: failure) ? "falling back" : "final")")
         if shouldFallBack(for: failure), let lastRequest {
             ApplePlaybackFailureHistory.shared.record(lastRequest.url)

@@ -4,6 +4,9 @@ import Foundation
 import MediaAccessibility
 import Observation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// What the cue layer draws for one cue: a line of text or a decoded bitmap
 /// (PGS/DVB) with its authored geometry and rich-text emphasis intact.
@@ -83,7 +86,45 @@ enum AppleSubtitleCueLayerPolicy {
                           isSelected: activeTrackID.map(choice.memberIDs.contains) ?? false)
             }
     }
+
+    /// The "More…" submenu under `menuEntries`: the stream's other
+    /// languages (`AppleSubtitleTrackFilter.otherLanguageChoices`).
+    static func moreMenuEntries(
+        tracks: [ApplePlaybackTrack],
+        preferredLanguages: [String],
+        activeTrackID: Int?
+    ) -> [MenuEntry] {
+        AppleSubtitleTrackFilter.otherLanguageChoices(
+            tracks, preferredLanguages: preferredLanguages, activeTrackID: activeTrackID
+        ).map { choice in
+            MenuEntry(trackID: choice.track.id, title: choice.title,
+                      isSelected: activeTrackID.map(choice.memberIDs.contains) ?? false)
+        }
+    }
+
+    /// The submenu's title.
+    static let moreMenuTitle = "More…"
 }
+
+#if canImport(UIKit) && !os(watchOS)
+extension AppleSubtitleCueLayerPolicy {
+    /// A UIKit captions menu's rows: `entries`, then "More…" holding `more`.
+    static func uiMenuChildren(
+        entries: [MenuEntry],
+        more: [MenuEntry],
+        select: @escaping @MainActor (Int?) -> Void
+    ) -> [UIMenuElement] {
+        func action(_ entry: MenuEntry) -> UIAction {
+            UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in select(entry.trackID) }
+        }
+        var children: [UIMenuElement] = entries.map(action)
+        if !more.isEmpty {
+            children.append(UIMenu(title: moreMenuTitle, options: .singleSelection, children: more.map(action)))
+        }
+        return children
+    }
+}
+#endif
 
 /// Follows an engine's cues and tracks for the stock-player cue layer and the
 /// app's subtitle menu. The transport overlay's model does the same job on
@@ -95,6 +136,8 @@ final class AppleStockPlayerSubtitles {
     /// Inline UIKit players have no transport overlay, including on surface routes.
     private(set) var drawsInlineCues = false
     private(set) var menuEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
+    /// The menu's "More…" rows: the stream's other languages.
+    private(set) var moreEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
     /// Whether the current item has legible options, i.e. whether AVKit's
     /// own captions button is there (`AppleStockSubtitleMenuPolicy`).
     private(set) var stockPlayerListsCaptions = false
@@ -136,6 +179,12 @@ final class AppleStockPlayerSubtitles {
             preferredLanguages: chosen ?? [],
             languagesAreExplicit: chosen != nil,
             activeTrackID: engine.activeSubtitleTrackID)
+        let more = entries.isEmpty ? [] : AppleSubtitleCueLayerPolicy.moreMenuEntries(
+            tracks: engine.subtitleTracks,
+            preferredLanguages: chosen ?? [],
+            activeTrackID: engine.activeSubtitleTrackID)
+        // More first: the observers of `menuEntries` rebuild with both.
+        if more != moreEntries { moreEntries = more }
         if entries != menuEntries { menuEntries = entries }
         probeStockCaptions(of: engine.avPlayer?.currentItem)
     }
@@ -186,7 +235,10 @@ struct AppleSubtitleCueLayer: View {
 private struct AppleSubtitleTextCues: View {
     @State private var appearance = AppleCaptionAppearance.system()
     #if os(tvOS)
-    @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 29
+    // Read from across a room: about the size the Apple TV app draws its
+    // captions at on a 1080p screen (29 pt read as phone-sized, full test
+    // 2026-10-01).
+    @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 46
     #elseif os(macOS)
     @ScaledMetric(relativeTo: .subheadline) private var baseSize: CGFloat = 12
     #else

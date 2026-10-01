@@ -101,6 +101,13 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             emit(.tracks)
         }
     }
+    /// Aether's `activeAudioTrackIndex`: the stream index playing.
+    public private(set) var activeAudioTrackID: Int? {
+        didSet {
+            guard activeAudioTrackID != oldValue else { return }
+            emit(.tracks)
+        }
+    }
     public private(set) var subtitleTracks: [ApplePlaybackTrack] = [] {
         didSet {
             guard subtitleTracks != oldValue else { return }
@@ -608,6 +615,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.$audioTracks
             .sink { [weak self] tracks in self?.audioTracks = tracks.map(Self.mapTrack) }
             .store(in: &cancellables)
+        aether.$activeAudioTrackIndex
+            .sink { [weak self] index in self?.activeAudioTrackID = index }
+            .store(in: &cancellables)
         aether.$mediaChapters
             .sink { [weak self] infos in self?.chapters = infos.map(Self.mapChapter) }
             .store(in: &cancellables)
@@ -818,7 +828,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             codec: track.codec,
             isDefault: track.isDefault,
             isForced: track.isForced,
-            isHearingImpaired: track.isHearingImpaired
+            isHearingImpaired: track.isHearingImpaired,
+            channels: track.channels,
+            isCommentary: track.isCommentary,
+            isAtmos: track.isAtmos
         )
     }
 

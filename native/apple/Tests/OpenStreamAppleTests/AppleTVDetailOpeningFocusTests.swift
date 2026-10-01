@@ -74,6 +74,18 @@ struct AppleTVDetailReturnFocusTests {
         #expect(AppleTVDetailReturnFocus.correction(from: old, to: new, target: .play) == nil)
     }
 
+    /// B22 again (full test 2026-10-01): Rate's button goes away as its
+    /// choices appear, so focus passes through `nil` for a frame.
+    @Test func openingRateThroughABriefNilKeepsTheChoice() {
+        #expect(AppleTVDetailReturnFocus.correction(
+            from: nil, to: .rateChoice(0), leftTitleRowAgo: .milliseconds(16), target: .play) == nil)
+    }
+
+    @Test func aLongStayBelowStillComesBackToPlay() {
+        #expect(AppleTVDetailReturnFocus.correction(
+            from: nil, to: .rate, leftTitleRowAgo: .seconds(2), target: .play) == .play)
+    }
+
     @Test func leavingTheRowIsLeftAlone() {
         #expect(AppleTVDetailReturnFocus.correction(from: .rate, to: nil, target: .play) == nil)
         #expect(AppleTVDetailReturnFocus.correction(from: nil, to: nil, target: .play) == nil)

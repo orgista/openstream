@@ -112,7 +112,38 @@ public enum AppleSubtitleTrackFilter: Sendable {
     ) -> [MenuChoice] {
         let wanted = effectiveLanguages(preferredLanguages)
         let tagged = tracks.filter { wanted.contains(languageKey(of: $0)) }
-        let tracks = tagged.isEmpty ? tracks.filter(isUntaggedClosedCaption) : tagged
+        return grouped(tagged.isEmpty ? tracks.filter(isUntaggedClosedCaption) : tagged,
+                       wanted: wanted, activeTrackID: activeTrackID)
+    }
+
+    /// The captions menu's "More…": every tagged language the stream has
+    /// that `menuChoices` leaves out, one row per language and kind as
+    /// there, alphabetical. English stays the only entry up front; Spanish
+    /// and the rest are one step away (full test 2026-10-01).
+    public static func otherLanguageChoices(
+        _ tracks: [ApplePlaybackTrack],
+        preferredLanguages: [String],
+        activeTrackID: Int? = nil
+    ) -> [MenuChoice] {
+        let wanted = effectiveLanguages(preferredLanguages)
+        let others = tracks.filter { track in
+            let language = languageKey(of: track)
+            return isLanguage(language) && !wanted.contains(language)
+        }
+        return grouped(others, wanted: [], activeTrackID: activeTrackID)
+            .enumerated()
+            .sorted { a, b in
+                let order = a.element.title.localizedStandardCompare(b.element.title)
+                return order == .orderedSame ? a.offset < b.offset : order == .orderedAscending
+            }
+            .map(\.element)
+    }
+
+    private static func grouped(
+        _ tracks: [ApplePlaybackTrack],
+        wanted: [String],
+        activeTrackID: Int?
+    ) -> [MenuChoice] {
         struct Key: Hashable { let language: String; let kind: MenuKind }
         var order: [Key] = []
         var members: [Key: [ApplePlaybackTrack]] = [:]

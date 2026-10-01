@@ -71,6 +71,8 @@ public struct AppleChannelHealthVideoInfo: Codable, Equatable, Sendable {
 /// Atomic JSON, matching AppleIPTVChannelCache and AppleLocalPlaylistStore.
 /// One small file per channel avoids tvOS's 1 MB UserDefaults termination limit
 /// and avoids rewriting the entire lineup after every completed probe.
+/// Apple TV may purge these files when storage runs low; that is safe, as the
+/// history is only what past probes saw and the next probes rebuild it.
 public actor AppleChannelHealthHistory {
     public static let shared = AppleChannelHealthHistory()
     public struct Entry: Codable, Equatable, Sendable {

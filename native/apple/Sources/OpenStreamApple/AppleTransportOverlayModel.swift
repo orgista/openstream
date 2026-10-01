@@ -169,6 +169,8 @@ public final class AppleTransportOverlayModel {
     public private(set) var position: Double = 0
     public private(set) var duration: Double? = nil
     public private(set) var audioTracks: [ApplePlaybackTrack] = []
+    /// The audio track playing: the engine's report, else the last pick.
+    public private(set) var selectedAudioID: Int?
     /// Every embedded track, unfiltered. `menuSubtitleTracks` is what the
     /// captions menu lists.
     public private(set) var subtitleTracks: [ApplePlaybackTrack] = []
@@ -235,6 +237,7 @@ public final class AppleTransportOverlayModel {
         self.cueTime = coordinator.engine.presentationTime
         self.duration = coordinator.engine.duration
         self.audioTracks = coordinator.engine.audioTracks
+        self.selectedAudioID = coordinator.engine.activeAudioTrackID
         self.subtitleTracks = coordinator.engine.subtitleTracks
         self.chapters = coordinator.engine.chapters
         self.introChapter = AppleChapterMarkers.intro(
@@ -398,6 +401,7 @@ public final class AppleTransportOverlayModel {
     public func selectAudio(_ id: Int) {
         bumpActivity()
         coordinator.engine.selectAudioTrack(id: id)
+        selectedAudioID = id
     }
 
     public func selectSubtitle(_ id: Int?) {
@@ -596,6 +600,9 @@ public final class AppleTransportOverlayModel {
             refreshIntroChapter()
             let audio = coordinator.engine.audioTracks
             if audioTracks != audio { audioTracks = audio }
+            if let active = coordinator.engine.activeAudioTrackID, active != selectedAudioID {
+                selectedAudioID = active
+            }
             let subtitles = coordinator.engine.subtitleTracks
             if subtitleTracks != subtitles { subtitleTracks = subtitles }
             let cues = coordinator.engine.subtitleCues

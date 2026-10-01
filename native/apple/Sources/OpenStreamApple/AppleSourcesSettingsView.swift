@@ -16,7 +16,9 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
     #if os(visionOS)
     Text(title).foregroundStyle(.white)
     #elseif os(tvOS)
-    Text(title).italic().foregroundStyle(.tertiary)
+    // Tertiary italic on black could not be read from the couch (full test
+    // 2026-10-01); secondary is the contrast tvOS gives its own placeholders.
+    Text(title).foregroundStyle(.secondary)
     #elseif os(iOS)
     // Use the system label color directly; hierarchical secondary styling
     // compounds the text field's placeholder dimming on a dark form.
@@ -773,6 +775,7 @@ private struct AppleAddManifestSourceView: View {
             text: $manifestURL,
             prompt: appleSecondaryFieldPrompt("Manifest URL")
         )
+            .appleTVFieldOutline()
             #if os(iOS) || os(tvOS) || os(visionOS)
             .textInputAutocapitalization(.never)
             #endif
@@ -1070,6 +1073,7 @@ struct AppleRevealableSecureField: View {
     private var field: some View {
         if isRevealed {
             TextField(title, text: $text, prompt: appleSecondaryFieldPrompt(title))
+                .appleTVFieldOutline()
                 .textContentType(.password)
                 #if os(iOS) || os(tvOS) || os(visionOS)
                 .textInputAutocapitalization(.never)
@@ -1077,6 +1081,7 @@ struct AppleRevealableSecureField: View {
                 .autocorrectionDisabled()
         } else {
                 SecureField(title, text: $text, prompt: appleSecondaryFieldPrompt(title))
+                    .appleTVFieldOutline()
                 .textContentType(.password)
                 #if os(iOS) || os(tvOS) || os(visionOS)
                 .textInputAutocapitalization(.never)
@@ -1145,12 +1150,14 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var nameField: some View {
         TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
+            .appleTVFieldOutline()
             .textContentType(.name)
             .appleSourceFieldStyle()
     }
 
     private var endpointField: some View {
         TextField(endpointTitle, text: $endpoint, prompt: appleSecondaryFieldPrompt(endpointTitle))
+            .appleTVFieldOutline()
             .textContentType(.URL)
             .appleSourceFieldStyle()
             .tint(.primary)
@@ -1165,6 +1172,7 @@ private struct AppleAddLiveTVSourceView: View {
 
     private var usernameField: some View {
         TextField("Username", text: $username, prompt: appleSecondaryFieldPrompt("Username"))
+            .appleTVFieldOutline()
             .textContentType(.username)
             .appleSourceFieldStyle()
             #if os(iOS) || os(tvOS) || os(visionOS)

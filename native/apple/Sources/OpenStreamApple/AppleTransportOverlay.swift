@@ -219,7 +219,8 @@ struct AppleTransportOverlay: View {
             // Cues sit against the **picture**, not the screen; the same
             // layer is mounted over the stock player on `.avPlayer`.
             AppleSubtitleCueLayer(cues: model.activeSubtitleCues, videoSize: coordinator.engine.videoSize,
-                                  textBottomLift: model.controlsVisible ? 100 : 24)
+                                  textBottomLift: AppleSubtitleCueLift.lift(
+                                      controlsVisible: model.controlsVisible, bottomBarHeight: bottomBarHeight))
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -245,6 +246,19 @@ struct AppleTransportOverlay: View {
             // Focus returns to the invisible surface when the controls hide,
             // so nothing is drawn as focused during playback.
             if !isVisible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
+        }
+        .onChange(of: tvFocus) { old, new in
+            // With the controls up, Down from the picture is a geometric move
+            // the engine makes itself (the surface's move command never runs),
+            // and it lands on the scrubber row below Skip Intro (full test
+            // 2026-10-01). While Skip Intro is offered it is the first stop.
+            if AppleTVSkipIntroFocusPolicy.redirects(
+                fromSurface: old == .surface,
+                toBottomBar: new == .scrubber || new == .captions,
+                showsSkipIntro: model.showsSkipIntro
+            ) {
+                tvFocus = .skipIntro
+            }
         }
         .onPlayPauseCommand { model.togglePlayPause() }
         .onExitCommand {
@@ -320,6 +334,7 @@ struct AppleTransportOverlay: View {
                 if liveTopControls {
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
+                        selectedAudioID: model.selectedAudioID,
                         subtitleTracks: model.menuSubtitleTracks,
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
@@ -571,6 +586,7 @@ struct AppleTransportOverlay: View {
                     // holds Off, every track and the audio languages.
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
+                        selectedAudioID: model.selectedAudioID,
                         subtitleTracks: model.menuSubtitleTracks,
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
@@ -745,6 +761,7 @@ private struct AppleTransportScrubberRow: View {
 @MainActor
 struct AppleTransportTrackMenu: View {
     let audioTracks: [ApplePlaybackTrack]
+    var selectedAudioID: Int? = nil
     let subtitleTracks: [ApplePlaybackTrack]
     let preferredSubtitleLanguages: [String]
     let selectedSubtitleID: Int?
@@ -756,12 +773,20 @@ struct AppleTransportTrackMenu: View {
 
     var body: some View {
         Menu {
-            if audioTracks.count > 1 {
+            let audio = AppleAudioTrackMenu.entries(audioTracks, activeTrackID: selectedAudioID)
+            if audio.count > 1 {
                 Section("Audio") {
-                    ForEach(audioTracks) { track in
-                        Button(trackLabel(track)) {
-                            onSelectAudio(track.id)
+                    ForEach(audio) { entry in
+                        Button { onSelectAudio(entry.trackID) } label: {
+                            if entry.isSelected {
+                                Label(entry.title, systemImage: "checkmark")
+                            } else {
+                                Text(entry.title)
+                            }
                         }
+                        .accessibilityLabel(entry.title)
+                        .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
+                        .accessibilityIdentifier("player.audio.track.\(entry.id)")
                         .onAppear(perform: onMenuItemAppeared)
                         .onDisappear(perform: onMenuItemDisappeared)
                     }
@@ -772,16 +797,18 @@ struct AppleTransportTrackMenu: View {
                     tracks: subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
                     languagesAreExplicit: false, activeTrackID: selectedSubtitleID
                 )) { entry in
-                    Button { onSelectSubtitle(entry.trackID) } label: {
-                        if entry.isSelected {
-                            Label(entry.title, systemImage: "checkmark")
-                        } else {
-                            Text(entry.title)
+                    subtitleButton(entry)
+                }
+                let more = AppleSubtitleCueLayerPolicy.moreMenuEntries(
+                    tracks: subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
+                    activeTrackID: selectedSubtitleID)
+                if !more.isEmpty {
+                    Menu(AppleSubtitleCueLayerPolicy.moreMenuTitle) {
+                        ForEach(more) { entry in
+                            subtitleButton(entry)
                         }
                     }
-                    .accessibilityLabel(entry.title)
-                    .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
-                    .accessibilityIdentifier("player.subtitle.track.\(entry.id)")
+                    .accessibilityIdentifier("player.subtitle.more")
                     .onAppear(perform: onMenuItemAppeared)
                     .onDisappear(perform: onMenuItemDisappeared)
                 }
@@ -791,7 +818,11 @@ struct AppleTransportTrackMenu: View {
                 .font(.system(size: 22))
                 .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                 .contentShape(.rect)
+                #if !os(tvOS)
                 .foregroundStyle(.white)
+                #endif
+                // tvOS: `AppleTVGlyphStyle` colours the glyph, black on its
+                // white focus disc; a fixed white drew a blank disc.
         }
         .appleBareMenu()
         .accessibilityLabel("Audio & Subtitles")
@@ -806,11 +837,19 @@ struct AppleTransportTrackMenu: View {
         #endif
     }
 
-    private func trackLabel(_ track: ApplePlaybackTrack) -> String {
-        if let language = track.language, !language.isEmpty {
-            return "\(track.title) (\(language))"
+    private func subtitleButton(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> some View {
+        Button { onSelectSubtitle(entry.trackID) } label: {
+            if entry.isSelected {
+                Label(entry.title, systemImage: "checkmark")
+            } else {
+                Text(entry.title)
+            }
         }
-        return track.title
+        .accessibilityLabel(entry.title)
+        .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
+        .accessibilityIdentifier("player.subtitle.track.\(entry.id)")
+        .onAppear(perform: onMenuItemAppeared)
+        .onDisappear(perform: onMenuItemDisappeared)
     }
 }
 
@@ -819,5 +858,30 @@ private extension View {
     func appleMenuPresence(_ model: AppleTransportOverlayModel) -> some View {
         onAppear { model.menuItemAppeared() }
             .onDisappear { model.menuItemDisappeared() }
+    }
+}
+
+/// Down from the picture reaches Skip Intro before the scrubber row while it
+/// is offered; moves from anywhere else are the viewer's own.
+enum AppleTVSkipIntroFocusPolicy {
+    static func redirects(fromSurface: Bool, toBottomBar: Bool, showsSkipIntro: Bool) -> Bool {
+        fromSurface && toBottomBar && showsSkipIntro
+    }
+}
+
+/// How far text cues rise above the bottom of the picture.
+///
+/// A fixed 100 pt cleared the phone's controls, but the Apple TV's scrubber
+/// row is taller and the cue was drawn across the scrubber line (full test
+/// 2026-10-01). While the controls show, the cue clears the measured bottom
+/// bar plus a gap; hidden, it rests near the bottom.
+enum AppleSubtitleCueLift {
+    static let hidden: CGFloat = 24
+    static let minimumVisible: CGFloat = 100
+    static let gapAboveControls: CGFloat = 40
+
+    static func lift(controlsVisible: Bool, bottomBarHeight: CGFloat) -> CGFloat {
+        guard controlsVisible else { return hidden }
+        return max(minimumVisible, bottomBarHeight + gapAboveControls)
     }
 }

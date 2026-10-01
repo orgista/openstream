@@ -471,7 +471,7 @@ public enum AppleMediaIngestion {
         verifiedAt: Date = .now
     ) -> AppleMediaRecord {
         AppleMediaRecord(
-            canonicalID: AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) ? item.mediaID : nil,
+            canonicalID: AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) ? item.mediaID : item.imdbID,
             kind: item.type == "series" ? .series : .movie,
             title: item.name,
             year: item.releaseInfo.flatMap { Int($0.prefix(4)) },

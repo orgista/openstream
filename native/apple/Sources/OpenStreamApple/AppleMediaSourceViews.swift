@@ -991,6 +991,7 @@ struct AppleLiveInlinePlayer: View {
                     zoomToFill: macCommands.zoomToFill,
                     showsAVKitFullScreenButton: onRequestFullWindow == nil,
                     subtitleEntries: inlineSubtitles.menuEntries,
+                    moreSubtitleEntries: inlineSubtitles.moreEntries,
                     showsSubtitleMenu: AppleStockSubtitleMenuPolicy.showsAppMenu(
                         tracks: coordinator.engine.subtitleTracks,
                         stockPlayerListsCaptions: inlineSubtitles.stockPlayerListsCaptions),
@@ -1526,13 +1527,14 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         let entries = inlineSubtitles.menuEntries
         captionsButton.isEnabled = !entries.isEmpty
         captionsButton.accessibilityValue = entries.contains { $0.trackID != nil && $0.isSelected } ? "On" : "Off"
-        captionsButton.menu = UIMenu(title: "Subtitles", options: .singleSelection, children: entries.map { entry in
-            UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { [weak self] _ in
-                guard let self else { return }
-                self.inlineSubtitles.select(entry.trackID, on: self.coordinator.engine)
-                self.updateCaptionMenu()
-                self.showControls()
-            }
+        captionsButton.menu = UIMenu(title: "Subtitles", options: .singleSelection,
+                                     children: AppleSubtitleCueLayerPolicy.uiMenuChildren(
+            entries: entries, more: inlineSubtitles.moreEntries
+        ) { [weak self] id in
+            guard let self else { return }
+            self.inlineSubtitles.select(id, on: self.coordinator.engine)
+            self.updateCaptionMenu()
+            self.showControls()
         })
     }
 
@@ -1858,9 +1860,14 @@ struct AppleTVChannelSearchEditor: View {
             }
             if !query.isEmpty {
                 Section {
-                    Button("Clear Search", role: .destructive) {
+                    // Not destructive: clearing a search loses nothing, and
+                    // the role painted the label red (no coloured label text).
+                    Button {
                         query = ""
+                    } label: {
+                        AppleTVFocusReadableText("Clear Search")
                     }
+                    .accessibilityIdentifier("live.search.clear")
                 }
             }
         }

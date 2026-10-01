@@ -33,9 +33,16 @@ public struct ApplePlaybackTrack: Identifiable, Equatable, Sendable {
     /// Container disposition HEARING_IMPAIRED (or the SDH characteristic):
     /// the captions menu names it "English (SDH)" beside a plain English.
     public let isHearingImpaired: Bool
+    /// Audio only: 2 = stereo, 6 = 5.1, 8 = 7.1; 0 when unknown.
+    public let channels: Int
+    /// Container disposition COMMENT (director or cast commentary).
+    public let isCommentary: Bool
+    /// Dolby Atmos (E-AC-3 JOC or TrueHD Atmos).
+    public let isAtmos: Bool
 
     public init(id: Int, title: String, language: String? = nil, codec: String? = nil,
-                isDefault: Bool = false, isForced: Bool = false, isHearingImpaired: Bool = false) {
+                isDefault: Bool = false, isForced: Bool = false, isHearingImpaired: Bool = false,
+                channels: Int = 0, isCommentary: Bool = false, isAtmos: Bool = false) {
         self.id = id
         self.title = title
         self.language = language
@@ -43,6 +50,9 @@ public struct ApplePlaybackTrack: Identifiable, Equatable, Sendable {
         self.isDefault = isDefault
         self.isForced = isForced
         self.isHearingImpaired = isHearingImpaired
+        self.channels = channels
+        self.isCommentary = isCommentary
+        self.isAtmos = isAtmos
     }
 }
 
@@ -237,6 +247,9 @@ public extension ApplePlaybackEngine {
     /// Engines that cannot report their selection say nothing, and the overlay
     /// falls back to the last track it selected itself.
     var activeSubtitleTrackID: Int? { nil }
+    /// The audio track playing, when the engine can say; the audio menu's
+    /// check mark. Nil falls back to the overlay's last pick, then the default.
+    var activeAudioTrackID: Int? { nil }
     /// Most routes cannot report this; the fitting falls back to 16:9.
     var videoSize: CGSize? { nil }
 

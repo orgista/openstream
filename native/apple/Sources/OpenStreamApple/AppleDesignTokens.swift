@@ -159,6 +159,9 @@ public struct AppleSettingsContentModifier: ViewModifier {
             // No `.brandSwitch` here: Apple TV draws a Toggle as a row with an
             // "On"/"Off" label rather than a switch, and the accent tint painted
             // the row *text* pink (seen on the Privacy pane, 2026-09-17).
+            // The white tint in turn drew a focused toggle's title white on
+            // the white focus fill; this style flips it to black.
+            .toggleStyle(.tvReadable)
         #elseif os(macOS)
         // This branch is the whole macOS Settings bug, and it is one bug, not
         // six (macOS sweep, 2026-09-21: About, Privacy, Backup, Metadata,
@@ -500,5 +503,24 @@ public enum AppleProgressVisibility {
     public static func remaining(since start: ContinuousClock.Instant,
                                  now: ContinuousClock.Instant = .now) -> Duration {
         remaining(after: start.duration(to: now))
+    }
+}
+
+extension View {
+    /// A hairline outline around a tvOS text field. Unfocused, the stock
+    /// field draws nothing behind its placeholder, so Add Catalog, Add Live
+    /// TV, Media Server and Network Share showed a line of grey text with
+    /// nowhere to click (full test 2026-10-01). A no-op elsewhere.
+    @ViewBuilder
+    func appleTVFieldOutline() -> some View {
+        #if os(tvOS)
+        self.overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.35), lineWidth: 2)
+                .allowsHitTesting(false)
+        }
+        #else
+        self
+        #endif
     }
 }
