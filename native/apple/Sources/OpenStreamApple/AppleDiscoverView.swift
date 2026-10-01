@@ -2838,8 +2838,12 @@ struct AppleCatalogItemDetailView: View {
                 .frame(width: 720, height: 540)
                 #endif
         }
+        // Exactly once per press: SwiftUI reruns this task whenever the page
+        // reappears (another tab and back), and an unconsumed request then
+        // started playback by itself without the episode it named
+        // (`ApplePlayRequestLedger`).
         .task(id: playbackUI.request) {
-            guard playbackUI.request != nil else { return }
+            guard playbackUI.ledger.consume(playbackUI.request) else { return }
             await resolvePlayback()
         }
         .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
@@ -2941,7 +2945,7 @@ struct AppleCatalogItemDetailView: View {
             await prepare()
             if !Task.isCancelled { fillTimeline.mark(.done) }
             await refreshOfflineState()
-            if initialAutoPlay { playbackUI.request = UUID() }
+            if playbackUI.ledger.takeInitialAutoPlay(initialAutoPlay) { playbackUI.request = UUID() }
             #if DEBUG
             if AppleTitlePageStreamFixture.opensQuality { await chooseStreams() }
             #endif
@@ -5736,7 +5740,10 @@ struct AppleCatalogItemDetailView: View {
                                 partID: AppleDetailResume.partID(type: item.type, mediaID: selectedPlaybackMediaID)),
                             mediaID: progressRecordID,
                             title: item.name,
-                            sourceKind: .stremio
+                            sourceKind: .stremio,
+                            // Names the episode, so its position is saved
+                            // under it (`AppleSeriesProgressGuard`).
+                            hints: .init(addonMediaID: selectedPlaybackMediaID, addonMediaType: item.type)
                         ),
                         settings: settings
                     )
@@ -7224,6 +7231,9 @@ private struct AppleTitlePageActionState {
 
 private struct AppleTitlePagePlaybackState {
     var request: UUID?
+    /// Which request has been resolved, and whether the opening auto-play
+    /// has fired, so neither happens again when the page reappears.
+    var ledger = ApplePlayRequestLedger()
     /// When Retry was pressed, so a failure that comes straight back still
     /// shows the loading state first (`ApplePlaybackFailureRecovery`).
     var retryStartedAt: ContinuousClock.Instant?

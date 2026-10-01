@@ -208,6 +208,12 @@ public final class ApplePlaybackStore {
     private func save(storageKey: String, position: Double, duration: Double, partID: String?) {
         guard position.isFinite, position >= 0, duration.isFinite, duration > 0 else { return }
         var current = entries()
+        // A save that names no episode never replaces a series' episode
+        // progress (a stray play of the whole show wiped S1E2's Resume).
+        guard AppleSeriesProgressGuard.mayOverwrite(existing: current[storageKey], with: partID) else {
+            AppleInteractionTrace.record(.playback, "progress save dropped key=\(storageKey): no episode over episode progress")
+            return
+        }
         let progress = ApplePlaybackProgress(position: min(position, duration), duration: duration, partID: partID)
         if progress.isComplete {
             current.removeValue(forKey: storageKey)
