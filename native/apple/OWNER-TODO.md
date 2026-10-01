@@ -7,6 +7,19 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Full-test bugs (Apple TV tvOS 27, v2 plan, 2026-10-01 overnight):**
+      1. HIGH: focused toggle rows (Settings › Sources › add-on, catalog toggles) and the "Playback Failed" Retry
+         button show no label — white text on the white focus pill.
+      2. Opening Rate on a title page drops focus back to Play (B22 regression).
+      3. Subtitle menu has no "More…" — non-preferred languages (Spanish) unreachable.
+      4. Audio menu shows raw labels ("ENG (ac3) (eng)") and no checkmark on the playing track.
+      5. Search "stranger things": the 2013 movie ranks first, twice (Cinemeta + TMDB not merged); 2016 series 3rd.
+      6. Truncated file reports "format OpenStream cannot play" instead of an incomplete/network error.
+      7. Skip Intro appears but Down from the video never reaches it.
+      8. Channel Manager: Package page blank and My Channels spinner endless when the IPTV panel is down.
+      9. Local playlists/channel health stored in Application Support — check tvOS purge safety (Swiftfin's #1 issue).
+      UX: subtitle cue drawn on the scrubber line; tvOS form fields have no outline and an invisible placeholder;
+      Live search "Clear Search" is red; weak focus in the guide; Top 10 "Wonka's" tile blank.
 - [ ] **Streaming services must be useful, not just a label** (2026-09-30): when no add-on/source can play a title,
       Play becomes "Watch on <service>" (menu if several of the viewer's services have it), and it must open the
       TITLE in that app, not just the app. Plan: TMDB/JustWatch providers for availability; per-service title IDs
