@@ -42,6 +42,11 @@ public enum AppleDiscoverEmptyState: Equatable, Sendable {
         }
     }
 
+    /// The one line under No Sources: the app ships no content of its own.
+    public var footnote: String? {
+        self == .noSources ? AppleAttribution.noContentDisclaimer : nil
+    }
+
     /// Only a failure is worth retrying; reloading an empty or missing
     /// catalog would leave the page exactly as it was.
     public var offersRetry: Bool { self == .couldNotLoad }

@@ -1114,19 +1114,15 @@ public final class AppleSourceStore {
 
     /// Fetches the add-on's manifest again and applies it. Fail-open: a
     /// transport or shape failure leaves the source exactly as it was.
-    /// Add-ons every tester should start with (owner, 2026-09-17: "add
-    /// AIOmetadata add-on for testing"). Seeded once per install in DEBUG and
-    /// TestFlight builds; a tester who deletes one never sees it come back.
-    public static let testCatalogManifests: [String] = [
-        "https://aiometadata.elfhosted.com/stremio/6907d7b7-37cb-4b48-adaf-f40b9cdec53c/manifest.json",
-    ]
+    /// Catalogs a DEBUG build starts with; empty in every Release build
+    /// (see `AppleTestCatalogSeedPolicy`). Seeded once per install; a tester
+    /// who deletes one never sees it come back.
+    public static var testCatalogManifests: [String] {
+        AppleTestCatalogSeedPolicy.manifests(isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild)
+    }
 
     public static var seedsTestCatalogs: Bool {
-        #if DEBUG
-        true
-        #else
-        AppleBuildChannel.isTestFlight
-        #endif
+        AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild)
     }
 
     /// Adds each test catalog the first time it succeeds; a manifest that

@@ -943,7 +943,6 @@ struct AppleDiscoverView: View {
             playbackSources: sourceStore.sources,
             metadataConfiguration: metadataConfiguration,
             gatewayConfig: gatewayConfig,
-            streamingServerConfiguration: streamingServerConfiguration,
             playbackResolver: playbackResolver,
             settings: settings,
             openSettings: openSettings,
@@ -1379,7 +1378,6 @@ struct AppleDiscoverView: View {
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
                 gatewayConfig: gatewayConfig,
-                streamingServerConfiguration: streamingServerConfiguration,
                 playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
@@ -1442,10 +1440,6 @@ struct AppleDiscoverView: View {
         )
     }
 
-    private var streamingServerConfiguration: AppleStremioStreamingServerConfiguration? {
-        nil
-    }
-
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 
     /// Discover's Search and Refresh, for the pages pushed from here.
@@ -1487,7 +1481,7 @@ struct AppleDiscoverView: View {
             // No Sources with Backup & Sync at hand: restore or import first.
             if state == .noSources, let backupController {
                 AppleDiscoverRestoreEmptyState(
-                    title: state.title, controller: backupController,
+                    title: state.title, footnote: state.footnote, controller: backupController,
                     offersICloud: state.offersICloudRestore(AppleICloudSyncProbe.current()),
                     openSettings: openSettings)
             } else {
@@ -1502,7 +1496,8 @@ struct AppleDiscoverView: View {
             title: state.title,
             systemImage: OpenStreamTab.home.systemImage,
             actionTitle: "Open Settings",
-            action: openSettings
+            action: openSettings,
+            footnote: state.footnote
         )
     }
 
@@ -1593,7 +1588,6 @@ struct AppleSearchView: View {
                                 playbackSources: sourceStore.sources,
                                 metadataConfiguration: metadataConfiguration,
                                 gatewayConfig: gatewayConfig,
-                                streamingServerConfiguration: streamingServerConfiguration,
                                 playbackResolver: playbackResolver,
                                 settings: settings,
                                 openSettings: openSettings,
@@ -1627,7 +1621,6 @@ struct AppleSearchView: View {
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
                 gatewayConfig: gatewayConfig,
-                streamingServerConfiguration: streamingServerConfiguration,
                 playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
@@ -1808,10 +1801,6 @@ struct AppleSearchView: View {
         )
     }
 
-    private var streamingServerConfiguration: AppleStremioStreamingServerConfiguration? {
-        nil
-    }
-
 
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 }
@@ -1825,7 +1814,6 @@ private struct AppleCatalogSectionView: View {
     let playbackSources: [AppleSource]
     let metadataConfiguration: AppleTMDBConfiguration?
     let gatewayConfig: AppleTranscodeGatewayConfig?
-    let streamingServerConfiguration: AppleStremioStreamingServerConfiguration?
     let playbackResolver: AppleStremioPlaybackResolver
     let settings: AppleSettingsStore
     let openSettings: () -> Void
@@ -1925,7 +1913,6 @@ private struct AppleCatalogSectionView: View {
                 playbackSources: playbackSources,
                 metadataConfiguration: metadataConfiguration,
                 gatewayConfig: gatewayConfig,
-                streamingServerConfiguration: streamingServerConfiguration,
                 playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
@@ -2508,7 +2495,6 @@ struct AppleCatalogItemDetailView: View {
     let playbackSources: [AppleSource]
     let metadataConfiguration: AppleTMDBConfiguration?
     let gatewayConfig: AppleTranscodeGatewayConfig?
-    let streamingServerConfiguration: AppleStremioStreamingServerConfiguration?
     let playbackResolver: AppleStremioPlaybackResolver
     let settings: AppleSettingsStore
     let openSettings: () -> Void
@@ -2632,7 +2618,6 @@ struct AppleCatalogItemDetailView: View {
         playbackSources: [AppleSource],
         metadataConfiguration: AppleTMDBConfiguration?,
         gatewayConfig: AppleTranscodeGatewayConfig?,
-        streamingServerConfiguration: AppleStremioStreamingServerConfiguration?,
         playbackResolver: AppleStremioPlaybackResolver,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
@@ -2655,7 +2640,6 @@ struct AppleCatalogItemDetailView: View {
         #endif
         self.metadataConfiguration = metadataConfiguration
         self.gatewayConfig = gatewayConfig
-        self.streamingServerConfiguration = streamingServerConfiguration
         self.playbackResolver = playbackResolver
         self.settings = settings
         self.openSettings = openSettings
@@ -2832,33 +2816,6 @@ struct AppleCatalogItemDetailView: View {
         // The backdrop fills 1920x1080; the tab bar returns when Menu pops.
         .toolbar(.hidden, for: .tabBar)
         #endif
-        .alert(
-            "Download to \(prompts.arrRequestKind?.displayName ?? "ARR")",
-            isPresented: Binding(
-                get: { prompts.arrRequestKind != nil },
-                set: { if !$0 { prompts.arrRequestKind = nil } }
-            )
-        ) {
-            Button("Cancel", role: .cancel) { prompts.arrRequestKind = nil }
-            Button("Add to Queue") {
-                guard let kind = prompts.arrRequestKind else { return }
-                prompts.arrRequestKind = nil
-                Task { await enqueueARR(kind) }
-            }
-        } message: {
-            Text("Add \(item.name) to your configured \(prompts.arrRequestKind?.displayName ?? "ARR") queue?")
-        }
-        .alert(
-            "Download Request",
-            isPresented: Binding(
-                get: { prompts.arrFeedback != nil },
-                set: { if !$0 { prompts.arrFeedback = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { prompts.arrFeedback = nil }
-        } message: {
-            Text(prompts.arrFeedback ?? "")
-        }
         #if os(tvOS)
         // Pages, not dialogs: tvOS drew a focused Pause or Resume white on the
         // white focus fill (N73). Menu pops them, as the dialogs' Cancel did.
@@ -4118,7 +4075,6 @@ struct AppleCatalogItemDetailView: View {
                                 playbackSources: playbackSources,
                                 metadataConfiguration: metadataConfiguration,
                                 gatewayConfig: gatewayConfig,
-                                streamingServerConfiguration: streamingServerConfiguration,
                                 playbackResolver: playbackResolver,
                                 settings: settings,
                                 openSettings: openSettings,
@@ -4165,7 +4121,11 @@ struct AppleCatalogItemDetailView: View {
         if let url = heroArtworkURL {
             failedHeroArtworkURLs.insert(url)
             if let next = heroArtworkURL {
+                #if DEBUG
                 appleTrace("title hero art failed, trying \(AppleCatalogArtworkPolicy.traceID(next)) (\(item.name))")
+                #else
+                _ = next
+                #endif
                 return
             }
         }
@@ -5102,57 +5062,6 @@ struct AppleCatalogItemDetailView: View {
         .foregroundStyle(.white)
     }
 
-    private var configuredARR: AppleArrKind? {
-        switch item.type.lowercased() {
-        case "movie":
-            guard AppleArrEndpointPolicy.isAllowed(settings.radarrURL),
-                  AppleArrClient.isValidAPIKey(settings.radarrAPIKey),
-                  !settings.radarrRootFolderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  Int(settings.radarrQualityProfileID) ?? 0 > 0 else { return nil }
-            return .radarr
-        case "series":
-            guard AppleArrEndpointPolicy.isAllowed(settings.sonarrURL),
-                  AppleArrClient.isValidAPIKey(settings.sonarrAPIKey),
-                  !settings.sonarrRootFolderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  Int(settings.sonarrQualityProfileID) ?? 0 > 0 else { return nil }
-            return .sonarr
-        default:
-            return nil
-        }
-    }
-
-    private func enqueueARR(_ kind: AppleArrKind) async {
-        do {
-            switch kind {
-            case .radarr:
-                _ = try await AppleArrClient().enqueueIfMissing(
-                    kind: kind,
-                    baseURL: settings.radarrURL,
-                    apiKey: settings.radarrAPIKey,
-                    title: item.name,
-                    year: Int(item.releaseInfo ?? ""),
-                    mediaID: pageMetadata.resolvedMediaID ?? item.id,
-                    rootFolderPath: settings.radarrRootFolderPath,
-                    qualityProfileID: settings.radarrQualityProfileID
-                )
-            case .sonarr:
-                _ = try await AppleArrClient().enqueueIfMissing(
-                    kind: kind,
-                    baseURL: settings.sonarrURL,
-                    apiKey: settings.sonarrAPIKey,
-                    title: item.name,
-                    year: Int(item.releaseInfo ?? ""),
-                    mediaID: pageMetadata.resolvedMediaID ?? item.id,
-                    rootFolderPath: settings.sonarrRootFolderPath,
-                    qualityProfileID: settings.sonarrQualityProfileID
-                )
-            }
-            prompts.arrFeedback = "Added \(item.name) to the \(kind.displayName) queue."
-        } catch {
-            prompts.arrFeedback = error.localizedDescription
-        }
-    }
-
     private func byteLabel(_ count: Int64) -> String {
         AppleByteFormatting.string(count)
     }
@@ -5446,7 +5355,6 @@ struct AppleCatalogItemDetailView: View {
                     playbackSources: playbackSources,
                     metadataConfiguration: metadataConfiguration,
                     gatewayConfig: gatewayConfig,
-                    streamingServerConfiguration: streamingServerConfiguration,
                     playbackResolver: playbackResolver,
                     settings: settings,
                     openSettings: openSettings,
@@ -5734,8 +5642,7 @@ struct AppleCatalogItemDetailView: View {
         defer { playbackUI.pickingStreams = false }
         do {
             playbackUI.streamChoices = try await playbackResolver.rankedCandidates(sources: playbackSources,
-                preferredSourceID: source.id, item: item.withMediaID(selectedPlaybackMediaID),
-                streamingServerConfiguration: streamingServerConfiguration)
+                preferredSourceID: source.id, item: item.withMediaID(selectedPlaybackMediaID))
         } catch {
             playbackUI.streamChoices = []
             if localFiles.isEmpty { playbackCoordinator.fail(error); return }
@@ -5799,8 +5706,7 @@ struct AppleCatalogItemDetailView: View {
             var loadError: Error?
             do {
                 streams = try await playbackResolver.rankedCandidates(sources: playbackSources,
-                    preferredSourceID: source.id, item: selectedItem,
-                    streamingServerConfiguration: streamingServerConfiguration)
+                    preferredSourceID: source.id, item: selectedItem)
             } catch { loadError = error }
             if localOptions.isEmpty && streams.isEmpty, let loadError { throw loadError }
             let partID = AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)
@@ -5986,8 +5892,7 @@ struct AppleCatalogItemDetailView: View {
             let ranked = try await playbackResolver.rankedCandidates(
                 sources: playbackSources,
                 preferredSourceID: source.id,
-                item: selectedItem,
-                streamingServerConfiguration: streamingServerConfiguration
+                item: selectedItem
             )
             try Task.checkCancellation()
             playbackUI.streamChoices = ranked
@@ -6058,7 +5963,6 @@ struct AppleCatalogItemDetailView: View {
         let selectedItem = item.withMediaID(streamID)
         let sources = playbackSources
         let preferredSourceID = source.id
-        let serverConfiguration = streamingServerConfiguration
         downloadCoordinator.start(
             request: .init(
                 mediaID: selection.map { "\(recordID):\($0.mediaID)" } ?? offlineRecordID,
@@ -6076,8 +5980,7 @@ struct AppleCatalogItemDetailView: View {
                 try await playbackResolver.resolveDownloadPlans(
                     sources: sources,
                     preferredSourceID: preferredSourceID,
-                    item: selectedItem,
-                    streamingServerConfiguration: serverConfiguration
+                    item: selectedItem
                 )
             },
             revokeCapabilities: { capabilities in
@@ -6105,8 +6008,7 @@ struct AppleCatalogItemDetailView: View {
                     destinationLabel: "OpenStream Offline Storage"),
                 resolvePlans: {
                     try await playbackResolver.resolveDownloadPlans(sources: playbackSources,
-                        preferredSourceID: source.id, item: selectedItem,
-                        streamingServerConfiguration: streamingServerConfiguration)
+                        preferredSourceID: source.id, item: selectedItem)
                 },
                 revokeCapabilities: { capabilities in
                     for capability in capabilities {
@@ -7470,8 +7372,6 @@ private struct AppleTitlePagePrompts {
     var optionsPreview = false
     #endif
     var streamPicker = false
-    var arrRequestKind: AppleArrKind?
-    var arrFeedback: String?
     /// Apple TV's "Watch on…" page of services.
     var watchOnMenu = false
     /// "Open <Service> and search for <Title>" when nothing could be opened.
@@ -8089,10 +7989,6 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         }
         #endif
     }
-}
-
-func appleStreamDisplayText(_ value: String) -> String {
-    value.replacingOccurrences(of: #"(?i)\b(?:stremio|torrent\w*)\b"#, with: "Add-on", options: .regularExpression)
 }
 
 extension AppleMediaServerLibraryStore {

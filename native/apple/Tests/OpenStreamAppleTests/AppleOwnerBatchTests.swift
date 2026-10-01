@@ -51,7 +51,6 @@ import Testing
         .deletingLastPathComponent()
         .appendingPathComponent("Sources/OpenStreamApple")
     let files = [
-        "AppleStremioStreamingServer.swift",
         "AppleSettingsViews.swift",
         "OpenStreamRootView.swift",
         "AppleSourcesSettingsView.swift",

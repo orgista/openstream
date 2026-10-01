@@ -871,10 +871,14 @@ private struct AppleMetadataSettingsView: View {
                 Toggle("Use Metadata APIs", isOn: $settings.metadataEnabled)
             }
 
-            Section("TMDB") {
+            Section {
                 SecureField("API key or read token", text: $settings.tmdbAPIKey)
                     .disabled(!settings.metadataEnabled)
                     .appleFormSubmit(.tmdb, chain: Self.chain, focus: $focusedField)
+            } header: {
+                Text("TMDB")
+            } footer: {
+                Text(AppleAttribution.tmdbNotice)
             }
 
             Section("OMDb") {
@@ -1311,19 +1315,16 @@ private struct AppleAboutView: View {
                 LabeledContent("Build", value: build)
             }
 
+            // TMDB's terms ask for its logo and notice; JustWatch supplies
+            // the "Also available on" data. No source link: the repository is
+            // private, so a reviewer would only reach a 404.
+            Section("Data Sources") {
+                AppleTMDBAttributionRow()
+                Text(AppleAttribution.justWatchCredit)
+                    .accessibilityIdentifier("settings.about.justwatch")
+            }
+
             Section {
-                if let url = URL(string: "https://github.com/orgista/openstream") {
-                    Link(destination: url) {
-                        HStack {
-                            Text("GitHub")
-                            Spacer()
-                            Text("github.com/orgista/openstream")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                }
                 NavigationLink {
                     AppleThirdPartyNoticesView()
                 } label: {

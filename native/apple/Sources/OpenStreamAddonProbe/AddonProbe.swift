@@ -436,7 +436,6 @@ struct AddonProbe {
 
     static func reasonName(_ reason: AppleStremioUnsupportedReason) -> String {
         switch reason {
-        case .torrent: "torrent"
         case .externalLink: "externalLink"
         case .youtube: "youtube"
         case .invalidHTTPURL: "invalidHTTPURL"

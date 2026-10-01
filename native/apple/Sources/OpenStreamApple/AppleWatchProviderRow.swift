@@ -16,30 +16,51 @@ struct AppleWatchProviderRow: View {
 
     var body: some View {
         if !providers.isEmpty {
-            HStack(spacing: logoSpacing) {
-                ForEach(AppleWatchProviderPolicy.logos(providers)) { provider in
-                    if let logoURL = provider.logoURL {
-                        AppleRemoteImage(url: logoURL, contentMode: .fit)
-                            .frame(width: logoSize, height: logoSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    }
-                }
-                Text(AppleWatchProviderRow.sentence(for: providers))
-                    .font(font)
+            VStack(alignment: .leading, spacing: 2) {
+                providerLine
+                // JustWatch supplies TMDB's availability data and asks for a
+                // credit wherever it is shown.
+                Text(AppleAttribution.justWatchCredit)
+                    .font(creditFont)
                     .foregroundStyle(AppleDesignTokens.textSecondary)
                     .lineLimit(1)
+                    .accessibilityIdentifier("detail.justWatchCredit")
             }
-            // One combined label — "Also available on Netflix" — never the
-            // logos' own alt text or a second element VoiceOver could tap.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(AppleWatchProviderRow.sentence(for: providers))
-            .accessibilityIdentifier("detail.alsoAvailableOn")
-            #if os(tvOS)
-            // A quiet line, not a fifth thing the remote can land on beside
-            // Play and the icon row.
-            .focusable(false)
-            #endif
         }
+    }
+
+    private var providerLine: some View {
+        HStack(spacing: logoSpacing) {
+            ForEach(AppleWatchProviderPolicy.logos(providers)) { provider in
+                if let logoURL = provider.logoURL {
+                    AppleRemoteImage(url: logoURL, contentMode: .fit)
+                        .frame(width: logoSize, height: logoSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+            }
+            Text(AppleWatchProviderRow.sentence(for: providers))
+                .font(font)
+                .foregroundStyle(AppleDesignTokens.textSecondary)
+                .lineLimit(1)
+        }
+        // One combined label — "Also available on Netflix" — never the
+        // logos' own alt text or a second element VoiceOver could tap.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AppleWatchProviderRow.sentence(for: providers))
+        .accessibilityIdentifier("detail.alsoAvailableOn")
+        #if os(tvOS)
+        // A quiet line, not a fifth thing the remote can land on beside
+        // Play and the icon row.
+        .focusable(false)
+        #endif
+    }
+
+    private var creditFont: Font {
+        #if os(tvOS)
+        .system(size: AppleTVDetailMetrics.badgeFontSize * 0.8)
+        #else
+        .caption2
+        #endif
     }
 
     private var font: Font {

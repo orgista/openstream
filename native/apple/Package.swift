@@ -35,6 +35,7 @@ let package = Package(
                 .copy("Resources/ThirdPartyNotices"),
                 .copy("Resources/ChannelLineup"),
                 .copy("Resources/Badges"),
+                .copy("Resources/Attribution"),
             ]
         ),
         // Release tool, not shipped: headless Stremio add-on compatibility sweep.

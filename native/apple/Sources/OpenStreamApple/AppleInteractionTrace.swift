@@ -72,14 +72,15 @@ public enum AppleInteractionTrace {
         #else
         return defaultEnabled(
             infoPlistFlag: Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? Bool,
-            isTestFlight: AppleBuildChannel.isTestFlight)
+            isTestFlight: AppleBuildChannel.hasSandboxReceipt)
         #endif
     }
 
     /// `OpenStreamTraceDefault` in the app's Info.plist. A build stamped
     /// `true` ships with tracing on (owner, 2026-09-17: Internal and
-    /// TraceEnabled), `false` with it off (the Reddit group). Absent, TestFlight
-    /// installs trace by default and App Store installs do not. The Settings
+    /// TraceEnabled), `false` with it off (the Reddit group). Absent, sandbox-receipt
+    /// installs (TestFlight, and App Review's build) trace by default and App
+    /// Store installs do not. The Settings
     /// toggle overrides either way.
     public static let infoPlistKey = "OpenStreamTraceDefault"
 

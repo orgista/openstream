@@ -85,7 +85,6 @@ public enum AppleSavedSourceDiagnosticsError: Error, Equatable, Sendable {
     case noResult
     case emptyStreamResponse
     case externalStream
-    case torrentStream
     case youtubeStream
     case malformedStream
     case unsupportedStage
@@ -173,14 +172,6 @@ public struct AppleSavedSourceDiagnosticsRunner: Sendable {
                 startedAt: startedAt,
                 status: .blocked,
                 errorCategory: "external-link"
-            )
-        } catch AppleSavedSourceDiagnosticsError.torrentStream {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .blocked,
-                errorCategory: "torrent-service-required"
             )
         } catch AppleSavedSourceDiagnosticsError.youtubeStream {
             return result(
@@ -437,8 +428,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
             throw AppleSavedSourceDiagnosticsError.emptyStreamResponse
         }
         switch unsupported.reason {
-        case .torrent:
-            throw AppleSavedSourceDiagnosticsError.torrentStream
         case .externalLink:
             throw AppleSavedSourceDiagnosticsError.externalStream
         case .youtube:

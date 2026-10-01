@@ -118,6 +118,8 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
                 .appleTVReadableFocus()
+            } footer: {
+                Text(AppleAttribution.noContentDisclaimer)
             }
 
             // Not "Sources" again: the pane is already titled Sources, so the
@@ -485,9 +487,6 @@ private struct AppleSourceRow: View {
     /// that row stops retrying it every redraw and shows the same deliberate
     /// fallback as a manifest with no logo at all.
     @State private var logoFailed = false
-    /// Same idea for the Stremio mark: one failure and the row goes back to
-    /// its monogram rather than refetching on every redraw.
-    @State private var brandIconFailed = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -508,7 +507,6 @@ private struct AppleSourceRow: View {
         .onChange(of: source.logoURL) { _, _ in
             logoIsWordmark = false
             logoFailed = false
-            brandIconFailed = false
         }
     }
 
@@ -528,16 +526,6 @@ private struct AppleSourceRow: View {
                         logoIsWordmark = CGFloat(image.width) > CGFloat(image.height) * Self.wordmarkAspectRatio
                     },
                     onFailure: { logoFailed = true }
-                )
-                .padding(6)
-            } else if let brandURL = AppleStremioBrandIcon.fallbackURL(kind: source.kind, manifestURL: source.url),
-                      !brandIconFailed {
-                AppleRemoteImage(
-                    url: brandURL,
-                    contentMode: .fit,
-                    placeholderSystemImage: source.kind.systemImage,
-                    onLoad: { _ in },
-                    onFailure: { brandIconFailed = true }
                 )
                 .padding(6)
             } else {

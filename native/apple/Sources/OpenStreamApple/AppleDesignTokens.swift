@@ -308,6 +308,9 @@ public struct AppleSourceEmptyState: View {
     /// under "Restore from iCloud" and "Import Backup".
     public let tertiaryActionTitle: String?
     public let tertiaryAction: (() -> Void)?
+    /// One quiet line under the title. Used only for No Sources, which has to
+    /// say that the app ships no content of its own.
+    public let footnote: String?
 
     public init(
         title: String,
@@ -317,7 +320,8 @@ public struct AppleSourceEmptyState: View {
         secondaryActionTitle: String? = nil,
         secondaryAction: (() -> Void)? = nil,
         tertiaryActionTitle: String? = nil,
-        tertiaryAction: (() -> Void)? = nil
+        tertiaryAction: (() -> Void)? = nil,
+        footnote: String? = nil
     ) {
         self.title = title
         self.systemImage = systemImage
@@ -327,6 +331,7 @@ public struct AppleSourceEmptyState: View {
         self.secondaryAction = secondaryAction
         self.tertiaryActionTitle = tertiaryActionTitle
         self.tertiaryAction = tertiaryAction
+        self.footnote = footnote
     }
 
     /// Title only. For a dead end an action cannot open: a button that runs and
@@ -340,6 +345,7 @@ public struct AppleSourceEmptyState: View {
         self.secondaryAction = nil
         self.tertiaryActionTitle = nil
         self.tertiaryAction = nil
+        self.footnote = nil
     }
 
     public var body: some View {
@@ -374,6 +380,13 @@ public struct AppleSourceEmptyState: View {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
+            if let footnote {
+                Text(footnote)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("emptyState.footnote")
+            }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.brandPrimary)

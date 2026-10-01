@@ -804,6 +804,10 @@ private struct AppleFirstRunGuidanceView: View {
             Text("Welcome to OpenStream")
                 .font(.largeTitle.bold())
                 .multilineTextAlignment(.center)
+            Text(AppleAttribution.noContentDisclaimer)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             Spacer(minLength: 0)
             Button("Open Sources", action: openSettings)
                 .buttonStyle(.brandPrimary)
@@ -833,6 +837,9 @@ private struct AppleFirstRunGuidanceView: View {
             Text("Welcome to OpenStream")
                 .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
                 .accessibilityAddTraits(.isHeader)
+            Text(AppleAttribution.noContentDisclaimer)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             // The same gap the billboard uses, which is wide enough that a
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {

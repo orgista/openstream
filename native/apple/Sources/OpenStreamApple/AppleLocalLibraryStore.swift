@@ -556,7 +556,7 @@ struct AppleLocalTitleDestination: View {
                 playbackSources: sourceStore.sources, metadataConfiguration: settings.metadataEnabled ? try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) : nil,
                 gatewayConfig: settings.gatewayEnabled ? try? AppleTranscodeGatewayConfig(baseURL: settings.gatewayURL,
                     sessionToken: settings.gatewayToken, isEnabled: true) : nil,
-                streamingServerConfiguration: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
+                playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
                 openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
                 tabToolbar: tabToolbar)
         }

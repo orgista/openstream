@@ -170,6 +170,7 @@ extension View {
 @MainActor
 struct AppleDiscoverRestoreEmptyState: View {
     let title: String
+    var footnote: String?
     let controller: AppleConfigurationController
     let offersICloud: Bool
     let openSettings: () -> Void
@@ -182,12 +183,14 @@ struct AppleDiscoverRestoreEmptyState: View {
                     title: title, systemImage: OpenStreamTab.home.systemImage,
                     actionTitle: "Restore from iCloud", action: restoreFromICloud,
                     secondaryActionTitle: "Import Backup", secondaryAction: importBackup,
-                    tertiaryActionTitle: "Open Settings", tertiaryAction: openSettings)
+                    tertiaryActionTitle: "Open Settings", tertiaryAction: openSettings,
+                    footnote: footnote)
             } else {
                 AppleSourceEmptyState(
                     title: title, systemImage: OpenStreamTab.home.systemImage,
                     actionTitle: "Open Settings", action: openSettings,
-                    secondaryActionTitle: "Import Backup", secondaryAction: importBackup)
+                    secondaryActionTitle: "Import Backup", secondaryAction: importBackup,
+                    footnote: footnote)
             }
         }
         .appleConfigurationImport(isPresented: $importing, controller: controller)
