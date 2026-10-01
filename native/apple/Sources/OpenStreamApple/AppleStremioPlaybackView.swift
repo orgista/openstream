@@ -15,6 +15,14 @@ struct AppleStremioPlayerPresentation: Identifiable {
     var sourceOptionsLoader: (() async throws -> ApplePlaybackSourceOptions)?
     /// Set when the thing being played is an episode with a successor.
     var nextEpisode: AppleNextEpisodeContext?
+    /// The engine this one play asked for instead of the saved setting
+    /// ("Try OpenStream Player"); nil plays with the setting.
+    let engineOverride: ApplePlaybackEngineKind?
+    /// Set by a presenter that shows its own alert when every stream fails
+    /// before anything plays (the title page's "Playback Unavailable"): the
+    /// player hands the failure over and the presenter closes it. Unset, the
+    /// player keeps its own "Playback Failed" alert.
+    var onUnplayable: (@MainActor (ApplePlaybackUnavailableAlert) -> Void)?
 
     /// Builds the player for presentation from the preferred engine in
     /// `settings`. The engine is chosen here, at presentation time, via
@@ -26,18 +34,21 @@ struct AppleStremioPlayerPresentation: Identifiable {
         request: ApplePlaybackRequest,
         fallbackCandidates: [ApplePlaybackRequest] = [],
         settings: AppleSettingsStore,
-        securityScopedURL: URL? = nil
+        securityScopedURL: URL? = nil,
+        engineOverride: ApplePlaybackEngineKind? = nil
     ) {
         self.request = request
         self.fallbackCandidates = fallbackCandidates
+        self.engineOverride = engineOverride
+        let chosenEngine = engineOverride ?? settings.playbackEngine
         #if os(tvOS)
         // Task 9: the stock AVPlayer route whenever the container allows it.
-        let preferredEngine = AppleTVPlaybackPresentationPolicy.engineKind(for: request, preferred: settings.playbackEngine)
+        let preferredEngine = AppleTVPlaybackPresentationPolicy.engineKind(for: request, preferred: chosenEngine)
         #else
-        let preferredEngine = settings.playbackEngine
+        let preferredEngine = chosenEngine
         #endif
         let (engine, fellBack) = ApplePlaybackEngineFactory.make(preferred: preferredEngine)
-        appleTrace("player engine \(preferredEngine) (setting \(settings.playbackEngine)) for "
+        appleTrace("player engine \(preferredEngine) (setting \(settings.playbackEngine)\(engineOverride.map { ", this play \($0)" } ?? "")) for "
             + "\(request.hints.filename.map { String($0.suffix(48)) } ?? "-"), \(fallbackCandidates.count) fallbacks")
         if fellBack {
             settings.engineFellBackToNative = true
@@ -104,6 +115,10 @@ struct AppleStremioPlayerView: View {
     @State private var stockSubtitles = AppleStockPlayerSubtitles()
     /// The stock player has started the next episode once already.
     @State private var stockRouteHandedOff = false
+    /// Something has played in this player; a failure after that is the
+    /// player's own alert, never handed to the title page.
+    @State private var hasPlayed = false
+    @State private var handedOffFailure = false
 
     private let request: ApplePlaybackRequest
     private let fallbackCandidates: [ApplePlaybackRequest]
@@ -112,9 +127,11 @@ struct AppleStremioPlayerView: View {
     private let securityScopedURL: URL?
     private let nextEpisode: AppleNextEpisodeContext?
     private let presentationID: UUID
+    private let onUnplayable: (@MainActor (ApplePlaybackUnavailableAlert) -> Void)?
 
     init(presentation: AppleStremioPlayerPresentation) {
         presentationID = presentation.id
+        onUnplayable = presentation.onUnplayable
         nextEpisode = presentation.nextEpisode
         sourceID = presentation.sourceID ?? presentation.request.url
         sourceOptionsLoader = presentation.sourceOptionsLoader
@@ -375,6 +392,19 @@ struct AppleStremioPlayerView: View {
             securityAccess = nil
         }
         .onChange(of: coordinator.phase) { _, newPhase in
+            if case .playing = newPhase { hasPlayed = true }
+            if handsFailureToPresenter, let failure = playbackFailure, let onUnplayable {
+                // Every stream failed before anything played: the title page
+                // closes this player and says why (`ApplePlaybackUnavailableAlert`).
+                handedOffFailure = true
+                let alert = ApplePlaybackUnavailableAlert(failure: failure, engine: coordinator.engine.kind,
+                    streamsSkippedForEngine: coordinator.streamsSkippedForEngine,
+                    isEpisode: request.hints.addonMediaType == "series")
+                appleTrace("player unplayable: engine=\(coordinator.engine.kind) skipped=\(coordinator.streamsSkippedForEngine) "
+                    + "kind=\(failure.kind) offersOpenStream=\(alert?.offersOpenStreamPlayer ?? false)")
+                if let alert { onUnplayable(alert) } else { closePlayer() }
+                return
+            }
             if case .ended = newPhase {
                 // The transport is starting the next episode; the title page
                 // swaps this player for it, so closing here would drop it.
@@ -668,9 +698,15 @@ struct AppleStremioPlayerView: View {
         #endif
     }
 
+    /// A failure before anything played goes to the presenter, when it takes
+    /// one, instead of this player's alert.
+    private var handsFailureToPresenter: Bool {
+        onUnplayable != nil && !hasPlayed && !handedOffFailure
+    }
+
     private var playbackErrorBinding: Binding<Bool> {
         Binding(
-            get: { playbackFailure != nil },
+            get: { playbackFailure != nil && !handsFailureToPresenter && !handedOffFailure },
             set: { if !$0 { coordinator.reset() } }
         )
     }

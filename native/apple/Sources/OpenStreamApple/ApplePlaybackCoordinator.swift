@@ -238,6 +238,11 @@ public final class ApplePlaybackCoordinator {
     var nextAutomaticSource: (() async throws -> ApplePlaybackRequest?)?
     var onSourceFailure: ((ApplePlaybackRequest) -> Void)?
     public private(set) var fallbackNoticeGeneration = 0
+    /// Streams this press passed over because this coordinator's engine
+    /// cannot open them (`engineOpens`): the Native player's MKVs. The title
+    /// page's "Playback Unavailable" alert offers the OpenStream player when
+    /// that is why nothing played (`ApplePlaybackUnavailableAlert`).
+    public private(set) var streamsSkippedForEngine = 0
     private var hasShownFallbackNotice = false
     private var lastRequest: ApplePlaybackRequest?
     /// The request playing (or last tried), for the next episode to prefer
@@ -401,6 +406,7 @@ public final class ApplePlaybackCoordinator {
     /// load failures and engine failures land in `phase` as `.failed`.
     public func begin(_ request: ApplePlaybackRequest) async {
         fallbackTask?.cancel()
+        streamsSkippedForEngine = 0
         librarySubtitles = AppleLibrarySubtitleService()
         fallbackCandidates = []
         fallbackAttempted = 0
@@ -433,6 +439,7 @@ public final class ApplePlaybackCoordinator {
             let named = opens.filter { Self.namesStockContainer(url: $0.url, filename: $0.hints.filename) }
             opens = named + opens.filter { !Self.namesStockContainer(url: $0.url, filename: $0.hints.filename) }
         }
+        streamsSkippedForEngine = fallbackCandidates.count - opens.count
         if opens.count < fallbackCandidates.count {
             appleTrace("fallback skips \(fallbackCandidates.count - opens.count) streams the stock player cannot open")
         }
@@ -703,8 +710,9 @@ public final class ApplePlaybackCoordinator {
                     skipped += 1
                     next = try await nextAutomaticSource()
                 }
+                streamsSkippedForEngine += skipped
                 if skipped > 0 { appleTrace("automatic source skipped \(skipped) the stock player cannot open") }
-                if let candidate = next, !engineOpens(candidate) { next = nil }
+                if let candidate = next, !engineOpens(candidate) { next = nil; streamsSkippedForEngine += 1 }
                 guard !Task.isCancelled, generation == attempt else { return }
                 if let next {
                     showFallbackNotice()

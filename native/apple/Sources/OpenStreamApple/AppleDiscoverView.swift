@@ -2976,30 +2976,59 @@ struct AppleCatalogItemDetailView: View {
         }
         #endif
         .modifier(AppleStremioPlayerPresentationModifier(presentation: $playbackUI.presentation))
+        // Hosted on its own view so it takes the system tint: a page opened
+        // from Search inherits its `.tint(.primary)`, which drew the focused
+        // button's title white on the white focus fill (Apple TV, 2026-10-01).
+        .background { playbackUnavailableAlertHost }
+    }
+
+    private var playbackUnavailableAlertHost: some View {
+        Color.clear
         .alert("Playback Unavailable", isPresented: Binding(
-            get: { playbackFailure != nil },
+            // A failure while the player is up is the player's: it shows its
+            // own alert, or hands an every-stream-failed press over as
+            // `unavailable` and is closed. Presenting from here as well took
+            // the player's cover down and lost the failure with it.
+            get: { playbackUI.unavailable != nil || (playbackFailure != nil && playbackUI.presentation == nil) },
             // The alert reports itself dismissed after its animation, by
             // which time Retry has already put the page into Preparing;
             // resetting then dropped that state and the page sat on Play.
-            set: { if !$0, playbackFailure != nil { playbackCoordinator.reset() } }
-        )) {
-            // Retry only where another attempt can end differently; a missing
-            // or unusable source fails the same way every time, and there
-            // the way on is Sources.
-            switch playbackFailure.map(ApplePlaybackFailureRecovery.init) {
-            case .retry:
-                Button("Retry", action: retryPlayback)
-            case .sources:
-                Button("Sources…", action: openSourcesAfterPlaybackFailure)
-            case .closeOnly, nil:
-                EmptyView()
+            set: {
+                guard !$0 else { return }
+                if playbackUI.unavailable != nil { playbackUI.unavailable = nil; return }
+                if playbackFailure != nil { playbackCoordinator.reset() }
             }
-            Button("Close", role: .cancel) { playbackCoordinator.reset() }
+        )) {
+            if let unavailable = playbackUI.unavailable {
+                if unavailable.offersOpenStreamPlayer {
+                    Button("Try OpenStream Player", action: retryWithOpenStreamPlayer)
+                }
+                Button("OK", role: .cancel) {
+                    playbackUI.unavailable = nil
+                    playbackCoordinator.reset()
+                }
+            } else {
+                // Retry only where another attempt can end differently; a missing
+                // or unusable source fails the same way every time, and there
+                // the way on is Sources.
+                switch playbackFailure.map(ApplePlaybackFailureRecovery.init) {
+                case .retry:
+                    Button("Retry", action: retryPlayback)
+                case .sources:
+                    Button("Sources…", action: openSourcesAfterPlaybackFailure)
+                case .closeOnly, nil:
+                    EmptyView()
+                }
+                Button("Close", role: .cancel) { playbackCoordinator.reset() }
+            }
         } message: {
-            if let playbackFailure {
+            if let unavailable = playbackUI.unavailable {
+                Text(unavailable.message)
+            } else if let playbackFailure {
                 Text(playbackFailure.message)
             }
         }
+        .tint(nil)
     }
 
     /// The iPad, landscape and Vision title page: the hero, the title block
@@ -5517,6 +5546,13 @@ struct AppleCatalogItemDetailView: View {
         result.nextEpisode = nextEpisodeContext()
         result.coordinator.trackCarryOver = playbackUI.trackCarryOver
         playbackUI.trackCarryOver = nil
+        // Every stream failed before anything played: close the player and
+        // say why here (`ApplePlaybackUnavailableAlert`).
+        result.onUnplayable = { alert in
+            playbackUI.unavailable = alert
+            playbackUI.presentation = nil
+        }
+        let engineOverride = presentation.engineOverride
         let files = localFiles
         let library = library
         let settings = settings
@@ -5528,7 +5564,7 @@ struct AppleCatalogItemDetailView: View {
         let releaseYear = stockPlayerYear
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         let runtime = expectedRuntime
-        let stockPlayerOnly = settings.playbackEngine == .native
+        let stockPlayerOnly = (engineOverride ?? settings.playbackEngine) == .native
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
                 ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
@@ -5551,7 +5587,8 @@ struct AppleCatalogItemDetailView: View {
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
                             addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear), settings: settings)
+                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear), settings: settings,
+                            engineOverride: engineOverride)
                     }
             }
             let device = AppleStreamDeviceCapabilities.current
@@ -5620,6 +5657,15 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.request = UUID()
     }
 
+    /// The same title again on the OpenStream engine, for this play only —
+    /// the saved Player setting stays as it is.
+    private func retryWithOpenStreamPlayer() {
+        playbackUI.unavailable = nil
+        playbackUI.engineOverride = .openStream
+        playbackCoordinator.beginResolving()
+        playbackUI.request = UUID()
+    }
+
     private func openSourcesAfterPlaybackFailure() {
         playbackCoordinator.reset()
         if let openSourcesSettings { openSourcesSettings() } else { openSettings() }
@@ -5628,6 +5674,9 @@ struct AppleCatalogItemDetailView: View {
     private func resolvePlayback() async {
         let retryStartedAt = playbackUI.retryStartedAt
         playbackUI.retryStartedAt = nil
+        let engineOverride = playbackUI.engineOverride
+        playbackUI.engineOverride = nil
+        playbackUI.unavailable = nil
         playbackCoordinator.beginResolving()
         do {
             if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
@@ -5721,14 +5770,17 @@ struct AppleCatalogItemDetailView: View {
                 title: item.name, year: item.year,
                 unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
                 preferredService: playbackUI.preferredServiceKey,
-                stockPlayerOnly: settings.playbackEngine == .native)
+                stockPlayerOnly: (engineOverride ?? settings.playbackEngine) == .native)
             playbackUI.preferredServiceKey = nil
             let mediaID = progressRecordID
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
             let subtitle = stockPlayerSubtitle
             let releaseYear = stockPlayerYear
             let runtime = expectedRuntime
-            let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
+            // A stream the Native player failed is not a failure for the
+            // OpenStream engine, so "Try OpenStream Player" offers them all.
+            let requests = ordered.filter { chosen != nil || engineOverride != nil
+                || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
                 candidate.playbackRequest(mediaID: mediaID, title: title,
                     resume: AppleDetailResume.position(mediaID: mediaID,
                         partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
@@ -5740,7 +5792,8 @@ struct AppleCatalogItemDetailView: View {
             let presentation = AppleStremioPlayerPresentation(
                 request: first,
                 fallbackCandidates: Array(requests.dropFirst()),
-                settings: settings
+                settings: settings,
+                engineOverride: engineOverride
             )
             playbackCoordinator = presentation.coordinator
             playbackUI.presentation = configuredSources(presentation)
@@ -7185,6 +7238,11 @@ private struct AppleTitlePagePlaybackState {
     var preferredServiceKey: String?
     /// The previous episode's audio and subtitle choices. Used once.
     var trackCarryOver: AppleTrackCarryOver?
+    /// Every stream of the last press failed before anything played; the
+    /// player has closed and the page's alert says why.
+    var unavailable: ApplePlaybackUnavailableAlert?
+    /// "Try OpenStream Player": the engine for the next press only. Used once.
+    var engineOverride: ApplePlaybackEngineKind?
 }
 
 private struct AppleTitlePageMetadataState {
