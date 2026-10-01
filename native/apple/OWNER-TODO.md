@@ -51,10 +51,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       in earlier TestFlight builds); torrent client removed; TMDB/JustWatch credits + "we don't provide any content"
       line; no "Stremio" in the UI (a test enforces it); About no longer links the private repo. Also caught: the
       Release build didn't compile (fixed). Note: the TMDB logo is blue-green — their terms require it unaltered.
-      DECIDE: (1) add-ons at all? safest = none, add-on users go through a Jellyfin bridge (Strand's route); middle =
-      user-pasted "Catalogs" only + all fixes. (2) downloads only from your own sources (local/SMB/media server)?
-      (3) catalog rows named by the add-on, not "Netflix Movies"; Top 10 off by default? (4) drop the bundled
-      361-channel US lineup (HBO, ESPN, PPV)? Owner still has the live App Store listing text to check by hand.
+      DECIDED 2026-10-01: (3) neutral row names + Top 10 off by default, (4) remove the bundled lineup — building.
+      (1) add-ons + (2) downloads: owner wants to KEEP both (incl. downloading away from home) in a safe way, e.g.
+      add-ons configured online and synced. Researching: a server-side bridge (our own open-source "OpenStream
+      Bridge" or Remux) where add-ons are set up on a web page and the app just signs in to "your media server" —
+      downloads then come from your own server; plus a second build with native add-ons outside the App Store.
+      Owner still has the live App Store listing text to check by hand.
       Ideas picked by Claude (owner delegated), in order: engine lab with smooth seek as a gate; dead live stream →
       restart, then same channel from another list; format badges; denser TV guide; IPTV catch-up + live pause.
 - [ ] **Ideas from Strand + iProTV (2026-10-01, pick what you want):** smooth seek (no black flash) as a gate test;
