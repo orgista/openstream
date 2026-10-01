@@ -407,14 +407,17 @@ final class AppleLocalLibraryStore {
         let resolution = file.name.range(of: #"(?i)\b(?:\d{3,4}p|[48]K)\b"#, options: .regularExpression).map { String(file.name[$0]).uppercased() }
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
-    func presentation(for file: AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore) async throws -> AppleStremioPlayerPresentation {
+    func presentation(for file: AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore,
+                      fromBeginning: Bool = false) async throws -> AppleStremioPlayerPresentation {
+        let resume = AppleTitlePagePolicy.startPosition(
+            saved: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, fromBeginning: fromBeginning)
         guard let source = sources.first(where: { $0.id == file.sourceID }) else { throw AppleLibrarySourceError.unavailable }
         let title = AppleLibraryTitleParser.parse(file).title
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
             let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials, sizeBytes: file.sizeBytes)
             var request = AppleSMBPlaybackRequestFactory.make(source: source, item: file, playbackURL: url)
-            request.resumePosition = ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition
+            request.resumePosition = resume
             return tracked(AppleStremioPlayerPresentation(request: request, settings: settings), file: file)
         }
         let root = file.sourceID == Self.downloadsID ? nil : try AppleLibraryBookmark.resolve(source)
@@ -422,7 +425,7 @@ final class AppleLocalLibraryStore {
         defer { withExtendedLifetime(access) {} }
         let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: settings.playbackEngine)
         return tracked(AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
-            resumePosition: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, mediaID: playbackID(file), title: title, sourceKind: .files, hints: .init(libraryFileURL: file.url)), settings: settings, securityScopedURL: root), file: file)
+            resumePosition: resume, mediaID: playbackID(file), title: title, sourceKind: .files, hints: .init(libraryFileURL: file.url)), settings: settings, securityScopedURL: root), file: file)
     }
     private func tracked(_ presentation: AppleStremioPlayerPresentation, file: AppleLibraryItem) -> AppleStremioPlayerPresentation {
         let store = ApplePlaybackStore()

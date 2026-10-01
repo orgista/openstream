@@ -15,14 +15,15 @@ struct AppleStremioPlayerPresentation: Identifiable {
     var sourceOptionsLoader: (() async throws -> ApplePlaybackSourceOptions)?
     /// Set when the thing being played is an episode with a successor.
     var nextEpisode: AppleNextEpisodeContext?
-    /// The engine this one play asked for instead of the saved setting
-    /// ("Try OpenStream Player"); nil plays with the setting.
+    /// The engine this one play uses instead of `settings.playbackEngine`
+    /// (the title page's OpenStream fallback after the AVPlayer-only route
+    /// failed, `ApplePlaybackEngineFallback`); nil plays as usual.
     let engineOverride: ApplePlaybackEngineKind?
-    /// Set by a presenter that shows its own alert when every stream fails
-    /// before anything plays (the title page's "Playback Unavailable"): the
-    /// player hands the failure over and the presenter closes it. Unset, the
-    /// player keeps its own "Playback Failed" alert.
-    var onUnplayable: (@MainActor (ApplePlaybackUnavailableAlert) -> Void)?
+    /// Set by a presenter that decides what follows when every stream fails
+    /// before anything plays (the title page: the OpenStream fallback, or its
+    /// "Playback Unavailable" alert): the player hands the failure over and
+    /// the presenter closes it. Unset, the player keeps its own alert.
+    var onUnplayable: (@MainActor (ApplePlaybackUnplayable) -> Void)?
 
     /// Builds the player for presentation from the preferred engine in
     /// `settings`. The engine is chosen here, at presentation time, via
@@ -40,15 +41,24 @@ struct AppleStremioPlayerPresentation: Identifiable {
         self.request = request
         self.fallbackCandidates = fallbackCandidates
         self.engineOverride = engineOverride
-        let chosenEngine = engineOverride ?? settings.playbackEngine
+        // The DEBUG-only Native override with not one stream the stock player
+        // opens (all MKV/TS): straight to the OpenStream engine.
+        let gatedEngine = ApplePlaybackEngineFallback.engine(preferred: settings.playbackEngine,
+            for: [request] + fallbackCandidates)
+        if engineOverride == nil, gatedEngine != settings.playbackEngine {
+            appleTrace("native pre-gate: 0 of \(fallbackCandidates.count + 1) playable → openStream")
+        }
+        let chosenEngine = engineOverride ?? gatedEngine
         #if os(tvOS)
-        // Task 9: the stock AVPlayer route whenever the container allows it.
-        let preferredEngine = AppleTVPlaybackPresentationPolicy.engineKind(for: request, preferred: chosenEngine)
+        // Task 9: the stock AVPlayer route whenever the container allows it —
+        // unless this play was sent to the OpenStream engine on purpose.
+        let preferredEngine = engineOverride
+            ?? AppleTVPlaybackPresentationPolicy.engineKind(for: request, preferred: chosenEngine)
         #else
         let preferredEngine = chosenEngine
         #endif
         let (engine, fellBack) = ApplePlaybackEngineFactory.make(preferred: preferredEngine)
-        appleTrace("player engine \(preferredEngine) (setting \(settings.playbackEngine)\(engineOverride.map { ", this play \($0)" } ?? "")) for "
+        appleTrace("player engine \(preferredEngine) (default \(settings.playbackEngine)\(engineOverride.map { ", this play \($0)" } ?? "")) for "
             + "\(request.hints.filename.map { String($0.suffix(48)) } ?? "-"), \(fallbackCandidates.count) fallbacks")
         if fellBack {
             settings.engineFellBackToNative = true
@@ -127,7 +137,7 @@ struct AppleStremioPlayerView: View {
     private let securityScopedURL: URL?
     private let nextEpisode: AppleNextEpisodeContext?
     private let presentationID: UUID
-    private let onUnplayable: (@MainActor (ApplePlaybackUnavailableAlert) -> Void)?
+    private let onUnplayable: (@MainActor (ApplePlaybackUnplayable) -> Void)?
 
     init(presentation: AppleStremioPlayerPresentation) {
         presentationID = presentation.id
@@ -395,14 +405,14 @@ struct AppleStremioPlayerView: View {
             if case .playing = newPhase { hasPlayed = true }
             if handsFailureToPresenter, let failure = playbackFailure, let onUnplayable {
                 // Every stream failed before anything played: the title page
-                // closes this player and says why (`ApplePlaybackUnavailableAlert`).
+                // closes this player and falls back to the OpenStream engine
+                // or says why (`ApplePlaybackEngineFallback`).
                 handedOffFailure = true
-                let alert = ApplePlaybackUnavailableAlert(failure: failure, engine: coordinator.engine.kind,
-                    streamsSkippedForEngine: coordinator.streamsSkippedForEngine,
-                    isEpisode: request.hints.addonMediaType == "series")
-                appleTrace("player unplayable: engine=\(coordinator.engine.kind) skipped=\(coordinator.streamsSkippedForEngine) "
-                    + "kind=\(failure.kind) offersOpenStream=\(alert?.offersOpenStreamPlayer ?? false)")
-                if let alert { onUnplayable(alert) } else { closePlayer() }
+                appleTrace("player unplayable: engine=\(coordinator.engine.kind) tried=\(coordinator.triedSourceURLs.count) "
+                    + "skipped=\(coordinator.streamsSkippedForEngine) kind=\(failure.kind)")
+                if failure.kind == .cancelled { closePlayer(); return }
+                onUnplayable(ApplePlaybackUnplayable(failure: failure, engine: coordinator.engine.kind,
+                    triedSourceURLs: coordinator.triedSourceURLs))
                 return
             }
             if case .ended = newPhase {

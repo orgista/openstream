@@ -24,21 +24,34 @@ private func makeIsolatedDefaults() -> UserDefaults {
     return defaults
 }
 
-/// The persisted key `AppleSettingsStore.playbackEngine` reads and writes, so
-/// tests can write an invalid raw value directly and assert the store maps it
-/// back to the default.
+/// The old Player picker's key (and the DEBUG launch argument's name).
 private let playbackEngineKey = "openstream.playback.engine"
 
+/// Owner decision 2026-10-01: no Player choice; a "native" the old picker
+/// saved is ignored and cleared, and never backed up.
 @MainActor
 @Test
-func playbackEngineRoundTripsThroughUserDefaults() {
+func aSavedNativeChoiceIsIgnoredAndCleared() {
     let defaults = makeIsolatedDefaults()
+    defaults.set("native", forKey: playbackEngineKey)
     let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    #expect(store.playbackEngine == .openStream)
+    #expect(defaults.string(forKey: playbackEngineKey) == nil)
     store.playbackEngine = .native
+    #expect(defaults.string(forKey: playbackEngineKey) == nil)
+    #expect(!AppleSettingsStore.configurationKeys.contains(playbackEngineKey))
+}
 
-    let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
-    #expect(reread.playbackEngine == .native)
-    #expect(defaults.string(forKey: playbackEngineKey) == "native")
+@Test
+func releaseIgnoresTheNativeLaunchOverride() {
+    let args = ["OpenStream", "-openstream.playback.engine", "native"]
+    #expect(ApplePlaybackEngineKind.resolved(launchArguments: args, isDebugBuild: false) == .openStream)
+    #expect(ApplePlaybackEngineKind.resolved(launchArguments: args, isDebugBuild: true) == .native)
+    #expect(ApplePlaybackEngineKind.resolved(launchArguments: ["OpenStream"], isDebugBuild: true) == .openStream)
+    #expect(ApplePlaybackEngineKind.resolved(launchArguments: ["-openstream.playback.engine"], isDebugBuild: true)
+        == .openStream)
+    #expect(ApplePlaybackEngineKind.resolved(launchArguments: ["-openstream.playback.engine", "bogus"],
+        isDebugBuild: true) == .openStream)
 }
 
 @MainActor

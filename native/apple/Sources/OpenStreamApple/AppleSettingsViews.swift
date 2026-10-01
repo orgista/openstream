@@ -1081,19 +1081,8 @@ private struct ApplePlaybackSettingsView: View {
         @Bindable var settings = settings
 
         Form {
-            Section("Engine") {
-                #if os(tvOS)
-                AppleTVChoicePicker("Player", selection: $settings.playbackEngine, options: [
-                    .init(value: .openStream, title: "OpenStream"), .init(value: .native, title: "Native"),
-                ])
-                #else
-                Picker("Player", selection: $settings.playbackEngine) {
-                    Text("OpenStream").tag(ApplePlaybackEngineKind.openStream)
-                    Text("Native").tag(ApplePlaybackEngineKind.native)
-                }
-                #endif
-            }
-
+            // No Player choice: every play uses the OpenStream engine inside
+            // Apple's own player (owner decision 2026-10-01).
             Section("Captions") {
                 // Not "Language": every option here is a *mode* — Off, English,
                 // Device Language, Always — so the row read "Language: Always",

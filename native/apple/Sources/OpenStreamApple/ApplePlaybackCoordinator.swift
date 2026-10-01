@@ -239,10 +239,13 @@ public final class ApplePlaybackCoordinator {
     var onSourceFailure: ((ApplePlaybackRequest) -> Void)?
     public private(set) var fallbackNoticeGeneration = 0
     /// Streams this press passed over because this coordinator's engine
-    /// cannot open them (`engineOpens`): the Native player's MKVs. The title
-    /// page's "Playback Unavailable" alert offers the OpenStream player when
-    /// that is why nothing played (`ApplePlaybackUnavailableAlert`).
+    /// cannot open them (`engineOpens`): the Native player's MKVs. Traced
+    /// when the press ends with nothing played.
     public private(set) var streamsSkippedForEngine = 0
+    /// The streams this press has loaded, in order, each once. When every one
+    /// fails on the Native player the title page starts the OpenStream engine
+    /// on the rest first (`ApplePlaybackEngineFallback.fallbackOrder`).
+    public private(set) var triedSourceURLs: [URL] = []
     private var hasShownFallbackNotice = false
     private var lastRequest: ApplePlaybackRequest?
     /// The request playing (or last tried), for the next episode to prefer
@@ -407,6 +410,7 @@ public final class ApplePlaybackCoordinator {
     public func begin(_ request: ApplePlaybackRequest) async {
         fallbackTask?.cancel()
         streamsSkippedForEngine = 0
+        triedSourceURLs = []
         librarySubtitles = AppleLibrarySubtitleService()
         fallbackCandidates = []
         fallbackAttempted = 0
@@ -424,6 +428,7 @@ public final class ApplePlaybackCoordinator {
         fallbackCandidates: [ApplePlaybackRequest]
     ) async {
         fallbackTask?.cancel()
+        triedSourceURLs = []
         librarySubtitles = AppleLibrarySubtitleService()
         hasShownFallbackNotice = false
         // The head of the list, with what decides the stock player's order.
@@ -490,6 +495,7 @@ public final class ApplePlaybackCoordinator {
         let attempt = generation
         loadTask?.cancel()
         lastRequest = request
+        if !triedSourceURLs.contains(request.url) { triedSourceURLs.append(request.url) }
         attemptCountedStart = false
         attemptCountedFailure = false
         AppleInteractionTrace.count { $0.recordAttempt(isLive: request.isLive) }

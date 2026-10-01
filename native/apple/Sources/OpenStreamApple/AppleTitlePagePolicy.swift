@@ -86,6 +86,22 @@ public enum AppleTitlePagePolicy {
         }
     }
 
+    // MARK: - Start from Beginning
+
+    /// "Start from Beginning" sits beside the one button whenever that button
+    /// resumes (a film or an episode with a saved position), and nowhere else.
+    public static func offersStartFromBeginning(_ action: PrimaryAction?) -> Bool {
+        if case .resume? = action { return true }
+        return false
+    }
+
+    /// Where a press starts: the saved position, or the top for "Start from
+    /// Beginning". The saved position is left alone; playing from the top
+    /// overwrites it as the title plays.
+    public static func startPosition(saved: Double?, fromBeginning: Bool) -> Double? {
+        fromBeginning ? nil : saved
+    }
+
     /// Shared by title pages and every Discover hero. A route is a source that
     /// can play THIS title: a Stremio add-on that serves streams, a media-server
     /// item, local or network-share files matched to the title

@@ -3003,25 +3003,22 @@ struct AppleCatalogItemDetailView: View {
         Color.clear
         .alert("Playback Unavailable", isPresented: Binding(
             // A failure while the player is up is the player's: it shows its
-            // own alert, or hands an every-stream-failed press over as
-            // `unavailable` and is closed. Presenting from here as well took
+            // own alert, or hands an every-stream-failed press over (the
+            // OpenStream fallback, or `unavailableMessage`) and is closed. Presenting from here as well took
             // the player's cover down and lost the failure with it.
-            get: { playbackUI.unavailable != nil || (playbackFailure != nil && playbackUI.presentation == nil) },
+            get: { playbackUI.unavailableMessage != nil || (playbackFailure != nil && playbackUI.presentation == nil) },
             // The alert reports itself dismissed after its animation, by
             // which time Retry has already put the page into Preparing;
             // resetting then dropped that state and the page sat on Play.
             set: {
                 guard !$0 else { return }
-                if playbackUI.unavailable != nil { playbackUI.unavailable = nil; return }
+                if playbackUI.unavailableMessage != nil { playbackUI.unavailableMessage = nil; return }
                 if playbackFailure != nil { playbackCoordinator.reset() }
             }
         )) {
-            if let unavailable = playbackUI.unavailable {
-                if unavailable.offersOpenStreamPlayer {
-                    Button("Try OpenStream Player", action: retryWithOpenStreamPlayer)
-                }
+            if playbackUI.unavailableMessage != nil {
                 Button("OK", role: .cancel) {
-                    playbackUI.unavailable = nil
+                    playbackUI.unavailableMessage = nil
                     playbackCoordinator.reset()
                 }
             } else {
@@ -3039,8 +3036,8 @@ struct AppleCatalogItemDetailView: View {
                 Button("Close", role: .cancel) { playbackCoordinator.reset() }
             }
         } message: {
-            if let unavailable = playbackUI.unavailable {
-                Text(unavailable.message)
+            if let unavailableMessage = playbackUI.unavailableMessage {
+                Text(unavailableMessage)
             } else if let playbackFailure {
                 Text(playbackFailure.message)
             }
@@ -3652,6 +3649,9 @@ struct AppleCatalogItemDetailView: View {
                     tvOSWatchOnButton(watchOnAction)
                 } else if tvOSShowsPlay {
                     tvOSPlayButton
+                    if offersStartFromBeginning {
+                        tvOSStartFromBeginningButton
+                    }
                 }
                 tvOSIconRow
             }
@@ -3779,6 +3779,25 @@ struct AppleCatalogItemDetailView: View {
                 Task { await chooseStreams() }
             }
         }
+    }
+
+    /// Beside Resume, a quieter pill: the title or episode from the top.
+    private var tvOSStartFromBeginningButton: some View {
+        Button(action: startFromBeginning) {
+            HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: AppleTVDetailMetrics.pillGlyphSize, weight: .semibold))
+                Text("Start from Beginning")
+            }
+        }
+        .buttonStyle(AppleTVPillStyle(
+            isSelected: false,
+            minimumSize: AppleTVDetailMetrics.pillSize,
+            fontSize: AppleTVDetailMetrics.pillFontSize
+        ))
+        .focused($tvDetailFocus, equals: .startFromBeginning)
+        .disabled(tvOSPlayIsBusy)
+        .accessibilityIdentifier("detail.startOver")
     }
 
     private var tvOSIconRow: some View {
@@ -4680,9 +4699,7 @@ struct AppleCatalogItemDetailView: View {
         )
         .accessibilityIdentifier("detail.play")
         .contextMenu {
-            Button("Quality", systemImage: "slider.horizontal.3") {
-                Task { await chooseStreams() }
-            }
+            playButtonMenuItems
         }
     }
 
@@ -5582,11 +5599,27 @@ struct AppleCatalogItemDetailView: View {
         result.nextEpisode = nextEpisodeContext()
         result.coordinator.trackCarryOver = playbackUI.trackCarryOver
         playbackUI.trackCarryOver = nil
-        // Every stream failed before anything played: close the player and
-        // say why here (`ApplePlaybackUnavailableAlert`).
-        result.onUnplayable = { alert in
-            playbackUI.unavailable = alert
+        // Every stream failed before anything played: close the player, then
+        // start again on the OpenStream engine when the Native player failed,
+        // or say why here (`ApplePlaybackEngineFallback`).
+        let fellBack = presentation.engineOverride != nil
+        let fromBeginning = playbackUI.pressFromBeginning
+        result.onUnplayable = { unplayable in
             playbackUI.presentation = nil
+            switch ApplePlaybackEngineFallback.afterEveryStreamFailed(unplayable.failure,
+                engine: unplayable.engine, alreadyFellBack: fellBack) {
+            case .openStream:
+                appleTrace("native fallback → openStream after \(unplayable.triedSourceURLs.count) failures")
+                playbackUI.engineOverride = .openStream
+                playbackUI.fallbackTriedSources = Set(unplayable.triedSourceURLs)
+                playbackUI.startsFromBeginning = fromBeginning
+                playbackCoordinator.beginResolving()
+                playbackUI.request = UUID()
+            case .alert(let message):
+                playbackUI.unavailableMessage = message
+            case nil:
+                playbackCoordinator.reset()
+            }
         }
         let engineOverride = presentation.engineOverride
         let files = localFiles
@@ -5600,6 +5633,8 @@ struct AppleCatalogItemDetailView: View {
         let releaseYear = stockPlayerYear
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         let runtime = expectedRuntime
+        // MP4-first order only under the DEBUG Native override; the OpenStream
+        // engine keeps the quality-first order.
         let stockPlayerOnly = (engineOverride ?? settings.playbackEngine) == .native
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
@@ -5693,15 +5728,6 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.request = UUID()
     }
 
-    /// The same title again on the OpenStream engine, for this play only —
-    /// the saved Player setting stays as it is.
-    private func retryWithOpenStreamPlayer() {
-        playbackUI.unavailable = nil
-        playbackUI.engineOverride = .openStream
-        playbackCoordinator.beginResolving()
-        playbackUI.request = UUID()
-    }
-
     private func openSourcesAfterPlaybackFailure() {
         playbackCoordinator.reset()
         if let openSourcesSettings { openSourcesSettings() } else { openSettings() }
@@ -5712,7 +5738,13 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.retryStartedAt = nil
         let engineOverride = playbackUI.engineOverride
         playbackUI.engineOverride = nil
-        playbackUI.unavailable = nil
+        let fallbackTried = playbackUI.fallbackTriedSources
+        playbackUI.fallbackTriedSources = []
+        let fromBeginning = playbackUI.startsFromBeginning
+        playbackUI.startsFromBeginning = false
+        playbackUI.pressFromBeginning = fromBeginning
+        if fromBeginning { appleTrace("title page: start from beginning") }
+        playbackUI.unavailableMessage = nil
         playbackCoordinator.beginResolving()
         do {
             if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
@@ -5731,7 +5763,7 @@ struct AppleCatalogItemDetailView: View {
                     episodeToPlay = msDetail.item
                 }
                 
-                let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: true)
+                let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: !fromBeginning)
                 let presentation = AppleStremioPlayerPresentation(request: req, settings: settings)
                 playbackCoordinator = presentation.coordinator
                 playbackUI.presentation = configuredSources(presentation, selectedID: req.url)
@@ -5744,7 +5776,8 @@ struct AppleCatalogItemDetailView: View {
                 for file in files {
                     do {
                         let presentation = try await library.presentation(for: file,
-                            sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings)
+                            sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings,
+                            fromBeginning: fromBeginning)
                         playbackCoordinator = presentation.coordinator
                         playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
                         return
@@ -5768,8 +5801,10 @@ struct AppleCatalogItemDetailView: View {
                         request: ApplePlaybackRequest(
                             url: prepared.url,
                             headers: prepared.requestHeaders,
-                            resumePosition: AppleDetailResume.position(mediaID: progressRecordID,
-                                partID: AppleDetailResume.partID(type: item.type, mediaID: selectedPlaybackMediaID)),
+                            resumePosition: AppleTitlePagePolicy.startPosition(
+                                saved: AppleDetailResume.position(mediaID: progressRecordID,
+                                    partID: AppleDetailResume.partID(type: item.type, mediaID: selectedPlaybackMediaID)),
+                                fromBeginning: fromBeginning),
                             mediaID: progressRecordID,
                             title: item.name,
                             sourceKind: .stremio,
@@ -5809,6 +5844,7 @@ struct AppleCatalogItemDetailView: View {
                 title: item.name, year: item.year,
                 unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
                 preferredService: playbackUI.preferredServiceKey,
+                // DEBUG Native override only; quality-first otherwise.
                 stockPlayerOnly: (engineOverride ?? settings.playbackEngine) == .native)
             playbackUI.preferredServiceKey = nil
             let mediaID = progressRecordID
@@ -5817,12 +5853,17 @@ struct AppleCatalogItemDetailView: View {
             let releaseYear = stockPlayerYear
             let runtime = expectedRuntime
             // A stream the Native player failed is not a failure for the
-            // OpenStream engine, so "Try OpenStream Player" offers them all.
-            let requests = ordered.filter { chosen != nil || engineOverride != nil
-                || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
+            // OpenStream engine, so its fallback keeps them all, the ones the
+            // Native player never tried first.
+            let kept = ordered.filter { chosen != nil || engineOverride != nil
+                || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }
+            let requests = ApplePlaybackEngineFallback.fallbackOrder(kept, url: \.sourceURL,
+                tried: fallbackTried).map { candidate in
                 candidate.playbackRequest(mediaID: mediaID, title: title,
-                    resume: AppleDetailResume.position(mediaID: mediaID,
-                        partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
+                    resume: AppleTitlePagePolicy.startPosition(
+                        saved: AppleDetailResume.position(mediaID: mediaID,
+                            partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
+                        fromBeginning: fromBeginning),
                     addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
                     expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear)
             }
@@ -7299,11 +7340,20 @@ private struct AppleTitlePagePlaybackState {
     var preferredServiceKey: String?
     /// The previous episode's audio and subtitle choices. Used once.
     var trackCarryOver: AppleTrackCarryOver?
-    /// Every stream of the last press failed before anything played; the
-    /// player has closed and the page's alert says why.
-    var unavailable: ApplePlaybackUnavailableAlert?
-    /// "Try OpenStream Player": the engine for the next press only. Used once.
+    /// Every stream of the last press failed before anything played, on the
+    /// OpenStream engine too; the player has closed and the page's alert
+    /// says why.
+    var unavailableMessage: String?
+    /// The Native player's OpenStream fallback: the engine for the next press
+    /// only. Used once.
     var engineOverride: ApplePlaybackEngineKind?
+    /// The streams the Native player tried before that fallback; they go last.
+    var fallbackTriedSources: Set<URL> = []
+    /// "Start from Beginning": the next press plays from the top. Used once.
+    var startsFromBeginning = false
+    /// The press under way started from the top, so its OpenStream fallback
+    /// does too.
+    var pressFromBeginning = false
 }
 
 private struct AppleTitlePageMetadataState {
@@ -8244,6 +8294,31 @@ extension AppleCatalogItemDetailView {
                                            isEnabled: isTrailer || canStartPlayback)
     }
 
+    private var offersStartFromBeginning: Bool {
+        AppleTitlePagePolicy.offersStartFromBeginning(titlePagePrimaryAction) && watchOnAction == nil
+    }
+
+    /// The title (or the episode Resume names) from the top; its saved
+    /// position is overwritten as it plays.
+    private func startFromBeginning() {
+        guard canStartPlayback else { return }
+        playbackUI.startsFromBeginning = true
+        playbackUI.request = UUID()
+    }
+
+    /// "Start from Beginning" in the one button's context menu on the iPhone,
+    /// iPad, Mac and Vision Pro, beside Quality.
+    @ViewBuilder
+    private var playButtonMenuItems: some View {
+        if offersStartFromBeginning {
+            Button("Start from Beginning", systemImage: "arrow.counterclockwise", action: startFromBeginning)
+                .accessibilityIdentifier("detail.startOver")
+        }
+        Button("Quality", systemImage: "slider.horizontal.3") {
+            Task { await chooseStreams() }
+        }
+    }
+
     /// Play (or resume), or the trailer when nothing here can play.
     fileprivate func performTitlePagePrimaryAction() {
         if titlePagePrimaryButtonState?.isTrailer == true {
@@ -8300,9 +8375,7 @@ extension AppleCatalogItemDetailView {
         .accessibilityLabel(isBusy ? "Preparing playback" : title)
         .accessibilityIdentifier("detail.play")
         .contextMenu {
-            Button("Quality", systemImage: "slider.horizontal.3") {
-                Task { await chooseStreams() }
-            }
+            playButtonMenuItems
         }
     }
 
@@ -9015,9 +9088,7 @@ extension AppleCatalogItemDetailView {
                 .accessibilityLabel(state.isBusy ? "Preparing playback" : state.title)
                 .accessibilityIdentifier("detail.play")
                 .contextMenu {
-                    Button("Quality", systemImage: "slider.horizontal.3") {
-                        Task { await chooseStreams() }
-                    }
+                    playButtonMenuItems
                 }
             }
 

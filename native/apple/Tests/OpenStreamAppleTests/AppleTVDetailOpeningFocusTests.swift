@@ -9,7 +9,7 @@ struct AppleTVDetailOpeningFocusTests {
         #expect(!AppleTVDetailOpeningFocus.settles(on: nil))
     }
 
-    @Test(arguments: [AppleTVDetailFocus.myList, .rate, .rateChoice(0)])
+    @Test(arguments: [AppleTVDetailFocus.startFromBeginning, .myList, .rate, .rateChoice(0)])
     func focusCarriedOntoTheTitleRowGoesBackToPlay(_ focus: AppleTVDetailFocus) {
         #expect(AppleTVDetailOpeningFocus.correction(for: focus, hasHadAnyFocus: true) == .play)
         #expect(AppleTVDetailOpeningFocus.correction(for: focus, hasHadAnyFocus: false) == .play)

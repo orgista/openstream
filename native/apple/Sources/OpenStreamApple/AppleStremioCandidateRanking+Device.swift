@@ -133,9 +133,6 @@ extension AppleStremioCandidateRanking {
         }
     }
 
-    /// Whether the AVPlayer-only engine opens this release: an MPEG-4 file or
-    /// a name that says nothing about its container (HLS, bare URLs), and
-    /// not one the add-on marked as needing the gateway.
     /// An MP4/M4V named anywhere in the URL's path (a debrid link often ends
     /// in an opaque id with the file name one segment earlier).
     static func urlNamesMPEG4(_ url: URL) -> Bool {
@@ -143,7 +140,8 @@ extension AppleStremioCandidateRanking {
         return path.contains(".mp4") || path.contains(".m4v")
     }
 
-    /// The Native engine's order: a release that says it is MPEG-4 first, then
+    /// The order under the DEBUG Native override (`stockPlayerOnly`): a
+    /// release that says it is MPEG-4 first, then
     /// one whose container is unknown (it may be anything — SNL S51E7's first
     /// three unknown names all failed "no video track"), then the rest.
     static func stockPlayerScore(_ traits: PlaybackTraits) -> Int {
@@ -151,6 +149,9 @@ extension AppleStremioCandidateRanking {
         return traits.container == .mp4 ? 2 : 1
     }
 
+    /// Whether the AVPlayer-only engine opens this release: an MPEG-4 file or
+    /// a name that says nothing about its container (HLS, bare URLs), and
+    /// not one the add-on marked as needing the gateway.
     public static func stockPlayerPlays(_ traits: PlaybackTraits) -> Bool {
         guard !traits.requiresGateway else { return false }
         switch traits.container {

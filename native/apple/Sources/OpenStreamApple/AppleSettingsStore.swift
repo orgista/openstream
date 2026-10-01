@@ -567,11 +567,13 @@ public final class AppleSettingsStore {
         didSet { defaults.set(regionalZIPCode, forKey: DefaultsKey.regionalZIPCode) }
     }
 
-    /// Preferred playback engine for the next presentation. Persisted as the
-    /// raw value; an invalid or missing stored string falls back to `.openStream`.
-    public var playbackEngine: ApplePlaybackEngineKind {
-        didSet { defaults.set(playbackEngine.rawValue, forKey: DefaultsKey.playbackEngine) }
-    }
+    /// The playback engine: always the OpenStream engine, which plays every
+    /// container inside Apple's own player (owner decision 2026-10-01, "native
+    /// player with our engine"). Not a setting any more, and not persisted: a
+    /// "native" saved by the old Player picker is ignored and cleared. A DEBUG
+    /// build honours `-openstream.playback.engine native` on the launch line
+    /// for testing (`ApplePlaybackEngineKind.resolved`).
+    public var playbackEngine: ApplePlaybackEngineKind
 
     /// Runtime-only flag set when the preferred OpenStream engine could not
     /// start and playback fell back to the AVPlayer-only native engine. Not
@@ -644,9 +646,9 @@ public final class AppleSettingsStore {
         show24x7Channels = defaults.object(forKey: DefaultsKey.show24x7Channels) as? Bool ?? false
         favoriteChannelIDs = Set(defaults.stringArray(forKey: DefaultsKey.favoriteChannelIDs) ?? [])
         regionalZIPCode = defaults.string(forKey: DefaultsKey.regionalZIPCode) ?? ""
-        playbackEngine = ApplePlaybackEngineKind(
-            rawValue: defaults.string(forKey: DefaultsKey.playbackEngine) ?? ""
-        ) ?? .openStream
+        playbackEngine = ApplePlaybackEngineKind.resolved(launchArguments: ProcessInfo.processInfo.arguments)
+        // The old Player picker's saved choice: never read again.
+        defaults.removeObject(forKey: DefaultsKey.playbackEngine)
         engineFellBackToNative = false
 
         var unreadable = Set<String>()
@@ -743,7 +745,6 @@ public final class AppleSettingsStore {
             DefaultsKey.show24x7Channels,
             DefaultsKey.favoriteChannelIDs,
             DefaultsKey.regionalZIPCode,
-            DefaultsKey.playbackEngine,
             AppleSubtitleLanguages.defaultsKey,
             AppleInteractionTrace.preferenceKey,
             "openstream.settings.live.custom.v1",
@@ -810,7 +811,6 @@ public final class AppleSettingsStore {
         show24x7Channels = restored.show24x7Channels
         favoriteChannelIDs = restored.favoriteChannelIDs
         regionalZIPCode = restored.regionalZIPCode
-        playbackEngine = restored.playbackEngine
     }
 
     func prepareConfigurationKeychain() throws {
@@ -886,6 +886,8 @@ public final class AppleSettingsStore {
         static let show24x7Channels = "openstream.settings.live.show24x7.v1"
         static let favoriteChannelIDs = "openstream.settings.live.favoriteChannelIDs.v1"
         static let regionalZIPCode = "openstream.settings.live.regionalZIPCode.v1"
+        /// The old Player picker's key, cleared at launch; also the DEBUG
+        /// launch argument's name.
         static let playbackEngine = "openstream.playback.engine"
     }
 
@@ -897,5 +899,27 @@ public final class AppleSettingsStore {
         static let gatewayToken = "transcode.gateway.token"
         static let traktClientID = "trakt.client.id"
         static let traktClientSecret = "trakt.client.secret"
+    }
+}
+
+public extension ApplePlaybackEngineKind {
+    /// The engine every play uses: the OpenStream engine. Only a DEBUG build
+    /// (`isDebugBuild`) honours `-openstream.playback.engine native` among the
+    /// launch arguments, to test the stock AVPlayer route; a Release build
+    /// ignores it, as it ignores any saved choice.
+    static func resolved(launchArguments: [String], isDebugBuild: Bool = Self.isDebugBuild) -> Self {
+        guard isDebugBuild,
+              let flag = launchArguments.lastIndex(of: "-openstream.playback.engine"),
+              launchArguments.indices.contains(flag + 1),
+              let kind = Self(rawValue: launchArguments[flag + 1]) else { return .openStream }
+        return kind
+    }
+
+    static var isDebugBuild: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
     }
 }
