@@ -25,6 +25,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Ideas from Strand + iProTV (2026-10-01, pick what you want):** smooth seek (no black flash) as a gate test;
+      App Store risk — Strand pulled Stremio add-ons to pass review (fallback: Remux, add-ons behind a Jellyfin API);
+      IPTV catch-up/timeshift + live pause; denser TV guide (TiviMate-style, Left → sidebar); IPTV multiview 2–4;
+      "watch without tracking" / rewatch / shuffle; hand-off to Infuse/VLC keeping Trakt; per-Apple-TV-user
+      profiles; Simkl + local watchlist; format badges (DV/HDR/Atmos); sports scores; iOS 27 external display
+      (video on TV, controls on phone); first-run guide. Dead IPTV stream → offer the same channel from another list.
 - [ ] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
       verify (specs/full-test-checklist-v3.md). Top gaps being fixed now: subtitle delay/frame-rate fix, preferred
       audio language, Spotlight opens the title, add-on catalog paging, Now Playing artwork/episode info, DV MP4
