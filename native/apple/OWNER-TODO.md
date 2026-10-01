@@ -22,6 +22,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          takes over automatically. Engine bug to report/fix: DV x265 MP4 demux failure.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
+      verify (specs/full-test-checklist-v3.md). Top gaps being fixed now: subtitle delay/frame-rate fix, preferred
+      audio language, Spotlight opens the title, add-on catalog paging, Now Playing artwork/episode info, DV MP4
+      mislabelled "truncated". 20 more Muse jobs queued on ServerPlus (disc menus, DV, subtitles, IPTV, App Review…).
 - [ ] **ISO / disc images (owner 2026-10-01):** today ISOs (DVD + Blu-ray, decrypted) play the main title only — no
       menus. Want: (1) at minimum real DVD menu playback for ISOs; (2) distinguish disc images in the library, maybe a
       small DVD spinner — research other apps' looks first, owner picks before we build. Research running.
