@@ -25,6 +25,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **App Store compliance audit (owner 2026-10-01):** add-on apps keep getting pulled while others stay — audit
+      how we use add-ons (metadata etc.), wording, defaults, review notes, before the next App Store submission.
+      Owner delegated idea picks to Claude. Picked, in order: (1) engine lab with smooth seek as a gate; (2) dead live
+      stream → auto-restart, then the same channel from another list; (3) format badges (DV/HDR/Atmos);
+      (4) denser TV guide; (5) IPTV catch-up + live pause. Audit running.
 - [ ] **Ideas from Strand + iProTV (2026-10-01, pick what you want):** smooth seek (no black flash) as a gate test;
       App Store risk — Strand pulled Stremio add-ons to pass review (fallback: Remux, add-ons behind a Jellyfin API);
       IPTV catch-up/timeshift + live pause; denser TV guide (TiviMate-style, Left → sidebar); IPTV multiview 2–4;
