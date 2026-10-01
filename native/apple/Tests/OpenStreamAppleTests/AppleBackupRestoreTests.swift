@@ -12,6 +12,15 @@ struct AppleAddonURLSecretPolicyTests {
         "https://opensubtitles-v3.strem.io/manifest.json",
         "https://torrentio.strem.fun/manifest.json",
         "https://addon.fixture.example/stremio/manifest.json",
+        // Add-on sweep 2026-09-30: repository and catalog names, not options.
+        "https://pages.fixture.example/40thproject-stremio-addon/manifest.json",
+        "https://pages.fixture.example/animes-season-addon/manifest.json",
+        "https://pages.fixture.example/org.stremio.NoReservationDailyMotion/manifest.json",
+        "https://catalogs.fixture.example/christmaspopular/manifest.json",
+        "https://raw.fixture.example/Andrev2/stremio-xmas-marathon/main/manifest.json",
+        "https://pages.fixture.example/stremio-dragonball-es-catalog/manifest.json",
+        "https://pages.fixture.example/selecta-vision-stremio/manifest.json",
+        "https://dev.fixture.example/stremio/archive.org-addon/manifest.json",
     ])
     func unconfiguredAddonsArePublic(_ text: String) throws {
         #expect(!AppleAddonURLSecretPolicy.isSecret(try url(text)))
@@ -25,6 +34,13 @@ struct AppleAddonURLSecretPolicyTests {
         "https://addon.fixture.example/manifest.json?token=fixture-token",
         "https://user:pass@addon.fixture.example/manifest.json",
         "https://addon.fixture.example/",
+        "https://fixture.example/eyJ0b3Jib3giOiJ1bnNldCIsInNvcnQiOiJkZXNjIn0/manifest.json",
+        "https://fixture.example/%7B%7D/manifest.json",
+        "https://fixture.example/0f1e2d3c4b5a69788796a5b4c3d2e1f0/manifest.json",
+        "https://fixture.example/1b4e28ba-2fa1-11d2-883f-0016d3cca427/manifest.json",
+        "https://fixture.example/QWERTYUIOPASDFGH/manifest.json",
+        "https://fixture.example/xkcdqrtvbnmzpwlk/manifest.json",
+        "https://fixture.example/aB3dE5fG7hJ9kL1mN/manifest.json",
     ])
     func configuredOrCredentialedAddonsAreSecret(_ text: String) throws {
         #expect(AppleAddonURLSecretPolicy.isSecret(try url(text)))

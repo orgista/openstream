@@ -130,7 +130,7 @@ struct AddonProbe {
             info.rawCatalogCount = raw.catalogs.count
             for catalog in raw.catalogs {
                 let type = ((catalog["type"] as? String) ?? "?").lowercased()
-                if !["movie", "series"].contains(type) { info.ignoredCatalogTypes[String(type.prefix(24)), default: 0] += 1 }
+                if !AppleCatalogDiscoveryPolicy.isShelfType(type) { info.ignoredCatalogTypes[String(type.prefix(24)), default: 0] += 1 }
                 let extras = catalog["extra"] as? [Any] ?? []
                 let required = extras.contains { (($0 as? [String: Any])?["isRequired"] as? Bool) == true }
                     || !((catalog["extraRequired"] as? [Any]) ?? []).isEmpty
@@ -158,6 +158,10 @@ struct AddonProbe {
             if value == .manifestNeedsConfiguration {
                 // Correct refusal: the add-on declares configurationRequired.
                 return .init(status: .skip, cause: "manifest:needsConfiguration", detail: "needs configuration")
+            }
+            if case .manifestNeedsSetup = value {
+                // Correct refusal: the add-on serves nothing until configured.
+                return .init(status: .skip, cause: "manifest:needsSetup", detail: "serves nothing until configured")
             }
             // The add-on answered with JSON; did the app refuse a manifest that
             // meets Stremio's spec?
@@ -193,7 +197,7 @@ struct AddonProbe {
         )
         guard !eligible.isEmpty else {
             let why = info.rawCatalogCount == 0 ? "no catalogs"
-                : info.ignoredCatalogTypes.isEmpty ? "all need extras" : "no movie/series catalogs"
+                : info.ignoredCatalogTypes.isEmpty ? "all need extras" : "no usable catalog types"
             return (.skip(why), [], [])
         }
 
@@ -297,7 +301,8 @@ struct AddonProbe {
                               outcome: .init(status: .pass))
         do {
             let details = try await withStageTimeout(.seconds(20)) {
-                try await client.details(source: source, type: target.type, mediaID: target.id)
+                try await client.details(source: source, type: target.type, mediaID: target.id,
+                                         isListingSource: target.fromCatalog)
             }
             probe.httpStatus = recorder.lastResponse?.status
             probe.outcome = .init(status: .pass, detail: details.title.map { _ in "details ok" } ?? "details (no title)")

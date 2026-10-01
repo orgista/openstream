@@ -56,7 +56,7 @@ import Testing
         #expect(source.manifestID == "org.fayallc.stravo1")
         #expect(source.version == "2.1.2")
         #expect(Set(source.resources) == ["meta", "subtitles", "stream", "catalog"])
-        #expect(source.catalogs.count == AppleStremioManifest.maximumCatalogs)
+        #expect(source.catalogs.count == 25)
         #expect(source.catalogs.first?.id == "homepage_1232643093049001320")
         // `extraSupported: ["skip"]` is paging, not a required input.
         #expect(source.catalogs.allSatisfy { !$0.requiresInput && !$0.supportsSearch })

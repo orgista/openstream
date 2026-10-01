@@ -148,7 +148,7 @@ private let tmdbManifestURL =
     #expect(source.url.absoluteString == tmdbManifestURL)
     #expect(source.manifestID == "tmdb-addon")
     #expect(source.resources == ["catalog", "meta"])
-    #expect(source.catalogs.count == AppleStremioManifest.maximumCatalogs)
+    #expect(source.catalogs.count == 32)
 
     let catalog = try #require(source.catalogs.first { $0.id == "tmdb.top" && $0.type == "movie" })
     let endpoint = try AppleStremioCatalogClient.endpoint(source: source, catalog: catalog)

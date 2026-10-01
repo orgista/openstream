@@ -702,7 +702,11 @@ public struct AppleMetadataResolver: Sendable {
     ) async throws -> AppleTMDBDetails? {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["movie", "series", "episode"].contains(cleanType), !cleanID.isEmpty else { return nil }
+        guard AppleCatalogDiscoveryPolicy.isShelfType(cleanType), !cleanID.isEmpty else { return nil }
+        // tv, anime, channel and custom types have no Cinemeta or TMDB
+        // record: only the add-on that listed the item is asked, for its own
+        // meta of that type.
+        let isTitleType = ["movie", "series", "episode"].contains(cleanType)
 
         // Every source, and TMDB, is asked at once, each within
         // `requestDeadline`. They were asked one after another, so on the
@@ -710,21 +714,32 @@ public struct AppleMetadataResolver: Sendable {
         // answers held the overview back 1.2-2.3 s on every opening, even
         // with the caches warm. Answers are still merged in candidate order,
         // with TMDB last, so a preferred add-on wins exactly as before.
-        let candidates = Self.candidates(
-            sources: sources,
-            preferredSourceID: preferredSourceID,
-            mediaID: cleanID,
-            defaultSource: defaultSource
-        )
+        let candidates = isTitleType
+            ? Self.candidates(
+                sources: sources,
+                preferredSourceID: preferredSourceID,
+                mediaID: cleanID,
+                defaultSource: defaultSource
+            )
+            : sources.filter { source in
+                source.id == preferredSourceID
+                    && source.kind == .stremio
+                    && source.isEnabled
+                    && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
+            }
+        guard !candidates.isEmpty || isTitleType else { return nil }
         let timeout = min(requestDeadline, overallDeadline)
-        let tmdbIMDBID = cleanID.split(separator: ":").first.map(String.init)
-            .flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
+        let tmdbIMDBID = isTitleType
+            ? cleanID.split(separator: ":").first.map(String.init)
+                .flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
+            : nil
         let values = try await withThrowingTaskGroup(of: (index: Int, value: AppleTMDBDetails?).self) { group in
             for (index, source) in candidates.enumerated() {
                 group.addTask {
                     do {
                         return (index, try await bounded(timeout: timeout) {
-                            try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID)
+                            try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID,
+                                                           isListingSource: source.id == preferredSourceID)
                         })
                     } catch is CancellationError {
                         throw CancellationError()

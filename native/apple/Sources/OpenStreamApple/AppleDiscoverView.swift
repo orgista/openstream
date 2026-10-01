@@ -556,9 +556,12 @@ struct AppleDiscoverView: View {
                                     picks: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         var values = continueWatching
         values += picks
-        if let section = visibleSections.first,
+        // Movies and shows only: a tv or channel shelf is no billboard.
+        if let section = visibleSections.first(where: { AppleCatalogDiscoveryPolicy.isTitleType($0.catalog.type) }),
            let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-            values += section.items.prefix(AppleHeroRotation.maximumCandidates * 4).map { item in
+            // A poster-only entry (no name) has no title to put on a billboard.
+            values += section.items.filter { !$0.name.isEmpty }
+                .prefix(AppleHeroRotation.maximumCandidates * 4).map { item in
                 IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
                                    item: item, source: source)
             }
@@ -1899,6 +1902,7 @@ private struct AppleCatalogSectionView: View {
                 playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
+                initialAutoPlay: AppleCatalogDiscoveryPolicy.opensStraightToPlayback(item: item, source: source),
                 tabToolbar: tabToolbar
             )
             .environment(\.appleDiscoverRows, nil)
@@ -1931,7 +1935,7 @@ private struct AppleTop10Card: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rank), \(item.name)")
+        .accessibilityLabel("\(rank), \(item.accessibilityTitle)")
         .accessibilityValue(AppleCatalogShelfPolicy.rankedSubtitle(for: item))
     }
 
@@ -2266,7 +2270,7 @@ struct AppleCatalogCard: View {
         // Featured posters (N49) had a blank VoiceOver label.
         .accessibilityElement(children: AppleCatalogCardAccessibility.namesItself(drawsTitle: showsTitle)
             ? .ignore : .combine)
-        .accessibilityLabel(item.name)
+        .accessibilityLabel(item.accessibilityTitle)
         .accessibilityValue(item.releaseInfo ?? "")
         .appleHoverAffordance()
     }

@@ -331,17 +331,24 @@ public struct AppleStremioMetadataClient: Sendable {
         self.mergeGrace = mergeGrace
     }
 
+    /// `isListingSource`: the add-on asked is the one whose catalog listed
+    /// the title, so the id is in its own namespace. Its single meta answers
+    /// the request even under another id (Stravo asked `mx:…` answers `tt…`,
+    /// Raccoonmendations asked `tmdb:…` answers the bare number); the result
+    /// keeps the requested id.
     public func details(
         source: AppleSource,
         type: String,
-        mediaID: String
+        mediaID: String,
+        isListingSource: Bool = false
     ) async throws -> AppleTMDBDetails {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard source.kind == .stremio,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("meta") == .orderedSame }),
-              ["movie", "series", "episode"].contains(cleanType),
+              // tv, anime, channel and custom types read the add-on's own meta.
+              AppleCatalogDiscoveryPolicy.isShelfType(cleanType),
               !cleanID.isEmpty else {
             throw AppleStremioPlaybackError.invalidSource
         }
@@ -354,7 +361,8 @@ public struct AppleStremioMetadataClient: Sendable {
             let value = envelope.meta
             let responseID = value.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let title = value.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard responseID == cleanID, !title.isEmpty else {
+            guard Self.metaAnswers(requestedID: cleanID, responseID: responseID, isListingSource: isListingSource),
+                  !title.isEmpty else {
                 throw AppleStremioPlaybackError.invalidPayload
             }
             let genres = (value.genres ?? value.genre ?? [])
@@ -365,7 +373,7 @@ public struct AppleStremioMetadataClient: Sendable {
                 .prefix(12)
                 .map { String($0.prefix(60)) }
             return AppleTMDBDetails(
-                mediaID: responseID,
+                mediaID: cleanID,
                 mediaType: Self.nonEmpty(value.type) ?? cleanType,
                 title: String(title.prefix(200)),
                 releaseInfo: Self.nonEmpty(value.releaseInfo).map { String($0.prefix(100)) },
@@ -402,9 +410,11 @@ public struct AppleStremioMetadataClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await loader(request)
+            // A redirect is followed as for episodes, as long as it ends on
+            // a plain https address.
             guard data.count <= AppleStremioPlaybackClient.maximumResponseBytes,
                   let http = response as? HTTPURLResponse,
-                  http.url == endpoint,
+                  http.url.map(Self.isAcceptableMetaResponseURL) == true,
                   (200 ... 299).contains(http.statusCode) else {
                 throw AppleStremioPlaybackError.invalidPayload
             }
@@ -418,6 +428,25 @@ public struct AppleStremioMetadataClient: Sendable {
             decode: decode(data:),
             fetch: fetch
         )
+    }
+
+    /// Whether a meta response's id answers the request: the same id, the
+    /// same id percent-encoded (`tmdb%3A…`), or any id from the add-on that
+    /// listed the title.
+    static func metaAnswers(requestedID: String, responseID: String, isListingSource: Bool) -> Bool {
+        guard !responseID.isEmpty else { return false }
+        if responseID == requestedID || responseID.removingPercentEncoding == requestedID { return true }
+        return isListingSource
+    }
+
+    /// Where a meta request may end after redirects: https, with a host and
+    /// no credentials in the address.
+    static func isAcceptableMetaResponseURL(_ url: URL) -> Bool {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return parts.scheme?.lowercased() == "https"
+            && parts.host?.isEmpty == false
+            && parts.user == nil
+            && parts.password == nil
     }
 
     public func episodes(source: AppleSource, mediaID: String) async throws -> [AppleStremioEpisode] {

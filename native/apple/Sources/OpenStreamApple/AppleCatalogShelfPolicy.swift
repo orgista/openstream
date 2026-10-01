@@ -134,6 +134,9 @@ func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogNa
     switch catalogType.lowercased() {
     case "movie": return "Movies"
     case "series": return "Shows"
+    case "tv": return "TV"
+    case "channel": return "Channels"
+    case "anime": return "Anime"
     default: return "Catalog"
     }
 }

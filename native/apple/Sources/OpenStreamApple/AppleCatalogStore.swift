@@ -20,20 +20,65 @@ public enum AppleCatalogDiscoveryPolicy {
         }
         let limit = min(max(maximumCatalogs, 0), hardMaximumCatalogs)
         guard limit > 0 else { return [] }
+        let browsable = browsableCatalogs(for: source)
+        guard !source.catalogChoices.isEmpty else { return Array(browsable.prefix(limit)) }
+        let defaults = Set(browsable.prefix(limit).map(choiceKey))
+        return browsable.filter { catalog in
+            let key = choiceKey(catalog)
+            return source.catalogChoices[key] ?? defaults.contains(key)
+        }
+    }
+
+    /// The `type:id` key a catalog choice is stored under.
+    public static func choiceKey(_ catalog: AppleStremioCatalog) -> String {
+        "\(catalog.type):\(catalog.id)"
+    }
+
+    /// The catalogs Discover shows for a source when the viewer has chosen
+    /// nothing: the first `defaultMaximumCatalogs` browsable ones.
+    public static func defaultCatalogKeys(for source: AppleSource) -> Set<String> {
+        Set(browsableCatalogs(for: source).prefix(defaultMaximumCatalogs).map(choiceKey))
+    }
+
+    /// Movie and series catalogs: the titles with a full title page, episode
+    /// lists and IMDb-keyed streams.
+    public static func isTitleType(_ type: String) -> Bool {
+        ["movie", "series"].contains(type.lowercased())
+    }
+
+    /// Any catalog type an add-on declares can be a shelf: `tv`, `anime`,
+    /// `channel` and custom types read through the add-on's own resources.
+    public static func isShelfType(_ type: String) -> Bool {
+        let clean = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !clean.isEmpty && clean.utf8.count <= 64
+    }
+
+    /// Live types (`tv`, `channel`) from an add-on that serves no meta have
+    /// no title page to show: opening one goes straight to its streams.
+    public static func opensStraightToPlayback(item: AppleCatalogItem, source: AppleSource) -> Bool {
+        ["tv", "channel"].contains(item.type.lowercased())
+            && source.kind == .stremio
+            && !source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
+    }
+
+    /// Every catalog Discover could draw for a source, movie and series
+    /// first (so the shelves an add-on had before other types were shown
+    /// keep their places), then the other types in manifest order.
+    public static func browsableCatalogs(for source: AppleSource) -> [AppleStremioCatalog] {
         var seen = Set<String>()
-        var result: [AppleStremioCatalog] = []
+        var titles: [AppleStremioCatalog] = []
+        var others: [AppleStremioCatalog] = []
         for catalog in source.catalogs {
             let key = "\(catalog.type):\(catalog.id)"
             guard !catalog.requiresInput,
-                  ["movie", "series"].contains(catalog.type),
+                  isShelfType(catalog.type),
                   !catalog.id.isEmpty,
                   seen.insert(key).inserted else {
                 continue
             }
-            result.append(catalog)
-            if result.count == limit { break }
+            if isTitleType(catalog.type) { titles.append(catalog) } else { others.append(catalog) }
         }
-        return result
+        return titles + others
     }
 
     public static func sourceConfigurationID(for source: AppleSource) -> String {
@@ -152,6 +197,19 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             year: try container.decodeIfPresent(Int.self, forKey: .year),
             logoURL: try container.decodeIfPresent(URL.self, forKey: .logoURL)
         )
+    }
+
+    /// What VoiceOver reads for the item: its name, or for a poster-only
+    /// entry that came without one, its type and id.
+    public var accessibilityTitle: String {
+        guard name.isEmpty else { return name }
+        let kind = switch type {
+        case "movie": "Movie"
+        case "series": "Show"
+        case "tv": "TV"
+        default: type.capitalized
+        }
+        return "\(kind) \(mediaID)"
     }
 
     private static func cleanedList(_ values: [String]?, limit: Int, maximumLength: Int) -> [String]? {
@@ -296,7 +354,10 @@ public enum AppleStremioCatalogError: Swift.Error, Equatable, LocalizedError, Se
 public struct AppleStremioCatalogClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
-    private static let maximumResponseBytes = 2_000_000
+    /// TMDB's series "tmdb.top" shelf is ~12 MB because each entry carries
+    /// its full episode list. The body is walked entry by entry
+    /// (`AppleJSONArrayElementScanner`), so only shelf fields are kept.
+    static let maximumResponseBytes = 16_000_000
     private let loader: Loader
 
     public init(loader: @escaping Loader = AppleStremioCatalogClient.liveLoader) {
@@ -308,7 +369,7 @@ public struct AppleStremioCatalogClient: Sendable {
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }),
               !catalog.requiresInput,
-              ["movie", "series"].contains(catalog.type),
+              AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
               !catalog.id.isEmpty,
               source.catalogs.contains(where: { $0.type == catalog.type && $0.id == catalog.id }) else {
             throw AppleStremioCatalogError.invalidSource
@@ -354,22 +415,28 @@ public struct AppleStremioCatalogClient: Sendable {
             throw AppleStremioCatalogError.requestFailed(http.statusCode)
         }
         guard data.count <= Self.maximumResponseBytes else { throw AppleStremioCatalogError.responseTooLarge }
-        guard let payload = try? JSONDecoder().decode(CatalogPayload.self, from: data) else {
-            throw AppleStremioCatalogError.invalidCatalog
-        }
+        let metas = try Self.decodeMetas(data)
 
         var seen = Set<String>()
         var items: [AppleCatalogItem] = []
-        items.reserveCapacity(min(payload.metas.count, AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog))
-        for meta in payload.metas {
+        items.reserveCapacity(min(metas.count, AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog))
+        for meta in metas {
             let mediaID = meta.id.trimmingCharacters(in: .whitespacesAndNewlines)
             let name = meta.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let type = (meta.type?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyCatalogString ?? catalog.type)
                 .lowercased()
             let identity = "\(type):\(mediaID)"
-            guard ["movie", "series"].contains(type),
+            // A movie or series catalog keeps only titles; any other
+            // catalog (tv, anime, channel, custom) keeps what it lists.
+            let typeFits = AppleCatalogDiscoveryPolicy.isTitleType(catalog.type)
+                ? AppleCatalogDiscoveryPolicy.isTitleType(type)
+                : AppleCatalogDiscoveryPolicy.isShelfType(type)
+            // An entry with a poster but no name (Cartoon Network, Viva Max)
+            // is a poster-only tile; one with neither has nothing to draw.
+            let posterURL = webURL(meta.poster)
+            guard typeFits,
                   !mediaID.isEmpty,
-                  !name.isEmpty,
+                  !name.isEmpty || posterURL != nil,
                   seen.insert(identity).inserted else {
                 continue
             }
@@ -377,7 +444,7 @@ public struct AppleStremioCatalogClient: Sendable {
                 mediaID: mediaID,
                 type: type,
                 name: name,
-                posterURL: webURL(meta.poster),
+                posterURL: posterURL,
                 backgroundURL: webURL(meta.background),
                 summary: meta.description,
                 releaseInfo: meta.releaseInfo,
@@ -415,7 +482,7 @@ public struct AppleStremioCatalogClient: Sendable {
         searchQuery: String?
     ) throws -> URL {
         let base = source.transportURL
-        guard ["movie", "series"].contains(catalog.type),
+        guard AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
               !catalog.id.isEmpty,
               base.host?.isEmpty == false,
               base.scheme?.lowercased() == "https"
@@ -467,36 +534,25 @@ public struct AppleStremioCatalogClient: Sendable {
         return url
     }
 
-    private struct CatalogPayload: Decodable {
-        let metas: [Meta]
-
-        private enum CodingKeys: String, CodingKey { case metas }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            metas = try container.decode(MetaList.self, forKey: .metas).values
+    /// The response's `metas`, decoded one entry at a time: at most 400
+    /// entries are looked at and 200 kept, and each entry is decoded into
+    /// the shelf fields alone, so an inlined episode list is never built.
+    static func decodeMetas(_ data: Data) throws -> [Meta] {
+        guard let ranges = AppleJSONArrayElementScanner.elements(ofTopLevelKey: "metas", in: data, limit: 400) else {
+            throw AppleStremioCatalogError.invalidCatalog
         }
-
-        private struct MetaList: Decodable {
-            let values: [Meta]
-
-            init(from decoder: Decoder) throws {
-                var container = try decoder.unkeyedContainer()
-                var result: [Meta] = []
-                var inspected = 0
-                while !container.isAtEnd,
-                      inspected < 400,
-                      result.count < AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog * 2 {
-                    inspected += 1
-                    let entry = try container.superDecoder()
-                    if let value = try? Meta(from: entry) { result.append(value) }
-                }
-                values = result
-            }
+        let decoder = JSONDecoder()
+        let base = data.startIndex
+        var result: [Meta] = []
+        for range in ranges {
+            let entry = data[(base + range.lowerBound) ..< (base + range.upperBound)]
+            if let value = try? decoder.decode(Meta.self, from: entry) { result.append(value) }
+            if result.count == AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog * 2 { break }
         }
+        return result
     }
 
-    private struct Meta: Decodable {
+    struct Meta: Decodable {
         let id: String
         let type: String?
         let name: String
@@ -525,7 +581,7 @@ public struct AppleStremioCatalogClient: Sendable {
             id = try container.decodeIfPresent(String.self, forKey: .id)
                 ?? (try container.decode(String.self, forKey: .imdbID))
             type = try? container.decode(String.self, forKey: .type)
-            name = try container.decode(String.self, forKey: .name)
+            name = (try? container.decode(String.self, forKey: .name)) ?? ""
             poster = try? container.decode(String.self, forKey: .poster)
             background = try? container.decode(String.self, forKey: .background)
             description = try? container.decode(String.self, forKey: .description)

@@ -193,14 +193,19 @@ enum CatalogDropAnalysis {
             let id = ((idValue as? String) ?? (object["imdb_id"] as? String) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if id.isEmpty { reasons["id-missing", default: 0] += 1; continue }
-            guard let name = object["name"] as? String else {
-                reasons[object["name"] == nil ? "name-missing" : "name-not-string", default: 0] += 1; continue
+            // The app keeps a poster-only entry; it drops one with neither.
+            let name = (object["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let poster = (object["poster"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let hasPoster = poster.lowercased().hasPrefix("https://") || poster.lowercased().hasPrefix("http://")
+            if name.isEmpty, !hasPoster {
+                reasons[object["name"] == nil ? "name-and-poster-missing" : "name-empty-no-poster", default: 0] += 1; continue
             }
-            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { reasons["name-empty", default: 0] += 1; continue }
             let typeValue = ((object["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines))
                 .flatMap { $0.isEmpty ? nil : $0 } ?? catalogType
             let type = typeValue.lowercased()
-            if !["movie", "series"].contains(type) { reasons["item-type-\(type.prefix(20))", default: 0] += 1; continue }
+            let fits = AppleCatalogDiscoveryPolicy.isTitleType(catalogType)
+                ? AppleCatalogDiscoveryPolicy.isTitleType(type) : AppleCatalogDiscoveryPolicy.isShelfType(type)
+            if !fits { reasons["item-type-\(type.prefix(20))", default: 0] += 1; continue }
             if !seen.insert("\(type):\(id)").inserted { reasons["duplicate", default: 0] += 1; continue }
             accepted += 1
         }

@@ -85,6 +85,10 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     public var version: String?
     public var resources: [String]
     public var catalogs: [AppleStremioCatalog]
+    /// The viewer's own choices on Settings › Sources › <add-on> › Catalogs,
+    /// keyed `type:id`: true shows a catalog Discover would leave out, false
+    /// hides one it would show. Empty means the default first catalogs.
+    public var catalogChoices: [String: Bool]
     public var logoURL: URL?
     public var iptvType: AppleIPTVSourceType?
     public var epgURL: URL?
@@ -143,7 +147,8 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         discoveredItemCount: Int? = nil,
         capabilities: [String] = [],
         networkDisplayHost: String? = nil,
-        serverKind: AppleMediaServerKind? = nil
+        serverKind: AppleMediaServerKind? = nil,
+        catalogChoices: [String: Bool] = [:]
     ) {
         self.id = id
         self.kind = kind
@@ -155,6 +160,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         self.version = version
         self.resources = resources
         self.catalogs = catalogs
+        self.catalogChoices = catalogChoices
         self.logoURL = logoURL
         self.iptvType = iptvType
         self.epgURL = epgURL
@@ -186,7 +192,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         case logoURL, iptvType, epgURL, credentialReference, transportReference, username, password, bookmarkData
         case configurationRevision, lastValidatedAt, validationSummary
         case lastValidationFailureAt, validationFailureSummary, discoveredItemCount, capabilities, networkDisplayHost
-        case serverKind
+        case serverKind, catalogChoices
     }
 
     public init(from decoder: Decoder) throws {
@@ -202,6 +208,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         version = try container.decodeIfPresent(String.self, forKey: .version)
         resources = try container.decodeIfPresent([String].self, forKey: .resources) ?? []
         catalogs = try container.decodeIfPresent([AppleStremioCatalog].self, forKey: .catalogs) ?? []
+        catalogChoices = (try? container.decodeIfPresent([String: Bool].self, forKey: .catalogChoices)) ?? [:]
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         iptvType = try container.decodeIfPresent(AppleIPTVSourceType.self, forKey: .iptvType)
         epgURL = try container.decodeIfPresent(URL.self, forKey: .epgURL)
@@ -246,6 +253,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         try container.encodeIfPresent(version, forKey: .version)
         try container.encode(resources, forKey: .resources)
         try container.encode(catalogs, forKey: .catalogs)
+        if !catalogChoices.isEmpty { try container.encode(catalogChoices, forKey: .catalogChoices) }
         try container.encodeIfPresent(logoURL, forKey: .logoURL)
         try container.encodeIfPresent(iptvType, forKey: .iptvType)
         try container.encodeIfPresent(epgURL, forKey: .epgURL)
@@ -410,6 +418,16 @@ public enum AppleManifestURLPolicy {
         return components.url ?? url
     }
 
+    /// An add-on's configure page: its base address plus `configure`.
+    public static func configureURL(forManifest url: URL) -> URL? {
+        guard var components = URLComponents(url: addonBaseURL(forManifest: url),
+                                             resolvingAgainstBaseURL: false) else { return nil }
+        var path = components.percentEncodedPath
+        if !path.hasSuffix("/") { path += "/" }
+        components.percentEncodedPath = path + "configure"
+        return components.url
+    }
+
     public static func isLoopbackHost(_ host: String) -> Bool {
         let normalized = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         return normalized == "localhost" || normalized == "::1" || normalized == "127.0.0.1"
@@ -502,7 +520,10 @@ public struct AppleStremioCatalog: Codable, Equatable, Sendable {
 }
 
 public struct AppleStremioManifest: Decodable, Equatable, Sendable {
-    public static let maximumCatalogs = 12
+    /// Every catalog is stored so Settings can offer each one (ArabCinemeta
+    /// lists 62); Discover still draws only the first few unless the viewer
+    /// turns others on (`AppleCatalogDiscoveryPolicy`).
+    public static let maximumCatalogs = 100
 
     public let id: String
     public let name: String
@@ -513,6 +534,17 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
     /// `behaviorHints.configurationRequired`: the add-on refuses to serve
     /// anything until the owner configures it on its own site.
     public let requiresConfiguration: Bool
+    /// `behaviorHints.configurable`: the add-on has a configure page at
+    /// `<base>/configure`.
+    public let isConfigurable: Bool
+
+    /// Whether anything in the app can use this add-on: streams, metadata,
+    /// subtitles, or at least one catalog. Unconfigured AIO Metadata hosts
+    /// answer with no resources at all (add-on sweep 2026-09-30).
+    public var servesUsableContent: Bool {
+        if resources.contains(where: { ["stream", "meta", "subtitles"].contains($0) }) { return true }
+        return resources.contains("catalog") && !catalogs.isEmpty
+    }
 
     public init(
         id: String,
@@ -521,9 +553,11 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
         logoURL: URL? = nil,
         resources: [String] = [],
         catalogs: [AppleStremioCatalog] = [],
-        requiresConfiguration: Bool = false
+        requiresConfiguration: Bool = false,
+        isConfigurable: Bool = false
     ) {
         self.requiresConfiguration = requiresConfiguration
+        self.isConfigurable = isConfigurable
         self.id = String(id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         self.name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
         self.version = version?
@@ -541,12 +575,14 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
 
     private struct BehaviorHints: Decodable {
         let configurationRequired: Bool
+        let configurable: Bool
 
-        private enum CodingKeys: String, CodingKey { case configurationRequired }
+        private enum CodingKeys: String, CodingKey { case configurationRequired, configurable }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             configurationRequired = (try? container.decode(Bool.self, forKey: .configurationRequired)) ?? false
+            configurable = (try? container.decode(Bool.self, forKey: .configurable)) ?? false
         }
     }
 
@@ -595,7 +631,8 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
             logoURL: logo,
             resources: decodedResources,
             catalogs: decodedCatalogs,
-            requiresConfiguration: hints?.configurationRequired ?? false
+            requiresConfiguration: hints?.configurationRequired ?? false,
+            isConfigurable: hints?.configurable ?? false
         )
     }
 
@@ -622,9 +659,12 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
         return result
     }
 
+    /// Every catalog type is kept (tv, anime, channel and custom types are
+    /// Discover shelves too). Past the cap, movie and series catalogs win the
+    /// places, so an add-on's title shelves never give way to other types.
     private static func sanitizeCatalogs(_ catalogs: [AppleStremioCatalog]) -> [AppleStremioCatalog] {
         var seen = Set<String>()
-        var result: [AppleStremioCatalog] = []
+        var valid: [AppleStremioCatalog] = []
         for value in catalogs {
             let catalog = AppleStremioCatalog(
                 type: value.type,
@@ -634,15 +674,27 @@ public struct AppleStremioManifest: Decodable, Equatable, Sendable {
                 supportsSearch: value.supportsSearch
             )
             let key = "\(catalog.type):\(catalog.id)"
-            guard ["movie", "series"].contains(catalog.type),
+            guard AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
                   !catalog.id.isEmpty,
                   seen.insert(key).inserted else {
                 continue
             }
-            result.append(catalog)
-            if result.count == maximumCatalogs { break }
+            valid.append(catalog)
         }
-        return result
+        guard valid.count > maximumCatalogs else { return valid }
+        let titleCount = valid.filter { AppleCatalogDiscoveryPolicy.isTitleType($0.type) }.count
+        var otherPlaces = max(maximumCatalogs - titleCount, 0)
+        var titlePlaces = maximumCatalogs
+        return valid.filter { catalog in
+            if AppleCatalogDiscoveryPolicy.isTitleType(catalog.type) {
+                guard titlePlaces > 0 else { return false }
+                titlePlaces -= 1
+                return true
+            }
+            guard otherPlaces > 0 else { return false }
+            otherPlaces -= 1
+            return true
+        }
     }
 }
 
@@ -653,7 +705,7 @@ private struct AppleManifestLossyList<Value: Decodable>: Decodable {
         var container = try decoder.unkeyedContainer()
         var result: [Value] = []
         var inspected = 0
-        while !container.isAtEnd, inspected < 64 {
+        while !container.isAtEnd, inspected < 128 {
             inspected += 1
             let entry = try container.superDecoder()
             if let value = try? Value(from: entry) { result.append(value) }
@@ -701,6 +753,9 @@ public enum AppleManifestClientError: Swift.Error, Equatable, LocalizedError, Se
     /// (field name, expected shape such as "text" or "a list").
     case manifestFieldWrongType(String, String)
     case manifestNeedsConfiguration
+    /// The add-on answers but serves nothing until it is set up; the
+    /// address is its configure page when it declares one.
+    case manifestNeedsSetup(configureURL: URL?)
 
     public var errorDescription: String? {
         switch self {
@@ -716,6 +771,8 @@ public enum AppleManifestClientError: Swift.Error, Equatable, LocalizedError, Se
             "The manifest's \"\(field)\" is not \(expected)."
         case .manifestNeedsConfiguration:
             "Configure this add-on on its own site first, then paste the address it gives you."
+        case .manifestNeedsSetup:
+            "This add-on needs to be configured first."
         }
     }
 }
@@ -798,6 +855,11 @@ public struct AppleManifestClient: Sendable {
         }
         guard !manifest.requiresConfiguration else {
             throw AppleManifestClientError.manifestNeedsConfiguration
+        }
+        guard manifest.servesUsableContent else {
+            throw AppleManifestClientError.manifestNeedsSetup(
+                configureURL: manifest.isConfigurable ? AppleManifestURLPolicy.configureURL(forManifest: url) : nil
+            )
         }
         return (url, manifest)
     }
@@ -963,7 +1025,8 @@ public final class AppleSourceStore {
                 validationSummary: "Manifest validated",
                 lastValidationFailureAt: existing.lastValidationFailureAt,
                 validationFailureSummary: existing.validationFailureSummary,
-                capabilities: cleanManifest.resources.map { $0.capitalized }
+                capabilities: cleanManifest.resources.map { $0.capitalized },
+                catalogChoices: existing.catalogChoices
             ))
             persist()
             return sources[index]
@@ -1123,6 +1186,21 @@ public final class AppleSourceStore {
         guard let source = sources.first(where: { $0.id == id }), source.kind == .stremio else { return false }
         guard let loaded = try? await manifestClient.load(source.url.absoluteString) else { return false }
         return applyManifest(loaded.1, to: id)
+    }
+
+    /// Shows or hides one of an add-on's catalogs on Discover. A choice that
+    /// matches the default is forgotten, so the defaults keep tracking the
+    /// manifest.
+    public func setCatalog(_ catalog: AppleStremioCatalog, shown: Bool, id: AppleSource.ID) {
+        guard let index = sources.firstIndex(where: { $0.id == id }), sources[index].kind == .stremio else { return }
+        let key = AppleCatalogDiscoveryPolicy.choiceKey(catalog)
+        var choices = sources[index].catalogChoices
+        let isDefault = AppleCatalogDiscoveryPolicy.defaultCatalogKeys(for: sources[index]).contains(key)
+        choices[key] = shown == isDefault ? nil : shown
+        guard choices != sources[index].catalogChoices else { return }
+        sources[index].catalogChoices = choices
+        sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
+        persist()
     }
 
     public func setEnabled(_ enabled: Bool, id: AppleSource.ID) {

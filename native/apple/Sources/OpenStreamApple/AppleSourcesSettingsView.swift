@@ -668,6 +668,23 @@ private struct AppleSourceDetailView: View {
                         }
                     }
 
+                    let catalogs = AppleCatalogDiscoveryPolicy.browsableCatalogs(for: source)
+                    if source.kind == .stremio, catalogs.count > 1 {
+                        Section("Catalogs") {
+                            let shown = Set(AppleCatalogDiscoveryPolicy.catalogs(for: source)
+                                .map(AppleCatalogDiscoveryPolicy.choiceKey))
+                            let titles = catalogTitles(catalogs)
+                            ForEach(Array(zip(catalogs, titles)), id: \.1.key) { catalog, title in
+                                Toggle(title.text, isOn: Binding(
+                                    get: { shown.contains(AppleCatalogDiscoveryPolicy.choiceKey(catalog)) },
+                                    set: { sourceStore.setCatalog(catalog, shown: $0, id: sourceID) }
+                                ))
+                                .accessibilityIdentifier(
+                                    "source.detail.catalog.\(AppleCatalogDiscoveryPolicy.choiceKey(catalog))")
+                            }
+                        }
+                    }
+
                     Section {
                         Button("Delete Source", role: .destructive) {
                             confirmDelete = true
@@ -691,6 +708,17 @@ private struct AppleSourceDetailView: View {
                 if sourceStore.remove(id: sourceID) { dismiss() }
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// Each catalog's row title; a name used by more than one catalog reads
+    /// "Popular Movies" / "Popular Shows", as on Discover.
+    private func catalogTitles(_ catalogs: [AppleStremioCatalog]) -> [(key: String, text: String)] {
+        let titles = catalogs.map(AppleCatalogShelfPolicy.title(for:))
+        let counts = Dictionary(titles.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
+        return zip(catalogs, titles).map { catalog, title in
+            (AppleCatalogDiscoveryPolicy.choiceKey(catalog),
+             (counts[title.lowercased()] ?? 0) > 1 ? AppleCatalogShelfPolicy.typedTitle(title, type: catalog.type) : title)
         }
     }
 
@@ -726,6 +754,8 @@ private struct AppleAddManifestSourceView: View {
     @State private var manifestURL = ""
     @State private var isAdding = false
     @State private var errorMessage: String?
+    /// Set when the add-on must be configured on its own site first.
+    @State private var configureURL: URL?
 
     let sourceStore: AppleSourceStore
 
@@ -812,6 +842,10 @@ private struct AppleAddManifestSourceView: View {
                 Section {
                     Text(errorMessage)
                         .foregroundStyle(.red)
+                    if let configureURL {
+                        Link("Open Configure Page", destination: configureURL)
+                            .accessibilityIdentifier("sources.catalog.configure")
+                    }
                 }
             }
 
@@ -847,6 +881,7 @@ private struct AppleAddManifestSourceView: View {
         }
         isAdding = true
         errorMessage = nil
+        configureURL = nil
 
         Task { @MainActor in
             defer { isAdding = false }
@@ -855,6 +890,13 @@ private struct AppleAddManifestSourceView: View {
                 // page, so adding a catalog just returns to Sources.
                 _ = try await sourceStore.addStremio(manifestValue: manifestURL)
                 dismiss()
+            } catch AppleManifestClientError.manifestNeedsSetup(let url) {
+                errorMessage = AppleManifestClientError.manifestNeedsSetup(configureURL: url).errorDescription
+                configureURL = url
+            } catch AppleManifestClientError.manifestNeedsConfiguration {
+                errorMessage = AppleManifestClientError.manifestNeedsConfiguration.errorDescription
+                configureURL = (try? AppleManifestURLPolicy.normalize(manifestURL))
+                    .flatMap(AppleManifestURLPolicy.configureURL(forManifest:))
             } catch {
                 errorMessage = error.localizedDescription
             }

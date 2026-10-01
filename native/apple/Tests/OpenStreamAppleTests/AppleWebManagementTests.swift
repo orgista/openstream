@@ -32,7 +32,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = AppleSourceStore(defaults: defaults)
     var now = Date()
-    let manifest = Data(#"{"id":"org.example.session","name":"Session Catalog","resources":["catalog"],"catalogs":[]}"#.utf8)
+    let manifest = Data(#"{"id":"org.example.session","name":"Session Catalog","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"#.utf8)
     let server = AppleWebManagementServer(
         configuration: .init(preferredPort: 0, sessionDuration: 60, advertisesBonjour: false, advertisedHost: "127.0.0.1"),
         manifestClient: AppleManifestClient { url in

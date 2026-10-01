@@ -36,17 +36,37 @@ public enum AppleAddonURLSecretPolicy {
     }
 
     /// A path segment that holds add-on options rather than a plain folder
-    /// name: long (base64, keys), JSON-ish or key=value, or naming a debrid
-    /// service or key.
+    /// name: JSON-ish or key=value, naming a debrid service or key, or long
+    /// and not made of plain words (base64, hex or random keys). A long name
+    /// of words such as `org.stremio.NoReservationDailyMotion` or
+    /// `stremio-xmas-marathon` is a folder (add-on sweep 2026-09-30: 14
+    /// public add-ons were sealed for their repository names).
     static func isConfigurationSegment(_ segment: String) -> Bool {
         let decoded = segment.removingPercentEncoding ?? segment
-        if decoded.count >= 16 { return true }
         let markers = CharacterSet(charactersIn: "=|{}[]:;,&%\"'+~!@$*()")
         if segment.rangeOfCharacter(from: markers) != nil || decoded.rangeOfCharacter(from: markers) != nil {
             return true
         }
         let lowered = decoded.lowercased()
-        return keyNames.contains { lowered.contains($0) }
+        if keyNames.contains(where: { lowered.contains($0) }) { return true }
+        return decoded.count >= 16 && !isPlainWords(decoded)
+    }
+
+    /// Words joined by `-`, `_` or `.`: ASCII letters with few digits, no
+    /// word longer than 24 characters, capitals only at word starts (at most
+    /// a quarter of a word), and a vowel in every longer word.
+    static func isPlainWords(_ value: String) -> Bool {
+        guard value.count <= 64, value.allSatisfy({ $0.isASCII }) else { return false }
+        guard value.filter(\.isNumber).count <= 4 else { return false }
+        let words = value.split(whereSeparator: { "-_.".contains($0) })
+        guard !words.isEmpty else { return false }
+        return words.allSatisfy { word in
+            guard word.count <= 24, word.allSatisfy({ $0.isLetter || $0.isNumber }) else { return false }
+            let capitals = word.filter(\.isUppercase).count
+            guard capitals <= max(2, word.count / 4) else { return false }
+            let letters = word.filter(\.isLetter)
+            return letters.count < 6 || letters.lowercased().contains(where: { "aeiouy".contains($0) })
+        }
     }
 
     private static let keyNames = [
