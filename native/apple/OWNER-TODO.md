@@ -33,9 +33,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **App Store compliance audit (2026-10-01) — specs/app-store-compliance-audit.md:** Apple pulled every app built
       around Stremio add-ons (Stremio Lite Jan 2026; Reelo, Omni, Fusion Aug 2026 — Reelo even after removing add-on
       install). Survivors (Infuse, SenPlayer, VidHub, IPTVX, Swiftfin, Channels) = "player for your own content".
-      Will fix (no decision needed): test add-ons seeded in DEBUG only (App Review installs count as TestFlight today
-      and would get the AIOMetadata config — rotate its keys); remove the dormant torrent client from the binary;
-      TMDB/JustWatch credits + "we don't provide content" line; no "Stremio" anywhere; About link not a private repo.
+      DONE a6765b2 (sim-checked): test add-ons seeded in DEBUG only (rotate the AIOMetadata keys anyway — they were
+      in earlier TestFlight builds); torrent client removed; TMDB/JustWatch credits + "we don't provide any content"
+      line; no "Stremio" in the UI (a test enforces it); About no longer links the private repo. Also caught: the
+      Release build didn't compile (fixed). Note: the TMDB logo is blue-green — their terms require it unaltered.
       DECIDE: (1) add-ons at all? safest = none, add-on users go through a Jellyfin bridge (Strand's route); middle =
       user-pasted "Catalogs" only + all fixes. (2) downloads only from your own sources (local/SMB/media server)?
       (3) catalog rows named by the add-on, not "Netflix Movies"; Top 10 off by default? (4) drop the bundled
