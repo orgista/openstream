@@ -7,6 +7,17 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **iPhone 27 re-run (v2, 2026-10-01 dawn):** most fixes since 09-30 hold (chapters, Quality, Also available on,
+      watch-link spam gone, row names, metadata on after seed, Stranger Things #1, audio labels + checkmark, subtitle
+      More…, menus stay open, long series open fast, encrypted backup). Still broken / new:
+      1. P0: Next Episode countdown ends → player closes, the next episode never plays (2/2); Continue Watching
+         doesn't show the next episode.
+      2. SNL S1E1/E2 still play "Saturday Night Live U K … 2026" — demotion misses "U K".
+      3. Sidecar subtitles: Windows-1251 (Russian) mojibake; UTF-16 (Portuguese) shows nothing.
+      4. AX-XXXL Dynamic Type: hero/title header collide with the nav bar, Play clipped, scrubber squeezed.
+      5. Add Service row only tappable on its label; its top-10 list is still odd; Subtitle Languages first row under
+         the nav bar; truncated-file failure shows raw engine text; Live error ".." with no Retry; search results
+         still show "AIOMetadata  | ElfHosted"; Quality sheet has no Done.
 - [ ] **P0 iOS 18: app freezes when opening a title from Discover** (2026-10-01, iOS 18.6 sim, 3/3; hero or poster
       tap; main thread 100% in the navigation push layout, app frame AppleCatalogItemDetailView.phoneHero).
       Search → title works. Old iOS 18 crash: 0 crashes now.
