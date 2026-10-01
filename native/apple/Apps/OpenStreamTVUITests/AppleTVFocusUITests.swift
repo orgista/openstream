@@ -285,20 +285,40 @@ final class AppleTVFocusUITests: XCTestCase {
         ]
         launch(screen: "add-files")
         let subtitles = element("Subtitles")
-        for _ in 0..<15 {
-            remote.press(.down)
-            if subtitles.waitForExistence(timeout: 2) { break }
+        func subtitlesFocused() -> Bool {
+            subtitles.exists && (subtitles.hasFocus || subtitles.descendants(matching: .any)
+                .matching(NSPredicate(format: "hasFocus == true")).count > 0)
         }
-        XCTAssertTrue(subtitles.exists)
-        remote.press(.up)
-        for _ in 0..<6 {
-            if subtitles.hasFocus || subtitles.descendants(matching: .any)
-                .matching(NSPredicate(format: "hasFocus == true")).count > 0 { break }
-            remote.press(.right)
+        func openSubtitlesMenu() {
+            // A pick under More… returns AVKit's menu to its first level; Menu
+            // closes it, leaving the captions item focused.
+            if app.staticTexts["Off"].firstMatch.exists {
+                remote.press(.menu)
+                Thread.sleep(forTimeInterval: 1.5)
+            }
+            if subtitlesFocused() {
+                remote.press(.select)
+                XCTAssertTrue(app.staticTexts["Off"].firstMatch.waitForExistence(timeout: 5), "Subtitles menu did not open")
+                return
+            }
+            // Reveal the transport bar, then step right to the captions item.
+            for _ in 0..<15 {
+                remote.press(.down)
+                if subtitles.waitForExistence(timeout: 2) { break }
+            }
+            XCTAssertTrue(subtitles.exists)
+            remote.press(.up)
+            for _ in 0..<6 where !subtitlesFocused() { remote.press(.right) }
+            remote.press(.select)
+            XCTAssertTrue(app.staticTexts["Off"].firstMatch.waitForExistence(timeout: 5), "Subtitles menu did not open")
         }
-        remote.press(.select)
-        for title in ["Off", "English", "Spanish", "English SDH"] {
-            XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 5), "Missing " + title)
+        func focus(_ label: String) {
+            for _ in 0..<6 where focusedElement.label != label { remote.press(.down) }
+            XCTAssertEqual(focusedElement.label, label)
+        }
+        func isChecked(_ title: String) -> Bool {
+            app.cells.matching(NSPredicate(format: "label CONTAINS 'selected' AND label CONTAINS %@", title))
+                .firstMatch.exists
         }
         func attach(_ name: String) {
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -306,15 +326,73 @@ final class AppleTVFocusUITests: XCTestCase {
             shot.lifetime = .keepAlways
             add(shot)
         }
-        attach("n5-tvos-full-menu")
-        for _ in 0..<5 {
-            if focusedElement.label == "Spanish" { break }
-            remote.press(.down)
+        // The viewer's language up front, the rest under "More…" (full test
+        // 2026-10-01): Off, English, English (SDH), More….
+        openSubtitlesMenu()
+        for title in ["Off", "English", "English (SDH)", "More…"] {
+            XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 5), "Missing " + title)
         }
-        XCTAssertEqual(focusedElement.label, "Spanish")
+        XCTAssertFalse(app.staticTexts["Spanish"].firstMatch.exists, "Spanish belongs under More…")
+        attach("n5-tvos-full-menu")
+        focus("More…")
+        remote.press(.select)
+        XCTAssertTrue(app.staticTexts["Spanish"].firstMatch.waitForExistence(timeout: 5), "More… has no Spanish")
+        attach("n5-tvos-more-menu")
+        focus("Spanish")
         remote.press(.select)
         XCTAssertTrue(app.staticTexts["HOLA DESDE ESPANA"].firstMatch.waitForExistence(timeout: 20))
         attach("n5-tvos-spanish-cue")
+
+        // Reopened, the menu checks what is drawn: Spanish, not English.
+        openSubtitlesMenu()
+        XCTAssertFalse(isChecked("English"), "English is still checked after picking Spanish")
+        focus("More…")
+        remote.press(.select)
+        XCTAssertTrue(app.staticTexts["Spanish"].firstMatch.waitForExistence(timeout: 5))
+        attach("n5-tvos-spanish-checked")
+        XCTAssertTrue(isChecked("Spanish"), "Spanish is not checked after picking it")
+    }
+
+    /// Every Settings choice opened an empty page and Menu there left the app
+    /// (Apple TV verification 2026-10-01). The Package choice must list its
+    /// options, check the current one, and Menu must go back one level.
+    func testSettingsChoicePageListsOptionsAndMenuGoesBack() throws {
+        let folder = ProcessInfo.processInfo.environment["OPENSTREAM_SHOTS_DIR"].map(URL.init(fileURLWithPath:))
+        func shoot(_ name: String) {
+            let screenshot = XCUIScreen.main.screenshot()
+            try? screenshot.pngRepresentation.write(to: folder?.appendingPathComponent("\(name).png") ?? URL(fileURLWithPath: "/dev/null"))
+            let shot = XCTAttachment(screenshot: screenshot)
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func press(_ button: XCUIRemote.Button, wait: TimeInterval = 1.2) {
+            remote.press(button)
+            Thread.sleep(forTimeInterval: wait)
+        }
+        launch(screen: "settings")
+        XCTAssertTrue(element("settings.section.channels").waitForExistence(timeout: 30), "Settings never opened")
+        press(.down)
+        press(.left)
+        for _ in 1 ... 8 where focusedElement.identifier != "settings.section.channels" {
+            press(focusedElement.identifier == "settings.section.sources" ? .down : .up)
+        }
+        XCTAssertEqual(focusedElement.identifier, "settings.section.channels")
+        press(.right)
+        for _ in 1 ... 4 where !focusedElement.label.hasPrefix("Package") { press(.down) }
+        XCTAssertTrue(focusedElement.label.hasPrefix("Package"), "Package row never took focus, got '\(focusedElement.label)'")
+        shoot("01-package-row")
+        press(.select, wait: 2)
+        shoot("02-package-page")
+        for title in ["Premier Guide", "Everything", "Custom"] {
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.waitForExistence(timeout: 5),
+                          "The Package page does not list \(title)")
+        }
+        XCTAssertFalse(focusedElement.label.isEmpty, "Nothing on the Package page took focus")
+        press(.menu, wait: 2)
+        shoot("03-after-menu")
+        XCTAssertEqual(app.state, .runningForeground, "Menu left the app")
+        XCTAssertTrue(focusedElement.label.hasPrefix("Package"), "Menu did not return to the Package row, got '\(focusedElement.label)'")
     }
 
     func testFirstLiveHLSPlayOffersCaptions() throws {

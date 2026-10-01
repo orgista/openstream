@@ -472,6 +472,13 @@ private struct AppleChannelManagerView: View {
 
         Form {
             Section("Channel Preferences") {
+                #if os(tvOS)
+                // The stock Picker pushed an empty page here (AppleTVChoicePicker).
+                AppleTVChoicePicker("Package", selection: $settings.liveChannelPackage,
+                                    options: AppleLiveChannelPackage.allCases.map { .init(value: $0, title: $0.title) })
+                AppleTVChoicePicker("Live view", selection: $settings.liveChannelScope,
+                                    options: AppleLiveChannelScope.allCases.map { .init(value: $0, title: $0.title) })
+                #else
                 Picker("Package", selection: $settings.liveChannelPackage) {
                     ForEach(AppleLiveChannelPackage.allCases) { package in
                         Text(package.title).tag(package)
@@ -483,6 +490,7 @@ private struct AppleChannelManagerView: View {
                         Text(scope.title).tag(scope)
                     }
                 }
+                #endif
 
                 Toggle("Show Pay-Per-View", isOn: $settings.showPayPerViewChannels)
                 Toggle("Show 24/7 channels", isOn: $settings.show24x7Channels)
@@ -522,7 +530,15 @@ private struct AppleChannelManagerView: View {
                     ProgressView()
                 } else if channels.isEmpty {
                     Text(errorMessage ?? emptyLineupMessage)
+                        #if os(tvOS)
+                        // A fixed grey, not the hierarchical `.secondary`: in
+                        // this tvOS form the message row drew as an empty
+                        // capsule (Apple TV verification 2026-10-01).
+                        .foregroundStyle(Color.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                        #else
                         .foregroundStyle(.secondary)
+                        #endif
                         .accessibilityIdentifier("channels.empty")
                     if errorMessage != nil {
                         Button {
@@ -1006,10 +1022,16 @@ private struct ApplePlaybackSettingsView: View {
 
         Form {
             Section("Engine") {
+                #if os(tvOS)
+                AppleTVChoicePicker("Player", selection: $settings.playbackEngine, options: [
+                    .init(value: .openStream, title: "OpenStream"), .init(value: .native, title: "Native"),
+                ])
+                #else
                 Picker("Player", selection: $settings.playbackEngine) {
                     Text("OpenStream").tag(ApplePlaybackEngineKind.openStream)
                     Text("Native").tag(ApplePlaybackEngineKind.native)
                 }
+                #endif
             }
 
             Section("Captions") {
@@ -1018,12 +1040,19 @@ private struct ApplePlaybackSettingsView: View {
                 // and the actual language list is the row underneath it. That
                 // pair is what left the owner thinking subtitles were chosen
                 // when captions were still off (review 2026-09-14).
+                #if os(tvOS)
+                AppleTVChoicePicker("Show Captions", selection: $settings.storedCaptionsPreference, options: [
+                    .init(value: .off, title: "Off"), .init(value: .english, title: "English"),
+                    .init(value: .deviceLanguage, title: "Device Language"), .init(value: .always, title: "Always"),
+                ])
+                #else
                 Picker("Show Captions", selection: $settings.storedCaptionsPreference) {
                     Text("Off").tag(AppleCaptionsPreference.off)
                     Text("English").tag(AppleCaptionsPreference.english)
                     Text("Device Language").tag(AppleCaptionsPreference.deviceLanguage)
                     Text("Always").tag(AppleCaptionsPreference.always)
                 }
+                #endif
                 NavigationLink(value: AppleSettingsRoute.subtitleLanguages) {
                     AppleTVNavigationLabel("Subtitle Languages")
                 }

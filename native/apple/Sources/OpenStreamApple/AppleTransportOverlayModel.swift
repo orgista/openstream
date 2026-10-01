@@ -171,6 +171,15 @@ public final class AppleTransportOverlayModel {
     public private(set) var audioTracks: [ApplePlaybackTrack] = []
     /// The audio track playing: the engine's report, else the last pick.
     public private(set) var selectedAudioID: Int?
+    /// The audio track the viewer picked that the engine has not reported
+    /// yet. An audio switch rebuilds the pipeline, and until it lands the
+    /// engine still reports the old track; adopting that put the check back
+    /// on English after Spanish was chosen (Apple TV verification 2026-10-01).
+    /// Held by the coordinator: the overlay can be rebuilt mid-switch.
+    private var pendingAudioID: Int? {
+        get { coordinator.pendingAudioPick }
+        set { coordinator.pendingAudioPick = newValue }
+    }
     /// Every embedded track, unfiltered. `menuSubtitleTracks` is what the
     /// captions menu lists.
     public private(set) var subtitleTracks: [ApplePlaybackTrack] = []
@@ -237,7 +246,11 @@ public final class AppleTransportOverlayModel {
         self.cueTime = coordinator.engine.presentationTime
         self.duration = coordinator.engine.duration
         self.audioTracks = coordinator.engine.audioTracks
-        self.selectedAudioID = coordinator.engine.activeAudioTrackID
+        // A switch can outlive this overlay: the route leaves `.surface`
+        // while the pipeline rebuilds and a new overlay is built after it.
+        self.selectedAudioID = AppleTrackSelectionPolicy.audio(
+            engineActive: coordinator.engine.activeAudioTrackID,
+            pending: coordinator.pendingAudioPick, current: nil)
         self.subtitleTracks = coordinator.engine.subtitleTracks
         self.chapters = coordinator.engine.chapters
         self.introChapter = AppleChapterMarkers.intro(
@@ -400,6 +413,7 @@ public final class AppleTransportOverlayModel {
 
     public func selectAudio(_ id: Int) {
         bumpActivity()
+        pendingAudioID = id
         coordinator.engine.selectAudioTrack(id: id)
         selectedAudioID = id
     }
@@ -560,7 +574,11 @@ public final class AppleTransportOverlayModel {
             // `.idle`; from here that is the only load boundary in sight (the
             // coordinator's attempt counter is private). The opening belongs to
             // the item, so both the marker and the skip end with it.
-            if phase == .idle { clearIntroForNewItem() }
+            if phase == .idle {
+                clearIntroForNewItem()
+                // A new item has its own tracks; an unconfirmed pick is moot.
+                pendingAudioID = nil
+            }
             // A load boundary replaces the item and with it the window.
             refreshSeekableRange()
             // Phase is otherwise read directly from the coordinator;
@@ -600,9 +618,13 @@ public final class AppleTransportOverlayModel {
             refreshIntroChapter()
             let audio = coordinator.engine.audioTracks
             if audioTracks != audio { audioTracks = audio }
-            if let active = coordinator.engine.activeAudioTrackID, active != selectedAudioID {
-                selectedAudioID = active
+            let active = coordinator.engine.activeAudioTrackID
+            if active != nil, active == pendingAudioID {
+                pendingAudioID = nil
             }
+            let audioID = AppleTrackSelectionPolicy.audio(
+                engineActive: active, pending: pendingAudioID, current: selectedAudioID)
+            if audioID != selectedAudioID { selectedAudioID = audioID }
             let subtitles = coordinator.engine.subtitleTracks
             if subtitleTracks != subtitles { subtitleTracks = subtitles }
             let cues = coordinator.engine.subtitleCues

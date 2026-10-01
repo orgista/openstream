@@ -105,6 +105,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// engine is. Both were previously applied only to `AetherPlaybackEngine`,
     /// so on this route the viewer's language choice was ignored outright.
     public var captionsPreference: AppleCaptionsPreference = .off
+    /// Captions are off and no selection has overridden that for this item.
+    var holdsCaptionsOff: Bool { captionsPreference == .off && !subtitleSelectionOverridden }
     public var preferredSubtitleLanguages: [String] = []
     /// See `AetherPlaybackEngine.subtitleLanguagesAreExplicit`.
     public var subtitleLanguagesAreExplicit = false

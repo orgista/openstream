@@ -61,4 +61,15 @@ struct AetherLoadOptionsTests {
         #expect(AetherPlaybackEngine.declaresNativeSubtitleRenditions == false)
         #expect(options.preferredSubtitleLanguages == (languages.isEmpty ? ["eng", "en"] : languages))
     }
+
+    /// Captions off: a chosen subtitle language must not make the demuxer
+    /// auto-select at load (Apple TV verification 2026-10-01).
+    @Test(arguments: [[], ["en"], ["es", "en"]])
+    func captionsOffHandsTheDemuxerNoLanguages(languages: [String]) throws {
+        let request = ApplePlaybackRequest(url: try #require(URL(string: "https://fixture.example/movie.mkv")),
+                                           mediaID: "movie", sourceKind: .stremio)
+        let options = AetherPlaybackEngine.loadOptions(
+            for: request, headers: [:], preferredSubtitleLanguages: languages, captionsPreference: .off)
+        #expect(options.preferredSubtitleLanguages.isEmpty)
+    }
 }

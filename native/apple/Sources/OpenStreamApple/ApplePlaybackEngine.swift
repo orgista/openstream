@@ -199,6 +199,12 @@ public protocol ApplePlaybackEngine: AnyObject {
     /// the viewer's captions preference asks for one. Without this the CC key
     /// would read "off" over a picture with captions on it.
     var activeSubtitleTrackID: Int? { get }
+    /// The audio track playing. A requirement, not only an extension
+    /// default: as a default alone, every read through `any
+    /// ApplePlaybackEngine` was the default's nil, so the audio menu checked
+    /// the file's default track whatever was playing (Apple TV verification
+    /// 2026-10-01).
+    var activeAudioTrackID: Int? { get }
     /// The picture's pixel dimensions once known, for laying out anything that
     /// has to sit against the video rather than the screen — subtitles, above
     /// all. Nil while unknown, and on routes that cannot report it; callers

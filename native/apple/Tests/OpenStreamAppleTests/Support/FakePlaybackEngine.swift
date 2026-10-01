@@ -30,6 +30,7 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
     var subtitleTracks: [ApplePlaybackTrack] = []
     var subtitleCues: [AppleSubtitleCue] = []
     var activeSubtitleTrackID: Int?
+    var activeAudioTrackID: Int?
     var failure: ApplePlaybackFailure? = nil
     var avPlayer: AVPlayer? { nil }
     /// The real seekable span the transport reads for every live decision.

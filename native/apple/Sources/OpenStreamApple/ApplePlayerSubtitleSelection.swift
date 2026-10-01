@@ -106,7 +106,14 @@ final class ApplePlayerSubtitleSelection {
                     }
                 }
             let selected = item.currentMediaSelection.selectedMediaOption(in: group)
-            if let selected {
+            if selected != nil, Self.holdsCaptionsOff(self.engine) {
+                // Captions are off and the viewer has not picked a track:
+                // AVKit's automatic pick at load is not a command. Mirroring
+                // it turned English on over "Off" on some launches (Apple TV
+                // verification 2026-10-01).
+                self.lastObservedOption = nil
+                item.select(nil, in: group)
+            } else if let selected {
                 // Include a selection made before observation began. This is
                 // the default-on path; it must not start with Off checked.
                 self.changed(selected, in: group)
@@ -160,6 +167,14 @@ final class ApplePlayerSubtitleSelection {
             native.mirrorSubtitleSelection(option)
         }
         lastMirroredTrackID = engine.activeSubtitleTrackID
+    }
+
+    /// True while the viewer's captions preference is Off and nothing has
+    /// overridden it for this item.
+    static func holdsCaptionsOff(_ engine: any ApplePlaybackEngine) -> Bool {
+        if let aether = engine as? AetherPlaybackEngine { return aether.holdsCaptionsOff }
+        if let native = engine as? NativePlaybackEngine { return native.holdsCaptionsOff }
+        return false
     }
 
     /// Match language and occurrence, not the AVKit ordinal: video/audio

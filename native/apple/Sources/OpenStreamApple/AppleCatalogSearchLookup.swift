@@ -17,10 +17,15 @@ struct AppleCatalogSearchLookup: Sendable {
     /// that are listed.
     private let matchesByAvailability: [String: AppleCatalogSearchMatch]
     private let activeCatalogSourcesByID: [AppleSource.ID: AppleSource]
-    private let orderedMatches: [AppleCatalogSearchMatch]
+    /// Every listed item, including the ones `matchesByRecordID` folds into
+    /// an earlier record with the same IMDb id. Title matching runs over these:
+    /// TMDB's "Wonka's The Golden Ticket" and Cinemeta's "The Golden Ticket"
+    /// share one IMDb id, search shows them as one row, and the Top 10 still
+    /// has to find the name Netflix ranks (Apple TV verification 2026-10-01).
+    private let titleMatches: [AppleCatalogSearchMatch]
     private let relatedItemsBySourceID: [AppleSource.ID: [AppleCatalogItem]]
     private let sourceNamesByID: [AppleSource.ID: String]
-    /// Each match's title as `match(title:)` compares it, in `orderedMatches`
+    /// Each match's title as `match(title:)` compares it, in `titleMatches`
     /// order — only when built with `indexesTitles`, otherwise empty and
     /// worked out per call. Discover's two Top 10 rows match 20 titles
     /// against every catalog title each time Discover draws, and folding
@@ -36,21 +41,21 @@ struct AppleCatalogSearchLookup: Sendable {
         let activeSourcesByID = allSourcesByID.filter { $0.value.isEnabled }
         var matches: [String: AppleCatalogSearchMatch] = [:]
         var matchesByAvailability: [String: AppleCatalogSearchMatch] = [:]
-        var ordered: [AppleCatalogSearchMatch] = []
+        var titled: [AppleCatalogSearchMatch] = []
         var related: [AppleSource.ID: [AppleCatalogItem]] = [:]
         var seenRelatedIDs: [AppleSource.ID: Set<String>] = [:]
 
         for section in sections {
             guard let source = activeSourcesByID[section.sourceID] else { continue }
             for item in section.items {
+                let match = AppleCatalogSearchMatch(item: item, source: source)
                 if seenRelatedIDs[section.sourceID, default: []].insert(item.id).inserted {
                     related[section.sourceID, default: []].append(item)
+                    titled.append(match)
                 }
                 let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-                let match = AppleCatalogSearchMatch(item: item, source: source)
                 if matches[record.id] == nil {
                     matches[record.id] = match
-                    ordered.append(match)
                 }
                 for availability in record.availability where matchesByAvailability[Self.key(availability)] == nil {
                     matchesByAvailability[Self.key(availability)] = match
@@ -61,11 +66,11 @@ struct AppleCatalogSearchLookup: Sendable {
         matchesByRecordID = matches
         self.matchesByAvailability = matchesByAvailability
         activeCatalogSourcesByID = activeSourcesByID.filter { $0.value.kind == .stremio }
-        orderedMatches = ordered
+        titleMatches = titled
         relatedItemsBySourceID = related
         sourceNamesByID = allSourcesByID.mapValues(\.name)
         if indexesTitles {
-            normalizedTitles = ordered.map { Self.normalized($0.item.name) }
+            normalizedTitles = titled.map { Self.normalized($0.item.name) }
             articleFreeTitles = normalizedTitles.map(Self.removingLeadingArticle)
         } else {
             normalizedTitles = []
@@ -173,24 +178,43 @@ struct AppleCatalogSearchLookup: Sendable {
     func match(title: String, type: String, seasonTitle: String? = nil,
                ignoringLeadingArticle: Bool = false) -> AppleCatalogSearchMatch? {
         let wanted = Set([title, seasonTitle ?? ""].map(Self.normalized).filter { !$0.isEmpty })
-        let typed = orderedMatches.indices.filter {
-            orderedMatches[$0].item.type.caseInsensitiveCompare(type) == .orderedSame
+        let typed = titleMatches.indices.filter {
+            titleMatches[$0].item.type.caseInsensitiveCompare(type) == .orderedSame
         }
         if let exact = typed.first(where: { wanted.contains(normalizedTitle(at: $0)) }) {
-            return orderedMatches[exact]
+            return withArtwork(titleMatches[exact], among: typed)
         }
         guard ignoringLeadingArticle else { return nil }
         // Ranking feeds and metadata catalogs sometimes differ only by "The".
         // Keep exact matches first, and never guess between distinct title IDs.
         let withoutArticles = Set(wanted.map(Self.removingLeadingArticle).filter { !$0.isEmpty })
-        let candidates = typed.filter { withoutArticles.contains(articleFreeTitle(at: $0)) }.map { orderedMatches[$0] }
+        let candidates = typed.filter { withoutArticles.contains(articleFreeTitle(at: $0)) }.map { titleMatches[$0] }
         guard let first = candidates.first,
-              candidates.allSatisfy({ $0.item.mediaID == first.item.mediaID }) else { return nil }
-        return first
+              candidates.allSatisfy({ Self.titleIdentity($0.item) == Self.titleIdentity(first.item) }) else { return nil }
+        return withArtwork(first, among: typed)
+    }
+
+    /// The matched item, or — when it carries no art of its own and no IMDb
+    /// id the image service could draw from — another listed item for the
+    /// same IMDb id that has art, so a Top 10 tile found by one catalog's name
+    /// can still draw another catalog's poster.
+    private func withArtwork(_ match: AppleCatalogSearchMatch, among typed: [Int]) -> AppleCatalogSearchMatch {
+        guard match.item.posterURL == nil, match.item.backgroundURL == nil,
+              !AppleStremioMetadataClient.isIMDBIdentifier(match.item.mediaID) else { return match }
+        let identity = Self.titleIdentity(match.item)
+        return typed.lazy.map { titleMatches[$0] }.first {
+            Self.titleIdentity($0.item) == identity && ($0.item.posterURL != nil || $0.item.backgroundURL != nil)
+        } ?? match
+    }
+
+    /// One title across catalogs: its IMDb id when known, else its own id.
+    private static func titleIdentity(_ item: AppleCatalogItem) -> String {
+        if AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) { return item.mediaID }
+        return item.imdbID ?? item.mediaID
     }
 
     private func normalizedTitle(at index: Int) -> String {
-        normalizedTitles.isEmpty ? Self.normalized(orderedMatches[index].item.name) : normalizedTitles[index]
+        normalizedTitles.isEmpty ? Self.normalized(titleMatches[index].item.name) : normalizedTitles[index]
     }
 
     private func articleFreeTitle(at index: Int) -> String {

@@ -204,6 +204,9 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
 public final class ApplePlaybackCoordinator {
     public private(set) var phase: ApplePlaybackPhase = .idle
     public private(set) var route: ApplePlaybackPresentationRoute = .none
+    /// The audio track picked in the transport that the engine has not
+    /// confirmed yet; outlives one overlay (`AppleTransportOverlayModel`).
+    @ObservationIgnored var pendingAudioPick: Int?
     public let engine: any ApplePlaybackEngine
     var sharePlayChannel: AppleSharePlayChannel?
     weak var sharedPlayback: AppleSharePlayPlaybackBinding?

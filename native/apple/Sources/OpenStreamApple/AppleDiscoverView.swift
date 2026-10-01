@@ -2170,6 +2170,10 @@ struct AppleCatalogCard: View {
                         }
                     }
                 }
+                // A Top 10 tile has no caption over its art, so while the art
+                // is in flight (or a load stalls) the title tile sits behind
+                // it rather than an empty dark box (Wonka's, 2026-10-01).
+                .background { if sizing == .ranked, resolvedPosterURL != nil { artworkPlaceholder } }
                 .overlay { if resolvedPosterURL == nil { artworkPlaceholder } }
                 .overlay {
                     // Figma's diagonal on the Top 10 tile (owner: follow the

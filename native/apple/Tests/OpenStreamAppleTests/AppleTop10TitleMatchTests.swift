@@ -44,6 +44,39 @@ import Testing
         #expect(lookup.match(title: "The Perfect Family", type: "movie") == nil)
     }
 
+    /// TMDB and Cinemeta list one title under two names and one IMDb id; the
+    /// search merge folds them into one record, but the Top 10 still has to
+    /// find the name Netflix ranks (Apple TV verification 2026-10-01).
+    @Test func titleFoldedIntoAnotherCatalogsRecordStillMatchesByItsOwnName() {
+        let poster = URL(string: "https://fixture.example/wonka.jpg")
+        let lookup = lookup(items: [
+            AppleCatalogItem(mediaID: "tt36258621", type: "movie", name: "The Golden Ticket"),
+            AppleCatalogItem(mediaID: "tmdb:286940", type: "movie", name: "Wonka's The Golden Ticket",
+                             posterURL: poster, imdbID: "tt36258621"),
+        ])
+        let wonka = lookup.match(title: "Wonka's The Golden Ticket", type: "movie", ignoringLeadingArticle: true)
+        #expect(wonka?.item.mediaID == "tmdb:286940")
+        #expect(wonka?.item.posterURL == poster)
+        #expect(lookup.match(title: "The Golden Ticket", type: "movie")?.item.mediaID == "tt36258621")
+        #expect(lookup.match(title: "Golden Ticket", type: "movie", ignoringLeadingArticle: true)?.item.mediaID == "tt36258621")
+    }
+
+    @Test func artlessMatchBorrowsTheArtOfItsIMDbSibling() {
+        let poster = URL(string: "https://fixture.example/wonka.jpg")
+        let lookup = lookup(items: [
+            AppleCatalogItem(mediaID: "tmdb:286940", type: "movie", name: "Wonka's The Golden Ticket", imdbID: "tt36258621"),
+            AppleCatalogItem(mediaID: "tmdb:999", type: "movie", name: "Another Name", posterURL: poster, imdbID: "tt36258621"),
+        ])
+        #expect(lookup.match(title: "Wonka's The Golden Ticket", type: "movie")?.item.posterURL == poster)
+    }
+
+    private func lookup(items: [AppleCatalogItem]) -> AppleCatalogSearchLookup {
+        let catalog = AppleStremioCatalog(type: "movie", id: "top")
+        let source = AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
+                                 resources: ["catalog"], catalogs: [catalog])
+        return AppleCatalogSearchLookup(sections: [.init(source: source, catalog: catalog, items: items)], sources: [source])
+    }
+
     private func lookup(_ titles: [(String, String)]) -> AppleCatalogSearchLookup {
         let catalog = AppleStremioCatalog(type: "movie", id: "top")
         let source = AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,

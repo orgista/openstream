@@ -162,8 +162,18 @@ struct AppleTransportOverlay: View {
                         model.bumpActivity()
                         if model.nextEpisodePrompt != nil {
                             tvFocus = .nextEpisode
+                        } else if model.showsSkipIntro {
+                            // After the reveal lands: written in the same
+                            // update, Skip Intro was still non-interactive and
+                            // the write was dropped (Apple TV verification
+                            // 2026-10-01).
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(100))
+                                guard model.showsSkipIntro else { return }
+                                tvFocus = .skipIntro
+                            }
                         } else {
-                            tvFocus = model.showsSkipIntro ? .skipIntro : (model.isScrubbable ? .scrubber : .captions)
+                            tvFocus = model.isScrubbable ? .scrubber : .captions
                         }
                     default: model.bumpActivity()
                     }
@@ -248,6 +258,12 @@ struct AppleTransportOverlay: View {
             if !isVisible, chrome.hidesFocusDuringPlayback { tvFocus = .surface }
         }
         .onChange(of: tvFocus) { old, new in
+            // A focused Skip Intro holds the controls up, as an open menu
+            // does: the three-second auto-hide used to take the focus back
+            // to the picture a moment after it landed (Apple TV
+            // verification 2026-10-01).
+            if new == .skipIntro, old != .skipIntro { model.menuItemAppeared() }
+            if old == .skipIntro, new != .skipIntro { model.menuItemDisappeared() }
             // With the controls up, Down from the picture is a geometric move
             // the engine makes itself (the surface's move command never runs),
             // and it lands on the scrubber row below Skip Intro (full test
@@ -257,7 +273,14 @@ struct AppleTransportOverlay: View {
                 toBottomBar: new == .scrubber || new == .captions,
                 showsSkipIntro: model.showsSkipIntro
             ) {
-                tvFocus = .skipIntro
+                // Deferred: a focus write made inside the focus engine's own
+                // move is dropped, and focus stayed on the scrubber (Apple TV
+                // verification 2026-10-01).
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard model.showsSkipIntro else { return }
+                    tvFocus = .skipIntro
+                }
             }
         }
         .onPlayPauseCommand { model.togglePlayPause() }
@@ -335,7 +358,7 @@ struct AppleTransportOverlay: View {
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         selectedAudioID: model.selectedAudioID,
-                        subtitleTracks: model.menuSubtitleTracks,
+                        subtitleTracks: model.subtitleTracks,
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
@@ -584,10 +607,13 @@ struct AppleTransportOverlay: View {
                 if controls.contains(.captions), !liveTopControls {
                     // One captions control, as in the Apple TV app: the menu
                     // holds Off, every track and the audio languages.
+                    // Every track, not `menuSubtitleTracks`: the menu splits
+                    // them into the viewer's languages and "More…", which the
+                    // filtered list left empty (Apple TV verification 2026-10-01).
                     AppleTransportTrackMenu(
                         audioTracks: model.audioTracks,
                         selectedAudioID: model.selectedAudioID,
-                        subtitleTracks: model.menuSubtitleTracks,
+                        subtitleTracks: model.subtitleTracks,
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },

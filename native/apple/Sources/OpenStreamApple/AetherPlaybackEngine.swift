@@ -152,6 +152,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// `.always` auto-selects the first track, `.english` / `.deviceLanguage`
     /// hand the engine matching languages, `.off` selects nothing.
     public var captionsPreference: AppleCaptionsPreference = .off
+    /// Captions are off and no selection has overridden that for this item.
+    var holdsCaptionsOff: Bool { captionsPreference == .off && !subtitleSelectionOverridden }
 
     /// The viewer's chosen subtitle languages. Auto-selection picks the first
     /// track in these rather than the first track in the file: a remux lists
@@ -413,7 +415,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // preference: under `.always` the preference contributes no languages
         // at all, so the demuxer used to pick in muxer order at load and get
         // corrected afterwards — a visible flash of the wrong language.
-        options.preferredSubtitleLanguages = preferredSubtitleLanguages.isEmpty
+        // Captions off hands the demuxer no languages at all: the chosen list
+        // made it pick English at load with captions off (Apple TV
+        // verification 2026-10-01, 2 of 3 launches).
+        options.preferredSubtitleLanguages = captionsPreference == .off ? []
+            : preferredSubtitleLanguages.isEmpty
             ? captionsPreference.preferredSubtitleLanguages
             : preferredSubtitleLanguages
         return options
