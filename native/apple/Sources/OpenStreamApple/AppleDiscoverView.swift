@@ -336,7 +336,8 @@ struct AppleDiscoverView: View {
         .navigationDestination(isPresented: $showsCatalog) {
             if let selectedCatalog,
                let source = sourceStore.sources.first(where: { $0.id == selectedCatalog.sourceID }) {
-                catalogSection(selectedCatalog, source: source).catalogList
+                // The live shelf, so pages loaded while the list is open show in it.
+                catalogSection(liveSection(selectedCatalog), source: source).catalogList
                     .environment(\.appleTabToolbar, tabToolbarContext)
             }
         }
@@ -924,6 +925,14 @@ struct AppleDiscoverView: View {
         }
     }
 
+    /// `section` as the store holds it now (more pages may have landed),
+    /// keeping the heading Discover gave it.
+    private func liveSection(_ section: AppleCatalogSection) -> AppleCatalogSection {
+        guard var live = catalogStore.sections.first(where: { $0.id == section.id }) else { return section }
+        live.shelfTitle = section.shelfTitle
+        return live
+    }
+
     private func catalogSection(_ section: AppleCatalogSection, source: AppleSource) -> AppleCatalogSectionView {
         AppleCatalogSectionView(
             section: section,
@@ -939,7 +948,10 @@ struct AppleDiscoverView: View {
             settings: settings,
             openSettings: openSettings,
             tabToolbar: tabToolbarContext,
-            onOpen: { selectedCatalog = section; showsCatalog = true }
+            onOpen: { selectedCatalog = section; showsCatalog = true },
+            onReachEnd: { [catalogStore, sourceStore] in
+                Task { await catalogStore.loadNextPage(sectionID: section.id, sources: sourceStore.sources) }
+            }
         )
     }
 
@@ -1820,6 +1832,9 @@ private struct AppleCatalogSectionView: View {
     /// Discover's Search and Refresh, for the title pages its posters open.
     let tabToolbar: AppleTabToolbarContext?
     let onOpen: () -> Void
+    /// Asks for the catalog's next page (`AppleCatalogPaging`); the store
+    /// ignores it for a catalog without `skip` or one that has run out.
+    var onReachEnd: (() -> Void)? = nil
     @FocusState private var focusedItemID: String?
 
     private var title: String {
@@ -1848,6 +1863,7 @@ private struct AppleCatalogSectionView: View {
                 }
                 .focused($focusedItemID, equals: item.id)
                 .accessibilityIdentifier("home.media.\(item.id)")
+                .onAppear { requestMoreIfNearEnd(item) }
             }
         }
         .accessibilityElement(children: .contain)
@@ -1884,10 +1900,18 @@ private struct AppleCatalogSectionView: View {
                 }
                 .frame(minHeight: 44, alignment: .leading)
             }
+            .onAppear { requestMoreIfNearEnd(item) }
         }
         .navigationTitle(title)
         .scrollIndicators(.hidden)
         .tint(.primary)
+    }
+
+    /// A ranked Top 10 row shows ten and never pages.
+    private func requestMoreIfNearEnd(_ item: AppleCatalogItem) {
+        guard let onReachEnd, AppleCatalogShelfPolicy.style(for: section.catalog) != .ranked,
+              AppleCatalogPaging.isNearEnd(itemID: item.id, in: section.items) else { return }
+        onReachEnd()
     }
 
     private func detail(_ item: AppleCatalogItem) -> some View {
@@ -5631,6 +5655,7 @@ struct AppleCatalogItemDetailView: View {
         let title = selectedEpisodeSelection?.displayTitle ?? item.name
         let subtitle = stockPlayerSubtitle
         let releaseYear = stockPlayerYear
+        let artwork = item.posterURL
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         let runtime = expectedRuntime
         // MP4-first order only under the DEBUG Native override; the OpenStream
@@ -5658,7 +5683,8 @@ struct AppleCatalogItemDetailView: View {
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
                             addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear), settings: settings,
+                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear,
+                            artworkURL: artwork), settings: settings,
                             engineOverride: engineOverride)
                     }
             }
@@ -5851,6 +5877,7 @@ struct AppleCatalogItemDetailView: View {
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
             let subtitle = stockPlayerSubtitle
             let releaseYear = stockPlayerYear
+            let artwork = item.posterURL
             let runtime = expectedRuntime
             // A stream the Native player failed is not a failure for the
             // OpenStream engine, so its fallback keeps them all, the ones the
@@ -5865,7 +5892,8 @@ struct AppleCatalogItemDetailView: View {
                             partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
                         fromBeginning: fromBeginning),
                     addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                    expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear)
+                    expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear,
+                    artworkURL: artwork)
             }
             playbackUI.selectedQuality = nil
             guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }

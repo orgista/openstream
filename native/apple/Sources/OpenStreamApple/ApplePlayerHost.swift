@@ -215,20 +215,29 @@ public final class ApplePlayerHost {
     /// its title and whether it is live (a live stream gets no skip controls
     /// rather than inert ones).
     public func attachRemoteCommands(title: String?, isLive: Bool) {
+        attachRemoteCommands(metadata: AppleNowPlayingMetadata(title: title, isLive: isLive))
+    }
+
+    /// The same, with the series line and the poster from the request.
+    public func attachRemoteCommands(request: ApplePlaybackRequest) {
+        attachRemoteCommands(metadata: AppleNowPlayingMetadata(request: request))
+    }
+
+    private func attachRemoteCommands(metadata: AppleNowPlayingMetadata) {
         #if canImport(MediaPlayer) && !os(macOS)
-        remoteCommands.attach(engine: coordinator.engine, title: title, isLive: isLive)
+        remoteCommands.attach(engine: coordinator.engine, metadata: metadata)
         #endif
         #if canImport(WatchConnectivity) && os(iOS)
         // Same engine, same command rules — the wrist is another remote, not a
         // second implementation.
         AppleWatchCompanion.shared.activate()
-        AppleWatchCompanion.shared.attach(engine: coordinator.engine, title: title)
+        AppleWatchCompanion.shared.attach(engine: coordinator.engine, title: metadata.knownTitle)
         #endif
         #if os(tvOS)
         // The television has no watch of its own to talk to; it leaves a note
         // in the shared key-value store instead, and any watch on the account
         // can read it. See `AppleDevicePlaybackBeacon`.
-        AppleDevicePlaybackBeacon.shared.attach(engine: coordinator.engine, title: title)
+        AppleDevicePlaybackBeacon.shared.attach(engine: coordinator.engine, title: metadata.knownTitle)
         #endif
     }
 

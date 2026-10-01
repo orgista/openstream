@@ -48,6 +48,9 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     var moreSubtitleEntries: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
     var showsSubtitleMenu = false
     var onSelectSubtitle: (Int?) -> Void = { _ in }
+    /// The per-play subtitle delay and frame-rate fix, offered while a track is on.
+    var subtitleTiming = AppleSubtitleTiming()
+    var onChangeSubtitleTiming: ((AppleSubtitleTiming.Change) -> Void)?
     var onOtherSources: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -69,12 +72,14 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
             nsView.showsFullScreenToggleButton = showsAVKitFullScreenButton
         }
         context.coordinator.onSelectSubtitle = onSelectSubtitle
+        context.coordinator.onChangeSubtitleTiming = onChangeSubtitleTiming
         context.coordinator.onOtherSources = onOtherSources
         // Rebuilt only when what it lists changes: replacing the menu while
         // it is open would close it under the pointer.
         let signature = MenuSignature(otherSources: onOtherSources != nil,
                                       subtitles: showsSubtitleMenu ? subtitleEntries : [],
-                                      moreSubtitles: showsSubtitleMenu ? moreSubtitleEntries : [])
+                                      moreSubtitles: showsSubtitleMenu ? moreSubtitleEntries : [],
+                                      timing: subtitleTiming)
         guard signature != context.coordinator.menuSignature else { return }
         context.coordinator.menuSignature = signature
         nsView.actionPopUpButtonMenu = actionMenu(coordinator: context.coordinator)
@@ -84,6 +89,7 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
         let otherSources: Bool
         let subtitles: [AppleSubtitleCueLayerPolicy.MenuEntry]
         var moreSubtitles: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
+        var timing = AppleSubtitleTiming()
     }
 
     private func actionMenu(coordinator: Coordinator) -> NSMenu? {
@@ -113,6 +119,12 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
                 moreItem.submenu = more
                 tracks.addItem(moreItem)
             }
+            if onChangeSubtitleTiming != nil,
+               AppleSubtitleTimingMenu.isOffered(subtitleSelected: subtitleEntries.contains {
+                   $0.trackID != nil && $0.isSelected }) {
+                tracks.addItem(.separator())
+                for item in timingItems(coordinator: coordinator) { tracks.addItem(item) }
+            }
             let item = NSMenuItem(title: "Subtitles", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "captions.bubble", accessibilityDescription: nil)
             item.submenu = tracks
@@ -121,9 +133,45 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
         return menu.items.isEmpty ? nil : menu
     }
 
+    private func timingItems(coordinator: Coordinator) -> [NSMenuItem] {
+        func actionItem(_ title: String, _ change: AppleSubtitleTiming.Change, enabled: Bool = true,
+                        on: Bool = false) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: enabled ? #selector(Coordinator.changeTiming(_:)) : nil,
+                                  keyEquivalent: "")
+            item.target = coordinator
+            item.representedObject = TimingChangeBox(change)
+            item.state = on ? .on : .off
+            return item
+        }
+        let delay = NSMenu(title: AppleSubtitleTimingMenu.title)
+        for step in AppleSubtitleTimingMenu.steps { delay.addItem(actionItem(step.title, .nudge(step.seconds))) }
+        delay.addItem(actionItem(AppleSubtitleTimingMenu.resetTitle, .resetDelay, enabled: subtitleTiming.delay != 0))
+        let delayItem = NSMenuItem(title: AppleSubtitleTimingMenu.titleWithValue(subtitleTiming), action: nil,
+                                   keyEquivalent: "")
+        delayItem.submenu = delay
+        let rate = NSMenu(title: AppleSubtitleTimingMenu.frameRateTitle)
+        for fix in AppleSubtitleTiming.FrameRateFix.allCases {
+            rate.addItem(actionItem(fix.title, .frameRate(fix), on: subtitleTiming.frameRateFix == fix))
+        }
+        let rateItem = NSMenuItem(title: AppleSubtitleTimingMenu.frameRateTitle, action: nil, keyEquivalent: "")
+        rateItem.submenu = rate
+        return [delayItem, rateItem]
+    }
+
+    final class TimingChangeBox: NSObject {
+        let change: AppleSubtitleTiming.Change
+        init(_ change: AppleSubtitleTiming.Change) { self.change = change }
+    }
+
     @MainActor final class Coordinator: NSObject {
         var menuSignature: MenuSignature?
         var onSelectSubtitle: (Int?) -> Void = { _ in }
+        var onChangeSubtitleTiming: ((AppleSubtitleTiming.Change) -> Void)?
+
+        @objc func changeTiming(_ sender: NSMenuItem) {
+            guard let box = sender.representedObject as? TimingChangeBox else { return }
+            onChangeSubtitleTiming?(box.change)
+        }
         var onOtherSources: (() -> Void)?
 
         @objc func selectSubtitle(_ sender: NSMenuItem) {

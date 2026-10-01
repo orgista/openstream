@@ -1109,6 +1109,18 @@ private struct ApplePlaybackSettingsView: View {
             }
 
             Section("Playback") {
+                #if os(tvOS)
+                AppleTVChoicePicker("Audio Language", selection: $settings.audioLanguage,
+                                    options: Self.audioLanguageOptions)
+                #else
+                Picker("Audio Language", selection: $settings.audioLanguage) {
+                    Text(AppleAudioLanguagePreference.automaticTitle).tag("")
+                    ForEach(AppleSubtitleLanguages.all) { language in
+                        Text(language.name).tag(language.code)
+                    }
+                }
+                .accessibilityIdentifier("settings.audioLanguage")
+                #endif
                 Toggle("Auto Play Next Episode", isOn: $settings.autoPlayNextEpisode)
                 #if os(tvOS)
                 // Apple TV has no trailers (47aebf1); the same stored switch now
@@ -1130,6 +1142,13 @@ private struct ApplePlaybackSettingsView: View {
         }
         .appleSettingsPane("Playback", embedded: embeddedInSplit)
     }
+
+    #if os(tvOS)
+    private static var audioLanguageOptions: [AppleTVChoicePicker<String>.Option] {
+        [AppleTVChoicePicker<String>.Option(value: "", title: AppleAudioLanguagePreference.automaticTitle)]
+            + AppleSubtitleLanguages.all.map { AppleTVChoicePicker<String>.Option(value: $0.code, title: $0.name) }
+    }
+    #endif
 }
 
 /// Picks up to three languages the captions menu lists add-on subtitles for.

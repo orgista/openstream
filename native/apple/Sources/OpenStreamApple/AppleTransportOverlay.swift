@@ -391,6 +391,8 @@ struct AppleTransportOverlay: View {
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) },
+                        subtitleTiming: model.subtitleTiming,
+                        onChangeSubtitleTiming: { model.changeSubtitleTiming($0) },
                         onMenuItemAppeared: { model.menuItemAppeared() },
                         onMenuItemDisappeared: { model.menuItemDisappeared() }
                     )
@@ -651,6 +653,8 @@ struct AppleTransportOverlay: View {
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
                         onSelectSubtitle: { model.selectSubtitle($0) },
+                        subtitleTiming: model.subtitleTiming,
+                        onChangeSubtitleTiming: { model.changeSubtitleTiming($0) },
                         onMenuItemAppeared: { model.menuItemAppeared() },
                         onMenuItemDisappeared: { model.menuItemDisappeared() }
                     )
@@ -868,6 +872,10 @@ struct AppleTransportTrackMenu: View {
     let selectedSubtitleID: Int?
     let onSelectAudio: (Int) -> Void
     let onSelectSubtitle: (Int?) -> Void
+    /// The per-play subtitle delay and frame-rate fix; the rows show only
+    /// while a subtitle is on and a handler is given.
+    var subtitleTiming = AppleSubtitleTiming()
+    var onChangeSubtitleTiming: ((AppleSubtitleTiming.Change) -> Void)? = nil
     /// Each row reports itself so the chrome stays up while the menu is open.
     var onMenuItemAppeared: () -> Void = {}
     var onMenuItemDisappeared: () -> Void = {}
@@ -912,6 +920,12 @@ struct AppleTransportTrackMenu: View {
                     .accessibilityIdentifier("player.subtitle.more")
                     .onAppear(perform: onMenuItemAppeared)
                     .onDisappear(perform: onMenuItemDisappeared)
+                }
+                if let onChangeSubtitleTiming,
+                   AppleSubtitleTimingMenu.isOffered(subtitleSelected: selectedSubtitleID != nil) {
+                    AppleSubtitleTimingMenus(timing: subtitleTiming, change: onChangeSubtitleTiming,
+                                             onItemAppeared: onMenuItemAppeared,
+                                             onItemDisappeared: onMenuItemDisappeared)
                 }
             }
         } label: {

@@ -443,6 +443,17 @@ public final class AppleSettingsStore {
 
     @ObservationIgnored private var storedSubtitleLanguages: [String]
 
+    /// Settings › Playback › Audio Language as a canonical three-letter
+    /// code, or "" for Device Language (`AppleAudioLanguagePreference`).
+    /// Engines read the stored value at each load.
+    public var audioLanguage: String {
+        didSet {
+            let clean = AppleSubtitleLanguages.normalized(audioLanguage) ?? ""
+            if clean.isEmpty { defaults.removeObject(forKey: AppleAudioLanguagePreference.defaultsKey) }
+            else { defaults.set(clean, forKey: AppleAudioLanguagePreference.defaultsKey) }
+        }
+    }
+
     /// True once the viewer has picked languages; until then the list is the
     /// English-first device default. The picker is only ever opened by hand,
     /// from Settings › Playback or a subtitles add-on's detail page.
@@ -623,6 +634,7 @@ public final class AppleSettingsStore {
             storedSubtitleLanguages = AppleSubtitleLanguages.deviceDefaults()
             hasChosenSubtitleLanguages = false
         }
+        audioLanguage = AppleAudioLanguagePreference.storedChoice(defaults: defaults) ?? ""
         autoPlayTrailer = defaults.object(forKey: DefaultsKey.autoPlayTrailer) as? Bool ?? true
         autoPlayNextEpisode = defaults.object(forKey: DefaultsKey.autoPlayNextEpisode) as? Bool ?? true
         storedWatchProviderIDs = Set((defaults.array(forKey: DefaultsKey.watchProviderIDs) as? [Int]) ?? [])
@@ -746,6 +758,7 @@ public final class AppleSettingsStore {
             DefaultsKey.favoriteChannelIDs,
             DefaultsKey.regionalZIPCode,
             AppleSubtitleLanguages.defaultsKey,
+            AppleAudioLanguagePreference.defaultsKey,
             AppleInteractionTrace.preferenceKey,
             "openstream.settings.live.custom.v1",
         ]
@@ -791,6 +804,7 @@ public final class AppleSettingsStore {
         gatewayURL = restored.gatewayURL
         storedCaptionsPreference = restored.storedCaptionsPreference
         subtitleLanguages = restored.subtitleLanguages
+        audioLanguage = restored.audioLanguage
         autoPlayNextEpisode = restored.autoPlayNextEpisode
         watchProviderIDs = restored.watchProviderIDs
         autoPlayTrailer = restored.autoPlayTrailer

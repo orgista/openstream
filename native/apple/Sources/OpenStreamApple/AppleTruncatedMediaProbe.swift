@@ -14,15 +14,30 @@ enum AppleTruncatedMediaProbe {
 
     /// What the viewer reads for a demuxer or engine failure: the engine's
     /// own text ("HLSVideoEngine: open failed (Demuxer: open failed (Invalid
-    /// data found when processing input (-1094995529)))") reached the alert
-    /// for a truncated file (iPhone 27 v2 re-run). Anything else passes as is.
+    /// data found when processing input (-1094995529)))") never reaches the
+    /// alert.
+    ///
+    /// "Ended early" needs evidence the file stopped: playback had started
+    /// (`midStream`), or the engine hit the end of the input. A demuxer that
+    /// refuses a file at its first bytes says nothing about its length: a
+    /// complete Dolby Vision x265 MP4 the demuxer cannot parse failed exactly
+    /// that way and read "the file ended early" (V13). A file really cut
+    /// short is caught by the container probe instead (`endsEarly`, run by
+    /// the coordinator for an open failure before anything played).
     static let droppedMessage = "The file ended early or the connection dropped. Try again or choose another source."
+    static let openFailedMessage = "OpenStream could not read this file. Try again or choose another source."
 
-    static func readableEngineMessage(_ raw: String) -> String {
+    static func readableEngineMessage(_ raw: String, midStream: Bool) -> String {
         let markers = ["open failed", "demuxer", "invalid data found", "end of file", "input/output error",
                        "hlsvideoengine", "avformat", "averror"]
         let lowered = raw.lowercased()
-        return markers.contains(where: lowered.contains) ? droppedMessage : raw
+        guard markers.contains(where: lowered.contains) else { return raw }
+        return midStream || hitsEndOfInput(lowered) ? droppedMessage : openFailedMessage
+    }
+
+    /// FFmpeg's AVERROR_EOF / EIO wording: the input ran out under the reader.
+    private static func hitsEndOfInput(_ lowered: String) -> Bool {
+        ["end of file", "input/output error", "averror_eof"].contains(where: lowered.contains)
     }
     /// Bytes read from the start of the file; enough for the header boxes.
     static let headLength = 65_536

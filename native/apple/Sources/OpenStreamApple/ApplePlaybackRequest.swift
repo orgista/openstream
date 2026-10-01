@@ -74,6 +74,9 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
     /// the film or episode. Unset, AVKit used the file's own tags.
     public var subtitle: String?
     public var releaseYear: Int?
+    /// The poster (a channel's logo for live), for the Now Playing artwork
+    /// on the lock screen and in Control Center. Nil draws the app icon.
+    public var artworkURL: URL?
     public var sourceName: String?
     public var sourceKind: SourceKind
     public var hints: Hints

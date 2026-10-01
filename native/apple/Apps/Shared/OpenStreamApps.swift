@@ -107,6 +107,7 @@ struct OpenStreamPlatformApp: App {
             // it." Green toggles stay (system on/off), red stays destructive.
             .tint(.white)
             .onOpenURL { router.open($0) }
+            .appleSpotlightContinuation(router)
             .onChange(of: resetGeneration.value) { Task { await webManagement.stop() } }
             // The cover lifts as soon as the Discover billboard has drawn,
             // held just long enough for the mark to read, and never longer

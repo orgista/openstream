@@ -47,4 +47,45 @@ struct AppleTruncatedMediaProbeTests {
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(await AppleTruncatedMediaProbe.endsEarly(url))
     }
+
+    // MARK: V13 — an open failure is not a truncation
+
+    @Test func aDemuxerRefusingACompleteFileIsNotCalledTruncated() {
+        let raw = "HLSVideoEngine: open failed (Demuxer: open failed (Invalid data found when processing input (-1094995529)))"
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage(raw, midStream: false)
+                == AppleTruncatedMediaProbe.openFailedMessage)
+        #expect(!AppleTruncatedMediaProbe.openFailedMessage.contains("ended early"))
+    }
+
+    @Test func endOfInputOrAStartedStreamIsADrop() {
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage("Demuxer: read failed (End of file)", midStream: false)
+                == AppleTruncatedMediaProbe.droppedMessage)
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage("avformat: Input/output error", midStream: false)
+                == AppleTruncatedMediaProbe.droppedMessage)
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage("Demuxer: Invalid data found when processing input",
+                                                               midStream: true) == AppleTruncatedMediaProbe.droppedMessage)
+    }
+
+    @MainActor @Test(arguments: [false, true])
+    func theCoordinatorAsksTheContainerBeforeSayingTruncated(cutShort: Bool) async throws {
+        // A complete MP4 head (mdat fits) vs one whose mdat runs past the end.
+        let url = FileManager.default.temporaryDirectory.appending(path: "v13-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let mdatSize: UInt32 = cutShort ? 2_000_000 : 72
+        try Data(box("ftyp", size: 32, payload: 24) + box("mdat", size: mdatSize, payload: 64)).write(to: url)
+        let engine = FakePlaybackEngine()
+        engine.failOnLoad = ApplePlaybackFailure(kind: .player, message: AppleTruncatedMediaProbe.openFailedMessage)
+        let coordinator = ApplePlaybackCoordinator(engine: engine)
+        await coordinator.begin(ApplePlaybackRequest(url: url, mediaID: "v13", sourceKind: .files))
+        for _ in 0..<50 {
+            if case .failed = coordinator.phase { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        guard case .failed(let failure) = coordinator.phase else {
+            Issue.record("expected a failure, got \(coordinator.phase)")
+            return
+        }
+        #expect(failure.message == (cutShort ? AppleTruncatedMediaProbe.message : AppleTruncatedMediaProbe.openFailedMessage))
+        coordinator.stop()
+    }
 }

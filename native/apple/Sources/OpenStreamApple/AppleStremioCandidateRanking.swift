@@ -132,7 +132,8 @@ extension AppleStremioHTTPPlaybackCandidate {
         addonMediaType: String? = nil,
         expectedRuntime: Double? = nil,
         subtitle: String? = nil,
-        releaseYear: Int? = nil
+        releaseYear: Int? = nil,
+        artworkURL: URL? = nil
     ) -> ApplePlaybackRequest {
         var request = ApplePlaybackRequest(
             url: sourceURL,
@@ -155,6 +156,7 @@ extension AppleStremioHTTPPlaybackCandidate {
         )
         request.subtitle = subtitle
         request.releaseYear = releaseYear
+        request.artworkURL = artworkURL
         return request
     }
 }

@@ -170,7 +170,8 @@ struct AppleStremioPlayerView: View {
                     .ignoresSafeArea()
             }
             if drawsStockPlayerCues {
-                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles)
+                AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles,
+                                         timing: coordinator.subtitleTiming)
                     .ignoresSafeArea()
             }
             if coordinator.route == .surface {
@@ -239,6 +240,7 @@ struct AppleStremioPlayerView: View {
         }
         .onChange(of: stockSubtitles.menuEntries) { installSourceMenu() }
         .onChange(of: stockSubtitles.moreEntries) { installSourceMenu() }
+        .onChange(of: coordinator.subtitleTiming) { installSourceMenu() }
         .onChange(of: coordinator.route) { _, route in
             if route != .none {
                 hasRouted = true
@@ -275,6 +277,13 @@ struct AppleStremioPlayerView: View {
                                 .onAppear { nativeMenuOpenItems += 1 }
                                 .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
                                 .accessibilityIdentifier("player.subtitles.more")
+                            }
+                            if stockSubtitles.menuEntries.contains(where: { $0.trackID != nil && $0.isSelected }) {
+                                AppleSubtitleTimingMenus(
+                                    timing: coordinator.subtitleTiming,
+                                    change: { coordinator.subtitleTiming.apply($0) },
+                                    onItemAppeared: { nativeMenuOpenItems += 1 },
+                                    onItemDisappeared: { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) })
                             }
                         }
                         .onAppear { nativeMenuOpenItems += 1 }
@@ -342,7 +351,7 @@ struct AppleStremioPlayerView: View {
                 visionHost = ApplePlayerHost(coordinator: coordinator, audioSession: audioSession)
             }
             visionHost?.activate()
-            visionHost?.attachRemoteCommands(title: request.title, isLive: request.isLive)
+            visionHost?.attachRemoteCommands(request: request)
             #else
             host.activate()
             #if os(iOS) || os(macOS)
@@ -351,7 +360,7 @@ struct AppleStremioPlayerView: View {
             // The AirPods stem, Control Centre and the lock screen. Bound here
             // rather than in `init` because the Now Playing entry needs the
             // title and whether this is live.
-            host.attachRemoteCommands(title: request.title, isLive: request.isLive)
+            host.attachRemoteCommands(request: request)
             #endif
             triedSources = [sourceID]
             sourceIdentities[request.url] = sourceID
@@ -556,15 +565,26 @@ struct AppleStremioPlayerView: View {
             if !entries.isEmpty {
                 let engine = coordinator.engine
                 let subtitles = stockSubtitles
+                let coordinator = coordinator
+                var children = AppleSubtitleCueLayerPolicy.uiMenuChildren(
+                    entries: entries, more: subtitles.moreEntries
+                ) { id in
+                    subtitles.select(id, on: engine)
+                }
+                if entries.contains(where: { $0.trackID != nil && $0.isSelected }) {
+                    // Inline, so its rows are not part of the track radio group.
+                    children.append(UIMenu(title: "", options: .displayInline,
+                                           children: AppleSubtitleTimingMenu.uiMenus(
+                        timing: coordinator.subtitleTiming
+                    ) { change in
+                        coordinator.subtitleTiming.apply(change)
+                    }))
+                }
                 items.append(UIMenu(
                     title: "Subtitles",
                     image: UIImage(systemName: "captions.bubble"),
                     options: .singleSelection,
-                    children: AppleSubtitleCueLayerPolicy.uiMenuChildren(
-                        entries: entries, more: subtitles.moreEntries
-                    ) { id in
-                        subtitles.select(id, on: engine)
-                    }
+                    children: children
                 ))
             }
         }
@@ -697,6 +717,8 @@ struct AppleStremioPlayerView: View {
                 host.selectSubtitleTrack(id: id)
                 stockSubtitles.refresh(from: coordinator.engine)
             },
+            subtitleTiming: coordinator.subtitleTiming,
+            onChangeSubtitleTiming: { coordinator.subtitleTiming.apply($0) },
             onOtherSources: qualityPickerAction
         )
         #elseif os(visionOS)

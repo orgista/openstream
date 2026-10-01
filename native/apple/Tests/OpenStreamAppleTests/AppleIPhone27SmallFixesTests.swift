@@ -47,9 +47,15 @@ import Testing
 
     @Test func engineInternalsBecomeAPlainSentence() {
         let raw = "HLSVideoEngine: open failed (Demuxer: open failed (Invalid data found when processing input (-1094995529)))"
-        #expect(AppleTruncatedMediaProbe.readableEngineMessage(raw) == AppleTruncatedMediaProbe.droppedMessage)
+        // Before playback an open failure is not evidence of truncation (V13);
+        // the container probe decides that. Mid-stream it is.
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage(raw, midStream: false)
+                == AppleTruncatedMediaProbe.openFailedMessage)
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage(raw, midStream: true)
+                == AppleTruncatedMediaProbe.droppedMessage)
         #expect(AppleTruncatedMediaProbe.droppedMessage.hasPrefix("The file ended early or the connection dropped"))
-        #expect(AppleTruncatedMediaProbe.readableEngineMessage("The server is busy.") == "The server is busy.")
+        #expect(AppleTruncatedMediaProbe.readableEngineMessage("The server is busy.", midStream: false)
+                == "The server is busy.")
     }
 
     @Test func searchShowsTheSameAddonNameAsTheRows() {

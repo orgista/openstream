@@ -53,7 +53,12 @@ enum AppleSubtitleCueLayerPolicy {
     /// repeat a line as it scrolls ("GOOD EVENING", "GOOD EVENING."), and three
     /// copies were stacked on screen (iPad v2 re-run). Of two lines where one
     /// is the start of the other, the longer one stays.
-    static func activeCues(in cues: [AppleSubtitleCue], at position: Double) -> [AppleSubtitleCue] {
+    ///
+    /// `timing` is the viewer's per-play delay and frame-rate fix: the lookup
+    /// runs at its cue clock, so a +2 s delay shows the 60 s cue at 62 s.
+    static func activeCues(in cues: [AppleSubtitleCue], at position: Double,
+                           timing: AppleSubtitleTiming = AppleSubtitleTiming()) -> [AppleSubtitleCue] {
+        let position = timing.cueClock(at: position)
         let active = cues.filter { position >= $0.startTime && position < $0.endTime }
         guard active.count > 1 else { return active }
         let keys = active.map { cue in cue.text.map(dedupeKey) }
@@ -162,6 +167,9 @@ final class AppleStockPlayerSubtitles {
     /// Whether the current item has legible options, i.e. whether AVKit's
     /// own captions button is there (`AppleStockSubtitleMenuPolicy`).
     private(set) var stockPlayerListsCaptions = false
+    /// The coordinator's per-play timing (`ApplePlaybackCoordinator.subtitleTiming`),
+    /// handed in by the cue layer.
+    private(set) var timing = AppleSubtitleTiming()
     private weak var probedItem: AVPlayerItem?
     private var legibleProbe: Task<Void, Never>?
 
@@ -185,13 +193,22 @@ final class AppleStockPlayerSubtitles {
         refresh(from: engine)
     }
 
+    /// Takes the coordinator's timing and redraws now, so a nudge while
+    /// paused moves the cue without waiting for a position tick.
+    func setTiming(_ timing: AppleSubtitleTiming, on engine: any ApplePlaybackEngine) {
+        guard timing != self.timing else { return }
+        self.timing = timing
+        refresh(from: engine)
+    }
+
     func refresh(from engine: any ApplePlaybackEngine) {
         drawsInlineCues = engine.route == .surface || AppleSubtitleCueLayerPolicy.mountsOverStockPlayer(
             engine: engine.kind, route: engine.route)
         // Nothing over AVKit's placeholder while PiP or AirPlay has the picture.
         let drawsHere = (engine as? AetherPlaybackEngine)?.captionHandoff.appDrawsCaptions ?? true
         let next = drawsHere
-            ? AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.presentationTime) : []
+            ? AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: engine.presentationTime,
+                                                   timing: timing) : []
         if next != cues { cues = next }
         // Same persisted list the overlay model reads, so both menus agree.
         let chosen = UserDefaults.standard.stringArray(forKey: AppleSubtitleLanguages.defaultsKey)
@@ -362,6 +379,8 @@ struct AppleStockPlayerCueLayer: View {
     let subtitles: AppleStockPlayerSubtitles
     /// Extra lift for text cues, e.g. the live footer while it is up.
     var textBottomLift: CGFloat = 0
+    /// The coordinator's per-play subtitle delay and frame-rate fix.
+    var timing = AppleSubtitleTiming()
 
     var body: some View {
         // 24: the overlay's resting inset with its controls hidden. AVKit's
@@ -370,5 +389,6 @@ struct AppleStockPlayerCueLayer: View {
                               textBottomLift: 24 + textBottomLift)
             .accessibilityIdentifier("player.stockCueLayer")
             .task(id: ObjectIdentifier(engine)) { await subtitles.follow(engine) }
+            .onChange(of: timing, initial: true) { subtitles.setTiming(timing, on: engine) }
     }
 }

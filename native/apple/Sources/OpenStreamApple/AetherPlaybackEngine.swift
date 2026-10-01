@@ -166,6 +166,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// rather than one inferred from the device. A picked language is the whole
     /// menu; see `AppleSubtitleTrackFilter.visible`.
     public var subtitleLanguagesAreExplicit = false
+    /// The audio languages a load starts in, best first. Nil reads Settings ›
+    /// Playback › Audio Language at each load (`AppleAudioLanguagePreference`).
+    public var preferredAudioLanguages: [String]?
     public private(set) var failure: ApplePlaybackFailure? = nil {
         didSet {
             guard failure != oldValue else { return }
@@ -261,11 +264,15 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             sourceURL = master
             headers = [:]
         }
+        let audioLanguages = preferredAudioLanguages
+            ?? AppleAudioLanguagePreference.engineLanguages(choice: AppleAudioLanguagePreference.storedChoice())
         var options = Self.loadOptions(
             for: request, headers: headers,
             preferredSubtitleLanguages: preferredSubtitleLanguages,
-            captionsPreference: captionsPreference
+            captionsPreference: captionsPreference,
+            preferredAudioLanguages: audioLanguages
         )
+        appleTrace("audio language preference \(audioLanguages.joined(separator: ","))")
         // An episode that starts while PiP or AirPlay holds the picture
         // declares the renditions itself rather than rebuilding right after.
         captionHandoffReload?.cancel()
@@ -395,7 +402,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         for request: ApplePlaybackRequest,
         headers: [String: String],
         preferredSubtitleLanguages: [String] = [],
-        captionsPreference: AppleCaptionsPreference = .off
+        captionsPreference: AppleCaptionsPreference = .off,
+        preferredAudioLanguages: [String] = []
     ) -> LoadOptions {
         var options = LoadOptions(
             httpHeaders: headers,
@@ -424,6 +432,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             : preferredSubtitleLanguages.isEmpty
             ? captionsPreference.preferredSubtitleLanguages
             : preferredSubtitleLanguages
+        // The first frame's audio: the engine resolves it from its one probe,
+        // so no reload follows (AetherEngine `preferredAudioLanguages`).
+        options.preferredAudioLanguages = preferredAudioLanguages
         return options
     }
 
@@ -899,7 +910,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // After playback has rolled, surface the engine's own message as a
         // mid-playback player failure rather than reclassifying the load.
         if hasReachedPlaying {
-            return ApplePlaybackFailure(kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message))
+            return ApplePlaybackFailure(kind: .player,
+                                        message: AppleTruncatedMediaProbe.readableEngineMessage(info.message, midStream: true))
         }
         let unsupportedKinds: Set<PlaybackErrorKind> = [
             .noPlayableTrackWithinBudget,
@@ -931,10 +943,12 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .audioSessionFailed,
         ]
         if networkKinds.contains(info.kind) {
-            return ApplePlaybackFailure(kind: .network, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message),
+            return ApplePlaybackFailure(kind: .network,
+                                        message: AppleTruncatedMediaProbe.readableEngineMessage(info.message, midStream: false),
                                         httpStatus: httpStatus, networkCode: networkCode)
         }
-        return ApplePlaybackFailure(kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(info.message),
+        return ApplePlaybackFailure(kind: .player,
+                                    message: AppleTruncatedMediaProbe.readableEngineMessage(info.message, midStream: false),
                                     networkCode: networkCode)
     }
 }

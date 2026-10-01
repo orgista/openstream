@@ -445,13 +445,17 @@ public struct AppleStremioCatalog: Codable, Equatable, Sendable {
     public let name: String?
     public let requiresInput: Bool
     public let supportsSearch: Bool
+    /// The catalog declares the `skip` extra, so further pages can be asked
+    /// for (`AppleCatalogPaging`). One that does not is a single page.
+    public let supportsSkip: Bool
 
     public init(
         type: String,
         id: String,
         name: String? = nil,
         requiresInput: Bool = false,
-        supportsSearch: Bool = false
+        supportsSearch: Bool = false,
+        supportsSkip: Bool = false
     ) {
         self.type = String(type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(40))
         self.id = String(id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
@@ -461,10 +465,11 @@ public struct AppleStremioCatalog: Codable, Equatable, Sendable {
             .map { String($0.prefix(100)) }
         self.requiresInput = requiresInput
         self.supportsSearch = supportsSearch
+        self.supportsSkip = supportsSkip
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, name, extra, extraRequired, extraSupported, requiresInput, supportsSearch
+        case type, id, name, extra, extraRequired, extraSupported, requiresInput, supportsSearch, supportsSkip
     }
 
     private struct Extra: Decodable {
@@ -505,7 +510,11 @@ public struct AppleStremioCatalog: Codable, Equatable, Sendable {
             supportsSearch: ((try? container.decode(Bool.self, forKey: .supportsSearch)) ?? false)
                 || extras.contains { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines)
                     .lowercased() == "search" }
-                || names(required + supported).contains("search")
+                || names(required + supported).contains("search"),
+            supportsSkip: ((try? container.decode(Bool.self, forKey: .supportsSkip)) ?? false)
+                || extras.contains { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == "skip" }
+                || names(required + supported).contains("skip")
         )
     }
 
@@ -516,6 +525,7 @@ public struct AppleStremioCatalog: Codable, Equatable, Sendable {
         try container.encodeIfPresent(name, forKey: .name)
         try container.encode(requiresInput, forKey: .requiresInput)
         try container.encode(supportsSearch, forKey: .supportsSearch)
+        if supportsSkip { try container.encode(supportsSkip, forKey: .supportsSkip) }
     }
 }
 

@@ -462,7 +462,17 @@ public final class AppleTransportOverlayModel {
     /// when no track is selected or no cue overlaps the position. Stock and
     /// inline players use the same policy through `AppleStockPlayerSubtitles`.
     public var activeSubtitleCues: [AppleSubtitleCue] {
-        AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: cueTime)
+        AppleSubtitleCueLayerPolicy.activeCues(in: subtitleCues, at: cueTime,
+                                               timing: coordinator.subtitleTiming)
+    }
+
+    /// The per-play subtitle delay and frame-rate fix (held by the coordinator).
+    public var subtitleTiming: AppleSubtitleTiming { coordinator.subtitleTiming }
+
+    /// A subtitle-menu timing action: the cue on screen moves at once, paused or not.
+    public func changeSubtitleTiming(_ change: AppleSubtitleTiming.Change) {
+        bumpActivity()
+        coordinator.subtitleTiming.apply(change)
     }
 
     // MARK: - Route-derived secondary actions
@@ -606,7 +616,8 @@ public final class AppleTransportOverlayModel {
         }
     }
 
-    private func apply(_ event: ApplePlaybackEngineEvent) {
+    /// Internal so a model test can feed it events without an engine stream.
+    func apply(_ event: ApplePlaybackEngineEvent) {
         switch event {
         case .phase(let phase):
             // A new load runs through the engine's `stop()`, which reports

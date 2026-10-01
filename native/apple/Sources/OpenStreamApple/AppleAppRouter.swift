@@ -38,6 +38,16 @@ public enum AppleAppRoute: Equatable, Sendable {
     }
 }
 
+public extension AppleAppRoute {
+    /// A tapped Spotlight result: the item's unique identifier is the media
+    /// record id (`AppleSpotlightIndexer`), so it opens that title's page.
+    init?(spotlightIdentifier: String) {
+        let id = spotlightIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard id.count == 64, id.allSatisfy(\.isHexDigit) else { return nil }
+        self = .media(id: id, action: .display)
+    }
+}
+
 @MainActor
 @Observable
 public final class AppleAppRouter {
@@ -58,6 +68,17 @@ public final class AppleAppRouter {
         route = value
         if case .search(let query) = value { searchQuery = query }
         revision &+= 1
+    }
+
+    /// Continues a tapped Spotlight result (`CSSearchableItemActionType`):
+    /// `identifier` is `CSSearchableItemActivityIdentifier` from the activity.
+    /// False, and nothing changes, for anything that is not one of ours.
+    @discardableResult
+    public func openSpotlightResult(identifier: String?) -> Bool {
+        guard let identifier, let value = AppleAppRoute(spotlightIdentifier: identifier) else { return false }
+        appleTrace("spotlight result → media route")
+        open(value)
+        return true
     }
 
     /// Opens Search with nothing typed yet — the Mac ⌘F path.

@@ -175,7 +175,17 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear) }
         #endif
         isLiveItem = request.isLive
-        let avPlayer = AVPlayer(playerItem: playerItem)
+        // The audio language first, then the item: AVPlayer applies its
+        // selection criteria as the item becomes ready, so a criteria set
+        // after it could start in the file's default dub.
+        let avPlayer = AVPlayer()
+        let audioLanguages = AppleAudioLanguagePreference.avPlayerLanguages(
+            choice: AppleAudioLanguagePreference.storedChoice())
+        avPlayer.setMediaSelectionCriteria(
+            AVPlayerMediaSelectionCriteria(preferredLanguages: audioLanguages, preferredMediaCharacteristics: nil),
+            forMediaCharacteristic: .audible)
+        appleTrace("audio language preference \(audioLanguages.joined(separator: ","))")
+        avPlayer.replaceCurrentItem(with: playerItem)
         if AppleTestAudioMute.isActive { avPlayer.isMuted = true }
         self.item = playerItem
         self.player = avPlayer

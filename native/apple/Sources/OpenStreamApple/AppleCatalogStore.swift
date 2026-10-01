@@ -327,7 +327,9 @@ public struct AppleCatalogSection: Identifiable, Codable, Equatable, Sendable {
         sourceName = String(source.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
         sourceConfigurationID = AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: source)
         self.catalog = catalog
-        self.items = Array(items.prefix(AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog))
+        // One page is at most `maximumItemsPerCatalog`; further pages
+        // (`AppleCatalogPaging`) grow the shelf up to its own cap.
+        self.items = Array(items.prefix(AppleCatalogPaging.maximumItems))
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -342,7 +344,7 @@ public struct AppleCatalogSection: Identifiable, Codable, Equatable, Sendable {
         sourceConfigurationID = try container.decodeIfPresent(String.self, forKey: .sourceConfigurationID) ?? ""
         catalog = try container.decode(AppleStremioCatalog.self, forKey: .catalog)
         items = Array((try container.decode([AppleCatalogItem].self, forKey: .items))
-            .prefix(AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog))
+            .prefix(AppleCatalogPaging.maximumItems))
     }
 }
 
@@ -393,6 +395,26 @@ public struct AppleStremioCatalogClient: Sendable {
         return try await load(url: url, source: source, catalog: catalog)
     }
 
+    /// One further page of a catalog that declares `skip`, with the number of
+    /// entries the add-on sent (before the shelf's own filtering), which is
+    /// what tells a short last page from a full one.
+    public func loadPage(
+        source: AppleSource,
+        catalog: AppleStremioCatalog,
+        skip: Int
+    ) async throws -> AppleCatalogPage {
+        guard source.kind == .stremio,
+              source.isEnabled,
+              source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }),
+              !catalog.requiresInput,
+              AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
+              source.catalogs.contains(where: { $0.type == catalog.type && $0.id == catalog.id }) else {
+            throw AppleStremioCatalogError.invalidSource
+        }
+        let url = try Self.endpoint(source: source, catalog: catalog, skip: skip)
+        return try await loadPage(url: url, source: source, catalog: catalog)
+    }
+
     public func search(
         source: AppleSource,
         catalog: AppleStremioCatalog,
@@ -418,6 +440,14 @@ public struct AppleStremioCatalogClient: Sendable {
         source: AppleSource,
         catalog: AppleStremioCatalog
     ) async throws -> [AppleCatalogItem] {
+        try await loadPage(url: url, source: source, catalog: catalog).items
+    }
+
+    private func loadPage(
+        url: URL,
+        source: AppleSource,
+        catalog: AppleStremioCatalog
+    ) async throws -> AppleCatalogPage {
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -481,27 +511,38 @@ public struct AppleStremioCatalogClient: Sendable {
             ))
             if items.count == AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog { break }
         }
-        return items
+        return AppleCatalogPage(items: items, receivedCount: metas.count)
     }
 
     public static func endpoint(source: AppleSource, catalog: AppleStremioCatalog) throws -> URL {
         try endpoint(source: source, catalog: catalog, searchQuery: nil)
     }
 
+    /// A further page: `…/catalog/movie/top/skip=100.json`. Only for a catalog
+    /// that declares the `skip` extra; `skip` 0 is the first page's URL.
+    public static func endpoint(source: AppleSource, catalog: AppleStremioCatalog, skip: Int) throws -> URL {
+        guard skip == 0 || catalog.supportsSkip, skip >= 0 else { throw AppleStremioCatalogError.invalidSource }
+        return try endpoint(source: source, catalog: catalog, searchQuery: nil, skip: skip)
+    }
+
     public static func searchEndpoint(
         source: AppleSource,
         catalog: AppleStremioCatalog,
-        query: String
+        query: String,
+        skip: Int = 0
     ) throws -> URL {
         let value = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        guard catalog.supportsSearch, !value.isEmpty else { throw AppleStremioCatalogError.invalidSource }
-        return try endpoint(source: source, catalog: catalog, searchQuery: value)
+        guard catalog.supportsSearch, !value.isEmpty, skip >= 0, skip == 0 || catalog.supportsSkip else {
+            throw AppleStremioCatalogError.invalidSource
+        }
+        return try endpoint(source: source, catalog: catalog, searchQuery: value, skip: skip)
     }
 
     private static func endpoint(
         source: AppleSource,
         catalog: AppleStremioCatalog,
-        searchQuery: String?
+        searchQuery: String?,
+        skip: Int = 0
     ) throws -> URL {
         let base = source.transportURL
         guard AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
@@ -523,7 +564,11 @@ public struct AppleStremioCatalogClient: Sendable {
         guard !encodedType.isEmpty, !encodedID.isEmpty else { throw AppleStremioCatalogError.invalidSource }
         var path = components.percentEncodedPath
         if !path.hasSuffix("/") { path += "/" }
-        let extraPath = searchQuery.map { "/search=\(encodePathSegment($0))" } ?? ""
+        // Extra args in the SDK's order, `&`-joined: `/search=x&skip=100`.
+        var extras: [String] = []
+        if let searchQuery { extras.append("search=\(encodePathSegment(searchQuery))") }
+        if skip > 0 { extras.append("skip=\(skip)") }
+        let extraPath = extras.isEmpty ? "" : "/" + extras.joined(separator: "&")
         components.percentEncodedPath = "\(path)catalog/\(encodedType)/\(encodedID)\(extraPath).json"
         guard let url = components.url else { throw AppleStremioCatalogError.invalidSource }
         return url
@@ -782,6 +827,10 @@ public final class AppleCatalogStore {
     private var cachedRequestIDs = Set<String>()
     private var activeRefreshTask: Task<[CatalogFetchResult], Never>?
     private var activeRefreshTaskGeneration: UInt64?
+    /// Per shelf (`AppleCatalogSection.id`): its page size and whether the
+    /// add-on has run out. Cleared whenever the shelves are replaced.
+    @ObservationIgnored private var paging: [String: AppleCatalogPaging.State] = [:]
+    @ObservationIgnored private var pagesInFlight: Set<String> = []
 
     public init(
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
@@ -817,6 +866,7 @@ public final class AppleCatalogStore {
             return
         }
         sections = snapshot.sections
+        paging = [:]
         contentRevision &+= 1
         cacheIsFresh = snapshot.isFresh
         cachedRequestIDs = Set(snapshot.sections.map(Self.requestID(for:)))
@@ -911,6 +961,7 @@ public final class AppleCatalogStore {
         }
 
         sections = updated
+        paging = [:]
         contentRevision &+= 1
         partialErrors = errors
         sourceRefreshReports = sources.compactMap { source in
@@ -927,6 +978,39 @@ public final class AppleCatalogStore {
         let isComplete = successfulRequests == requests.count
         cacheIsFresh = isComplete && updated.contains(where: { !$0.items.isEmpty })
         try? await cache.save(updated, isComplete: isComplete)
+    }
+
+    /// Loads the next page of a shelf whose catalog declares `skip`, when its
+    /// row or See All list nears the end. At most one page per shelf at a
+    /// time; nothing happens once the add-on has run out.
+    public func loadNextPage(sectionID: String, sources: [AppleSource]) async {
+        guard !pagesInFlight.contains(sectionID),
+              let section = sections.first(where: { $0.id == sectionID }),
+              let source = sources.first(where: { $0.id == section.sourceID }) else { return }
+        let state = paging[sectionID] ?? AppleCatalogPaging.State(pageSize: section.items.count)
+        guard let skip = AppleCatalogPaging.nextSkip(
+            catalog: section.catalog, loadedCount: section.items.count, state: state) else { return }
+        let generation = refreshGeneration
+        pagesInFlight.insert(sectionID)
+        defer { pagesInFlight.remove(sectionID) }
+        appleTrace("catalog page \(section.catalog.type)/\(section.catalog.id) skip=\(skip)")
+        let page: AppleCatalogPage
+        do {
+            page = try await client.loadPage(source: source, catalog: section.catalog, skip: skip)
+        } catch {
+            // A failed page is not the end of the catalog; the next scroll retries.
+            return
+        }
+        guard generation == refreshGeneration,
+              let index = sections.firstIndex(where: { $0.id == sectionID }),
+              sections[index].items.count == section.items.count else { return }
+        let merged = AppleCatalogPaging.merge(sections[index].items, page: page, pageSize: state.pageSize)
+        paging[sectionID] = AppleCatalogPaging.State(pageSize: state.pageSize, isExhausted: merged.isExhausted)
+        appleTrace("catalog page \(section.catalog.type)/\(section.catalog.id) +\(merged.items.count - section.items.count) → \(merged.items.count)\(merged.isExhausted ? " end" : "")")
+        guard merged.items.count != section.items.count else { return }
+        var next = AppleCatalogSection(source: source, catalog: section.catalog, items: merged.items)
+        next.shelfTitle = sections[index].shelfTitle
+        sections[index] = next
     }
 
     private func cancelActiveRefresh() async {

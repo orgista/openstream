@@ -216,6 +216,16 @@ public final class ApplePlaybackCoordinator {
     @ObservationIgnored var handsOffAtEnd = false
     /// The next episode has been started from this stream; once is enough.
     @ObservationIgnored var hasAdvancedToNextEpisode = false
+    /// The viewer's subtitle delay and frame-rate fix for the title playing.
+    /// Per play: a retry, a fallback or a quality switch of the same title
+    /// keeps it, a different title starts at zero, and nothing is saved.
+    public var subtitleTiming = AppleSubtitleTiming() {
+        didSet {
+            guard subtitleTiming != oldValue else { return }
+            appleTrace("subtitle timing delay=\(subtitleTiming.delayLabel) fps=\(subtitleTiming.frameRateFix.rawValue)")
+        }
+    }
+    @ObservationIgnored private var subtitleTimingMediaID: String?
     public let engine: any ApplePlaybackEngine
     var sharePlayChannel: AppleSharePlayChannel?
     weak var sharedPlayback: AppleSharePlayPlaybackBinding?
@@ -495,6 +505,10 @@ public final class ApplePlaybackCoordinator {
         let attempt = generation
         loadTask?.cancel()
         lastRequest = request
+        if subtitleTimingMediaID != request.mediaID {
+            subtitleTimingMediaID = request.mediaID
+            if !subtitleTiming.isIdentity { subtitleTiming = AppleSubtitleTiming() }
+        }
         if !triedSourceURLs.contains(request.url) { triedSourceURLs.append(request.url) }
         attemptCountedStart = false
         attemptCountedFailure = false
@@ -679,9 +693,12 @@ public final class ApplePlaybackCoordinator {
     /// `.unsupportedMedia` failure naming how many streams were tried.
     private func handleFailure(_ failure: ApplePlaybackFailure) async {
         var failure = failure
-        // A file cut short opens like an unplayable format; it is an
-        // incomplete download, which Retry (or another source) can fix.
-        if failure.kind == .unsupportedMedia, let request = lastRequest, !request.isLive {
+        // A file cut short opens like an unplayable format or an unreadable
+        // file; it is an incomplete download, which Retry (or another source)
+        // can fix. Only the container's own sizes say so, never the error
+        // text alone (V13).
+        if failure.kind == .unsupportedMedia || failure.message == AppleTruncatedMediaProbe.openFailedMessage,
+           let request = lastRequest, !request.isLive {
             let attempt = generation
             let endsEarly = await AppleTruncatedMediaProbe.endsEarly(request.url)
             guard !Task.isCancelled, generation == attempt else { return }
@@ -915,7 +932,8 @@ public final class ApplePlaybackCoordinator {
         case .error(let message):
             cancelTimeout()
             scheduleFailure(engine.failure ?? ApplePlaybackFailure(
-                kind: .player, message: AppleTruncatedMediaProbe.readableEngineMessage(message)))
+                kind: .player,
+                message: AppleTruncatedMediaProbe.readableEngineMessage(message, midStream: attemptCountedStart)))
         }
     }
 
