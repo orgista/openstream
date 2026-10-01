@@ -37,9 +37,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       profiles; Simkl + local watchlist; format badges (DV/HDR/Atmos); sports scores; iOS 27 external display
       (video on TV, controls on phone); first-run guide. Dead IPTV stream → offer the same channel from another list.
 - [ ] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
-      verify (specs/full-test-checklist-v3.md). Top gaps being fixed now: subtitle delay/frame-rate fix, preferred
-      audio language, Spotlight opens the title, add-on catalog paging, Now Playing artwork/episode info, DV MP4
-      mislabelled "truncated". 20 more Muse jobs queued on ServerPlus (disc menus, DV, subtitles, IPTV, App Review…).
+      verify (specs/full-test-checklist-v3.md). Batch 1 DONE 40e9350: Subtitle Delay + Frame Rate fix (sim-checked),
+      Settings › Audio Language (sim-checked), Spotlight opens the title, add-on catalog paging, Now Playing series/
+      episode/artwork (not seen on a sim), honest "could not read this file" instead of "ended early". 20 more Muse
+      jobs queued on ServerPlus. Next: disc badge/spinner/Play Disc, format badges, engine open retry (running).
 - [ ] **ISO / disc images (owner 2026-10-01):** today ISOs play the main title only. DECIDED: Apple disc symbol in the
       poster corner (A2) + that symbol spinning while the disc opens (S1); "Play Disc" opens the real DVD menu first,
       "Skip to Movie" plays the main title (D2) — menus are part of the experience; Disc Menu button in the player (P1).
