@@ -2793,6 +2793,14 @@ struct AppleCatalogItemDetailView: View {
             Text(seasonDownloadMessage)
         }
         #endif
+        #if os(tvOS)
+        .navigationDestination(isPresented: $prompts.watchOnMenu) {
+            AppleTVWatchOnPage(choices: watchOnAction?.choices ?? [], onChoose: openWatchOn)
+        }
+        #endif
+        .sheet(item: $prompts.watchOnInstructions) { instructions in
+            AppleWatchOnInstructionsView(instructions: instructions)
+        }
         .sheet(isPresented: $prompts.streamPicker) {
             streamPicker
                 #if os(visionOS)
@@ -3404,7 +3412,7 @@ struct AppleCatalogItemDetailView: View {
             }
             // The overlay hero (iPad and landscape) never drew this line, so
             // it did not appear with services added (full test 2026-09-30).
-            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+            AppleWatchProviderRow(providers: alsoAvailableProviders)
                 .frame(width: actionColumnWidth, alignment: .leading)
             seasonDownloadStatus
             secondaryActionRow
@@ -3554,7 +3562,9 @@ struct AppleCatalogItemDetailView: View {
             titleMetadata
                 .frame(width: AppleTVDetailMetrics.overlayColumnWidth, alignment: .leading)
             HStack(alignment: .appleTVControlCenter, spacing: AppleTVDetailMetrics.pillToIconSpacing) {
-                if tvOSShowsPlay {
+                if let watchOnAction {
+                    tvOSWatchOnButton(watchOnAction)
+                } else if tvOSShowsPlay {
                     tvOSPlayButton
                 }
                 tvOSIconRow
@@ -3611,7 +3621,33 @@ struct AppleCatalogItemDetailView: View {
     /// No Play at all when nothing here can play (no trailers on the Apple
     /// TV), rather than one that is dead at rest (N22c).
     private var tvOSShowsPlay: Bool {
-        titlePagePrimaryAction != nil
+        titlePagePrimaryAction != nil || watchOnAction != nil
+    }
+
+    /// Watch on in Play's place, holding Play's focus slot. Several services
+    /// push a page of them rather than a menu (`AppleTVWatchOnPage`).
+    private func tvOSWatchOnButton(_ action: AppleWatchOnAction) -> some View {
+        Button {
+            switch action {
+            case .single(let choice): openWatchOn(choice)
+            case .menu: prompts.watchOnMenu = true
+            }
+        } label: {
+            HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: AppleTVDetailMetrics.pillGlyphSize, weight: .semibold))
+                Text(action.title)
+            }
+        }
+        .buttonStyle(AppleTVPillStyle(
+            isSelected: true,
+            minimumSize: AppleTVDetailMetrics.pillSize,
+            fontSize: AppleTVDetailMetrics.pillFontSize
+        ))
+        .focused($tvDetailFocus, equals: .play)
+        .accessibilityLabel(action.title)
+        .accessibilityHint(action.choices.count == 1 ? watchOnHint(action.choices[0]) : "")
+        .accessibilityIdentifier("detail.watchOn")
     }
 
     private var tvOpeningFocusTarget: AppleTVDetailFocus {
@@ -3711,7 +3747,7 @@ struct AppleCatalogItemDetailView: View {
             // Directly under the hero's Play/icon row above, in secondary
             // text, competing with nothing — easier to spot than buried in
             // the synopsis, but still not a second Play (owner 2026-09-28).
-            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+            AppleWatchProviderRow(providers: alsoAvailableProviders)
                 .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             if let summary = AppleMetadataPresentationPolicy.synopsis(
                 catalog: item.summary,
@@ -4431,6 +4467,49 @@ struct AppleCatalogItemDetailView: View {
     /// closes up around a missing one.
     @ViewBuilder
     private var primaryPlayButton: some View {
+        if let watchOnAction {
+            watchOnControl(watchOnAction) {
+                AppleDetailActionButtonLabel(title: watchOnAction.title, glyph: .systemImage("arrow.up.forward.app"),
+                                             kind: .play, width: actionButtonWidth)
+            }
+            .buttonStyle(.plain)
+        } else {
+            titlePagePlayButton
+        }
+    }
+
+    /// One service is a button, several are a menu; both are the same
+    /// control on the iPhone, iPad, Vision Pro and Mac. The caller sets the
+    /// button style, which the menu's label takes too.
+    @ViewBuilder
+    private func watchOnControl<Label: View>(_ action: AppleWatchOnAction,
+                                             @ViewBuilder label: () -> Label) -> some View {
+        switch action {
+        case .single(let choice):
+            Button { openWatchOn(choice) } label: { label() }
+                .accessibilityLabel(choice.title)
+                .accessibilityHint(watchOnHint(choice))
+                .accessibilityIdentifier("detail.watchOn")
+        case .menu(let choices):
+            Menu {
+                ForEach(choices) { choice in
+                    Button(choice.service.displayName) { openWatchOn(choice) }
+                        .accessibilityLabel(choice.title)
+                        .accessibilityHint(watchOnHint(choice))
+                        .accessibilityIdentifier("detail.watchOn.\(choice.id)")
+                }
+            } label: {
+                label()
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .accessibilityLabel(action.title)
+            .accessibilityIdentifier("detail.watchOn")
+        }
+    }
+
+    @ViewBuilder
+    private var titlePagePlayButton: some View {
         switch titlePagePrimaryAction {
         case nil:
             EmptyView()
@@ -4479,7 +4558,7 @@ struct AppleCatalogItemDetailView: View {
             // Directly under Play/Trailer, in secondary text — easier to
             // spot than buried in the synopsis, but still not a second Play
             // (owner 2026-09-28).
-            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+            AppleWatchProviderRow(providers: alsoAvailableProviders)
                 .padding(.top, hasPrimaryActionRow ? AppleDetailMetrics.buttonsToIconRowSpacing : 0)
             seasonDownloadStatus
             secondaryActionRow
@@ -4520,11 +4599,11 @@ struct AppleCatalogItemDetailView: View {
 
     /// Whether the Play / Download row has anything in it.
     private var hasPrimaryActionRow: Bool {
-        titlePagePrimaryAction != nil || showsDownloadAction
+        titlePagePrimaryAction != nil || watchOnAction != nil || showsDownloadAction
     }
 
     private var actionButtonWidth: CGFloat {
-        showsDownloadAction && titlePagePrimaryAction != nil
+        showsDownloadAction && (titlePagePrimaryAction != nil || watchOnAction != nil)
             ? AppleDetailMetrics.actionButtonWidth(for: detailLayout, screenWidth: viewportSize.width)
             : actionColumnWidth
     }
@@ -5663,6 +5742,7 @@ struct AppleCatalogItemDetailView: View {
         episodeList.selectedEpisodeID = nil
         pageMetadata.resolvedMediaID = nil
         pageMetadata.watchProviders = []
+        pageMetadata.streamingIDs = nil
         
         if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
             pageMetadata.isPreparing = true
@@ -5845,6 +5925,59 @@ struct AppleCatalogItemDetailView: View {
         let visible = AppleWatchProviderPolicy.visible(all, enabledProviderIDs: enabled)
         appleTrace("watch providers: \(visible.count) for \(item.name) (enabled \(enabled.count), \(all.count) in \(region))")
         pageMetadata.watchProviders = visible
+        // Only when Watch on takes Play's place does the IMDb id go to
+        // Wikidata — and nothing else does.
+        guard watchOnAction != nil, AppleWikidataStreamingQuery.isIMDbID(imdbID) else { return }
+        let ids = await AppleWikidataStreamingIDClient.shared.ids(for: imdbID)
+        guard !Task.isCancelled else { return }
+        pageMetadata.streamingIDs = ids
+    }
+
+    /// Watch on <Service> in Play's place: nothing in the app can play this
+    /// title and a service the viewer added carries it.
+    private var watchOnAction: AppleWatchOnAction? {
+        AppleWatchOnPolicy.action(hasInAppSource: hasPlaybackRoute, visibleProviders: pageMetadata.watchProviders)
+    }
+
+    /// The "Also available on" line, which Watch on replaces when it is the
+    /// main button (it would only repeat it).
+    private var alsoAvailableProviders: [AppleWatchProvider] {
+        watchOnAction == nil ? pageMetadata.watchProviders : []
+    }
+
+    private func watchOnLinks(_ choice: AppleWatchOnChoice, ids: AppleStreamingIDs?) -> [AppleWatchOnLink] {
+        AppleWatchOnLinkPolicy.links(for: choice.service, ids: ids ?? AppleStreamingIDs(), title: item.name)
+    }
+
+    private func watchOnHint(_ choice: AppleWatchOnChoice) -> String {
+        AppleWatchOnLinkPolicy.accessibilityHint(
+            service: choice.service, links: watchOnLinks(choice, ids: pageMetadata.streamingIDs)
+        ) ?? ""
+    }
+
+    /// Opens the service: the title in its app where possible, then the
+    /// fallbacks (`AppleWatchOnPolicy.attempts`), ending on instructions.
+    private func openWatchOn(_ choice: AppleWatchOnChoice) {
+        prompts.watchOnMenu = false
+        let imdbID = pageMetadata.resolvedMediaID ?? item.mediaID
+        let cached = pageMetadata.streamingIDs
+        let title = item.name
+        Task {
+            var ids = cached
+            if ids == nil, AppleWikidataStreamingQuery.isIMDbID(imdbID) {
+                ids = await AppleWikidataStreamingIDClient.shared.ids(for: imdbID)
+                pageMetadata.streamingIDs = ids
+            }
+            let links = watchOnLinks(choice, ids: ids)
+            let outcome = await AppleWatchOnPolicy.run(
+                AppleWatchOnPolicy.attempts(for: links, platform: .current),
+                open: { url, appOnly in await appleOpenWatchOnURL(url, appOnly: appOnly) }
+            )
+            appleTrace("watch-on: \(title) → \(choice.service.displayName) (\(outcome.traceDetail))")
+            if case .instructions(let link) = outcome {
+                prompts.watchOnInstructions = AppleWatchOnInstructions(service: choice.service, title: title, link: link)
+            }
+        }
     }
 
     /// The episode the show's saved position names — what Continue Watching
@@ -6880,6 +7013,10 @@ private struct AppleTitlePagePrompts {
     var streamPicker = false
     var arrRequestKind: AppleArrKind?
     var arrFeedback: String?
+    /// Apple TV's "Watch on…" page of services.
+    var watchOnMenu = false
+    /// "Open <Service> and search for <Title>" when nothing could be opened.
+    var watchOnInstructions: AppleWatchOnInstructions?
 }
 
 private struct AppleTitlePageActionState {
@@ -6913,6 +7050,9 @@ private struct AppleTitlePageMetadataState {
     /// Services the viewer subscribes to that also carry this title. Empty
     /// unless they have opted in — see `AppleWatchProviderPolicy`.
     var watchProviders: [AppleWatchProvider] = []
+    /// The title's per-service ids from Wikidata, fetched only when Watch on
+    /// replaces Play (`AppleWatchOnPolicy`).
+    var streamingIDs: AppleStreamingIDs?
     var rankedSuggestions: [AppleCatalogItem] = []
     /// The title page's schedule badge (iPhone and Mac), worked out once per
     /// episode list rather than on every redraw.
@@ -7759,7 +7899,10 @@ extension AppleCatalogItemDetailView {
             ? AnyLayout(VStackLayout(spacing: 12))
             : AnyLayout(HStackLayout(spacing: 12))
         return layout {
-            if let state = titlePagePrimaryButtonState {
+            if let watchOnAction {
+                watchOnControl(watchOnAction) { phoneWatchOnLabel(watchOnAction.title) }
+                    .buttonStyle(.plain)
+            } else if let state = titlePagePrimaryButtonState {
                 phonePrimaryButton(state)
             }
             HStack(spacing: 12) {
@@ -7815,6 +7958,23 @@ extension AppleCatalogItemDetailView {
         } else {
             playbackUI.request = UUID()
         }
+    }
+
+    private func phoneWatchOnLabel(_ title: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.up.forward.app")
+                .accessibilityHidden(true)
+            Text(title)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .minimumScaleFactor(0.8)
+        }
+        .font(.body.weight(.semibold))
+        .foregroundStyle(.black)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, minHeight: 50)
+        .background(.white, in: .rect(cornerRadius: 12, style: .continuous))
+        .contentShape(.rect(cornerRadius: 12, style: .continuous))
     }
 
     private func phonePrimaryButton(_ state: TitlePagePrimaryButtonState) -> some View {
@@ -7904,7 +8064,7 @@ extension AppleCatalogItemDetailView {
             // Directly under the hero's action row above, in secondary
             // text — easier to spot than buried in the synopsis, but still
             // not a second Play (owner 2026-09-28).
-            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+            AppleWatchProviderRow(providers: alsoAvailableProviders)
             if item.type == "series", let episode = selectedEpisode,
                let heading = AppleTitlePagePolicy.nextEpisodeHeading(episode) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -8525,7 +8685,21 @@ extension AppleCatalogItemDetailView {
     /// and pressed states and a tooltip on each round one.
     private var macActionRow: some View {
         HStack(spacing: 12) {
-            if let state = titlePagePrimaryButtonState {
+            if let watchOnAction {
+                watchOnControl(watchOnAction) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.forward.app")
+                            .accessibilityHidden(true)
+                        Text(watchOnAction.title)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .frame(minWidth: 180)
+                }
+                .buttonStyle(AppleMacHeroButtonStyle(kind: .primary))
+            } else if let state = titlePagePrimaryButtonState {
                 Button(action: performTitlePagePrimaryAction) {
                     HStack(spacing: 8) {
                         if state.isBusy {
