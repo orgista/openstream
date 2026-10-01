@@ -14,6 +14,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
       last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
+- [ ] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
+      Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials
+      not the checked season; Settings › Playback bottom row, Left doesn't reach the sidebar; faint metadata line
+      over bright art (Goede Tijden).
 - [ ] **iOS 18.6 iPhone regression (b4d4793, 2026-10-01):** no hang (5 titles incl. General Hospital S64), Resume,
       next episode, no tab-switch replay, English-only captions, Live error ~9 s, configure-first, 0 crashes. Open:
       FIXED (sim-checked on iOS 18.6): hero Play Trailer over the preview gets sound; title-page art comes back
