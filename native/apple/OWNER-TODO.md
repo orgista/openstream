@@ -16,13 +16,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **iOS 18.6 iPhone regression (b4d4793, 2026-10-01):** no hang (5 titles incl. General Hospital S64), Resume,
       next episode, no tab-switch replay, English-only captions, Live error ~9 s, configure-first, 0 crashes. Open:
-      1. Discover hero: Play Trailer while the silent preview plays does nothing (no sound).
-      2. Title page: after the trailer ends the background stays black instead of the art.
-      3. Hero says Play for a title with no episodes → "Playback Unavailable… details only".
-      4. Left swipe on a hero with a playing preview opens the title instead of the next hero.
-      5. Subtitles show "£" for ♪ (A Different World).
-      6. Search "General Hospital" puts the 2008/1994/1972 shows above the 1963 soap.
-      7. VoiceOver reads Settings icons as symbol names ("rectangle.stack.badge.plus").
+      FIXED (sim-checked on iOS 18.6): hero Play Trailer over the preview gets sound; title-page art comes back
+      (the art itself failed to load — now tries the next image); hero shows Play only when something plays; a
+      swipe pages the hero; "£" → "♪" in subtitles; General Hospital 1963 first; VoiceOver no longer reads icon
+      names. Still: "A Different World" search lists the 2026 show above 1987.
       Minor: title page flashes between auto-advanced episodes; CW time left uses the stream's length (director's cut).
 - [ ] **iPad regression of today's fixes (2026-10-01):** 10/11 pass (Resume, latest season, next episode, captions,
       IPTV error ~9 s, configure-first, Remove from CW, rotation, search, 0 crashes). Open:
