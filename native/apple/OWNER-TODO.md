@@ -7,6 +7,14 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **P0 iOS 18: app freezes when opening a title from Discover** (2026-10-01, iOS 18.6 sim, 3/3; hero or poster
+      tap; main thread 100% in the navigation push layout, app frame AppleCatalogItemDetailView.phoneHero).
+      Search → title works. Old iOS 18 crash: 0 crashes now.
+- [ ] Watch on Netflix opened tv.apple.com when the Netflix app/id was missing — a fallback must stay on the
+      labelled service (Netflix search), not jump to Apple TV.
+- [ ] iOS 18 UX: nav icons + large "Discover" title unreadable on bright hero art (no glass on iOS 18); Streaming
+      Services "Add Service" only tappable on its label; full-screen player not modal for VoiceOver; a search
+      deep link with a title page open lands under it.
 - [ ] **tvOS verification of 4fd1ac5 (2026-10-01 early):** toggles/Retry readable ✅, cue placement ✅, field outlines ✅,
       audio labels ✅. Still broken: **every Settings Picker on tvOS opens an empty page** (Package, Live view,
       Playback › Player; Menu there quits to Home) — pre-existing; Skip Intro still not reachable with Down; Top 10
