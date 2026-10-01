@@ -171,6 +171,9 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         let asset = AVURLAsset(url: playbackURL)
         let playerItem = AVPlayerItem(asset: asset)
         playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
+        #if !os(macOS)
+        if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title) }
+        #endif
         let avPlayer = AVPlayer(playerItem: playerItem)
         if AppleTestAudioMute.isActive { avPlayer.isMuted = true }
         self.item = playerItem

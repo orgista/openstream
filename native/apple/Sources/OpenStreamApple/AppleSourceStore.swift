@@ -1134,6 +1134,13 @@ public final class AppleSourceStore {
 
     private var testCatalogSeedKey: String { storageKey + ".seeded-test-catalogs.v1" }
 
+    /// A device set up from the owner's dev-sources file gets exactly that
+    /// file (`scripts/seed-sim.sh`): the test catalogs count as seeded, so
+    /// AIOMetadata is not added beside it now or on a later launch.
+    public func markTestCatalogsSeeded() {
+        for value in Self.testCatalogManifests { markTestCatalogSeeded(value) }
+    }
+
     private func seededTestCatalogs() -> [String] {
         defaults.stringArray(forKey: testCatalogSeedKey) ?? []
     }

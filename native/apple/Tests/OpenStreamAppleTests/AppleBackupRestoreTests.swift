@@ -27,7 +27,6 @@ struct AppleAddonURLSecretPolicyTests {
         "https://fixture.example/%7B%22tmdbKey%22%3A%22%22%7D/manifest.json",
         "https://fixture.example/eyJ0b3Jib3giOiJ1bnNldCIsInNvcnQiOiJkZXNjIn0/manifest.json",
         "https://fixture.baby-beamup.club/eyJjYXRhbG9ncyI6WyJuZngiLCJobnAiXX0/manifest.json",
-        "https://fixture.example/eyJwcm92aWRlciI6ImRpcmVjdCIsIm0zdVVybCI6Imh0dHBzOi8vbGlzdHMuZml4dHVyZS5leGFtcGxlL2lwdHYvaW5kZXgubTN1IiwiZW5hYmxlRXBnIjpmYWxzZX0/manifest.json",
     ])
     func unconfiguredAddonsArePublic(_ text: String) throws {
         #expect(!AppleAddonURLSecretPolicy.isSecret(try url(text)))
@@ -38,6 +37,8 @@ struct AppleAddonURLSecretPolicyTests {
         "https://torrentio.strem.fun/sort=qualitysize|realdebrid=FIXTUREKEY/manifest.json",
         "https://fixture.baby-beamup.club/%7B%22key%22%3A%22fixture%22%7D/manifest.json",
         // A key, a signed-in playlist or an instance id inside JSON options.
+        // Any playlist address: sign-ins often sit in the path (user/pass/playlist.m3u).
+        "https://fixture.example/eyJwcm92aWRlciI6ImRpcmVjdCIsIm0zdVVybCI6Imh0dHBzOi8vbGlzdHMuZml4dHVyZS5leGFtcGxlL2lwdHYvaW5kZXgubTN1IiwiZW5hYmxlRXBnIjpmYWxzZX0/manifest.json",
         "https://fixture.example/eyJ0b3Jib3giOiJmaXh0dXJlS2V5MDEyMzQ1Njc4OWFiY2RlZiJ9/manifest.json",
         "https://fixture.example/eyJwcm92aWRlciI6ImRpcmVjdCIsIm0zdVVybCI6Imh0dHBzOi8vbGlzdHMuZml4dHVyZS5leGFtcGxlL2dldC5waHA_dXNlcm5hbWU9dSZwYXNzd29yZD1wIn0/manifest.json",
         "https://fixture.example/eyJpbnN0YW5jZUlkIjoiMWI0ZTI4YmEtMmZhMS0xMWQyLTg4M2YtMDAxNmQzY2NhNDI3In0/manifest.json",

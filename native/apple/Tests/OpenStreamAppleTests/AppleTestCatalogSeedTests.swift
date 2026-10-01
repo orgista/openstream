@@ -42,6 +42,15 @@ private func seedStore(manifestName: String = "AIOMetadata") -> (AppleSourceStor
         #expect(store.sources.filter { $0.kind == .stremio }.count == 1)
     }
 
+    /// seed-sim.sh: a device set up from the dev-sources file gets only
+    /// that file, never AIOMetadata beside it (Apple TV check 2026-10-01).
+    @Test func devSourcesSetupSkipsTheTestCatalogs() async {
+        let (store, _) = seedStore()
+        store.markTestCatalogsSeeded()
+        await store.seedTestCatalogsIfNeeded(force: true)
+        #expect(store.sources.filter { $0.kind == .stremio }.isEmpty)
+    }
+
     @Test func aDeletedSeedStaysDeleted() async throws {
         let (store, _) = seedStore()
         await store.seedTestCatalogsIfNeeded(force: true)

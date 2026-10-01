@@ -132,6 +132,17 @@ extension AppleStremioCandidateRanking {
         }
     }
 
+    /// Whether the AVPlayer-only engine opens this release: an MPEG-4 file or
+    /// a name that says nothing about its container (HLS, bare URLs), and
+    /// not one the add-on marked as needing the gateway.
+    public static func stockPlayerPlays(_ traits: PlaybackTraits) -> Bool {
+        guard !traits.requiresGateway else { return false }
+        switch traits.container {
+        case .mp4, .unknown: return true
+        case .matroska, .transportStream, .other: return false
+        }
+    }
+
     /// A Dolby Vision stream with no HDR10 base layer (profile 5) plays in
     /// the wrong colours on a display without Dolby Vision, so it does not
     /// count as playable there; one with a base layer plays as HDR10.
@@ -193,7 +204,8 @@ extension AppleStremioCandidateRanking {
         title: String? = nil,
         year: Int? = nil,
         unhealthyServices: Set<String> = [],
-        preferredService: String? = nil
+        preferredService: String? = nil,
+        stockPlayerOnly: Bool = false
     ) -> [AppleStremioHTTPPlaybackCandidate] {
         let mismatched = titleMismatches(candidates, title: title, year: year, season: episode?.season)
         let tierRank: (AppleStreamQualityTier?) -> Int = { tier in
@@ -216,12 +228,17 @@ extension AppleStremioCandidateRanking {
             let preferred = preferredService != nil && candidate.serviceKey == preferredService
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),
                     playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down, preferred,
-                    AppleStreamPlaceholderPolicy.isPlaceholder(candidate))
+                    AppleStreamPlaceholderPolicy.isPlaceholder(candidate),
+                    !stockPlayerOnly || stockPlayerPlays(traits))
         }
         .sorted { a, b in
             // A provider's error clip goes last, below even another title.
             if a.9 != b.9 { return !a.9 }
             if a.2 != b.2 { return !a.2 }
+            // The Native (stock) player cannot open Matroska or TS: a release
+            // it plays comes first, the rest stay as fallbacks (Apple TV
+            // check 2026-10-01: next episode picked an MKV → Playback Failed).
+            if a.10 != b.10 { return a.10 }
             if a.3 != b.3 { return a.3 }
             if a.7 != b.7 { return !a.7 }
             if a.4 != b.4 { return a.4 < b.4 }

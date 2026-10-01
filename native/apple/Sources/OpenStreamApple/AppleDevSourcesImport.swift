@@ -15,6 +15,9 @@ public enum AppleDevSourcesImport {
     private static var pendingData: Data?
     private static var pendingReadFailure: String?
 
+    /// A dev-sources file was handed over at launch and not yet imported.
+    public static var isPending: Bool { pendingData != nil || pendingReadFailure != nil }
+
     public static func captureIfRequested(defaults: UserDefaults = .standard, fileManager: FileManager = .default) {
         guard let path = defaults.string(forKey: AppleDevSourcesPolicy.launchKey), !path.isEmpty else { return }
         let url = URL(fileURLWithPath: path)

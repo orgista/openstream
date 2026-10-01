@@ -759,6 +759,8 @@ private struct AppleAddManifestSourceView: View {
     @State private var errorMessage: String?
     /// Set when the add-on must be configured on its own site first.
     @State private var configureURL: URL?
+    /// The add-on answered "configure me first": a state, not a failure.
+    @State private var needsConfiguration = false
 
     let sourceStore: AppleSourceStore
 
@@ -816,7 +818,17 @@ private struct AppleAddManifestSourceView: View {
                 .focusSection()
 
                 if let errorMessage {
-                    AppleTVFormMessage(text: errorMessage, isError: true)
+                    if needsConfiguration {
+                        // Plain secondary text: no browser on the Apple TV,
+                        // so no link either.
+                        Text(errorMessage)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                            .accessibilityIdentifier("sources.form.message")
+                    } else {
+                        AppleTVFormMessage(text: errorMessage, isError: true)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -846,7 +858,7 @@ private struct AppleAddManifestSourceView: View {
                 Section {
                     // "Configure first" is a state, not a failure: plain text.
                     Text(errorMessage)
-                        .foregroundStyle(configureURL == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                        .foregroundStyle(needsConfiguration ? AnyShapeStyle(.primary) : AnyShapeStyle(.red))
                     if let configureURL {
                         Link("Open Configuration", destination: configureURL)
                             .accessibilityIdentifier("sources.catalog.configure")
@@ -887,6 +899,7 @@ private struct AppleAddManifestSourceView: View {
         isAdding = true
         errorMessage = nil
         configureURL = nil
+        needsConfiguration = false
 
         Task { @MainActor in
             defer { isAdding = false }
@@ -898,7 +911,9 @@ private struct AppleAddManifestSourceView: View {
             } catch AppleManifestClientError.manifestNeedsSetup(let url) {
                 errorMessage = AppleManifestClientError.manifestNeedsSetup(configureURL: url).errorDescription
                 configureURL = url
+                needsConfiguration = true
             } catch AppleManifestClientError.manifestNeedsConfiguration {
+                needsConfiguration = true
                 errorMessage = AppleManifestClientError.manifestNeedsConfiguration.errorDescription
                 configureURL = (try? AppleManifestURLPolicy.normalize(manifestURL))
                     .flatMap(AppleManifestURLPolicy.configureURL(forManifest:))

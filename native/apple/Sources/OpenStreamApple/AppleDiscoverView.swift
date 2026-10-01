@@ -5298,6 +5298,15 @@ struct AppleCatalogItemDetailView: View {
         AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
     }
 
+    /// Where this title's saved position lives: `recordID`, or the key the
+    /// same title was saved under when it was opened another way
+    /// (`AppleTitleProgressIdentity`). Read and written through this one key.
+    private var progressRecordID: String {
+        let candidates = AppleTitleProgressIdentity.candidates(
+            item: item, sourceID: source.id, resolvedMediaID: pageMetadata.resolvedMediaID)
+        return AppleTitleProgressIdentity.key(among: candidates) { playbackStore.progress(for: $0) } ?? recordID
+    }
+
     private var offlineRecordID: String {
         selectedEpisodeSelection.map { "\(recordID):\($0.mediaID)" } ?? recordID
     }
@@ -5477,10 +5486,11 @@ struct AppleCatalogItemDetailView: View {
         let settings = settings
         let store = localSourceStore ?? AppleSourceStore()
         let selectedItem = item.withMediaID(selectedPlaybackMediaID)
-        let mediaID = recordID
+        let mediaID = progressRecordID
         let title = selectedEpisodeSelection?.displayTitle ?? item.name
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         let runtime = expectedRuntime
+        let stockPlayerOnly = settings.playbackEngine == .native
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
                 ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
@@ -5510,7 +5520,8 @@ struct AppleCatalogItemDetailView: View {
             @MainActor func order(_ choice: AppleStreamQualityChoice) -> [ApplePlaybackSourceOption] {
                 AppleStremioCandidateRanking.playbackOrder(streams, choice: choice, device: device,
                     episode: episode, title: selectedItem.name, year: selectedItem.year,
-                    unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys()).map(option)
+                    unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
+                    stockPlayerOnly: stockPlayerOnly).map(option)
             }
             let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
             return ApplePlaybackSourceOptions(
@@ -5634,9 +5645,9 @@ struct AppleCatalogItemDetailView: View {
                         request: ApplePlaybackRequest(
                             url: prepared.url,
                             headers: prepared.requestHeaders,
-                            resumePosition: AppleDetailResume.position(mediaID: recordID,
+                            resumePosition: AppleDetailResume.position(mediaID: progressRecordID,
                                 partID: AppleDetailResume.partID(type: item.type, mediaID: selectedPlaybackMediaID)),
-                            mediaID: recordID,
+                            mediaID: progressRecordID,
                             title: item.name,
                             sourceKind: .stremio
                         ),
@@ -5671,9 +5682,10 @@ struct AppleCatalogItemDetailView: View {
                 episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
                 title: item.name, year: item.year,
                 unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
-                preferredService: playbackUI.preferredServiceKey)
+                preferredService: playbackUI.preferredServiceKey,
+                stockPlayerOnly: settings.playbackEngine == .native)
             playbackUI.preferredServiceKey = nil
-            let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
+            let mediaID = progressRecordID
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
             let runtime = expectedRuntime
             let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
@@ -6075,7 +6087,7 @@ struct AppleCatalogItemDetailView: View {
     /// The episode the show's saved position names — what Continue Watching
     /// and the home hero's Resume button promise — when it is in `loaded`.
     private func savedEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
-        AppleStremioEpisodePolicy.savedEpisode(progress: playbackStore.progress(for: recordID), in: loaded)
+        AppleStremioEpisodePolicy.savedEpisode(progress: playbackStore.progress(for: progressRecordID), in: loaded)
     }
 
     private func nextUnwatchedEpisodeID(
@@ -6102,8 +6114,8 @@ struct AppleCatalogItemDetailView: View {
     private func setWatched(_ watched: Bool, episode: AppleStremioEpisode) {
         if watched {
             playbackStore.markWatched(mediaID: episode.id)
-            if playbackStore.progress(for: recordID)?.partID == episode.id {
-                playbackStore.clear(mediaID: recordID)
+            if playbackStore.progress(for: progressRecordID)?.partID == episode.id {
+                playbackStore.clear(mediaID: progressRecordID)
             }
         } else {
             playbackStore.markUnwatched(mediaID: episode.id)
@@ -8008,7 +8020,7 @@ extension AppleCatalogItemDetailView {
     private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction? {
         AppleTitlePagePolicy.titlePagePrimaryAction(
             type: item.type,
-            progress: playbackStore.progress(for: recordID),
+            progress: playbackStore.progress(for: progressRecordID),
             selectedEpisode: selectedEpisode,
             isPlayable: hasPlaybackRoute,
             hasTrailer: trailerEmbedURL != nil,
@@ -8311,7 +8323,7 @@ extension AppleCatalogItemDetailView {
     /// N32 #10 (its list stopped at 83 % of the page beside a full-width
     /// More Like This).
     private func episodeRail(cardWidth: CGFloat, inset: CGFloat) -> some View {
-        let saved = playbackStore.progress(for: recordID)
+        let saved = playbackStore.progress(for: progressRecordID)
         let watched = watchedEpisodeIDs
         let now = Date.now
         return ScrollViewReader { proxy in
@@ -8965,7 +8977,7 @@ extension AppleCatalogItemDetailView {
     }
 
     private func macEpisodeRail(style: AppleDiscoverRowStyle) -> some View {
-        let saved = playbackStore.progress(for: recordID)
+        let saved = playbackStore.progress(for: progressRecordID)
         let watched = watchedEpisodeIDs
         let now = Date.now
         return AppleMacRail {
