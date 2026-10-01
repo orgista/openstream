@@ -22,11 +22,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (AIOMetadata is seeded on purpose in Debug/TestFlight). Still open:
       3. FIXED e8b60ec (sim-checked): stock player froze after a seek (AVPlayer stuck waiting with media buffered);
          it now plays what's buffered after 4 s.
-      5. Re-check of 5298e1c on the sim: Resume… still shows Play (from Search and Continue Watching); stock player
-         still shows "2023" as the small line above the title; Native next episode tried 3 sources with "no video
-         track" and closed before reaching the MP4. Fix batch running.
-      4. DECIDE: when no source plays in the Native player, hand over to the OpenStream player? (today the Native
-         choice is kept on purpose, so it shows Playback Failed).
+      5. FIXED (sim-checked): Resume… now shows on Apple TV (the button was hard-coded "Play"); the player shows
+         2015, not "2023"; on the stock player MP4 sources go first and MKVs are skipped instead of ~100 black-
+         spinner retries. Still open: when every stream fails the player just closes with no "Playback Unavailable"
+         message, and the stock player doesn't hand MKVs to the OpenStream player (ties into the DECIDE above).
 - [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
       chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
       1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,
