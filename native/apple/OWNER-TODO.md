@@ -25,11 +25,18 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
-- [ ] **App Store compliance audit (owner 2026-10-01):** add-on apps keep getting pulled while others stay — audit
-      how we use add-ons (metadata etc.), wording, defaults, review notes, before the next App Store submission.
-      Owner delegated idea picks to Claude. Picked, in order: (1) engine lab with smooth seek as a gate; (2) dead live
-      stream → auto-restart, then the same channel from another list; (3) format badges (DV/HDR/Atmos);
-      (4) denser TV guide; (5) IPTV catch-up + live pause. Audit running.
+- [ ] **App Store compliance audit (2026-10-01) — specs/app-store-compliance-audit.md:** Apple pulled every app built
+      around Stremio add-ons (Stremio Lite Jan 2026; Reelo, Omni, Fusion Aug 2026 — Reelo even after removing add-on
+      install). Survivors (Infuse, SenPlayer, VidHub, IPTVX, Swiftfin, Channels) = "player for your own content".
+      Will fix (no decision needed): test add-ons seeded in DEBUG only (App Review installs count as TestFlight today
+      and would get the AIOMetadata config — rotate its keys); remove the dormant torrent client from the binary;
+      TMDB/JustWatch credits + "we don't provide content" line; no "Stremio" anywhere; About link not a private repo.
+      DECIDE: (1) add-ons at all? safest = none, add-on users go through a Jellyfin bridge (Strand's route); middle =
+      user-pasted "Catalogs" only + all fixes. (2) downloads only from your own sources (local/SMB/media server)?
+      (3) catalog rows named by the add-on, not "Netflix Movies"; Top 10 off by default? (4) drop the bundled
+      361-channel US lineup (HBO, ESPN, PPV)? Owner still has the live App Store listing text to check by hand.
+      Ideas picked by Claude (owner delegated), in order: engine lab with smooth seek as a gate; dead live stream →
+      restart, then same channel from another list; format badges; denser TV guide; IPTV catch-up + live pause.
 - [ ] **Ideas from Strand + iProTV (2026-10-01, pick what you want):** smooth seek (no black flash) as a gate test;
       App Store risk — Strand pulled Stremio add-ons to pass review (fallback: Remux, add-ons behind a Jellyfin API);
       IPTV catch-up/timeshift + live pause; denser TV guide (TiviMate-style, Left → sidebar); IPTV multiview 2–4;
