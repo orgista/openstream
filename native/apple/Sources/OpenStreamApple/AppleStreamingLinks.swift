@@ -232,8 +232,10 @@ public struct AppleWatchOnLink: Equatable, Sendable {
 }
 
 /// The links to try for a service, best first (spec §4): the title's own
-/// page → its Apple TV page → in-app search (only where the app claims it)
-/// → the service's home. Never empty: home is always last.
+/// page → in-app search (only where the app claims it) → the service's home.
+/// Never empty: home is always last. The title's tv.apple.com page is a link
+/// for Apple TV only: a "Watch on Netflix" that fell back to it opened the
+/// TV app instead of Netflix (iOS 18 test, 2026-10-01).
 public enum AppleWatchOnLinkPolicy {
     public static func links(for service: AppleStreamingService, ids: AppleStreamingIDs, title: String) -> [AppleWatchOnLink] {
         var links: [AppleWatchOnLink] = []
@@ -250,7 +252,9 @@ public enum AppleWatchOnLinkPolicy {
         if service == .disneyPlus || service == .hulu {
             append(disneyPlusURL(fromHulu: ids), .title)
         }
-        append(appleTVTitleURL(ids), .appleTV)
+        if service == .appleTV {
+            append(appleTVTitleURL(ids), .appleTV)
+        }
         append(service.searchURL(for: title), .search)
         append(service.homeURL, .home)
         return links

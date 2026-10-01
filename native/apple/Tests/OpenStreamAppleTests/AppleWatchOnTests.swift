@@ -100,21 +100,38 @@ struct AppleWatchOnTests {
 
     private func ids(_ values: [String: [String]]) -> AppleStreamingIDs { AppleStreamingIDs(values: values) }
 
-    @Test func titleLinkComesFirstThenAppleTVThenSearchThenHome() {
+    @Test func titleLinkComesFirstThenSearchThenHome() {
         let links = AppleWatchOnLinkPolicy.links(
             for: .netflix,
             ids: ids(["P1874": ["70143836"], "P9751": ["umc.cmc.1v90fu25sgywa1e14jwnrt9uc"]]),
             title: "Breaking Bad"
         )
-        #expect(links.map(\.kind) == [.title, .appleTV, .search, .home])
+        #expect(links.map(\.kind) == [.title, .search, .home])
         #expect(links.first?.url.absoluteString == "https://www.netflix.com/title/70143836")
     }
 
-    @Test func noServiceIDFallsBackToAppleTVPage() {
-        let links = AppleWatchOnLinkPolicy.links(
+    /// "Watch on Netflix" with no Netflix id opened tv.apple.com (iOS 18
+    /// test, 2026-10-01): the fallback stays on the labelled service.
+    @Test func noServiceIDStaysOnTheServiceNotTheAppleTVPage() {
+        let netflix = AppleWatchOnLinkPolicy.links(
+            for: .netflix, ids: ids(["P9751": ["umc.cmc.1v90fu25sgywa1e14jwnrt9uc"]]), title: "Breaking Bad"
+        )
+        #expect(netflix.map(\.kind) == [.search, .home])
+        #expect(netflix.allSatisfy { $0.url.host()?.hasSuffix("netflix.com") == true })
+        let hbo = AppleWatchOnLinkPolicy.links(
             for: .hboMax, ids: ids(["P9586": ["umc.cmc.6loas01ow0w4lkatxxloz7a6e"]]), title: "Dune"
         )
-        #expect(links.map(\.kind) == [.appleTV, .search, .home])
+        #expect(!hbo.contains { $0.kind == .appleTV || $0.url.host() == "tv.apple.com" })
+        #expect(hbo.last?.kind == .home)
+        for platform in [AppleUIPlatform.iOS, .tvOS, .visionOS] {
+            let attempts = AppleWatchOnPolicy.attempts(for: netflix, platform: platform)
+            #expect(!attempts.contains { attempt in
+                switch attempt {
+                case .app(let link), .system(let link): link.url.host() == "tv.apple.com"
+                case .instructions: false
+                }
+            }, "\(platform)")
+        }
     }
 
     @Test func noIDsAtAllIsSearchThenHomeOrJustHome() {
