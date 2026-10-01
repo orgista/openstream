@@ -25,6 +25,14 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Open-source / public repo (2026-10-01) — specs/oss-public-readiness.md:** history scan (410 commits): no signing
+      keys, .env, API keys or IPTV logins anywhere. But: (1) your AIOMetadata config URL (its id is a login token) is
+      in the code — being moved out now; RECREATE that config in AIOMetadata. (2) 2.3 GB of movie/TV rips sit in git
+      history (Tests/Fixtures/private/) plus build folders, ServerPlus IPs in notes/screenshots, 21 commits under your
+      work email. No LICENSE yet. DECIDE: publish a fresh single-commit public repo from today's code minus the
+      exclude list (recommended; keep the old private repos archived — never flip them public), and the licence
+      (recommended Apache-2.0; MIT or MPL-2.0 also fine; engine/FFmpeg are LGPL, dynamically linked, so any works).
+      In progress (no decision needed): untrack the rips/build folders, add AetherEngine/FFmpeg/libdovi notices.
 - [ ] **Disc looks + badges DONE 987ce0a (sim-checked iPad + Apple TV):** disc badge on posters, turning-disc
       spinner, Play Disc / Skip to Movie (both play the movie until the engine menu is wired), Titles row, format
       badges (4K, Dolby Vision, HDR, Atmos, 7.1, Remux) on title pages only — the Quality picker stays plain per your
