@@ -187,6 +187,8 @@ public final class ApplePlaybackStore {
 
     public func save(mediaID: String, position: Double, duration: Double, partID: String? = nil) {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        AppleInteractionTrace.record(.playback,
+            "progress save key=\(storageKey) pos=\(Int(position.isFinite ? position : -1)) dur=\(Int(duration.isFinite ? duration : -1)) part=\(partID ?? "-")")
         save(storageKey: storageKey, position: position, duration: duration, partID: partID)
     }
 

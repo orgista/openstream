@@ -69,6 +69,11 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
     public var autoplay: Bool
     public var mediaID: String
     public var title: String?
+    /// The small line the stock player shows above `title` is "<year> •
+    /// <subtitle>": the show for an episode (nil for a film), and the year of
+    /// the film or episode. Unset, AVKit used the file's own tags.
+    public var subtitle: String?
+    public var releaseYear: Int?
     public var sourceName: String?
     public var sourceKind: SourceKind
     public var hints: Hints

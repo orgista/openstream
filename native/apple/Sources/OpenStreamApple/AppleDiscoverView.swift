@@ -3712,7 +3712,11 @@ struct AppleCatalogItemDetailView: View {
                     Image(systemName: "play.fill")
                         .font(.system(size: AppleTVDetailMetrics.pillGlyphSize, weight: .semibold))
                 }
-                Text(tvOSPlayIsBusy ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading") : "Play")
+                // The page's own verb (Resume once there is a saved position):
+                // this label was a literal "Play", so the Apple TV said Play
+                // after watching whatever the progress key resolved to
+                // (Apple TV check 2026-10-01).
+                Text(tvOSPlayIsBusy ? (playbackCoordinator.phase.isBusy ? "Preparing" : "Loading") : regularPlayTitle)
             }
         }
         .buttonStyle(AppleTVPillStyle(
@@ -3721,7 +3725,8 @@ struct AppleCatalogItemDetailView: View {
             fontSize: AppleTVDetailMetrics.pillFontSize
         ))
         .focused($tvDetailFocus, equals: .play)
-        .accessibilityLabel(tvOSPlayIsBusy ? "Preparing playback" : "Play")
+        .accessibilityLabel(tvOSPlayIsBusy ? "Preparing playback" : regularPlayTitle)
+        .task(id: regularPlayTitle) { traceTitleProgress() }
         .accessibilityIdentifier("detail.play")
         .contextMenu {
             Button("Quality", systemImage: "slider.horizontal.3") {
@@ -5301,10 +5306,41 @@ struct AppleCatalogItemDetailView: View {
     /// Where this title's saved position lives: `recordID`, or the key the
     /// same title was saved under when it was opened another way
     /// (`AppleTitleProgressIdentity`). Read and written through this one key.
+    /// Read through `ApplePlaybackProgressFeed`, so a save while the player
+    /// is up redraws the page's button when the player closes.
     private var progressRecordID: String {
-        let candidates = AppleTitleProgressIdentity.candidates(
+        let candidates = progressCandidates
+        return AppleTitleProgressIdentity.key(among: candidates) {
+            ApplePlaybackProgressFeed.shared.progress(for: $0, in: playbackStore)
+        } ?? recordID
+    }
+
+    private var progressCandidates: [String] {
+        AppleTitleProgressIdentity.candidates(
             item: item, sourceID: source.id, resolvedMediaID: pageMetadata.resolvedMediaID)
-        return AppleTitleProgressIdentity.key(among: candidates) { playbackStore.progress(for: $0) } ?? recordID
+    }
+
+    /// Every key the page tries, what each holds, the one it chose and the
+    /// verb it shows — the ids are catalog ids, never stream URLs.
+    private func traceTitleProgress() {
+        let held = progressCandidates.map { key -> String in
+            let saved = playbackStore.progress(for: key)
+            return "\(key)=\(saved.map { "\(Int($0.position))/\(Int($0.duration)) part=\($0.partID ?? "-")" } ?? "none")"
+        }
+        AppleInteractionTrace.record(.screen,
+            "title progress candidates=[\(held.joined(separator: ", "))] chosen=\(progressRecordID) label=\(regularPlayTitle)")
+    }
+
+    /// The stock player's line above the title (`ApplePlaybackRequest.subtitle`
+    /// and `releaseYear`): the show for an episode, and the year it aired or
+    /// the film's year.
+    private var stockPlayerSubtitle: String? {
+        item.type == "series" ? item.name : nil
+    }
+
+    private var stockPlayerYear: Int? {
+        let releaseInfo = item.type == "series" ? selectedEpisode?.releaseInfo : item.releaseInfo
+        return releaseInfo.flatMap { Int($0.prefix(4)) } ?? (item.type == "series" ? nil : item.year)
     }
 
     private var offlineRecordID: String {
@@ -5488,6 +5524,8 @@ struct AppleCatalogItemDetailView: View {
         let selectedItem = item.withMediaID(selectedPlaybackMediaID)
         let mediaID = progressRecordID
         let title = selectedEpisodeSelection?.displayTitle ?? item.name
+        let subtitle = stockPlayerSubtitle
+        let releaseYear = stockPlayerYear
         let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
         let runtime = expectedRuntime
         let stockPlayerOnly = settings.playbackEngine == .native
@@ -5513,7 +5551,7 @@ struct AppleCatalogItemDetailView: View {
                         AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
                             resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
                             addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                            expectedRuntime: runtime), settings: settings)
+                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear), settings: settings)
                     }
             }
             let device = AppleStreamDeviceCapabilities.current
@@ -5687,13 +5725,15 @@ struct AppleCatalogItemDetailView: View {
             playbackUI.preferredServiceKey = nil
             let mediaID = progressRecordID
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
+            let subtitle = stockPlayerSubtitle
+            let releaseYear = stockPlayerYear
             let runtime = expectedRuntime
             let requests = ordered.filter { chosen != nil || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }.map { candidate in
                 candidate.playbackRequest(mediaID: mediaID, title: title,
                     resume: AppleDetailResume.position(mediaID: mediaID,
                         partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
                     addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                    expectedRuntime: runtime)
+                    expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear)
             }
             playbackUI.selectedQuality = nil
             guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }
@@ -8020,7 +8060,7 @@ extension AppleCatalogItemDetailView {
     private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction? {
         AppleTitlePagePolicy.titlePagePrimaryAction(
             type: item.type,
-            progress: playbackStore.progress(for: progressRecordID),
+            progress: ApplePlaybackProgressFeed.shared.progress(for: progressRecordID, in: playbackStore),
             selectedEpisode: selectedEpisode,
             isPlayable: hasPlaybackRoute,
             hasTrailer: trailerEmbedURL != nil,

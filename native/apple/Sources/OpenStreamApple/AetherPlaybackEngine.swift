@@ -272,7 +272,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         captionHandoffEligible = !Self.declaresNativeSubtitleRenditions && !request.hints.nativeRemoteHLS
         if captionHandoff.loadStarted(eligible: captionHandoffEligible) { options.prepareNativeSubtitles = true }
         // The title page's title, not the file's own tags (`AppleStockPlayerMetadata`).
-        if !request.isLive { aether.setExternalMetadata(AppleStockPlayerMetadata.items(title: request.title)) }
+        if !request.isLive { aether.setExternalMetadata(AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear)) }
         do {
             _ = try await aether.load(
                 url: sourceURL,

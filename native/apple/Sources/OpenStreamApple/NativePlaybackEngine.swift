@@ -172,7 +172,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         let playerItem = AVPlayerItem(asset: asset)
         playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
         #if !os(macOS)
-        if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title) }
+        if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear) }
         #endif
         isLiveItem = request.isLive
         let avPlayer = AVPlayer(playerItem: playerItem)

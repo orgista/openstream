@@ -110,4 +110,45 @@ struct AppleTVCheck630db1dTests {
             isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: false,
             secondsStill: 12, secondsSinceLastNudge: NativePlaybackEngine.stallNudgeCooldown))
     }
+
+    // MARK: Re-check of 5298e1c: subtitle line, Native order and fallback depth
+
+    @Test func stockPlayerLineAboveTheTitleIsTheTitlePagesNotTheFiles() throws {
+        let film = AppleStockPlayerMetadata.items(title: "Mad Max: Fury Road", year: 2015)
+        // No subtitle for a film: an empty one still draws AVKit's "•".
+        #expect(!film.contains { $0.identifier == .iTunesMetadataTrackSubTitle })
+        let date = try #require(film.first { $0.identifier == .commonIdentifierCreationDate }?.value as? Date)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        #expect(calendar.component(.year, from: date) == 2015)
+        #expect(film.filter { $0.value is Date }.count == AppleStockPlayerMetadata.dateIdentifiers.count)
+        let episode = AppleStockPlayerMetadata.items(title: "S51, E7", subtitle: "Saturday Night Live")
+        #expect(episode.first { $0.identifier == .iTunesMetadataTrackSubTitle }?.value as? String == "Saturday Night Live")
+    }
+
+    @Test func nativeEnginePutsAnExplicitMP4BeforeUnknownContainers() {
+        let names = ["SNL.S51E07.1080p.WEB.h264-A", "SNL.S51E07.720p.WEB.h264-B", "SNL.S51E07.1080p.HEVC-C",
+                     "SNL.S51E07.2160p.mkv", "SNL.S51E07.720p.WEB.H264.mp4"]
+        let candidates = names.map { AppleStremioHTTPPlaybackCandidate(title: $0,
+            sourceURL: URL(string: "https://fixture.example/\($0)")!, filename: $0) }
+        let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: true)
+        let stock = AppleStremioCandidateRanking.playbackOrder(candidates, choice: .automatic, device: device,
+                                                               stockPlayerOnly: true)
+        #expect(stock.first?.filename == "SNL.S51E07.720p.WEB.H264.mp4")
+        #expect(stock.last?.filename == "SNL.S51E07.2160p.mkv")
+        // The MP4 named only in the URL's path counts too.
+        let opaque = AppleStremioHTTPPlaybackCandidate(title: "SNL S51E07",
+            sourceURL: URL(string: "https://fixture.example/dl/SNL.S51E07.mp4/abc123")!, filename: nil)
+        #expect(AppleStremioCandidateRanking.traits(of: opaque).container == .mp4)
+    }
+
+    @Test func nativeEngineTriesSixStreamsBeforeGivingUp() {
+        #expect(ApplePlaybackCoordinator.fallbackLimit(nativeEngine: true) == 6)
+        #expect(ApplePlaybackCoordinator.fallbackLimit(nativeEngine: false) == 3)
+        let base = URL(string: "https://fixture.example/stream/1")!
+        #expect(!ApplePlaybackCoordinator.stockPlayerOpens(url: base, filename: "Mad.Max.2015.2160p.Remux.mkv"))
+        #expect(ApplePlaybackCoordinator.stockPlayerOpens(url: base, filename: "Mad.Max.2015.DV.x265.mp4"))
+        // Unnamed: still tried.
+        #expect(ApplePlaybackCoordinator.stockPlayerOpens(url: base, filename: nil))
+    }
 }

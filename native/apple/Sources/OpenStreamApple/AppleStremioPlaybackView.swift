@@ -37,6 +37,8 @@ struct AppleStremioPlayerPresentation: Identifiable {
         let preferredEngine = settings.playbackEngine
         #endif
         let (engine, fellBack) = ApplePlaybackEngineFactory.make(preferred: preferredEngine)
+        appleTrace("player engine \(preferredEngine) (setting \(settings.playbackEngine)) for "
+            + "\(request.hints.filename.map { String($0.suffix(48)) } ?? "-"), \(fallbackCandidates.count) fallbacks")
         if fellBack {
             settings.engineFellBackToNative = true
         }

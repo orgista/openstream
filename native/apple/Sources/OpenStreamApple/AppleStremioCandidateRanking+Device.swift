@@ -96,7 +96,8 @@ extension AppleStremioCandidateRanking {
         case "mkv", "webm": .matroska
         case "ts", "m2ts", "mts": .transportStream
         case "avi", "wmv", "flv", "mpg", "mpeg": .other
-        default: has(#"\bmkv\b"#) ? .matroska : has(#"\bmp4\b"#) ? .mp4 : .unknown
+        default: has(#"\bmkv\b"#) ? .matroska
+            : has(#"\bmp4\b"#) || Self.urlNamesMPEG4(candidate.sourceURL) ? .mp4 : .unknown
         }
         let video: PlaybackTraits.VideoCodec =
             if has(#"\b(?:x265|h\.?265|hevc)\b"#) { .hevc }
@@ -135,6 +136,21 @@ extension AppleStremioCandidateRanking {
     /// Whether the AVPlayer-only engine opens this release: an MPEG-4 file or
     /// a name that says nothing about its container (HLS, bare URLs), and
     /// not one the add-on marked as needing the gateway.
+    /// An MP4/M4V named anywhere in the URL's path (a debrid link often ends
+    /// in an opaque id with the file name one segment earlier).
+    static func urlNamesMPEG4(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        return path.contains(".mp4") || path.contains(".m4v")
+    }
+
+    /// The Native engine's order: a release that says it is MPEG-4 first, then
+    /// one whose container is unknown (it may be anything — SNL S51E7's first
+    /// three unknown names all failed "no video track"), then the rest.
+    static func stockPlayerScore(_ traits: PlaybackTraits) -> Int {
+        guard stockPlayerPlays(traits) else { return 0 }
+        return traits.container == .mp4 ? 2 : 1
+    }
+
     public static func stockPlayerPlays(_ traits: PlaybackTraits) -> Bool {
         guard !traits.requiresGateway else { return false }
         switch traits.container {
@@ -229,7 +245,7 @@ extension AppleStremioCandidateRanking {
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),
                     playbackClass(traits), dynamicRangeScore(traits.dynamicRange, on: device), down, preferred,
                     AppleStreamPlaceholderPolicy.isPlaceholder(candidate),
-                    !stockPlayerOnly || stockPlayerPlays(traits))
+                    stockPlayerOnly ? stockPlayerScore(traits) : 0)
         }
         .sorted { a, b in
             // A provider's error clip goes last, below even another title.
@@ -238,7 +254,8 @@ extension AppleStremioCandidateRanking {
             // The Native (stock) player cannot open Matroska or TS: a release
             // it plays comes first, the rest stay as fallbacks (Apple TV
             // check 2026-10-01: next episode picked an MKV → Playback Failed).
-            if a.10 != b.10 { return a.10 }
+            // Among those, an explicit MP4 before an unknown container.
+            if a.10 != b.10 { return a.10 > b.10 }
             if a.3 != b.3 { return a.3 }
             if a.7 != b.7 { return !a.7 }
             if a.4 != b.4 { return a.4 < b.4 }

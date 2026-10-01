@@ -420,12 +420,62 @@ public final class ApplePlaybackCoordinator {
         fallbackTask?.cancel()
         librarySubtitles = AppleLibrarySubtitleService()
         hasShownFallbackNotice = false
-        let ordered = [request] + fallbackCandidates.prefix(2)
+        // The head of the list, with what decides the stock player's order.
+        for (index, candidate) in ([request] + fallbackCandidates).prefix(8).enumerated() {
+            appleTrace("candidate \(index + 1): file=\(candidate.hints.filename.map { String($0.suffix(40)) } ?? "-") "
+                + "ext=\(AppleTVPlaybackPresentationPolicy.containerExtension(url: candidate.url, filename: candidate.hints.filename) ?? "-") "
+                + "mp4InPath=\(AppleStremioCandidateRanking.urlNamesMPEG4(candidate.url))")
+        }
+        var opens = fallbackCandidates.filter(engineOpens)
+        // On the stock player a stream that names an MP4/M4V/MOV/HLS goes
+        // before one whose container is unknown; order is otherwise kept.
+        if engine is NativePlaybackEngine {
+            let named = opens.filter { Self.namesStockContainer(url: $0.url, filename: $0.hints.filename) }
+            opens = named + opens.filter { !Self.namesStockContainer(url: $0.url, filename: $0.hints.filename) }
+        }
+        if opens.count < fallbackCandidates.count {
+            appleTrace("fallback skips \(fallbackCandidates.count - opens.count) streams the stock player cannot open")
+        }
+        let ordered = [request] + opens.prefix(Self.fallbackLimit(nativeEngine: engine is NativePlaybackEngine) - 1)
         self.fallbackCandidates = Array(ordered.dropFirst())
+        appleTrace("fallback list \(ordered.count) of \(fallbackCandidates.count + 1) "
+            + "native=\(engine is NativePlaybackEngine)")
         self.fallbackAttempted = 1
         self.fallbackTotal = ordered.count
         self.fallbackTitle = request.title
         await beginAttempt(ordered[0])
+    }
+
+    /// How many streams one press tries. The stock (Native) player cannot open
+    /// an MKV or TS and only finds out once the file loads ("no video track"),
+    /// so three tries could all be spent on those before the explicit MP4 —
+    /// SNL S51E7 closed after three while its MP4 was fifth (Apple TV check
+    /// 2026-10-01). It gets six; the OpenStream engine plays nearly anything
+    /// and keeps three.
+    nonisolated static func fallbackLimit(nativeEngine: Bool) -> Int { nativeEngine ? 6 : 3 }
+
+    /// Whether this coordinator's engine can open `request` at all. The
+    /// engine is chosen once per player from the FIRST stream (on the Apple
+    /// TV an MP4 picks the stock player even with OpenStream selected), and
+    /// every fallback then runs on it: Mad Max's MKV fallbacks all failed "no
+    /// video track" in the stock player, one after another, and Search's
+    /// automatic sources looped through 100 of them (Apple TV re-check
+    /// 2026-10-01). The stock player skips a stream whose name says Matroska,
+    /// TS, AVI or WebM; an unnamed container is still tried.
+    private func engineOpens(_ request: ApplePlaybackRequest) -> Bool {
+        guard engine is NativePlaybackEngine else { return true }
+        return Self.stockPlayerOpens(url: request.url, filename: request.hints.filename)
+    }
+
+    nonisolated static func namesStockContainer(url: URL, filename: String?) -> Bool {
+        AppleTVPlaybackPresentationPolicy.containerExtension(url: url, filename: filename)
+            .map(AppleTVPlaybackPresentationPolicy.nativeContainers.contains) ?? false
+    }
+
+    nonisolated static func stockPlayerOpens(url: URL, filename: String?) -> Bool {
+        guard let ext = AppleTVPlaybackPresentationPolicy.containerExtension(url: url, filename: filename),
+              ["mkv", "webm", "ts", "m2ts", "mts", "avi", "wmv", "flv", "mpg", "mpeg"].contains(ext) else { return true }
+        return false
     }
 
     private func beginAttempt(_ request: ApplePlaybackRequest) async {
@@ -447,7 +497,7 @@ public final class ApplePlaybackCoordinator {
         setPhase(.loading)
         setRoute(engine.route)
         let joinProfile = request.hints.nativeRemoteHLS ? "standard" : "fastZap"
-        appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") route=\(route)\(request.isLive ? " join=\(joinProfile)" : "")")
+        appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") file=\(request.hints.filename.map { String($0.suffix(48)) } ?? "-") route=\(route)\(request.isLive ? " join=\(joinProfile)" : "")")
         setupProgress(for: request)
         startTimeout()
         let engine = self.engine
@@ -645,7 +695,16 @@ public final class ApplePlaybackCoordinator {
             cancelObservation()
             let attempt = generation
             do {
-                let next = try await nextAutomaticSource()
+                // Sources this engine cannot open are passed over, a bounded
+                // number of them (`engineOpens`).
+                var next = try await nextAutomaticSource()
+                var skipped = 0
+                while let candidate = next, !engineOpens(candidate), skipped < 40 {
+                    skipped += 1
+                    next = try await nextAutomaticSource()
+                }
+                if skipped > 0 { appleTrace("automatic source skipped \(skipped) the stock player cannot open") }
+                if let candidate = next, !engineOpens(candidate) { next = nil }
                 guard !Task.isCancelled, generation == attempt else { return }
                 if let next {
                     showFallbackNotice()
