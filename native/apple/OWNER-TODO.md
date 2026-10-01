@@ -7,6 +7,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **tvOS verification of 4fd1ac5 (2026-10-01 early):** toggles/Retry readable ✅, cue placement ✅, field outlines ✅,
+      audio labels ✅. Still broken: **every Settings Picker on tvOS opens an empty page** (Package, Live view,
+      Playback › Player; Menu there quits to Home) — pre-existing; Skip Intro still not reachable with Down; Top 10
+      "Wonka's" tile blank (TMDB+Cinemeta share an IMDb id → merge hides the TMDB record from the Top 10 artwork
+      match); subtitle/audio menus keep the old checkmark after picking from More…/another track; Channel Manager
+      error row draws an empty capsule; captions "off" still auto-selects English on some launches; a sparse-cue
+      subtitle shows nothing after a mid-stream switch; UI test testFullSubtitleMenuSelectsSpanish needs updating.
 - [ ] **Full-test bugs (Apple TV tvOS 27, v2 plan, 2026-10-01 overnight):**
       1. HIGH: focused toggle rows (Settings › Sources › add-on, catalog toggles) and the "Playback Failed" Retry
          button show no label — white text on the white focus pill.
