@@ -150,4 +150,55 @@ struct ApplePlaybackRouteTests {
                                                localResumeEpisode: next) == next)
     }
 
+    /// iOS 18.6 regression 2026-10-01: Monster: The Lizzie Borden Story with
+    /// Torrentio off. Its catalog lists no episodes, so the title page has no
+    /// Play (Play Trailer instead) — and the hero said Play, whose press ended
+    /// in "Playback Unavailable". Both now read the same answer.
+    @Test func heroWhoseEpisodeLookupCameBackEmptyOffersWhatTheTitlePageDoes() {
+        let sources = [source(resources: ["stream"])]
+        let heroPlayable = AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: sources, episodeLookup: .empty)
+        let titlePagePlayable = AppleTitlePagePolicy.hasPlaybackRoute(item: series, sources: sources, episodesUnavailable: true)
+        #expect(heroPlayable == false)
+        #expect(heroPlayable == titlePagePlayable)
+        let hero = AppleTitlePagePolicy.heroPrimaryAction(type: series.type, progress: nil, selectedEpisode: nil,
+                                                         isPlayable: heroPlayable, trailer: .available)
+        let page = AppleTitlePagePolicy.titlePagePrimaryAction(type: series.type, progress: nil, selectedEpisode: nil,
+                                                              isPlayable: titlePagePlayable, hasTrailer: true,
+                                                              platform: .iOS)
+        #expect(hero == .playTrailer)
+        #expect(hero == page)
+        #expect(AppleTitlePagePolicy.heroPrimaryAction(type: series.type, progress: nil, selectedEpisode: nil,
+                                                      isPlayable: heroPlayable, trailer: .none) == .details)
+        // Episodes found: Play, as before.
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: series, sources: sources, episodeLookup: .found))
+        // A movie has no episode list to come back empty.
+        #expect(AppleTitlePagePolicy.heroHasPlaybackRoute(item: movie, sources: sources, episodeLookup: .empty))
+    }
+
+    /// While the hero's episode lookup is out, a series that can only stream
+    /// holds its button back rather than saying Play and changing its mind.
+    @Test func heroRouteWaitsForTheEpisodeLookupOnlyWhenItDecides() {
+        let streaming = [source(resources: ["stream"])]
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: series, sources: streaming, episodeLookup: .pending) == false)
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: series, sources: streaming, episodeLookup: .unknown))
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: series, sources: streaming, episodeLookup: .empty))
+        // Files on disk play whatever the catalog lists; nothing plays at all.
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: series, sources: [], hasLocalGroup: true, episodeLookup: .pending))
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: series, sources: [], episodeLookup: .pending))
+        #expect(AppleTitlePagePolicy.heroRouteIsSettled(item: movie, sources: streaming, episodeLookup: .pending))
+    }
+
+    /// iOS 18.6 regression 2026-10-01: a title page whose first art 404'd
+    /// stayed black, and black again after its trailer ended. It moves on to
+    /// the next art the metadata named.
+    @Test func titlePageHeroArtSkipsArtThatFailed() {
+        let backdrop = URL(string: "https://fixture.example/backdrop.jpg")!
+        let background = URL(string: "https://fixture.example/background.jpg")!
+        let poster = URL(string: "https://fixture.example/poster.jpg")!
+        let candidates: [URL?] = [nil, backdrop, background, nil, poster]
+        #expect(AppleTitlePagePolicy.heroArtworkURL(candidates: candidates, failed: []) == backdrop)
+        #expect(AppleTitlePagePolicy.heroArtworkURL(candidates: candidates, failed: [backdrop]) == background)
+        #expect(AppleTitlePagePolicy.heroArtworkURL(candidates: candidates, failed: [backdrop, background]) == poster)
+        #expect(AppleTitlePagePolicy.heroArtworkURL(candidates: candidates, failed: [backdrop, background, poster]) == nil)
+    }
 }

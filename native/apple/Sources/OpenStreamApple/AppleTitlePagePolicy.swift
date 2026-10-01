@@ -109,16 +109,49 @@ public enum AppleTitlePagePolicy {
         }
     }
 
-    /// The hero's route: `hasPlaybackRoute` with the episode list treated as
-    /// unknown. The hero's own lookup coming back empty (or not back yet) is
-    /// no evidence the title page's will — JEOPARDY!'s came back empty while
-    /// its title page offered Play and Download Season (N17e) — so the hero
-    /// falls back to the source check instead of saying Details.
+    /// Where the hero's own episode lookup stands, for a series.
+    public enum HeroEpisodeLookup: Equatable, Sendable {
+        /// Still out, inside `heroTrailerLookupPatience`.
+        case pending
+        /// Never answered in time, or not looked up: no evidence either way.
+        case unknown
+        /// Answered with at least one episode.
+        case found
+        /// Answered with none — the title page will say "Episodes aren't
+        /// available" and its Play is not offered.
+        case empty
+    }
+
+    /// The hero's route: the title page's `hasPlaybackRoute`, fed with what
+    /// the hero's episode lookup found. An empty answer is the title page's
+    /// "Episodes aren't available", so the hero must not promise Play: it
+    /// did, for Monster: The Lizzie Borden Story with Torrentio off, and the
+    /// press ended in "Playback Unavailable" (iOS 18.6 regression
+    /// 2026-10-01). A lookup that never answered (`unknown`) is no evidence,
+    /// so the hero falls back to the source check (N17e).
     public static func heroHasPlaybackRoute(item: AppleCatalogItem, sources: [AppleSource],
                                              hasLocalGroup: Bool = false,
-                                             hasCompletedDownload: Bool = false) -> Bool {
+                                             hasCompletedDownload: Bool = false,
+                                             episodeLookup: HeroEpisodeLookup = .unknown) -> Bool {
         hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
-                         hasCompletedDownload: hasCompletedDownload)
+                         hasCompletedDownload: hasCompletedDownload,
+                         episodesUnavailable: episodeLookup == .empty)
+    }
+
+    /// Whether the hero's route is final: false only while its episode
+    /// lookup is out and the answer turns on it (a series whose only route
+    /// is a streaming add-on), so the button waits instead of saying Play
+    /// and then changing its mind.
+    public static func heroRouteIsSettled(item: AppleCatalogItem, sources: [AppleSource],
+                                           hasLocalGroup: Bool = false,
+                                           hasCompletedDownload: Bool = false,
+                                           episodeLookup: HeroEpisodeLookup) -> Bool {
+        guard episodeLookup == .pending else { return true }
+        let withEpisodes = hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
+                                            hasCompletedDownload: hasCompletedDownload, episodesUnavailable: false)
+        let withoutEpisodes = hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
+                                               hasCompletedDownload: hasCompletedDownload, episodesUnavailable: true)
+        return withEpisodes == withoutEpisodes
     }
 
     /// Whether the title page's Play is enabled. It needs a playback route
@@ -215,6 +248,13 @@ public enum AppleTitlePagePolicy {
             return .resume(episode: episodeCode(selectedEpisode))
         }
         return .resume(episode: nil)
+    }
+
+    /// The title page's hero art: the first candidate that has not failed
+    /// to load, nil once every one has. Candidates are in preference order;
+    /// nil entries (art the metadata did not name) are skipped.
+    public static func heroArtworkURL(candidates: [URL?], failed: Set<URL>) -> URL? {
+        candidates.lazy.compactMap { $0 }.first { !failed.contains($0) }
     }
 
     /// Whether a platform plays trailers at all. Everywhere but the Apple TV

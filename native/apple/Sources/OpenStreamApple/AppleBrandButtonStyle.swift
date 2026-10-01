@@ -198,9 +198,16 @@ public struct AppleTVNavigationLabel: View {
                 Label {
                     Text(title)
                 } icon: {
+                    // Decorative: the title carries the row's meaning. Left
+                    // visible, VoiceOver read the symbol's name with it
+                    // ("rectangle.stack.badge.plus", "Icloud Upload"; iOS 18.6
+                    // regression 2026-10-01).
                     Image(systemName: systemImage)
                         .foregroundStyle(.primary)
+                        .accessibilityHidden(true)
                 }
+                // The row reads as its title alone.
+                .accessibilityRepresentation { Text(title) }
                 // The same style again, on the outside.
                 //
                 // On macOS a `Label` inside a `List` row re-tints its icon

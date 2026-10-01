@@ -2506,6 +2506,9 @@ struct AppleCatalogItemDetailView: View {
     // dynamic property of a view, and the page had sixty.
     @State private var heroTrailer = AppleTitlePageTrailerState()
     @State private var heroStill = AppleTitlePageHeroStill()
+    /// Hero art URLs that failed to load on this page; the next candidate is
+    /// tried (`AppleTitlePagePolicy.heroArtworkURL`).
+    @State private var failedHeroArtworkURLs: Set<URL> = []
     @State private var titleWordmark = AppleTitlePageWordmarkState()
     @State private var pageGeometry = AppleTitlePageGeometry()
     @State private var prompts = AppleTitlePagePrompts()
@@ -2945,7 +2948,17 @@ struct AppleCatalogItemDetailView: View {
             await prepare()
             if !Task.isCancelled { fillTimeline.mark(.done) }
             await refreshOfflineState()
-            if playbackUI.ledger.takeInitialAutoPlay(initialAutoPlay) { playbackUI.request = UUID() }
+            // A hero's Play opens the page to play — but only what the page
+            // itself would offer: a series whose catalog lists no episodes
+            // has no Play here, and starting one anyway could only end in
+            // "Playback Unavailable" (iOS 18.6 regression 2026-10-01).
+            if playbackUI.ledger.takeInitialAutoPlay(initialAutoPlay) {
+                if hasPlaybackRoute {
+                    playbackUI.request = UUID()
+                } else {
+                    appleTrace("detail autoplay skipped: nothing on this page can play (\(item.name))")
+                }
+            }
             #if DEBUG
             if AppleTitlePageStreamFixture.opensQuality { await chooseStreams() }
             #endif
@@ -4003,12 +4016,24 @@ struct AppleCatalogItemDetailView: View {
                 heroStill.art = heroStill.art.settling(with: .loaded)
                 fillTimeline.mark(.artwork)
             },
-            onFailure: {
-                heroStill.image = nil
-                heroStill.art = heroStill.art.settling(with: .failed)
-            },
+            onFailure: heroArtworkFailed,
             keepsImageWhileReloading: true
         )
+    }
+
+    /// The art that failed is skipped for the next candidate; only when none
+    /// is left is the art failed for good.
+    private func heroArtworkFailed() {
+        if let url = heroArtworkURL {
+            failedHeroArtworkURLs.insert(url)
+            if let next = heroArtworkURL {
+                appleTrace("title hero art failed, trying \(AppleCatalogArtworkPolicy.traceID(next)) (\(item.name))")
+                return
+            }
+        }
+        appleTrace("title hero art failed: none left (\(item.name))")
+        heroStill.image = nil
+        heroStill.art = heroStill.art.settling(with: .failed)
     }
 
     /// Landscape art only: a poster cropped to 16:9 reads worse than the
@@ -4017,13 +4042,20 @@ struct AppleCatalogItemDetailView: View {
         pageMetadata.details?.backdropURL ?? item.backgroundURL ?? pageMetadata.fallbackArtwork?.backgroundURL
     }
 
+    /// The first art that has not failed, in the order the page prefers it.
+    /// It took only the first that existed: a catalog backdrop that 404s
+    /// (metahub has none for new titles) left the hero black under the
+    /// copy, and black again once a trailer ended — "back to the art" with
+    /// no art (iOS 18.6 regression 2026-10-01, screens 14/16).
     private var heroArtworkURL: URL? {
-        pageMetadata.details?.backdropURL
-                ?? item.backgroundURL
-                ?? pageMetadata.details?.posterURL
-                ?? item.posterURL
-                ?? pageMetadata.fallbackArtwork?.backgroundURL
-                ?? pageMetadata.fallbackArtwork?.posterURL
+        AppleTitlePagePolicy.heroArtworkURL(candidates: [
+            pageMetadata.details?.backdropURL,
+            item.backgroundURL,
+            pageMetadata.details?.posterURL,
+            item.posterURL,
+            pageMetadata.fallbackArtwork?.backgroundURL,
+            pageMetadata.fallbackArtwork?.posterURL
+        ], failed: failedHeroArtworkURLs)
     }
 
     private var displayTitle: String {
@@ -6383,6 +6415,19 @@ private struct AppleDetailRowButtonStyle: ButtonStyle {
 
 #if os(iOS) || os(visionOS)
 @MainActor
+/// The trailer's full-frame pause control. Touches go to a tap recognizer
+/// (`AppleYouTubeAutoPreview.PlayerContainer`), so VoiceOver's activate is
+/// routed here rather than to a control action.
+final class AppleTrailerTouchShield: UIButton {
+    var onAccessibilityActivate: (() -> Void)?
+
+    override func accessibilityActivate() -> Bool {
+        guard let onAccessibilityActivate else { return false }
+        onAccessibilityActivate()
+        return true
+    }
+}
+
 struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let url: URL
     let artworkURL: URL?
@@ -6620,7 +6665,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private let artworkStill = UIImageView()
         private let artworkCover: UIView & UIContentView
         private var artworkURL: URL?
-        let touchShield = UIButton(type: .custom)
+        let touchShield = AppleTrailerTouchShield(type: .custom)
         let muteButton = UIButton(type: .system)
         var onTap: (() -> Void)?
         var onMute: (() -> Void)?
@@ -6719,7 +6764,13 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             // container so YouTube never receives a user gesture.
             touchShield.backgroundColor = .clear
             touchShield.accessibilityIdentifier = "detail.trailer.toggle"
-            touchShield.addTarget(self, action: #selector(tapPreview), for: .primaryActionTriggered)
+            // A tap, never the button's own touch-up: that fired on any touch
+            // lifting inside the shield, so the hero carousel's left swipe
+            // over a playing preview paused it and the page under the swipe
+            // took it as a tap (iOS 18.6 regression 2026-10-01). A tap
+            // recognizer fails once the finger travels, and the swipe pages.
+            touchShield.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapPreview)))
+            touchShield.onAccessibilityActivate = { [weak self] in self?.tapPreview() }
             addSubview(touchShield)
 
             muteButton.tintColor = .white
@@ -8787,10 +8838,7 @@ extension AppleCatalogItemDetailView {
                         heroStill.art = heroStill.art.settling(with: .loaded)
                         fillTimeline.mark(.artwork)
                     },
-                    onFailure: {
-                        heroStill.image = nil
-                        heroStill.art = heroStill.art.settling(with: .failed)
-                    },
+                    onFailure: heroArtworkFailed,
                     keepsImageWhileReloading: true,
                     fixedPixelDimension: AppleMacHeroLayout.stillPixelDimension,
                     // Centred like the trailer's cover over it (N44).

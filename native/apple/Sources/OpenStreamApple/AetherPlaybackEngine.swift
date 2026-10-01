@@ -852,14 +852,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         )
     }
 
-    private static func mapCueBody(_ body: SubtitleCue.Body) -> AppleSubtitleCueBody {
+    /// Embedded text tracks carry the same "£"-for-"♪" captions as the
+    /// add-on files (A Different World's MKV, iOS 18.6 regression
+    /// 2026-10-01), so they get the same repair
+    /// (`AppleSubtitleTextParser.musicNotesRestored`).
+    static func mapCueBody(_ body: SubtitleCue.Body) -> AppleSubtitleCueBody {
         switch body {
         case .text(let s):
-            return .text(s)
+            return .text(AppleSubtitleTextParser.musicNotesRestored(s))
         case .richText(let runs):
             return .richText(runs.map { run in
                 AppleSubtitleTextRun(
-                    text: run.text,
+                    text: AppleSubtitleTextParser.musicNotesRestored(run.text),
                     isBold: run.isBold,
                     isItalic: run.isItalic,
                     isUnderlined: run.isUnderlined,

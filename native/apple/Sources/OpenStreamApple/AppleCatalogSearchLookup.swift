@@ -258,6 +258,9 @@ final class AppleCatalogSearchStore {
     private let debounce: Duration
     private let maximumResults: Int
     private var generation: UInt64 = 0
+    /// Each remote result's place in its add-on's own answer
+    /// (`sourceRanks(_:)`), kept so the re-rank as you type agrees with it.
+    private var sourceRanks: [String: Int] = [:]
 
     init(
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
@@ -300,7 +303,7 @@ final class AppleCatalogSearchStore {
         // add-ons answer: "saturday night live" sat under the
         // "saturday night li" list (Life, Lights, then Live) until the slow
         // search came back (Apple TV regression 2026-10-01).
-        results = Self.mergedResults(results, matching: value, limit: maximumResults)
+        results = Self.mergedResults(results, matching: value, limit: maximumResults, sourceRanks: sourceRanks)
 
         let clock = ContinuousClock()
         let debounceStart = clock.now
@@ -321,10 +324,12 @@ final class AppleCatalogSearchStore {
         guard generation == currentGeneration, !Task.isCancelled else { return }
 
         let remoteRecords = fetchedSections.flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
+        sourceRanks = Self.sourceRanks(fetchedSections)
         results = Self.mergedResults(
             localRecords + remoteRecords,
             matching: value,
-            limit: maximumResults
+            limit: maximumResults,
+            sourceRanks: sourceRanks
         )
         lookup = AppleCatalogSearchLookup(
             sections: fetchedSections + baseSections,
@@ -357,7 +362,8 @@ final class AppleCatalogSearchStore {
     nonisolated static func mergedResults(
         _ values: [AppleMediaRecord],
         matching query: String,
-        limit: Int
+        limit: Int,
+        sourceRanks: [String: Int] = [:]
     ) -> [AppleMediaRecord] {
         let tokens = normalized(query).split(separator: " ")
         var recordsByID: [String: AppleMediaRecord] = [:]
@@ -368,6 +374,7 @@ final class AppleCatalogSearchStore {
         // are different keys. The first record to claim a canonical id owns the
         // key; later ones with that id merge into it.
         var keysByCanonicalID: [String: String] = [:]
+        var ranksByKey: [String: Int] = [:]
         for value in values where value.kind != .episode && matches(value, tokens: tokens) {
             var key = collapseKey(value)
             if let canonical = value.canonicalID, !canonical.isEmpty {
@@ -382,13 +389,19 @@ final class AppleCatalogSearchStore {
             } else {
                 recordsByID[key] = value
             }
+            if let rank = sourceRanks[value.id] { ranksByKey[key] = min(ranksByKey[key] ?? rank, rank) }
         }
+        // The merged record keeps one id; its rank is the best of the rows it
+        // was made from.
+        var rankByID: [String: Int] = [:]
+        for (key, record) in recordsByID { if let rank = ranksByKey[key] { rankByID[record.id] = rank } }
         let normalizedQuery = tokens.joined(separator: " ")
         return recordsByID.values.sorted { lhs, rhs in
             let lhsRank = relevance(lhs, query: normalizedQuery)
             let rhsRank = relevance(rhs, query: normalizedQuery)
             if lhsRank != rhsRank { return lhsRank < rhsRank }
-            if lhsRank == 0, let exactOrder = exactMatchOrder(lhs, rhs) { return exactOrder }
+            if lhsRank == 0, let exactOrder = exactMatchOrder(lhs, rhs, lhsSourceRank: rankByID[lhs.id],
+                                                              rhsSourceRank: rankByID[rhs.id]) { return exactOrder }
             let lhsTitle = normalized(lhs.title)
             let rhsTitle = normalized(rhs.title)
             if lhsTitle != rhsTitle { return lhsTitle < rhsTitle }
@@ -421,18 +434,41 @@ final class AppleCatalogSearchStore {
     /// "stranger things" put the 2013 film above the 2016 series, because
     /// exact matches then fell back to alphabetical order and the id (full
     /// test 2026-10-01). The title more sources carry is the one people mean
-    /// (the merged rows are the popularity signal there is), then the newer
-    /// one, then a show or film ahead of a bare library file. Nil when none
-    /// of those tells them apart.
-    nonisolated static func exactMatchOrder(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord) -> Bool? {
+    /// (the merged rows are the popularity signal there is), then the one its
+    /// add-on ranked higher, then the newer one, then a show or film ahead of
+    /// a bare library file. Nil when none of those tells them apart.
+    ///
+    /// The add-on's own order is its popularity ranking: Cinemeta answers
+    /// "General Hospital" with the 1963 soap first, then 1972, 2008 and 1994
+    /// namesakes, and newest-first had put the soap last of the four (iOS
+    /// 18.6 regression 2026-10-01). `lhsSourceRank`/`rhsSourceRank` are each
+    /// title's place in its add-on's answer (`sourceRanks(_:)`), nil for a
+    /// title no add-on returned. A movie and a series each top their own
+    /// list, so "stranger things" still falls through to the year.
+    nonisolated static func exactMatchOrder(_ lhs: AppleMediaRecord, _ rhs: AppleMediaRecord,
+                                            lhsSourceRank: Int? = nil, rhsSourceRank: Int? = nil) -> Bool? {
         let lhsSources = Set(lhs.availability.map(\.instanceID)).count
         let rhsSources = Set(rhs.availability.map(\.instanceID)).count
         if lhsSources != rhsSources { return lhsSources > rhsSources }
+        if let lhsSourceRank, let rhsSourceRank, lhsSourceRank != rhsSourceRank { return lhsSourceRank < rhsSourceRank }
         if let lhsYear = lhs.year, let rhsYear = rhs.year, lhsYear != rhsYear { return lhsYear > rhsYear }
         let lhsTitled = lhs.kind == .series || lhs.kind == .movie
         let rhsTitled = rhs.kind == .series || rhs.kind == .movie
         if lhsTitled != rhsTitled { return lhsTitled }
         return nil
+    }
+
+    /// Each record's place in the answer of the add-on that returned it,
+    /// keyed by record id: the best place when several returned it. Only
+    /// what the search already returned — no lookup of its own.
+    nonisolated static func sourceRanks(_ sections: [AppleCatalogSection]) -> [String: Int] {
+        var ranks: [String: Int] = [:]
+        for section in sections {
+            for (position, record) in AppleMediaIngestion.catalogRecords(section: section).enumerated() {
+                ranks[record.id] = min(ranks[record.id] ?? position, position)
+            }
+        }
+        return ranks
     }
 
     /// One row per title: the normalised name and the year.

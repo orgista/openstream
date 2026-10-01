@@ -1,3 +1,4 @@
+import AetherEngine
 import Foundation
 import Testing
 @testable import OpenStreamApple
@@ -57,5 +58,34 @@ import Testing
         #expect(AppleSubtitleTextEncoding.utf16WithoutMark(ascii) == nil)
         let be = Array("1\r\n00:00:01,000".utf16.flatMap { [UInt8($0 >> 8), UInt8($0 & 0xFF)] })
         #expect(AppleSubtitleTextEncoding.utf16WithoutMark(be) == .utf16BigEndian)
+    }
+
+    /// iOS 18.6 regression 2026-10-01 (A Different World, screens 28–31): the
+    /// OpenSubtitles file itself says "£" where the broadcast caption had "♪".
+    @Test func aPoundSignWithNoAmountIsTheMusicNote() {
+        let srt = "1\r\n00:00:06,005 --> 00:00:08,708\r\n£ I know my parents love me £\r\n\r\n"
+            + "2\r\n00:00:09,000 --> 00:00:10,000\r\nThat's £5. It cost 20 £, or £ 30.\r\n"
+        let cues = AppleSubtitleTextParser.cues(from: Data(srt.utf8), language: "eng")
+        #expect(cues.map(\.body) == [.text("♪ I know my parents love me ♪"), .text("That's £5. It cost 20 £, or £ 30.")])
+    }
+
+    /// The other file for that episode is UTF-8 read as Latin-1 and saved as
+    /// UTF-8 again: "Â£ I KNOW MY PARENTS LOVE ME Â£".
+    @Test func doublyEncodedUTF8IsRepaired() {
+        let srt = "1\n00:00:06,005 --> 00:00:08,708\nÂ£ I KNOW MY PARENTS LOVE ME Â£\n\n2\n00:00:09,000 --> 00:00:10,000\nCafÃ© crÃ¨me\n"
+        let cues = AppleSubtitleTextParser.cues(from: Data(srt.utf8))
+        #expect(cues.map(\.body) == [.text("♪ I KNOW MY PARENTS LOVE ME ♪"), .text("Café crème")])
+        // Real text with an Â in it, or anything Latin-1 cannot hold, is left alone.
+        #expect(AppleSubtitleTextParser.utf8MojibakeRepaired("Â bientôt") == "Â bientôt")
+        #expect(AppleSubtitleTextParser.utf8MojibakeRepaired("Ã ♪") == "Ã ♪")
+    }
+
+    /// On the sim the "£" came from the MKV's own text track, decoded by the
+    /// engine, not from an add-on file: its cues get the same repair.
+    @MainActor
+    @Test func embeddedTextCuesGetTheMusicNoteToo() {
+        #expect(AetherPlaybackEngine.mapCueBody(.text("£ BECAUSE I FINALLY\nHEARD THEM SAY £"))
+            == .text("♪ BECAUSE I FINALLY\nHEARD THEM SAY ♪"))
+        #expect(AetherPlaybackEngine.mapCueBody(.text("That's £5.")) == .text("That's £5."))
     }
 }

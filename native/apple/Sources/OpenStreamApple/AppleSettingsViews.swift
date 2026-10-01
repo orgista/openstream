@@ -334,6 +334,7 @@ private struct AppleTVSettingsSplitView: View {
                         Image(systemName: section.systemImage)
                             .font(.body)
                             .frame(width: metrics.iconColumnWidth)
+                            .accessibilityHidden(true)
                         Text(section.title)
                             .font(.body)
                             .lineLimit(1)
@@ -1178,7 +1179,9 @@ struct AppleSubtitleLanguagesView: View {
                         Text(language.name)
                         Spacer()
                         if isSelected {
+                            // The row's Selected trait says it.
                             Image(systemName: "checkmark")
+                                .accessibilityHidden(true)
                         }
                     }
                 }

@@ -82,6 +82,15 @@ public enum AppleTrailerArtFirstPolicy {
         state == "ended" || dropsVideoLayer(forPlayerState: state)
     }
 
+    /// Whether a hero's Play Trailer press asks for the trailer. Only a
+    /// trailer that was itself pressed and is on screen ignores it (a second
+    /// press would only cut it back to the art). The muted preview that plays
+    /// by itself is not an answer to the press: it restarts with sound (iOS
+    /// 18.6 regression 2026-10-01: the press did nothing over the preview).
+    public static func heroPressRequestsTrailer(videoIsOnScreen: Bool, pressedTrailerPlaying: Bool) -> Bool {
+        !(videoIsOnScreen && pressedTrailerPlaying)
+    }
+
     public static let crossfadeDuration: Double = 0.6
 
     /// The art ↔ video crossfade; an instant swap with Reduce Motion.

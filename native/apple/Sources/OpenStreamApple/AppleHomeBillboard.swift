@@ -48,14 +48,18 @@ struct AppleHomeBillboard<Actions: View>: View {
     var libraryButton: AppleTitlePagePolicy.HeroButton? = nil
     @ViewBuilder var actions: (AppleTitlePagePolicy.HeroButton, @escaping () -> Void) -> Actions
     @State private var episodes: [AppleStremioEpisode] = []
+    /// True once the episode lookup has answered; false when there was
+    /// none to make (not a series, or no id to look up); nil while out.
+    @State private var episodeLookupAnswered: Bool?
     /// Every lookup that can find a trailer has answered.
     @State private var actionMetadataLoaded = false
     /// The hero has waited long enough for them (`heroTrailerLookupPatience`).
     @State private var trailerLookupPatienceElapsed = false
-    /// A trailer's video — pressed or autoplaying — is on screen; a press
-    /// would only cut it back to the art and restart it. A press while one
-    /// is still loading behind the art starts the load again, so a stalled
-    /// trailer never leaves a dead button.
+    /// A trailer's video — pressed or autoplaying — is on screen. A press
+    /// over a pressed one does nothing; over the muted autoplay preview it
+    /// restarts the trailer with sound (`heroPressRequestsTrailer`). A press
+    /// while one is still loading behind the art starts the load again, so a
+    /// stalled trailer never leaves a dead button.
     @State private var trailerIsOnScreen = false
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
     @State private var previewTrailerKeys: [String] = []
@@ -77,8 +81,26 @@ struct AppleHomeBillboard<Actions: View>: View {
         AppleTitlePagePolicy.heroHasPlaybackRoute(
             item: item, sources: sources,
             hasLocalGroup: !AppleLocalLibraryStore.shared.matchingGroups(item).isEmpty,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted
+            hasCompletedDownload: downloadCoordinator.state.isCompleted,
+            episodeLookup: episodeLookup
         )
+    }
+
+    /// The title page's answer is not known yet: hold the button back.
+    private var playbackRouteIsSettled: Bool {
+        AppleTitlePagePolicy.heroRouteIsSettled(
+            item: item, sources: sources,
+            hasLocalGroup: !AppleLocalLibraryStore.shared.matchingGroups(item).isEmpty,
+            hasCompletedDownload: downloadCoordinator.state.isCompleted,
+            episodeLookup: episodeLookup
+        )
+    }
+
+    /// What the hero's own episode lookup said, the title page's
+    /// "Episodes aren't available" included (`heroHasPlaybackRoute`).
+    private var episodeLookup: AppleTitlePagePolicy.HeroEpisodeLookup {
+        if let episodeLookupAnswered { return episodeLookupAnswered ? (episodes.isEmpty ? .empty : .found) : .unknown }
+        return trailerLookupPatienceElapsed ? .unknown : .pending
     }
 
     /// The Apple TV hero never offers a trailer (N23 removes them there).
@@ -93,6 +115,7 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     private var primaryAction: AppleTitlePagePolicy.PrimaryAction? {
         if let libraryButton { return libraryButton.action }
+        guard playbackRouteIsSettled else { return nil }
         return AppleTitlePagePolicy.heroPrimaryAction(
             type: item.type, progress: ApplePlaybackProgressFeed.shared.progress(for: progressID),
             selectedEpisode: selectedEpisode, isPlayable: hasPlaybackRoute, trailer: trailerAvailability
@@ -110,7 +133,12 @@ struct AppleHomeBillboard<Actions: View>: View {
         case .playTrailer:
             // Art-first: the art stays and the button keeps its label; the
             // video fades in over it once it plays, or never, silently.
-            guard !trailerIsOnScreen else { return }
+            guard AppleTrailerArtFirstPolicy.heroPressRequestsTrailer(
+                videoIsOnScreen: trailerIsOnScreen, pressedTrailerPlaying: trailerRequest != nil) else {
+                appleTrace("hero play trailer pressed: the pressed trailer is already playing (\(item.name))")
+                return
+            }
+            appleTrace("hero play trailer pressed (\(trailerIsOnScreen ? "over the muted preview" : "from the art")) \(item.name)")
             trailerRequest = UUID()
         case .details:
             onOpenDetails()
@@ -129,6 +157,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// a catalog's private id may need resolving before it can list episodes.
     private func loadActionMetadata() async {
         episodes = []
+        episodeLookupAnswered = item.type == "series" ? nil : false
         actionMetadataLoaded = false
         previewTrailerKeys = []
         detailTrailerKeys = []
@@ -178,10 +207,15 @@ struct AppleHomeBillboard<Actions: View>: View {
                 case .identity(let id): addLookups(to: &group, mediaID: id ?? item.mediaID)
                 case .episodes(let loaded):
                     episodes = loaded
+                    episodeLookupAnswered = true
+                    if loaded.isEmpty { appleTrace("hero episodes: none for \(item.name) — no Play") }
                 }
             }
         }
         guard !Task.isCancelled else { return }
+        // No episode lookup was made (a media-server title, or an id that
+        // never resolved): no evidence either way.
+        if episodeLookupAnswered == nil { episodeLookupAnswered = false }
         actionMetadataLoaded = true
     }
 

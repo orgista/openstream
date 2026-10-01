@@ -82,4 +82,15 @@ import Testing
         // An autoplaying trailer was pressed on no card.
         #expect(Policy.pressedCardIsLoading(cardKey: "abc123", pressedKey: nil, videoIsOnScreen: false) == false)
     }
+
+    /// iOS 18.6 regression 2026-10-01: Play Trailer over the hero's muted
+    /// autoplay preview did nothing. It restarts the trailer with sound; only
+    /// a pressed trailer that is already on screen ignores a second press.
+    @Test func aHeroPressOverTheMutedPreviewRequestsTheTrailer() {
+        #expect(Policy.heroPressRequestsTrailer(videoIsOnScreen: true, pressedTrailerPlaying: false))
+        #expect(Policy.heroPressRequestsTrailer(videoIsOnScreen: false, pressedTrailerPlaying: false))
+        // Pressed, still loading behind the art (or ended): press again.
+        #expect(Policy.heroPressRequestsTrailer(videoIsOnScreen: false, pressedTrailerPlaying: true))
+        #expect(Policy.heroPressRequestsTrailer(videoIsOnScreen: true, pressedTrailerPlaying: true) == false)
+    }
 }

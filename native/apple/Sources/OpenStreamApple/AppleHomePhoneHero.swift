@@ -48,19 +48,23 @@ struct AppleHomePhoneHero<Actions: View>: View {
         VStack(spacing: 12) {
             // The title block is the way into the title page, as tapping the
             // hero is in the Apple TV app; Details is no longer a button of
-            // its own.
-            Button(action: onOpenDetails) {
-                VStack(spacing: 10) {
-                    title
-                    AppleHomePhoneHeroMetadata(item: item)
-                }
-                .appleHeroCopyShadow(scrim.copyShadow)
-                .animation(.easeInOut(duration: 0.3), value: scrim.copyShadow)
-                .frame(maxWidth: .infinity)
-                .contentShape(.rect)
+            // its own. A tap, not a Button: a Button fires on any touch that
+            // lifts inside it, so a left swipe across the title — the
+            // carousel's page gesture — opened the title page instead of
+            // paging (iOS 18.6 regression 2026-10-01). A tap fails once the
+            // finger travels.
+            VStack(spacing: 10) {
+                title
+                AppleHomePhoneHeroMetadata(item: item)
             }
-            .buttonStyle(.plain)
+            .appleHeroCopyShadow(scrim.copyShadow)
+            .animation(.easeInOut(duration: 0.3), value: scrim.copyShadow)
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+            .onTapGesture(perform: onOpenDetails)
             .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, onOpenDetails)
             .accessibilityHint("Opens the title page")
             .accessibilityIdentifier("home.featured.details")
             actions

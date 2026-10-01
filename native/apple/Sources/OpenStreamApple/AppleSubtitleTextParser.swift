@@ -27,7 +27,7 @@ public enum AppleSubtitleTextParser {
     }
 
     public static func cues(from text: String) -> [AppleSubtitleCue] {
-        let normalized = text
+        let normalized = musicNotesRestored(utf8MojibakeRepaired(text))
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
         let lines = normalized.components(separatedBy: "\n")
@@ -63,6 +63,49 @@ public enum AppleSubtitleTextParser {
             )
         }
         return cues
+    }
+
+    // MARK: - Repairs
+
+    /// UTF-8 that was read as Latin-1 and written out as UTF-8 again: "Â£"
+    /// where "£" was meant, "Ã©" for "é". One of the two OpenSubtitles files
+    /// for A Different World S1E1 is this (2026-10-01). Re-read as Latin-1
+    /// bytes, such text is valid UTF-8 again; real text with an "Â" or "Ã"
+    /// in it almost never is, and any character Latin-1 cannot hold leaves
+    /// the text as it was.
+    static func utf8MojibakeRepaired(_ text: String) -> String {
+        guard text.contains(where: { $0 == "Â" || $0 == "Ã" }),
+              let bytes = text.data(using: .isoLatin1, allowLossyConversion: false),
+              let repaired = String(data: bytes, encoding: .utf8) else { return text }
+        return repaired
+    }
+
+    /// Captions taken from US broadcast line 21 carry "♪" as CEA-608's
+    /// special character 0x37, right beside "£" (0x36), and caption
+    /// extractors have written it out as "£". The file itself says "£": both
+    /// OpenSubtitles files for A Different World S1E1 open "£ I know my
+    /// parents love me £" (iOS 18.6 regression 2026-10-01, screens 28–31).
+    /// A "£" with no amount beside it is that note; "£5", "5 £" and "£ 20"
+    /// stay money.
+    static func musicNotesRestored(_ text: String) -> String {
+        guard text.contains("£") else { return text }
+        let characters = Array(text)
+        var result = ""
+        result.reserveCapacity(text.unicodeScalars.count)
+        for (index, character) in characters.enumerated() {
+            guard character == "£" else { result.append(character); continue }
+            result.append(isAmountBeside(characters, at: index) ? "£" : "♪")
+        }
+        return result
+    }
+
+    private static func isAmountBeside(_ characters: [Character], at index: Int) -> Bool {
+        var after = index + 1
+        while after < characters.count, characters[after] == " " { after += 1 }
+        if after < characters.count, characters[after].isNumber { return true }
+        var before = index - 1
+        while before >= 0, characters[before] == " " { before -= 1 }
+        return before >= 0 && characters[before].isNumber
     }
 
     // MARK: - Timing
