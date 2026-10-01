@@ -1954,7 +1954,13 @@ struct AppleLibraryView: View {
 
     var body: some View {
         Group {
-            if hasNothingToShow {
+            if hasNothingToShow, let error = library.errorMessage {
+                // A share that refused access read as "No Videos" (full test
+                // 2026-09-30); the scan's own error is the title instead.
+                AppleSourceEmptyState(title: error, systemImage: OpenStreamTab.library.systemImage,
+                                      actionTitle: "Try Again", action: { Task { await reload() } },
+                                      secondaryActionTitle: "Open Settings", secondaryAction: openSettings)
+            } else if hasNothingToShow {
                 AppleSourceEmptyState(title: "No Videos", systemImage: OpenStreamTab.library.systemImage,
                                       actionTitle: "Open Settings", action: openSettings)
             } else {

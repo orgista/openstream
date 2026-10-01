@@ -74,6 +74,9 @@ struct AppleStremioPlayerView: View {
     @State private var audioSession: AppleAudioSessionCoordinator
     @State private var nativeMenuVisible = true
     @State private var nativeMenuActivity = 0
+    /// Rows of the More menu on screen: the auto-hide removed the open menu
+    /// after three seconds (full test 2026-09-30), so it waits while > 0.
+    @State private var nativeMenuOpenItems = 0
     @State private var showsOtherSources = false
     /// What the fallback loop walks after a failure: Automatic's order, or
     /// the picked resolution's once one is picked.
@@ -215,6 +218,8 @@ struct AppleStremioPlayerView: View {
                 Menu {
                     if sourceOptionsLoader != nil {
                         Button("Quality", systemImage: "slider.horizontal.3") { showsOtherSources = true }
+                            .onAppear { nativeMenuOpenItems += 1 }
+                            .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
                     }
                     if showsAppSubtitleMenu {
                         Menu("Subtitles", systemImage: "captions.bubble") {
@@ -230,8 +235,12 @@ struct AppleStremioPlayerView: View {
                                 }
                                 .accessibilityLabel(entry.title)
                                 .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
+                                .onAppear { nativeMenuOpenItems += 1 }
+                                .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
                             }
                         }
+                        .onAppear { nativeMenuOpenItems += 1 }
+                        .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
                         .accessibilityIdentifier("player.subtitles")
                     }
                 } label: {
@@ -248,10 +257,10 @@ struct AppleStremioPlayerView: View {
             nativeMenuVisible = true
             nativeMenuActivity &+= 1
         })
-        .task(id: "\(nativeMenuActivity):\(coordinator.phase)") {
+        .task(id: "\(nativeMenuActivity):\(coordinator.phase):\(nativeMenuOpenItems > 0)") {
             nativeMenuVisible = true
             guard case .playing = coordinator.phase else { return }
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(nativeMenuOpenItems > 0 ? 60 : 3))
             guard !Task.isCancelled else { return }
             nativeMenuVisible = false
         }

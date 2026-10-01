@@ -112,3 +112,11 @@ struct AppleCatalogRowTitleTests {
         #expect(AppleCatalogShelfPolicy.typedTitle("Trending", type: "channel") == "Trending")
     }
 }
+
+/// Full test 2026-09-30: "Trending Movies · AIOMetadata  | ElfHosted".
+@Test func rowHeadingsShowAddonNamesWithoutHostSuffix() {
+    #expect(AppleCatalogShelfPolicy.displaySourceName("AIOMetadata  | ElfHosted") == "AIOMetadata")
+    #expect(AppleCatalogShelfPolicy.displaySourceName("  Cinemeta  ") == "Cinemeta")
+    #expect(AppleCatalogShelfPolicy.displaySourceName("Torrentio   Lite") == "Torrentio Lite")
+    #expect(AppleCatalogShelfPolicy.displaySourceName("| Only Host") == "| Only Host")
+}

@@ -303,6 +303,29 @@ import Testing
         coordinator.stop()
     }
 
+    /// Full test 2026-09-30: the Audio & Subtitles menu closed itself after
+    /// 2-3 s because the auto-hide removed the chrome it hangs from.
+    @Test func anOpenMenuHoldsTheControlsPastTheAutoHide() async {
+        let engine = FakePlaybackEngine()
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        await coordinator.begin(makeRequest())
+        engine.emit(.phase(.playing))
+        #expect(await waitUntil { if case .playing = coordinator.phase { true } else { false } })
+        // A menu reports every row; two rows open, both must close.
+        model.menuItemAppeared()
+        model.menuItemAppeared()
+        try? await Task.sleep(for: .milliseconds(3600))
+        #expect(model.controlsVisible)
+        #expect(model.menuIsOpen)
+        model.menuItemDisappeared()
+        #expect(model.menuIsOpen)
+        model.menuItemDisappeared()
+        #expect(!model.menuIsOpen)
+        #expect(await waitUntil { !model.controlsVisible })
+        coordinator.stop()
+    }
+
     @Test func surfaceRouteShowsOverlay() {
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)

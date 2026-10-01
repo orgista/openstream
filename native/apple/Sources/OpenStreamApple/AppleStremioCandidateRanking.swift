@@ -12,9 +12,25 @@ public enum AppleStremioCandidateRanking {
     public static func rankForAutomaticPlayback(
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         episode: (season: Int, episode: Int)? = nil,
-        title: String? = nil
+        title: String? = nil,
+        year: Int? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
-        ordered(candidates, preferCompatibleWhenUnknown: false, episode: episode, title: title)
+        ordered(candidates, preferCompatibleWhenUnknown: false, episode: episode, title: title, year: year)
+    }
+
+    /// Per candidate, whether its name is for another title or another
+    /// edition of it (`AppleStremioTitleMatch.mismatches`). All false
+    /// without a title.
+    static func titleMismatches(
+        _ candidates: [AppleStremioHTTPPlaybackCandidate],
+        title: String?,
+        year: Int? = nil
+    ) -> [Bool] {
+        guard let title, !title.isEmpty else { return candidates.map { _ in false } }
+        let texts = candidates.map { candidate in
+            [candidate.filename ?? "", candidate.title, candidate.sourceURL.lastPathComponent].joined(separator: " ")
+        }
+        return AppleStremioTitleMatch.mismatches(texts, title: title, year: year)
     }
 
     /// Whether this candidate is named for a different title altogether.
@@ -40,17 +56,16 @@ public enum AppleStremioCandidateRanking {
         _ candidates: [AppleStremioHTTPPlaybackCandidate],
         preferCompatibleWhenUnknown: Bool,
         episode: (season: Int, episode: Int)? = nil,
-        title: String? = nil
+        title: String? = nil,
+        year: Int? = nil
     ) -> [AppleStremioHTTPPlaybackCandidate] {
-        candidates.enumerated().sorted { lhs, rhs in
+        let mismatched = titleMismatches(candidates, title: title, year: year)
+        return candidates.enumerated().sorted { lhs, rhs in
             // Demoted rather than dropped: if every candidate contradicts, the
             // viewer still gets something to play rather than nothing.
             // A different show is worse than a different episode, so it sorts first.
-            if let title, !title.isEmpty {
-                let lw = contradictsTitle(lhs.element, title: title)
-                let rw = contradictsTitle(rhs.element, title: title)
-                if lw != rw { return !lw }
-            }
+            let lw = mismatched[lhs.offset], rw = mismatched[rhs.offset]
+            if lw != rw { return !lw }
             if let episode {
                 let lw = contradictsEpisode(lhs.element, season: episode.season, episode: episode.episode)
                 let rw = contradictsEpisode(rhs.element, season: episode.season, episode: episode.episode)

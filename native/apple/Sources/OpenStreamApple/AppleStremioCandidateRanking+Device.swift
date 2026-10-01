@@ -190,8 +190,10 @@ extension AppleStremioCandidateRanking {
         device: AppleStreamDeviceCapabilities,
         episode: (season: Int, episode: Int)? = nil,
         title: String? = nil,
+        year: Int? = nil,
         unhealthyServices: Set<String> = []
     ) -> [AppleStremioHTTPPlaybackCandidate] {
+        let mismatched = titleMismatches(candidates, title: title, year: year)
         let tierRank: (AppleStreamQualityTier?) -> Int = { tier in
             switch choice {
             case .automatic:
@@ -206,7 +208,7 @@ extension AppleStremioCandidateRanking {
         }
         return candidates.enumerated().map { offset, candidate in
             let traits = traits(of: candidate)
-            let contradicts = (title.map { !$0.isEmpty && contradictsTitle(candidate, title: $0) } ?? false)
+            let contradicts = mismatched[offset]
                 || (episode.map { contradictsEpisode(candidate, season: $0.season, episode: $0.episode) } ?? false)
             let down = candidate.serviceKey.map(unhealthyServices.contains) ?? false
             return (candidate, offset, contradicts, isPlayable(traits, on: device), tierRank(traits.tier),

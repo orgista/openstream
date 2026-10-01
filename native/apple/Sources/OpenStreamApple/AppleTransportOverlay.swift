@@ -64,7 +64,7 @@ struct AppleTransportOverlay: View {
         AppleTVPlaybackPresentationPolicy.visibleControls(
             route: .surface,
             isScrubbable: model.isScrubbable,
-            hasOtherSources: otherSources != nil,
+            hasOtherSources: otherSources != nil || !model.chapters.isEmpty,
             hasSharePlay: sharePlayMenu != nil
         )
     }
@@ -324,12 +324,33 @@ struct AppleTransportOverlay: View {
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
-                        onSelectSubtitle: { model.selectSubtitle($0) }
+                        onSelectSubtitle: { model.selectSubtitle($0) },
+                        onMenuItemAppeared: { model.menuItemAppeared() },
+                        onMenuItemDisappeared: { model.menuItemDisappeared() }
                     )
                 }
-                if let otherSources, controls.contains(.otherSourcesMenu) {
+                if controls.contains(.otherSourcesMenu) {
                     Menu {
-                        Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
+                        if !model.chapters.isEmpty {
+                            Menu("Chapters", systemImage: "list.bullet") {
+                                ForEach(Array(model.chapters.enumerated()), id: \.offset) { _, chapter in
+                                    Button {
+                                        Task { await model.jump(to: chapter) }
+                                    } label: {
+                                        Text(chapter.title)
+                                        Text(AppleTransportOverlayModel.timeText(chapter.start))
+                                    }
+                                    .appleMenuPresence(model)
+                                }
+                            }
+                            .appleMenuPresence(model)
+                            .accessibilityIdentifier("player.chapters")
+                        }
+                        if let otherSources {
+                            Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
+                                .appleMenuPresence(model)
+                                .accessibilityIdentifier("player.quality")
+                        }
                     } label: {
                         Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                             .contentShape(.rect)
@@ -554,7 +575,9 @@ struct AppleTransportOverlay: View {
                         preferredSubtitleLanguages: model.preferredSubtitleLanguages,
                         selectedSubtitleID: model.selectedSubtitleID,
                         onSelectAudio: { model.selectAudio($0) },
-                        onSelectSubtitle: { model.selectSubtitle($0) }
+                        onSelectSubtitle: { model.selectSubtitle($0) },
+                        onMenuItemAppeared: { model.menuItemAppeared() },
+                        onMenuItemDisappeared: { model.menuItemDisappeared() }
                     )
                     #if os(tvOS)
                     .focused($tvFocus, equals: .captions)
@@ -646,6 +669,7 @@ private struct AppleTransportScrubberRow: View {
                 set: { fraction in Task { await model.scrub(to: fraction) } }
             ), in: 0...1)
             .tint(.white)
+            .overlay { chapterMarks(height: 10) }
             .appleVisionActionTarget()
             .accessibilityLabel("Playback position")
             .accessibilityValue(model.positionText)
@@ -654,6 +678,21 @@ private struct AppleTransportScrubberRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.white)
         }
+    }
+
+    /// A thin mark at each chapter start, as in the Apple TV app's scrubber.
+    /// Drawn over the track and never hit-tested, so scrubbing is unchanged.
+    private func chapterMarks(height: CGFloat) -> some View {
+        GeometryReader { proxy in
+            ForEach(model.chapterMarkFractions, id: \.self) { fraction in
+                Rectangle()
+                    .fill(.black.opacity(0.55))
+                    .frame(width: 2, height: height)
+                    .position(x: proxy.size.width * fraction, y: proxy.size.height / 2)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// Remaining time as `-m:ss` (or `-h:mm:ss`). Empty for live.
@@ -675,6 +714,7 @@ private struct AppleTransportScrubberRow: View {
                 Capsule()
                     .fill(.white)
                     .frame(width: proxy.size.width * model.progress)
+                chapterMarks(height: height)
             }
             .frame(height: height)
             .focusable()
@@ -710,6 +750,9 @@ struct AppleTransportTrackMenu: View {
     let selectedSubtitleID: Int?
     let onSelectAudio: (Int) -> Void
     let onSelectSubtitle: (Int?) -> Void
+    /// Each row reports itself so the chrome stays up while the menu is open.
+    var onMenuItemAppeared: () -> Void = {}
+    var onMenuItemDisappeared: () -> Void = {}
 
     var body: some View {
         Menu {
@@ -719,6 +762,8 @@ struct AppleTransportTrackMenu: View {
                         Button(trackLabel(track)) {
                             onSelectAudio(track.id)
                         }
+                        .onAppear(perform: onMenuItemAppeared)
+                        .onDisappear(perform: onMenuItemDisappeared)
                     }
                 }
             }
@@ -737,6 +782,8 @@ struct AppleTransportTrackMenu: View {
                     .accessibilityLabel(entry.title)
                     .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
                     .accessibilityIdentifier("player.subtitle.track.\(entry.id)")
+                    .onAppear(perform: onMenuItemAppeared)
+                    .onDisappear(perform: onMenuItemDisappeared)
                 }
             }
         } label: {
@@ -764,5 +811,13 @@ struct AppleTransportTrackMenu: View {
             return "\(track.title) (\(language))"
         }
         return track.title
+    }
+}
+
+private extension View {
+    /// A row of a transport menu: holds the auto-hide while it is on screen.
+    func appleMenuPresence(_ model: AppleTransportOverlayModel) -> some View {
+        onAppear { model.menuItemAppeared() }
+            .onDisappear { model.menuItemDisappeared() }
     }
 }

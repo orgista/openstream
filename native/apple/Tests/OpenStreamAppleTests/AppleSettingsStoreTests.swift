@@ -371,3 +371,17 @@ func captionsAutoOnMigratesToAlways() {
     reread.autoPlayTrailer = true
     #expect(reread.autoMuteTrailer)
 }
+
+#if DEBUG
+/// Full test 2026-09-30: the dev seed applied the TMDB key and left Use
+/// Metadata APIs off.
+@MainActor
+@Test
+func devSeedTMDBKeyTurnsMetadataOn() {
+    let store = AppleSettingsStore(defaults: makeIsolatedDefaults(), keychain: StubCredentialStore())
+    #expect(!store.metadataEnabled)
+    AppleDevSourcesImport.apply(AppleDevSettings(tmdbAPIKey: "fixture-key"), to: store)
+    #expect(store.metadataEnabled)
+    #expect(store.tmdbAPIKey == "fixture-key")
+}
+#endif

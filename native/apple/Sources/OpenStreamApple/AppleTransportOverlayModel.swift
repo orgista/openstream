@@ -93,8 +93,27 @@ public final class AppleTransportOverlayModel {
     /// known now. Idempotent and write-guarded, so calling it from both
     /// `.tracks` and `.duration` costs no extra Observation invalidation.
     private func refreshIntroChapter() {
-        let found = AppleChapterMarkers.intro(in: coordinator.engine.chapters, duration: duration)
+        let all = coordinator.engine.chapters
+        if chapters != all { chapters = all }
+        let found = AppleChapterMarkers.intro(in: all, duration: duration)
         if introChapter != found { introChapter = found }
+    }
+
+    /// Every chapter the stream carries, for the scrubber marks and the
+    /// Chapters menu. The engine reported them and nothing showed them
+    /// (full test 2026-09-30: 16 for Top Gun: Maverick).
+    public private(set) var chapters: [AppleChapter] = []
+
+    /// Where the chapter marks sit on the scrubber, as fractions of it.
+    public var chapterMarkFractions: [Double] {
+        AppleChapterMarkers.scrubberFractions(chapters: chapters, duration: duration)
+    }
+
+    /// Seeks to a chapter's start through the scrubber's path.
+    public func jump(to chapter: AppleChapter) async {
+        bumpActivity()
+        appleTrace("chapter → \(chapter.title) at \(Int(chapter.start))s")
+        await coordinator.userSeek(to: max(0, chapter.start))
     }
 
     /// Re-reads the engine's real seekable span. Write-guarded: the position
@@ -217,6 +236,7 @@ public final class AppleTransportOverlayModel {
         self.duration = coordinator.engine.duration
         self.audioTracks = coordinator.engine.audioTracks
         self.subtitleTracks = coordinator.engine.subtitleTracks
+        self.chapters = coordinator.engine.chapters
         self.introChapter = AppleChapterMarkers.intro(
             in: coordinator.engine.chapters,
             duration: coordinator.engine.duration
@@ -473,6 +493,32 @@ public final class AppleTransportOverlayModel {
         hideTask?.cancel()
     }
 
+    /// True while a menu from the transport (Audio & Subtitles, More) is open.
+    /// Removing the chrome closed the open menu after three seconds (full
+    /// test 2026-09-30), so the auto-hide stands down until it closes.
+    public var menuIsOpen: Bool { openMenuItems > 0 }
+
+    /// Menu rows on screen. A menu reports each of its rows appearing and
+    /// disappearing, so the count is balanced however many rows it has.
+    private var openMenuItems = 0
+
+    /// How long an open menu holds the chrome before the timer resumes, in
+    /// case the menu's close is never reported.
+    private let openMenuHideDelay: Duration = .seconds(60)
+
+    public func menuItemAppeared() {
+        openMenuItems += 1
+        guard openMenuItems == 1 else { return }
+        controlsVisible = true
+        scheduleAutoHide()
+    }
+
+    public func menuItemDisappeared() {
+        guard openMenuItems > 0 else { return }
+        openMenuItems -= 1
+        if openMenuItems == 0 { scheduleAutoHide() }
+    }
+
     // MARK: - Formatting
 
     /// `m:ss` for streams under an hour, `h:mm:ss` once ≥ 1 h. Pure static so
@@ -572,7 +618,7 @@ public final class AppleTransportOverlayModel {
             controlsVisible = true
             return
         }
-        let delay = hideDelay
+        let delay = menuIsOpen ? max(hideDelay, openMenuHideDelay) : hideDelay
         hideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }

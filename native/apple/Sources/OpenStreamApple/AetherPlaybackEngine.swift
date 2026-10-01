@@ -685,6 +685,12 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     private func applyPhase(_ phase: PlaybackPhase) {
+        // The engine applies a volume set before load to the host when it is
+        // created, but the software host only builds its audio output inside
+        // `load`, so the 0 from `init` landed on nothing and the `swift test`
+        // Matroska fixture played out loud (2026-09-30). Every phase change
+        // re-applies it, before any sample is rendered.
+        if AppleTestAudioMute.isActive { aether.volume = 0 }
         self.phase = Self.mapPhase(phase)
         // The pixel aspect is set after the coded size and is not published;
         // the next phase change picks it up.

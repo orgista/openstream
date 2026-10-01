@@ -111,8 +111,13 @@ public enum AppleDevSourcesImport {
         }
     }
 
-    private static func apply(_ values: AppleDevSettings, to settings: AppleSettingsStore) {
-        if let key = values.tmdbAPIKey { settings.tmdbAPIKey = key }
+    static func apply(_ values: AppleDevSettings, to settings: AppleSettingsStore) {
+        // A key without the switch left Use Metadata APIs off after seeding
+        // (full test 2026-09-30); the seed is for testing with metadata.
+        if let key = values.tmdbAPIKey {
+            settings.tmdbAPIKey = key
+            if !key.isEmpty { settings.metadataEnabled = true }
+        }
         if let radarr = values.radarr {
             settings.radarrURL = radarr.url
             settings.radarrAPIKey = radarr.apiKey

@@ -83,6 +83,10 @@ public final class AppleWatchCompanion: NSObject {
     // Throttles trace output while inactive
     private var lastTracedActivationState: Int?
     private var tracedUnsupported = false
+    /// Set once "no paired watch / app not installed" has been traced; the
+    /// publish retried every 250 ms forever before (1,433 failures in 25 min,
+    /// full test 2026-09-30). Cleared when the watch state changes.
+    private var tracedNoWatch = false
 
     public func detach() {
         engine = nil
@@ -120,6 +124,16 @@ public final class AppleWatchCompanion: NSObject {
             return
         }
         lastTracedActivationState = nil
+        // No watch to talk to: nothing to publish until
+        // `sessionWatchStateDidChange` says otherwise.
+        guard session.isPaired, session.isWatchAppInstalled else {
+            if !tracedNoWatch {
+                tracedNoWatch = true
+                appleTrace("watch link: idle (paired=\(session.isPaired) installed=\(session.isWatchAppInstalled))")
+            }
+            return
+        }
+        tracedNoWatch = false
         let isPlaying = engine?.phase == .playing
         let publishedTitle = engine == nil ? nil : title
         let signature = AppleWatchPayload.signature(title: publishedTitle, isPlaying: isPlaying)
@@ -166,6 +180,14 @@ extension AppleWatchCompanion: WCSessionDelegate {
     }
 
     nonisolated public func sessionDidBecomeInactive(_: WCSession) {}
+
+    /// A watch paired or the watch app installed: publish what is playing now.
+    nonisolated public func sessionWatchStateDidChange(_: WCSession) {
+        Task { @MainActor [weak self] in
+            self?.lastSignature = nil
+            self?.publish(force: true)
+        }
+    }
 
     /// Reactivating is required, or the link dies when the viewer switches
     /// watches and never comes back without relaunching the app.

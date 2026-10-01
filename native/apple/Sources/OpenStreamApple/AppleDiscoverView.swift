@@ -3394,6 +3394,10 @@ struct AppleCatalogItemDetailView: View {
             if hasPrimaryActionRow {
                 primaryActionButtons
             }
+            // The overlay hero (iPad and landscape) never drew this line, so
+            // it did not appear with services added (full test 2026-09-30).
+            AppleWatchProviderRow(providers: pageMetadata.watchProviders)
+                .frame(width: actionColumnWidth, alignment: .leading)
             seasonDownloadStatus
             secondaryActionRow
         }
@@ -5347,7 +5351,7 @@ struct AppleCatalogItemDetailView: View {
             let device = AppleStreamDeviceCapabilities.current
             @MainActor func order(_ choice: AppleStreamQualityChoice) -> [ApplePlaybackSourceOption] {
                 AppleStremioCandidateRanking.playbackOrder(streams, choice: choice, device: device,
-                    episode: episode, title: selectedItem.name,
+                    episode: episode, title: selectedItem.name, year: selectedItem.year,
                     unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys()).map(option)
             }
             let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
@@ -5492,7 +5496,7 @@ struct AppleCatalogItemDetailView: View {
                 ranked, choice: chosen.map(AppleStreamQualityChoice.tier) ?? .automatic,
                 device: AppleStreamDeviceCapabilities.current,
                 episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
-                title: item.name,
+                title: item.name, year: item.year,
                 unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys())
             let mediaID = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item).id
             let title = selectedEpisodeSelection?.displayTitle ?? item.name
@@ -5810,22 +5814,29 @@ struct AppleCatalogItemDetailView: View {
     /// out at all, rather than one being made and the answer thrown away.
     private func loadWatchProviders() async {
         let enabled = settings.watchProviderIDs
-        guard !enabled.isEmpty,
-              let configuration = metadataConfiguration,
-              let imdbID = (pageMetadata.resolvedMediaID ?? item.mediaID) as String?,
-              imdbID.hasPrefix("tt") else {
+        let imdbID = pageMetadata.resolvedMediaID ?? item.mediaID
+        guard !enabled.isEmpty, let configuration = metadataConfiguration, imdbID.hasPrefix("tt") else {
+            // The full test found no provider line in the trace at all
+            // (2026-09-30); every way out says why.
+            appleTrace("watch providers: skipped for \(item.name) (enabled \(enabled.count), "
+                + "metadata \(metadataConfiguration == nil ? "off" : "on"), id \(imdbID.hasPrefix("tt") ? "imdb" : "other"))")
             pageMetadata.watchProviders = []
             return
         }
         let kind: AppleMediaKind = item.type == "series" ? .series : .movie
-        let all = try? await AppleTMDBClient().watchProviders(
-            imdbID: imdbID,
-            kind: kind,
-            region: AppleWatchProviderResponse.currentRegion(),
-            configuration: configuration
-        )
+        let region = AppleWatchProviderResponse.currentRegion()
+        let all: [AppleWatchProvider]
+        do {
+            all = try await AppleTMDBClient().watchProviders(
+                imdbID: imdbID, kind: kind, region: region, configuration: configuration)
+        } catch {
+            appleTrace("watch providers: failed for \(item.name) (\(region)) — \(error.localizedDescription)")
+            all = []
+        }
         guard !Task.isCancelled else { return }
-        pageMetadata.watchProviders = AppleWatchProviderPolicy.visible(all ?? [], enabledProviderIDs: enabled)
+        let visible = AppleWatchProviderPolicy.visible(all, enabledProviderIDs: enabled)
+        appleTrace("watch providers: \(visible.count) for \(item.name) (enabled \(enabled.count), \(all.count) in \(region))")
+        pageMetadata.watchProviders = visible
     }
 
     /// The episode the show's saved position names — what Continue Watching
@@ -7415,7 +7426,15 @@ struct AppleStremioPlayerPresentationModifier: ViewModifier {
         content.fullScreenCover(item: $presentation) {
             AppleStremioPlayerView(presentation: $0)
                 #if os(iOS)
-                .onAppear { AppleOrientationLock.shared.allowsLandscape = true }
+                // Opened from Search the keyboard's safe-area inset was still
+                // applied under the cover, so the transport and its tap area
+                // filled only the top ~458 pt on iPad until a rotation
+                // (full test 2026-09-30). The player never takes text input.
+                .ignoresSafeArea(.keyboard)
+                .onAppear {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    AppleOrientationLock.shared.allowsLandscape = true
+                }
                 .onDisappear { AppleOrientationLock.shared.allowsLandscape = false }
                 #endif
         }

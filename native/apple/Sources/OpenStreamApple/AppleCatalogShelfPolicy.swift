@@ -57,12 +57,25 @@ enum AppleCatalogShelfPolicy {
             let items = Set(section.items.prefix(20).map(\.id))
             if let kept = itemsByTitle[key] {
                 guard !mostlyRepeats(items, kept) else { return nil }
-                section.shelfTitle = "\(section.shelfTitle ?? "") · \(section.sourceName)"
+                section.shelfTitle = "\(section.shelfTitle ?? "") · \(displaySourceName(section.sourceName))"
             } else {
                 itemsByTitle[key] = items
             }
             return section
         }
+    }
+
+    /// An add-on's name as a row heading shows it: whitespace collapsed and a
+    /// trailing " | Host" dropped. "AIOMetadata  | ElfHosted" was printed raw,
+    /// double space and all (full test 2026-09-30).
+    static func displaySourceName(_ name: String) -> String {
+        let collapse: (Substring) -> String = {
+            $0.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        let full = collapse(Substring(name))
+        guard let bar = name.firstIndex(of: "|") else { return full }
+        let head = collapse(name[..<bar])
+        return head.isEmpty ? full : head
     }
 
     /// Half or more of a row's leading titles already shown under the same
