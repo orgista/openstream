@@ -875,10 +875,23 @@ private struct AppleMetadataSettingsView: View {
                 SecureField("API key or read token", text: $settings.tmdbAPIKey)
                     .disabled(!settings.metadataEnabled)
                     .appleFormSubmit(.tmdb, chain: Self.chain, focus: $focusedField)
+                #if os(tvOS)
+                // TMDB's notice sits behind an (i); a tvOS section header
+                // cannot take focus, so it is a row here.
+                AppleAttributionInfoRow()
+                #endif
             } header: {
+                #if os(tvOS)
                 Text("TMDB")
-            } footer: {
-                Text(AppleAttribution.tmdbNotice)
+                #else
+                // TMDB's required notice is behind the (i) beside the header
+                // (owner: "just make them (i)").
+                HStack {
+                    Text("TMDB")
+                    Spacer()
+                    AppleAttributionInfoButton()
+                }
+                #endif
             }
 
             Section("OMDb") {
@@ -1315,13 +1328,28 @@ private struct AppleAboutView: View {
                 LabeledContent("Build", value: build)
             }
 
-            // TMDB's terms ask for its logo and notice; JustWatch supplies
-            // the "Also available on" data. No source link: the repository is
-            // private, so a reviewer would only reach a 404.
-            Section("Data Sources") {
-                AppleTMDBAttributionRow()
-                Text(AppleAttribution.justWatchCredit)
-                    .accessibilityIdentifier("settings.about.justwatch")
+            // TMDB's logo and notice and the JustWatch credit sit behind one
+            // (i) row (owner: "just make them (i)"). The app is open source:
+            // the repository link may 404 until the owner flips it public
+            // after a secret scan, which is expected.
+            Section {
+                AppleAttributionInfoRow()
+                #if os(tvOS)
+                LabeledContent("Source Code", value: AppleAttribution.sourceCodeDisplay)
+                    .accessibilityIdentifier("settings.about.sourceCode")
+                #else
+                Link(destination: AppleAttribution.sourceCodeURL) {
+                    HStack {
+                        Text("Source Code")
+                        Spacer()
+                        Text(AppleAttribution.sourceCodeDisplay)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(.primary)
+                .accessibilityIdentifier("settings.about.sourceCode")
+                #endif
             }
 
             Section {

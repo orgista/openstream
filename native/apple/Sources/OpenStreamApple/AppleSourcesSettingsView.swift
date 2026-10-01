@@ -118,8 +118,13 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
                 .appleTVReadableFocus()
-            } footer: {
-                Text(AppleAttribution.noContentDisclaimer)
+                #if os(tvOS)
+                // The no-content statement lives behind an (i). Apple TV has
+                // no navigation bar to hold it beside the title, so it is the
+                // last row here (owner: "just make them (i)").
+                AppleAttributionInfoRow()
+                    .appleTVReadableFocus()
+                #endif
             }
 
             // Not "Sources" again: the pane is already titled Sources, so the
@@ -154,6 +159,15 @@ struct AppleSourcesSettingsView: View {
             }
         }
         .appleSettingsPane("Sources", embedded: embeddedInSplit)
+        #if !os(tvOS)
+        // The (i) beside the pane title: the no-content statement that used
+        // to be the first section's footer (owner: "just make them (i)").
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                AppleAttributionInfoButton()
+            }
+        }
+        #endif
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .navigationDestination(for: AppleSourceRoute.self) { route in
             switch route {

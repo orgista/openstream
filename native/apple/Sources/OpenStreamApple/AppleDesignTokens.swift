@@ -308,8 +308,9 @@ public struct AppleSourceEmptyState: View {
     /// under "Restore from iCloud" and "Import Backup".
     public let tertiaryActionTitle: String?
     public let tertiaryAction: (() -> Void)?
-    /// One quiet line under the title. Used only for No Sources, which has to
-    /// say that the app ships no content of its own.
+    /// Set only for No Sources, which has to say that the app ships no content
+    /// of its own. Not printed: it puts an (i) beside the title that opens the
+    /// attribution sheet carrying the line (owner: "just make them (i)").
     public let footnote: String?
 
     public init(
@@ -377,15 +378,14 @@ public struct AppleSourceEmptyState: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
-            Text(title)
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-            if let footnote {
-                Text(footnote)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("emptyState.footnote")
+                if footnote != nil {
+                    AppleAttributionInfoButton()
+                        .accessibilityIdentifier("emptyState.footnote")
+                }
             }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)

@@ -42,7 +42,10 @@ public enum AppleDiscoverEmptyState: Equatable, Sendable {
         }
     }
 
-    /// The one line under No Sources: the app ships no content of its own.
+    /// No Sources has to say that the app ships no content of its own. The
+    /// line is not printed under the title: `AppleSourceEmptyState` puts an
+    /// (i) beside the title that opens the attribution sheet carrying it
+    /// (owner on a6765b2: "just make them (i)").
     public var footnote: String? {
         self == .noSources ? AppleAttribution.noContentDisclaimer : nil
     }

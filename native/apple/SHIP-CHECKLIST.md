@@ -31,6 +31,8 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
       and look at each icon in the simulator.
 - [ ] No debug-only UI, test data, or `TODO(ship)` markers in Release code paths.
 - [ ] `OWNER-TODO.md`: nothing Open is marked as blocking a release; mention any known issues in the notes.
+- [ ] TestFlight/App Store builds start with NO sources: install the Release build on a clean simulator
+      with iCloud sync off and confirm No Sources (seeding is DEBUG-only since a6765b2).
 
 ## 5. Tracing and groups
 - [ ] Traced build: tracing is on by default for TestFlight installs (AppleInteractionTrace.swift

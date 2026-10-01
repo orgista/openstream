@@ -801,13 +801,14 @@ private struct AppleFirstRunGuidanceView: View {
             Spacer(minLength: 0)
             OpenStreamThreeBarMark()
                 .frame(width: 64, height: 46)
-            Text("Welcome to OpenStream")
-                .font(.largeTitle.bold())
-                .multilineTextAlignment(.center)
-            Text(AppleAttribution.noContentDisclaimer)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            // The no-content statement is behind the (i) beside the title
+            // (owner: "just make them (i)").
+            HStack(spacing: AppleDesignTokens.spacingSmall) {
+                Text("Welcome to OpenStream")
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
+                AppleAttributionInfoButton()
+            }
             Spacer(minLength: 0)
             Button("Open Sources", action: openSettings)
                 .buttonStyle(.brandPrimary)
@@ -834,12 +835,14 @@ private struct AppleFirstRunGuidanceView: View {
         VStack(spacing: AppleDesignTokens.spacingExtraLarge) {
             OpenStreamThreeBarMark()
                 .frame(width: 132, height: 96)
-            Text("Welcome to OpenStream")
-                .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
-                .accessibilityAddTraits(.isHeader)
-            Text(AppleAttribution.noContentDisclaimer)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            // The no-content statement is behind the (i) beside the title: a
+            // focusable glyph the remote reaches from the pills below.
+            HStack(spacing: AppleDesignTokens.spacingMedium) {
+                Text("Welcome to OpenStream")
+                    .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
+                    .accessibilityAddTraits(.isHeader)
+                AppleAttributionInfoButton()
+            }
             // The same gap the billboard uses, which is wide enough that a
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {

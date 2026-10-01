@@ -16,15 +16,13 @@ struct AppleWatchProviderRow: View {
 
     var body: some View {
         if !providers.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            // JustWatch supplies TMDB's availability data and asks for a
+            // credit wherever it is shown; it sits behind the (i) beside the
+            // line (owner: "just make them (i)"), which on Apple TV is the
+            // one focusable thing on this row.
+            HStack(spacing: logoSpacing) {
                 providerLine
-                // JustWatch supplies TMDB's availability data and asks for a
-                // credit wherever it is shown.
-                Text(AppleAttribution.justWatchCredit)
-                    .font(creditFont)
-                    .foregroundStyle(AppleDesignTokens.textSecondary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("detail.justWatchCredit")
+                AppleAttributionInfoButton()
             }
         }
     }
@@ -52,14 +50,6 @@ struct AppleWatchProviderRow: View {
         // A quiet line, not a fifth thing the remote can land on beside
         // Play and the icon row.
         .focusable(false)
-        #endif
-    }
-
-    private var creditFont: Font {
-        #if os(tvOS)
-        .system(size: AppleTVDetailMetrics.badgeFontSize * 0.8)
-        #else
-        .caption2
         #endif
     }
 
