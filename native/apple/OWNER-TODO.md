@@ -15,10 +15,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **Owner decisions 2026-10-01 (afternoon):**
-      1. Native player: when a title has nothing the Native player can open, fall back to the OpenStream player
-         automatically — and pre-check before playing so it never fails first. (in progress)
+      1. FINAL: "native player with our engine" — remove the Player choice; always the OpenStream engine shown in
+         Apple's player (Infuse-style). Native stays as a hidden debug override only. (in progress)
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
+      developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
+      end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
 - [ ] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
       Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials
       not the checked season; Settings › Playback bottom row, Left doesn't reach the sidebar; faint metadata line
