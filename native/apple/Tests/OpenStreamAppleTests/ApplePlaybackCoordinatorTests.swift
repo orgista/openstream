@@ -236,6 +236,8 @@ import Testing
 
     // MARK: - Live retry
 
+    /// A live stream that ends mid-play goes through the bounded reconnect
+    /// (`AppleLiveReconnectPolicy`); here one try, so the second end fails.
     @Test func liveEndedRetriesOnceThenFailsOnSecondEnded() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
@@ -245,13 +247,14 @@ import Testing
             timeout: .seconds(60),
             retryDelay: .milliseconds(50)
         )
+        coordinator.liveReconnectPolicy = AppleLiveReconnectPolicy(maxAttempts: 1, delays: [.milliseconds(50)])
         await coordinator.begin(makeRequest(isLive: true))
         #expect(coordinator.phase == .playing)
 
         try? await Task.sleep(for: .milliseconds(10))
         engine.emit(.phase(.ended))
         try? await Task.sleep(for: .milliseconds(20))
-        #expect(coordinator.phase == .waiting("Stream ended. Reconnecting…"))
+        #expect(coordinator.phase == .waiting("Reconnecting…"))
 
         try? await Task.sleep(for: .milliseconds(120))
         #expect(coordinator.phase == .playing)

@@ -120,6 +120,18 @@ def add_media_server():
     return entry
 
 
+FIXTURE = os.path.expanduser("~/Developer/openstream-build/iptv-fixture/dev-sources.json")
+
+
+def add_fixture_iptv():
+    """The local IPTV fixture (Fixture Xtream + Fixture M3U on 127.0.0.1:8790).
+    Debug builds only, like every entry here; see the fixture's README.md."""
+    if not os.path.exists(FIXTURE):
+        raise RuntimeError(f"no fixture at {FIXTURE} — run iptvfixture.py generate first")
+    with open(FIXTURE) as handle:
+        return json.load(handle)["sources"]
+
+
 def edit_settings(settings):
     if yes("Set the TMDB API key?", default=not settings.get("tmdbAPIKey")):
         settings["tmdbAPIKey"] = secret("TMDB API key (v3) or read token")
@@ -167,6 +179,7 @@ def main():
         "4": ("Add IPTV (M3U playlist URL)", add_m3u),
         "5": ("Add a network share (SMB)", add_smb),
         "6": ("Add a media server (Jellyfin / Emby / Plex)", add_media_server),
+        "f": ("Add the local IPTV fixture (127.0.0.1:8790)", add_fixture_iptv),
     }
     while True:
         print("\nCurrent sources:")

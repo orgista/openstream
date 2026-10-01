@@ -23,6 +23,8 @@ struct AppleTVGuideCellFocus: Hashable {
     let summary: String?
     let start: Date
     let end: Date
+    let airStart: Date
+    let airEnd: Date
 
     init(cell: AppleGuideGridCell) {
         cellID = cell.id
@@ -31,6 +33,8 @@ struct AppleTVGuideCellFocus: Hashable {
         summary = cell.subtitle
         start = cell.start
         end = cell.end
+        airStart = cell.airStart
+        airEnd = cell.airEnd
     }
 }
 
@@ -39,6 +43,8 @@ struct AppleTVGuideCellFocus: Hashable {
 enum AppleTVLivePlayerFocus: Hashable {
     case surface
     case card(String)
+    /// "Watch on <other list>" over a channel that could not be recovered.
+    case otherList
 }
 
 /// The guide's shared horizontal scroll offset. Held in a reference type so
@@ -339,6 +345,17 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         }
     }
 
+    /// Left from the channel rail goes to the categories (TiviMate's group
+    /// list sits there). The chip row is above the grid, so the focus engine
+    /// alone finds nothing to the left and the press would be lost.
+    private func focusCategories(from origin: String) {
+        guard let chip = categories.contains(selectedCategory) ? selectedCategory : categories.first else { return }
+        #if DEBUG
+        AppleInteractionTrace.record(.press, "guide left from \(origin) → category \(chip)")
+        #endif
+        focus = .category(chip)
+    }
+
     /// First channel once the rows exist; the current category chip until then.
     private var initialFocus: AppleTVGuideFocus {
         if let first = rows.first { return .channel(first.id) }
@@ -450,7 +467,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
                     return AppleTVGuideStripInfo(
                         channel: channel,
                         title: cell.title,
-                        detail: "\(channel.name) · \(AppleTVGuideTimeSpan.text(from: cell.start, to: cell.end))",
+                        detail: "\(channel.name) · \(AppleTVGuideTimeSpan.text(from: cell.airStart, to: cell.airEnd))",
                         summary: cell.summary
                     )
                 }
@@ -577,7 +594,8 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             onToggleFavorite: onToggleFavorite,
             health: health,
             healthRevision: healthRevision,
-            onShowHealth: onShowHealth
+            onShowHealth: onShowHealth,
+            onRailMoveLeft: { focusCategories(from: "rail") }
         )
         .equatable()
     }
@@ -611,6 +629,7 @@ private struct AppleTVGuideGrid: View, Equatable {
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
     let onShowHealth: (AppleIPTVChannel) -> Void
+    let onRailMoveLeft: () -> Void
 
     // `View` infers `@MainActor` for the whole type; the comparison reads only
     // Sendable value properties, so it stays outside that isolation.
@@ -643,7 +662,8 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 focus: focus,
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
-                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) }
+                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
+                                onMoveLeft: onRailMoveLeft
                             )
                             .frame(width: metrics.railWidth, height: metrics.rowHeight, alignment: .topLeading)
                             .onAppear { visibility.insert(row.id) }
@@ -777,53 +797,54 @@ private struct AppleTVGuideRailCell: View {
     /// The health detail, from the long-press menu, so the row keeps one
     /// focus stop. Nil when the channel has never been checked.
     let onShowHealth: (() -> Void)?
+    /// Left from the rail: nothing lies to its left, so the press goes to
+    /// the categories instead of being swallowed.
+    let onMoveLeft: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
-            // Logo and number share the top row; the name gets the full
-            // width underneath so a 25 pt name never wraps.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .center, spacing: 12) {
-                    AppleTVGuideLogoTile(
-                        logoURL: row.channel.logoURL,
-                        fallbackText: AppleTVGuideLogoTile.fallbackText(name: model.name, number: model.numberText),
-                        size: metrics.logoSize,
-                        cornerRadius: metrics.cornerRadius,
-                        fontSize: metrics.railNameFontSize
-                    )
-                    if let number = model.numberText {
-                        Text(number)
-                            .font(.system(size: metrics.badgeFontSize, weight: .medium).monospacedDigit())
-                            .foregroundStyle(AppleDesignTokens.textSecondary)
-                    }
-                    if model.isFavorite {
-                        // The only favourite marker on the rail now that the
-                        // heart column is gone.
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: metrics.badgeFontSize - 4, weight: .semibold))
-                            .foregroundStyle(AppleDesignTokens.brandAccent)
-                            .accessibilityLabel("Favorite")
-                    }
-                    Spacer(minLength: 0)
-                }
-                HStack(spacing: 10) {
-                    Text(model.name)
-                        .font(.system(size: metrics.railNameFontSize, weight: .medium))
-                        .foregroundStyle(.white)
+            // One compact line, TiviMate-style: logo, number, name.
+            HStack(alignment: .center, spacing: 12) {
+                AppleTVGuideLogoTile(
+                    logoURL: row.channel.logoURL,
+                    fallbackText: AppleTVGuideLogoTile.fallbackText(name: model.name, number: model.numberText),
+                    size: metrics.logoSize,
+                    cornerRadius: metrics.cornerRadius - 2,
+                    fontSize: metrics.badgeFontSize - 6
+                )
+                if let number = model.numberText {
+                    Text(number)
+                        .font(.system(size: metrics.badgeFontSize, weight: .medium).monospacedDigit())
+                        .foregroundStyle(AppleDesignTokens.textSecondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if let health {
-                        AppleChannelHealthDot(indicator: health, size: metrics.healthDotSize)
-                    }
+                        .minimumScaleFactor(0.7)
+                        .frame(width: metrics.railNumberWidth - 12, alignment: .trailing)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(model.name)
+                    .font(.system(size: metrics.railNameFontSize, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if model.isFavorite {
+                    // The only favourite marker on the rail.
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: metrics.badgeFontSize - 6, weight: .semibold))
+                        .foregroundStyle(AppleDesignTokens.brandAccent)
+                        .accessibilityLabel("Favorite")
+                }
+                if let health {
+                    AppleChannelHealthDot(indicator: health, size: metrics.healthDotSize)
+                }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .frame(width: metrics.railPlayWidth, height: metrics.cellHeight, alignment: .topLeading)
+            .frame(width: metrics.railPlayWidth, height: metrics.cellHeight, alignment: .leading)
         }
         .buttonStyle(AppleTVGuideRailStyle(cornerRadius: metrics.cornerRadius))
         .focused(focus, equals: .channel(row.id))
+        .onMoveCommand { direction in
+            if direction == .left { onMoveLeft() }
+        }
         .contextMenu {
             Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
             if let onShowHealth {
@@ -968,7 +989,9 @@ private struct AppleTVGuideScheduleRow: View {
                 ForEach(cells) { cell in
                     let width = metrics.cellWidth(columnSpan: cell.columnSpan)
                     Button(action: onSelect) {
-                        AppleTVGuideCellLabel(cell: cell, width: width, metrics: metrics)
+                        AppleTVGuideCellLabel(cell: cell, width: width, metrics: metrics,
+                            progress: metrics.isGapCell(id: cell.id) ? nil
+                                : metrics.progress(start: cell.airStart, end: cell.airEnd, now: now))
                     }
                     .buttonStyle(AppleTVGuideCellStyle(
                         isCurrent: cell.start <= now && cell.end > now,
@@ -1013,13 +1036,31 @@ private struct AppleTVGuideCellLabel: View {
     let cell: AppleGuideGridCell
     let width: CGFloat
     let metrics: AppleTVGuideMetrics
+    /// How far the programme on now has run; nil for every other cell.
+    var progress: Double? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
             if metrics.showsText(cellWidth: width) {
                 Text(cell.title)
-                    .font(.system(size: metrics.titleFontSize, weight: .medium))
+                    .font(.system(size: metrics.cellFontSize, weight: .medium))
                     .lineLimit(1)
+            }
+            if let progress {
+                // Elapsed time on the programme on now. Hierarchical styles
+                // follow the cell's own text colour, white at rest and black
+                // under focus — no colour of its own.
+                Capsule()
+                    .fill(.quaternary)
+                    .frame(height: metrics.progressBarHeight)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { proxy in
+                            Capsule()
+                                .fill(.primary)
+                                .frame(width: max(metrics.progressBarHeight, proxy.size.width * progress))
+                        }
+                    }
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, metrics.cellInset)
@@ -1376,6 +1417,8 @@ struct AppleTVLivePlayerScreen: View {
     /// is deduplicated to one feed per network — exactly the feeds that would
     /// be needed as replacements are the ones it has already removed.
     let alternateLineup: [AppleIPTVChannel]
+    /// Names of the viewer's lists, for "Watch on <list>".
+    let sourceNames: [UUID: String]
     /// Only used to name what is on each channel in the strip.
     let guide: AppleIPTVGuide
     let metrics: AppleTVGuideMetrics
@@ -1383,6 +1426,7 @@ struct AppleTVLivePlayerScreen: View {
 
     init(channel: AppleIPTVChannel, coordinator: ApplePlaybackCoordinator, footerChannels: [AppleIPTVChannel],
          footer: Binding<AppleTVLiveFooterState>, alternateLineup: [AppleIPTVChannel] = [],
+         sourceNames: [UUID: String] = [:],
          guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []),
          metrics: AppleTVGuideMetrics = .standard,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
@@ -1390,6 +1434,7 @@ struct AppleTVLivePlayerScreen: View {
         self.coordinator = coordinator
         self.footerChannels = footerChannels
         self.alternateLineup = alternateLineup
+        self.sourceNames = sourceNames
         _footer = footer
         self.guide = guide
         self.metrics = metrics
@@ -1413,7 +1458,23 @@ struct AppleTVLivePlayerScreen: View {
             } else {
                 stockPlayerWithFooter
             }
-            if coordinator.phase.isBusy {
+            if coordinator.isReconnectingLive {
+                // A channel that was playing and dropped: say so, quietly,
+                // while the coordinator reopens it (`AppleLiveReconnectPolicy`).
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .controlSize(.large)
+                    Text("Reconnecting…")
+                        .font(.system(size: metrics.subtitleFontSize, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.7), radius: 8, y: 1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Reconnecting to \(channel.name)")
+                .accessibilityIdentifier("live.reconnecting")
+            } else if coordinator.phase.isBusy {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .tint(.white)
@@ -1513,9 +1574,26 @@ struct AppleTVLivePlayerScreen: View {
         // needs is the next channel, so the strip opens itself and takes
         // focus. Menu still leaves, exactly as it does with the strip open.
         .onChange(of: failureIdentity) { _, identity in
-            guard identity != nil,
-                  case .failed(let failure) = coordinator.phase,
-                  AppleLiveFailurePresentation.opensChannelStrip(for: failure),
+            guard identity != nil, case .failed(let failure) = coordinator.phase else { return }
+            // The same channel on another list beats the next channel: offer
+            // it, focused, and leave the strip closed.
+            if let other = otherListChannel {
+                #if DEBUG
+                AppleInteractionTrace.record(
+                    .failure,
+                    "live \(channel.name) failed (\(failure.kind)) — offering \"\(otherListTitle(for: other))\""
+                )
+                #endif
+                appleTrace("live other-list offer: \(otherListTitle(for: other)) (guide id \(other.guideID == nil ? "no" : "yes"))")
+                if footer.isVisible { footer.reset() }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(60))
+                    focus = .otherList
+                }
+                return
+            }
+            appleTrace("live other-list offer: none for \(channel.name)")
+            guard AppleLiveFailurePresentation.opensChannelStrip(for: failure),
                   !footer.isVisible else { return }
             #if DEBUG
             AppleInteractionTrace.record(
@@ -1611,13 +1689,31 @@ struct AppleTVLivePlayerScreen: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 1100)
                     }
-                    Button("Try Again") { Task { await coordinator.retry() } }
-                        .buttonStyle(AppleTVPillStyle(
-                            isSelected: true,
-                            minimumSize: AppleTVDetailMetrics.pillSize,
-                            fontSize: AppleTVDetailMetrics.pillFontSize
-                        ))
-                        .accessibilityIdentifier("live.failure.retry")
+                    HStack(spacing: 32) {
+                        if let other = otherListChannel {
+                            Button(otherListTitle(for: other)) {
+                                appleTrace("live other-list chosen: \(otherListTitle(for: other))")
+                                #if DEBUG
+                                AppleInteractionTrace.record(.press, "live watch on other list \(other.name)")
+                                #endif
+                                onSwitch(other)
+                            }
+                            .buttonStyle(AppleTVPillStyle(
+                                isSelected: true,
+                                minimumSize: AppleTVDetailMetrics.pillSize,
+                                fontSize: AppleTVDetailMetrics.pillFontSize
+                            ))
+                            .focused($focus, equals: .otherList)
+                            .accessibilityIdentifier("live.failure.otherList")
+                        }
+                        Button("Try Again") { Task { await coordinator.retry() } }
+                            .buttonStyle(AppleTVPillStyle(
+                                isSelected: otherListChannel == nil,
+                                minimumSize: AppleTVDetailMetrics.pillSize,
+                                fontSize: AppleTVDetailMetrics.pillFontSize
+                            ))
+                            .accessibilityIdentifier("live.failure.retry")
+                    }
                 }
                 .padding(.bottom, footer.isVisible ? metrics.footerHeight : 0)
                 .accessibilityIdentifier("live.failure")
@@ -1661,6 +1757,11 @@ struct AppleTVLivePlayerScreen: View {
             switch direction {
             case .down: apply(.swipeDown)
             case .up: apply(.swipeUp)
+            // Left/right rewind and catch up inside what the stream really
+            // holds (`AppleLiveSeekPolicy`); a live-edge-only channel ignores
+            // them. Only while the strip is closed: open, they move the cards.
+            case .left where !footer.isVisible: skipLive(by: -10)
+            case .right where !footer.isVisible: skipLive(by: 10)
             default: break
             }
         }
@@ -1701,6 +1802,31 @@ struct AppleTVLivePlayerScreen: View {
             toggleCaptions()
         case .none, .switchChannel:
             break
+        }
+    }
+
+    /// Live rewind within the engine's real seekable window. The stock
+    /// transport is hidden on this route, so this is the only way back.
+    private func skipLive(by seconds: Double) {
+        let engine = coordinator.engine
+        let range = engine.seekableRange
+        guard let target = AppleLiveSeekPolicy.skipTarget(from: engine.position, by: seconds, in: range) else {
+            appleTrace("live skip \(Int(seconds)) s: no DVR window (span \(range.map { Int($0.span) } ?? 0) s)")
+            return
+        }
+        let behind = (range?.end ?? target) - target
+        appleTrace("live skip \(Int(seconds)) s → \(Int(behind)) s behind live (window \(Int(range?.span ?? 0)) s)")
+        Task { await coordinator.userSeek(to: target) }
+        showNotice(behind < 2 ? "Live" : "\(Int(behind.rounded())) s behind live")
+    }
+
+    private func showNotice(_ notice: String) {
+        captionsNoticeTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { captionsNotice = notice }
+        captionsNoticeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { captionsNotice = nil }
         }
     }
 
@@ -1771,6 +1897,25 @@ struct AppleTVLivePlayerScreen: View {
         case .idle, .resolving, .loading, .ended, .failed:
             break
         }
+    }
+
+    /// The same channel on another of the viewer's lists, while this one is
+    /// failed: matched by guide id, then name (`AppleLiveOtherListMatch`).
+    /// Streams this press already tried are not offered again.
+    private var otherListChannel: AppleIPTVChannel? {
+        guard case .failed(let failure) = coordinator.phase,
+              AppleLiveFailurePresentation.isVisible(failure),
+              failure.kind != .authentication, failure.kind != .engineUnavailable else { return nil }
+        return AppleLiveOtherListMatch.match(
+            for: channel,
+            in: alternateLineup,
+            excludingURLs: Set(coordinator.triedSourceURLs),
+            hasRecentlyFailed: { ApplePlaybackFailureHistory.shared.contains($0) }
+        )
+    }
+
+    private func otherListTitle(for other: AppleIPTVChannel) -> String {
+        AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID])
     }
 
     /// Changes once per distinct failure, so the strip opens for a new one

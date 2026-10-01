@@ -179,8 +179,8 @@ struct AppleTVGuideRailCellModelTests {
     @Test func railPlayWidthFillsTheRailApartFromTheColumnGap() {
         let metrics = AppleTVGuideMetrics.standard
         #expect(metrics.railPlayWidth == metrics.railWidth - metrics.cellGap)
-        #expect(metrics.railPlayWidth == 254)
-        #expect(metrics.railWidth == 260)
+        #expect(metrics.railPlayWidth == 336)
+        #expect(metrics.railWidth == 340)
     }
 
     @Test func footerCardsFitInsideTheFooterRow() {

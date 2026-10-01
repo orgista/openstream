@@ -268,6 +268,33 @@ public final class ApplePlaybackCoordinator {
     private var timeoutTask: Task<Void, Never>?
     private var liveRetryTask: Task<Void, Never>?
     private var liveRetryAttempted = false
+
+    // MARK: - Live reconnect (`AppleLiveReconnectPolicy`)
+
+    /// Injected by tests with millisecond delays.
+    @ObservationIgnored var liveReconnectPolicy: AppleLiveReconnectPolicy = .standard
+    /// The reopen in flight (1-based) while a live channel that was playing
+    /// is being reconnected; 0 otherwise. The player reads it to say
+    /// "Reconnecting…" instead of "Connecting to …".
+    public private(set) var liveReconnectAttempt = 0
+    /// This press's live channel has shown a frame. Only a channel that was
+    /// playing is reconnected; one that never started is a dead channel.
+    private var liveHasPlayed = false
+    private var liveEpisodeAttempts = 0
+    private var liveEpisodeStart: ContinuousClock.Instant?
+    private var livePlayingSince: ContinuousClock.Instant?
+    private var liveStallTask: Task<Void, Never>?
+    private var liveStallStart: ContinuousClock.Instant?
+    private var liveStallKind: String?
+    static let reconnectingText = "Reconnecting…"
+
+    /// The live channel is being reconnected, by this coordinator's bounded
+    /// reopen or by the engine's own (`.stalled(reconnecting:)`).
+    public var isReconnectingLive: Bool {
+        guard phase.isBusy else { return false }
+        if liveReconnectAttempt > 0 { return true }
+        return (lastRequest?.isLive ?? false) && phase == .waiting(Self.reconnectingText)
+    }
     private let timeoutDuration: Duration
     private let retryDelay: Duration
     private let progressInterval: Duration
@@ -362,6 +389,7 @@ public final class ApplePlaybackCoordinator {
         fallbackTask?.cancel()
         timeoutTask?.cancel()
         liveRetryTask?.cancel()
+        liveStallTask?.cancel()
         // A player that goes away without stopping first must not leave the
         // television awake for the rest of the day.
         wakeLock.release(wakeOwner)
@@ -374,6 +402,12 @@ public final class ApplePlaybackCoordinator {
 
     private func setPhase(_ newPhase: ApplePlaybackPhase) {
         let previous = phase
+        switch newPhase {
+        case .playing, .failed, .idle, .ended:
+            if liveReconnectAttempt != 0 { liveReconnectAttempt = 0 }
+        default:
+            break
+        }
         phase = newPhase
         updateWakeLock()
         countTransition(from: previous, to: newPhase)
@@ -427,6 +461,7 @@ public final class ApplePlaybackCoordinator {
     /// load failures and engine failures land in `phase` as `.failed`.
     public func begin(_ request: ApplePlaybackRequest) async {
         fallbackTask?.cancel()
+        resetLiveReconnect()
         streamsSkippedForEngine = 0
         triedSourceURLs = []
         openRetriedURLs = []
@@ -447,6 +482,7 @@ public final class ApplePlaybackCoordinator {
         fallbackCandidates: [ApplePlaybackRequest]
     ) async {
         fallbackTask?.cancel()
+        resetLiveReconnect()
         triedSourceURLs = []
         openRetriedURLs = []
         librarySubtitles = AppleLibrarySubtitleService()
@@ -572,6 +608,8 @@ public final class ApplePlaybackCoordinator {
     /// live-retry policy (retry once) is preserved across auto-retry.
     public func retry() async {
         guard let request = lastRequest else { return }
+        liveEpisodeAttempts = 0
+        liveEpisodeStart = nil
         let retriedLive = liveRetryAttempted
         await beginAttempt(request)
         liveRetryAttempted = retriedLive
@@ -593,6 +631,7 @@ public final class ApplePlaybackCoordinator {
         lastRequest = nil
         librarySubtitles = AppleLibrarySubtitleService()
         clearFallback()
+        resetLiveReconnect()
         stopMonitoring()
         cancelObservation()
         cancelTimeout()
@@ -716,6 +755,11 @@ public final class ApplePlaybackCoordinator {
                 appleTrace("playback: the file ends before its container says it should — incomplete download")
                 failure = ApplePlaybackFailure(kind: .network, message: AppleTruncatedMediaProbe.message)
             }
+        }
+        // A live channel that was playing is reopened a few times before
+        // anything is shown (`AppleLiveReconnectPolicy`).
+        if let request = lastRequest, request.isLive, await reconnectLive(request, after: failure) {
+            return
         }
         // An engine open that failed before the first frame gets one more go
         // on the same candidate before the next one is tried.
@@ -931,6 +975,7 @@ public final class ApplePlaybackCoordinator {
             // sees as a spinner, so it is the one timestamp worth having.
             if case .playing = phase {} else { appleTrace("first frame, route=\(route)") }
             if rejectsPlaceholder(request) { return }
+            if request.isLive { noteLivePlaying() }
             let isResume = (phase == .paused)
             setPhase(.playing)
             cancelTimeout()
@@ -941,6 +986,7 @@ public final class ApplePlaybackCoordinator {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .progress)
             }
         case .paused:
+            cancelLiveStall()
             setPhase(.paused)
             if request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .paused)
@@ -950,9 +996,11 @@ public final class ApplePlaybackCoordinator {
         case .rebuffering:
             appleTrace("rebuffering")
             setPhase(.waiting("Buffering…"))
+            if request.isLive { watchLiveStall(kind: "rebuffering") }
         case .stalled(let reconnecting):
             appleTrace("stalled reconnecting=\(reconnecting)")
-            setPhase(.waiting(reconnecting ? "Reconnecting…" : "Reconnecting…"))
+            setPhase(.waiting(Self.reconnectingText))
+            if request.isLive { watchLiveStall(kind: "stalled") }
         case .ended:
             handleEnded(request: request)
         case .error(let message):
@@ -974,6 +1022,13 @@ public final class ApplePlaybackCoordinator {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .stopped)
                 remoteProgressStarted = false
             }
+            return
+        }
+        // A channel that was playing goes through the bounded reconnect.
+        if liveHasPlayed {
+            cancelTimeout()
+            appleTrace("live stream ended mid-play")
+            scheduleFailure(ApplePlaybackFailure(kind: .sourceEnded, message: "The channel stopped sending data."))
             return
         }
         if !liveRetryAttempted {
@@ -1161,5 +1216,108 @@ public final class ApplePlaybackCoordinator {
     private func cancelLiveRetry() {
         liveRetryTask?.cancel()
         liveRetryTask = nil
+    }
+
+    // MARK: - Live reconnect
+
+    private func resetLiveReconnect() {
+        liveHasPlayed = false
+        liveEpisodeAttempts = 0
+        liveEpisodeStart = nil
+        livePlayingSince = nil
+        liveReconnectAttempt = 0
+        cancelLiveStall()
+    }
+
+    private func noteLivePlaying() {
+        cancelLiveStall()
+        if liveEpisodeAttempts > 0, liveReconnectAttempt > 0 {
+            appleTrace("live reconnect recovered on attempt \(liveEpisodeAttempts)")
+        }
+        liveHasPlayed = true
+        // A recovery restarts the window, so the next outage gets its own
+        // 15 s; the attempt count carries on until the channel has played
+        // steadily (`episodeResetAfter`), so a flapping feed is still bounded.
+        liveEpisodeStart = nil
+        if livePlayingSince == nil { livePlayingSince = ContinuousClock.now }
+    }
+
+    /// Reopens the live `request` after `failure` when the policy says so.
+    /// Returns false when the failure should take its normal course.
+    private func reconnectLive(_ request: ApplePlaybackRequest, after failure: ApplePlaybackFailure) async -> Bool {
+        let now = ContinuousClock.now
+        if liveEpisodeAttempts > 0, let since = livePlayingSince,
+           liveReconnectPolicy.startsNewEpisode(playingFor: now - since) {
+            appleTrace("live reconnect: played \(now - since) since the last drop — new episode")
+            liveEpisodeStart = nil
+            liveEpisodeAttempts = 0
+        }
+        let elapsed = liveEpisodeStart.map { now - $0 } ?? .zero
+        let decision = liveReconnectPolicy.decide(kind: failure.kind, attemptsSoFar: liveEpisodeAttempts,
+                                                  elapsed: elapsed, hasPlayed: liveHasPlayed)
+        switch decision {
+        case .giveUp(let reason):
+            if liveHasPlayed {
+                appleTrace("live reconnect gave up (\(reason)) after \(liveEpisodeAttempts) of "
+                    + "\(liveReconnectPolicy.maxAttempts) in \(elapsed) — \(failure.kind)")
+            }
+            return false
+        case .reconnect(let attempt, let delay):
+            if liveEpisodeStart == nil { liveEpisodeStart = now }
+            liveEpisodeAttempts = attempt
+            livePlayingSince = nil
+            appleTrace("live reconnect \(attempt)/\(liveReconnectPolicy.maxAttempts) in \(delay) after "
+                + "\(failure.kind): \(failure.message) host=\(request.url.host() ?? "?")")
+            cancelTimeout()
+            cancelObservation()
+            cancelLiveStall()
+            engine.stop()
+            setPhase(.waiting(Self.reconnectingText))
+            liveReconnectAttempt = attempt
+            let attemptGeneration = generation
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, generation == attemptGeneration else { return true }
+            // `liveReconnectAttempt` survives the loading phase, so the
+            // screen keeps saying "Reconnecting…" until a frame or a give-up.
+            await beginAttempt(request)
+            return true
+        }
+    }
+
+    /// A playing live channel that waits for data longer than the policy's
+    /// stall timeout is treated as dropped, so the reconnect starts instead
+    /// of a frozen frame under a spinner. The engine reconnects on its own
+    /// first (`.stalled(reconnecting: true)`); when it moves on to buffering,
+    /// data is flowing again, so the timer starts over — up to three
+    /// timeouts in all, so a stream that keeps stuttering is still caught.
+    private func watchLiveStall(kind: String) {
+        guard liveHasPlayed else { return }
+        if liveStallTask != nil, kind == liveStallKind { return }
+        let now = ContinuousClock.now
+        let start = liveStallStart ?? now
+        liveStallStart = start
+        liveStallKind = kind
+        let timeout = liveReconnectPolicy.stallTimeout
+        let remaining = min(timeout, timeout * 3 - (now - start))
+        let attempt = generation
+        liveStallTask?.cancel()
+        liveStallTask = Task { @MainActor [weak self] in
+            if remaining > .zero { try? await Task.sleep(for: remaining) }
+            guard !Task.isCancelled, let self, self.generation == attempt else { return }
+            self.liveStallTask = nil
+            guard case .waiting = self.phase else { return }
+            appleTrace("live stalled \(ContinuousClock.now - start) (\(kind)) — treating as a drop")
+            self.liveStallStart = nil
+            self.liveStallKind = nil
+            self.engine.stop()
+            self.scheduleFailure(ApplePlaybackFailure(kind: .timedOut, message: "The channel stopped sending data."))
+        }
+    }
+
+    private func cancelLiveStall() {
+        liveStallTask?.cancel()
+        liveStallTask = nil
+        liveStallStart = nil
+        liveStallKind = nil
     }
 }

@@ -23,6 +23,11 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// playlist shape before asking the proxy for a declaring master.
     public var wrapsInCaptionMaster: Bool? = nil
 
+    /// Days of catch-up the panel keeps for this channel (Xtream
+    /// `tv_archive` + `tv_archive_duration`); nil when it reports none.
+    /// Optional so cached channels written before it decode unchanged.
+    public var catchUpDays: Int? = nil
+
     public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {
         var copy = self
         copy.probedMediaKind = kind
@@ -75,7 +80,7 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     }
 
     public func withGuideURL(_ guideURL: URL?) -> Self {
-        Self(
+        var copy = Self(
             id: id,
             sourceID: sourceID,
             name: name,
@@ -89,6 +94,10 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
             guideURL: guideURL,
             originalEXTINF: originalEXTINF
         )
+        copy.probedMediaKind = probedMediaKind
+        copy.wrapsInCaptionMaster = wrapsInCaptionMaster
+        copy.catchUpDays = catchUpDays
+        return copy
     }
 }
 
@@ -603,15 +612,22 @@ public struct AppleIPTVClient: Sendable {
                   ),
                   seen.insert(streamID).inserted else { continue }
             let cleanName = (stream.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            channels.append(AppleIPTVChannel(
+            // The panel's guide id is what another list calls the same
+            // channel by (`tvg-id`), so a dead feed can be matched across lists.
+            let epgID = stream.epgChannelID?.value.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var channel = AppleIPTVChannel(
                 id: "\(source.id.uuidString):\(streamID)",
                 sourceID: source.id,
                 name: String((cleanName.isEmpty ? "Channel \(channels.count + 1)" : cleanName).prefix(160)),
                 group: String((stream.categoryID.flatMap { categories[$0.value] } ?? "").prefix(120)),
                 logoURL: Self.safeArtworkURL(stream.streamIcon),
                 streamURL: upstreamURL,
-                userAgent: "OpenStream/1.0 Apple"
-            ))
+                userAgent: "OpenStream/1.0 Apple",
+                guideID: epgID.isEmpty ? nil : String(epgID.prefix(160))
+            )
+            channel.catchUpDays = AppleIPTVCatchUp.archiveDays(
+                tvArchive: stream.tvArchive?.value, duration: stream.tvArchiveDuration?.value)
+            channels.append(channel)
             if channels.count == Self.maximumChannels { break }
         }
         guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
@@ -1106,6 +1122,9 @@ private struct XtreamLiveStream: Decodable {
     let categoryID: XtreamFlexibleString?
     let directSource: String?
     let containerExtension: String?
+    let epgChannelID: XtreamFlexibleString?
+    let tvArchive: XtreamFlexibleString?
+    let tvArchiveDuration: XtreamFlexibleString?
 
     private enum CodingKeys: String, CodingKey {
         case streamID = "stream_id"
@@ -1114,6 +1133,24 @@ private struct XtreamLiveStream: Decodable {
         case categoryID = "category_id"
         case directSource = "direct_source"
         case containerExtension = "container_extension"
+        case epgChannelID = "epg_channel_id"
+        case tvArchive = "tv_archive"
+        case tvArchiveDuration = "tv_archive_duration"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        streamID = try values.decodeIfPresent(XtreamFlexibleString.self, forKey: .streamID)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        streamIcon = try values.decodeIfPresent(String.self, forKey: .streamIcon)
+        categoryID = try values.decodeIfPresent(XtreamFlexibleString.self, forKey: .categoryID)
+        directSource = try values.decodeIfPresent(String.self, forKey: .directSource)
+        containerExtension = try values.decodeIfPresent(String.self, forKey: .containerExtension)
+        // Optional extras: a panel that sends them in an odd shape must not
+        // lose the channel itself.
+        epgChannelID = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .epgChannelID)
+        tvArchive = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .tvArchive)
+        tvArchiveDuration = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .tvArchiveDuration)
     }
 }
 

@@ -10,8 +10,16 @@ public struct AppleGuideGridCell: Sendable, Equatable, Identifiable {
     public let title: String
     public let subtitle: String?
     public let isLive: Bool
+    /// The programme's own times; `start`/`end` are clamped to the guide's
+    /// window and to the programme before it, so a programme that began
+    /// before the window would read as starting with it.
+    public let airStart: Date
+    public let airEnd: Date
 
-    public init(id: String, channelID: String, start: Date, end: Date, columnOffset: Double, columnSpan: Double, title: String, subtitle: String?, isLive: Bool) {
+    public init(id: String, channelID: String, start: Date, end: Date, columnOffset: Double, columnSpan: Double, title: String, subtitle: String?, isLive: Bool,
+                airStart: Date? = nil, airEnd: Date? = nil) {
+        self.airStart = airStart ?? start
+        self.airEnd = airEnd ?? end
         self.id = id
         self.channelID = channelID
         self.start = start
@@ -179,7 +187,9 @@ public enum AppleGuideGridModel: Sendable {
                         columnSpan: span,
                         title: prog.title,
                         subtitle: prog.subtitle ?? prog.description,
-                        isLive: prog.isLive
+                        isLive: prog.isLive,
+                        airStart: prog.start,
+                        airEnd: prog.end
                     ))
                 }
                 currentCellStart = max(currentCellStart, clampedEnd)

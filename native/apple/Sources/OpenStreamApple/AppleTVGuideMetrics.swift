@@ -1,10 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// Apple TV guide geometry from the rework plan (FEEDBACK section C): a
-/// 1920x1080 point canvas with 80/60 safe insets, a 260 pt channel rail with
-/// 88x50 logos, a 320 pt cell per 30 minutes, 100 pt rows and a 3 pt now-line.
-/// Every value is plain data so the layout can be asserted without a view.
+/// Apple TV guide geometry: a 1920x1080 point canvas with 80/60 safe insets.
+///
+/// Dense since 2026-10-01 (TiviMate-style, the owner's and Strand users' top
+/// complaint about the guide): a 340 pt rail with one compact line per channel
+/// (64x36 logo, number, name), 68 pt rows and 240 pt per half hour, so about
+/// seven channels and three hours are on screen instead of four and a half
+/// channels and two and a half hours. Every value is plain data so the layout
+/// can be asserted without a view.
 public struct AppleTVGuideMetrics: Sendable, Equatable {
     public static let standard = AppleTVGuideMetrics()
 
@@ -12,16 +16,20 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     public var horizontalSafeInset: CGFloat = 80
     public var verticalSafeInset: CGFloat = 60
 
-    public var railWidth: CGFloat = 260
-    public var logoSize = CGSize(width: 88, height: 50)
+    public var railWidth: CGFloat = 340
+    public var logoSize = CGSize(width: 64, height: 36)
+    /// The channel number column, wide enough for four digits.
+    public var railNumberWidth: CGFloat = 60
     public var slotMinutes = 30
-    public var slotWidth: CGFloat = 320
-    public var rowHeight: CGFloat = 100
-    public var cellGap: CGFloat = 6
-    public var cellInset: CGFloat = 16
+    public var slotWidth: CGFloat = 240
+    public var rowHeight: CGFloat = 68
+    public var cellGap: CGFloat = 4
+    public var cellInset: CGFloat = 14
     public var cornerRadius: CGFloat = 8
-    public var headerHeight: CGFloat = 44
+    public var headerHeight: CGFloat = 36
     public var nowLineWidth: CGFloat = 3
+    /// The elapsed-time bar under the programme on now.
+    public var progressBarHeight: CGFloat = 4
 
     /// The info panel above the category row: tall enough for a title, the
     /// channel and time line, and two lines of description — and for a
@@ -37,7 +45,7 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     public var stripTextMaxWidth: CGFloat = 1200
     public var pillSize = CGSize(width: 220, height: 66)
     public var categoryPillHeight: CGFloat = 56
-    public var sectionSpacing: CGFloat = 20
+    public var sectionSpacing: CGFloat = 14
 
     /// The channel footer over full-screen live playback: card size, the
     /// logo inside it and the row's height including its padding.
@@ -53,6 +61,9 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     public var titleFontSize: CGFloat = 29
     public var subtitleFontSize: CGFloat = 25
     public var railNameFontSize: CGFloat = 25
+    /// Programme titles in the grid: Caption 1, one step under the strip's
+    /// title so a 68 pt row holds the title and the progress bar.
+    public var cellFontSize: CGFloat = 25
     public var headerFontSize: CGFloat = 23
     public var badgeFontSize: CGFloat = 23
     public var pillFontSize: CGFloat = 31
@@ -72,6 +83,14 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     /// The play target inside a rail cell: the whole rail minus the column
     /// gap, so the cell lines up with the first programme cell beside it.
     public var railPlayWidth: CGFloat { railWidth - cellGap }
+
+    /// How far through `start..<end` the moment `now` is, 0...1; nil when
+    /// `now` is outside it (only the programme on now draws a bar).
+    public func progress(start: Date, end: Date, now: Date) -> Double? {
+        let length = end.timeIntervalSince(start)
+        guard length > 0, now >= start, now < end else { return nil }
+        return min(1, max(0, now.timeIntervalSince(start) / length))
+    }
 
     /// Cells narrower than this draw no text at all.
     public var textMinimumCellWidth: CGFloat { 60 }

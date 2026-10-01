@@ -146,6 +146,8 @@ struct AppleLiveTVView: View {
                                 sharePlay: sharePlay,
                                 liveChannel: selectedChannel,
                                 channels: channelSnapshot.channels,
+                                otherListLineup: channels,
+                                sourceNames: liveSourceNames,
                                 guide: guideStore.guide(for: channelSnapshot.channelIDs),
                                 onSwitchChannel: { startChannel($0, shareSelection: true, present: false) },
                                 onRequestFullWindow: fullWindowAction
@@ -400,6 +402,11 @@ struct AppleLiveTVView: View {
         // The full-screen player owns the failure alert (Retry/Close). A second
         // alert here, bound to the same coordinator phase, collided with the
         // fullScreenCover and dismissed the player silently (2026-09-03).
+    }
+
+    /// Each list's name by id, for "Watch on <list>".
+    private var liveSourceNames: [UUID: String] {
+        Dictionary(sourceStore.sources.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     }
 
     private var sharedSourceChoices: [AppleSharedChannelSourceChoice] {
@@ -845,6 +852,7 @@ struct AppleLiveTVView: View {
                     footerChannels: channelSnapshot.channels,
                     footer: $tvFooter,
                     alternateLineup: channels,
+                    sourceNames: liveSourceNames,
                     guide: guideStore.guide(for: channelSnapshot.channelIDs),
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
@@ -1013,6 +1021,10 @@ struct AppleLiveInlinePlayer: View {
     let sharePlay: AppleSharePlaySessionStore
     let liveChannel: AppleIPTVChannel?
     let channels: [AppleIPTVChannel]
+    /// Every list's channels, searched for this channel on another list
+    /// when it cannot be recovered ("Watch on <list>").
+    let otherListLineup: [AppleIPTVChannel]
+    let sourceNames: [UUID: String]
     let guide: AppleIPTVGuide
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     /// macOS: the channel goes to the window's full player
@@ -1024,7 +1036,7 @@ struct AppleLiveInlinePlayer: View {
     private let macCommands = AppleMacCommandCenter.shared
     #endif
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], otherListLineup: [AppleIPTVChannel] = [], sourceNames: [UUID: String] = [:], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil) {
         self.onRequestFullWindow = onRequestFullWindow
         self.request = request
         self.coordinator = coordinator
@@ -1035,6 +1047,8 @@ struct AppleLiveInlinePlayer: View {
         self.sharePlay = sharePlay
         self.liveChannel = liveChannel
         self.channels = channels
+        self.otherListLineup = otherListLineup
+        self.sourceNames = sourceNames
         self.guide = guide
         self.onSwitchChannel = onSwitchChannel
         let audioSession = AppleAudioSessionCoordinator()
@@ -1101,6 +1115,23 @@ struct AppleLiveInlinePlayer: View {
             if coordinator.phase.isBusy {
                 AppleLiveConnectingArtwork(logoURL: logoURL)
                     .allowsHitTesting(false)
+                if coordinator.isReconnectingLive {
+                    // A channel that was playing dropped and is being reopened
+                    // (`AppleLiveReconnectPolicy`).
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.white)
+                            Text("Reconnecting…")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.bottom, 16)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("live.reconnecting")
+                }
             }
         }
         .background(.black)
@@ -1167,6 +1198,12 @@ struct AppleLiveInlinePlayer: View {
             lifetime.inlineDisappeared(host: host, coordinator: coordinator)
         }
         .alert("Playback Failed", isPresented: failureBinding) {
+            if let other = otherListChannel, let onSwitchChannel {
+                Button(AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID])) {
+                    appleTrace("live other-list chosen: \(AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID]))")
+                    onSwitchChannel(other)
+                }
+            }
             Button("Retry") { Task { await coordinator.retry() } }
             Button("Close", role: .cancel) { coordinator.stop() }
         } message: {
@@ -1178,6 +1215,16 @@ struct AppleLiveInlinePlayer: View {
 
     private var requestIdentity: String {
         "\(request.mediaID)|\(request.url.absoluteString)"
+    }
+
+    /// This channel on another list, while it is failed.
+    private var otherListChannel: AppleIPTVChannel? {
+        guard request.isLive, let liveChannel, case .failed(let failure) = coordinator.phase,
+              failure.kind != .cancelled, failure.kind != .authentication else { return nil }
+        return AppleLiveOtherListMatch.match(
+            for: liveChannel, in: otherListLineup,
+            excludingURLs: Set(coordinator.triedSourceURLs),
+            hasRecentlyFailed: { ApplePlaybackFailureHistory.shared.contains($0) })
     }
 
     private var failureBinding: Binding<Bool> {
