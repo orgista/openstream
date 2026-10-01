@@ -1,1 +1,0 @@
-/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/openstream_xr_session_test.dir/tests/immersive_video_session_test.cpp.o -o openstream_xr_session_test  libopenstream_xr_core.a

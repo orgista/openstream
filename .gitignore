@@ -11,3 +11,29 @@ artifacts/
 .claude/
 *.old.*
 native/apple/verification-artifacts/
+
+# Build output: never tracked (local files stay; see native/apple/scripts and CI)
+native/apple/Apps/build/
+native/openxr/build-test/
+Apps/build/
+**/build/
+**/build-test/
+**/.build/
+**/DerivedData/
+**/XCBuildData/
+
+# Owner-provided media samples (copyrighted; 2.3 GB) — kept locally only
+native/apple/Tests/Fixtures/private/
+Tests/Fixtures/private/
+
+# Signing material and private configuration, never in the repo
+*.p12
+*.p8
+*.mobileprovision
+*.jks
+*.keystore
+AuthKey_*
+credentials.env
+dev-sources.json
+.env
+.env.*

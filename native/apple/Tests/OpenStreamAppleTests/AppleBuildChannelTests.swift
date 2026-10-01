@@ -17,14 +17,19 @@ import Testing
     /// TestFlight, App Review and the App Store all run Release archives; App
     /// Review's carries the same sandbox receipt as TestFlight. None of them
     /// may start with a catalog the user did not add.
+    private static let fixture = ["https://fixture.example/aiometadata/manifest.json"]
+
     @Test func releaseBuildsNeverSeedWhateverTheReceipt() {
         #expect(!AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: false))
-        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: false).isEmpty)
+        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: false, devSourceManifests: Self.fixture).isEmpty)
     }
 
-    @Test func debugBuildsSeedTheTestCatalogs() {
+    /// A debug build seeds exactly the dev-sources add-ons it was given; the
+    /// addresses themselves are never compiled in.
+    @Test func debugBuildsSeedTheDevSourcesCatalogs() {
         #expect(AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: true))
-        #expect(!AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true).isEmpty)
+        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true, devSourceManifests: Self.fixture) == Self.fixture)
+        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true, devSourceManifests: []).isEmpty)
     }
 
     /// The store follows the policy for the build it was compiled in (tests
@@ -32,7 +37,8 @@ import Testing
     @MainActor @Test func storeFollowsThePolicyForThisBuild() {
         #expect(AppleTestCatalogSeedPolicy.isDebugBuild)
         #expect(AppleSourceStore.seedsTestCatalogs == AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: true))
-        #expect(AppleSourceStore.testCatalogManifests == AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true))
+        #expect(AppleSourceStore.testCatalogManifests == AppleTestCatalogSeedPolicy.manifests(
+            isDebugBuild: true, devSourceManifests: AppleTestCatalogSeedPolicy.debugManifests))
     }
 }
 

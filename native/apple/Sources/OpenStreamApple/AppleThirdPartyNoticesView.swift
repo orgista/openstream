@@ -48,6 +48,12 @@ private struct AppleThirdPartyNoticeDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.primary)
                 }
+                if !notice.note.isEmpty {
+                    Text(notice.note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 Text(notice.text)
                     .font(.body.monospaced())
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -1114,11 +1114,24 @@ public final class AppleSourceStore {
 
     /// Fetches the add-on's manifest again and applies it. Fail-open: a
     /// transport or shape failure leaves the source exactly as it was.
-    /// Catalogs a DEBUG build starts with; empty in every Release build
-    /// (see `AppleTestCatalogSeedPolicy`). Seeded once per install; a tester
-    /// who deletes one never sees it come back.
+    /// Catalogs a DEBUG build starts with (the owner's dev-sources add-ons);
+    /// empty in every Release build (see `AppleTestCatalogSeedPolicy`). Seeded
+    /// once per install; a tester who deletes one never sees it come back.
     public static var testCatalogManifests: [String] {
-        AppleTestCatalogSeedPolicy.manifests(isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild)
+        #if DEBUG
+        AppleTestCatalogSeedPolicy.manifests(
+            isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild,
+            devSourceManifests: AppleTestCatalogSeedPolicy.debugManifests)
+        #else
+        []
+        #endif
+    }
+
+    /// Tests hand a fixture list to one store instead of a dev-sources file.
+    @ObservationIgnored public var testCatalogManifestsOverride: [String]?
+
+    private var activeTestCatalogManifests: [String] {
+        testCatalogManifestsOverride ?? Self.testCatalogManifests
     }
 
     public static var seedsTestCatalogs: Bool {
@@ -1150,7 +1163,7 @@ public final class AppleSourceStore {
     /// file (`scripts/seed-sim.sh`): the test catalogs count as seeded, so
     /// AIOMetadata is not added beside it now or on a later launch.
     public func markTestCatalogsSeeded() {
-        for value in Self.testCatalogManifests { markTestCatalogSeeded(value) }
+        for value in activeTestCatalogManifests { markTestCatalogSeeded(value) }
     }
 
     private func seededTestCatalogs() -> [String] {
@@ -1159,7 +1172,7 @@ public final class AppleSourceStore {
 
     private func pendingTestCatalogs() -> [String] {
         let done = seededTestCatalogs()
-        return Self.testCatalogManifests.filter { !done.contains($0) }
+        return activeTestCatalogManifests.filter { !done.contains($0) }
     }
 
     private func markTestCatalogSeeded(_ value: String) {
