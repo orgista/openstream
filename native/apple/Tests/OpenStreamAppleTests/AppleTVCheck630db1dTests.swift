@@ -79,4 +79,35 @@ struct AppleTVCheck630db1dTests {
         #expect(AppleStockPlayerMetadata.items(title: "  ").isEmpty)
         #expect(AppleStockPlayerMetadata.items(title: nil).isEmpty)
     }
+
+    // MARK: 3. Stock player stuck after a seek (clock still, rate 1)
+
+    @Test func aStuckMinimizeStallsWaitWithMediaBufferedIsNudged() {
+        #expect(NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: false,
+            secondsStill: 4, secondsSinceLastNudge: .max))
+        // Too soon: AVPlayer usually resumes by itself within a few seconds.
+        #expect(!NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: false,
+            secondsStill: 3, secondsSinceLastNudge: .max))
+        // Nothing buffered: playing immediately would only stall again.
+        #expect(!NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: true, isLive: false,
+            secondsStill: 30, secondsSinceLastNudge: .max))
+        // Paused by the viewer, or waiting for another reason.
+        #expect(!NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: false, bufferEmpty: false, isLive: false,
+            secondsStill: 30, secondsSinceLastNudge: .max))
+        // Live is left to AVPlayer.
+        #expect(!NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: true,
+            secondsStill: 30, secondsSinceLastNudge: .max))
+        // One nudge per cooldown.
+        #expect(!NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: false,
+            secondsStill: 6, secondsSinceLastNudge: 2))
+        #expect(NativePlaybackEngine.stallNudgeIsDue(
+            isWaitingToMinimizeStalls: true, bufferEmpty: false, isLive: false,
+            secondsStill: 12, secondsSinceLastNudge: NativePlaybackEngine.stallNudgeCooldown))
+    }
 }

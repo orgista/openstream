@@ -174,6 +174,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         #if !os(macOS)
         if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title) }
         #endif
+        isLiveItem = request.isLive
         let avPlayer = AVPlayer(playerItem: playerItem)
         if AppleTestAudioMute.isActive { avPlayer.isMuted = true }
         self.item = playerItem
@@ -471,7 +472,10 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             Task { @MainActor [weak self] in self?.derivePhase() }
         })
         observers.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor [weak self] in self?.derivePhase() }
+            Task { @MainActor [weak self] in
+                self?.traceTransport("timeControlStatus")
+                self?.derivePhase()
+            }
         })
 
         let center = NotificationCenter.default
@@ -481,6 +485,27 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleEnd() }
+        })
+        // Seek/stall diagnostics for the stock route, where AVKit seeks the
+        // player itself and the engine only sees the consequences.
+        notificationObservers.append(center.addObserver(
+            forName: AVPlayerItem.timeJumpedNotification, object: playerItem, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.traceTransport("timeJumped") }
+        })
+        notificationObservers.append(center.addObserver(
+            forName: .AVPlayerItemPlaybackStalled, object: playerItem, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.traceTransport("stalled") }
+        })
+        notificationObservers.append(center.addObserver(
+            forName: .AVPlayerItemNewErrorLogEntry, object: playerItem, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let entry = self?.item?.errorLog()?.events.last else { return }
+                // Status and domain only: the URI and comment can carry tokens.
+                appleTrace("native errorLog: status=\(entry.errorStatusCode) domain=\(entry.errorDomain)")
+            }
         })
         notificationObservers.append(center.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
@@ -492,6 +517,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             // phase here instead of forwarding the notification payload.
             Task { @MainActor [weak self] in self?.derivePhase() }
         })
+
+        startClockMonitor(player: player)
 
         let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
@@ -544,6 +571,93 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         }
     }
 
+    private var clockMonitor: Task<Void, Never>?
+    private var isLiveItem = false
+
+    /// Watches for the stall AVPlayer does not come out of by itself.
+    ///
+    /// After a seek on the stock route, AVPlayer can sit in
+    /// `waitingToPlayAtSpecifiedRate` (reason: minimize stalls) with media
+    /// buffered ahead of the playhead and the network still delivering, yet
+    /// never re-decide to play: rate 1, so the stock transport shows playing,
+    /// and the clock stands still until the viewer pauses and plays (SNL
+    /// S51E1 at 1:07:24 on the Apple TV sim, 11 s, 25 s and 40+ s in three
+    /// runs; access log 25–65 MB arriving meanwhile). Pause/play unsticks it
+    /// because the stock play button plays what is buffered immediately; this
+    /// does the same, through `stallNudgeIsDue`.
+    private func startClockMonitor(player: AVPlayer) {
+        clockMonitor?.cancel()
+        clockMonitor = Task { @MainActor [weak self, weak player] in
+            var last = -1.0
+            var still = 0
+            var sinceNudge = Int.max
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, let player, self.player === player else { return }
+                let now = player.currentTime().seconds
+                let status = player.timeControlStatus
+                still = (status != .paused && now == last) ? still + 1 : 0
+                sinceNudge = sinceNudge == .max ? .max : sinceNudge + 1
+                last = now
+                guard still > 0 else { continue }
+                if AppleInteractionTrace.isEnabled, [2, 5, 10, 20, 40].contains(still) || still % 60 == 0 {
+                    let access = self.item?.accessLog()?.events.last
+                    let bytes = access.map { "\($0.numberOfBytesTransferred / 1024) KB, stalls \($0.numberOfStalls)" } ?? "no access log"
+                    self.traceTransport("clock still \(still)s (\(bytes))")
+                }
+                guard Self.stallNudgeIsDue(
+                    isWaitingToMinimizeStalls: status == .waitingToPlayAtSpecifiedRate
+                        && player.reasonForWaitingToPlay == .toMinimizeStalls,
+                    bufferEmpty: self.item?.isPlaybackBufferEmpty ?? true,
+                    isLive: self.isLiveItem,
+                    secondsStill: still,
+                    secondsSinceLastNudge: sinceNudge) else { continue }
+                sinceNudge = 0
+                self.traceTransport("stall nudge after \(still)s")
+                player.playImmediately(atRate: player.rate > 0 ? player.rate : 1)
+            }
+        }
+    }
+
+    /// Seconds the clock must stand still in a minimize-stalls wait, with
+    /// media buffered, before the engine plays what it has.
+    nonisolated static let stallNudgeAfter = 4
+    /// At most one nudge this often, so a stream that truly has nothing
+    /// left stalls normally instead of being kicked every second.
+    nonisolated static let stallNudgeCooldown = 8
+
+    /// See `startClockMonitor`. Never for live: a live wait is the live edge
+    /// filling, which AVPlayer handles itself.
+    nonisolated static func stallNudgeIsDue(
+        isWaitingToMinimizeStalls: Bool, bufferEmpty: Bool, isLive: Bool,
+        secondsStill: Int, secondsSinceLastNudge: Int
+    ) -> Bool {
+        isWaitingToMinimizeStalls && !bufferEmpty && !isLive
+            && secondsStill >= stallNudgeAfter
+            && secondsSinceLastNudge >= stallNudgeCooldown
+    }
+
+    /// One trace line per transport change on this route: what AVPlayer
+    /// says it is doing, why it is waiting, and where the clock is.
+    private func traceTransport(_ cause: String) {
+        guard AppleInteractionTrace.isEnabled, let player else { return }
+        let status: String
+        switch player.timeControlStatus {
+        case .paused: status = "paused"
+        case .playing: status = "playing"
+        case .waitingToPlayAtSpecifiedRate: status = "waiting"
+        @unknown default: status = "unknown"
+        }
+        let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
+        let time = player.currentTime().seconds
+        let keepUp = item?.isPlaybackLikelyToKeepUp ?? false
+        let empty = item?.isPlaybackBufferEmpty ?? false
+        let loaded = item?.loadedTimeRanges.map(\.timeRangeValue).map {
+            "\(Int($0.start.seconds))+\(Int($0.duration.seconds))"
+        }.joined(separator: ",") ?? ""
+        appleTrace("native \(cause): tcs=\(status) reason=\(reason) rate=\(player.rate) t=\(time.isFinite ? Int(time) : -1) keepUp=\(keepUp) bufferEmpty=\(empty) loaded=[\(loaded)] phase=\(phase)")
+    }
+
     private func finishSeek() {
         isSeeking = false
         derivePhase()
@@ -591,6 +705,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     }
 
     private func teardown() {
+        clockMonitor?.cancel()
+        clockMonitor = nil
         captionObservation?.cancel()
         captionObservation = nil
         externalSubtitleLoad?.cancel()
