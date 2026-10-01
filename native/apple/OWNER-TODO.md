@@ -14,6 +14,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
       last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
+- [ ] **Owner decisions 2026-10-01 (afternoon):**
+      1. Native player: when a title has nothing the Native player can open, fall back to the OpenStream player
+         automatically — and pre-check before playing so it never fails first. (in progress)
+      2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
+         Resume on the title page. (in progress)
 - [ ] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
       Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials
       not the checked season; Settings › Playback bottom row, Left doesn't reach the sidebar; faint metadata line
