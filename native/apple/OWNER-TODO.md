@@ -19,6 +19,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          Apple's player (Infuse-style). Native stays as a hidden debug override only. (in progress)
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **ISO / disc images (owner 2026-10-01):** today ISOs (DVD + Blu-ray, decrypted) play the main title only — no
+      menus. Want: (1) at minimum real DVD menu playback for ISOs; (2) distinguish disc images in the library, maybe a
+      small DVD spinner — research other apps' looks first, owner picks before we build. Research running.
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
