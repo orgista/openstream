@@ -24,8 +24,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          it now plays what's buffered after 4 s.
       5. FIXED (sim-checked): Resume… now shows on Apple TV (the button was hard-coded "Play"); the player shows
          2015, not "2023"; on the stock player MP4 sources go first and MKVs are skipped instead of ~100 black-
-         spinner retries. Still open: when every stream fails the player just closes with no "Playback Unavailable"
-         message, and the stock player doesn't hand MKVs to the OpenStream player (ties into the DECIDE above).
+         spinner retries. When every stream fails there is now a "Playback Unavailable" alert;
+         on Native it offers "Try OpenStream Player" for that one play (sim-checked). DECIDE above still stands:
+         switch automatically instead of asking?
 - [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
       chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
       1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,
