@@ -44,7 +44,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       poster corner (A2) + that symbol spinning while the disc opens (S1); "Play Disc" opens the real DVD menu first,
       "Skip to Movie" plays the main title (D2) — menus are part of the experience; Disc Menu button in the player (P1).
       Engine forked (github.com/cyberbanksy/AetherEngine, public — LGPL-3.0 + App Store exception, so our engine
-      changes are published; keep rebased on upstream). DVD menu player phase 1 (disc structure + menu logic) running.
+      changes are published; keep rebased on upstream). Phase 1 DONE (disc menu structure, button highlights, the
+      DVD menu "brain", 70 tests, test disc) on branch dvd-menus in ~/Developer/openstream-build/AetherEngine-fork —
+      NOT pushed: pushing was blocked by permissions. Owner: run `cd ~/Developer/openstream-build/AetherEngine-fork &&
+      git push -u origin dvd-menus` or allow it. Phase 2 (menus on screen + remote) running, ~4–6 days.
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
