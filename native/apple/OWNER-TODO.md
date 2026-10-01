@@ -19,7 +19,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          Apple's player (Infuse-style). Native stays as a hidden debug override only. DONE 4440c97 (sim-checked).
          Kept on tvOS: an MP4 still opens straight in AVPlayer first — moving it onto the engine made a Dolby
          Vision MP4 (Mad Max) fail in the engine's demuxer ("Invalid data"); if the direct play fails, the engine
-         takes over automatically. Engine bug to report/fix: DV x265 MP4 demux failure.
+         takes over automatically. Investigated: the DV MP4 is fine (faststart, opens in ~1 s in the engine outside
+         the sim) — the sim failure was a one-off open error with no engine log to explain it. Next (engine lab):
+         send engine logs into the trace, retry a failed open once before moving to the next source, then re-try
+         MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
 - [ ] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
