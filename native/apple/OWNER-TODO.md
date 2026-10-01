@@ -36,7 +36,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       work email. No LICENSE yet. DECIDE: publish a fresh single-commit public repo from today's code minus the
       exclude list (recommended; keep the old private repos archived — never flip them public), and the licence
       (recommended Apache-2.0; MIT or MPL-2.0 also fine; engine/FFmpeg are LGPL, dynamically linked, so any works).
-      In progress (no decision needed): untrack the rips/build folders, add AetherEngine/FFmpeg/libdovi notices.
+      DONE dd4e101: AIOMetadata URL out of the code (Debug catalogs now come from your private dev-sources file —
+      put the NEW config there after recreating it); rips + build folders untracked (still on disk); full
+      third-party notices in About. (i) credits + Source Code link DONE cfa0bb7.
 - [ ] **Disc looks + badges DONE 987ce0a (sim-checked iPad + Apple TV):** disc badge on posters, turning-disc
       spinner, Play Disc / Skip to Movie (both play the movie until the engine menu is wired), Titles row, format
       badges (4K, Dolby Vision, HDR, Atmos, 7.1, Remux) on title pages only — the Quality picker stays plain per your
