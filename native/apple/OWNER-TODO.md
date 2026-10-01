@@ -12,6 +12,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       TITLE in that app, not just the app. Plan: TMDB/JustWatch providers for availability; per-service title IDs
       from Wikidata (Netflix/Disney+/Hulu/Prime/Max/Apple TV by IMDb id) → universal links; fallback = service
       search for the title. tvOS deep links are limited (search/TV app fallback). Overnight: verify which links work.
+      **Owner decision 2026-09-30: use Wikidata** for the per-service title IDs.
 - [ ] **Test every public Stremio add-on (FMHY + r/StremioAddons + community catalogue)** (2026-09-30) — list, a
       headless harness using the app's own add-on code (manifest/catalog/meta/stream/subtitles), then in-app
       spot checks of flagged + top 20; harness kept for every release.
