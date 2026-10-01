@@ -14,6 +14,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
       last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
       nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
+- [ ] **iPad regression of today's fixes (2026-10-01):** 10/11 pass (Resume, latest season, next episode, captions,
+      IPTV error ~9 s, configure-first, Remove from CW, rotation, search, 0 crashes). Open:
+      1. HIGH: switching tabs and back to an open title page starts playback by itself ~2 s later; for a series it
+         plays the wrong episode (Friends S1E2 → a season-9 file) and wipes that episode's Resume. Fix running.
+      2. Question: after Remove from Continue Watching the title page still says Resume (progress kept). Intended?
 - [ ] **Apple TV check of 630db1d (2026-10-01):** pass: Goede Tijden opens on Season 37, stock player advances to the
       next episode, widescreen captions clear the scrubber, SNL 1975 first, Clear Cache readable, 0 crashes.
       Fixed in 5298e1c (unit-tested, not yet re-checked on the sim): Resume… shows however the title was opened;
