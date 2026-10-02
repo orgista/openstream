@@ -25,6 +25,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Engine lab DONE (fork branch engine-lab, 9 commits, NOT pushed):** 98 test files/servers (4.4 GB, off the repo)
+      scored automatically. Fixed 5 engine bugs: MKV seeks landing one group late, debrid servers that ignore Range
+      (hung 45 s → works), HDR10 MKV with no colour tags never showing a picture, software-decoded seeks near the end
+      killing playback, TS seeks never showing a frame. Seek speed passes 55→71 of 84, seek smoothness 63→70.
+      Next round: AV1 stutter after seek, truncated files stalling 12 s, interlaced TV freezes, VC-1 ending early.
+      Push both fork branches: `cd ~/Developer/openstream-build/AetherEngine-fork && git push -u origin dvd-menus engine-lab`
 - [ ] **DONE da014fb (2026-10-02):** IPTV catch-up from the guide (back up to 3 days, plays a past programme from its
       start, Watch Live returns; sim-checked on Apple TV — iPad build only); Discover rows neutral + Top 10 off;
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
