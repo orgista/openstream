@@ -25,6 +25,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
+      delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
+      HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
+      whole-library disc check on the main thread; HIGH: iPad Live guide cells draw over the channel column;
+      Playback Unavailable shows raw engine text; Watch Live overlaps the speaker icon on the inline player; full-
+      screen catch-up has no way back except the guide. Expected: Play Disc = main title until the engine fork is
+      pushed. Rotation not testable headless.
 - [ ] **Apple TV full pass 2026-10-02 (9c0be32):** most new features pass (reconnect, Watch on other list, catch-up,
       latest season, Start from Beginning, recent searches, disc badge, Play Disc/Skip to Movie, no tab replay).
       P0 FIXED 0e9a6d5: every on-demand play with artwork crashed (Now Playing artwork, from 40e9350) — verified.
