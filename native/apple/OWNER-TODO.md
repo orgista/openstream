@@ -56,6 +56,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       add-ons configured online and synced. Researching: a server-side bridge (our own open-source "OpenStream
       Bridge" or Remux) where add-ons are set up on a web page and the app just signs in to "your media server" —
       downloads then come from your own server; plus a second build with native add-ons outside the App Store.
+      Research done (specs/addon-bridge-options.md): every removed app ran add-ons ON the device; no add-on app has
+      passed review since Aug 2026 (Vidi/All The Media haven't been re-reviewed). Recommended: App Store build = a
+      generic Jellyfin client (no add-on code) + an "OpenStream Bridge" = Remux (open source, runs on Unraid/NAS or
+      hosted) where add-ons are set up on its web page; add "download from your server" (~1 week); keep native
+      add-ons in a Mac Developer-ID build + sideload build. Orgista-hosted accounts = possible but we'd become the
+      aggregator (DMCA, user keys, bandwidth) — only as a deliberate business. DECIDE: go with the bridge plan?
       Owner still has the live App Store listing text to check by hand.
       Ideas picked by Claude (owner delegated), in order: engine lab with smooth seek as a gate; dead live stream →
       restart, then same channel from another list; format badges; denser TV guide; IPTV catch-up + live pause.
