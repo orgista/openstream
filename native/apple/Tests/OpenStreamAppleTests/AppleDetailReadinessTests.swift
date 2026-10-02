@@ -101,3 +101,11 @@ struct AppleDetailReadinessTests {
         #expect(AppleEpisodeListPresentation.resolve(episodeCount: 12, isLoading: false, hasFinishedLoading: true) == .episodes)
     }
 }
+
+/// Apple TV full pass 2026-10-02: a fast tab-bar run ending in Select left the
+/// chosen tab empty until the viewer moved off and back.
+@Test func tabMountWatchdogRemountsOnlyATabThatNeverAppeared() {
+    #expect(OpenStreamTabMountWatchdog.needsRemount(selected: OpenStreamTab.search, mounted: [OpenStreamTab.home]))
+    #expect(!OpenStreamTabMountWatchdog.needsRemount(selected: OpenStreamTab.search, mounted: [.search]))
+    #expect(OpenStreamTabMountWatchdog.grace < .seconds(2))
+}

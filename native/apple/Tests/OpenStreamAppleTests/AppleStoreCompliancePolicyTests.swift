@@ -122,7 +122,8 @@ struct AppleStoreCompliancePolicyTests {
                                                       entries: [], favoriteIDs: [], category: "All")
         #expect(snapshot.channels.map(\.id) == ["1", "2"])
         #expect(snapshot.channels.first?.logoURL == URL(string: "http://x/espn.png"))
-        #expect(snapshot.categories == ["All", "Favorites"])
+        // The playlist's own groups still give the chips (Apple TV pass 2026-10-02).
+        #expect(snapshot.categories == ["All", "Favorites", "News", "Sports"])
     }
 
     @Test("Package choices follow the lineup: no Premier Guide without one")

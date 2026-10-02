@@ -41,9 +41,13 @@ struct AppleTMDBAttributionRow: View {
                     .frame(height: logoHeight)
                     .accessibilityLabel("TMDB")
             }
+            // The notice is required in full: the tvOS sheet sizes to its
+            // content and proposed one line, so the text was truncated ("…by TM…").
             Text(AppleAttribution.tmdbNotice)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -159,9 +163,11 @@ struct AppleAttributionSheet: View {
             AppleTMDBAttributionRow()
             Text(AppleAttribution.justWatchCredit)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("settings.about.justwatch")
             Text(AppleAttribution.noContentDisclaimer)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("settings.about.noContent")
             HStack {
                 Spacer(minLength: 0)

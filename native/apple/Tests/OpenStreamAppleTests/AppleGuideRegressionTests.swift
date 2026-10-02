@@ -59,3 +59,25 @@ import Testing
         #expect(window.end == Date(timeIntervalSince1970: 24 * 3600))
     }
 }
+
+/// d018726 meant logo + number + name, but the number only ever came from the
+/// curated US lineup; a provider's own `tvg-chno` was never read.
+@Test func guideRowsShowThePlaylistChannelNumber() throws {
+    let playlist = """
+    #EXTM3U
+    #EXTINF:-1 tvg-id="a" tvg-chno="12" group-title="News",Atlas News
+    http://a.example/a.m3u8
+    #EXTINF:-1 tvg-id="b" tvg-chno="x" group-title="News",Beacon News
+    http://a.example/b.m3u8
+    #EXTINF:-1 tvg-id="c" tvg-chno="3" group-title="Sports",Cedar Sports
+    http://a.example/c.m3u8
+    """
+    let channels = try AppleIPTVClient.parseM3U(Data(playlist.utf8), sourceID: UUID(), baseURL: URL(string: "http://a.example/")!)
+    #expect(channels.map(\.channelNumber) == [12, nil, 3])
+    let rows = AppleGuideChannelProjection.rows(channels: channels, entries: [], favoriteIDs: [], favoritesOnly: false, sortByNumber: true)
+    #expect(rows.map(\.channel.name) == ["Cedar Sports", "Atlas News", "Beacon News"])
+    #expect(rows.map(\.number) == [3, 12, nil])
+    #expect(AppleIPTVChannel.playlistChannelNumber(" 7 ") == 7)
+    #expect(AppleIPTVChannel.playlistChannelNumber("0") == nil)
+    #expect(AppleIPTVChannel.playlistChannelNumber("5.1") == nil)
+}

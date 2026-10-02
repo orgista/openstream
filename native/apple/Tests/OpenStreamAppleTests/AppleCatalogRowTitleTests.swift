@@ -74,20 +74,19 @@ struct AppleCatalogRowTitleTests {
         #expect(titles == ["Popular Movies", "Popular Shows", "Prime Video Movies", "Prime Video Shows"])
     }
 
-    /// gpt-6-luna review of d605c9f: a heading collision must not hide a
-    /// catalog whose titles are different — only a repeated list is dropped.
-    @Test func sameHeadingWithDifferentTitlesKeepsBothRows() {
+    /// gpt-6-luna review of d605c9f kept both rows, the later one suffixed
+    /// with its add-on; the owner's rules (no provider in a heading, never two
+    /// rows under one heading) leave one.
+    @Test func sameHeadingWithDifferentTitlesKeepsOneRow() {
         let other = AppleSource(kind: .stremio, name: "TMDB", url: URL(string: "https://fixture.example/tmdb/manifest.json")!)
         let first = AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "a", name: "Popular"),
                                         items: [AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "One")])
         let different = AppleCatalogSection(source: other, catalog: AppleStremioCatalog(type: "series", id: "b", name: "Popular"),
                                             items: [AppleCatalogItem(mediaID: "tt0000002", type: "series", name: "Two")])
         let visible = AppleCatalogShelfPolicy.visibleSections([first, different], activeSourceIDs: [source.id, other.id])
-        #expect(visible.count == 2)
-        #expect(Set(visible.compactMap { $0.shelfTitle?.lowercased() }).count == 2)
-        // Which row is kept first depends on source IDs; the other is named after its add-on.
-        #expect(Set(visible.compactMap(\.shelfTitle)).isSubset(of: ["Popular", "Popular · TMDB", "Popular · Streaming Catalogs"]))
-        #expect(visible.contains { $0.shelfTitle == "Popular" })
+        // Apple TV pass 2026-10-02: no "· <add-on>" suffix, and never a
+        // second row under the same heading — the later one is not drawn.
+        #expect(visible.compactMap(\.shelfTitle) == ["Popular"])
     }
 
     /// N32 #12: "TMDB Popular Movies" named the add-on in the heading.
@@ -100,6 +99,9 @@ struct AppleCatalogRowTitleTests {
         ("TMDB", "TMDB"),
         ("Netflix Top 10 US", "Netflix Top 10 US"),
         ("TMDBX Picks", "TMDBX Picks"),
+        ("RT: Certified Fresh", "Certified Fresh"),
+        ("RT - Certified Fresh", "Certified Fresh"),
+        ("RTL Classics", "RTL Classics"),
     ])
     func providerPrefixIsStripped(name: String, expected: String) {
         #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "movie", id: "x", name: name)) == expected)
@@ -115,6 +117,11 @@ struct AppleCatalogRowTitleTests {
         #expect(AppleCatalogShelfPolicy.typedTitle("Popular Movies", type: "series") == "Popular Shows")
         #expect(AppleCatalogShelfPolicy.typedTitle("Trending", type: "movie") == "Trending Movies")
         #expect(AppleCatalogShelfPolicy.typedTitle("Trending", type: "channel") == "Trending")
+        // Apple TV pass 2026-10-02: the type word reads as English.
+        #expect(AppleCatalogShelfPolicy.typedTitle("Year", type: "movie") == "Movies by Year")
+        #expect(AppleCatalogShelfPolicy.typedTitle("Year", type: "series") == "Shows by Year")
+        #expect(AppleCatalogShelfPolicy.typedTitle("Latest Releases", type: "movie") == "Latest Movie Releases")
+        #expect(AppleCatalogShelfPolicy.typedTitle("Top Rated", type: "series") == "Top Rated Shows")
     }
 }
 

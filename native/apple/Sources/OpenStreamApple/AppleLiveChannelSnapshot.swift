@@ -151,12 +151,23 @@ struct AppleLiveChannelSnapshot: Sendable {
         #endif
         let entryByChannelID = matchCache.match(channels: selected, entries: entries)
 
-        var categoryByID = [String: String](minimumCapacity: entryByChannelID.count)
+        var categoryByID = [String: String](minimumCapacity: selected.count)
         for (id, entry) in entryByChannelID {
             categoryByID[id] = entry.category == "Local" ? "Locals" : entry.category
         }
+        // A channel the lineup does not know keeps the playlist's own group
+        // (M3U `group-title`, Xtream category) when that group names one of
+        // the guide's categories. Categories came from lineup matches only,
+        // so a provider whose channels are not US networks (the fixture's
+        // "News" / "Sports" panel, most foreign lists) showed All and
+        // Favorites and nothing else (Apple TV full pass, 2026-10-02).
+        for channel in selected where categoryByID[channel.id] == nil {
+            if let category = AppleLiveCategoryPolicy.category(forPlaylistGroup: channel.group) {
+                categoryByID[channel.id] = category
+            }
+        }
         let available = Set(categoryByID.values)
-        let order = ["News", "Sports", "Entertainment", "Kids", "Movies", "Premium", "Lifestyle", "Music", "International", "Locals"]
+        let order = AppleLiveCategoryPolicy.order
         let categories = ["All", "Favorites"] + order.filter { available.contains($0) }
         let channels: [AppleIPTVChannel]
         if category == "All" {
@@ -205,5 +216,34 @@ struct AppleLiveChannelSnapshot: Sendable {
         let shown = Array(channels.prefix(Self.maximumDisplayedChannels))
         return .init(channels: shown, channelIDs: shown.map(\.id), categories: categories,
                      hiddenCount: max(0, channels.count - shown.count))
+    }
+}
+
+/// The guide's category chips, and how a playlist group reads as one of them.
+enum AppleLiveCategoryPolicy {
+    static let order = ["News", "Sports", "Entertainment", "Kids", "Movies", "Premium", "Lifestyle", "Music", "International", "Locals"]
+
+    /// Keywords per chip, matched as whole words of the group name ("US| NEWS
+    /// HD" is News). Groups that name no chip stay under All only, which keeps
+    /// a panel with thousands of groups from flooding the chip row.
+    private static let keywords: [(category: String, words: Set<String>)] = [
+        ("News", ["news", "noticias", "nachrichten"]),
+        ("Sports", ["sport", "sports", "deportes", "football", "soccer", "nfl", "nba", "nhl", "mlb"]),
+        ("Kids", ["kids", "kid", "children", "cartoon", "cartoons", "family", "infantil"]),
+        ("Movies", ["movie", "movies", "cinema", "film", "films", "cine"]),
+        ("Music", ["music", "musica", "musique"]),
+        ("Entertainment", ["entertainment", "general", "variety"]),
+        ("Lifestyle", ["lifestyle", "documentary", "documentaries", "docs"]),
+        ("Premium", ["premium"]),
+        ("Locals", ["local", "locals"]),
+        ("International", ["international", "world"]),
+    ]
+
+    static func category(forPlaylistGroup group: String) -> String? {
+        let words = Set(group.lowercased()
+            .split(whereSeparator: { !$0.isLetter })
+            .map(String.init))
+        guard !words.isEmpty else { return nil }
+        return keywords.first { !$0.words.isDisjoint(with: words) }?.category
     }
 }

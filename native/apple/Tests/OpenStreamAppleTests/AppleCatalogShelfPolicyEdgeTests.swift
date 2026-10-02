@@ -53,9 +53,10 @@ struct AppleCatalogShelfPolicyEdgeTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([s1, s2],
             activeSourceIDs: [primary.id])
 
-        #expect(visible.count == 2)
+        // One row per heading, and no "· <add-on>" suffix (Apple TV pass
+        // 2026-10-02): the later row is not drawn.
+        #expect(visible.count == 1)
         #expect(visible[0].shelfTitle == "Popular")
-        #expect(visible[1].shelfTitle == "Popular · Primary")
     }
 
     // ─── short rows ────────────────────────────────────────────────
@@ -76,7 +77,7 @@ struct AppleCatalogShelfPolicyEdgeTests {
         #expect(visible.count == 1)
     }
 
-    @Test("A second same-titled row with fewer than 20 items is kept when distinct")
+    @Test("A second same-titled row is not drawn even when distinct")
     func shortRowThatIsDistinctIsKept() {
         let long = (0..<20).map { AppleCatalogItem(mediaID: "id-\($0)", type: "movie",
                                                      name: "Movie \($0)") }
@@ -89,7 +90,8 @@ struct AppleCatalogShelfPolicyEdgeTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([s1, s2],
             activeSourceIDs: [primary.id, secondary.id])
 
-        #expect(visible.count == 2)
+        // One row per heading since the Apple TV pass 2026-10-02.
+        #expect(visible.count == 1)
     }
 
     // ─── three same-heading rows ───────────────────────────────────
@@ -110,9 +112,10 @@ struct AppleCatalogShelfPolicyEdgeTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([s1, s2, s3],
             activeSourceIDs: [primary.id])
 
-        #expect(visible.count == 2)
+        // One row per heading, and no "· <add-on>" suffix (Apple TV pass
+        // 2026-10-02): the later row is not drawn.
+        #expect(visible.count == 1)
         #expect(visible[0].shelfTitle == "Popular")
-        #expect(visible[1].shelfTitle == "Popular · Primary")
     }
 
     // ─── empty rows ────────────────────────────────────────────────
@@ -161,9 +164,8 @@ struct AppleCatalogShelfPolicyEdgeTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([s1, s2],
             activeSourceIDs: [primary.id])
 
-        #expect(visible.count == 2)
-        #expect(visible[1].shelfTitle != nil &&
-                visible[1].shelfTitle!.hasSuffix("· Primary"))
+        #expect(visible.count == 1)
+        #expect(visible[0].shelfTitle?.contains("·") == false)
     }
 
     @Test("Rows whose titles differ only by whitespace are treated as same heading")
@@ -179,7 +181,7 @@ struct AppleCatalogShelfPolicyEdgeTests {
         let visible = AppleCatalogShelfPolicy.visibleSections([s1, s2],
             activeSourceIDs: [primary.id, secondary.id])
 
-        #expect(visible.count == 2)
+        #expect(visible.count == 1)
         #expect(visible[0].shelfTitle == "Popular")
     }
 

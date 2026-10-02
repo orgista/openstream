@@ -261,6 +261,8 @@ final class AppleCatalogSearchStore {
     /// Each remote result's place in its add-on's own answer
     /// (`sourceRanks(_:)`), kept so the re-rank as you type agrees with it.
     private var sourceRanks: [String: Int] = [:]
+    /// Runtime/popularity/run length from the same answer (`prominence(_:)`).
+    private var prominence: [String: AppleSearchProminence] = [:]
 
     init(
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
@@ -303,7 +305,8 @@ final class AppleCatalogSearchStore {
         // add-ons answer: "saturday night live" sat under the
         // "saturday night li" list (Life, Lights, then Live) until the slow
         // search came back (Apple TV regression 2026-10-01).
-        results = Self.mergedResults(results, matching: value, limit: maximumResults, sourceRanks: sourceRanks)
+        results = Self.mergedResults(results, matching: value, limit: maximumResults, sourceRanks: sourceRanks,
+                                     prominence: prominence)
 
         let clock = ContinuousClock()
         let debounceStart = clock.now
@@ -325,11 +328,13 @@ final class AppleCatalogSearchStore {
 
         let remoteRecords = fetchedSections.flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
         sourceRanks = Self.sourceRanks(fetchedSections)
+        prominence = Self.prominence(fetchedSections)
         results = Self.mergedResults(
             localRecords + remoteRecords,
             matching: value,
             limit: maximumResults,
-            sourceRanks: sourceRanks
+            sourceRanks: sourceRanks,
+            prominence: prominence
         )
         lookup = AppleCatalogSearchLookup(
             sections: fetchedSections + baseSections,
@@ -363,7 +368,8 @@ final class AppleCatalogSearchStore {
         _ values: [AppleMediaRecord],
         matching query: String,
         limit: Int,
-        sourceRanks: [String: Int] = [:]
+        sourceRanks: [String: Int] = [:],
+        prominence: [String: AppleSearchProminence] = [:]
     ) -> [AppleMediaRecord] {
         let tokens = normalized(query).split(separator: " ")
         var recordsByID: [String: AppleMediaRecord] = [:]
@@ -375,6 +381,7 @@ final class AppleCatalogSearchStore {
         // key; later ones with that id merge into it.
         var keysByCanonicalID: [String: String] = [:]
         var ranksByKey: [String: Int] = [:]
+        var prominenceByKey: [String: AppleSearchProminence] = [:]
         for value in values where value.kind != .episode && matches(value, tokens: tokens) {
             var key = collapseKey(value)
             if let canonical = value.canonicalID, !canonical.isEmpty {
@@ -390,23 +397,50 @@ final class AppleCatalogSearchStore {
                 recordsByID[key] = value
             }
             if let rank = sourceRanks[value.id] { ranksByKey[key] = min(ranksByKey[key] ?? rank, rank) }
+            if let signal = prominence[value.id] {
+                prominenceByKey[key] = prominenceByKey[key].map { $0.merged(with: signal) } ?? signal
+            }
         }
         // The merged record keeps one id; its rank is the best of the rows it
         // was made from.
         var rankByID: [String: Int] = [:]
-        for (key, record) in recordsByID { if let rank = ranksByKey[key] { rankByID[record.id] = rank } }
+        var prominenceByID: [String: AppleSearchProminence] = [:]
+        for (key, record) in recordsByID {
+            if let rank = ranksByKey[key] { rankByID[record.id] = rank }
+            if let signal = prominenceByKey[key] { prominenceByID[record.id] = signal }
+        }
         let normalizedQuery = tokens.joined(separator: " ")
-        return recordsByID.values.sorted { lhs, rhs in
-            let lhsRank = relevance(lhs, query: normalizedQuery)
-            let rhsRank = relevance(rhs, query: normalizedQuery)
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            if lhsRank == 0, let exactOrder = exactMatchOrder(lhs, rhs, lhsSourceRank: rankByID[lhs.id],
-                                                              rhsSourceRank: rankByID[rhs.id]) { return exactOrder }
-            let lhsTitle = normalized(lhs.title)
-            let rhsTitle = normalized(rhs.title)
+        // Ranking keys computed once per record, not per comparison.
+        let keyed = recordsByID.values.map { record -> (AppleMediaRecord, Int, String, AppleSearchProminence?) in
+            (record, relevance(record, query: normalizedQuery), normalized(record.title), prominenceByID[record.id])
+        }
+        return keyed.sorted { lhsEntry, rhsEntry in
+            let (lhs, lhsRelevance, lhsTitle, lhsSignal) = lhsEntry
+            let (rhs, rhsRelevance, rhsTitle, rhsSignal) = rhsEntry
+            // Titles that are or begin with the query, ahead of titles that
+            // only contain it somewhere.
+            let lhsTier = tier(lhsRelevance), rhsTier = tier(rhsRelevance)
+            if lhsTier != rhsTier { return lhsTier < rhsTier }
+            // A known short film never leads, not even over its namesake.
+            let lhsShort = lhsSignal?.isShort ?? false, rhsShort = rhsSignal?.isShort ?? false
+            if lhsShort != rhsShort { return rhsShort }
+            // Namesakes ("General Hospital" ×4): sources, the add-on's own
+            // rank, the year.
+            if lhsTitle == rhsTitle, let exactOrder = exactMatchOrder(
+                lhs, rhs, lhsSourceRank: rankByID[lhs.id], rhsSourceRank: rankByID[rhs.id]) { return exactOrder }
+            // Different titles: the feature over a short, then the add-on's
+            // own (popularity) order, popularity, run length, rating
+            // ("dune" → Dune: Part One, not a 4-minute "Dune"; Apple TV pass
+            // 2026-10-02).
+            if let order = AppleSearchProminence.order(lhsSignal, rhsSignal, lhsSourceRank: rankByID[lhs.id],
+                                                       rhsSourceRank: rankByID[rhs.id]) { return order }
+            // Nothing to tell them apart: the exact title, then A–Z.
+            if lhsRelevance != rhsRelevance { return lhsRelevance < rhsRelevance }
+            if lhsRelevance == 0, let exactOrder = exactMatchOrder(
+                lhs, rhs, lhsSourceRank: rankByID[lhs.id], rhsSourceRank: rankByID[rhs.id]) { return exactOrder }
             if lhsTitle != rhsTitle { return lhsTitle < rhsTitle }
             return lhs.id < rhs.id
-        }.prefix(limit).map { $0 }
+        }.prefix(limit).map(\.0)
     }
 
     /// How directly a matched title answers the query — 0 best.
@@ -420,6 +454,25 @@ final class AppleCatalogSearchStore {
     ///
     /// Ties still break alphabetically, so *Dune* stays ahead of *Dune: Part
     /// Two* and the ordering that was already right does not move.
+    /// The tier a result sorts in: the title is or begins with the query
+    /// (0), or only contains it (1). Exact and prefix share a tier so the
+    /// add-on's own order can put Dune: Part One above an obscure or short
+    /// film that happens to be called "Dune" (Apple TV pass 2026-10-02);
+    /// with nothing else to go on, the exact title still comes first.
+    nonisolated static func tier(_ relevance: Int) -> Int { relevance < 2 ? 0 : 1 }
+
+    /// Search-ranking signals per record id, from the add-ons' own answer.
+    nonisolated static func prominence(_ sections: [AppleCatalogSection]) -> [String: AppleSearchProminence] {
+        var values: [String: AppleSearchProminence] = [:]
+        for section in sections {
+            for (record, item) in zip(AppleMediaIngestion.catalogRecords(section: section), section.items) {
+                let signal = AppleSearchProminence(item: item)
+                values[record.id] = values[record.id].map { $0.merged(with: signal) } ?? signal
+            }
+        }
+        return values
+    }
+
     nonisolated static func relevance(_ record: AppleMediaRecord, query: String) -> Int {
         guard !query.isEmpty else { return 2 }
         let title = normalized(record.title)
@@ -659,5 +712,87 @@ private struct AppleCatalogSearchPipeline: Sendable {
         case result(Int, [AppleCatalogItem]?)
         case deadline
         case deadlineCancelled
+    }
+}
+
+/// How prominent a search result is, from what its add-on already sent:
+/// runtime (a known short film is not what "dune" means), popularity, rating
+/// and, for a series, how many years it ran ("General Hospital" 1963– over the
+/// 1972–1980 namesake). No network of its own.
+struct AppleSearchProminence: Sendable, Equatable {
+    var runtimeMinutes: Int?
+    var popularity: Double?
+    var rating: Double?
+    var runYears: Int?
+    var isMovie: Bool
+
+    /// Under 40 minutes is a short film by the Academy's definition.
+    var isShort: Bool { isMovie && (runtimeMinutes.map { $0 < 40 } ?? false) }
+
+    init(runtimeMinutes: Int? = nil, popularity: Double? = nil, rating: Double? = nil, runYears: Int? = nil,
+         isMovie: Bool) {
+        self.runtimeMinutes = runtimeMinutes
+        self.popularity = popularity
+        self.rating = rating
+        self.runYears = runYears
+        self.isMovie = isMovie
+    }
+
+    init(item: AppleCatalogItem, currentYear: Int = Calendar(identifier: .gregorian).component(.year, from: .now)) {
+        self.init(runtimeMinutes: item.runtimeMinutes, popularity: item.popularity, rating: item.rating,
+                  runYears: item.type == "series" ? Self.runYears(item.releaseInfo, currentYear: currentYear) : nil,
+                  isMovie: item.type == "movie")
+    }
+
+    /// The best of two answers for one title.
+    func merged(with other: Self) -> Self {
+        Self(runtimeMinutes: [runtimeMinutes, other.runtimeMinutes].compactMap { $0 }.max(),
+             popularity: [popularity, other.popularity].compactMap { $0 }.max(),
+             rating: rating ?? other.rating,
+             runYears: [runYears, other.runYears].compactMap { $0 }.max(),
+             isMovie: isMovie && other.isMovie)
+    }
+
+    /// Which of two results is the more prominent; nil when nothing tells them apart.
+    /// `lhsSourceRank`/`rhsSourceRank`: each title's place in its add-on's
+    /// answer — Cinemeta lists "dune" as Part One, Part Two, Part Three, then
+    /// the 1984 film — which outranks the weaker signals below it.
+    static func order(_ lhs: Self?, _ rhs: Self?, lhsSourceRank: Int? = nil, rhsSourceRank: Int? = nil) -> Bool? {
+        let lhsShort = lhs?.isShort ?? false, rhsShort = rhs?.isShort ?? false
+        if lhsShort != rhsShort { return rhsShort }
+        if let lhsSourceRank, let rhsSourceRank, lhsSourceRank != rhsSourceRank { return lhsSourceRank < rhsSourceRank }
+        let lhsPopularity = lhs?.popularity ?? 0, rhsPopularity = rhs?.popularity ?? 0
+        if lhsPopularity != rhsPopularity { return lhsPopularity > rhsPopularity }
+        let lhsRun = lhs?.runYears ?? 0, rhsRun = rhs?.runYears ?? 0
+        if lhsRun != rhsRun { return lhsRun > rhsRun }
+        let lhsRated = lhs?.rating != nil, rhsRated = rhs?.rating != nil
+        if lhsRated != rhsRated { return lhsRated }
+        return nil
+    }
+
+    /// "155 min", "2h 35min", "1 h 5 m", "95" → minutes; nil when unreadable.
+    static func runtimeMinutes(_ text: String?) -> Int? {
+        guard let text = text?.lowercased(), !text.isEmpty else { return nil }
+        func value(_ pattern: String) -> Int? {
+            guard let regex = try? Regex(pattern), let match = text.firstMatch(of: regex),
+                  let group = match.output[1].substring else { return nil }
+            return Int(group)
+        }
+        let hours = value(#"(\d+)\s*h"#)
+        let minutes = value(#"(\d+)\s*m"#)
+        if hours != nil || minutes != nil {
+            let total = (hours ?? 0) * 60 + (minutes ?? 0)
+            return total > 0 ? total : nil
+        }
+        return value(#"^\s*(\d+)\s*$"#).flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// "1963-" → years to now, "1972-1980" → 8; a single year → nil.
+    static func runYears(_ releaseInfo: String?, currentYear: Int) -> Int? {
+        guard let info = releaseInfo?.trimmingCharacters(in: .whitespaces), info.count >= 5,
+              let start = Int(info.prefix(4)) else { return nil }
+        let rest = info.dropFirst(4).trimmingCharacters(in: CharacterSet(charactersIn: "-–— "))
+        let end = rest.isEmpty ? currentYear : (Int(rest.prefix(4)) ?? start)
+        return max(0, end - start)
     }
 }

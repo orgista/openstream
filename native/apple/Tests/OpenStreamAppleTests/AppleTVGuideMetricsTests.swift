@@ -153,3 +153,17 @@ struct AppleTVGuideMetricsTests {
         #expect(CGFloat(header.headerSlots.count) * metrics.slotWidth == metrics.timelineContentWidth(for: window))
     }
 }
+
+/// Apple TV pass 2026-10-02 (16): a programme that started before the visible
+/// left edge drew an empty cell — its title sat at the off-screen start.
+@Test func guideTitlePinsToTheVisibleLeftEdge() {
+    let metrics = AppleTVGuideMetrics.standard
+    let inset = metrics.cellInset
+    // Cell start on screen: no slide.
+    #expect(metrics.pinnedTitleOffset(titleMinX: 200 + inset, cellWidth: 480) == 0)
+    // Cell started 300 pt off screen: the title lands at the visible edge + inset.
+    #expect(metrics.pinnedTitleOffset(titleMinX: -300 + inset, cellWidth: 900) == 300)
+    // Nearly scrolled past: never slides beyond the cell's last readable stretch.
+    #expect(metrics.pinnedTitleOffset(titleMinX: -1000, cellWidth: 480)
+        == 480 - metrics.textMinimumCellWidth)
+}

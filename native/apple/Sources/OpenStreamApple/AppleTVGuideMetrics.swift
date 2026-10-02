@@ -146,6 +146,24 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     /// made the behaviour look covered when nothing called it.
     public func showsText(cellWidth: CGFloat) -> Bool { cellWidth >= textMinimumCellWidth }
 
+    /// How far to slide a cell's title right so it stays on screen when the
+    /// cell began left of the visible timeline (a programme that started
+    /// before the window's left edge read as an empty cell, 2026-10-02).
+    ///
+    /// - Parameters:
+    ///   - titleMinX: the title's leading edge in the row's visible scroll
+    ///     coordinates, before any slide (the cell's leading edge + inset).
+    ///   - cellWidth: the cell's drawn width.
+    /// - Returns: 0 while the cell's start is on screen; otherwise the slide
+    ///   that pins the title at the visible edge plus the inset, never past
+    ///   the point where less than `textMinimumCellWidth` of the cell is left.
+    public func pinnedTitleOffset(titleMinX: CGFloat, cellWidth: CGFloat) -> CGFloat {
+        let wanted = cellInset - titleMinX
+        guard wanted > 0 else { return 0 }
+        let limit = max(0, cellWidth - textMinimumCellWidth)
+        return min(wanted, limit)
+    }
+
     /// `AppleGuideGridModel` names filler cells `<channel>-gap-<time>`.
     public func isGapCell(id: String) -> Bool { id.contains("-gap-") }
 

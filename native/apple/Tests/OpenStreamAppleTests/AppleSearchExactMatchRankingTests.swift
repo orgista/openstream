@@ -69,4 +69,56 @@ struct AppleSearchExactMatchRankingTests {
                                                             sourceRanks: [film.id: 0, show.id: 0])
         #expect(results.map(\.canonicalID) == ["tt4574334", "tt3007000"])
     }
+
+    /// Apple TV pass 2026-10-02: "general hosp" (a prefix, not an exact
+    /// match) put the 1963 soap third — namesakes in the prefix tier fell
+    /// back to the id. They now order like exact matches, and the long
+    /// running one leads the other "General Hospital…" titles.
+    @Test func prefixNamesakesKeepTheAddOnsOrderAndTheLongRunnerLeads() {
+        func gh(_ id: String, _ name: String, _ year: String) -> AppleMediaRecord {
+            AppleMediaIngestion.catalogRecord(
+                instanceID: cinemeta,
+                item: AppleCatalogItem(mediaID: id, type: "series", name: name, releaseInfo: year))
+        }
+        let answer = [gh("tt0056758", "General Hospital", "1963-"), gh("tt0196249", "General Hospital", "1972-1980"),
+                      gh("tt0983983", "General Hospital: Night Shift", "2007-2008"),
+                      gh("tt6283678", "General Hospital", "2008-2009")]
+        let ranks = Dictionary(uniqueKeysWithValues: answer.enumerated().map { ($1.id, $0) })
+        let results = AppleCatalogSearchStore.mergedResults(answer.reversed(), matching: "general hosp",
+                                                            limit: 20, sourceRanks: ranks)
+        #expect(results.first?.canonicalID == "tt0056758")
+    }
+
+    /// Apple TV pass 2026-10-02: "dune" put a 4-minute short called "Dune"
+    /// above Dune (2021), which Cinemeta titles "Dune: Part One".
+    @Test func aKnownShortSortsBelowTheFeature() {
+        let short = AppleCatalogItem(mediaID: "tt9000001", type: "movie", name: "Dune", releaseInfo: "2023",
+                                     runtimeMinutes: 4)
+        let feature = AppleCatalogItem(mediaID: "tt1160419", type: "movie", name: "Dune: Part One", releaseInfo: "2021",
+                                       rating: 8.0, runtimeMinutes: 155, popularity: 1.5)
+        let sequel = AppleCatalogItem(mediaID: "tt15239678", type: "movie", name: "Dune: Part Two", releaseInfo: "2024")
+        let classic = AppleCatalogItem(mediaID: "tt0087182", type: "movie", name: "Dune", releaseInfo: "1984")
+        let section = AppleCatalogSection(
+            source: AppleSource(kind: .stremio, name: "Cinemeta", url: URL(string: "https://fixture.example/manifest.json")!),
+            catalog: AppleStremioCatalog(type: "movie", id: "top", name: "Popular"),
+            items: [short, feature, sequel, classic])
+        let records = AppleMediaIngestion.catalogRecords(section: section)
+        let results = AppleCatalogSearchStore.mergedResults(
+            records, matching: "dune", limit: 20,
+            sourceRanks: AppleCatalogSearchStore.sourceRanks([section]),
+            prominence: AppleCatalogSearchStore.prominence([section]))
+        // The feature first, then the add-on's order; the short goes last.
+        #expect(results.map(\.canonicalID) == ["tt1160419", "tt15239678", "tt0087182", "tt9000001"])
+    }
+
+    @Test func runtimeAndRunLengthParse() {
+        #expect(AppleSearchProminence.runtimeMinutes("155 min") == 155)
+        #expect(AppleSearchProminence.runtimeMinutes("2h 35min") == 155)
+        #expect(AppleSearchProminence.runtimeMinutes("1 h 5 m") == 65)
+        #expect(AppleSearchProminence.runtimeMinutes("95") == 95)
+        #expect(AppleSearchProminence.runtimeMinutes("N/A") == nil)
+        #expect(AppleSearchProminence.runYears("1963-", currentYear: 2026) == 63)
+        #expect(AppleSearchProminence.runYears("1972-1980", currentYear: 2026) == 8)
+        #expect(AppleSearchProminence.runYears("2021", currentYear: 2026) == nil)
+    }
 }

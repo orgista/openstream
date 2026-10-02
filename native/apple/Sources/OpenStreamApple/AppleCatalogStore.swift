@@ -127,6 +127,11 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
     /// (`tmdb:…`) but sends `imdb_id` too, so search can merge the TMDB and
     /// Cinemeta rows for one title (full test 2026-10-01).
     public let imdbID: String?
+    /// Search-ranking signals the add-on's answer already carried (Cinemeta
+    /// sends `runtime` "155 min" and `popularity`); nil when it sent none.
+    /// Used only to order search results — no lookup of their own.
+    public let runtimeMinutes: Int?
+    public let popularity: Double?
 
     public init(
         mediaID: String,
@@ -145,8 +150,12 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
         writers: [String]? = nil,
         year: Int? = nil,
         logoURL: URL? = nil,
-        imdbID: String? = nil
+        imdbID: String? = nil,
+        runtimeMinutes: Int? = nil,
+        popularity: Double? = nil
     ) {
+        self.runtimeMinutes = runtimeMinutes.flatMap { (1 ... 3_000).contains($0) ? $0 : nil }
+        self.popularity = popularity.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         let normalizedType = String(type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(40))
         let normalizedMediaID = String(mediaID.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
         id = "\(normalizedType):\(normalizedMediaID)"
@@ -207,7 +216,9 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             writers: try container.decodeIfPresent([String].self, forKey: .writers),
             year: try container.decodeIfPresent(Int.self, forKey: .year),
             logoURL: try container.decodeIfPresent(URL.self, forKey: .logoURL),
-            imdbID: try container.decodeIfPresent(String.self, forKey: .imdbID)
+            imdbID: try container.decodeIfPresent(String.self, forKey: .imdbID),
+            runtimeMinutes: try container.decodeIfPresent(Int.self, forKey: .runtimeMinutes),
+            popularity: try container.decodeIfPresent(Double.self, forKey: .popularity)
         )
     }
 
@@ -254,7 +265,9 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             writers: writers,
             year: year,
             logoURL: logoURL,
-            imdbID: imdbID
+            imdbID: imdbID,
+            runtimeMinutes: runtimeMinutes,
+            popularity: popularity
         )
     }
 
@@ -281,7 +294,9 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             writers: writers,
             year: year,
             logoURL: logoURL ?? self.logoURL,
-            imdbID: imdbID
+            imdbID: imdbID,
+            runtimeMinutes: runtimeMinutes,
+            popularity: popularity
         )
     }
 
@@ -305,7 +320,9 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
             writers: writers ?? (details.writers.isEmpty ? nil : details.writers),
             year: year ?? details.year,
             logoURL: logoURL ?? details.logoURL,
-            imdbID: imdbID
+            imdbID: imdbID,
+            runtimeMinutes: runtimeMinutes,
+            popularity: popularity
         )
     }
 }
@@ -507,7 +524,9 @@ public struct AppleStremioCatalogClient: Sendable {
                 director: meta.director,
                 writers: meta.writers,
                 year: meta.year,
-                imdbID: meta.imdbID
+                imdbID: meta.imdbID,
+                runtimeMinutes: meta.runtimeMinutes,
+                popularity: meta.popularity
             ))
             if items.count == AppleCatalogDiscoveryPolicy.maximumItemsPerCatalog { break }
         }
@@ -637,10 +656,12 @@ public struct AppleStremioCatalogClient: Sendable {
         let year: Int?
         /// `imdb_id` when `id` is another scheme; nil when it is the id.
         let imdbID: String?
+        let runtimeMinutes: Int?
+        let popularity: Double?
 
         private enum CodingKeys: String, CodingKey {
             case id, imdbID = "imdb_id", type, name, poster, background, description, releaseInfo, imdbRating, contentRating, badges, formats
-            case genre, genres, cast, director, writer, year
+            case genre, genres, cast, director, writer, year, runtime, popularity
         }
 
         init(from decoder: Decoder) throws {
@@ -677,6 +698,16 @@ public struct AppleStremioCatalogClient: Sendable {
                 year = AppleStremioMetadataClient.leadingYear(value)
             } else {
                 year = AppleStremioMetadataClient.leadingYear(releaseInfo)
+            }
+            if let value = try? container.decode(Int.self, forKey: .runtime) {
+                runtimeMinutes = value
+            } else {
+                runtimeMinutes = AppleSearchProminence.runtimeMinutes(try? container.decode(String.self, forKey: .runtime))
+            }
+            if let value = try? container.decode(Double.self, forKey: .popularity) {
+                popularity = value
+            } else {
+                popularity = (try? container.decode(String.self, forKey: .popularity)).flatMap(Double.init)
             }
         }
 

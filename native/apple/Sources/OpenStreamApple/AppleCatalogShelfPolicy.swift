@@ -26,11 +26,15 @@ enum AppleCatalogShelfPolicy {
     /// appeared twice). Each row carries its heading in `shelfTitle`.
     ///
     /// When one name covers catalogs of different types — Cinemeta's
-    /// "Popular" movies and "Popular" series — each reads "<name> Movies" /
-    /// "<name> Shows". When two rows still share a heading, the later one is
-    /// dropped only if it mostly repeats the first (two add-ons listing the
-    /// same service); different titles under one heading keep both rows, the
-    /// later one named after its add-on so no catalog silently disappears.
+    /// "Popular" movies and "Popular" series — each reads "Popular Movies" /
+    /// "Popular Shows". When two rows still share a heading, the first keeps
+    /// it and the later one is not drawn. A later row with different titles
+    /// used to stay, headed "Popular Movies · Cinemeta" — the provider back in
+    /// the shelf title (Apple TV pass 2026-10-02) — and without the suffix it
+    /// would be a second "Popular Movies" right under the first, which the
+    /// owner ruled out on 2026-09-24. Its items are not folded into the first
+    /// row: they open through their own add-on, and a merged row has one.
+    /// The row is still listed (and can be turned on) in Discover Rows.
     static func visibleSections(
         _ sections: [AppleCatalogSection], activeSourceIDs: Set<AppleSource.ID>
     ) -> [AppleCatalogSection] {
@@ -41,7 +45,7 @@ enum AppleCatalogShelfPolicy {
             typesByTitle[title.lowercased(), default: []].insert(section.catalog.type.lowercased())
         }
         var seenIDs = Set<String>()
-        var itemsByTitle = [String: Set<String>]()
+        var seenHeadings = Set<String>()
         return zip(shown, titles).map { section, title -> AppleCatalogSection in
             var section = section
             section.shelfTitle = (typesByTitle[title.lowercased()]?.count ?? 0) > 1
@@ -50,18 +54,9 @@ enum AppleCatalogShelfPolicy {
         }.sorted {
             let order = ($0.shelfTitle ?? "").localizedCaseInsensitiveCompare($1.shelfTitle ?? "")
             return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
-        }.compactMap { section -> AppleCatalogSection? in
-            guard seenIDs.insert(section.id).inserted else { return nil }
-            var section = section
-            let key = (section.shelfTitle ?? "").lowercased()
-            let items = Set(section.items.prefix(20).map(\.id))
-            if let kept = itemsByTitle[key] {
-                guard !mostlyRepeats(items, kept) else { return nil }
-                section.shelfTitle = "\(section.shelfTitle ?? "") · \(displaySourceName(section.sourceName))"
-            } else {
-                itemsByTitle[key] = items
-            }
-            return section
+        }.filter { section in
+            seenIDs.insert(section.id).inserted
+                && seenHeadings.insert((section.shelfTitle ?? "").lowercased()).inserted
         }
     }
 
@@ -86,19 +81,34 @@ enum AppleCatalogShelfPolicy {
     }
 
     /// "Popular" → "Popular Movies" / "Popular Shows"; a name that already
-    /// ends in a type word swaps it rather than stacking a second one.
+    /// ends in a type word swaps it rather than stacking a second one. The
+    /// type word goes where it reads as English (Apple TV pass 2026-10-02:
+    /// "Year Movies", "Latest Releases Movies"):
+    /// - a name that is a way of sorting ("Year", "Genre") → "Movies by Year";
+    /// - a name ending in a plural noun the type describes ("Latest
+    ///   Releases") → "Latest Movie Releases";
+    /// - anything else, an adjective ("Popular", "Top Rated") → "Popular Movies".
     static func typedTitle(_ title: String, type: String) -> String {
-        let suffix: String
+        let plural: String
+        let singular: String
         switch type.lowercased() {
-        case "movie": suffix = "Movies"
-        case "series": suffix = "Shows"
+        case "movie": (plural, singular) = ("Movies", "Movie")
+        case "series": (plural, singular) = ("Shows", "Show")
         default: return title
         }
         var words = title.split(separator: " ").map(String.init)
-        if let last = words.last?.lowercased(), ["movies", "movie", "shows", "series", "tv"].contains(last), words.count > 1 {
+        if let last = words.last?.lowercased(), ["movies", "movie", "shows", "show", "series", "tv"].contains(last), words.count > 1 {
             words.removeLast()
         }
-        return (words + [suffix]).joined(separator: " ")
+        let byWords: Set<String> = ["year", "years", "genre", "genres", "decade", "decades", "country", "language", "rating", "network", "networks", "studio", "studios"]
+        if words.count == 1, let only = words.first, byWords.contains(only.lowercased()) {
+            return "\(plural) by \(only)"
+        }
+        let nounWords: Set<String> = ["releases", "premieres", "arrivals", "additions", "picks", "favorites", "favourites", "classics", "hits", "gems"]
+        if words.count > 1, let last = words.last, nounWords.contains(last.lowercased()) {
+            return (words.dropLast() + [singular, last]).joined(separator: " ")
+        }
+        return (words + [plural]).joined(separator: " ")
     }
 
     /// First occurrence wins. A shelf keys its `ForEach` on `id`, so a repeated
@@ -140,6 +150,9 @@ func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogNa
 
 /// Metadata add-ons that prefix every catalog with their own name.
 private let appleCatalogProviderPrefixes = ["tmdb", "cinemeta", "trakt", "imdb", "mdblist", "letterboxd", "stremio"]
+/// Short provider tags that are only a prefix when a separator follows them
+/// ("RT: Certified Fresh"), so a list that merely starts with the letters keeps them.
+private let appleCatalogProviderTags = ["rt"]
 
 /// "TMDB Popular Movies" → "Popular Movies", "Trakt - Trending" → "Trending":
 /// a row names what it lists, not the add-on it came from (the Apple TV app
@@ -147,10 +160,12 @@ private let appleCatalogProviderPrefixes = ["tmdb", "cinemeta", "trakt", "imdb",
 /// ("TMDB") is kept, so no row loses its heading.
 func appleCatalogNameWithoutProviderPrefix(_ name: String) -> String {
     let words = name.split(separator: " ", omittingEmptySubsequences: true)
-    guard let first = words.first,
-          appleCatalogProviderPrefixes.contains(first.trimmingCharacters(in: CharacterSet(charactersIn: ":|-·")).lowercased())
-    else { return name }
     let separators: Set<Substring> = ["-", "–", "—", ":", "|", "·"]
+    guard let first = words.first else { return name }
+    let bare = first.trimmingCharacters(in: CharacterSet(charactersIn: ":|-·")).lowercased()
+    let separated = bare.count < first.count || words.dropFirst().first.map { separators.contains($0) } == true
+    guard appleCatalogProviderPrefixes.contains(bare) || (separated && appleCatalogProviderTags.contains(bare))
+    else { return name }
     let rest = words.dropFirst().drop { separators.contains($0) }
     return rest.isEmpty ? name : rest.joined(separator: " ")
 }

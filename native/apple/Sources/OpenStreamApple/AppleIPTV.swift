@@ -33,6 +33,17 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// How the playlist says the archive is reached (M3U `catchup` /
     /// `catchup-source`); nil for Xtream panels, whose shape is derived.
     public var catchUp: AppleIPTVCatchUpSpec? = nil
+    /// The playlist's own channel number (M3U `tvg-chno`, Xtream `num`);
+    /// nil when it gives none. Optional so cached channels decode unchanged.
+    public var channelNumber: Int? = nil
+
+    /// A playlist channel number as the guide shows it: a positive whole
+    /// number, nothing else ("5.1", "", "0", "-3" are not numbers here).
+    static func playlistChannelNumber(_ raw: String?) -> Int? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let value = Int(raw), value > 0, value < 1_000_000 else { return nil }
+        return value
+    }
 
     public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {
         var copy = self
@@ -105,6 +116,7 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         copy.catchUpDays = catchUpDays
         copy.catchUpTimeZoneID = catchUpTimeZoneID
         copy.catchUp = catchUp
+        copy.channelNumber = channelNumber
         return copy
     }
 }
@@ -637,6 +649,7 @@ public struct AppleIPTVClient: Sendable {
             channel.catchUpDays = AppleIPTVCatchUp.archiveDays(
                 tvArchive: stream.tvArchive?.value, duration: stream.tvArchiveDuration?.value)
             channel.catchUpTimeZoneID = channel.catchUpDays == nil ? nil : account.timeZoneID
+            channel.channelNumber = AppleIPTVChannel.playlistChannelNumber(stream.num?.value)
             channels.append(channel)
             if channels.count == Self.maximumChannels { break }
         }
@@ -838,6 +851,7 @@ public struct AppleIPTVClient: Sendable {
                 guideURL: guideURL,
                 originalEXTINF: details.extinf
             )
+            channel.channelNumber = AppleIPTVChannel.playlistChannelNumber(details.attributes["tvg-chno"])
             if let spec = AppleIPTVCatchUpSpec.from(attributes: details.attributes) {
                 channel.catchUp = spec
                 channel.catchUpDays = AppleIPTVCatchUpSpec.days(attributes: details.attributes) ?? 1
@@ -1174,8 +1188,10 @@ private struct XtreamLiveStream: Decodable {
     let epgChannelID: XtreamFlexibleString?
     let tvArchive: XtreamFlexibleString?
     let tvArchiveDuration: XtreamFlexibleString?
+    let num: XtreamFlexibleString?
 
     private enum CodingKeys: String, CodingKey {
+        case num
         case streamID = "stream_id"
         case name
         case streamIcon = "stream_icon"
@@ -1200,6 +1216,7 @@ private struct XtreamLiveStream: Decodable {
         epgChannelID = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .epgChannelID)
         tvArchive = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .tvArchive)
         tvArchiveDuration = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .tvArchiveDuration)
+        num = try? values.decodeIfPresent(XtreamFlexibleString.self, forKey: .num)
     }
 }
 

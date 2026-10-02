@@ -184,3 +184,24 @@ struct AppleLiveChannelDisplayCapTests {
         #expect(s.channels.count == 5); #expect(s.hiddenCount == 0)
     }
 }
+
+/// Apple TV full pass 2026-10-02: the fixture's Xtream panel serves News and
+/// Sports categories, but its channels match no US lineup entry, so the chips
+/// were All and Favorites only.
+@Test func liveSnapshotFallsBackToPlaylistGroupsForCategories() {
+    let source = UUID()
+    let channels = [
+        AppleIPTVChannel(id: "a", sourceID: source, name: "Atlas News", group: "News", streamURL: URL(string: "https://fixture.example/a.ts")!),
+        AppleIPTVChannel(id: "b", sourceID: source, name: "Atlas Sports", group: "US| SPORTS HD", streamURL: URL(string: "https://fixture.example/b.ts")!),
+        AppleIPTVChannel(id: "c", sourceID: source, name: "Odd One", group: "Random 24/7", streamURL: URL(string: "https://fixture.example/c.ts")!)
+    ]
+    let groups = [AppleIPTVChannelGroup(name: "All", channels: channels)]
+    let all = AppleLiveChannelSnapshot.build(groups: groups, package: .everything, custom: .init(),
+        entries: [], favoriteIDs: [], category: "All")
+    #expect(all.categories == ["All", "Favorites", "News", "Sports"])
+    let sports = AppleLiveChannelSnapshot.build(groups: groups, package: .everything, custom: .init(),
+        entries: [], favoriteIDs: [], category: "Sports")
+    #expect(sports.channelIDs == ["b"])
+    #expect(AppleLiveCategoryPolicy.category(forPlaylistGroup: "Newsmax") == nil)
+    #expect(AppleLiveCategoryPolicy.category(forPlaylistGroup: "UK | Kids") == "Kids")
+}

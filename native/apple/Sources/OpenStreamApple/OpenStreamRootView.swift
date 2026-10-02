@@ -101,6 +101,18 @@ enum OpenStreamTabVisibility {
     }
 }
 
+/// Whether a selected tab's stack failed to come on screen (tvOS; see the
+/// root view's `onChange(of: selectedTab)`).
+enum OpenStreamTabMountWatchdog {
+    /// Long enough for a normal tab switch to appear, short enough that an
+    /// empty tab is not noticed.
+    static let grace: Duration = .milliseconds(1200)
+
+    static func needsRemount<Tab: Hashable>(selected: Tab, mounted: Set<Tab>) -> Bool {
+        !mounted.contains(selected)
+    }
+}
+
 /// Decides what a tab bar selection means. Re-selecting the tab that is
 /// already showing pops that tab's navigation stack back to its root.
 enum OpenStreamTabReselection {
@@ -114,6 +126,13 @@ enum OpenStreamTabReselection {
 public struct OpenStreamRootView: View {
     @State private var selectedTab = OpenStreamTab.home
     @State private var navigationPaths: [OpenStreamTab: NavigationPath] = [:]
+    #if os(tvOS)
+    /// The tabs whose stack is on screen right now, and a remount counter per
+    /// tab for the watchdog below (`OpenStreamTabMountWatchdog`).
+    @State private var mountedTabs: Set<OpenStreamTab> = []
+    @State private var tabMountGeneration: [OpenStreamTab: Int] = [:]
+    @State private var tabMountWatchdog: Task<Void, Never>?
+    #endif
     #if os(iOS)
     @State private var rootViewportSize: CGSize = .zero
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -232,6 +251,11 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
+                // Remounted only by the watchdog, when the tab was selected
+                // and its stack never came on screen.
+                .id(tabMountGeneration[tab] ?? 0)
+                .onAppear { mountedTabs.insert(tab) }
+                .onDisappear { mountedTabs.remove(tab) }
                 .tabItem {
                     if tab.showsTitleInTabBar {
                         Label(tab.title, systemImage: tab.systemImage)
@@ -270,6 +294,23 @@ public struct OpenStreamRootView: View {
         // Owner (16:20): keep the stock top tab bar; the sidebar experiment
         // (X8) read as "the top bar is gone". The bar hides while scrolling.
         .onExitCommand(perform: exitCommandHandler(for: selectedTab))
+        // A quick run along the tab bar ending in Select could leave the
+        // chosen tab empty for a minute or more — no spinner, no task, the
+        // trace only "tab → search" — until the viewer moved off and back
+        // (Apple TV full pass 2026-10-02, 55). The selected tab's stack never
+        // appeared, so nothing inside it ever started. If it has not appeared
+        // shortly after the selection settles, remount it: the same thing
+        // moving off and back did, without the viewer having to.
+        .onChange(of: selectedTab) { _, tab in
+            tabMountWatchdog?.cancel()
+            tabMountWatchdog = Task { @MainActor in
+                try? await Task.sleep(for: OpenStreamTabMountWatchdog.grace)
+                guard !Task.isCancelled, selectedTab == tab,
+                      OpenStreamTabMountWatchdog.needsRemount(selected: tab, mounted: mountedTabs) else { return }
+                appleTraceFailure("tab \(tab): content never appeared after selection — remounting")
+                tabMountGeneration[tab, default: 0] += 1
+            }
+        }
         #endif
     }
 

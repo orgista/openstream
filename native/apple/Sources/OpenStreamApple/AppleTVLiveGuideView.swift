@@ -1127,6 +1127,15 @@ private struct AppleTVGuideCellLabel: View {
                         .font(.system(size: metrics.cellFontSize, weight: .medium))
                         .lineLimit(1)
                 }
+                // A programme that began left of the visible timeline keeps
+                // its title on screen, pinned at the left edge (the cell's
+                // own start is scrolled off). A visual effect, not state: it
+                // follows the scroll without re-running any body.
+                .visualEffect { [metrics, width] content, proxy in
+                    content.offset(x: metrics.pinnedTitleOffset(
+                        titleMinX: proxy.frame(in: .scrollView(axis: .horizontal)).minX,
+                        cellWidth: width))
+                }
             }
             if let progress {
                 // Elapsed time on the programme on now. Hierarchical styles
