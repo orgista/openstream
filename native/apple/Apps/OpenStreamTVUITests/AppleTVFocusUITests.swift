@@ -8,7 +8,7 @@ import Vision
 /// `simctl` has no such API. Each of these assertions replaces something the
 /// owner previously had to check by hand and report back.
 @MainActor
-final class AppleTVFocusUITests: XCTestCase {
+final class AppleTVFocusUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
     private var remote: XCUIRemote { .shared }
 

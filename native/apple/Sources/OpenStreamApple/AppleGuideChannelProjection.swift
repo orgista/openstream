@@ -31,18 +31,26 @@ enum AppleGuideChannelProjection {
         }
     }
 
-    static func window(day: Date, now: Date, calendar: Calendar = .current) -> DateInterval {
+    /// - Parameter earliest: how far back the guide may scroll for channels
+    ///   with catch-up (`AppleIPTVCatchUp.earliestGuideTime`); the window then
+    ///   opens on that half hour instead of the current one.
+    static func window(day: Date, now: Date, calendar: Calendar = .current, earliest: Date? = nil) -> DateInterval {
         let startOfDay = calendar.startOfDay(for: day)
         let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
         let start: Date
         if calendar.isDate(day, inSameDayAs: now) {
-            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now)
-            var rounded = components
-            rounded.minute = ((components.minute ?? 0) / 30) * 30
-            start = calendar.date(from: rounded) ?? now
+            start = halfHour(of: min(now, earliest ?? now), calendar: calendar)
         } else {
             start = startOfDay
         }
         return DateInterval(start: start, end: nextDay)
+    }
+
+    /// `date` rounded down to the half hour.
+    static func halfHour(of date: Date, calendar: Calendar = .current) -> Date {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        var rounded = components
+        rounded.minute = ((components.minute ?? 0) / 30) * 30
+        return calendar.date(from: rounded) ?? date
     }
 }

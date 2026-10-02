@@ -670,7 +670,10 @@ public struct AppleTMDBClient: Sendable {
     }
 
     public static func liveLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        try await credentialSafeSession.data(for: request)
+        if let root = AppleNetworkStub.root {
+            return try AppleNetworkStub.response(for: request, root: root)
+        }
+        return try await credentialSafeSession.data(for: request)
     }
 }
 

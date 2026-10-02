@@ -32,6 +32,15 @@ public struct AppleGuideGridCell: Sendable, Equatable, Identifiable {
     }
 }
 
+extension AppleGuideGridCell {
+    /// The programme this cell draws, with its own (unclamped) times — what
+    /// catch-up plays. Gap cells have no programme.
+    public var programme: AppleIPTVProgramme {
+        AppleIPTVProgramme(id: id, channelID: channelID, title: title, subtitle: nil, description: subtitle,
+                           start: airStart, end: airEnd, category: nil, isLive: isLive)
+    }
+}
+
 public struct AppleGuideGridRow: Sendable, Equatable, Identifiable {
     public let channelID: String
     public var id: String { channelID }

@@ -15,28 +15,33 @@ struct AppleCatalogRowTitleTests {
                             items: [AppleCatalogItem(mediaID: "tt0000001", type: type, name: "Fixture")])
     }
 
-    @Test("A service's movie catalog reads \"<Service> Movies\"", arguments: [
-        ("amp", "Prime  Video", "Prime Movies"),
-        ("nfx", "Netflix", "Netflix Movies"),
-        ("dnp", "Disney+", "Disney+ Movies"),
-        ("streaming.hbm", "HBO Max", "HBO Max Movies"),
+    /// Owner 2026-10-01 (compliance B4): a row is headed by what the add-on
+    /// called the list — the app never turns a catalog id into a brand.
+    @Test("A catalog keeps the add-on's own name, whatever its id", arguments: [
+        ("amp", "Prime  Video", "Prime Video"),
+        ("nfx", "Netflix", "Netflix"),
+        ("dnp", "Disney+", "Disney+"),
+        ("streaming.hbm", "HBO Max", "HBO Max"),
+        ("nfx", "Streaming Picks", "Streaming Picks"),
+        ("streaming.amp", "New on Prime", "New on Prime"),
     ])
-    func movieCatalogs(id: String, name: String, expected: String) {
+    func catalogsKeepTheirOwnName(id: String, name: String, expected: String) {
         #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "movie", id: id, name: name)) == expected)
-    }
-
-    @Test("A service's series catalog reads \"<Service> Shows\"", arguments: [
-        ("amp", "Prime Video", "Prime Shows"),
-        ("atp", "Apple TV+", "Apple TV+ Shows"),
-        ("streaming.amp", "Prime Video", "Prime Shows"),
-    ])
-    func seriesCatalogs(id: String, name: String, expected: String) {
         #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "series", id: id, name: name)) == expected)
     }
 
-    @Test func serviceIsKnownByNameWhenTheIDIsNot() {
-        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "movie", id: "custom-1", name: "Prime Video")) == "Prime Movies")
-        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "series", id: "custom-2", name: " netflix ")) == "Netflix Shows")
+    @Test("A known service id with no name gets a neutral heading, not the brand", arguments: [
+        ("nfx", "movie", "Movies"), ("dnp", "series", "Shows"), ("netflix-top10-us", "movie", "Movies"),
+        ("streaming.amp", "series", "Shows"), ("hbm", "other", "Catalog"),
+    ])
+    func unnamedServiceCatalogsAreNeutral(id: String, type: String, expected: String) {
+        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: type, id: id, name: nil)) == expected)
+    }
+
+    @Test func aNameIsNeverRewrittenToAServiceBrand() {
+        // "Prime Video" used to become "Prime Movies"; " netflix " became "Netflix Shows".
+        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "movie", id: "custom-1", name: "Prime Video")) == "Prime Video")
+        #expect(AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: "series", id: "custom-2", name: " netflix ")) == "netflix")
     }
 
     @Test func otherCatalogsKeepTheirNameWithWhitespaceCollapsed() {
@@ -49,7 +54,7 @@ struct AppleCatalogRowTitleTests {
     @Test func streamingCatalogsManifestDrawsTwoDistinctPrimeRows() throws {
         let sections = [section("amp", "movie", "Prime  Video"), section("amp", "series", "Prime Video")]
         let visible = AppleCatalogShelfPolicy.visibleSections(sections, activeSourceIDs: [source.id])
-        #expect(visible.map(\.shelfTitle) == ["Prime Movies", "Prime Shows"])
+        #expect(visible.map(\.shelfTitle) == ["Prime Video Movies", "Prime Video Shows"])
     }
 
     @Test func noTwoRowsEverShareATitle() {
@@ -66,7 +71,7 @@ struct AppleCatalogRowTitleTests {
         let titles = visible.compactMap(\.shelfTitle)
         #expect(titles.count == visible.count)
         #expect(Set(titles.map { $0.lowercased() }).count == titles.count)
-        #expect(titles == ["Popular Movies", "Popular Shows", "Prime Movies", "Prime Shows"])
+        #expect(titles == ["Popular Movies", "Popular Shows", "Prime Video Movies", "Prime Video Shows"])
     }
 
     /// gpt-6-luna review of d605c9f: a heading collision must not hide a

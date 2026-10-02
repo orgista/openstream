@@ -159,6 +159,11 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             else { combined.append(source) }
         }
         result.sources = combined
+        // Resume position: the freshest of the two per title, so a snapshot
+        // written before this device's last play never winds it back (V6).
+        result.playbackProgress = playbackProgress.merging(incoming.playbackProgress) { mine, theirs in
+            theirs.updatedAt >= mine.updatedAt ? theirs : mine
+        }
         var history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
         history.merge(watched: incoming.watchedHistory, tombstones: incoming.watchedTombstones)
         result.watchedHistory = history.watched

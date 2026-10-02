@@ -9,7 +9,7 @@ import XCTest
 /// press Home, walk focus onto the OpenStream icon, and look at what the
 /// shelf renders.
 @MainActor
-final class AppleTVTopShelfUITests: XCTestCase {
+final class AppleTVTopShelfUITests: OpenStreamUITestCase {
     private var remote: XCUIRemote { .shared }
     /// tvOS renders the home screen and the Top Shelf in PineBoard; HeadBoard
     /// is the surrounding springboard. Both are queried — whichever exposes

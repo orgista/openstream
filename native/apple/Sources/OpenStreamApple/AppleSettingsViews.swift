@@ -519,12 +519,12 @@ private struct AppleChannelManagerView: View {
                 #if os(tvOS)
                 // The stock Picker pushed an empty page here (AppleTVChoicePicker).
                 AppleTVChoicePicker("Package", selection: $settings.liveChannelPackage,
-                                    options: AppleLiveChannelPackage.allCases.map { .init(value: $0, title: $0.title) })
+                                    options: AppleLiveChannelPackage.available.map { .init(value: $0, title: $0.title) })
                 AppleTVChoicePicker("Live view", selection: $settings.liveChannelScope,
                                     options: AppleLiveChannelScope.allCases.map { .init(value: $0, title: $0.title) })
                 #else
                 Picker("Package", selection: $settings.liveChannelPackage) {
-                    ForEach(AppleLiveChannelPackage.allCases) { package in
+                    ForEach(AppleLiveChannelPackage.available) { package in
                         Text(package.title).tag(package)
                     }
                 }

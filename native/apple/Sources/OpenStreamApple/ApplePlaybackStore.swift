@@ -367,8 +367,11 @@ public final class ApplePlaybackStore {
         if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
     }
 
-    func restoreConfigurationProgress(_ entries: [String: ApplePlaybackProgress]) {
-        persist(entries)
+    /// Merges a backup's or another device's resume positions into this one:
+    /// per title the freshest `updatedAt` wins, so a snapshot written before
+    /// this device's last play never winds it back (V6).
+    func restoreConfigurationProgress(_ incoming: [String: ApplePlaybackProgress]) {
+        persist(entries().merging(incoming) { mine, theirs in theirs.updatedAt >= mine.updatedAt ? theirs : mine })
     }
 
     /// Backups and iCloud always read and write the stored history, never a

@@ -68,7 +68,7 @@ import Testing
 }
 
 @Test func shelfTitlesTrimCatalogWhitespace() {
-    #expect(appleCatalogShelfTitle(sourceName: "Streaming Catalogs", catalogType: "movie", catalogName: " Prime Video ") == "Prime Movies")
+    #expect(appleCatalogShelfTitle(sourceName: "Streaming Catalogs", catalogType: "movie", catalogName: " Prime Video ") == "Prime Video")
     #expect(appleCatalogShelfTitle(sourceName: "Provider", catalogType: "movie", catalogName: " New  Releases ") == "New Releases")
     #expect(appleCatalogShelfTitle(sourceName: "Provider", catalogType: "other", catalogName: "  ") == "Catalog")
 }

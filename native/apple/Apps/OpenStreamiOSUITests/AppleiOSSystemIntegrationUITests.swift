@@ -13,7 +13,7 @@ import XCTest
 /// query and the property read, and the mismatch fails the test. The tree text
 /// from `debugDescription` carries the same information safely.
 @MainActor
-final class AppleiOSWidgetPlacementUITests: XCTestCase {
+final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
     private var springboard: XCUIApplication!
 
@@ -204,7 +204,7 @@ final class AppleiOSWidgetPlacementUITests: XCTestCase {
 /// Export the configuration through the real save sheet, then import the file
 /// it wrote back through the real browse sheet.
 @MainActor
-final class AppleiOSConfigurationTransferUITests: XCTestCase {
+final class AppleiOSConfigurationTransferUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
 
     override func setUp() {

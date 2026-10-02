@@ -27,6 +27,12 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// `tv_archive` + `tv_archive_duration`); nil when it reports none.
     /// Optional so cached channels written before it decode unchanged.
     public var catchUpDays: Int? = nil
+    /// The panel's clock (Xtream `server_info.timezone`), which is the zone
+    /// its catch-up start times are written in; nil reads as UTC.
+    public var catchUpTimeZoneID: String? = nil
+    /// How the playlist says the archive is reached (M3U `catchup` /
+    /// `catchup-source`); nil for Xtream panels, whose shape is derived.
+    public var catchUp: AppleIPTVCatchUpSpec? = nil
 
     public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {
         var copy = self
@@ -97,6 +103,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         copy.probedMediaKind = probedMediaKind
         copy.wrapsInCaptionMaster = wrapsInCaptionMaster
         copy.catchUpDays = catchUpDays
+        copy.catchUpTimeZoneID = catchUpTimeZoneID
+        copy.catchUp = catchUp
         return copy
     }
 }
@@ -571,7 +579,8 @@ public struct AppleIPTVClient: Sendable {
         source: AppleSource,
         credentials: AppleIPTVCredentials
     ) async throws -> [AppleIPTVChannel] {
-        let preferredExtension = try await verifyXtreamAccount(source: source, credentials: credentials)
+        let account = try await verifyXtreamAccount(source: source, credentials: credentials)
+        let preferredExtension = account.preferredExtension
 
         let categoryURL = try Self.xtreamAPIURL(
             baseURL: source.url,
@@ -627,6 +636,7 @@ public struct AppleIPTVClient: Sendable {
             )
             channel.catchUpDays = AppleIPTVCatchUp.archiveDays(
                 tvArchive: stream.tvArchive?.value, duration: stream.tvArchiveDuration?.value)
+            channel.catchUpTimeZoneID = channel.catchUpDays == nil ? nil : account.timeZoneID
             channels.append(channel)
             if channels.count == Self.maximumChannels { break }
         }
@@ -643,7 +653,7 @@ public struct AppleIPTVClient: Sendable {
     private func verifyXtreamAccount(
         source: AppleSource,
         credentials: AppleIPTVCredentials
-    ) async throws -> String? {
+    ) async throws -> XtreamAccount {
         let accountURL = try Self.xtreamAPIURL(baseURL: source.url, credentials: credentials, action: nil)
         var request = URLRequest(url: accountURL)
         request.timeoutInterval = Self.accountProbeTimeout
@@ -678,9 +688,38 @@ public struct AppleIPTVClient: Sendable {
         guard userInfo.auth?.value == "1" else {
             throw AppleIPTVError.authenticationFailed(status: userInfo.status?.value)
         }
-        return AppleXtreamOutputFormat.preferred(
-            allowedOutputFormats: userInfo.allowedOutputFormats ?? []
-        ).rawValue
+        return XtreamAccount(
+            preferredExtension: AppleXtreamOutputFormat.preferred(
+                allowedOutputFormats: userInfo.allowedOutputFormats ?? []
+            ).rawValue,
+            timeZoneID: Self.serverTimeZoneID(account.serverInfo?.timezone?.value)
+        )
+    }
+
+    /// What the login told us beyond "yes": the stream extension to use and
+    /// the panel's clock for catch-up start times.
+    struct XtreamAccount {
+        var preferredExtension: String?
+        var timeZoneID: String?
+    }
+
+    /// The panel's `server_info.timezone` as a zone the system knows
+    /// (`Europe/London`, `UTC`, `GMT+2`); nil when it is absent or unknown,
+    /// which catch-up reads as UTC.
+    static func serverTimeZoneID(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        if let zone = TimeZone(identifier: raw) { return zone.identifier }
+        if let zone = TimeZone(abbreviation: raw) { return zone.identifier }
+        // "+03:00" / "UTC+3" / "GMT-05:00" style offsets.
+        let digits = raw.replacingOccurrences(of: "UTC", with: "").replacingOccurrences(of: "GMT", with: "")
+            .replacingOccurrences(of: ":", with: "")
+        guard let sign = digits.first, sign == "+" || sign == "-",
+              let value = Int(digits.dropFirst()), digits.count <= 5 else { return nil }
+        let hours = digits.count <= 3 ? value : value / 100
+        let minutes = digits.count <= 3 ? 0 : value % 100
+        guard hours <= 14, minutes < 60 else { return nil }
+        let seconds = (hours * 3600 + minutes * 60) * (sign == "-" ? -1 : 1)
+        return TimeZone(secondsFromGMT: seconds)?.identifier
     }
 
     private func load(_ url: URL, accept: String) async throws -> Data {
@@ -785,7 +824,7 @@ public struct AppleIPTVClient: Sendable {
                 : "\(providerID)|\(cleanName)|\(url.absoluteString)"
             guard seenEntries.insert(entryKey).inserted else { continue }
             let stableID = ApplePlaybackIdentity.digest(for: "\(providerID)|\(url.absoluteString)")
-            channels.append(AppleIPTVChannel(
+            var channel = AppleIPTVChannel(
                 id: "\(sourceID.uuidString):\(stableID)",
                 sourceID: sourceID,
                 name: String(cleanName.prefix(160)),
@@ -798,7 +837,12 @@ public struct AppleIPTVClient: Sendable {
                 guideID: providerID.isEmpty ? nil : providerID,
                 guideURL: guideURL,
                 originalEXTINF: details.extinf
-            ))
+            )
+            if let spec = AppleIPTVCatchUpSpec.from(attributes: details.attributes) {
+                channel.catchUp = spec
+                channel.catchUpDays = AppleIPTVCatchUpSpec.days(attributes: details.attributes) ?? 1
+            }
+            channels.append(channel)
             if channels.count == maximumChannels {
                 // Never silently. The viewer sees a guide missing its tail and
                 // has no way to know the playlist was cut, so say so where the
@@ -1091,7 +1135,12 @@ private struct XtreamFlexibleString: Decodable {
 
 private struct XtreamAccountEnvelope: Decodable {
     let userInfo: XtreamUserInfo?
-    private enum CodingKeys: String, CodingKey { case userInfo = "user_info" }
+    let serverInfo: XtreamServerInfo?
+    private enum CodingKeys: String, CodingKey { case userInfo = "user_info", serverInfo = "server_info" }
+}
+
+private struct XtreamServerInfo: Decodable {
+    let timezone: XtreamFlexibleString?
 }
 
 private struct XtreamUserInfo: Decodable {

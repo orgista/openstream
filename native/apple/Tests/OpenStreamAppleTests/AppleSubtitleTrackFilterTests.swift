@@ -109,6 +109,20 @@ struct AppleSubtitleTrackFilterTests {
         #expect(visible.map(\.id) == [3])
     }
 
+    /// V16: "Forced" in a title with no forced flag is a muxer's label, never
+    /// an auto-selection; a flagged forced track is picked when it is all
+    /// the language has, and loses to a full track otherwise.
+    @Test func aTitleOnlyForcedTrackIsNeverAutoSelected() {
+        let titled = [track(0, "en", "English Forced")]
+        #expect(AppleSubtitleTrackFilter.visible(titled, preferredLanguages: ["en"]).isEmpty)
+
+        let flagged = [ApplePlaybackTrack(id: 1, title: "English", language: "en", codec: nil, isDefault: false, isForced: true)]
+        #expect(AppleSubtitleTrackFilter.visible(flagged, preferredLanguages: ["en"]).map(\.id) == [1])
+
+        let both = flagged + [track(2, "en", "English")]
+        #expect(AppleSubtitleTrackFilter.visible(both, preferredLanguages: ["en"]).map(\.id) == [2])
+    }
+
     @Test func nothingPickedMeansTheDevicesPrimaryLanguage() {
         #expect(AppleSubtitleTrackFilter.effectiveLanguages([], deviceLanguages: ["en-US", "fr-FR"]) == ["en"])
         #expect(AppleSubtitleTrackFilter.effectiveLanguages([], deviceLanguages: ["es-MX", "en-US"]) == ["es"])

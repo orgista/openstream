@@ -137,7 +137,7 @@ struct AppleLiveTVView: View {
                     if let selectedChannel {
                         ZStack(alignment: .topTrailing) {
                             AppleLiveInlinePlayer(
-                                request: selectedChannel.playbackRequest(),
+                                request: playbackRequest(for: selectedChannel),
                                 coordinator: playbackCoordinator,
                                 playbackRevision: playbackRevision,
                                 fullScreenRevision: fullScreenRevision,
@@ -155,16 +155,30 @@ struct AppleLiveTVView: View {
                             .id(ObjectIdentifier(playbackCoordinator))
                             
                             #if os(iOS)
-                            if isPad && verticalSizeClass == .compact {
-                                Button {
-                                    showsSearch = true
-                                } label: {
-                                    Image(systemName: "magnifyingglass")
-                                        .frame(width: 44, height: 44)
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.3), radius: 2)
+                            HStack(spacing: 0) {
+                                if catchUp != nil {
+                                    // Back to the live channel from a programme
+                                    // played out of the archive.
+                                    Button("Watch Live") {
+                                        startChannel(selectedChannel, shareSelection: true, present: false)
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .shadow(color: .black.opacity(0.3), radius: 2)
+                                    .padding()
+                                    .accessibilityIdentifier("live.watchLive")
                                 }
-                                .padding()
+                                if isPad && verticalSizeClass == .compact {
+                                    Button {
+                                        showsSearch = true
+                                    } label: {
+                                        Image(systemName: "magnifyingglass")
+                                            .frame(width: 44, height: 44)
+                                            .foregroundStyle(.white)
+                                            .shadow(color: .black.opacity(0.3), radius: 2)
+                                    }
+                                    .padding()
+                                }
                             }
                             #endif
                         }
@@ -254,7 +268,8 @@ struct AppleLiveTVView: View {
                         onToggleFavorite: toggleFavorite,
                         onVisibleChannels: refreshGuide,
                         health: channelHealth,
-                        onShowHealth: { healthDetailChannel = $0 }
+                        onShowHealth: { healthDetailChannel = $0 },
+                        onSelectProgramme: playProgramme
                     )
                     .safeAreaPadding(.bottom, 8)
                 }
@@ -295,7 +310,8 @@ struct AppleLiveTVView: View {
                 onToggleFavorite: toggleFavorite,
                 onVisibleChannels: refreshGuide,
                 health: channelHealth,
-                onShowHealth: { healthDetailChannel = $0 }
+                onShowHealth: { healthDetailChannel = $0 },
+                onSelectProgramme: playProgramme
             )
         })
         #if os(iOS)
@@ -635,6 +651,7 @@ struct AppleLiveTVView: View {
         guard !visibleIDs.isEmpty else { return }
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         guideStore.retainSources(Set(sources.map(\.id)))
+        guideStore.archiveChannelIDs = Set(channels.lazy.filter(AppleIPTVCatchUp.supportsCatchUp).map(\.id))
         for source in sources {
             if source.iptvType == .xtream {
                 guard let credentials = try? sourceStore.iptvCredentials(for: source) else { continue }
@@ -699,6 +716,28 @@ struct AppleLiveTVView: View {
         startChannel(channel, shareSelection: true)
     }
 
+    /// A programme that already aired, from the channel's archive
+    /// (`AppleIPTVCatchUp`). Not shared: SharePlay follows live channels.
+    private func playProgramme(_ channel: AppleIPTVChannel, _ programme: AppleIPTVProgramme) {
+        #if DEBUG
+        AppleInteractionTrace.record(.press, "guide catch-up \(channel.name): \(programme.title) from \(programme.start.formatted(date: .omitted, time: .shortened))")
+        #endif
+        startChannel(channel, shareSelection: false, programme: programme)
+    }
+
+    /// The programme out of the archive being played on `selectedChannel`;
+    /// nil while the channel is live. Cleared by every live start.
+    @State private var catchUp: AppleIPTVProgramme?
+
+    /// What the player is asked to play for `channel`: the archived
+    /// programme when one was chosen, else the live stream.
+    private func playbackRequest(for channel: AppleIPTVChannel) -> ApplePlaybackRequest {
+        if let catchUp, let request = AppleIPTVCatchUp.playbackRequest(for: channel, programme: catchUp) {
+            return request
+        }
+        return channel.playbackRequest()
+    }
+
     @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
     private let liveStreamProbe = AppleIPTVStreamProbe()
     private struct ChannelProbeRequest {
@@ -706,6 +745,7 @@ struct AppleLiveTVView: View {
         let channel: AppleIPTVChannel
         let shareSelection: Bool
         let present: Bool
+        var programme: AppleIPTVProgramme? = nil
     }
     @State private var pendingProbe: ChannelProbeRequest?
     @State private var failedProbe: ChannelProbeRequest?
@@ -721,6 +761,7 @@ struct AppleLiveTVView: View {
             guard pendingProbe?.id == request.id else { return }
             liveProbedKinds[request.channel.id] = kind
             pendingProbe = nil
+            catchUp = request.programme
             startChannelNow(request.channel.withProbedMediaKind(kind),
                 shareSelection: request.shareSelection, present: request.present)
         } catch {
@@ -754,7 +795,8 @@ struct AppleLiveTVView: View {
     private var probeFailureActions: some View {
         Button("Retry") {
             guard let request = failedProbe else { return }
-            startChannel(request.channel, shareSelection: request.shareSelection, present: request.present)
+            startChannel(request.channel, shareSelection: request.shareSelection, present: request.present,
+                         programme: request.programme)
         }
         Button("Close", role: .cancel) { failedProbe = nil }
     }
@@ -764,10 +806,12 @@ struct AppleLiveTVView: View {
     /// gets one 32 KB look first so HLS goes to AVPlayer and raw TS to the
     /// engine (`AppleLiveStreamRoutePolicy`); the verdict is kept for the
     /// session. Anything with a telling extension starts at once.
-    private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
+    private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true,
+                              programme: AppleIPTVProgramme? = nil) {
         pendingProbe = nil
         probeFailureMessage = nil
         failedProbe = nil
+        catchUp = programme
         guard channel.probedMediaKind == nil, AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
             startChannelNow(channel, shareSelection: shareSelection, present: present)
             return
@@ -779,7 +823,8 @@ struct AppleLiveTVView: View {
         // Retire the previous attempt before showing a new channel's failure.
         // Otherwise its player alert can cover the preflight's Retry/Close alert.
         playbackCoordinator.stop()
-        pendingProbe = ChannelProbeRequest(channel: channel, shareSelection: shareSelection, present: present)
+        pendingProbe = ChannelProbeRequest(channel: channel, shareSelection: shareSelection, present: present,
+                                           programme: programme)
     }
 
     private func startChannelNow(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true) {
@@ -789,7 +834,7 @@ struct AppleLiveTVView: View {
         let channel = channel.withCaptionMaster(
             AppleLiveCaptionProbe.shared.wrapsInCaptionMaster(channelID: channel.id))
         #if os(tvOS)
-        if present { ensureTVEngine(for: channel.playbackRequest()) }
+        if present { ensureTVEngine(for: playbackRequest(for: channel)) }
         #endif
         playbackCoordinator.sharePlayChannel = try? AppleSharePlayChannel(channel: channel)
         playbackRevision &+= 1
@@ -840,7 +885,8 @@ struct AppleLiveTVView: View {
             onVisibleChannels: refreshGuide,
             health: channelHealth,
             healthRevision: channelHealthRevision,
-            onShowHealth: { healthDetailChannel = $0 }
+            onShowHealth: { healthDetailChannel = $0 },
+            onSelectProgramme: playProgramme
         )
         // The tab root draws no page title on a television; the tab bar names it.
         .toolbar(.hidden, for: .navigationBar)
@@ -854,6 +900,7 @@ struct AppleLiveTVView: View {
                     alternateLineup: channels,
                     sourceNames: liveSourceNames,
                     guide: guideStore.guide(for: channelSnapshot.channelIDs),
+                    programme: catchUp,
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .id(ObjectIdentifier(playbackCoordinator))

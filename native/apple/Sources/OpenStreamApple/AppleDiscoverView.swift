@@ -1532,6 +1532,7 @@ struct AppleSearchView: View {
     @State private var routedResult: RoutedResult?
     @State private var deliveredRouteRevision: Int?
     @State private var catalogLookup = AppleCatalogSearchLookup()
+    @State private var recentSearches = AppleRecentSearchStore()
     #if DEBUG
     @State private var debugOpenedFirstResult = false
     #endif
@@ -1571,6 +1572,8 @@ struct AppleSearchView: View {
                         systemImage: "magnifyingglass",
                         description: Text("Titles appear here after you add and refresh a catalog source.")
                     )
+                } else if !recentSearches.recents.isEmpty {
+                    recentSearchesList
                 } else {
                     ContentUnavailableView("Search Your Sources", systemImage: "magnifyingglass")
                 }
@@ -1612,6 +1615,7 @@ struct AppleSearchView: View {
         #else
         .searchable(text: $query, prompt: "Search movies, shows, and channels")
         #endif
+        .onSubmit(of: .search) { recentSearches.record(query) }
         .navigationDestination(item: $routedResult) { value in
             AppleCatalogItemDetailView(
                 item: value.item,
@@ -1658,6 +1662,13 @@ struct AppleSearchView: View {
                 await mediaIndex.search(value)
             }
             deliverMediaRoute(revision: revision)
+            // A query that stayed put and found something is a search worth
+            // remembering; the keystrokes on the way to it are not (tvOS has
+            // no submit, so this is the only path there).
+            guard !listedResults.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            recentSearches.record(query)
         }
         .task {
             await mediaIndex.load()
@@ -1714,6 +1725,23 @@ struct AppleSearchView: View {
             }
         }
         #endif
+    }
+
+    /// The last searches, newest first, while the field is empty: a row
+    /// re-runs that search, the last row forgets them all. Plain rows, no
+    /// colour (owner rule), the way the TV app lists its recents.
+    private var recentSearchesList: some View {
+        List {
+            Section("Recent Searches") {
+                ForEach(recentSearches.recents, id: \.self) { entry in
+                    Button(entry) { query = entry }
+                        .accessibilityIdentifier("search.recent.row")
+                }
+                Button("Clear Recent Searches") { recentSearches.clear() }
+                    .accessibilityIdentifier("search.recent.clear")
+            }
+        }
+        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
     }
 
     private func deliverMediaRoute(revision: Int) {

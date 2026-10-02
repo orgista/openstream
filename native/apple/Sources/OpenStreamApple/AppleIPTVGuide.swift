@@ -107,13 +107,18 @@ public actor AppleIPTVGuideLoader {
         return AppleIPTVGuide(programmes: AppleIPTVGuideXMLTVParser().parse(data: data))
     }
 
-    public func load(xtreamBase: URL, username: String, password: String, streamIDs: [Int]) async throws -> AppleIPTVGuide {
+    /// - Parameter archiveStreamIDs: channels with catch-up. Those are read
+    ///   with `get_simple_data_table`, which carries the past days the guide
+    ///   can scroll back into; `get_short_epg` only lists what is coming.
+    public func load(xtreamBase: URL, username: String, password: String, streamIDs: [Int],
+                     archiveStreamIDs: Set<Int> = []) async throws -> AppleIPTVGuide {
         let ids = Array(Set(streamIDs.filter { $0 > 0 })).sorted().prefix(50)
         return try await withThrowingTaskGroup(of: [AppleIPTVProgramme].self) { group in
             var iterator = ids.makeIterator()
             func enqueue(_ id: Int) {
                 group.addTask {
-                    try await self.loadStream(base: xtreamBase, username: username, password: password, id: id)
+                    try await self.loadStream(base: xtreamBase, username: username, password: password, id: id,
+                                              action: archiveStreamIDs.contains(id) ? "get_simple_data_table" : "get_short_epg")
                 }
             }
             for _ in 0..<4 { if let id = iterator.next() { enqueue(id) } }
@@ -127,7 +132,8 @@ public actor AppleIPTVGuideLoader {
         }
     }
 
-    private func loadStream(base: URL, username: String, password: String, id: Int) async throws -> [AppleIPTVProgramme] {
+    private func loadStream(base: URL, username: String, password: String, id: Int,
+                            action: String = "get_short_epg") async throws -> [AppleIPTVProgramme] {
         guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
             throw AppleIPTVError.invalidEndpoint
         }
@@ -138,7 +144,7 @@ public actor AppleIPTVGuideLoader {
         components.queryItems = [
             URLQueryItem(name: "username", value: username),
             URLQueryItem(name: "password", value: password),
-            URLQueryItem(name: "action", value: "get_short_epg"),
+            URLQueryItem(name: "action", value: action),
             URLQueryItem(name: "stream_id", value: String(id))
         ]
         guard let url = components.url else { throw AppleIPTVError.invalidEndpoint }

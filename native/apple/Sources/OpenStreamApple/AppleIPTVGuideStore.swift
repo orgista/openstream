@@ -63,6 +63,10 @@ public final class AppleIPTVGuideStore {
         revision &+= 1
     }
 
+    /// Channel ids whose panel keeps an archive; their Xtream listings are
+    /// read with the past included. Set by the Live tab from the lineup.
+    public var archiveChannelIDs: Set<String> = []
+
     public func refreshVisible(channelIDs: Set<String>) async {
         let now = Date()
         let stale = channelIDs.filter { id in
@@ -90,8 +94,9 @@ public final class AppleIPTVGuideStore {
                         if let value = Int(raw), value > 0 { providerIDs[id] = String(value) }
                     }
                     guard !providerIDs.isEmpty else { continue }
+                    let archive = Set(providerIDs.filter { archiveChannelIDs.contains($0.key) }.values.compactMap(Int.init))
                     guide = try await loader.load(xtreamBase: base, username: user, password: pass,
-                        streamIDs: providerIDs.values.compactMap(Int.init).sorted())
+                        streamIDs: providerIDs.values.compactMap(Int.init).sorted(), archiveStreamIDs: archive)
                 }
                 guard !Task.isCancelled, configurations[key] == configuration else { continue }
                 for id in ids {

@@ -98,15 +98,26 @@ public struct AppleTVGuideMetrics: Sendable, Equatable {
     /// The guide starts at the current half hour and runs to the end of the
     /// day, never shorter than `minimumHours` so a late-evening guide still has
     /// a few columns to browse.
-    public func window(now: Date, calendar: Calendar = .current, minimumHours: Int = 3) -> DateInterval {
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now)
-        var rounded = components
-        rounded.minute = ((components.minute ?? 0) / slotMinutes) * slotMinutes
-        let start = calendar.date(from: rounded) ?? now
+    ///
+    /// - Parameter earliest: how far back the guide may scroll for channels
+    ///   with catch-up (`AppleIPTVCatchUp.earliestGuideTime`); the window then
+    ///   opens on that slot instead of the current one. The current slot is
+    ///   still where the guide first lands (`xOffset(of:)` of `nowSlot`).
+    public func window(now: Date, calendar: Calendar = .current, minimumHours: Int = 3,
+                       earliest: Date? = nil) -> DateInterval {
+        let start = slotStart(of: min(now, earliest ?? now), calendar: calendar)
         let startOfDay = calendar.startOfDay(for: now)
         let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
         let minimumEnd = start.addingTimeInterval(TimeInterval(minimumHours) * 3600)
         return DateInterval(start: start, end: max(nextDay, minimumEnd))
+    }
+
+    /// The slot `date` falls in, rounded down to `slotMinutes`.
+    public func slotStart(of date: Date, calendar: Calendar = .current) -> Date {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        var rounded = components
+        rounded.minute = ((components.minute ?? 0) / slotMinutes) * slotMinutes
+        return calendar.date(from: rounded) ?? date
     }
 
     /// Width of one row's timeline content: whole slots, rounded up.

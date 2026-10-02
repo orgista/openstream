@@ -110,25 +110,22 @@ enum AppleCatalogShelfPolicy {
     }
 }
 
-/// A Discover row's heading.
+/// A Discover row's heading: the add-on's own catalog name, never a streaming
+/// service the app put there itself.
 ///
-/// A streaming service's catalog reads "<Service> Movies" / "<Service> Shows"
-/// by its content type, so a service that publishes both never draws two rows
-/// with one name ("Prime Movies" and "Prime Shows", never "Prime Video" twice —
-/// owner, 2026-09-24). Every other catalog keeps its own name. Runs of
-/// whitespace collapse to one space: the Streaming Catalogs add-on names its
-/// Prime movies "Prime  Video".
+/// The app used to map catalog ids (`nfx`, `dnp`, `hbm`…) to brands and head
+/// rows "Netflix Movies" / "Disney+ Shows". That read as the service's content
+/// inside this app (App Store compliance audit B4, owner 2026-10-01), so the
+/// id table is gone: a row says what the add-on called the list, with a
+/// provider prefix dropped and whitespace collapsed (the Streaming Catalogs
+/// add-on names its Prime movies "Prime  Video"). Service names and logos
+/// belong only to Watch On / "Also available on". When one name covers a
+/// movie and a series catalog, `AppleCatalogShelfPolicy.visibleSections` adds
+/// the type word, so two rows never share a heading (owner, 2026-09-24).
 func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogName: String? = nil,
-                            catalogID: String? = nil) -> String {
+                            catalogID _: String? = nil) -> String {
     let name = appleCatalogNameWithoutProviderPrefix(
         (catalogName ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " "))
-    if let service = AppleCatalogServiceName.streamingService(catalogID: catalogID, name: name) {
-        switch catalogType.lowercased() {
-        case "movie": return "\(service) Movies"
-        case "series": return "\(service) Shows"
-        default: return service
-        }
-    }
     if !name.isEmpty { return name }
     // Unnamed catalogs still get a useful heading, never an add-on name.
     switch catalogType.lowercased() {

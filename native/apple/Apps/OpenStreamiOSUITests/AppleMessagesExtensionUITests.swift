@@ -16,7 +16,7 @@ import XCTest
 /// Settings › Privacy. With no snapshot the extension draws its empty state,
 /// and this test checks that instead of failing.
 @MainActor
-final class AppleMessagesExtensionUITests: XCTestCase {
+final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
     private var messages: XCUIApplication!
 
     override func setUpWithError() throws {
@@ -43,35 +43,39 @@ final class AppleMessagesExtensionUITests: XCTestCase {
         XCTAssertTrue(conversation.waitForExistence(timeout: 20), "no conversation to open")
         conversation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
-        sleep(3)
+        // The conversation is open once the compose field is there.
+        XCTAssertTrue(messages.textViews.firstMatch.waitForExistence(timeout: 10)
+                      || messages.textFields.firstMatch.waitForExistence(timeout: 5),
+                      "the conversation never opened")
         // "Apps" on iOS 18; the same control is unlabelled on iOS 26, where it
         // is the only button sitting left of the compose field.
         var apps = messages.buttons["Apps"]
         if !apps.waitForExistence(timeout: 8) {
-            let candidates = messages.buttons.allElementsBoundByIndex.filter {
-                $0.exists && $0.frame.minX < 60 && $0.frame.minY > 400
+            let leftOfCompose = NSPredicate { element, _ in
+                guard let element = element as? XCUIElementAttributes else { return false }
+                return element.frame.minX < 60 && element.frame.minY > 400
             }
-            apps = try XCTUnwrap(candidates.first, "no Apps button: \(messages.buttons.allElementsBoundByIndex.map { "\($0.identifier)/\($0.label)" })")
+            let candidate = messages.buttons.matching(leftOfCompose).firstMatch
+            XCTAssertTrue(candidate.waitForExistence(timeout: 5),
+                          "no Apps button: \(messages.buttons.allElementsBoundByIndex.map { "\($0.identifier)/\($0.label)" })")
+            apps = candidate
         }
         apps.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        sleep(3)
+        // The send menu is a collection of app cells; wait for it rather than
+        // for a clock.
+        XCTAssertTrue(messages.cells.firstMatch.waitForExistence(timeout: 10), "the send menu never opened")
 
         // The send menu is a lazy collection view whose last rows sit below the
         // screen, so a third-party app is absent from the hierarchy until it
         // has been scrolled into view.
-        var entry: XCUIElement?
-        for _ in 0..<5 {
-            if let match = messages.cells.allElementsBoundByIndex.first(where: {
-                $0.identifier.contains("com.orgista.openstream.messages")
-            }) {
-                entry = match
-                break
-            }
+        let entry = messages.cells.matching(
+            NSPredicate(format: "identifier CONTAINS %@", "com.orgista.openstream.messages")
+        ).firstMatch
+        for _ in 0..<5 where !entry.waitForExistence(timeout: 2) {
             messages.swipeUp()
-            sleep(2)
         }
-        try XCTUnwrap(entry, "OpenStream is not listed in the Messages send menu").tap()
-        sleep(5)
+        XCTAssertTrue(entry.exists, "OpenStream is not listed in the Messages send menu")
+        entry.tap()
 
         let row = messages.buttons["messages.share.row"].firstMatch
         guard row.waitForExistence(timeout: 10) else {
@@ -108,8 +112,9 @@ final class AppleMessagesExtensionUITests: XCTestCase {
         let remove = messages.buttons["Remove app from message"]
         if remove.waitForExistence(timeout: 5) {
             remove.tap()
-            sleep(2)
         }
-        XCTAssertFalse(staged.exists, "the composed bubble was left in the conversation")
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: staged)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed,
+                       "the composed bubble was left in the conversation")
     }
 }

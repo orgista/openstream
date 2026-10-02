@@ -48,6 +48,9 @@ struct AppleTransportOverlay: View {
     let onRequestFullScreen: (() -> Void)?
     let onClose: (() -> Void)?
     let sharePlayMenu: SharePlayMenu?
+    /// Set while a programme plays from a channel's archive: a "Watch Live"
+    /// control returns to the live channel.
+    let onWatchLive: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     @State private var model: AppleTransportOverlayModel
@@ -77,7 +80,7 @@ struct AppleTransportOverlay: View {
     }
 
     #if os(tvOS)
-    fileprivate enum TVFocus: Hashable { case surface, scrubber, captions, nextEpisode, skipIntro }
+    fileprivate enum TVFocus: Hashable { case surface, scrubber, captions, nextEpisode, skipIntro, watchLive }
     @FocusState private var tvFocus: TVFocus?
     #endif
 
@@ -93,8 +96,10 @@ struct AppleTransportOverlay: View {
         onRequestFullScreen: (() -> Void)? = nil,
         onClose: (() -> Void)? = nil,
         sharePlayMenu: SharePlayMenu? = nil,
-        nextEpisode: AppleNextEpisodeContext? = nil
+        nextEpisode: AppleNextEpisodeContext? = nil,
+        onWatchLive: (() -> Void)? = nil
     ) {
+        self.onWatchLive = onWatchLive
         self.coordinator = coordinator
         self.request = request
         self.otherSources = otherSources
@@ -182,6 +187,13 @@ struct AppleTransportOverlay: View {
                             // reveal and the focus write share this update,
                             // as the scrubber's does.
                             tvFocus = .skipIntro
+                        } else if onWatchLive != nil {
+                            // Over an archived programme the way back to the
+                            // channel is the first stop. Kept a focus target
+                            // while faded, exactly like Skip Intro: a control
+                            // inside the chrome's opacity-0 fade is not, and
+                            // the write was dropped (Apple TV, 2026-10-02).
+                            tvFocus = .watchLive
                         } else {
                             tvFocus = model.isScrubbable ? .scrubber : .captions
                         }
@@ -214,6 +226,12 @@ struct AppleTransportOverlay: View {
             VStack {
                 Spacer()
                 HStack {
+                    #if os(tvOS)
+                    watchLiveButton
+                        .opacity(model.controlsVisible ? 1 : AppleTVSkipIntroFocusPolicy.hiddenOpacity)
+                    #else
+                    if model.controlsVisible { watchLiveButton.transition(.opacity) }
+                    #endif
                     Spacer()
                     #if os(tvOS)
                     // Faded with the controls but still a focus target, so a
@@ -292,12 +310,15 @@ struct AppleTransportOverlay: View {
             ) { tvFocus = .surface }
         }
         .onChange(of: tvFocus) { old, new in
+            #if DEBUG
+            AppleInteractionTrace.record(.focus, "overlay \(new.map(String.init(describing:)) ?? "none")")
+            #endif
             // The player opens with nothing focused and the engine's first
             // pick is Skip Intro, not the picture (`defaultFocus` is not
             // consulted). Only the viewer's own move should land there.
             if AppleTVSkipIntroFocusPolicy.returnsInitialFocusToSurface(
                 cameFromNowhere: old == nil, landedOnSkipIntro: new == .skipIntro
-            ) {
+            ) || (old == nil && new == .watchLive) {
                 tvFocus = .surface
                 return
             }
@@ -557,6 +578,29 @@ struct AppleTransportOverlay: View {
         }
     }
 
+    /// Back to the live channel from a programme played out of the archive.
+    /// Same pill and the same faded-focus rule as Skip Intro.
+    @ViewBuilder
+    private var watchLiveButton: some View {
+        if let onWatchLive {
+            Button("Watch Live") {
+                #if DEBUG
+                AppleInteractionTrace.record(.press, "player watch live")
+                #endif
+                onWatchLive()
+            }
+            .buttonStyle(.brandSecondary)
+            #if os(tvOS)
+            .focused($tvFocus, equals: .watchLive)
+            .onDisappear {
+                if tvFocus == .watchLive { tvFocus = .surface }
+            }
+            #endif
+            .accessibilityIdentifier("player.watchLive")
+            .transition(.opacity)
+        }
+    }
+
     // MARK: - Next episode
 
     /// The card sits on the same column as the rest of the app. tvOS already
@@ -634,7 +678,7 @@ struct AppleTransportOverlay: View {
                     tvFocus: $tvFocus,
                     // Reach the chapter action above the scrubber when it is
                     // present; otherwise keep focus on a visible control.
-                    onMoveUp: { tvFocus = model.showsSkipIntro ? .skipIntro : (controls.contains(.captions) ? .captions : .surface) },
+                    onMoveUp: { tvFocus = model.showsSkipIntro ? .skipIntro : (onWatchLive != nil ? .watchLive : (controls.contains(.captions) ? .captions : .surface)) },
                     onMoveDown: { tvFocus = controls.contains(.captions) ? .captions : .surface }
                 )
                 #else

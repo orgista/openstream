@@ -45,16 +45,20 @@ public enum AppleSubtitleTrackFilter: Sendable {
         isExplicitChoice: Bool = false
     ) -> [ApplePlaybackTrack] {
         let wanted = effectiveLanguages(preferredLanguages)
-        var candidates = wanted.map { language in tracks.filter { languageKey(of: $0) == language } }
-        candidates.append(tracks.filter(isUntaggedClosedCaption))
+        // A track only *titled* "Forced" (no forced flag) is a muxer's label,
+        // not a forced track: it is never switched on by itself. A flagged
+        // one may be, when it is all the language has (V16).
+        let eligible = tracks.filter { $0.isForced || !isTitledForced($0) }
+        var candidates = wanted.map { language in eligible.filter { languageKey(of: $0) == language } }
+        candidates.append(eligible.filter(isUntaggedClosedCaption))
         for matches in candidates {
             if let best = matches.min(by: { a, b in
                 if a.isDefault != b.isDefault { return a.isDefault }
                 let aIsCC = a.codec?.lowercased() == "cc"
                 let bIsCC = b.codec?.lowercased() == "cc"
                 if aIsCC != bIsCC { return !aIsCC }
-                let aBad = a.title.lowercased().contains("forced") || a.title.lowercased().contains("sdh") || a.title.lowercased().contains("commentary")
-                let bBad = b.title.lowercased().contains("forced") || b.title.lowercased().contains("sdh") || b.title.lowercased().contains("commentary")
+                let aBad = a.isForced || a.title.lowercased().contains("sdh") || a.title.lowercased().contains("commentary")
+                let bBad = b.isForced || b.title.lowercased().contains("sdh") || b.title.lowercased().contains("commentary")
                 if aBad != bBad { return !aBad }
                 return a.id < b.id
             }) {
@@ -223,6 +227,11 @@ public enum AppleSubtitleTrackFilter: Sendable {
 
     /// Both engines number add-on subtitle files from here.
     static let externalTrackIDBase = 1_000_000
+
+    /// "Forced" in the title with no forced flag set.
+    static func isTitledForced(_ track: ApplePlaybackTrack) -> Bool {
+        !track.isForced && track.title.range(of: #"\bforced\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
 
     static func kind(of track: ApplePlaybackTrack) -> MenuKind {
         let title = track.title.lowercased()

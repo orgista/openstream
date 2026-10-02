@@ -9,7 +9,7 @@ import Vision
 /// every row that depended on one — the sheets in C3, landscape in C8, typing a
 /// query in F2 — sat blocked. This target is the way to them.
 @MainActor
-final class AppleiOSUITests: XCTestCase {
+final class AppleiOSUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {

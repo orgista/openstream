@@ -51,7 +51,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       in earlier TestFlight builds); torrent client removed; TMDB/JustWatch credits + "we don't provide any content"
       line; no "Stremio" in the UI (a test enforces it); About no longer links the private repo. Also caught: the
       Release build didn't compile (fixed). Note: the TMDB logo is blue-green — their terms require it unaltered.
-      DECIDED 2026-10-01: (3) neutral row names + Top 10 off by default, (4) remove the bundled lineup — building.
+      DONE 2026-10-01 (uncommitted, gates green): (3) rows keep the add-on's own catalog name (id→brand map
+      AppleCatalogServiceName deleted), Top 10 off by default; (4) lineup JSON moved to Tests/…/Fixtures/ChannelLineup
+      (Debug/test only, Release ships none → Premier Guide hidden, package defaults to Everything, playlist tvg-logo).
       (1) add-ons + (2) downloads: owner wants to KEEP both (incl. downloading away from home) in a safe way, e.g.
       add-ons configured online and synced. Researching: a server-side bridge (our own open-source "OpenStream
       Bridge" or Remux) where add-ons are set up on a web page and the app just signs in to "your media server" —

@@ -19,7 +19,13 @@ public enum AppleDevSourcesImport {
     public static var isPending: Bool { pendingData != nil || pendingReadFailure != nil }
 
     public static func captureIfRequested(defaults: UserDefaults = .standard, fileManager: FileManager = .default) {
-        guard let path = defaults.string(forKey: AppleDevSourcesPolicy.launchKey), !path.isEmpty else { return }
+        guard let path = defaults.string(forKey: AppleDevSourcesPolicy.launchKey), !path.isEmpty else {
+            // A stubbed run (`-OpenStreamStubNetwork <dir>`) takes the sources
+            // beside its fixtures, read in place: that file is a repo fixture,
+            // not a copy, so it is never deleted.
+            if let stubbed = AppleNetworkStub.devSourcesURL { pendingData = try? Data(contentsOf: stubbed) }
+            return
+        }
         let url = URL(fileURLWithPath: path)
         do {
             pendingData = try Data(contentsOf: url)

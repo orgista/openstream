@@ -10,7 +10,7 @@ import XCTest
 /// It cleans up after itself: the download is cancelled through the app's own
 /// dialog so nothing is left on the persistent simulator.
 @MainActor
-final class AppleiOSLiveActivityUITests: XCTestCase {
+final class AppleiOSLiveActivityUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
 
     override func setUp() {

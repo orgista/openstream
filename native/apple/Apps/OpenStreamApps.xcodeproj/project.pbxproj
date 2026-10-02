@@ -51,6 +51,11 @@
 		D00000000000000000000044 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000044 /* Assets.xcassets */; };
 		E2B2AB38C6D68040B501C422 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 99D9BC94256B56EF50B40F8D /* Assets.xcassets */; };
 		FD7D51600EA6E0DA8FC34047 /* OpenStreamMessages.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 6ADFECBFDE89C06061477463 /* OpenStreamMessages.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7A1000000000000000000011 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000010 /* OpenStreamUITestCase.swift */; };
+		7A1000000000000000000013 /* AppleiOSStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */; };
+		7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000014 /* OpenStreamUITestCase.swift */; };
+		7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */; };
+		7A1000000000000000000019 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000018 /* OpenStreamUITestCase.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +209,11 @@
 		D250BAE285EB9F0BBB8574E8 /* OpenStreamMessages.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = OpenStreamMessages.entitlements; sourceTree = "<group>"; };
 		F0939948B102A07B300065C8 /* OpenStreamTVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenStreamTVUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FBC0D50DDECAD797F31ABA92 /* OpenStreamMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenStreamMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A1000000000000000000010 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
+		7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleiOSStubSmokeUITests.swift; sourceTree = "<group>"; };
+		7A1000000000000000000014 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
+		7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVStubSmokeUITests.swift; sourceTree = "<group>"; };
+		7A1000000000000000000018 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -303,6 +313,8 @@
 			isa = PBXGroup;
 			children = (
 				791687CEE8616CBB3C5CCAE0 /* AppleTVFocusUITests.swift */,
+				7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */,
+				7A1000000000000000000014 /* OpenStreamUITestCase.swift */,
 				7A1000000000000000000001 /* AppleTVTopShelfUITests.swift */,
 			);
 			name = OpenStreamTVUITests;
@@ -321,6 +333,8 @@
 			isa = PBXGroup;
 			children = (
 				AB1000000000000000000002 /* AppleiOSUITests.swift */,
+				7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */,
+				7A1000000000000000000010 /* OpenStreamUITestCase.swift */,
 				59D22BCCC6AE343179BCBE05 /* AppleMessagesExtensionUITests.swift */,
 				7A1000000000000000000003 /* AppleiOSLiveActivityUITests.swift */,
 				7A1000000000000000000005 /* AppleiOSSystemIntegrationUITests.swift */,
@@ -438,6 +452,7 @@
 			isa = PBXGroup;
 			children = (
 				B1C369990DBB3867E958FE11 /* AppleMacScreenshotUITests.swift */,
+				7A1000000000000000000018 /* OpenStreamUITestCase.swift */,
 			);
 			name = OpenStreamMacUITests;
 			path = OpenStreamMacUITests;
@@ -848,6 +863,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A9DFB0A2C2BF8A24229BB45D /* AppleMacScreenshotUITests.swift in Sources */,
+				7A1000000000000000000019 /* OpenStreamUITestCase.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -856,6 +872,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				ACE25E4B2EFB78058040C93F /* AppleTVFocusUITests.swift in Sources */,
+				7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */,
+				7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */,
 				7A1000000000000000000002 /* AppleTVTopShelfUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -865,6 +883,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AB1000000000000000000001 /* AppleiOSUITests.swift in Sources */,
+				7A1000000000000000000013 /* AppleiOSStubSmokeUITests.swift in Sources */,
+				7A1000000000000000000011 /* OpenStreamUITestCase.swift in Sources */,
 				51A32276ED29BE9EE33C74AE /* AppleMessagesExtensionUITests.swift in Sources */,
 				7A1000000000000000000004 /* AppleiOSLiveActivityUITests.swift in Sources */,
 				7A1000000000000000000006 /* AppleiOSSystemIntegrationUITests.swift in Sources */,

@@ -249,6 +249,18 @@ public enum AppleLiveChannelPackage: String, Codable, CaseIterable, Identifiable
     case custom
 
     public var id: String { rawValue }
+
+    /// The packages this build can offer: Premier Guide needs the channel
+    /// lineup, which only Debug builds carry (owner, 2026-10-01 — a Release
+    /// build shows only what the viewer's own playlist contains).
+    public static var available: [AppleLiveChannelPackage] {
+        AppleChannelLineupPresets.isAvailable ? allCases : allCases.filter { $0 != .premierGuide }
+    }
+
+    /// Premier Guide where the lineup exists, else everything in the playlist.
+    public static var defaultPackage: AppleLiveChannelPackage {
+        AppleChannelLineupPresets.isAvailable ? .premierGuide : .everything
+    }
     public var title: String {
         switch self {
         case .premierGuide: "Premier Guide"
@@ -646,12 +658,12 @@ public final class AppleSettingsStore {
         liveTVEnabled = defaults.object(forKey: DefaultsKey.liveTVEnabled) as? Bool ?? true
         discoverEnabled = defaults.object(forKey: DefaultsKey.discoverEnabled) as? Bool ?? true
         libraryEnabled = defaults.object(forKey: DefaultsKey.libraryEnabled) as? Bool ?? true
-        top10ListsEnabled = defaults.object(forKey: DefaultsKey.top10ListsEnabled) as? Bool ?? true
+        top10ListsEnabled = defaults.object(forKey: DefaultsKey.top10ListsEnabled) as? Bool ?? false
         discoverRowOrder = defaults.stringArray(forKey: DefaultsKey.discoverRowOrder)
         liveChannelScope = defaults.string(forKey: DefaultsKey.liveChannelScope)
             .flatMap(AppleLiveChannelScope.init(rawValue:)) ?? .providerLineup
         liveChannelPackage = defaults.string(forKey: DefaultsKey.liveChannelPackage)
-            .flatMap(AppleLiveChannelPackage.init(rawValue:)) ?? .premierGuide
+            .flatMap(AppleLiveChannelPackage.init(rawValue:)) ?? AppleLiveChannelPackage.defaultPackage
         customChannelPackage = defaults.data(forKey: "openstream.settings.live.custom.v1")
             .flatMap { try? JSONDecoder().decode(AppleCustomChannelPackage.self, from: $0) } ?? .init()
         showPayPerViewChannels = defaults.object(forKey: DefaultsKey.showPayPerViewChannels) as? Bool ?? true

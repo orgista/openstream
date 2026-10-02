@@ -20,6 +20,9 @@ public struct AppleIPTVGuideGridView: View {
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
     let onSelect: (AppleIPTVChannel) -> Void
+    /// A programme that already aired on a channel with catch-up; the live
+    /// channel is `onSelect`.
+    let onSelectProgramme: (AppleIPTVChannel, AppleIPTVProgramme) -> Void
     let onToggleFavorite: (String) -> Void
     let onVisibleChannels: (Set<String>) async -> Void
     /// Last health result per channel id, built by the Live tab once per
@@ -33,6 +36,13 @@ public struct AppleIPTVGuideGridView: View {
     @State private var headerSlots: [AppleGuideGridHeaderSlot] = []
     @State private var scrollState = GuideScrollState()
     @State private var visibleIDs = Set<String>()
+    /// Days the guide may scroll back into, from the lineup's catch-up
+    /// channels (`AppleIPTVCatchUp.maximumGuideDays` at most).
+    @State private var lookbackDays: Int?
+    @State private var horizontalPosition = ScrollPosition()
+    /// Window start the timeline was last placed in, so the scroll keeps the
+    /// same clock time when the window's past edge moves.
+    @State private var placedWindowStart: Date?
     
     @ScaledMetric(relativeTo: .body) private var rowHeight = 76.0
 
@@ -42,7 +52,9 @@ public struct AppleIPTVGuideGridView: View {
                 onToggleFavorite: @escaping (String) -> Void,
                 onVisibleChannels: @escaping (Set<String>) async -> Void,
                 health: [String: AppleChannelHealthResult] = [:],
-                onShowHealth: ((AppleIPTVChannel) -> Void)? = nil) {
+                onShowHealth: ((AppleIPTVChannel) -> Void)? = nil,
+                onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in }) {
+        self.onSelectProgramme = onSelectProgramme
         self.channels = channels
         self.guide = guide
         self.guideRevision = guideRevision
@@ -60,7 +72,8 @@ public struct AppleIPTVGuideGridView: View {
 
     public var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            let window = AppleGuideChannelProjection.window(day: context.date, now: context.date)
+            let window = AppleGuideChannelProjection.window(day: context.date, now: context.date,
+                earliest: lookbackDays.map { context.date.addingTimeInterval(-Double($0) * 86_400) })
             let timelineWidth = CGFloat(window.duration / 1800) * cellWidth
             let tick = floor(context.date.timeIntervalSince1970 / 60)
             
@@ -86,7 +99,13 @@ public struct AppleIPTVGuideGridView: View {
                                                     .background(Color.black)
                                                     .zIndex(1)
                                                 GuideScheduleRow(row: row, cellWidth: cellWidth, height: rowHeight,
-                                                    onSelect: { onSelect(row.channel) })
+                                                    onSelect: { onSelect(row.channel) },
+                                                    onSelectSpan: { span in
+                                                        guard let start = span.airStart, let end = span.airEnd else { return }
+                                                        onSelectProgramme(row.channel, AppleIPTVProgramme(
+                                                            id: span.id, channelID: row.id, title: span.title, subtitle: nil,
+                                                            description: span.subtitle, start: start, end: end, category: nil, isLive: false))
+                                                    })
                                                     .equatable()
                                             }
                                             .onAppear { visibleIDs.insert(row.id) }
@@ -124,8 +143,12 @@ public struct AppleIPTVGuideGridView: View {
                             .frame(width: railWidth + timelineWidth, height: geometry.size.height)
                         }
                         .scrollIndicators(.never)
+                        .scrollPosition($horizontalPosition)
                         .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.x) } action: { _, offset in
                             scrollState.horizontalOffset = offset
+                        }
+                        .onChange(of: window.start, initial: true) { _, start in
+                            placeTimeline(window: window, now: context.date, viewportWidth: geometry.size.width)
                         }
                     }
                 }
@@ -151,23 +174,34 @@ public struct AppleIPTVGuideGridView: View {
                     let newRows = projected.map { channel in
                         let cells = gridIndex.cells(for: channel.id)
                         let spans = cells.map { cell in
-                            AppleGuideProgrammeSpan(
+                            let isGap = cell.id.contains("-gap-")
+                            return AppleGuideProgrammeSpan(
                                 id: cell.id,
                                 startOffset: cell.columnOffset,
                                 width: cell.columnSpan,
                                 title: cell.title,
                                 subtitle: cell.subtitle,
-                                isNow: cell.isLive || (cell.start <= now && cell.end > now)
+                                isNow: cell.isLive || (cell.start <= now && cell.end > now),
+                                airStart: isGap ? nil : cell.airStart,
+                                airEnd: isGap ? nil : cell.airEnd,
+                                isCatchUp: !isGap && AppleIPTVCatchUp.isAvailable(
+                                    start: cell.airStart, end: cell.airEnd, on: channel.channel, now: now)
                             )
                         }
                         return AppleGuideRowModel(id: channel.id, channel: channel.channel, number: channel.number, spans: spans)
                     }
-                    return (newRows, gridIndex.headerSlots)
+                    let lookback = projected.lazy
+                        .filter { AppleIPTVCatchUp.supportsCatchUp($0.channel) }
+                        .compactMap { $0.channel.catchUpDays }
+                        .map { min($0, AppleIPTVCatchUp.maximumGuideDays) }
+                        .max()
+                    return (newRows, gridIndex.headerSlots, lookback)
                 }.value
                 
                 guard !Task.isCancelled else { return }
                 self.rows = result.0
                 self.headerSlots = result.1
+                self.lookbackDays = result.2
             }
         }
         .task(id: visibleIDs) {
@@ -175,6 +209,25 @@ public struct AppleIPTVGuideGridView: View {
             guard !Task.isCancelled else { return }
             await onVisibleChannels(visibleIDs)
         }
+    }
+
+    /// The guide opens on the current half hour, however far back the window
+    /// reaches; when the window's past edge moves the rows keep showing the
+    /// same clock time.
+    private func placeTimeline(window: DateInterval, now: Date, viewportWidth: CGFloat) {
+        defer { placedWindowStart = window.start }
+        let x: CGFloat
+        if let previous = placedWindowStart {
+            guard previous != window.start else { return }
+            x = scrollState.horizontalOffset + CGFloat(previous.timeIntervalSince(window.start) / 1800) * cellWidth
+        } else {
+            let nowSlot = AppleGuideChannelProjection.halfHour(of: now)
+            x = CGFloat(max(0, nowSlot.timeIntervalSince(window.start)) / 1800) * cellWidth
+        }
+        let contentWidth = railWidth + CGFloat(window.duration / 1800) * cellWidth
+        let placed = max(0, min(x, contentWidth - viewportWidth))
+        guard abs(placed - scrollState.horizontalOffset) > 0.5 else { return }
+        horizontalPosition.scrollTo(x: placed)
     }
 
     private func accessibleSchedule(window: DateInterval) -> some View {
@@ -212,9 +265,18 @@ public struct AppleIPTVGuideGridView: View {
                         let programmes = guide.programmes(channelID: row.id, in: window)
                         if programmes.isEmpty { Text("No information").foregroundStyle(.secondary) }
                         ForEach(programmes) { programme in
-                            Button { onSelect(row.channel) } label: {
+                            let catchUp = AppleIPTVCatchUp.isAvailable(programme, on: row.channel)
+                            Button {
+                                if catchUp { onSelectProgramme(row.channel, programme) } else { onSelect(row.channel) }
+                            } label: {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text(programme.start, format: .dateTime.hour().minute()).font(.caption)
+                                    HStack(spacing: 6) {
+                                        if catchUp {
+                                            Image(systemName: "arrow.counterclockwise").font(.caption2)
+                                                .foregroundStyle(.secondary).accessibilityHidden(true)
+                                        }
+                                        Text(programme.start, format: .dateTime.hour().minute()).font(.caption)
+                                    }
                                     Text(programme.title).font(.body)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,6 +373,8 @@ private struct GuideScheduleRow: View, Equatable {
     let cellWidth: CGFloat
     let height: CGFloat
     let onSelect: () -> Void
+    /// A past programme the channel's archive still holds.
+    var onSelectSpan: (AppleGuideProgrammeSpan) -> Void = { _ in }
     
     nonisolated static func == (lhs: GuideScheduleRow, rhs: GuideScheduleRow) -> Bool {
         lhs.row == rhs.row && lhs.cellWidth == rhs.cellWidth && lhs.height == rhs.height
@@ -319,9 +383,17 @@ private struct GuideScheduleRow: View, Equatable {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(row.spans) { cell in
-                Button(action: onSelect) {
+                Button(action: cell.isCatchUp ? { onSelectSpan(cell) } : onSelect) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(cell.title).font(.caption.bold()).lineLimit(2)
+                        HStack(spacing: 4) {
+                            if cell.isCatchUp {
+                                // Already aired and still in the archive: a
+                                // small replay glyph, in the text's own colour.
+                                Image(systemName: "arrow.counterclockwise").font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary).accessibilityHidden(true)
+                            }
+                            Text(cell.title).font(.caption.bold()).lineLimit(2)
+                        }
                         if let subtitle = cell.subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     }
                     .padding(8)
@@ -332,7 +404,7 @@ private struct GuideScheduleRow: View, Equatable {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(row.channel.name), \(cell.title)")
+                .accessibilityLabel("\(row.channel.name), \(cell.title)" + (cell.isCatchUp ? ", available to watch" : ""))
             }
         }
     }

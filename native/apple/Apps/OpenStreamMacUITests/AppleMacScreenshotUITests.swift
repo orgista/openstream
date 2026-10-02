@@ -6,7 +6,7 @@ import XCTest
 /// which cannot be given headlessly. `XCUIElement.screenshot()` goes through the
 /// automation path instead and only ever sees the app's own window.
 @MainActor
-final class AppleMacScreenshotUITests: XCTestCase {
+final class AppleMacScreenshotUITests: OpenStreamUITestCase {
     func testDiscoverWindowScreenshot() throws {
         let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
         app.launchArguments += ["-OpenStreamTrace", "YES"]

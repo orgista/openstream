@@ -45,6 +45,8 @@ enum AppleTVLivePlayerFocus: Hashable {
     case card(String)
     /// "Watch on <other list>" over a channel that could not be recovered.
     case otherList
+    /// "Watch Live" over a programme played from the archive.
+    case watchLive
 }
 
 /// The guide's shared horizontal scroll offset. Held in a reference type so
@@ -130,6 +132,9 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let focusRestoreChannelID: String
     let searchDestination: () -> Search
     let onSelect: (AppleIPTVChannel) -> Void
+    /// A programme that already aired on a channel with catch-up; the live
+    /// channel is `onSelect`.
+    let onSelectProgramme: (AppleIPTVChannel, AppleIPTVProgramme) -> Void
     let onToggleFavorite: (String) -> Void
     let onVisibleChannels: (Set<String>) async -> Void
     /// Last health result per channel id, built by the Live tab once per
@@ -140,6 +145,13 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let onShowHealth: (AppleIPTVChannel) -> Void
 
     @FocusState private var focus: AppleTVGuideFocus?
+    /// Days the guide may scroll back into, from the lineup's catch-up
+    /// channels (`AppleIPTVCatchUp.maximumGuideDays` at most); nil without
+    /// any archive. Found once per projection, never in the body.
+    @State private var lookbackDays: Int?
+    /// Window start the timeline was last placed in, so the shared scroll
+    /// keeps the same clock time when the window's past edge moves.
+    @State private var placedWindowStart: Date?
     @State private var rows: [AppleGuideChannel] = []
     @State private var visibility = AppleTVGuideVisibility()
     @State private var timeline = AppleTVGuideTimeline()
@@ -174,7 +186,8 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         onVisibleChannels: @escaping (Set<String>) async -> Void,
         health: [String: AppleChannelHealthResult] = [:],
         healthRevision: Int = 0,
-        onShowHealth: @escaping (AppleIPTVChannel) -> Void = { _ in }
+        onShowHealth: @escaping (AppleIPTVChannel) -> Void = { _ in },
+        onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in }
     ) {
         self.metrics = metrics
         self.channels = channels
@@ -199,6 +212,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         self.health = health
         self.healthRevision = healthRevision
         self.onShowHealth = onShowHealth
+        self.onSelectProgramme = onSelectProgramme
     }
 
     var body: some View {
@@ -208,7 +222,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             #else
             let now = context.date
             #endif
-            let window = metrics.window(now: now)
+            let window = metrics.window(now: now, earliest: lookbackDays.map { now.addingTimeInterval(-Double($0) * 86_400) })
             VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                 nowPlayingStrip(now: now)
                 categoryRow
@@ -216,6 +230,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
                 grid(window: window, now: now)
             }
             .task(id: gridIdentity(window: window, now: now)) {
+                placeTimeline(window: window, now: now)
                 let inputChannels = rows.map(\.id)
                 let currentWindow = window
                 let currentNow = now
@@ -277,6 +292,11 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             guard !Task.isCancelled else { return }
             rows = projected
             rowsRevision &+= 1
+            lookbackDays = projected.lazy
+                .filter { AppleIPTVCatchUp.supportsCatchUp($0.channel) }
+                .compactMap { $0.channel.catchUpDays }
+                .map { min($0, AppleIPTVCatchUp.maximumGuideDays) }
+                .max()
             #if DEBUG
             if !projected.isEmpty { AppleLaunchClock.mark("live.rows") }
             AppleTVGuideLatencyProbe.shared.rowsReady(count: projected.count)
@@ -382,6 +402,27 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
 
     private var projectionInput: AppleTVGuideProjectionInput {
         AppleTVGuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs)
+    }
+
+    /// The guide opens on the current slot, however far back the window
+    /// reaches; when the window's past edge moves (a new slot every half
+    /// hour, or the archive channels arriving) the rows keep showing the
+    /// same clock time.
+    private func placeTimeline(window: DateInterval, now: Date) {
+        defer { placedWindowStart = window.start }
+        let x: CGFloat
+        if let previous = placedWindowStart {
+            guard previous != window.start else { return }
+            x = timeline.untracked + CGFloat(previous.timeIntervalSince(window.start) / metrics.slotDuration) * metrics.slotWidth
+        } else {
+            x = metrics.xOffset(of: metrics.slotStart(of: now), in: window)
+        }
+        let placed = max(0, min(x, metrics.timelineContentWidth(for: window) - metrics.timelineWidth))
+        guard abs(placed - timeline.untracked) > 0.5 else { return }
+        timeline.update(placed)
+        #if DEBUG
+        appleTrace("guide window from \(window.start.formatted(date: .numeric, time: .shortened)): timeline x=\(Int(placed))")
+        #endif
     }
 
     // MARK: Strip
@@ -591,6 +632,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             visibility: visibility,
             focus: $focus,
             onSelect: onSelect,
+            onSelectProgramme: onSelectProgramme,
             onToggleFavorite: onToggleFavorite,
             health: health,
             healthRevision: healthRevision,
@@ -625,6 +667,7 @@ private struct AppleTVGuideGrid: View, Equatable {
     let visibility: AppleTVGuideVisibility
     let focus: FocusState<AppleTVGuideFocus?>.Binding
     let onSelect: (AppleIPTVChannel) -> Void
+    let onSelectProgramme: (AppleIPTVChannel, AppleIPTVProgramme) -> Void
     let onToggleFavorite: (String) -> Void
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
@@ -641,6 +684,15 @@ private struct AppleTVGuideGrid: View, Equatable {
             && lhs.favoriteIDs == rhs.favoriteIDs
             && lhs.metrics == rhs.metrics
             && lhs.healthRevision == rhs.healthRevision
+    }
+
+    /// Right from the rail lands on the programme on now (else the next one),
+    /// which is where the row is scrolled to; the engine's own choice is the
+    /// row's first cell, days back in the archive.
+    private func focusEntryCell(of channelID: String) {
+        let cells = gridIndex.cells(for: channelID)
+        guard let entry = cells.first(where: { $0.start <= now && $0.end > now }) ?? cells.first(where: { $0.end > now }) else { return }
+        focus.wrappedValue = .cell(AppleTVGuideCellFocus(cell: entry))
     }
 
     var body: some View {
@@ -663,7 +715,8 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
                                 onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
-                                onMoveLeft: onRailMoveLeft
+                                onMoveLeft: onRailMoveLeft,
+                                onMoveRight: { focusEntryCell(of: row.id) }
                             )
                             .frame(width: metrics.railWidth, height: metrics.rowHeight, alignment: .topLeading)
                             .onAppear { visibility.insert(row.id) }
@@ -680,6 +733,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 timeline: timeline,
                                 focus: focus,
                                 onSelect: { onSelect(row.channel) },
+                                onSelectCell: { onSelectProgramme(row.channel, $0.programme) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
                                 onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) }
                             )
@@ -800,6 +854,10 @@ private struct AppleTVGuideRailCell: View {
     /// Left from the rail: nothing lies to its left, so the press goes to
     /// the categories instead of being swallowed.
     let onMoveLeft: () -> Void
+    /// Right from the rail: with an archive the row begins days before the
+    /// screen, and the focus engine would pick that first, hidden cell; the
+    /// grid names the programme on now instead.
+    var onMoveRight: (() -> Void)? = nil
 
     var body: some View {
         Button(action: onSelect) {
@@ -844,6 +902,7 @@ private struct AppleTVGuideRailCell: View {
         .focused(focus, equals: .channel(row.id))
         .onMoveCommand { direction in
             if direction == .left { onMoveLeft() }
+            if direction == .right, let onMoveRight { onMoveRight() }
         }
         .contextMenu {
             Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
@@ -951,6 +1010,8 @@ private struct AppleTVGuideScheduleRow: View {
     let timeline: AppleTVGuideTimeline
     let focus: FocusState<AppleTVGuideFocus?>.Binding
     let onSelect: () -> Void
+    /// A past programme the channel's archive still holds.
+    let onSelectCell: (AppleGuideGridCell) -> Void
     let onToggleFavorite: () -> Void
     let onShowHealth: (() -> Void)?
     @State private var position: ScrollPosition
@@ -958,9 +1019,12 @@ private struct AppleTVGuideScheduleRow: View {
     init(channel: AppleIPTVChannel, cells: [AppleGuideGridCell], window: DateInterval, now: Date,
          metrics: AppleTVGuideMetrics, isFavorite: Bool, timeline: AppleTVGuideTimeline,
          focus: FocusState<AppleTVGuideFocus?>.Binding,
-         onSelect: @escaping () -> Void, onToggleFavorite: @escaping () -> Void,
+         onSelect: @escaping () -> Void,
+         onSelectCell: @escaping (AppleGuideGridCell) -> Void = { _ in },
+         onToggleFavorite: @escaping () -> Void,
          onShowHealth: (() -> Void)? = nil) {
         self.channel = channel
+        self.onSelectCell = onSelectCell
         self.cells = cells
         self.window = window
         self.now = now
@@ -985,17 +1049,24 @@ private struct AppleTVGuideScheduleRow: View {
     var body: some View {
         let actions = AppleTVGuideRailCellModel(channelID: channel.id, name: channel.name, number: nil, isFavorite: isFavorite)
         ScrollView(.horizontal) {
+            // Not lazy: a lazy stack ignored the shared scroll offset until
+            // its cells existed, so rows with a days-long archive opened on
+            // the gap at the far left while the header sat on the present.
             HStack(spacing: 0) {
                 ForEach(cells) { cell in
                     let width = metrics.cellWidth(columnSpan: cell.columnSpan)
-                    Button(action: onSelect) {
+                    let isGap = metrics.isGapCell(id: cell.id)
+                    let catchUp = !isGap && AppleIPTVCatchUp.isAvailable(start: cell.airStart, end: cell.airEnd, on: channel, now: now)
+                    Button(action: catchUp ? { onSelectCell(cell) } : onSelect) {
                         AppleTVGuideCellLabel(cell: cell, width: width, metrics: metrics,
-                            progress: metrics.isGapCell(id: cell.id) ? nil
-                                : metrics.progress(start: cell.airStart, end: cell.airEnd, now: now))
+                            progress: isGap ? nil
+                                : metrics.progress(start: cell.airStart, end: cell.airEnd, now: now),
+                            isCatchUp: catchUp)
                     }
                     .buttonStyle(AppleTVGuideCellStyle(
                         isCurrent: cell.start <= now && cell.end > now,
-                        isGap: metrics.isGapCell(id: cell.id),
+                        isGap: isGap,
+                        isPast: cell.end <= now && !catchUp,
                         cornerRadius: metrics.cornerRadius
                     ))
                     .focused(focus, equals: .cell(AppleTVGuideCellFocus(cell: cell)))
@@ -1005,7 +1076,7 @@ private struct AppleTVGuideScheduleRow: View {
                     }
                     .frame(width: width, height: metrics.cellHeight)
                     .padding(.trailing, metrics.cellGap)
-                    .accessibilityLabel("\(channel.name), \(cell.title)")
+                    .accessibilityLabel("\(channel.name), \(cell.title)" + (catchUp ? ", available to watch" : ""))
                 }
             }
             .frame(width: metrics.timelineContentWidth(for: window), alignment: .leading)
@@ -1038,13 +1109,24 @@ private struct AppleTVGuideCellLabel: View {
     let metrics: AppleTVGuideMetrics
     /// How far the programme on now has run; nil for every other cell.
     var progress: Double? = nil
+    /// Already aired and still in the channel's archive: a small replay
+    /// glyph before the title, in the cell's own text colour.
+    var isCatchUp = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if metrics.showsText(cellWidth: width) {
-                Text(cell.title)
-                    .font(.system(size: metrics.cellFontSize, weight: .medium))
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    if isCatchUp {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: metrics.cellFontSize * 0.75, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(cell.title)
+                        .font(.system(size: metrics.cellFontSize, weight: .medium))
+                        .lineLimit(1)
+                }
             }
             if let progress {
                 // Elapsed time on the programme on now. Hierarchical styles
@@ -1097,10 +1179,12 @@ private enum AppleTVGuideTimeSpan {
 struct AppleTVGuideCellStyle: ButtonStyle {
     let isCurrent: Bool
     let isGap: Bool
+    /// Over and in no archive: the title is dimmed like a gap's.
+    var isPast = false
     let cornerRadius: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
-        StyledBody(configuration: configuration, isCurrent: isCurrent, isGap: isGap, cornerRadius: cornerRadius)
+        StyledBody(configuration: configuration, isCurrent: isCurrent, isGap: isGap, isPast: isPast, cornerRadius: cornerRadius)
     }
 
     private struct StyledBody: View {
@@ -1108,11 +1192,12 @@ struct AppleTVGuideCellStyle: ButtonStyle {
         let configuration: ButtonStyleConfiguration
         let isCurrent: Bool
         let isGap: Bool
+        let isPast: Bool
         let cornerRadius: CGFloat
 
         var body: some View {
             configuration.label
-                .foregroundStyle(isFocused ? Color.black : (isGap ? AppleDesignTokens.textSecondary : Color.white))
+                .foregroundStyle(isFocused ? Color.black : (isGap || isPast ? AppleDesignTokens.textSecondary : Color.white))
                 .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 // The white fill alone read as weak beside the brighter
                 // on-now tiles (full test 2026-10-01); a shadow lifts the
@@ -1422,6 +1507,10 @@ struct AppleTVLivePlayerScreen: View {
     /// Only used to name what is on each channel in the strip.
     let guide: AppleIPTVGuide
     let metrics: AppleTVGuideMetrics
+    /// A programme played from the channel's archive instead of the live
+    /// stream (`AppleIPTVCatchUp`); nil for live. "Watch Live" is
+    /// `onSwitch(channel)`.
+    let programme: AppleIPTVProgramme?
     let onSwitch: (AppleIPTVChannel) -> Void
 
     init(channel: AppleIPTVChannel, coordinator: ApplePlaybackCoordinator, footerChannels: [AppleIPTVChannel],
@@ -1429,8 +1518,10 @@ struct AppleTVLivePlayerScreen: View {
          sourceNames: [UUID: String] = [:],
          guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []),
          metrics: AppleTVGuideMetrics = .standard,
+         programme: AppleIPTVProgramme? = nil,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
         self.channel = channel
+        self.programme = programme
         self.coordinator = coordinator
         self.footerChannels = footerChannels
         self.alternateLineup = alternateLineup
@@ -1444,20 +1535,93 @@ struct AppleTVLivePlayerScreen: View {
         _host = State(initialValue: ApplePlayerHost(coordinator: coordinator, audioSession: audioSession))
     }
 
-    private var request: ApplePlaybackRequest { channel.playbackRequest() }
+    private var request: ApplePlaybackRequest {
+        if let programme, let request = AppleIPTVCatchUp.playbackRequest(for: channel, programme: programme) {
+            return request
+        }
+        return channel.playbackRequest()
+    }
+
+    /// "Watch Live" for the overlay: only over an archived programme.
+    private var watchLiveAction: (() -> Void)? {
+        guard programme != nil else { return nil }
+        return { watchLive() }
+    }
+
+    /// Back to the live channel from an archived programme.
+    private func watchLive() {
+        #if DEBUG
+        AppleInteractionTrace.record(.press, "live watch live \(channel.name)")
+        #endif
+        onSwitch(channel)
+    }
+
+    /// The picture: the engine's surface with the overlay, or the stock
+    /// player. Split out of `body` so the type-checker can still finish it.
+    @ViewBuilder
+    private var playbackLayer: some View {
+        if coordinator.route == .surface {
+            ApplePlaybackSurfaceView(engine: coordinator.engine)
+                .ignoresSafeArea()
+            // The overlay owns the remote on this route: Menu closes,
+            // Play/Pause toggles, the clickpad edges skip.
+            AppleTransportOverlay(coordinator: coordinator, request: request, onClose: { dismiss() },
+                                  onWatchLive: watchLiveAction)
+        } else {
+            stockPlayerWithFooter
+        }
+    }
+
+    /// The channel strip (and, over an archived programme on the stock
+    /// route, the Watch Live pill above it) while the footer is shown.
+    @ViewBuilder
+    private var footerOverlay: some View {
+        if footer.isVisible {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if let programme, coordinator.route != .surface {
+                    // The stock route has no overlay of its own for this;
+                    // the pill sits above the channel strip.
+                    Button("Watch Live", action: watchLive)
+                        .buttonStyle(AppleTVPillStyle(
+                            isSelected: true,
+                            minimumSize: AppleTVDetailMetrics.pillSize,
+                            fontSize: AppleTVDetailMetrics.pillFontSize
+                        ))
+                        .focused($focus, equals: .watchLive)
+                        .accessibilityLabel("Watch Live, leave \(programme.title)")
+                        .accessibilityIdentifier("live.watchLive")
+                        .padding(.bottom, 24)
+                }
+                AppleTVLiveChannelFooter(
+                    channels: footerChannels,
+                    currentID: channel.id,
+                    metrics: metrics,
+                    focus: $focus,
+                    guide: guide,
+                    onSelect: { selected in
+                        guard footer.apply(.channelSelected) == .switchChannel else { return }
+                        // Close the row and take focus back to the surface
+                        // in the same turn. Leaving it open over a picture
+                        // that was reloading is what read as a freeze
+                        // (owner 18:55); `reset` keeps Menu meaning
+                        // "show the channels" rather than "leave".
+                        footer.reset()
+                        focus = .surface
+                        onSwitch(selected)
+                    }
+                )
+                .padding(.bottom, metrics.verticalSafeInset - 20)
+            }
+            .ignoresSafeArea()
+            .transition(.move(edge: .bottom))
+        }
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if coordinator.route == .surface {
-                ApplePlaybackSurfaceView(engine: coordinator.engine)
-                    .ignoresSafeArea()
-                // The overlay owns the remote on this route: Menu closes,
-                // Play/Pause toggles, the clickpad edges skip.
-                AppleTransportOverlay(coordinator: coordinator, request: request, onClose: { dismiss() })
-            } else {
-                stockPlayerWithFooter
-            }
+            playbackLayer
             if coordinator.isReconnectingLive {
                 // A channel that was playing and dropped: say so, quietly,
                 // while the coordinator reopens it (`AppleLiveReconnectPolicy`).
@@ -1503,7 +1667,7 @@ struct AppleTVLivePlayerScreen: View {
             AppleInteractionTrace.record(.focus, "live player \(value.map(String.init(describing:)) ?? "none")")
             #endif
         }
-        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)") {
+        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")") {
             hasPlayed = false
             coordinator.stop()
             // Drop the controller's reference to the channel that just
@@ -1533,9 +1697,10 @@ struct AppleTVLivePlayerScreen: View {
                     + (alternates.isEmpty ? "" : " — \(alternates.map(\.name).joined(separator: ", "))")
             )
             #endif
+            // An archived programme has no stand-in on another list.
             await coordinator.begin(
                 request,
-                fallbackCandidates: alternates.map { $0.playbackRequest() }
+                fallbackCandidates: programme == nil ? alternates.map { $0.playbackRequest() } : []
             )
             // Bind the controller to the new stream now instead of waiting for
             // the host's 0.25 s safety timer, so a channel switch changes the
@@ -1719,32 +1884,7 @@ struct AppleTVLivePlayerScreen: View {
                 .accessibilityIdentifier("live.failure")
             }
 
-            if footer.isVisible {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    AppleTVLiveChannelFooter(
-                        channels: footerChannels,
-                        currentID: channel.id,
-                        metrics: metrics,
-                        focus: $focus,
-                        guide: guide,
-                        onSelect: { selected in
-                            guard footer.apply(.channelSelected) == .switchChannel else { return }
-                            // Close the row and take focus back to the surface
-                            // in the same turn. Leaving it open over a picture
-                            // that was reloading is what read as a freeze
-                            // (owner 18:55); `reset` keeps Menu meaning
-                            // "show the channels" rather than "leave".
-                            footer.reset()
-                            focus = .surface
-                            onSwitch(selected)
-                        }
-                    )
-                    .padding(.bottom, metrics.verticalSafeInset - 20)
-                }
-                .ignoresSafeArea()
-                .transition(.move(edge: .bottom))
-            }
+            footerOverlay
         }
         // The `.surface` button only exists while the footer is hidden, so a
         // fixed default aimed at it left focus nowhere the moment the row
