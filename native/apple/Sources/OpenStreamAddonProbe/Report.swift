@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 
 enum Report {
@@ -228,3 +229,5 @@ enum Report {
         return 3
     }
 }
+
+#endif

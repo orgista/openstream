@@ -59,7 +59,7 @@ public final class AppleWebManagementServer {
         public let advertisesBonjour: Bool
         fileprivate let hostProvider: @Sendable () -> String?
 
-        public init(
+    public init(
             preferredPort: UInt16 = AppleWebManagementServer.defaultPort,
             sessionDuration: TimeInterval = AppleWebManagementServer.defaultSessionDuration,
             advertisesBonjour: Bool = true
@@ -69,6 +69,7 @@ public final class AppleWebManagementServer {
             self.advertisesBonjour = advertisesBonjour
             hostProvider = { AppleWebManagementNetwork.localIPv4Address() }
         }
+
 
         init(
             preferredPort: UInt16,
@@ -108,7 +109,9 @@ public final class AppleWebManagementServer {
     public var onStop: (@MainActor @Sendable (AppleWebManagementServerStopReason) -> Void)?
 
     private let configuration: Configuration
+    #if OPENSTREAM_ADDONS
     private let manifestClient: AppleManifestClient
+    #endif
     private let iptvClient: AppleIPTVClient
     private let networkQueue = DispatchQueue(label: "com.orgista.openstream.web-management", qos: .userInitiated)
 
@@ -122,6 +125,7 @@ public final class AppleWebManagementServer {
     private var generation = UUID()
     private var isCompleting = false
 
+    #if OPENSTREAM_ADDONS
     public init(
         configuration: Configuration = Configuration(),
         manifestClient: AppleManifestClient = AppleManifestClient(),
@@ -133,6 +137,17 @@ public final class AppleWebManagementServer {
         self.manifestClient = manifestClient
         self.iptvClient = iptvClient
     }
+    #else
+    public init(
+        configuration: Configuration = Configuration(),
+        iptvClient: AppleIPTVClient = AppleIPTVClient(),
+        now: @escaping @MainActor () -> Date = { Date() }
+    ) {
+        self.now = now
+        self.configuration = configuration
+        self.iptvClient = iptvClient
+    }
+    #endif
 
     @discardableResult
     public func start(sourceStore: AppleSourceStore) async throws -> AppleWebManagementSession {
@@ -596,7 +611,11 @@ public final class AppleWebManagementServer {
                 case "xtream":
                     source = try await addXtream(form: form, sourceStore: sourceStore)
                 default:
+                    #if OPENSTREAM_ADDONS
                     source = try await addSource(manifestValue: manifest, sourceStore: sourceStore)
+                    #else
+                    return (.plain(400, "Bad Request", "Unsupported source type."), false)
+                    #endif
                 }
                 traceWeb("added \(sourceType) source \"\(source.name)\"")
                 guard !Task.isCancelled, self.session?.token == activeSession.token else {
@@ -651,7 +670,7 @@ public final class AppleWebManagementServer {
         manifest: String = "",
         notice: String? = nil,
         error: String? = nil,
-        sourceType: String = "addon",
+        sourceType: String = AppleWebManagementPage.defaultSourceType,
         draft: [String: String] = [:]
     ) -> String {
         AppleWebManagementPage.setup(
@@ -680,7 +699,11 @@ public final class AppleWebManagementServer {
         switch form["sourceType"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "m3u": "m3u"
         case "xtream": "xtream"
+        #if OPENSTREAM_ADDONS
         default: "addon"
+        #else
+        default: "unsupported"
+        #endif
         }
     }
 
@@ -692,6 +715,7 @@ public final class AppleWebManagementServer {
         }
     }
 
+#if OPENSTREAM_ADDONS
     private func addSource(
         manifestValue: String,
         sourceStore: AppleSourceStore
@@ -712,6 +736,7 @@ public final class AppleWebManagementServer {
             return result
         }
     }
+#endif
 
     private func pairingCookies(_ token: String) -> [String] {
         ["openstream_token=\(token); Max-Age=\(Int(Self.browserInactivityDuration)); SameSite=Strict; HttpOnly; Path=/"]

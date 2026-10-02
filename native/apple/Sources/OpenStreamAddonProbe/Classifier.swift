@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 import OpenStreamApple
 
@@ -218,3 +219,5 @@ enum CatalogDropAnalysis {
         return reasons
     }
 }
+
+#endif

@@ -229,6 +229,7 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
       defaults (tab toggles on, Top 10 on).
 
 ## E. Web management portal
+- [x] E8 Distribution add-on boundary (2026-10-02): `OPENSTREAM_ADDONS` removes add-on controls/transports from Release; binary scan has zero markers, SDK floors pass. Debug gate 2707 / 338; iOS + tvOS Debug recompiled 36 / 36 edited module files. Unknown-source backup preservation covered by `AppleReleaseSourcePreservationTests`.
 - [F] E7 Portal polish (worker audit 2026-09-17, cited): placeholder contrast 2.5:1 → 6.07:1
       (#9a9a9e on #1c1c1e); `:focus-visible` ring in #FF3366 instead of a bare border change; radio
       tabs 38→44 px and secondary buttons 34→44 px; hover/error colours (#ff453a/#ff9a9f) → the accent;

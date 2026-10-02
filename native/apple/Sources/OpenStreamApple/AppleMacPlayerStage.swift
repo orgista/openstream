@@ -8,7 +8,7 @@ import AppKit
 /// How each platform puts the player on screen. Every entry point — hero
 /// Play, title page Play, an episode, a local file, a media server, Add Files —
 /// goes through `AppleStremioPlayerPresentationModifier`, which asks this.
-enum AppleStremioPlayerPresentationStyle: Equatable {
+enum AppleMediaPlayerPresentationStyle: Equatable {
     /// The player takes over the window it was opened from (macOS).
     case windowStage
     /// Its own window (visionOS).
@@ -276,3 +276,5 @@ struct AppleMacPlayerStagePresenter: ViewModifier {
     }
 }
 #endif
+
+typealias AppleStremioPlayerPresentationStyle = AppleMediaPlayerPresentationStyle

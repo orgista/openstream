@@ -80,7 +80,7 @@ enum AppleManifestRefreshPolicy {
     /// signed in, last tried a day or more ago (or never).
     static func due(sources: [AppleSource], lastAttempt: [String: Double], now: Date) -> [AppleSource.ID] {
         sources.filter { source in
-            guard source.kind == .stremio, source.isEnabled, !source.needsSignIn, !source.catalogs.isEmpty else { return false }
+            guard source.isAddon, source.isEnabled, !source.needsSignIn, !source.catalogs.isEmpty else { return false }
             guard let last = lastAttempt[source.id.uuidString] else { return true }
             return now.timeIntervalSince1970 - last >= interval || last > now.timeIntervalSince1970
         }

@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG && OPENSTREAM_ADDONS
 import Foundation
 
 /// One source from the owner's private dev-sources file, written by
@@ -129,7 +129,7 @@ enum AppleDevSourcesPolicy {
         switch source {
         case .stremio(_, let manifestURL):
             guard let url = try? AppleManifestURLPolicy.normalize(manifestURL) else { return false }
-            return existing.contains { $0.kind == .stremio && $0.url == url }
+            return existing.contains { $0.isAddon && $0.url == url }
         case .xtream(_, let serverURL, _, _, _):
             return existingIPTV(.xtream, endpoint: serverURL, in: existing)
         case .m3u(_, let playlistURL, _):

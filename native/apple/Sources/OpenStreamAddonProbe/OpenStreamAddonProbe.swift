@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 
 /// Headless Stremio add-on compatibility harness for the OpenStream Apple app.
@@ -42,3 +43,11 @@ struct OpenStreamAddonProbeMain {
         }
     }
 }
+
+#endif
+
+#if !OPENSTREAM_ADDONS
+@main enum DisabledAddonProbe {
+    static func main() { }
+}
+#endif

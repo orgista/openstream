@@ -101,10 +101,12 @@ struct AppleSourcesSettingsView: View {
                 }
                 .appleTVReadableFocus()
 
+#if OPENSTREAM_ADDONS
                 NavigationLink(value: AppleSourceRoute.addManifest) {
                     AppleTVNavigationLabel("Add Catalog", systemImage: "square.stack.3d.up")
                 }
                 .appleTVReadableFocus()
+#endif
                 NavigationLink(value: AppleSourceRoute.addLiveTV) {
                     AppleTVNavigationLabel("Add Live TV", systemImage: "dot.radiowaves.left.and.right")
                 }
@@ -180,8 +182,10 @@ struct AppleSourcesSettingsView: View {
                 )
             case .addInstance:
                 AppleAddInstanceView()
+            #if OPENSTREAM_ADDONS
             case .addManifest:
                 AppleAddManifestSourceView(sourceStore: sourceStore)
+            #endif
             case .addLiveTV:
                 AppleAddLiveTVSourceView(sourceStore: sourceStore)
             case .addMediaServer:
@@ -262,7 +266,9 @@ struct AppleSourcesSettingsView: View {
 enum AppleSourceRoute: Hashable {
     case addFiles
     case addInstance
+    #if OPENSTREAM_ADDONS
     case addManifest
+    #endif
     case addLiveTV
     case addMediaServer
     case addNetworkShare
@@ -530,7 +536,7 @@ private struct AppleSourceRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.secondary.opacity(0.15))
 
-            if source.kind == .stremio, let logoURL = source.logoURL.flatMap(AppleAddonLogoURLPolicy.displayURL(for:)),
+            if source.isAddon, let logoURL = source.logoURL.flatMap(AppleAddonLogoURLPolicy.displayURL(for:)),
                !logoIsWordmark, !logoFailed {
                 AppleRemoteImage(
                     url: logoURL,
@@ -559,7 +565,7 @@ private struct AppleSourceRow: View {
     /// iconless kinds (IPTV, ServerPlus, Library) use the shared glyph.
     private var sourceFallbackIcon: some View {
         Group {
-            if source.kind == .stremio, let initial = source.name.trimmingCharacters(in: .whitespaces).first {
+            if source.isAddon, let initial = source.name.trimmingCharacters(in: .whitespaces).first {
                 Text(String(initial).uppercased())
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -577,7 +583,9 @@ private extension AppleSourceKind {
     var systemImage: String {
         switch self {
         case .library: "books.vertical"
+        #if OPENSTREAM_ADDONS
         case .stremio: "square.stack.3d.up"
+        #endif
         case .youtube: "play.rectangle"
         case .liveTV: "dot.radiowaves.left.and.right"
         case .nas: "externaldrive.connected.to.line.below"
@@ -674,7 +682,8 @@ private struct AppleSourceDetailView: View {
                     }
 
                     let catalogs = AppleCatalogDiscoveryPolicy.browsableCatalogs(for: source)
-                    if source.kind == .stremio, catalogs.count > 1 {
+#if OPENSTREAM_ADDONS
+                    if source.isAddon, catalogs.count > 1 {
                         Section("Catalogs") {
                             let shown = Set(AppleCatalogDiscoveryPolicy.catalogs(for: source)
                                 .map(AppleCatalogDiscoveryPolicy.choiceKey))
@@ -689,6 +698,7 @@ private struct AppleSourceDetailView: View {
                             }
                         }
                     }
+#endif
 
                     Section {
                         Button("Delete Source", role: .destructive) {
@@ -729,7 +739,9 @@ private struct AppleSourceDetailView: View {
 
     private func locationLabel(_ source: AppleSource) -> String {
         switch source.kind {
+        #if OPENSTREAM_ADDONS
         case .stremio: "Manifest Host"
+        #endif
         case .library: "Folder"
         case .liveTV: "Server"
         default: "Location"
@@ -753,6 +765,7 @@ private struct AppleSourceDetailView: View {
     }
 }
 
+ #if OPENSTREAM_ADDONS
 @MainActor
 private struct AppleAddManifestSourceView: View {
     @Environment(\.dismiss) private var dismiss
@@ -925,6 +938,7 @@ private struct AppleAddManifestSourceView: View {
         }
     }
 }
+#endif
 
 private enum AppleInstanceConnectionAction: Equatable {
     case test(UUID)

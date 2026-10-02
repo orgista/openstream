@@ -7,7 +7,7 @@ import Foundation
 /// before a wordmark appears (the art itself draws in ~67 ms once the URL is
 /// known). A cache lets the home screen fetch, while the viewer is still
 /// deciding, what the content page would otherwise wait for.
-public actor AppleStremioPreviewAssetsCache {
+public actor AppleMediaPreviewAssetsCache {
     public static let shared = AppleStremioPreviewAssetsCache()
 
     public struct Entry: Sendable, Equatable {
@@ -187,3 +187,5 @@ public enum AppleMetadataPrefetcher: Sendable {
         }
     }
 }
+
+public typealias AppleStremioPreviewAssetsCache = AppleMediaPreviewAssetsCache

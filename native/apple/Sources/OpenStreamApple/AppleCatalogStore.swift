@@ -16,7 +16,7 @@ public enum AppleCatalogDiscoveryPolicy {
         for source: AppleSource,
         maximumCatalogs: Int = defaultMaximumCatalogs
     ) -> [AppleStremioCatalog] {
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }) else {
             return []
@@ -61,7 +61,7 @@ public enum AppleCatalogDiscoveryPolicy {
     /// no title page to show: opening one goes straight to its streams.
     public static func opensStraightToPlayback(item: AppleCatalogItem, source: AppleSource) -> Bool {
         ["tv", "channel"].contains(item.type.lowercased())
-            && source.kind == .stremio
+            && source.isAddon
             && !source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
     }
 
@@ -365,7 +365,8 @@ public struct AppleCatalogSection: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-public enum AppleStremioCatalogError: Swift.Error, Equatable, LocalizedError, Sendable {
+#if OPENSTREAM_ADDONS
+public enum AppleMediaCatalogError: Swift.Error, Equatable, LocalizedError, Sendable {
     case invalidSource
     case nonHTTPResponse
     case insecureRedirect
@@ -385,7 +386,7 @@ public enum AppleStremioCatalogError: Swift.Error, Equatable, LocalizedError, Se
     }
 }
 
-public struct AppleStremioCatalogClient: Sendable {
+public struct AppleMediaCatalogClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     /// TMDB's series "tmdb.top" shelf is ~12 MB because each entry carries
@@ -399,7 +400,7 @@ public struct AppleStremioCatalogClient: Sendable {
     }
 
     public func load(source: AppleSource, catalog: AppleStremioCatalog) async throws -> [AppleCatalogItem] {
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }),
               !catalog.requiresInput,
@@ -420,7 +421,7 @@ public struct AppleStremioCatalogClient: Sendable {
         catalog: AppleStremioCatalog,
         skip: Int
     ) async throws -> AppleCatalogPage {
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }),
               !catalog.requiresInput,
@@ -438,7 +439,7 @@ public struct AppleStremioCatalogClient: Sendable {
         query: String
     ) async throws -> [AppleCatalogItem] {
         let value = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }),
               catalog.supportsSearch,
@@ -724,6 +725,7 @@ public struct AppleStremioCatalogClient: Sendable {
     }
 }
 
+#endif
 public struct AppleCatalogCacheSnapshot: Equatable, Sendable {
     public let sections: [AppleCatalogSection]
     public let updatedAt: Date
@@ -758,6 +760,7 @@ public struct AppleCatalogSourceRefreshReport: Identifiable, Equatable, Sendable
     }
 }
 
+#if OPENSTREAM_ADDONS
 public actor AppleCatalogCache {
     private struct StoredCache: Codable {
         let updatedAt: Date
@@ -841,7 +844,9 @@ public actor AppleCatalogCache {
         try fileManager.removeItem(at: fileURL)
     }
 }
+#endif
 
+#if OPENSTREAM_ADDONS
 @MainActor
 @Observable
 public final class AppleCatalogStore {
@@ -1138,6 +1143,22 @@ public final class AppleCatalogStore {
     }
 }
 
+#else
+@MainActor
+@Observable
+public final class AppleCatalogStore {
+    public let sections: [AppleCatalogSection] = []
+    public let contentRevision: UInt64 = 0
+    public let partialErrors: [String] = []
+    public let sourceRefreshReports: [AppleCatalogSourceRefreshReport] = []
+    public let isLoading = false
+    public init() {}
+    public func loadCachedSections(sources: [AppleSource], maximumCatalogs: Int = 8, now: Date = .now) async {}
+    public func refresh(sources: [AppleSource], maximumCatalogs: Int = 8, force: Bool = false) async {}
+    public func loadNextPage(sectionID: String, sources: [AppleSource]) async {}
+}
+
+#endif
 private extension String {
     var nonEmptyCatalogString: String? { isEmpty ? nil : self }
 
@@ -1146,3 +1167,11 @@ private extension String {
         return value.isEmpty ? nil : String(value.prefix(maximumCharacters))
     }
 }
+
+#if OPENSTREAM_ADDONS
+public typealias AppleStremioCatalogError = AppleMediaCatalogError
+#endif
+
+#if OPENSTREAM_ADDONS
+public typealias AppleStremioCatalogClient = AppleMediaCatalogClient
+#endif

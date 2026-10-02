@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 
 /// Whether a Stremio add-on's manifest URL carries the viewer's own sign-in.
@@ -130,3 +131,5 @@ public enum AppleAddonURLSecretPolicy {
         "apikey", "api_key", "api-key", "token", "password", "secret", "auth",
     ]
 }
+
+#endif

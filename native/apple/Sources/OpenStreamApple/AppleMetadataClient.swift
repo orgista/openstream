@@ -677,6 +677,7 @@ public struct AppleTMDBClient: Sendable {
     }
 }
 
+#if OPENSTREAM_ADDONS
 public struct AppleMetadataResolver: Sendable {
     private let sourceClient: AppleStremioMetadataClient
     private let tmdbClient: AppleTMDBClient
@@ -729,7 +730,7 @@ public struct AppleMetadataResolver: Sendable {
             )
             : sources.filter { source in
                 source.id == preferredSourceID
-                    && source.kind == .stremio
+                    && source.isAddon
                     && source.isEnabled
                     && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
             }
@@ -794,14 +795,14 @@ public struct AppleMetadataResolver: Sendable {
         defaultSource: AppleSource
     ) -> [AppleSource] {
         let eligible = sources.filter { source in
-            source.kind == .stremio
+            source.isAddon
                 && source.isEnabled
                 && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         }
-        
+
         let builtIn: [AppleSource]
         let addOns: [AppleSource]
-        
+
         if let defaultManifestID = defaultSource.manifestID {
             builtIn = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) == .orderedSame }
             addOns = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) != .orderedSame }
@@ -813,11 +814,11 @@ public struct AppleMetadataResolver: Sendable {
         var result = addOns.filter { $0.id == preferredSourceID }
             + addOns.filter { $0.id != preferredSourceID }
             + builtIn
-            
+
         let hasDefaultSource = defaultSource.manifestID.map { manifestID in
             result.contains { $0.manifestID == manifestID }
         } ?? false
-        
+
         if AppleStremioMetadataClient.isIMDBIdentifier(mediaID), !hasDefaultSource {
             result.append(defaultSource)
         }
@@ -883,3 +884,23 @@ public struct AppleMetadataResolver: Sendable {
         case expired
     }
 }
+#else
+public struct AppleMetadataResolver: Sendable {
+    private let tmdbClient: AppleTMDBClient
+    public init(tmdbClient: AppleTMDBClient = AppleTMDBClient()) { self.tmdbClient = tmdbClient }
+    public func resolve(
+        sources: [AppleSource],
+        preferredSourceID: AppleSource.ID? = nil,
+        type: String,
+        mediaID: String,
+        configuration: AppleTMDBConfiguration? = nil,
+        fallbackName: String? = nil
+    ) async throws -> AppleTMDBDetails? {
+        guard let configuration else { return nil }
+        let id = mediaID.split(separator: ":").first.map(String.init) ?? mediaID
+        guard AppleStremioMetadataClient.isIMDBIdentifier(id) else { return nil }
+        return try await tmdbClient.details(imdbID: id, kind: type == "series" ? .series : .movie, configuration: configuration)
+    }
+}
+
+#endif

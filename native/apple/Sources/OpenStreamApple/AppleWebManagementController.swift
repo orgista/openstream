@@ -16,7 +16,9 @@ public final class AppleWebManagementController: AppleWebManagementServing {
     public var running: Bool { isRunning }
 
     @ObservationIgnored private let configuration: AppleWebManagementServer.Configuration
+    #if OPENSTREAM_ADDONS
     @ObservationIgnored private let manifestClient: AppleManifestClient
+    #endif
     @ObservationIgnored private var server: AppleWebManagementServer?
     @ObservationIgnored private var sessionObservers: [
         UUID: AsyncStream<AppleWebManagementSession?>.Continuation
@@ -24,7 +26,9 @@ public final class AppleWebManagementController: AppleWebManagementServing {
 
     public init() {
         configuration = .init()
+        #if OPENSTREAM_ADDONS
         manifestClient = AppleManifestClient()
+        #endif
     }
 
     public func sessionUpdates() -> AsyncStream<AppleWebManagementSession?> {
@@ -40,6 +44,7 @@ public final class AppleWebManagementController: AppleWebManagementServing {
         }
     }
 
+#if OPENSTREAM_ADDONS
     init(
         configuration: AppleWebManagementServer.Configuration,
         manifestClient: AppleManifestClient
@@ -47,15 +52,23 @@ public final class AppleWebManagementController: AppleWebManagementServing {
         self.configuration = configuration
         self.manifestClient = manifestClient
     }
+#else
+    init(configuration: AppleWebManagementServer.Configuration) { self.configuration = configuration }
+#endif
 
     @discardableResult
     public func start(sourceStore: AppleSourceStore) async throws -> AppleWebManagementSession {
         stopActiveServer(clearError: true)
 
+#if OPENSTREAM_ADDONS
         let newServer = AppleWebManagementServer(
             configuration: configuration,
             manifestClient: manifestClient
         )
+#else
+        let newServer = AppleWebManagementServer(configuration: configuration)
+
+#endif
         newServer.onStop = { [weak self, weak newServer] reason in
             guard let self, let newServer, self.server === newServer else { return }
             self.server = nil

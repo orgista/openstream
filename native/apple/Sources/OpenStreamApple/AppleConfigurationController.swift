@@ -253,7 +253,7 @@ final class AppleConfigurationController {
             let address = AppleConfigurationSnapshot.publicAddress(url).absoluteString
             values[key] = try PropertyListSerialization.data(fromPropertyList: [address], format: .binary, options: 0)
         }
-        return AppleConfigurationSnapshot(
+        var snapshot = AppleConfigurationSnapshot(
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
             sources: sources.sources, settings: values,
             playbackProgress: ApplePlaybackStore(defaults: defaults).configurationProgress(),
@@ -262,6 +262,8 @@ final class AppleConfigurationController {
             watchlist: mediaIndex.records.filter(\.isFavorite),
             ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue),
             continueWatchingRemovals: ApplePlaybackStore(defaults: defaults).configurationContinueWatchingRemovals())
+        snapshot.preservedSourcePayloads = sources.preservedConfigurationSources
+        return snapshot
     }
 
     private func contentFingerprint() throws -> Data {
@@ -285,7 +287,10 @@ final class AppleConfigurationController {
         applying = true
         defer { applying = false }
         try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
+        try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: mergeSources)
+        #if OPENSTREAM_ADDONS
         sources.refreshRestoredManifests(ids: snapshot.sources.map(\.id))
+        #endif
         try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
         if let secrets { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
         ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)

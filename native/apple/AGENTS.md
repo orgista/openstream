@@ -82,6 +82,17 @@ chapter and skip affordances, quiet chrome that hides together). On iPhone the a
 except the full-screen player, which follows the device orientation and also plays in portrait.
 
 ## 5. Architecture traps (each one cost an hour)
+- **Add-on distribution boundary:** `OPENSTREAM_ADDONS` is defined for Debug in the app project and
+  SwiftPM module/tests. App Store and TestFlight Release builds leave it undefined. Manifest,
+  catalog, meta, stream and add-on subtitle transports and their add/edit UI are compiled out.
+  Saved unsupported source payloads are ignored and retained in storage and backups.
+  Only for a sideload or future Mac Developer-ID Release build, append the single xcodebuild
+  setting `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'` (equivalently,
+  `SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) OPENSTREAM_ADDONS` in a local xcconfig).
+  For the developer sweep or SwiftPM Release, use `-Xswiftc -DOPENSTREAM_ADDONS`.
+  Never pass either override to an App Store/TestFlight archive. Run
+  `bash scripts/check-no-addons-in-release.sh` before shipping (SHIP-CHECKLIST.md §4).
+
 - The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
   are picked up automatically — but `#if os(tvOS)` files never compile in the SPM gate (macOS),
   so a tvOS-only change needs a tvOS build to prove it.

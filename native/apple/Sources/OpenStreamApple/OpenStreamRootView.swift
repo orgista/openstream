@@ -398,7 +398,9 @@ public struct OpenStreamRootView: View {
             Task { await AppleDevSourcesImport.importPendingIfNeeded(sourceStore: sourceStore, settings: settingsStore) }
             let playbackFixture = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL").flatMap(URL.init(string:))
             if !importsDevSources, !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"), playbackFixture?.isFileURL != true {
+        #if OPENSTREAM_ADDONS
                 Task { await sourceStore.seedTestCatalogsIfNeeded() }
+        #endif
             }
             // Simulator-only navigation to real screens; no fixtures or saved sources.
             let screen = debugScreen
@@ -451,13 +453,13 @@ public struct OpenStreamRootView: View {
         .task(id: sourceAvailabilityIdentity) {
             await mediaIndex.load()
             let activeSources = sourceStore.sources.filter { $0.isEnabled && ($0.kind == .library || $0.kind == .nas) }
-            
+
             let published = await AppleLocalLibraryStore.shared.publishPersistedIndex(activeSources: activeSources)
-            
+
             let delay = AppleLaunchWorkPolicy.scanDelay(hasPersistedIndex: published)
             await Task.yield()
             if delay > .zero { try? await Task.sleep(for: delay) }
-            
+
             let sourceDigest = ApplePlaybackIdentity.digest(for: activeSources.map(\.id.uuidString).sorted().joined(separator: ","))
             if AppleLaunchWorkPolicy.shouldRescan(published: published, sourceDigest: sourceDigest, now: Date()) {
                 let task = Task.detached(priority: AppleLaunchWorkPolicy.backgroundPriority) {
@@ -465,7 +467,7 @@ public struct OpenStreamRootView: View {
                 }
                 await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
             }
-            
+
             let enabledServerIDs = Set(sourceStore.sources.filter { $0.isEnabled && $0.kind == .mediaServer }.map(\.id))
             let existingServerIDs = Set(mediaServerLibrary.shelves.map(\.sourceID)).union(mediaServerLibrary.failures.keys)
             for id in existingServerIDs where !enabledServerIDs.contains(id) {
@@ -501,7 +503,9 @@ public struct OpenStreamRootView: View {
             // The engine's own log in the trace (scrubbed), while tracing is on.
             AppleEngineLogBridge.install()
             // Add-ons saved before catalog paging pick up `skip` (once a day each).
+        #if OPENSTREAM_ADDONS
             sourceStore.scheduleDailyManifestRefresh()
+        #endif
         }
         .onChange(of: sharePlay.revision) {
             if sharePlay.channel != nil { selectedTab = .live }

@@ -65,7 +65,7 @@ struct AppleCatalogSearchLookup: Sendable {
 
         matchesByRecordID = matches
         self.matchesByAvailability = matchesByAvailability
-        activeCatalogSourcesByID = activeSourcesByID.filter { $0.value.kind == .stremio }
+        activeCatalogSourcesByID = activeSourcesByID.filter { $0.value.isAddon }
         titleMatches = titled
         relatedItemsBySourceID = related
         sourceNamesByID = allSourcesByID.mapValues(\.name)
@@ -254,7 +254,9 @@ final class AppleCatalogSearchStore {
     private(set) var isSearching = false
     private(set) var metrics: AppleCatalogSearchMetrics?
 
+    #if OPENSTREAM_ADDONS
     private let pipeline: AppleCatalogSearchPipeline
+    #endif
     private let debounce: Duration
     private let maximumResults: Int
     private var generation: UInt64 = 0
@@ -264,6 +266,7 @@ final class AppleCatalogSearchStore {
     /// Runtime/popularity/run length from the same answer (`prominence(_:)`).
     private var prominence: [String: AppleSearchProminence] = [:]
 
+#if OPENSTREAM_ADDONS
     init(
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
         debounce: Duration = .milliseconds(100),
@@ -279,6 +282,12 @@ final class AppleCatalogSearchStore {
         self.debounce = max(debounce, .zero)
         self.maximumResults = min(max(maximumResults, 1), 100)
     }
+#else
+    init(debounce: Duration = .milliseconds(100), maximumResults: Int = 100) {
+        self.debounce = max(debounce, .zero)
+        self.maximumResults = min(max(maximumResults, 1), 100)
+    }
+#endif
 
     func search(
         query: String,
@@ -319,10 +328,16 @@ final class AppleCatalogSearchStore {
         guard generation == currentGeneration, !Task.isCancelled else { return }
 
         let fetchStart = clock.now
+#if OPENSTREAM_ADDONS
         let pipeline = pipeline
         async let remoteSections = pipeline.fetch(query: value, sources: sources)
         let localRecords = await localSearch(value)
         let fetchedSections = await remoteSections
+#else
+        let localRecords = await localSearch(value)
+        let fetchedSections: [AppleCatalogSection] = []
+
+#endif
         let fetchDuration = fetchStart.duration(to: clock.now)
         guard generation == currentGeneration, !Task.isCancelled else { return }
 
@@ -600,6 +615,7 @@ final class AppleCatalogSearchStore {
     }
 }
 
+#if OPENSTREAM_ADDONS
 private struct AppleCatalogSearchPipeline: Sendable {
     private static let maximumRequests = 16
 
@@ -685,7 +701,7 @@ private struct AppleCatalogSearchPipeline: Sendable {
     private static func requests(sources: [AppleSource]) -> [Request] {
         var values: [Request] = []
         var seen = Set<String>()
-        sourceLoop: for source in sources where source.kind == .stremio && source.isEnabled {
+        sourceLoop: for source in sources where source.isAddon && source.isEnabled {
             guard source.resources.contains(where: { $0.caseInsensitiveCompare("catalog") == .orderedSame }) else {
                 continue
             }
@@ -714,6 +730,7 @@ private struct AppleCatalogSearchPipeline: Sendable {
         case deadlineCancelled
     }
 }
+#endif
 
 /// How prominent a search result is, from what its add-on already sent:
 /// runtime (a known short film is not what "dune" means), popularity, rating

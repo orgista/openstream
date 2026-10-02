@@ -5,7 +5,7 @@ import OSLog
 #endif
 
 @MainActor
-struct AppleStremioPlayerPresentation: Identifiable {
+struct AppleMediaPlayerPresentation: Identifiable {
     let id = UUID()
     let request: ApplePlaybackRequest
     let fallbackCandidates: [ApplePlaybackRequest]
@@ -76,7 +76,7 @@ struct AppleStremioPlayerPresentation: Identifiable {
 }
 
 @MainActor
-struct AppleStremioPlayerView: View {
+struct AppleMediaPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     #if os(visionOS)
     @Environment(\.dismissWindow) private var dismissWindow
@@ -728,10 +728,10 @@ struct AppleStremioPlayerView: View {
         )
         #elseif os(visionOS)
         if let visionHost {
-            AppleStremioPlayerControllerRepresentable(viewController: visionHost.viewController)
+            AppleMediaPlayerControllerRepresentable(viewController: visionHost.viewController)
         }
         #else
-        AppleStremioPlayerControllerRepresentable(viewController: host.viewController)
+        AppleMediaPlayerControllerRepresentable(viewController: host.viewController)
         #endif
     }
 
@@ -779,7 +779,7 @@ private struct AppleMacPlayerCloseButton: View {
     }
 }
 #else
-private struct AppleStremioPlayerControllerRepresentable: UIViewControllerRepresentable {
+private struct AppleMediaPlayerControllerRepresentable: UIViewControllerRepresentable {
     let viewController: AVPlayerViewController
 
     func makeUIViewController(context: Context) -> AVPlayerViewController { viewController }
@@ -814,3 +814,7 @@ private struct AppleTVStockNextEpisodeAction: View {
     }
 }
 #endif
+
+typealias AppleStremioPlayerPresentation = AppleMediaPlayerPresentation
+
+typealias AppleStremioPlayerView = AppleMediaPlayerView

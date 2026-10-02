@@ -4397,3 +4397,8 @@ exercised live on the Mac's test server, Jellyfin shares the same code path.
 Dune plays and pause, More and close respond. The title page stops repeating its stream and library lookups behind the player. The Live guide keeps programmes clear of channel logos and hearts, and the first visible time and programme titles stay readable as you scroll. Watch Live has its own material-backed spot in the inline player and is also available in the full-screen channel strip beside the way back to the guide. Playback errors show a short message instead of engine diagnostics.
 
 Checked on the review iPad with physical taps and the local Live fixture. Package tests: 2705 in 337 suites; iOS and tvOS simulator builds passed. Changes remain uncommitted.
+
+## 2026-10-02 — Add-ons stay in development builds
+App Store and TestFlight builds now compile out add-on fetching and controls. Debug builds keep them, and a single documented setting enables them for sideload or future Developer-ID Release builds. Saved add-ons and their backup credentials stay intact. Local/network files, media servers, Live TV, TMDB and Watch On remain available in both.
+
+Verified: 2,707 tests in 338 suites, iOS and tvOS Debug builds, and the iOS Release binary scan and SDK floors. No simulator was launched.

@@ -26,6 +26,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Creating or changing a certificate or profile needs the owner's OK first. Say what and why.
 
 ## 4. Nothing unfinished goes out
+- [ ] `bash scripts/check-no-addons-in-release.sh` passes: Release iOS simulator binaries contain no add-on markers, and `OPENSTREAM_ADDONS` is absent from distribution compile commands.
 - [ ] No placeholder assets: every icon set (app, Watch, Widgets, **iMessage**, Top Shelf, Mac) is the
       real artwork, with every required size. `grep -rni placeholder HANDOFF-NEXT-SESSION.md FEEDBACK.md`
       and look at each icon in the simulator.

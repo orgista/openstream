@@ -42,7 +42,7 @@ struct AppleMacPlayerStageTests {
                                            "AppleMediaSourceViews.swift"]))
         let discover = try String(contentsOf: Self.sources.appendingPathComponent("AppleDiscoverView.swift"),
                                   encoding: .utf8)
-        let modifier = try #require(discover.range(of: "struct AppleStremioPlayerPresentationModifier"))
+        let modifier = try #require(discover.range(of: "struct AppleMediaPlayerPresentationModifier"))
         let macBranch = discover[modifier.lowerBound...].prefix(1_200)
         #expect(macBranch.contains("AppleMacPlayerStagePresenter"))
         #expect(macBranch.contains("content.sheet(") == false)

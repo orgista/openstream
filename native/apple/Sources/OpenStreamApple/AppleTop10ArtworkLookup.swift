@@ -1,6 +1,7 @@
 import Foundation
 
 @MainActor enum AppleTop10ArtworkLookup {
+#if OPENSTREAM_ADDONS
     static func find(
         title: String, type: String, seasonTitle: String?, sources: [AppleSource],
         client: AppleStremioCatalogClient = AppleStremioCatalogClient(),
@@ -25,7 +26,7 @@ import Foundation
         // Configured metadata catalogs are asked first. Four catalogs and two
         // concurrent requests bound the work for each lazily visible card.
         let eligible = sources.compactMap { source -> AppleSource? in
-            guard source.isEnabled, source.kind == .stremio else { return nil }
+            guard source.isEnabled, source.isAddon else { return nil }
             var value = source
             value.catalogs = Array(source.catalogs.filter { $0.type == type && $0.supportsSearch }.prefix(1))
             return value.catalogs.isEmpty ? nil : value
@@ -53,6 +54,10 @@ import Foundation
         return nil
     }
 
+#else
+    static func find(title: String, type: String, seasonTitle: String?, sources: [AppleSource]) async -> AppleCatalogSearchMatch? { nil }
+
+#endif
     /// "Monster: The Lizzie Borden Story" → "Monster": Netflix names an
     /// anthology's season after its subtitle, the catalogs list the series.
     /// Series only — a film's subtitle is part of its own name.
@@ -68,6 +73,7 @@ import Foundation
     /// search catalog (the iPhone review sim's only add-on lists `tmdb.top`,
     /// `tmdb.trending`… and none of them searchable) asked nobody, and every
     /// Top 10 tile stayed a grey box with its title in it (N11, 2026-09-23).
+#if OPENSTREAM_ADDONS
     static func searchSources(_ eligible: [AppleSource], type: String) -> [AppleSource] {
         var values = Array(eligible.prefix(4))
         var cinemeta = AppleStremioMetadataClient.defaultMetadataSource
@@ -77,4 +83,5 @@ import Foundation
         values.append(cinemeta)
         return values
     }
+#endif
 }

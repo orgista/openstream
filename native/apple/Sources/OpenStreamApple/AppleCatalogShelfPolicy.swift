@@ -149,7 +149,11 @@ func appleCatalogShelfTitle(sourceName _: String, catalogType: String, catalogNa
 }
 
 /// Metadata add-ons that prefix every catalog with their own name.
+#if OPENSTREAM_ADDONS
 private let appleCatalogProviderPrefixes = ["tmdb", "cinemeta", "trakt", "imdb", "mdblist", "letterboxd", "stremio"]
+#else
+private let appleCatalogProviderPrefixes = ["tmdb", "cinemeta", "trakt", "imdb", "mdblist", "letterboxd"]
+#endif
 /// Short provider tags that are only a prefix when a separator follows them
 /// ("RT: Certified Fresh"), so a list that merely starts with the letters keeps them.
 private let appleCatalogProviderTags = ["rt"]

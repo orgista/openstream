@@ -35,11 +35,12 @@ let package = Package(
                 .copy("Resources/ThirdPartyNotices"),
                 .copy("Resources/Badges"),
                 .copy("Resources/Attribution"),
-            ]
+            ],
+            swiftSettings: [.define("OPENSTREAM_ADDONS", .when(configuration: .debug))]
         ),
         // Release tool, not shipped: headless Stremio add-on compatibility sweep.
         // `swift run --scratch-path … OpenStreamAddonProbe sweep`
-        .executableTarget(name: "OpenStreamAddonProbe", dependencies: ["OpenStreamApple"]),
-        .testTarget(name: "OpenStreamAppleTests", dependencies: ["OpenStreamApple"]),
+        .executableTarget(name: "OpenStreamAddonProbe", dependencies: ["OpenStreamApple"], swiftSettings: [.define("OPENSTREAM_ADDONS", .when(configuration: .debug))]),
+        .testTarget(name: "OpenStreamAppleTests", dependencies: ["OpenStreamApple"], swiftSettings: [.define("OPENSTREAM_ADDONS", .when(configuration: .debug))]),
     ]
 )

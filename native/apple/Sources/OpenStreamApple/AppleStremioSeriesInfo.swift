@@ -1,7 +1,7 @@
 import Foundation
 
 /// Season and episode read from an add-on media id (`tt123:2:5`).
-public struct AppleStremioSeriesInfo: Equatable, Sendable {
+public struct AppleMediaSeriesInfo: Equatable, Sendable {
     public let season: Int
     public let episode: Int
 
@@ -18,3 +18,5 @@ public struct AppleStremioSeriesInfo: Equatable, Sendable {
         self.episode = episode
     }
 }
+
+public typealias AppleStremioSeriesInfo = AppleMediaSeriesInfo

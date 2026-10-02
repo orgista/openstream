@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 import Synchronization
 
@@ -201,3 +202,5 @@ func withStageTimeout<T: Sendable>(
         return first
     }
 }
+
+#endif

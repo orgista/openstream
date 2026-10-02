@@ -1,7 +1,7 @@
 import Foundation
 
 /// Quality order, preserving provider order when quality is equal.
-public enum AppleStremioCandidateRanking {
+public enum AppleMediaCandidateRanking {
     public static func rank(_ candidates: [AppleStremioHTTPPlaybackCandidate]) -> [AppleStremioHTTPPlaybackCandidate] {
         ordered(candidates, preferCompatibleWhenUnknown: true)
     }
@@ -143,7 +143,7 @@ extension AppleStremioHTTPPlaybackCandidate {
             mediaID: mediaID,
             title: title ?? self.title,
             sourceName: sourceName.map { "via \($0)" },
-            sourceKind: .stremio,
+            sourceKind: .catalog,
             hints: ApplePlaybackRequest.Hints(
                 notWebReady: requiresGateway,
                 proxyHeaders: requestHeaders,
@@ -160,3 +160,5 @@ extension AppleStremioHTTPPlaybackCandidate {
         return request
     }
 }
+
+public typealias AppleStremioCandidateRanking = AppleMediaCandidateRanking

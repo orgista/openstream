@@ -4,7 +4,7 @@ import Foundation
 /// pipeline. HTTP alone does not prove container or codec support, so callers
 /// must inspect the asset and route it through `ApplePlaybackPreparer` before
 /// creating a player.
-public struct AppleStremioHTTPPlaybackCandidate: Equatable, Sendable {
+public struct AppleMediaHTTPPlaybackCandidate: Equatable, Sendable {
     public let title: String
     public let sourceURL: URL
     public let filename: String?
@@ -61,7 +61,7 @@ public struct AppleStremioHTTPPlaybackCandidate: Equatable, Sendable {
 /// an add-on result was not offered as a playable URL without silently treating
 /// a web page or YouTube identifier as direct media. Results that carry no
 /// HTTP(S) locator at all are reported as `missingLocator`.
-public enum AppleStremioUnsupportedReason: Equatable, Sendable {
+public enum AppleMediaUnsupportedReason: Equatable, Sendable {
     case externalLink(URL)
     case youtube(videoID: String)
     case invalidHTTPURL
@@ -69,7 +69,7 @@ public enum AppleStremioUnsupportedReason: Equatable, Sendable {
     case missingLocator
 }
 
-public struct AppleStremioUnsupportedStream: Equatable, Sendable {
+public struct AppleMediaUnsupportedStream: Equatable, Sendable {
     public let title: String
     public let filename: String?
     public let reason: AppleStremioUnsupportedReason
@@ -81,7 +81,7 @@ public struct AppleStremioUnsupportedStream: Equatable, Sendable {
     }
 }
 
-public struct AppleStremioStreamSelection: Equatable, Sendable {
+public struct AppleMediaStreamSelection: Equatable, Sendable {
     public let httpCandidates: [AppleStremioHTTPPlaybackCandidate]
     public let unsupported: [AppleStremioUnsupportedStream]
 
@@ -96,7 +96,7 @@ public struct AppleStremioStreamSelection: Equatable, Sendable {
     public static let empty = AppleStremioStreamSelection(httpCandidates: [], unsupported: [])
 }
 
-public struct AppleStremioSubtitleTrack: Equatable, Sendable {
+public struct AppleMediaSubtitleTrack: Equatable, Sendable {
     public let id: String
     public let url: URL
     public let language: String
@@ -110,7 +110,7 @@ public struct AppleStremioSubtitleTrack: Equatable, Sendable {
     }
 }
 
-public enum AppleStremioPlaybackError: Swift.Error, Equatable, LocalizedError, Sendable {
+public enum AppleMediaPlaybackError: Swift.Error, Equatable, LocalizedError, Sendable {
     case invalidSource
     case invalidMediaIdentity
     case nonHTTPResponse
@@ -142,7 +142,8 @@ public enum AppleStremioPlaybackError: Swift.Error, Equatable, LocalizedError, S
 /// A bounded Stremio playback-resource client. It deliberately resolves only
 /// the protocol layer: native media compatibility remains an AVAsset runtime
 /// decision made by the playback preparation pipeline.
-public struct AppleStremioPlaybackClient: Sendable {
+#if OPENSTREAM_ADDONS
+public struct AppleMediaPlaybackClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
     public typealias Sleeper = @Sendable (Duration) async throws -> Void
 
@@ -170,7 +171,7 @@ public struct AppleStremioPlaybackClient: Sendable {
         type: String,
         mediaID: String
     ) async throws -> AppleStremioStreamSelection {
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("stream") == .orderedSame }) else {
             return .empty
@@ -194,7 +195,7 @@ public struct AppleStremioPlaybackClient: Sendable {
         type: String,
         mediaID: String
     ) async throws -> [AppleStremioSubtitleTrack] {
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("subtitles") == .orderedSame }) else {
             return []
@@ -531,6 +532,7 @@ public struct AppleStremioPlaybackClient: Sendable {
         try await Task.sleep(for: duration)
     }
 }
+#endif
 
 private struct AppleStremioLossy<Value: Decodable>: Decodable {
     let value: Value?
@@ -623,3 +625,19 @@ private struct RawSubtitle: Decodable {
         language = try? container.decode(String.self, forKey: .language)
     }
 }
+
+public typealias AppleStremioHTTPPlaybackCandidate = AppleMediaHTTPPlaybackCandidate
+
+public typealias AppleStremioUnsupportedReason = AppleMediaUnsupportedReason
+
+public typealias AppleStremioUnsupportedStream = AppleMediaUnsupportedStream
+
+public typealias AppleStremioStreamSelection = AppleMediaStreamSelection
+
+public typealias AppleStremioSubtitleTrack = AppleMediaSubtitleTrack
+
+public typealias AppleStremioPlaybackError = AppleMediaPlaybackError
+
+#if OPENSTREAM_ADDONS
+public typealias AppleStremioPlaybackClient = AppleMediaPlaybackClient
+#endif

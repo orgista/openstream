@@ -164,7 +164,7 @@ public actor AppleOfflineMediaStore {
             in: .userDomainMask
         ).first!.appending(path: "OpenStream/Offline", directoryHint: .isDirectory)
         self.rootDirectory = applicationSupport
-        self.manifestURL = applicationSupport.appending(path: "manifest.json")
+        self.manifestURL = applicationSupport.appendingPathComponent("manifest").appendingPathExtension("json")
 
         if let allowedDirectories {
             self.allowedDirectories = allowedDirectories

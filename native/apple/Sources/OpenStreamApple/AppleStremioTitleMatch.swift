@@ -13,7 +13,7 @@ import Foundation
 /// (a hash, two words) is not a contradiction; a real release name that lacks
 /// the title's own words is. Titles with a colon are matched on their best
 /// part, because releases of "Star Wars: Andor" are named "Andor".
-public enum AppleStremioTitleMatch {
+public enum AppleMediaTitleMatch {
     static let stopwords: Set<String> = ["the", "a", "an", "of", "and", "in", "on", "at", "to", "for", "with", "vs", "by", "from", "part"]
 
     public static func normalize(_ text: String) -> [String] {
@@ -162,3 +162,5 @@ public enum AppleStremioTitleMatch {
         }
     }
 }
+
+public typealias AppleStremioTitleMatch = AppleMediaTitleMatch

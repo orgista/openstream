@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 
 /// The people a Stremio meta response names with their pictures.
@@ -10,7 +11,7 @@ import Foundation
 /// pass TMDB's own `credits_cast` / `credits_crew` through with a
 /// `profile_path`. Every field is optional and a malformed entry is skipped,
 /// so a response this cannot read still loads.
-struct AppleStremioCredits: Decodable, Sendable {
+struct AppleMediaCredits: Decodable, Sendable {
     let people: [AppleCreditPerson]
 
     static let tmdbProfileBase = "https://image.tmdb.org/t/p/\(AppleCreditPerson.tmdbPortraitSize)"
@@ -108,3 +109,7 @@ struct AppleStremioCredits: Decodable, Sendable {
         init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
     }
 }
+
+typealias AppleStremioCredits = AppleMediaCredits
+
+#endif

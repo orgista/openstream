@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AppleResolvedStremioPlayback: Equatable, Sendable {
+public struct AppleResolvedMediaPlayback: Equatable, Sendable {
     public let sourceName: String
     public let stream: AppleStremioHTTPPlaybackCandidate
     public let preparedPlayback: ApplePreparedPlayback
@@ -16,7 +16,7 @@ public struct AppleResolvedStremioPlayback: Equatable, Sendable {
     }
 }
 
-public enum AppleStremioPlaybackResolutionError: Swift.Error, Equatable, LocalizedError, Sendable {
+public enum AppleMediaPlaybackResolutionError: Swift.Error, Equatable, LocalizedError, Sendable {
     case noStreams
     case unsupportedOnly(AppleStremioUnsupportedReason)
     case externalDemuxRequired
@@ -52,7 +52,8 @@ public enum AppleStremioPlaybackResolutionError: Swift.Error, Equatable, Localiz
 /// Coordinates the protocol client with AVAsset runtime inspection and the
 /// existing playback route executor. Provider ordering is preserved: each
 /// HTTP candidate is tried until one produces a real prepared playback URL.
-public struct AppleStremioPlaybackResolver: Sendable {
+#if OPENSTREAM_ADDONS
+public struct AppleMediaPlaybackResolver: Sendable {
     public typealias Inspector = @Sendable (URL) async throws -> AppleAssetInspection
     public typealias Preparer = @Sendable (
         URL,
@@ -404,7 +405,7 @@ public struct AppleStremioPlaybackResolver: Sendable {
     ) -> [AppleSource] {
         sources
             .filter { source in
-                source.kind == .stremio
+                source.isAddon
                     && source.isEnabled
                     && source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame }
             }
@@ -619,3 +620,31 @@ public struct AppleStremioPlaybackResolver: Sendable {
         }
     }
 }
+#else
+public struct AppleMediaPlaybackResolver: Sendable {
+    public init() {}
+    public func rankedCandidates(sources: [AppleSource], preferredSourceID: AppleSource.ID? = nil, item: AppleCatalogItem) async throws -> [AppleStremioHTTPPlaybackCandidate] { [] }
+    func resolveDownloadPlans(sources: [AppleSource], preferredSourceID: AppleSource.ID? = nil, item: AppleCatalogItem) async throws -> [AppleOfflineDownloadPlan] { [] }
+    public static func decision(for inspection: AppleAssetInspection) -> OpenStreamPlaybackDecision {
+        let evidence = inspection.runtimeEvidence
+        guard evidence.supportsDirectPlayback else {
+            let reason: String
+            if evidence.hasProtectedContent && !evidence.assetIsPlayable {
+                reason = "Protected media failed the system playback check."
+            } else if !evidence.assetIsPlayable {
+                reason = "The asset failed the system playback check."
+            } else {
+                reason = "An enabled track failed the system playback check."
+            }
+            return OpenStreamPlaybackDecision(support: .unsupported, reasons: [reason])
+        }
+        return OpenStreamPlaybackDecision(support: .supported, reasons: [])
+    }
+}
+#endif
+
+public typealias AppleResolvedStremioPlayback = AppleResolvedMediaPlayback
+
+public typealias AppleStremioPlaybackResolutionError = AppleMediaPlaybackResolutionError
+
+public typealias AppleStremioPlaybackResolver = AppleMediaPlaybackResolver

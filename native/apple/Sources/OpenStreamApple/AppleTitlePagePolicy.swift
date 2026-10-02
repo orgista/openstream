@@ -120,7 +120,7 @@ public enum AppleTitlePagePolicy {
         if hasCompletedDownload { return true }
         if item.type == "series", episodesUnavailable { return false }
         return sources.contains { source in
-            source.isEnabled && source.kind == .stremio
+            source.isEnabled && source.isAddon
                 && source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame }
         }
     }

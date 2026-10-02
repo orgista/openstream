@@ -142,10 +142,11 @@ actor AppleLibraryMetadataResolver {
 
     static func liveLookup(_ parsed: AppleLibraryTitle, _ sources: [AppleSource], _ tmdbKey: String, _ omdbKey: String) async throws -> AppleCatalogItem? {
         let type = parsed.kind == .show ? "series" : "movie"
+#if OPENSTREAM_ADDONS
         var cinemeta = AppleStremioMetadataClient.defaultMetadataSource
         cinemeta.resources = ["catalog", "meta"]
         cinemeta.catalogs = [.init(type: type, id: "top", supportsSearch: true)]
-        let candidates = [cinemeta] + sources.filter { $0.isEnabled && $0.kind == .stremio && $0.manifestID != cinemeta.manifestID }
+        let candidates = [cinemeta] + sources.filter { $0.isEnabled && $0.isAddon && $0.manifestID != cinemeta.manifestID }
         let client = AppleStremioCatalogClient()
         for source in candidates {
             for catalog in source.catalogs.filter({ $0.type == type && $0.supportsSearch }).prefix(1) {
@@ -166,6 +167,7 @@ actor AppleLibraryMetadataResolver {
                 } catch { try Task.checkCancellation() }
             }
         }
+#endif
         if !tmdbKey.isEmpty, let result = try? await credentialLookup(parsed, key: tmdbKey, tmdb: true) { return result }
         try Task.checkCancellation()
         if !omdbKey.isEmpty { return try await credentialLookup(parsed, key: omdbKey, tmdb: false) }

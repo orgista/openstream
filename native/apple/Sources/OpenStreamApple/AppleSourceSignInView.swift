@@ -50,7 +50,7 @@ struct AppleSourceSignInView: View {
     var body: some View {
         Form {
             if source.kind != .library {
-                TextField(source.kind == .stremio ? "Manifest URL" : "Source address", text: $address)
+                TextField(source.isAddon ? "Manifest URL" : "Source address", text: $address)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     #if os(iOS)
@@ -112,7 +112,8 @@ struct AppleSourceSignInView: View {
     private func signIn() {
         do {
             let url: URL
-            if source.kind == .stremio {
+            #if OPENSTREAM_ADDONS
+            if source.isAddon {
                 url = try AppleManifestURLPolicy.normalize(address)
             } else {
                 let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,12 +122,20 @@ struct AppleSourceSignInView: View {
                       parsed.host != nil else { throw AppleConfigurationError.invalidFile }
                 url = parsed
             }
+            #else
+                let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let parsed = URL(string: trimmed),
+                      ["http", "https", "smb"].contains(parsed.scheme?.lowercased() ?? ""),
+                      parsed.host != nil else { throw AppleConfigurationError.invalidFile }
+                url = parsed
+            #endif
             try store.restoreSourceSignIn(id: source.id, address: url, username: username, password: password)
             appleTrace("source sign-in: restored \(source.kind.rawValue)")
             dismiss()
-        } catch let policy as AppleManifestURLPolicy.Error {
-            error = policy.errorDescription
         } catch {
+            #if OPENSTREAM_ADDONS
+            if let policy = error as? AppleManifestURLPolicy.Error { self.error = policy.errorDescription; return }
+            #endif
             self.error = "Could not restore source"
         }
     }

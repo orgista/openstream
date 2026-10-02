@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 import Synchronization
 
@@ -370,3 +371,5 @@ enum ProbeRunner {
         return excerpt.joined(separator: "\n")
     }
 }
+
+#endif

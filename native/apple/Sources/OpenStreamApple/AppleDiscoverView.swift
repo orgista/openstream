@@ -9,7 +9,7 @@ import WebKit
 
 func catalogConfigurationIdentity(_ sources: [AppleSource]) -> String {
     sources
-        .filter { $0.kind == .stremio }
+        .filter { $0.isAddon }
         .map { "\($0.id.uuidString)|\($0.configurationRevision)|\($0.isEnabled)" }
         .joined(separator: ";")
 }
@@ -632,7 +632,7 @@ struct AppleDiscoverView: View {
         // it was being rebuilt again for every merged item below.
         let localItems = local.map { $0.item }
         let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
-        
+
         let resolved = mergedItems.compactMap { item -> IndexedCatalogItem? in
             if let existing = local.first(where: { $0.item.mediaID == item.mediaID }) {
                 return existing
@@ -1515,7 +1515,7 @@ struct AppleDiscoverView: View {
     }
 
     private func indexCatalogs() async {
-        for source in sourceStore.sources where source.kind == .stremio && source.isEnabled {
+        for source in sourceStore.sources where source.isAddon && source.isEnabled {
             let records = catalogStore.sections
                 .filter { $0.sourceID == source.id }
                 .flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
@@ -1799,7 +1799,7 @@ struct AppleSearchView: View {
     }
 
     private func indexCatalogs() async {
-        for source in sourceStore.sources where source.kind == .stremio && source.isEnabled {
+        for source in sourceStore.sources where source.isAddon && source.isEnabled {
             let records = catalogStore.sections
                 .filter { $0.sourceID == source.id }
                 .flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
@@ -5883,7 +5883,7 @@ struct AppleCatalogItemDetailView: View {
         do {
             if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
                 let msDetail = try await msLibrary.detail(for: msRef)
-                
+
                 let episodeToPlay: AppleMediaServerItem
                 if item.type == "series" || msDetail.item.type == .series || msDetail.item.type == .episode {
                     let epID = episodeList.selectedEpisodeID ?? msRef.itemID
@@ -5896,7 +5896,7 @@ struct AppleCatalogItemDetailView: View {
                 } else {
                     episodeToPlay = msDetail.item
                 }
-                
+
                 let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: !fromBeginning)
                 let presentation = AppleStremioPlayerPresentation(request: req, settings: settings)
                 playbackCoordinator = presentation.coordinator
@@ -5941,7 +5941,7 @@ struct AppleCatalogItemDetailView: View {
                                 fromBeginning: fromBeginning),
                             mediaID: progressRecordID,
                             title: item.name,
-                            sourceKind: .stremio,
+                            sourceKind: .catalog,
                             // Names the episode, so its position is saved
                             // under it (`AppleSeriesProgressGuard`).
                             hints: .init(addonMediaID: selectedPlaybackMediaID, addonMediaType: item.type)
@@ -6150,7 +6150,7 @@ struct AppleCatalogItemDetailView: View {
         pageMetadata.resolvedMediaID = nil
         pageMetadata.watchProviders = []
         pageMetadata.streamingIDs = nil
-        
+
         if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
             pageMetadata.isPreparing = true
             do {
@@ -8024,7 +8024,7 @@ struct AppleFormatBadge: View {
     }
 }
 
-struct AppleStremioPlayerPresentationModifier: ViewModifier {
+struct AppleMediaPlayerPresentationModifier: ViewModifier {
     @Binding var presentation: AppleStremioPlayerPresentation?
 
     func body(content: Content) -> some View {
@@ -9534,3 +9534,5 @@ enum AppleTitlePageStreamFixture {
     }
 }
 #endif
+
+typealias AppleStremioPlayerPresentationModifier = AppleMediaPlayerPresentationModifier

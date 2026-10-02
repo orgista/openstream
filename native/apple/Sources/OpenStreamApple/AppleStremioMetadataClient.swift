@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AppleStremioEpisodeIdentity: Equatable, Sendable {
+public struct AppleMediaEpisodeIdentity: Equatable, Sendable {
     public let seriesID: String
     public let season: Int
     public let episode: Int
@@ -14,7 +14,7 @@ public struct AppleStremioEpisodeIdentity: Equatable, Sendable {
     public var id: String { "\(seriesID):\(season):\(episode)" }
 }
 
-public struct AppleStremioEpisode: Identifiable, Equatable, Sendable {
+public struct AppleMediaEpisode: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let season: Int?
@@ -69,7 +69,7 @@ public struct AppleStremioEpisode: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct AppleStremioEpisodeSelection: Equatable, Sendable {
+public struct AppleMediaEpisodeSelection: Equatable, Sendable {
     public let episode: AppleStremioEpisode
 
     public init?(seriesMediaID: String, episode: AppleStremioEpisode) {
@@ -95,7 +95,7 @@ public struct AppleStremioEpisodeSelection: Equatable, Sendable {
     public var displayTitle: String { episode.displayTitle }
 }
 
-public struct AppleStremioPreviewAssets: Equatable, Sendable {
+public struct AppleMediaPreviewAssets: Equatable, Sendable {
     public let trailerYouTubeKeys: [String]
     public let logoURL: URL?
     /// Every episode the meta lists with a release date, for the iPhone hero's
@@ -136,10 +136,10 @@ public struct AppleRuntimeMinutesParser {
         guard let value else { return nil }
         let clean = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if let exact = Int(clean) { return exact }
-        
+
         var total = 0
         var hasValue = false
-        
+
         if let hRange = clean.range(of: "h") {
             let hStr = clean[..<hRange.lowerBound].trimmingCharacters(in: .whitespaces)
             if let h = Int(hStr) {
@@ -147,7 +147,7 @@ public struct AppleRuntimeMinutesParser {
                 total += h * 60
                 hasValue = true
             }
-            
+
             let remainder = clean[hRange.upperBound...].trimmingCharacters(in: .whitespaces)
             let mStr = remainder.replacingOccurrences(of: "min", with: "")
                                 .replacingOccurrences(of: "m", with: "")
@@ -167,12 +167,12 @@ public struct AppleRuntimeMinutesParser {
                 hasValue = true
             }
         }
-        
+
         return hasValue ? total : nil
     }
 }
 
-public enum AppleStremioEpisodePolicy {
+public enum AppleMediaEpisodePolicy {
     /// Above this many episodes a series is a daily soap whose first season
     /// is decades old, so it opens on its latest season instead.
     static let latestSeasonFirstEpisodeCount = 1_000
@@ -304,7 +304,8 @@ public enum AppleStremioEpisodePolicy {
     }
 }
 
-public struct AppleStremioMetadataClient: Sendable {
+#if OPENSTREAM_ADDONS
+public struct AppleMediaMetadataClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let loader: Loader
     private let metadataCache: AppleMetadataDiskCache?
@@ -383,7 +384,7 @@ public struct AppleStremioMetadataClient: Sendable {
     ) async throws -> AppleTMDBDetails {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard source.kind == .stremio,
+        guard source.isAddon,
               source.isEnabled,
               source.resources.contains(where: { $0.caseInsensitiveCompare("meta") == .orderedSame }),
               // tv, anime, channel and custom types read the add-on's own meta.
@@ -490,7 +491,7 @@ public struct AppleStremioMetadataClient: Sendable {
     }
 
     public func episodes(source: AppleSource, mediaID: String) async throws -> [AppleStremioEpisode] {
-        guard source.kind == .stremio, source.isEnabled else {
+        guard source.isAddon, source.isEnabled else {
             throw AppleStremioPlaybackError.invalidSource
         }
         let endpoint = try Self.endpoint(source: source, mediaID: mediaID)
@@ -560,7 +561,7 @@ public struct AppleStremioMetadataClient: Sendable {
         mediaID: String
     ) async throws -> [AppleStremioEpisode] {
         let eligible = sources.filter { source in
-            source.kind == .stremio
+            source.isAddon
                 && source.isEnabled
                 && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         }
@@ -648,7 +649,7 @@ public struct AppleStremioMetadataClient: Sendable {
         // Already an IMDB id (movie `tt123`, or series episode `tt123:1:2`).
         if let canonical = Self.canonicalMediaID(id) { return canonical }
         let eligible = sources.filter { source in
-            source.kind == .stremio
+            source.isAddon
                 && source.isEnabled
                 && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         }
@@ -683,7 +684,7 @@ public struct AppleStremioMetadataClient: Sendable {
         AppleLaunchClock.mark("meta.miss.\(mediaID)")
         #endif
         let eligible = sources.filter { source in
-            source.kind == .stremio
+            source.isAddon
                 && source.isEnabled
                 && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
         }
@@ -1227,3 +1228,78 @@ public struct AppleStremioMetadataClient: Sendable {
         }
     }
 }
+#else
+public struct AppleMediaMetadataClient: Sendable {
+    public init() {}
+    public func episodes(sources: [AppleSource], preferredSourceID: AppleSource.ID? = nil, mediaID: String) async throws -> [AppleStremioEpisode] { [] }
+    public func previewAssets(sources: [AppleSource], preferredSourceID: AppleSource.ID? = nil, type: String, mediaID: String) async -> AppleStremioPreviewAssets? { nil }
+    public func imdbIdentifier(sources: [AppleSource], preferredSourceID: AppleSource.ID? = nil, type: String, id: String) async -> String? { Self.canonicalMediaID(id) }
+    public static func canonicalMediaID(_ id: String) -> String? {
+        let parts = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 1 || parts.count == 3,
+              let seriesID = canonicalSeriesID(String(parts[0])) else { return nil }
+        guard parts.count == 3,
+              let season = positiveNumber(parts[1], allowingZero: true),
+              let episode = positiveNumber(parts[2], allowingZero: false) else {
+            return parts.count == 1 ? seriesID : nil
+        }
+        return "\(seriesID):\(season):\(episode)"
+    }
+
+    public static func episodeIdentity(
+        _ id: String,
+        expectedSeriesID: String? = nil
+    ) -> AppleStremioEpisodeIdentity? {
+        let parts = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let seriesID = canonicalSeriesID(String(parts[0])),
+              let season = positiveNumber(parts[1], allowingZero: true),
+              let episode = positiveNumber(parts[2], allowingZero: false),
+              expectedSeriesID.map({ seriesRootID($0) == seriesID }) ?? true else {
+            return nil
+        }
+        return AppleStremioEpisodeIdentity(seriesID: seriesID, season: season, episode: episode)
+    }
+
+    /// True for a canonical movie/series id `tt1234567` or episode id `tt1234567:1:2`.
+    public static func isIMDBIdentifier(_ id: String) -> Bool {
+        canonicalMediaID(id) != nil
+    }
+
+    private static func seriesRootID(_ id: String) -> String? {
+        let root = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            .first.map(String.init) ?? ""
+        return canonicalSeriesID(root)
+    }
+
+    private static func canonicalSeriesID(_ id: String) -> String? {
+        guard id.hasPrefix("tt"), id.count >= 7,
+              id.dropFirst(2).allSatisfy(\.isNumber) else { return nil }
+        return id
+    }
+
+    private static func positiveNumber(_ value: Substring, allowingZero: Bool) -> Int? {
+        guard !value.isEmpty, value.allSatisfy(\.isNumber), let number = Int(value),
+              number <= 100_000, allowingZero ? number >= 0 : number >= 1 else { return nil }
+        return number
+    }
+
+    static func leadingYear(_ value: String?) -> Int? { value.flatMap { Int($0.prefix(4)) } }
+}
+
+#endif
+
+public typealias AppleStremioEpisodeIdentity = AppleMediaEpisodeIdentity
+
+public typealias AppleStremioEpisode = AppleMediaEpisode
+
+public typealias AppleStremioEpisodeSelection = AppleMediaEpisodeSelection
+
+public typealias AppleStremioPreviewAssets = AppleMediaPreviewAssets
+
+public typealias AppleStremioEpisodePolicy = AppleMediaEpisodePolicy
+
+public typealias AppleStremioMetadataClient = AppleMediaMetadataClient

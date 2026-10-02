@@ -1,3 +1,4 @@
+#if OPENSTREAM_ADDONS
 import Foundation
 import OpenStreamApple
 
@@ -501,3 +502,5 @@ struct AddonProbe {
         return (probe.outcome, probe)
     }
 }
+
+#endif

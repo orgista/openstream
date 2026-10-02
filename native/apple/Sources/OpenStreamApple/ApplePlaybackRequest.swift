@@ -2,7 +2,10 @@ import Foundation
 
 public struct ApplePlaybackRequest: Equatable, Sendable {
     public enum SourceKind: String, Equatable, Sendable, CaseIterable {
-        case stremio
+        case catalog
+        #if OPENSTREAM_ADDONS
+        public static var stremio: Self { .catalog }
+        #endif
         case iptv
         case liveTV
         case files

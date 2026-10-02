@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG && OPENSTREAM_ADDONS
 import Foundation
 
 /// `-OpenStreamDevSources <absolute path>`: adds every source in the owner's
