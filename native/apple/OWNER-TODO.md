@@ -31,7 +31,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       has no add-on code. Remux removed from ServerPlus (container, image, data). Add-on code kept in the repo
       behind a build switch (Debug/sideload/Mac Developer-ID on; App Store/TestFlight compiled out). DEPLOYED
       2026-10-02 to your Cloudflare account (wrangler, no GitHub needed): https://rill.xcxhcprtpj.workers.dev
-      (D1 "rill", queue "rill-jobs", free plan). Source: ~/Developer/openstream-build/bridge/rill; update =
+      (D1 "rill", queue "rill-jobs", free plan) + custom domain https://stream.orgista.com (both work). Source: ~/Developer/openstream-build/bridge/rill; update =
       `npm run build && npm run deploy` there. YOU: open the address now and create the Rill account (first
       visitor claims it), add your add-ons, then test in OpenStream (Add Media Server › Jellyfin).
 - [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
