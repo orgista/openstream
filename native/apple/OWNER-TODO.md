@@ -25,6 +25,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Add-on route DECIDED 2026-10-02: Cloudflare bridge (Rill, github.com/mrtxiv/Rill, MIT).** Each user deploys
+      their own free bridge to their own Cloudflare account (Deploy button), pastes add-ons into its page, and
+      OpenStream signs in to it as a Jellyfin server — works anywhere, free, Orgista never touches it, App Store app
+      has no add-on code. Remux removed from ServerPlus (container, image, data). Add-on code kept in the repo
+      behind a build switch (Debug/sideload/Mac Developer-ID on; App Store/TestFlight compiled out). Next: deploy
+      Rill to your Cloudflare account and test; then make OpenStream polished with it (sign-in code, downloads).
 - [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
       delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
       HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
