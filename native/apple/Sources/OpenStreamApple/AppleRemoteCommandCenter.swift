@@ -182,6 +182,14 @@ public final class AppleRemoteCommandCenter {
         appleTrace("now playing title=\"\(metadata.title)\" series=\(metadata.seriesTitle != nil) live=\(metadata.isLive) artwork=\(info[MPMediaItemPropertyArtwork] != nil) duration=\(info[MPMediaItemPropertyPlaybackDuration] != nil)")
     }
 
+    /// MediaPlayer calls the request handler on its own queue. Built in a
+    /// nonisolated context so the closure doesn't inherit main-actor
+    /// isolation (a main-actor closure traps with dispatch_assert_queue_fail
+    /// there — every VOD play with artwork crashed, Apple TV 2026-10-02).
+    nonisolated private static func artwork(for picture: UIImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: picture.size) { @Sendable _ in picture }
+    }
+
     /// The poster from the app's own image cache, then the entry again.
     private func loadArtwork(_ url: URL?) {
         guard let url else { artwork = nil; return }
@@ -191,7 +199,7 @@ public final class AppleRemoteCommandCenter {
             guard let image = try? await AppleRemoteImageCache.shared.image(url: url, maximumPixelDimension: 600),
                   !Task.isCancelled, let self else { return }
             let picture = UIImage(cgImage: image)
-            let value = MPMediaItemArtwork(boundsSize: picture.size) { _ in picture }
+            let value = Self.artwork(for: picture)
             self.artwork = (url, value)
             self.publishNowPlaying()
         }
