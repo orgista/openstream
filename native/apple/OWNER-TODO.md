@@ -25,6 +25,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Apple TV full pass 2026-10-02 (9c0be32):** most new features pass (reconnect, Watch on other list, catch-up,
+      latest season, Start from Beginning, recent searches, disc badge, Play Disc/Skip to Movie, no tab replay).
+      P0 FIXED 0e9a6d5: every on-demand play with artwork crashed (Now Playing artwork, from 40e9350) — verified.
+      Fixing next: TMDB credit text cut off in the (i) sheet; intermittent blank tab after fast tab hops; Live
+      categories missing (only All/Favorites); guide cells that started before the window show no title; catch-up
+      player has no title/time/progress; disc title page black top; rows still say "· Cinemeta"/"RT: Certified
+      Fresh"; no channel numbers; search ranking (General Hospital 1963 #3, Dune short above Dune 2021).
 - [ ] **Engine lab DONE (fork branch engine-lab, 9 commits, NOT pushed):** 98 test files/servers (4.4 GB, off the repo)
       scored automatically. Fixed 5 engine bugs: MKV seeks landing one group late, debrid servers that ignore Range
       (hung 45 s → works), HDR10 MKV with no colour tags never showing a picture, software-decoded seeks near the end
