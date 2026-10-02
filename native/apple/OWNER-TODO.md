@@ -38,7 +38,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       && git push -u origin HEAD:main`). Security audit (specs/codex/rill-audit.out): NOT safe as-is — malicious
       add-on artwork (SVG) could take over the settings page; config links embed your password + add-on keys in
       reversible form; public routes can be abused; no login throttling; its build pulls upstream code at deploy.
-      Hardening running on Codex. Until redeployed: no debrid-key add-ons, don't reuse the Rill password elsewhere.
+      HARDENED + DEPLOYED 2026-10-02 (fork branch `hardening` b43c981): builds/deploys only our code, no auto-update,
+      owner-only helper routes, raster-only images + size caps, outbound policy, same-origin settings, login
+      throttling, revocable sessions, AES-GCM-encrypted add-on keys (key in ~/Developer/openstream-build/signing/
+      rill/RILL_DATA_KEY — back it up), third-party features off. D1 backup taken first. Remaining: DNS-rebinding
+      SSRF gap (platform limit); root still sends a harmless invalid CORS combo. YOU: sign in again, change the Rill
+      password (old one was stored reversibly), then add your add-ons. Push: `cd ~/Developer/openstream-build/bridge/
+      rill && git push -u origin hardening`.
 - [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
       delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
       HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
