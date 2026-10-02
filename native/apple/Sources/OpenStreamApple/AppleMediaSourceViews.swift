@@ -156,18 +156,6 @@ struct AppleLiveTVView: View {
                             
                             #if os(iOS)
                             HStack(spacing: 0) {
-                                if catchUp != nil {
-                                    // Back to the live channel from a programme
-                                    // played out of the archive.
-                                    Button("Watch Live") {
-                                        startChannel(selectedChannel, shareSelection: true, present: false)
-                                    }
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.3), radius: 2)
-                                    .padding()
-                                    .accessibilityIdentifier("live.watchLive")
-                                }
                                 if isPad && verticalSizeClass == .compact {
                                     Button {
                                         showsSearch = true
@@ -1255,7 +1243,7 @@ struct AppleLiveInlinePlayer: View {
             Button("Close", role: .cancel) { coordinator.stop() }
         } message: {
             if case .failed(let failure) = coordinator.phase {
-                Text(request.isLive ? failure.liveChannelMessage : failure.message)
+                Text(request.isLive ? failure.liveChannelMessage : failure.userMessage)
             }
         }
     }
@@ -1374,6 +1362,15 @@ private struct AppleLiveFullScreenControls: View {
     @State private var hideChromeSignal = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var watchLiveAction: (() -> Void)? {
+        guard !request.isLive, let channel = channels.first(where: { $0.id == currentChannelID }),
+              let onSwitchChannel else { return nil }
+        return {
+            channelPicker.dismiss()
+            onSwitchChannel(channel)
+        }
+    }
+
     /// The iPad browses channels in a strip along the bottom of the video;
     /// every other platform keeps the leading-edge panel.
     @ViewBuilder
@@ -1404,7 +1401,8 @@ private struct AppleLiveFullScreenControls: View {
         case .bottomStrip:
             AppleLiveChannelStripOverlay(
                 channels: channels, guide: guide, currentChannelID: currentChannelID,
-                onSelect: onSelect, onDismiss: onDismiss, onBack: onBack)
+                onSelect: onSelect, onDismiss: onDismiss, onBack: onBack,
+                onWatchLive: watchLiveAction)
                 .ignoresSafeArea(edges: .horizontal)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .transition(.move(edge: .bottom))
@@ -1453,7 +1451,8 @@ private struct AppleLiveFullScreenControls: View {
                 },
                 hideChromeSignal: hideChromeSignal,
                 onClose: onClose,
-                sharePlayMenu: sharePlayMenu
+                sharePlayMenu: sharePlayMenu,
+                onWatchLive: watchLiveAction
             )
             // Hidden from accessibility as well as from touch, on every
             // platform. `allowsHitTesting(false)` alone leaves the transport's
@@ -1499,6 +1498,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private let inlineSubtitles = AppleStockPlayerSubtitles()
     private var cueHost: UIHostingController<AppleLiveInlineCueLayer>?
     private var captionsButton: UIButton!
+    private var watchLiveButton: UIButton!
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
     private var channels: [AppleIPTVChannel]
     private var guide: AppleIPTVGuide
@@ -1549,12 +1549,33 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         captionsButton = menuButton(imageName: "captions.bubble", accessibilityLabel: "Subtitles", menu: nil)
         captionsButton.accessibilityIdentifier = "player.inline.subtitles"
         captionsButton.showsMenuAsPrimaryAction = true
+        watchLiveButton = UIButton(type: .system)
+        var watchLiveConfiguration = UIButton.Configuration.plain()
+        watchLiveConfiguration.title = "Watch Live"
+        watchLiveConfiguration.baseForegroundColor = .label
+        #if os(tvOS)
+        watchLiveConfiguration.background.visualEffect = UIBlurEffect(style: .regular)
+        #else
+        watchLiveConfiguration.background.visualEffect = UIBlurEffect(style: .systemMaterial)
+        #endif
+        watchLiveConfiguration.background.cornerRadius = 16
+        watchLiveConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+        watchLiveButton.configuration = watchLiveConfiguration
+        watchLiveButton.translatesAutoresizingMaskIntoConstraints = false
+        watchLiveButton.accessibilityLabel = "Watch Live"
+        watchLiveButton.accessibilityIdentifier = "live.watchLive"
+        watchLiveButton.addTarget(self, action: #selector(watchLive), for: .primaryActionTriggered)
+        watchLiveButton.isHidden = request.isLive
+        view.addSubview(watchLiveButton)
         view.addSubview(captionsButton)
         view.addSubview(playPauseButton)
         view.addSubview(muteButton)
         view.addSubview(fullscreenButton)
         
         NSLayoutConstraint.activate([
+            watchLiveButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            watchLiveButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            watchLiveButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             captionsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             captionsButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             playPauseButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
@@ -1569,7 +1590,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             fullscreenButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
         ])
         
-        chromeButtons = [playPauseButton, muteButton, fullscreenButton, captionsButton]
+        updateChromeButtons()
         attachPlayerIfNeeded()
         
         // KVO calls back on whichever thread changed the value, with no main-queue
@@ -1614,6 +1635,17 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         }
     }
     
+    private func updateChromeButtons() {
+        chromeButtons = [playPauseButton, muteButton, fullscreenButton, captionsButton]
+        if !request.isLive { chromeButtons.append(watchLiveButton) }
+        else { watchLiveButton.isHidden = true }
+    }
+
+    @objc private func watchLive() {
+        guard let channel = channels.first(where: { $0.id == currentChannelID }) else { return }
+        onSwitchChannel?(channel)
+    }
+
     @objc private func toggleMute() {
         guard let player = playerViewController.player else { return }
         player.isMuted.toggle()
@@ -1726,7 +1758,10 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         self.currentChannelID = currentChannelID
         self.onSwitchChannel = onSwitchChannel
         self.fullScreenRevision = fullScreenRevision
-        if isViewLoaded { updateInlineSurface() }
+        if isViewLoaded {
+            updateInlineSurface()
+            updateChromeButtons()
+        }
         if isViewLoaded {
             let playing = coordinator.phase == .playing
             playPauseButton.setImage(UIImage(systemName: playing ? "pause.fill" : "play.fill",

@@ -57,7 +57,7 @@ public enum ApplePlaybackEngineFallback {
     ) -> Decision? {
         guard failure.kind != .cancelled else { return nil }
         if engine == .native, !alreadyFellBack { return .openStream }
-        return .alert(failure.message)
+        return .alert(failure.userMessage)
     }
 
     /// The fallback press's order: the streams the stock player never tried

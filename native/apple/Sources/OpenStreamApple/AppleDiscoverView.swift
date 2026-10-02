@@ -2537,15 +2537,24 @@ struct AppleCatalogItemDetailView: View {
     let tabToolbar: AppleTabToolbarContext?
     @State private var library = AppleLocalLibraryStore.shared
 
-    private var localFiles: [AppleLibraryItem] {
-        library.localFiles(for: item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID), group: localGroup,
-            episode: episodeList.episodes.first { $0.id == episodeList.selectedEpisodeID })
-    }
+    @State private var localFiles: [AppleLibraryItem] = []
+    @State private var discFile: AppleLibraryItem?
+    @State private var hasMatchingLocalGroup = false
+    @State private var titlePageStreamBadges: [AppleStreamFormatBadge] = []
 
-    /// The disc image among this title's files: the page offers Play Disc
-    /// and Skip to Movie, and its titles.
-    private var discFile: AppleLibraryItem? { library.discFile(in: localFiles) }
     private var isDiscTitle: Bool { discFile != nil }
+
+    /// Library matching is tied to content changes, never playback progress.
+    private func refreshTitleLocalFiles() {
+        let matched = item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID)
+        hasMatchingLocalGroup = localGroup != nil || !library.matchingGroups(matched).isEmpty
+        let files = library.localFiles(for: matched, group: localGroup,
+            episode: episodeList.episodes.first { $0.id == episodeList.selectedEpisodeID })
+        if localFiles.first?.id != files.first?.id { playbackUI.localInspection = nil }
+        localFiles = files
+        discFile = library.discFile(in: localFiles)
+        refreshTitleStreamBadges()
+    }
 
     /// The disc's titles, from the engine's read of the local image or from
     /// the last play of it; empty for one title.
@@ -2568,15 +2577,16 @@ struct AppleCatalogItemDetailView: View {
 
     /// Format badges for this title: the local file's probe (or name), else
     /// the stream Automatic would play, once streams are known. No network.
-    private var titlePageStreamBadges: [AppleStreamFormatBadge] {
+    private func refreshTitleStreamBadges() {
         if let file = localFiles.first {
-            return playbackUI.localInspection?.badges ?? AppleStreamFormatBadge.parse(file.name)
+            titlePageStreamBadges = playbackUI.localInspection?.badges ?? AppleStreamFormatBadge.parse(file.name)
+            return
         }
-        guard !playbackUI.streamChoices.isEmpty else { return [] }
+        guard !playbackUI.streamChoices.isEmpty else { titlePageStreamBadges = []; return }
         let first = AppleStremioCandidateRanking.playbackOrder(
             playbackUI.streamChoices, choice: .automatic, device: .current,
             title: item.name, year: item.year).first
-        return first.map { AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0)) } ?? []
+        titlePageStreamBadges = first.map { AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0)) } ?? []
     }
 
     /// The badges a Quality row shows for `choice`: those of the stream it
@@ -2766,26 +2776,41 @@ struct AppleCatalogItemDetailView: View {
         )
     }
 
+    private var titlePageIsCovered: Bool {
+        #if os(iOS) || os(tvOS)
+        playbackUI.presentation != nil
+        #else
+        false
+        #endif
+    }
+
     private var detailContent: some View {
         Group {
-            #if os(tvOS)
-            tvOSDetailLayout
-            #else
-            ScrollView {
-                AppleTitlePageScrollContent(page: self)
+            // The player owns progress and transport updates while covering this
+            // page. Remove the covered content's Observation subscriptions;
+            // on dismissal it reads the latest saved progress again.
+            if titlePageIsCovered {
+                Color.clear
+            } else {
+                #if os(tvOS)
+                tvOSDetailLayout
+                #else
+                ScrollView {
+                    AppleTitlePageScrollContent(page: self)
+                }
+                .scrollPosition($detailScrollPosition)
+                #if os(macOS)
+                // Discover's: the hero runs up under the toolbar with no backing.
+                .appleMacHeroUnderToolbar()
+                #endif
+                // The navigation bar is hidden here so the hero can bleed to the top
+                // of the screen. With no bar there is nothing behind the status bar
+                // once the page scrolls, and the synopsis was drawn through the
+                // clock. Applied to the scroll view itself, not the group, because
+                // it reads that scroll view's offset.
+                .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top)
+                #endif
             }
-            .scrollPosition($detailScrollPosition)
-            #if os(macOS)
-            // Discover's: the hero runs up under the toolbar with no backing.
-            .appleMacHeroUnderToolbar()
-            #endif
-            // The navigation bar is hidden here so the hero can bleed to the top
-            // of the screen. With no bar there is nothing behind the status bar
-            // once the page scrolls, and the synopsis was drawn through the
-            // clock. Applied to the scroll view itself, not the group, because
-            // it reads that scroll view's offset.
-            .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top)
-            #endif
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .coordinateSpace(name: "detail-scroll")
@@ -2913,11 +2938,27 @@ struct AppleCatalogItemDetailView: View {
             guard playbackUI.ledger.consume(playbackUI.request) else { return }
             await resolvePlayback()
         }
+        .onChange(of: library.contentRevision, initial: true) { _, _ in
+            guard !titlePageIsCovered else { return }
+            refreshTitleLocalFiles()
+        }
+        .onChange(of: titlePageIsCovered) { _, covered in
+            // Metadata for unrelated library titles can finish during playback.
+            // Defer the matching pass until this page is visible again.
+            if !covered { refreshTitleLocalFiles() }
+        }
+        .onChange(of: pageMetadata.resolvedMediaID) { _, _ in refreshTitleLocalFiles() }
+        .onChange(of: episodeList.episodes) { _, _ in refreshTitleLocalFiles() }
+        .onChange(of: episodeList.selectedEpisodeID) { _, _ in refreshTitleLocalFiles() }
+        .onChange(of: playbackUI.streamChoices) { _, _ in refreshTitleStreamBadges() }
         // The local file's format and, for a disc image, its titles: read by
         // the engine from the file itself, once per page.
         .task(id: localFiles.first?.id) {
             guard let file = discFile ?? localFiles.first else { return }
-            playbackUI.localInspection = await library.inspection(for: file)
+            let inspection = await library.inspection(for: file)
+            guard !Task.isCancelled else { return }
+            playbackUI.localInspection = inspection
+            refreshTitleStreamBadges()
         }
         .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
             heroTrailer.isActive = false
@@ -3109,7 +3150,7 @@ struct AppleCatalogItemDetailView: View {
             if let unavailableMessage = playbackUI.unavailableMessage {
                 Text(unavailableMessage)
             } else if let playbackFailure {
-                Text(playbackFailure.message)
+                Text(playbackFailure.userMessage)
             }
         }
         .tint(nil)
@@ -5476,12 +5517,14 @@ struct AppleCatalogItemDetailView: View {
     /// Where this title's saved position lives: `recordID`, or the key the
     /// same title was saved under when it was opened another way
     /// (`AppleTitleProgressIdentity`). Read and written through this one key.
-    /// Read through `ApplePlaybackProgressFeed`, so a save while the player
-    /// is up redraws the page's button when the player closes.
+    /// The covered page stops observing the progress feed; dismissal reads
+    /// the latest saved position and restores the button's subscription.
     private var progressRecordID: String {
         let candidates = progressCandidates
         return AppleTitleProgressIdentity.key(among: candidates) {
-            ApplePlaybackProgressFeed.shared.progress(for: $0, in: playbackStore)
+            !titlePageIsCovered
+                ? ApplePlaybackProgressFeed.shared.progress(for: $0, in: playbackStore)
+                : playbackStore.progress(for: $0)
         } ?? recordID
     }
 
@@ -6399,7 +6442,9 @@ struct AppleCatalogItemDetailView: View {
     /// Finished episodeList.episodes on the visible list, read through the feed so a
     /// finish, mark or unmark redraws the ticks.
     private var watchedEpisodeIDs: Set<String> {
-        ApplePlaybackProgressFeed.shared.completedMediaIDs(among: visibleEpisodes.map(\.id), in: playbackStore)
+        !titlePageIsCovered
+            ? ApplePlaybackProgressFeed.shared.completedMediaIDs(among: visibleEpisodes.map(\.id), in: playbackStore)
+            : playbackStore.completedMediaIDs(among: visibleEpisodes.map(\.id))
     }
 }
 
@@ -8321,10 +8366,9 @@ extension AppleCatalogItemDetailView {
     /// an enabled add-on that serves streams — and, for a series, an episode
     /// list to play from.
     private var hasPlaybackRoute: Bool {
-        let matched = item.withMediaID(pageMetadata.resolvedMediaID ?? item.mediaID)
         return AppleTitlePagePolicy.hasPlaybackRoute(
             item: item, sources: playbackSources,
-            hasLocalGroup: localGroup != nil || !library.matchingGroups(matched).isEmpty,
+            hasLocalGroup: hasMatchingLocalGroup,
             hasCompletedDownload: downloadCoordinator.state.isCompleted,
             episodesUnavailable: episodeListPresentation == .unavailable
         )
@@ -8333,7 +8377,9 @@ extension AppleCatalogItemDetailView {
     private var titlePagePrimaryAction: AppleTitlePagePolicy.PrimaryAction? {
         AppleTitlePagePolicy.titlePagePrimaryAction(
             type: item.type,
-            progress: ApplePlaybackProgressFeed.shared.progress(for: progressRecordID, in: playbackStore),
+            progress: !titlePageIsCovered
+                ? ApplePlaybackProgressFeed.shared.progress(for: progressRecordID, in: playbackStore)
+                : playbackStore.progress(for: progressRecordID),
             selectedEpisode: selectedEpisode,
             isPlayable: hasPlaybackRoute,
             hasTrailer: trailerEmbedURL != nil,

@@ -454,7 +454,7 @@ struct AppleStremioPlayerView: View {
             Button("Close", role: .cancel) { closePlayer() }
         } message: {
             if let failure = playbackFailure {
-                Text(failure.message)
+                Text(failure.userMessage)
             }
         }
     }

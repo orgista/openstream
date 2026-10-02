@@ -99,6 +99,11 @@ public struct AppleGuideGridIndex: Sendable, Equatable {
 }
 
 public enum AppleGuideGridModel: Sendable {
+    /// How much of a programme lies behind the channel rail after scrolling.
+    public static func visibleTitleInset(start: Double, width: Double, scrollOffset: Double) -> Double {
+        min(max(0, width), max(0, scrollOffset - start))
+    }
+
     /// The whole grid for `channels` in one pass, pulling each channel's
     /// programmes out of `guide`. Duplicate ids are dropped, like `build`.
     public static func index(

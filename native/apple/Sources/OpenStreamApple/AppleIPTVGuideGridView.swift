@@ -97,8 +97,9 @@ public struct AppleIPTVGuideGridView: View {
                                                     onShowHealth: health[row.id] == nil ? nil : onShowHealth.map { show in { show(row.channel) } })
                                                     .frame(width: railWidth, height: rowHeight)
                                                     .background(Color.black)
+                                                    .offset(x: scrollState.horizontalOffset)
                                                     .zIndex(1)
-                                                GuideScheduleRow(row: row, cellWidth: cellWidth, height: rowHeight,
+                                                GuideScheduleRow(row: row, cellWidth: cellWidth, height: rowHeight, scrollState: scrollState,
                                                     onSelect: { onSelect(row.channel) },
                                                     onSelectSpan: { span in
                                                         guard let start = span.airStart, let end = span.airEnd else { return }
@@ -107,6 +108,7 @@ public struct AppleIPTVGuideGridView: View {
                                                             description: span.subtitle, start: start, end: end, category: nil, isLive: false))
                                                     })
                                                     .equatable()
+                                                    .mask(GuideProgrammeClip(scrollState: scrollState))
                                             }
                                             .onAppear { visibleIDs.insert(row.id) }
                                             .onDisappear { visibleIDs.remove(row.id) }
@@ -118,14 +120,9 @@ public struct AppleIPTVGuideGridView: View {
                                                 .frame(width: railWidth, height: 36, alignment: .leading)
                                                 .background(Color.black)
                                                 .offset(x: scrollState.horizontalOffset).zIndex(1)
-                                            HStack(spacing: 0) {
-                                                ForEach(headerSlots) { slot in
-                                                    Text(slot.label)
-                                                        .font(.caption).foregroundStyle(.secondary)
-                                                        .frame(width: cellWidth, height: 36, alignment: .leading)
-                                                }
-                                            }
-                                            .background(Color.black)
+                                            GuideTimelineHeader(slots: headerSlots, cellWidth: cellWidth,
+                                                scrollState: scrollState)
+                                                .mask(GuideProgrammeClip(scrollState: scrollState))
                                         }
                                     }
                                 }
@@ -135,6 +132,8 @@ public struct AppleIPTVGuideGridView: View {
                                         Rectangle().fill(AppleDesignTokens.brandAccent).frame(width: 2)
                                             .offset(x: railWidth + CGFloat(offset) * cellWidth)
                                             .padding(.top, 36)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                            .mask(GuideProgrammeClip(scrollState: scrollState, leadingWidth: railWidth))
                                             .allowsHitTesting(false).accessibilityHidden(true)
                                     }
                                 }
@@ -364,7 +363,6 @@ private struct GuideChannelRail: View {
             .accessibilityIdentifier("guide.favorite.\(row.id)")
         }
         .padding(.leading, 8)
-        .offset(x: scrollState.horizontalOffset)
     }
 }
 
@@ -372,6 +370,7 @@ private struct GuideScheduleRow: View, Equatable {
     let row: AppleGuideRowModel
     let cellWidth: CGFloat
     let height: CGFloat
+    let scrollState: GuideScrollState
     let onSelect: () -> Void
     /// A past programme the channel's archive still holds.
     var onSelectSpan: (AppleGuideProgrammeSpan) -> Void = { _ in }
@@ -384,20 +383,7 @@ private struct GuideScheduleRow: View, Equatable {
         HStack(spacing: 0) {
             ForEach(row.spans) { cell in
                 Button(action: cell.isCatchUp ? { onSelectSpan(cell) } : onSelect) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 4) {
-                            if cell.isCatchUp {
-                                // Already aired and still in the archive: a
-                                // small replay glyph, in the text's own colour.
-                                Image(systemName: "arrow.counterclockwise").font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary).accessibilityHidden(true)
-                            }
-                            Text(cell.title).font(.caption.bold()).lineLimit(2)
-                        }
-                        if let subtitle = cell.subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                    }
-                    .padding(8)
-                    .frame(width: cellWidth * CGFloat(cell.width), height: height, alignment: .topLeading)
+                    GuideProgrammeTitle(cell: cell, cellWidth: cellWidth, height: height, scrollState: scrollState)
                     .background(cell.isNow ? AppleDesignTokens.brandAccent.opacity(0.14) : AppleDesignTokens.surface)
                     .overlay(Rectangle().stroke(.white.opacity(0.08), lineWidth: 1))
                     .clipped()
@@ -407,5 +393,83 @@ private struct GuideScheduleRow: View, Equatable {
                 .accessibilityLabel("\(row.channel.name), \(cell.title)" + (cell.isCatchUp ? ", available to watch" : ""))
             }
         }
+    }
+}
+
+/// The programme canvas starts at the rail's right edge even after scrolling.
+/// Its mask observes scrolling without rebuilding the programme projection.
+private struct GuideProgrammeClip: View {
+    let scrollState: GuideScrollState
+    var leadingWidth: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let leading = min(proxy.size.width, leadingWidth + scrollState.horizontalOffset)
+            Rectangle()
+                .frame(width: max(0, proxy.size.width - leading), height: proxy.size.height)
+                .offset(x: leading)
+        }
+    }
+}
+
+/// Keep the first visible clock label wholly to the right of Channels.
+private struct GuideTimelineHeader: View {
+    let slots: [AppleGuideGridHeaderSlot]
+    let cellWidth: CGFloat
+    let scrollState: GuideScrollState
+
+    var body: some View {
+        let offset = scrollState.horizontalOffset
+        let first = min(max(0, Int(offset / cellWidth)), max(0, slots.count - 1))
+        ZStack(alignment: .leading) {
+            HStack(spacing: 0) {
+                ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                    Text(slot.label)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(width: cellWidth, height: 36, alignment: .leading)
+                        .opacity(CGFloat(index) * cellWidth >= offset + 96 ? 1 : 0)
+                }
+            }
+            if !slots.isEmpty {
+                Text(slots[first].label)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.leading, 8)
+                    .frame(width: 96, height: 36, alignment: .leading)
+                    .background(Color.black)
+                    .offset(x: offset)
+            }
+        }
+        .background(Color.black)
+    }
+}
+
+/// A partly visible programme keeps its title beside the pinned channel rail.
+private struct GuideProgrammeTitle: View {
+    let cell: AppleGuideProgrammeSpan
+    let cellWidth: CGFloat
+    let height: CGFloat
+    let scrollState: GuideScrollState
+
+    var body: some View {
+        let width = cellWidth * CGFloat(cell.width)
+        let inset = CGFloat(AppleGuideGridModel.visibleTitleInset(
+            start: Double(cellWidth) * cell.startOffset, width: Double(width),
+            scrollOffset: Double(scrollState.horizontalOffset)))
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                if cell.isCatchUp {
+                    Image(systemName: "arrow.counterclockwise").font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+                Text(cell.title).font(.caption.bold()).lineLimit(2)
+            }
+            if let subtitle = cell.subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(8)
+        .frame(width: max(0, width - inset), height: height, alignment: .topLeading)
+        .frame(width: width, height: height, alignment: .trailing)
+        .clipped()
     }
 }

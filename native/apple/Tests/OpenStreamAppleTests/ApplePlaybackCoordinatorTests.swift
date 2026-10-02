@@ -349,3 +349,24 @@ struct AppleLiveFailureWordingTests {
         #expect(failure.liveChannelMessage == failure.message)
     }
 }
+
+@Suite("Playback diagnostic presentation")
+struct ApplePlaybackDiagnosticPresentationTests {
+    @Test func engineDiagnosticsStayOutOfUserMessages() {
+        for kind in [ApplePlaybackFailure.Kind.player, .unsupportedMedia, .unavailable] {
+            let raw = "HLSVideoEngine: open failed (Demuxer could not open input)"
+            let failure = ApplePlaybackFailure(kind: kind, message: raw)
+            #expect(!failure.userMessage.contains("Demuxer"))
+            #expect(!failure.userMessage.contains("HLSVideoEngine"))
+            #expect(failure.message == raw)
+            #expect(ApplePlaybackEngineFallback.afterEveryStreamFailed(failure,
+                engine: .openStream, alreadyFellBack: false) == .alert(failure.userMessage))
+        }
+    }
+
+    @Test func sourceGuidanceIsPreserved() {
+        let failure = ApplePlaybackFailure(kind: .unavailable,
+            message: "Add an enabled stream source in Settings to play this title.")
+        #expect(failure.userMessage == failure.message)
+    }
+}

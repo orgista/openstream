@@ -2247,3 +2247,13 @@ Open, not fixed — see the reports' own exception lists: the live ±10 s skips 
 and the scrubber still); the VOD player on the phone plays through `AVPlayerViewController` for
 this content, so the transport on screen there is Apple's own; two Discover cards could not be
 brought back on screen after the walk had scrolled past their row.
+
+
+## 2026-10-02 — iPad player and guide fixes
+
+- [F] Covered title page: cached local files/disc and stream badges; library refresh waits for dismissal. Dune plays; physical pause/More/close work. Three-second before/after samples: title-page badge/ranking/disc/matching hot paths absent after; unrelated Home billboard matching remains.
+- [F] Guide: programme canvas clips to the channel rail, titles follow visible spans, first visible clock label stays whole. `titleFollowsTheVisiblePartOfASpanningProgramme`; iPad horizontal/vertical captures.
+- [F] Playback failure: engine diagnostics stay in trace/recovery data; alerts use short wording. `engineDiagnosticsStayOutOfUserMessages` and `sourceGuidanceIsPreserved`.
+- [F] Inline catch-up: Watch Live sits bottom-left on system material, clear of top-right mute; label is Watch Live; hides with existing controls. iPad capture and return-to-live tap.
+- [F] Full-screen catch-up: Watch Live in existing transport/Channels strip; Back to guide closes. Physical taps verified with local IPTV fixture.
+- Gate: 2705 tests / 337 suites; iOS and generic tvOS simulator builds passed, all nine edited source files confirmed recompiled. Captures: `~/Developer/openstream-build/e2e-full-2026-10-02/ipad-fixes/`; samples: `/tmp/ipad-before.sample`, `/tmp/ipad-dune-final.sample`.

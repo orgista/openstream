@@ -155,6 +155,7 @@ struct AppleLiveChannelStripOverlay: View {
     let onSelect: (AppleIPTVChannel) -> Void
     let onDismiss: () -> Void
     var onBack: (() -> Void)? = nil
+    var onWatchLive: (() -> Void)? = nil
 
     private var entries: [AppleLiveChannelPickerEntry] {
         AppleLiveChannelPickerEntry.entries(
@@ -169,6 +170,13 @@ struct AppleLiveChannelStripOverlay: View {
                     Text("Channels")
                         .font(.headline)
                     Spacer()
+                    if let onWatchLive {
+                        Button("Watch Live", action: onWatchLive)
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .accessibilityLabel("Watch Live")
+                            .accessibilityIdentifier("live.picker.watchLive")
+                    }
                     if let onBack {
                         AppleLiveChannelPickerBackButton(action: onBack)
                     }

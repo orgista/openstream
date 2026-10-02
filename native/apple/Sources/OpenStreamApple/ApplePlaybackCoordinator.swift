@@ -56,6 +56,18 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
 
     public var errorDescription: String? { message }
 
+    /// Engine diagnostics remain in `message` for recovery policies and traces.
+    /// Only this wording belongs in playback alerts.
+    public var userMessage: String {
+        let diagnostic = message.lowercased()
+        let hasEngineDiagnostic = ["videoengine", "demuxer", "ffmpeg", "coremedia", "avplayer"]
+            .contains { diagnostic.contains($0) }
+        if kind == .player || hasEngineDiagnostic {
+            return "This video could not be played. Try another source."
+        }
+        return message
+    }
+
     /// Channel playback failures do not invalidate a saved playlist or account.
     var liveChannelMessage: String {
         switch kind {
@@ -67,7 +79,7 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
         case .network, .timedOut:
             return "This channel is not responding. Check your connection, then try again or choose another channel."
         default:
-            return message
+            return userMessage
         }
     }
 

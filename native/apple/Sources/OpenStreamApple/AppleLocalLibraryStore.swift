@@ -95,7 +95,7 @@ final class AppleLocalLibraryStore {
     /// Bumped whenever `groups` or `metadata` changes, so `sortedCache` knows
     /// when its answer is stale. `@Observable` forbids property observers, so
     /// every mutation site calls `contentDidChange()` by hand.
-    @ObservationIgnored private var contentRevision = 0
+    private(set) var contentRevision = 0
     @ObservationIgnored private var sortedCache: [AppleLibrarySort: (revision: Int, value: [AppleLibrarySeries])] = [:]
 
     private func contentDidChange() {
