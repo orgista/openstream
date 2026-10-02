@@ -34,6 +34,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (D1 "rill", queue "rill-jobs", free plan) + custom domain https://stream.ourzephyr.com (personal domain on purpose — keep streaming off orgista/Raster domains). Source: ~/Developer/openstream-build/bridge/rill; update =
       `npm run build && npm run deploy` there. YOU: open the address now and create the Rill account (first
       visitor claims it), add your add-ons, then test in OpenStream (Add Media Server › Jellyfin).
+      Private fork: github.com/cyberbanksy/stream-bridge (push needed: `cd ~/Developer/openstream-build/bridge/rill
+      && git push -u origin HEAD:main`). Security audit (specs/codex/rill-audit.out): NOT safe as-is — malicious
+      add-on artwork (SVG) could take over the settings page; config links embed your password + add-on keys in
+      reversible form; public routes can be abused; no login throttling; its build pulls upstream code at deploy.
+      Hardening running on Codex. Until redeployed: no debrid-key add-ons, don't reuse the Rill password elsewhere.
 - [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
       delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
       HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
