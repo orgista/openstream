@@ -4,6 +4,15 @@ Run every line before uploading a TestFlight build, and tick them in the release
 `DELIVERIES.md`. Owner rule (2026-09-28): these must be clean **before** a build ships, not fixed after.
 If a line fails, fix it or stop and ask; never "ship now, fix in the next build".
 
+## 0. Which build is this? (owner decision 2026-10-02)
+- **TestFlight** builds keep add-ons: archive with `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
+  Internal groups only by default — external TestFlight groups go through Beta App Review under the same rules
+  as the App Store, so an add-on build there can be rejected.
+- **App Store** submissions are a SEPARATE archive and build number WITHOUT the flag (add-ons compiled out);
+  `scripts/check-no-addons-in-release.sh` must pass on it. Never submit a TestFlight add-on build for App Store review.
+- **Mac with add-ons** ships outside the App Store as a Developer ID–signed, notarized download on orgista's
+  website (needs a Developer ID Application certificate — owner creates it; not yet set up).
+
 ## 1. Authorization and numbers
 - [ ] The owner said "ship N" (or "push N") for this exact build number. Nothing else authorizes an upload.
 - [ ] Every platform goes up on the same N: iOS, tvOS, visionOS **and macOS**.
