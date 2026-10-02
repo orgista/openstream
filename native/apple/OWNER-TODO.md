@@ -25,6 +25,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **DONE da014fb (2026-10-02):** IPTV catch-up from the guide (back up to 3 days, plays a past programme from its
+      start, Watch Live returns; sim-checked on Apple TV — iPad build only); Discover rows neutral + Top 10 off;
+      channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
+      iCloud restore no longer rewinds Resume; "Forced"-only subtitle tracks never auto-picked. Open: a deleted
+      add-on can come back after iCloud sync; search tab position on tvOS (kept first per your 09-14 call).
 - [ ] **Live TV DONE d018726 (sim-checked with a local fake IPTV server):** a dropped channel reconnects by itself
       ("Reconnecting…", 3 tries), then offers "Watch on <other list>" for the same channel; tvOS guide shows 7 channels
       × 3 hours (was ~4.5 × 2.3) with now-airing progress, Left goes to categories. Not done: catch-up from the guide
