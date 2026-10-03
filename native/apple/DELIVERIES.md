@@ -102,3 +102,41 @@ Build 12 notes:
 **OpenStream 1.0 (9) is available to Anthony in TestFlight.** Apple processing `VALID`; internal state `IN_BETA_TESTING`; present in the existing Internal group (`ca5595ab-44fd-4063-bb55-89a053bf2736`) alongside builds 7 and 8. Build ID `5aad4dbc-0515-4d48-a397-c0c22033dc24`. What to Test notes set and read back (en-US localization `03538f2f-6d70-45be-880d-b5121d8b6e96`).
 
 Export rule: use the App Store profile with Group Activities (`75afc0e9-11e3-4236-b7e4-95c4b8d7bc79`, ExportOptions-Manual.plist in artifacts/testflight/2026-09-10/shareplay-build-8-final); `manageAppVersionAndBuildNumber` assigns the next build number. Signing identity lives in `~/Developer/openstream-build/openstream.keychain-db`.
+
+
+## OpenStream build 15 TestFlight delivery — October 3, 2026 (iOS, tvOS, visionOS, macOS)
+
+Owner authorized "ship 15", Internal only. Source `47383ca98a4da1eb0d944a7e7d78d660bfb87eff`
+(main snapshot), reused local worktree `~/Developer/openstream-build/wt-b15`. Fresh pre-upload gate:
+**2733 tests / 345 suites passed**. All four archives used `CURRENT_PROJECT_VERSION=15` and
+`SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
+
+- [x] Authorization and numbers: previous build 14 VALID on each platform; all four uploads are build 15.
+- [x] Source: pinned local worktree, Swift build/test gates green, zero-byte Swift check clean.
+- [x] Signing: all referenced Release profiles ACTIVE; existing signing assets reused; no new certificates/profiles.
+- [x] Assets and first run: real iMessage icon inspected; Release No Sources confirmed; no debug source seeding.
+- [x] TestFlight tracing default checked; Internal is the only receiving group on every build.
+- [x] Archives and exported artifacts: each app/embedded app/extension has build 15 and its own PrivacyInfo.xcprivacy;
+      strict signatures pass, team 2VQ74PD5YG, get-task-allow false; SDK floor checks pass on every archive.
+- [x] Mac installer signature: 3rd Party Mac Developer Installer: Raster Inc; extracted package app verified strictly.
+- [x] Uploads: `asc publish testflight … --group "Internal" --submit --confirm --wait`; live readbacks VALID,
+      IN_BETA_TESTING, Internal only. ASC skipped beta review because no external groups were added.
+
+| Platform | Build ID | Live status |
+|---|---|---|
+| iOS 15 | 28e3b851-09bb-49a9-9b73-e2e707e881de | VALID / IN_BETA_TESTING |
+| tvOS 15 | bcd4d37e-54f4-4706-baf2-bf7747e0b5f4 | VALID / IN_BETA_TESTING |
+| visionOS 15 | 53791dde-98db-447c-988f-d3b059d25138 | VALID / IN_BETA_TESTING |
+| macOS 15 | 65e8dc9d-55d0-4329-a39b-82ecf74ec6af | VALID / IN_BETA_TESTING |
+
+Testing: prior same-snapshot iPhone Release Jellyfin playback and iPad launch reused. This attempt:
+tvOS Release empty home, Quick Connect sign-in, demo movie picture and resume verified with the repo's
+AppStoreScreenshotUITests/XCUIRemote harness; visionOS Release reached Discover / No Sources;
+macOS Debug with the existing Mac Development profile reached home (app-owned window snapshot) and quit.
+The broader tvOS screenshot sequence was stopped after the required playback/resume checks, before optional
+Live TV steps; no full screenshot-suite pass is claimed. tvOS and visionOS test installs removed; sims shut down.
+The Mac App Store archive/package was verified statically, as authorized, rather than launched locally.
+Known items in OWNER-TODO.md remain; no app crash or required launch/sign-in/playback failure was observed.
+No App Store or beta review submission, ASC metadata edits, source/signing configuration edits, or git push.
+Artifacts: `~/Developer/openstream-build/OpenStream-{iOS,tvOS,visionOS,macOS}-b15.xcarchive` and
+matching `export-{iOS,tvOS,visionOS,macOS}-b15` directories. Delivery record left uncommitted.
