@@ -25,6 +25,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **App Store push (owner 2026-10-02: assume the bridge works, get the app ready to publish, then move on to the
+      next app).** Running: Codex batch A (server discovery on your network, Quick Connect as the default on Apple TV,
+      Dolby Vision/HDR/SDR + audio line in player info, Release first-run leads with Media Server); work Claude
+      (App Store submission pack: description/keywords/review notes/legal demo/privacy label/screenshot list, and
+      an Apple app playbook for future apps at Code, Apps & Websites/Apps/APPLE-APP-PLAYBOOK.md). Next: downloads
+      from your media server; Release screenshots; then "ship" when you say so.
 - [ ] **Add-on route DECIDED 2026-10-02: Cloudflare bridge (Rill, github.com/mrtxiv/Rill, MIT).** Each user deploys
       their own free bridge to their own Cloudflare account (Deploy button), pastes add-ons into its page, and
       OpenStream signs in to it as a Jellyfin server — works anywhere, free, Orgista never touches it, App Store app
