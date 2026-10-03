@@ -31,6 +31,7 @@ let package = Package(
                 ),
             ],
             resources: [
+                .copy("Resources/PrivacyInfo.xcprivacy"),
                 .copy("Resources/ThirdPartyLicenses"),
                 .copy("Resources/ThirdPartyNotices"),
                 .copy("Resources/Badges"),

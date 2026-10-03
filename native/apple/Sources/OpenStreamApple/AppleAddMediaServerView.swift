@@ -56,6 +56,7 @@ public struct AppleMediaServerFormPolicy {
         case .malformedResponse: return "The server's reply made no sense."
         case .unreachable: return "Can't reach the server."
         case .unsupported: return "Not supported by this server."
+        case .downloadNotAllowed: return "Downloads are not allowed by this server."
         }
     }
 

@@ -168,8 +168,12 @@ struct AppleDiscoverView: View {
         let localContinueWatching = continueWatching
         let picks = topPicks(continueWatching: localContinueWatching)
         let heroes = featuredCandidates(continueWatching: withoutRemoved(localContinueWatching), picks: picks)
+        let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
+            hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
+            hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
+        )
         Group {
-            if visibleSections.isEmpty && library.groups.isEmpty && catalogIsStillLoading {
+            if !hasContent && (catalogIsStillLoading || mediaServerLibrary.isLoading) {
                 ProgressView()
                     .controlSize(.large)
                     .accessibilityLabel("Loading")
@@ -177,7 +181,7 @@ struct AppleDiscoverView: View {
                     #if os(tvOS)
                     .background(Color.black.ignoresSafeArea())
                     #endif
-            } else if visibleSections.isEmpty && library.groups.isEmpty {
+            } else if !hasContent {
                 discoverEmptyState
                 // The black ground was on the populated branch only, so an
                 // empty Discover fell through to the tvOS system material —
@@ -348,7 +352,7 @@ struct AppleDiscoverView: View {
         }
         .overlay(alignment: .top) {
             // Not over the centred loading state, which already says it.
-            if catalogStore.isLoading, !(visibleSections.isEmpty && library.groups.isEmpty) {
+            if catalogStore.isLoading, hasContent {
                 ProgressView()
                     .padding()
             }
@@ -3083,8 +3087,10 @@ struct AppleCatalogItemDetailView: View {
         }
         .onDisappear {
             pauseTrailerPreview()
-            seasonDownloads.cancel()
-            if downloadCoordinator.state.ownsDownload { downloadCoordinator.cancel() }
+            if AppleMediaServerItemReference.parse(item.mediaID) == nil {
+                seasonDownloads.cancel()
+                if downloadCoordinator.state.ownsDownload { downloadCoordinator.cancel() }
+            }
         }
         .task(id: "offline:\(episodeList.selectedEpisodeID ?? ""):\(seasonDownloads.isRunning)") {
             guard !seasonDownloads.isRunning, !downloadCoordinator.state.ownsDownload else { return }
@@ -5557,11 +5563,16 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var offlineRecordID: String {
-        selectedEpisodeSelection.map { "\(recordID):\($0.mediaID)" } ?? recordID
+        if let reference = AppleMediaServerItemReference.parse(item.mediaID) {
+            return AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episodeList.selectedEpisodeID ?? reference.itemID).mediaID
+        }
+        return selectedEpisodeSelection.map { "\(recordID):\($0.mediaID)" } ?? recordID
     }
 
     private var showsDownloadAction: Bool {
-        guard AppleMediaServerItemReference.parse(item.mediaID) == nil else { return false }
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil {
+            return AppleLocalDownloadPlatformPolicy.isSupportedOnCurrentPlatform && offlineState.serverDownloadsAllowed
+        }
         guard localGroup == nil else { return false }
         guard AppleLocalDownloadPlatformPolicy.isSupportedOnCurrentPlatform else { return false }
         guard offersDownload else { return false }
@@ -5589,7 +5600,10 @@ struct AppleCatalogItemDetailView: View {
     /// Whether a download could start here at all (a stream-capable source
     /// or a media-server title), or one already finished.
     private var offersDownload: Bool {
-        AppleTitlePagePolicy.offersDownload(
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil {
+            return offlineState.serverDownloadsAllowed || downloadCoordinator.state.isCompleted
+        }
+        return AppleTitlePagePolicy.offersDownload(
             item: item, sources: playbackSources,
             hasCompletedDownload: downloadCoordinator.state.isCompleted,
             episodesUnavailable: episodeListPresentation == .unavailable
@@ -5697,6 +5711,9 @@ struct AppleCatalogItemDetailView: View {
     private func refreshDownloadedEpisodeIDs() async {
         guard item.type == "series" else { return }
         let resolvedIDs = episodeList.episodes.compactMap { episode -> (String, String)? in
+            if let reference = AppleMediaServerItemReference.parse(item.mediaID) {
+                return (episode.id, AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode.id).mediaID)
+            }
             guard let selection = AppleStremioEpisodeSelection(
                 seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
                 episode: episode
@@ -5881,7 +5898,18 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.unavailableMessage = nil
         playbackCoordinator.beginResolving()
         do {
-            if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
+            if AppleMediaServerItemReference.parse(item.mediaID) != nil,
+               let offline = await downloadCoordinator.record(for: offlineRecordID) {
+                let request = try AppleMediaServerLibraryStore.offlinePlaybackRequest(record: offline,
+                    title: offlineDisplayTitle, resumePosition: fromBeginning ? nil : ApplePlaybackStore().progress(for: offline.mediaID)?.position)
+                let presentation = AppleStremioPlayerPresentation(request: request, settings: settings,
+                    engineOverride: engineOverride)
+                playbackCoordinator = presentation.coordinator
+                playbackUI.presentation = configuredSources(presentation, selectedID: offline.localURL)
+                return
+            }
+            if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID),
+               await downloadCoordinator.record(for: offlineRecordID) == nil {
                 let msDetail = try await msLibrary.detail(for: msRef)
 
                 let episodeToPlay: AppleMediaServerItem
@@ -6036,7 +6064,7 @@ struct AppleCatalogItemDetailView: View {
         let preferredSourceID = source.id
         downloadCoordinator.start(
             request: .init(
-                mediaID: selection.map { "\(recordID):\($0.mediaID)" } ?? offlineRecordID,
+                mediaID: AppleMediaServerItemReference.parse(item.mediaID) != nil ? offlineRecordID : (selection.map { "\(recordID):\($0.mediaID)" } ?? offlineRecordID),
                 itemTitle: selection?.displayTitle ?? offlineDisplayTitle,
                 subtitle: selection?.displayTitle ?? offlineSubtitle,
                 artworkURL: item.posterURL,
@@ -6048,7 +6076,11 @@ struct AppleCatalogItemDetailView: View {
                 // coordinator walks them in order when one fails, which is what
                 // makes "a source is chosen by default but is not necessarily
                 // available" (tester, build 10) safe without asking.
-                try await playbackResolver.resolveDownloadPlans(
+                if let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary {
+                    let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode?.id ?? episodeList.selectedEpisodeID ?? reference.itemID)
+                    return [try await mediaServerLibrary.downloadPlan(reference: target)]
+                }
+                return try await playbackResolver.resolveDownloadPlans(
                     sources: sources,
                     preferredSourceID: preferredSourceID,
                     item: selectedItem
@@ -6062,9 +6094,53 @@ struct AppleCatalogItemDetailView: View {
         )
     }
 
+    private func startServerSeasonDownload(reference: AppleMediaServerItemReference, library: AppleMediaServerLibraryStore) {
+        let episodes = visibleEpisodes
+        let byID = Dictionary(episodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let mediaIDs = Set(episodes.map { AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: $0.id).mediaID })
+        var plans: [String: AppleOfflineDownloadPlan] = [:]
+        seasonDownloads.start(episodeIDs: episodes.map(\.id), onCancel: {
+            AppleMediaServerBackgroundDownloads.shared.cancel(mediaIDs: mediaIDs)
+        }) { id in
+            // Resolve and enqueue the entire season before waiting on its first item.
+            // The OS then retains every transfer even if the process is terminated.
+            if plans.isEmpty {
+                for episode in episodes {
+                    try Task.checkCancellation()
+                    let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode.id)
+                    if await downloadCoordinator.record(for: target.mediaID) != nil { continue }
+                    plans[episode.id] = try await library.downloadPlan(reference: target)
+                }
+                try Task.checkCancellation()
+                for episode in episodes {
+                    guard let plan = plans[episode.id] else { continue }
+                    let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode.id)
+                    _ = AppleMediaServerBackgroundDownloads.shared.start(
+                        request: .init(mediaID: target.mediaID, itemTitle: "\(item.name) · \(episode.displayTitle)",
+                            subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "OpenStream Offline Storage"),
+                        plan: plan, observer: { _ in })
+                }
+            }
+            guard let episode = byID[id] else { return }
+            let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: id)
+            try await downloadCoordinator.downloadAndWait(
+                request: .init(mediaID: target.mediaID, itemTitle: "\(item.name) · \(episode.displayTitle)",
+                    subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "OpenStream Offline Storage"),
+                resolvePlans: {
+                    guard let plan = plans[id] else { return [] }
+                    return [plan]
+                }, revokeCapabilities: { _ in }
+            )
+        }
+    }
+
     private func startSeasonDownload() {
         guard !pageMetadata.isPreparing, !downloadCoordinator.state.ownsDownload else { return }
         offlineState.downloadSeason = episodeList.selectedSeason
+        if let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary {
+            startServerSeasonDownload(reference: reference, library: mediaServerLibrary)
+            return
+        }
         let selections = visibleEpisodes.compactMap {
             AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0)
         }
@@ -6078,7 +6154,7 @@ struct AppleCatalogItemDetailView: View {
                     subtitle: selection.displayTitle, artworkURL: item.posterURL,
                     destinationLabel: "OpenStream Offline Storage"),
                 resolvePlans: {
-                    try await playbackResolver.resolveDownloadPlans(sources: playbackSources,
+                    return try await playbackResolver.resolveDownloadPlans(sources: playbackSources,
                         preferredSourceID: source.id, item: selectedItem)
                 },
                 revokeCapabilities: { capabilities in
@@ -6091,7 +6167,11 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var offlineTitle: String {
-        selectedEpisodeSelection?.displayTitle ?? item.name
+        if AppleMediaServerItemReference.parse(item.mediaID) != nil,
+           let episode = episodeList.episodes.first(where: { $0.id == episodeList.selectedEpisodeID }) {
+            return "\(item.name) · \(episode.displayTitle)"
+        }
+        return selectedEpisodeSelection?.displayTitle ?? item.name
     }
 
     private var offlineSubtitle: String? {
@@ -6161,6 +6241,8 @@ struct AppleCatalogItemDetailView: View {
                 self.episodeList.episodes = msLibrary.episodes(from: msDetail)
                 markMetadataArrived()
                 fillTimeline.mark(.episodes, detail: "\(self.episodeList.episodes.count)")
+                self.offlineState.serverDownloadsAllowed = (try? await msLibrary.downloadsAllowed(in: msDetail)) == true
+                guard !Task.isCancelled, preparationGeneration == generation else { return }
                 self.offlineState.downloadedEpisodeIDs = []
                 self.episodeList.selectedSeason = upNextEpisode(in: self.episodeList.episodes)?.season
                     ?? AppleStremioEpisodePolicy.initialSeason(in: self.episodeList.episodes)
@@ -6169,6 +6251,8 @@ struct AppleCatalogItemDetailView: View {
                 self.pageMetadata.isPreparing = false
                 self.episodeList.isLoading = false
                 self.episodeList.loadFinished = true
+                await refreshOfflineState()
+                await refreshDownloadedEpisodeIDs()
             } catch {
                 guard !Task.isCancelled, preparationGeneration == generation else { return }
                 self.pageMetadata.isPreparing = false
@@ -7530,6 +7614,7 @@ private struct AppleTitlePageEpisodeState {
 }
 
 private struct AppleTitlePageOfflineState {
+    var serverDownloadsAllowed = false
     var downloadedEpisodeIDs = Set<String>()
     var downloadSeason: Int?
 }

@@ -56,6 +56,14 @@
 		7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000014 /* OpenStreamUITestCase.swift */; };
 		7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */; };
 		7A1000000000000000000019 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000018 /* OpenStreamUITestCase.swift */; };
+		A5B100000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000004 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000003 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000006 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000002 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000007 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000004 /* PrivacyInfo.xcprivacy */; };
+		A5B100000000000000000008 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000005 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -214,6 +222,11 @@
 		7A1000000000000000000014 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 		7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVStubSmokeUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000018 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
+		A5B000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Shared/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		A5B000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = OpenStreamWidgets/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		A5B000000000000000000003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = OpenStreamTopShelf/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		A5B000000000000000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = OpenStreamWatch/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		A5B000000000000000000005 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = OpenStreamMessages/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -369,6 +382,11 @@
 				C00000000000000000000008 /* Assets.xcassets */,
 				C00000000000000000000060 /* AppIcon.icon */,
 				C00000000000000000000009 /* Info.plist */,
+				A5B000000000000000000005 /* PrivacyInfo.xcprivacy */,
+				A5B000000000000000000004 /* PrivacyInfo.xcprivacy */,
+				A5B000000000000000000003 /* PrivacyInfo.xcprivacy */,
+				A5B000000000000000000002 /* PrivacyInfo.xcprivacy */,
+				A5B000000000000000000001 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -788,6 +806,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000008 /* PrivacyInfo.xcprivacy in Resources */,
 				E2B2AB38C6D68040B501C422 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -803,6 +822,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				D00000000000000000000011 /* Assets.xcassets in Resources */,
 				D00000000000000000000061 /* AppIcon.icon in Resources */,
 			);
@@ -812,6 +832,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000002 /* PrivacyInfo.xcprivacy in Resources */,
 				D00000000000000000000012 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -820,6 +841,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000003 /* PrivacyInfo.xcprivacy in Resources */,
 				D00000000000000000000013 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -828,6 +850,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000004 /* PrivacyInfo.xcprivacy in Resources */,
 				D00000000000000000000014 /* Assets.xcassets in Resources */,
 				D00000000000000000000062 /* AppIcon.icon in Resources */,
 			);
@@ -837,6 +860,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000005 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -844,6 +868,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000006 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -851,6 +876,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A5B100000000000000000007 /* PrivacyInfo.xcprivacy in Resources */,
 				D00000000000000000000044 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

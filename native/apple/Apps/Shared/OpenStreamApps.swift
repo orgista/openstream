@@ -25,8 +25,17 @@ struct OpenStreamPlatformApp: App {
         // `-OpenStreamResetOnLaunch YES`: Reset OpenStream before any store loads.
         AppleDeviceReset.performIfRequestedAtLaunch()
         #if os(macOS)
+        AppleMediaServerBackgroundDownloads.shared.activate()
+        #endif
+        #if os(macOS)
         // Before any view exists, so a stall early in launch is caught too.
         AppleDebugMainThreadWatchdog.startIfRequested()
+        #endif
+    }
+    #else
+    init() {
+        #if os(macOS)
+        AppleMediaServerBackgroundDownloads.shared.activate()
         #endif
     }
     #endif
@@ -181,6 +190,22 @@ private struct AppleOpenStreamLaunchView: View {
 #if os(iOS)
 @MainActor
 private final class OpenStreamAppDelegate: NSObject, UIApplicationDelegate {
+    private var backgroundSessionCompletion: (() -> Void)?
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        AppleMediaServerBackgroundDownloads.shared.activate()
+        return true
+    }
+
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        backgroundSessionCompletion = completionHandler
+        AppleMediaServerBackgroundDownloads.shared.handleEvents(identifier: identifier) { [weak self] in
+            let completion = self?.backgroundSessionCompletion
+            self?.backgroundSessionCompletion = nil
+            completion?()
+        }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

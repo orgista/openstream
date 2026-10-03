@@ -87,6 +87,7 @@ public enum AppleMediaServerError: Error, Equatable, Sendable {
     case malformedResponse
     case unreachable
     case unsupported
+    case downloadNotAllowed
 }
 
 public struct AppleQuickConnectTicket: Equatable, Sendable {
@@ -453,5 +454,23 @@ public struct AppleMediaServerClient: Sendable {
             serverName: server.name,
             userName: nil
         )
+    }
+}
+
+
+extension AppleMediaServerClient {
+    public func downloadsAllowed(session: AppleMediaServerSession) async throws -> Bool {
+        let url = try normalizedURL(base: session.baseURL, path: "Users/\(session.userID)")
+        let data = try await perform(request(url: url, token: session.accessToken))
+        let user = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return (user?["Policy"] as? [String: Any])?["EnableContentDownloading"] as? Bool == true
+    }
+
+    public func downloadRequest(session: AppleMediaServerSession, itemID: String, allowed: Bool) throws -> URLRequest {
+        guard allowed else { throw AppleMediaServerError.downloadNotAllowed }
+        guard session.kind != .plex, !itemID.isEmpty,
+              !itemID.contains("/"), !itemID.contains("..") else { throw AppleMediaServerError.unsupported }
+        let url = try normalizedURL(base: session.baseURL, path: "Items/\(itemID)/Download")
+        return request(url: url, token: session.accessToken)
     }
 }

@@ -482,3 +482,29 @@ extension ApplePlexClient {
         _ = try await performRequest(url: comp.url!, token: session.accessToken)
     }
 }
+
+
+extension ApplePlexClient {
+    public func downloadsAllowed(session: AppleMediaServerSession) async throws -> Bool {
+        let data = try await performRequest(url: session.baseURL, token: session.accessToken)
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let container = root?["MediaContainer"] as? [String: Any]
+        // The server reports the authenticated user's capability. Missing is denied.
+        let sync = container?["allowSync"]
+        return (sync as? Bool == true) || (sync as? Int == 1) || (sync as? String == "1")
+    }
+
+    public func downloadRequest(session: AppleMediaServerSession, part: ApplePlexItem.Part, allowed: Bool) throws -> URLRequest {
+        guard allowed else { throw AppleMediaServerError.downloadNotAllowed }
+        guard part.key.hasPrefix("/library/parts/"), !part.key.contains(".."),
+              let base = URLComponents(url: session.baseURL, resolvingAgainstBaseURL: false),
+              var components = URLComponents(url: session.baseURL.appendingPathComponent(String(part.key.dropFirst())), resolvingAgainstBaseURL: false),
+              components.host == base.host else { throw AppleMediaServerError.unsupported }
+        // download=1 lets PMS enforce download permissions, rather than saving a playback URL.
+        components.queryItems = [URLQueryItem(name: "download", value: "1")]
+        guard let url = components.url else { throw AppleMediaServerError.unreachable }
+        var request = URLRequest(url: url)
+        for (key, value) in defaultHeaders(token: session.accessToken) { request.setValue(value, forHTTPHeaderField: key) }
+        return request
+    }
+}

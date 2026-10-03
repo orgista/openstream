@@ -4410,3 +4410,13 @@ The welcome button now opens Media Server setup. Sources lists Media Server, Net
 Nearby Jellyfin servers can be found automatically, but physical iPhones and iPads still need Apple's broadcast-network permission added through the signing setup. Signing was left unchanged. The default playback engine supplies the output format to the existing player Info panel; the Native AVPlayer fallback still cannot report a confirmed output range and leaves it out.
 
 Verified: 2718 tests in 342 suites, iOS and tvOS Debug builds, iPad Release build, Release no-addons scan and SDK floors. Welcome and Add-flow screenshots are in the requested appstore-a evidence folder. Changes remain uncommitted; both simulators are shut down.
+
+
+## 2026-10-03 — App Store readiness, batch B
+Every shipping target now includes a privacy declaration. The local-network prompt uses neutral wording, and the two affected request identities use the public support address. The embedded FFmpeg and AMSMB2 frameworks still lack their own vendor privacy declarations.
+
+Movies, episodes and whole seasons from your media server can use the existing Downloads flow when the server permits downloading. Transfers run in the background, can pause and resume, and saved files play through the engine without contacting the server. A setup containing only a media server now shows its Discover shelves. A manual pause stays paused after relaunch.
+
+Verified on the iPad with an authenticated local fixture: download, pause, resumed byte-range transfer, progress while the app was on Home Screen, and playback with the server stopped. The public Jellyfin demo signed in with its path base and showed a public-domain title, but Download was unavailable through the permission check, so its download remains unverified. All added test sources and files were removed and the iPad was shut down.
+
+Verified: 2728 tests in 343 suites, iOS and tvOS Debug builds, and iOS Release with the no-add-ons scan and SDK floors. One existing catalog-fixture/network-stub race passed in isolation and on a full rerun. Screens are in the requested appstore-b folder. No signing changes, uploads or commits.

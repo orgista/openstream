@@ -2266,3 +2266,12 @@ brought back on screen after the walk had scrolled past their row.
 - [!] Playback output line uses Aether's presented video format and selected audio in AVKit Info. Native AVPlayer output range remains unknown and omitted; no hardware HDR confirmation. `ApplePlaybackOutputInfoTests` covers all five labels.
 - [x] Release welcome opens Media Server; Sources Add order is Media Server, Network Share, Live TV. Release iPad physical taps and three screenshots verified; no add-on copy in these screens. Evidence: `~/Developer/openstream-build/e2e-full-2026-10-02/appstore-a/` (owner-requested location).
 - [x] Gates: baseline 2707/338; final 2718/342; iOS/tvOS Debug and iPad Release passed, all ten changed app Swift files recompiled. `check-no-addons-in-release.sh` and SDK floors passed; zero-byte check clean. Generated local-network description verified. No signing changes or uploads; simulators shut down, no new saved sources.
+
+
+## 2026-10-03 — App Store readiness, batch B
+- [x] Privacy manifests: all eight shipping targets plus the package resource bundle; no tracking or collected data. Bundle resources verified on iOS/tvOS. Embedded AMSMB2 and FFmpeg frameworks have no vendor manifests.
+- [x] Neutral local-network descriptions in all five plist files; public support identity in both affected User-Agents. Signing settings unchanged.
+- [x] Server movie/episode/season downloads: current permission checks, authenticated original-file requests, background transfers, pause/resume and saved-file engine playback. Fixed server-only Discover empty state. Request, denial, offline routing and persisted pause tests included.
+- [x] iPad AXe: authenticated fixture downloaded, paused, resumed with a byte-range request, advanced while on Home Screen, and played with the fixture server stopped. Both added sources, download and playback history removed; no pending jobs; iPad shut down. Evidence: `~/Developer/openstream-build/e2e-full-2026-10-02/appstore-b/`.
+- [!] Public Jellyfin demo: sign-in with its path base succeeded and a public-domain title opened; Download was unavailable through the permission gate. No bypass attempted; the actual public-demo download remains unverified.
+- [x] Gates: baseline 2718/342; final 2728/343; iOS/tvOS Debug and iOS Release passed, modified app Swift files recompiled. Release add-on scan and SDK floors passed; zero-byte check clean. An existing catalog-fixture/network-stub race passed in isolation and on the full rerun. Changes remain uncommitted.

@@ -663,6 +663,39 @@ public final class AppleMediaServerLibraryStore {
         return detail
     }
 
+    nonisolated static func offlinePlaybackRequest(record: AppleOfflineRecord, title: String, resumePosition: Double?) throws -> ApplePlaybackRequest {
+        guard record.localURL.isFileURL else { throw AppleOfflineStoreError.uncontainedSourceFileURL }
+        return ApplePlaybackRequest(url: record.localURL, headers: [:], isLive: false,
+            resumePosition: resumePosition, autoplay: true, mediaID: record.mediaID,
+            title: title, sourceName: "Downloads", sourceKind: .mediaServer,
+            hints: .init(libraryFileURL: record.localURL))
+    }
+
+    public func downloadsAllowed(in detail: AppleMediaServerDetail) async throws -> Bool {
+        if detail.session.kind == .plex { return try await plexClient.downloadsAllowed(session: detail.session) }
+        return try await client.downloadsAllowed(session: detail.session)
+    }
+
+    func downloadPlan(reference: AppleMediaServerItemReference) async throws -> AppleOfflineDownloadPlan {
+        let detail = try await detail(for: reference)
+        let allowed = try await downloadsAllowed(in: detail)
+        guard allowed else { throw AppleMediaServerError.downloadNotAllowed }
+        let request: URLRequest
+        if detail.session.kind == .plex {
+            let fresh = try await plexClient.item(session: detail.session, ratingKey: reference.itemID)
+            guard [.movie, .episode].contains(fresh.type), let part = fresh.parts.first else {
+                throw AppleMediaServerError.unsupported
+            }
+            request = try plexClient.downloadRequest(session: detail.session, part: part, allowed: allowed)
+        } else {
+            guard [.movie, .episode].contains(detail.item.type) else { throw AppleMediaServerError.unsupported }
+            request = try client.downloadRequest(session: detail.session, itemID: reference.itemID, allowed: allowed)
+        }
+        guard let url = request.url else { throw AppleMediaServerError.unreachable }
+        return .init(sourceURL: url, requestHeaders: request.allHTTPHeaderFields ?? [:],
+                     protectedCapabilityToRevoke: nil, usesBackgroundSession: true)
+    }
+
     public func playbackRequest(for item: AppleMediaServerItem, in detail: AppleMediaServerDetail, resume: Bool) async throws -> ApplePlaybackRequest {
         if detail.session.kind == .plex {
             guard let plexItem = plexIndex[AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id)] else {

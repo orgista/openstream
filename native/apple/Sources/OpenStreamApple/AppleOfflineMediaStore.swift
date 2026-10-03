@@ -87,6 +87,7 @@ struct AppleOfflineDownloadPlan: Equatable, Sendable {
     let sourceURL: URL
     let requestHeaders: [String: String]
     let protectedCapabilityToRevoke: URL?
+    var usesBackgroundSession: Bool = false
 }
 
 enum AppleOfflineDownloadPolicy {

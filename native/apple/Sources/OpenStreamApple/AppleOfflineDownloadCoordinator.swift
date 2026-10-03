@@ -141,6 +141,7 @@ final class AppleOfflineDownloadCoordinator {
     @ObservationIgnored private var revoker: CapabilityRevoker?
     @ObservationIgnored private var plans: [AppleOfflineDownloadPlan] = []
     @ObservationIgnored private var planIndex = 0
+    @ObservationIgnored private var backgroundID: UUID?
     @ObservationIgnored private var driver: AppleOfflineDataTaskDriver?
     @ObservationIgnored private var resolutionTask: Task<Void, Never>?
     @ObservationIgnored private var partialURL: URL?
@@ -217,12 +218,19 @@ final class AppleOfflineDownloadCoordinator {
     }
 
     func pause() {
-        guard case .downloading = state, let driver else { return }
-        driver.pause()
+        guard case .downloading = state else { return }
+        if let backgroundID { AppleMediaServerBackgroundDownloads.shared.pause(backgroundID); return }
+        driver?.pause()
     }
 
     func resume() {
-        guard case .paused = state, partialURL != nil else { return }
+        guard case .paused = state else { return }
+        if let backgroundID {
+            transition(.resuming(item: request?.itemTitle ?? "Download", destination: request?.destinationLabel ?? "OpenStream Offline Storage", received: receivedBytes, expected: expectedBytes))
+            AppleMediaServerBackgroundDownloads.shared.resume(backgroundID)
+            return
+        }
+        guard partialURL != nil else { return }
         let activeID = operationID
         transition(.resuming(
             item: request?.itemTitle ?? "Download",
@@ -277,6 +285,28 @@ final class AppleOfflineDownloadCoordinator {
     private func beginCurrentPlan(operationID activeID: UUID, resumeOffset: Int64) {
         guard operationID == activeID, plans.indices.contains(planIndex), let request else { return }
         let plan = plans[planIndex]
+        if plan.usesBackgroundSession {
+            supportsPauseResume = true
+            transition(.downloading(item: request.itemTitle, destination: request.destinationLabel, received: 0, expected: nil))
+            backgroundID = AppleMediaServerBackgroundDownloads.shared.start(request: request, plan: plan) { [weak self] event in
+                guard let self, self.operationID == activeID else { return }
+                switch event {
+                case .progress(let received, let expected):
+                    self.receivedBytes = received
+                    self.expectedBytes = expected
+                    self.transition(.downloading(item: request.itemTitle, destination: request.destinationLabel, received: received, expected: expected))
+                case .paused:
+                    self.transition(.paused(item: request.itemTitle, destination: request.destinationLabel, received: self.receivedBytes, expected: self.expectedBytes))
+                case .completed(let record):
+                    self.backgroundID = nil
+                    Task { await self.complete(record, operationID: activeID) }
+                case .failed:
+                    self.backgroundID = nil
+                    Task { await self.advanceAfterFailure(.preparationFailed, operationID: activeID) }
+                }
+            }
+            return
+        }
         let scheme = plan.sourceURL.scheme?.lowercased()
         let usesProgressiveHTTP = (scheme == "http" || scheme == "https")
             && plan.requestHeaders.isEmpty
@@ -477,6 +507,8 @@ final class AppleOfflineDownloadCoordinator {
     }
 
     private func abandonCurrentWork(removePartial: Bool) {
+        if let backgroundID { AppleMediaServerBackgroundDownloads.shared.cancel(backgroundID) }
+        backgroundID = nil
         resolutionTask?.cancel()
         resolutionTask = nil
         driver?.cancel()

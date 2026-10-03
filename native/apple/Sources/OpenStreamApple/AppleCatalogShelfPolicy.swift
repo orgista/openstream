@@ -1,6 +1,10 @@
 import Foundation
 
 enum AppleCatalogShelfPolicy {
+    static func hasDiscoverContent(hasCatalog: Bool, hasLocalLibrary: Bool, hasMediaServerItems: Bool) -> Bool {
+        hasCatalog || hasLocalLibrary || hasMediaServerItems
+    }
+
     enum Style: Equatable, Sendable { case poster, featured, ranked }
 
     static func title(for catalog: AppleStremioCatalog) -> String {

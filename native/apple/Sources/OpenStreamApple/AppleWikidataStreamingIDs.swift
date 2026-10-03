@@ -44,7 +44,7 @@ public enum AppleWikidataStreamingQuery {
         request.httpShouldHandleCookies = false
         request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
         request.setValue(
-            "OpenStream/\(version) (https://github.com/cyberbanksy/OpenStream; watch-on links)",
+            "OpenStream/\(version) (+https://orgista.com/support)",
             forHTTPHeaderField: "User-Agent"
         )
         return request
