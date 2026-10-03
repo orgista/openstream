@@ -27,10 +27,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          Resume on the title page. (in progress)
 - [ ] **Ship 15 (owner 2026-10-03, TestFlight, all 4 platforms, test first):** running on Codex per SHIP-CHECKLIST —
       add-on builds go to internal TestFlight only if "TraceEnabled" turns out to be an external (reviewed) group.
-- [ ] **CarPlay video while parked (owner ask 2026-10-03):** iOS 26 lets CarPlay screens show AirPlay video while
-      the car is parked, only in cars whose maker enabled it; apps don't need a CarPlay app for that, just working
-      AirPlay (we have it). Check: AirPlay on, picture-in-picture/external playback allowed, no DRM blocks. A real
-      CarPlay *app* (audio-only Live TV in the car) would need Apple's CarPlay entitlement — only if you want that.
+- [ ] **CarPlay video while parked (owner ask 2026-10-03):** needs Apple's new CarPlay video entitlement (request it in
+      the developer account for com.orgista.openstream), then we build the CarPlay scene and test in Xcode's CarPlay
+      simulator; plays only in Park and only in cars whose maker enabled it. YOU: request the entitlement.
 - [ ] **App Store push (owner 2026-10-02: assume the bridge works, get the app ready to publish, then move on to the
       next app).** Running: Codex batch A (server discovery on your network, Quick Connect as the default on Apple TV,
       Dolby Vision/HDR/SDR + audio line in player info, Release first-run leads with Media Server); work Claude
