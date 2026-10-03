@@ -1,4 +1,6 @@
 import XCTest
+import CoreGraphics
+import ImageIO
 
 /// Runs only with the demo launch environment supplied by the local test runner.
 /// No demo address or credential is stored in the project or test plan.
@@ -9,9 +11,70 @@ final class AppStoreScreenshotUITests: XCTestCase {
     private var liveAdded = false
     private var downloadAttempted = false
     private var emptyDownloadsVerified = false
+    private var demoHost = ""
+    private var playlistHost = ""
+    private var playing = false
+    private var captureURL: URL?
+
+    private var uiSurface: XCUIElement {
+        #if os(visionOS)
+        // The tab ornament can be first; scroll the content window instead.
+        app.windows.allElementsBoundByIndex.max {
+            $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+        } ?? app.windows.firstMatch
+        #elseif os(macOS)
+        app.windows.firstMatch
+        #else
+        app
+        #endif
+    }
+
+    private func cleanupDemo() throws {
+        continueAfterFailure = true
+        defer { app.terminate() }
+        if serverAdded || liveAdded || downloadAttempted {
+            if liveAdded || playing { app.terminate(); app.launch(); playing = false }
+            else if app.state != .runningForeground { app.launch() }
+            if playing { try playerControl("player.close"); playing = false }
+            try removeDemoDownloads()
+            try removeDemoSources()
+        }
+    }
+
+    private func revealPlayerControls() {
+        guard !element("player.close").exists else { return }
+        #if os(tvOS)
+        XCUIRemote.shared.press(.select)
+        #else
+        let surface = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == %@", "player.controls.show")).allElementsBoundByIndex.first { $0.isHittable }
+        if let surface { surface.tap() }
+        else { uiSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap() }
+        #endif
+    }
+
+    private func playerControl(_ identifier: String) throws {
+        #if os(tvOS)
+        if identifier == "player.close" {
+            for _ in 0..<3 {
+                XCUIRemote.shared.press(.menu)
+                Thread.sleep(forTimeInterval: 1)
+                if element("detail.play").isHittable { break }
+            }
+            return
+        }
+        #endif
+        revealPlayerControls()
+        if identifier == "player.close", !element(identifier).exists {
+            // Live's hidden-background tap opens its channel picker.
+            try activate(element("live.picker.back"))
+        } else {
+            try activate(element(identifier))
+        }
+    }
 
     private func element(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", identifier)).firstMatch
     }
 
     private func button(_ label: String) -> XCUIElement {
@@ -19,39 +82,59 @@ final class AppStoreScreenshotUITests: XCTestCase {
     }
 
     private func activate(_ target: XCUIElement) throws {
-        XCTAssertTrue(target.waitForExistence(timeout: 30), "Expected navigation control is absent")
+        guard target.waitForExistence(timeout: 30) else {
+            XCTFail("Expected navigation control is absent")
+            throw NavigationFailure.unreachable
+        }
         #if os(tvOS)
-        for step in 0..<40 {
+        var focusTrace: [String] = []
+        for step in 0..<60 {
             if target.hasFocus { XCUIRemote.shared.press(.select); Thread.sleep(forTimeInterval: 0.7); return }
-            let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            if focused.exists {
+            let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
+                .allElementsBoundByIndex.filter { $0.frame.width > 0 && $0.frame.height > 0 }
+                .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+            focusTrace.append("step \(step): \(focused?.identifier ?? "none") \(focused?.frame ?? .zero) target \(target.identifier) \(target.frame)")
+            if let focused {
                 let from = focused.frame, to = target.frame
+                if to.width > 0, to.height > 0,
+                   from.contains(CGPoint(x: to.midX, y: to.midY)),
+                   (focused.elementType == .cell || focused.elementType == .button),
+                   from.height <= to.height * 4 {
+                    XCUIRemote.shared.press(.select)
+                    Thread.sleep(forTimeInterval: 0.7)
+                    return
+                }
                 if from.midY < 150 && to.midY > 150 {
                     XCUIRemote.shared.press(.down)
+                } else if from.width >= 350, from.maxX <= 520, to.minX > 520 {
+                    XCUIRemote.shared.press(.right)
+                } else if to.width >= 350, to.maxX <= 520, from.minX > 520 {
+                    XCUIRemote.shared.press(.left)
+                } else if abs(to.midY - from.midY) > 35 {
+                    XCUIRemote.shared.press(to.midY > from.midY ? .down : .up)
                 } else if from.maxX < to.minX - 20 {
                     XCUIRemote.shared.press(.right)
                 } else if from.minX > to.maxX + 20 {
                     XCUIRemote.shared.press(.left)
-                } else if abs(to.midY - from.midY) > 35 {
-                    XCUIRemote.shared.press(to.midY > from.midY ? .down : .up)
                 } else {
                     XCUIRemote.shared.press(to.midX > from.midX ? .right : .left)
                 }
             } else {
                 XCUIRemote.shared.press(step % 2 == 0 ? .up : .right)
             }
+            Thread.sleep(forTimeInterval: 0.4)
         }
         capture("failure-focus")
         let focus = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
             .allElementsBoundByIndex.map { "\($0.elementType.rawValue) \($0.identifier) \($0.frame)" }.joined(separator: "\n")
-        let proof = XCTAttachment(string: focus + "\nTarget: \(target.frame)")
+        let proof = XCTAttachment(string: focusTrace.joined(separator: "\n") + "\n" + focus + "\nTarget: \(target.frame)")
         proof.name = "proof-focus-geometry"; proof.lifetime = .keepAlways; add(proof)
         XCTFail("Remote could not reach the requested control")
         throw NavigationFailure.unreachable
         #else
         if !target.isHittable {
             #if os(iOS)
-            app.swipeUp()
+            uiSurface.swipeUp()
             #endif
         }
         target.tap()
@@ -60,14 +143,15 @@ final class AppStoreScreenshotUITests: XCTestCase {
 
     private func tab(_ name: String) throws {
         #if os(tvOS)
-        for _ in 0..<6 { XCUIRemote.shared.press(.up) }
+        for _ in 0..<6 { XCUIRemote.shared.press(.up); Thread.sleep(forTimeInterval: 0.3) }
         #endif
         let target = app.descendants(matching: .any).matching(NSPredicate(format:
-            "label == %@ AND (elementType == %d OR elementType == %d)", name,
-            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.tab.rawValue)).firstMatch
+            "label == %@ AND (elementType == %d OR elementType == %d OR elementType == %d)", name,
+            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.tab.rawValue,
+            XCUIElement.ElementType.radioButton.rawValue)).firstMatch
         try activate(target)
         #if os(tvOS)
-        Thread.sleep(forTimeInterval: 2)
+        Thread.sleep(forTimeInterval: 3)
         #endif
     }
 
@@ -80,13 +164,67 @@ final class AppStoreScreenshotUITests: XCTestCase {
         #endif
     }
 
+    private func verifyPinnedLivePicture() throws {
+        #if os(iOS)
+        try verifyPicture(in: CGRect(x: 0.1, y: 0.14, width: 0.8, height: 0.18))
+        #endif
+    }
+
+    private func verifyPicture(in region: CGRect) throws {
+        // The selected fixture frame is bright; an error-free black player must fail.
+        let png = XCUIScreen.main.screenshot().pngRepresentation
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let picture = try XCTUnwrap(image.cropping(to: CGRect(
+            x: Double(image.width) * region.minX, y: Double(image.height) * region.minY,
+            width: Double(image.width) * region.width, height: Double(image.height) * region.height)))
+        var pixels = [UInt8](repeating: 0, count: 64 * 32 * 4)
+        let mean = try pixels.withUnsafeMutableBytes { buffer -> Double in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 64, height: 32,
+                bitsPerComponent: 8, bytesPerRow: 64 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(picture, in: CGRect(x: 0, y: 0, width: 64, height: 32))
+            let bytes = buffer.bindMemory(to: UInt8.self)
+            return stride(from: 0, to: bytes.count, by: 4).reduce(0.0) {
+                $0 + Double(bytes[$1]) + Double(bytes[$1 + 1]) + Double(bytes[$1 + 2])
+            } / Double(64 * 32 * 3)
+        }
+        XCTAssertGreaterThan(mean, 10, "The fixture's video picture is black")
+    }
+
+    private func waitForPlayer(timeout: TimeInterval) {
+        #if os(tvOS)
+        // TV closes with Menu and its native player has no app Close identifier.
+        let presented = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == false"),
+                                                 object: element("detail.play"))
+        XCTAssertEqual(XCTWaiter.wait(for: [presented], timeout: timeout), .completed)
+        #else
+        XCTAssertTrue(element("player.close").waitForExistence(timeout: timeout))
+        #endif
+    }
+
     private func capture(_ name: String) {
+        Thread.sleep(forTimeInterval: 2)
         #if os(macOS)
         let screenProof = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenProof.name = "proof-screen-" + name
         screenProof.lifetime = .keepAlways
         add(screenProof)
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        #elseif os(visionOS)
+        // XCUIScreen.main on this runtime returns a 1×1 placeholder. The
+        // foreground runner supplies the native compositor PNG at this exact
+        // checkpoint, before the test continues to another scene.
+        guard let captureURL else { XCTFail("The Vision capture service is absent"); return }
+        let attachment: XCTAttachment
+        do {
+            let data = try send(URLRequest(url: captureURL))
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+            let picture = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            XCTAssertEqual(picture.width, 3840)
+            XCTAssertEqual(picture.height, 2160)
+            attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+        } catch { XCTFail("The native Vision screenshot could not be captured"); return }
         #else
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         #endif
@@ -113,12 +251,23 @@ final class AppStoreScreenshotUITests: XCTestCase {
 
     private func sources() throws {
         try tab("Settings")
-        #if !os(tvOS)
+        #if os(tvOS)
+        try activate(button("Sources"))
+        Thread.sleep(forTimeInterval: 2)
+        #else
+        if button("Media Server").exists { return }
+        for _ in 0..<3 where !button("Sources").exists { back() }
+        #if os(iOS)
+        for _ in 0..<4 where !button("Sources").exists { uiSurface.swipeDown() }
+        #endif
         try activate(button("Sources"))
         #endif
     }
 
     func testAppStorePass() throws {
+        // XCTest awaits this block even when immediate failure aborts the test body.
+        // The async block preserves the UI helpers' MainActor isolation.
+        addTeardownBlock { @MainActor [self] () async throws in try cleanupDemo() }
         let processEnvironment = ProcessInfo.processInfo.environment
         var env = processEnvironment
         if let hex = processEnvironment["OPENSTREAM_DEMO_CONFIG_HEX"] {
@@ -138,11 +287,14 @@ final class AppStoreScreenshotUITests: XCTestCase {
         continueAfterFailure = false
         XCTAssertTrue(server.contains("://"), "The demo server environment lost its URL scheme delimiter")
         XCTAssertFalse(password.isEmpty, "The demo password environment is empty")
-        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES"]
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES",
+                               "-openstream.backup.icloud.enabled.v1", "NO"]
         app.launchEnvironment = ["OPENSTREAM_DEMO_SERVER": server, "OPENSTREAM_DEMO_USER": user,
                                  "OPENSTREAM_DEMO_PASSWORD": password, "OPENSTREAM_TEST_M3U": playlist]
+        captureURL = env["OPENSTREAM_DEMO_CAPTURE_URL"].flatMap(URL.init(string:))
+        demoHost = URL(string: server)?.host ?? ""
+        playlistHost = URL(string: playlist)?.host ?? ""
         app.launch()
-        defer { try? removeDemoDownloads(); try? removeDemoSources(); app.terminate() }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 45))
         #if os(macOS)
         let window = app.windows.firstMatch
@@ -152,11 +304,36 @@ final class AppStoreScreenshotUITests: XCTestCase {
         corner.press(forDuration: 0.1, thenDragTo: size)
         #endif
         if button("Not Now").waitForExistence(timeout: 8) { try activate(button("Not Now")) }
+        if env["OPENSTREAM_DEMO_CLEAN_STALE"] == "YES" {
+            serverAdded = true
+            liveAdded = true
+            try removeDemoSources()
+            app.terminate()
+            app.launch()
+        }
         XCTAssertFalse(app.staticTexts["Couldn't Load Your Catalogs"].exists)
+        XCTAssertTrue(app.staticTexts["No Sources"].waitForExistence(timeout: 30), "The demo pass requires an empty supported source list")
+        capture("proof-welcome")
+        try activate(element("emptyState.footnote"))
+        #if os(tvOS)
+        // tvOS can expose sheet text as a combined accessibility label.
+        let noContent = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "Add your own sources.")).firstMatch
+        if !noContent.waitForExistence(timeout: 15) { capture("failure-attribution") }
+        XCTAssertTrue(noContent.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "JustWatch")).firstMatch.exists)
+        #else
+        XCTAssertTrue(element("settings.about.noContent").waitForExistence(timeout: 15))
+        XCTAssertTrue(element("settings.about.justwatch").exists)
+        #endif
+        capture("proof-credits")
+        try activate(button("Done"))
         try sources()
         capture("07-sources")
         #if os(iOS)
         back()
+        for _ in 0..<4 where !button("Storage").exists { uiSurface.swipeUp() }
         try activate(button("Storage"))
         Thread.sleep(forTimeInterval: 2)
         XCTAssertFalse(button("Delete All Downloads").isEnabled, "Demo downloads require an initially empty download store")
@@ -199,42 +376,94 @@ final class AppStoreScreenshotUITests: XCTestCase {
         app.terminate()
         app.launch()
         try tab("Discover")
-        let movie = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Big Buck Bunny'")).firstMatch
+        let movies = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home.ms.' AND label CONTAINS[c] 'Big Buck Bunny'"))
+        let movie = movies.firstMatch
+        var visibleMovie: XCUIElement? {
+            let visible = movies.allElementsBoundByIndex.filter {
+                $0.frame.width > 0 && uiSurface.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY))
+            }
+            #if os(tvOS)
+            return visible.first(where: { $0.hasFocus }) ?? visible.first
+            #else
+            return visible.first
+            #endif
+        }
         let firstPoster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home.ms.'")).firstMatch
+        #if os(tvOS)
+        for _ in 0..<8 where !firstPoster.exists {
+            XCUIRemote.shared.press(.down)
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        #endif
         XCTAssertTrue(firstPoster.waitForExistence(timeout: 90), "Saved server did not produce its library after relaunch")
+        Thread.sleep(forTimeInterval: 8)
+        #if os(iOS)
+        // Show the populated library rails together in the portrait store shot.
+        uiSurface.swipeUp()
+        #endif
         capture("01-discover")
-        let shelfY = firstPoster.frame.midY
+        #if os(tvOS)
+        for _ in 0..<3 { XCUIRemote.shared.press(.down); Thread.sleep(forTimeInterval: 0.5) }
+        #else
+        // The billboard and Continue Watching can place Latest below the viewport.
+        // A swipe at its offscreen Y hits the system gesture area instead of the shelf.
+        for _ in 0..<8 where firstPoster.frame.midY > uiSurface.frame.maxY - 120 || firstPoster.frame.width == 0 {
+            uiSurface.swipeUp()
+        }
+        #endif
+        let shelfY = min(max(firstPoster.frame.midY, uiSurface.frame.minY + 160), uiSurface.frame.maxY - 160)
         for _ in 0..<12 {
-            if movie.exists && movie.frame.width > 0 && app.frame.contains(CGPoint(x: movie.frame.midX, y: movie.frame.midY)) { break }
+            if visibleMovie != nil { break }
             #if os(tvOS)
             XCUIRemote.shared.press(.right)
             #else
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width * 0.9, dy: shelfY))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: app.frame.width * 0.1, dy: shelfY)))
+            uiSurface.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: uiSurface.frame.width * 0.9, dy: shelfY - uiSurface.frame.minY))
+                .press(forDuration: 0.05, thenDragTo: uiSurface.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: uiSurface.frame.width * 0.1, dy: shelfY - uiSurface.frame.minY)))
             #endif
         }
         XCTAssertTrue(movie.exists, "The demo movie is absent from the shelf")
-        try activate(movie)
+        // Pin the identifier: a lazy firstMatch query changes when another shelf
+        // scrolls into view, even while the remote is approaching its target.
+        let chosenMovie = visibleMovie ?? movie
+        try activate(element(chosenMovie.identifier))
         XCTAssertTrue(element("detail.play").waitForExistence(timeout: 30))
+        XCTAssertFalse(element("detail.play").label.isEmpty)
         capture("02-title")
         try activate(element("detail.play"))
-        XCTAssertTrue(element("player.close").waitForExistence(timeout: 45))
+        playing = true
+        waitForPlayer(timeout: 45)
         #if os(iOS)
-        XCUIDevice.shared.orientation = .landscapeLeft
+        XCUIDevice.shared.orientation = .portrait
         #endif
         Thread.sleep(forTimeInterval: 20)
         #if os(tvOS)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.playPause)
         #else
-        app.tap()
+        revealPlayerControls()
         #endif
+        if element("player.play-pause").exists, element("player.play-pause").label == "Pause" {
+            #if os(tvOS)
+            try playerControl("player.play-pause")
+            #else
+            element("player.play-pause").tap()
+            #endif
+        }
         capture("04-player")
+        #if os(tvOS)
+        try verifyPicture(in: CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6))
+        for _ in 0..<6 { XCUIRemote.shared.press(.right); Thread.sleep(forTimeInterval: 0.5) }
+        XCUIRemote.shared.press(.select)
+        Thread.sleep(forTimeInterval: 3)
+        #else
+        revealPlayerControls()
         XCTAssertFalse(element("player.play-pause").label.isEmpty)
         if element("player.skip-forward").exists {
-            for _ in 0..<3 { try activate(element("player.skip-forward")) }
+            for _ in 0..<3 { try playerControl("player.skip-forward") }
         }
-        try activate(element("player.close"))
+        #endif
+        try playerControl("player.close")
+        playing = false
         #if os(iOS)
         XCUIDevice.shared.orientation = .portrait
         #endif
@@ -244,8 +473,10 @@ final class AppStoreScreenshotUITests: XCTestCase {
         if resumed != .completed { capture("failure-resume") }
         XCTAssertEqual(resumed, .completed, "Playback did not retain a resume position")
         try activate(element("detail.play"))
-        XCTAssertTrue(element("player.close").waitForExistence(timeout: 30))
-        try activate(element("player.close"))
+        playing = true
+        waitForPlayer(timeout: 30)
+        try playerControl("player.close")
+        playing = false
         #if os(iOS)
         let download = element("detail.download")
         XCTAssertTrue(download.waitForExistence(timeout: 30))
@@ -256,16 +487,30 @@ final class AppStoreScreenshotUITests: XCTestCase {
         if downloaded != .completed { capture("failure-download") }
         XCTAssertEqual(downloaded, .completed, "The demo download did not complete")
         try activate(element("detail.play"))
-        XCTAssertTrue(element("player.close").waitForExistence(timeout: 45))
+        playing = true
+        waitForPlayer(timeout: 45)
         Thread.sleep(forTimeInterval: 3)
-        try activate(element("player.close"))
+        try playerControl("player.close")
+        playing = false
         #endif
         back()
         try tab("Library")
         try tab("Discover")
+        #if os(tvOS)
+        XCUIRemote.shared.press(.down)
+        XCUIRemote.shared.press(.down)
+        #else
+        for _ in 0..<4 { uiSurface.swipeDown() }
+        uiSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            .press(forDuration: 0.1, thenDragTo: uiSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+        #endif
+        Thread.sleep(forTimeInterval: 3)
         capture("06-continue-watching")
         try sources()
-        try activate(button("Live TV"))
+        let addLive = app.buttons.matching(NSPredicate(format:
+            "label == %@ AND NOT (identifier BEGINSWITH %@)", "Live TV", "settings.section.")).firstMatch
+        try activate(addLive)
         #if os(tvOS)
         try activate(element("sources.live.type.m3u"))
         #else
@@ -282,16 +527,70 @@ final class AppStoreScreenshotUITests: XCTestCase {
         liveAdded = true
         try tab("Live")
         Thread.sleep(forTimeInterval: 8)
+        let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'guide.play.' AND label CONTAINS[c] 'Spring'")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "The fixture guide has no playable channels")
+        XCTAssertFalse(channel.label.isEmpty)
+        try activate(channel)
+        // Spring's opening has a dark title fade near 18–20 seconds.
+        // Wait for the film scene before returning to the pinned player.
+        Thread.sleep(forTimeInterval: 30)
+        XCTAssertFalse(element("live.failure").exists)
+        XCTAssertFalse(app.staticTexts["Playback Failed"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "Live playback presented an error alert")
+        #if os(visionOS)
         capture("05-live")
+        // XR Simulator exposes this modal with a zero world transform: XCTest
+        // cannot tap its exit. Relaunch to finish Settings and source cleanup.
+        app.terminate()
+        app.launch()
+        playing = false
+        #endif
+        #if os(tvOS)
+        for _ in 0..<3 where !channel.isHittable {
+            XCUIRemote.shared.press(.menu)
+            Thread.sleep(forTimeInterval: 1)
+        }
+        #elseif !os(macOS) && !os(visionOS)
+        if element("live.picker.back").exists { try activate(element("live.picker.back")) }
+        else { try playerControl("player.close") }
+        #endif
+        Thread.sleep(forTimeInterval: 3)
+        #if !os(visionOS)
+        try verifyPinnedLivePicture()
+        capture("05-live")
+        #endif
+        try tab("Settings")
+        #if !os(tvOS)
+        back()
+        #endif
+        // Settings can retain the Sources subpage, which includes private addresses.
+        // Its screenshot is captured after the demo sources are removed below.
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'add-on'")).firstMatch.exists)
+        // Cleanup uses the same source editor as the owner; it never resets the app.
+        try removeDemoDownloads()
+        try removeDemoSources()
         try tab("Settings")
         #if !os(tvOS)
         back()
         #endif
         capture("09-settings")
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'add-on'")).firstMatch.exists)
-        // Cleanup uses the same source editor as the owner; it never resets the app.
-        try removeDemoDownloads()
-        try removeDemoSources()
+        #if os(visionOS)
+        for _ in 0..<8 where !button("About").exists { app.collectionViews.firstMatch.swipeUp() }
+        #elseif !os(tvOS)
+        for _ in 0..<4 where !button("About").exists { uiSurface.swipeUp() }
+        #endif
+        try activate(button("About"))
+        #if os(tvOS)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "Source Code")).firstMatch.waitForExistence(timeout: 15))
+        #else
+        XCTAssertTrue(element("settings.about.sourceCode").waitForExistence(timeout: 15))
+        #endif
+        try activate(button("Third-Party Notices"))
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "AetherEngine")).firstMatch.waitForExistence(timeout: 15))
+        capture("proof-third-party-notices")
+        back()
     }
 
     private func removeDemoDownloads() throws {
@@ -299,6 +598,7 @@ final class AppStoreScreenshotUITests: XCTestCase {
         guard emptyDownloadsVerified, downloadAttempted else { return }
         try tab("Settings")
         for _ in 0..<3 where !button("Storage").exists { back() }
+        for _ in 0..<4 where !button("Storage").exists { uiSurface.swipeUp() }
         try activate(button("Storage"))
         Thread.sleep(forTimeInterval: 2)
         let remove = button("Delete All Downloads")
@@ -316,17 +616,26 @@ final class AppStoreScreenshotUITests: XCTestCase {
     private func removeDemoSources() throws {
         for name in [serverAdded ? "Home Server" : nil, liveAdded ? "Open Movies" : nil].compactMap({ $0 }) {
             try sources()
-            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+            let host = name == "Home Server" ? demoHost : playlistHost
+            let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", name, host)).firstMatch
+            #if !os(tvOS)
+            for _ in 0..<4 where !row.exists { uiSurface.swipeUp() }
+            #endif
             if row.waitForExistence(timeout: 5) {
                 try activate(row)
+                #if !os(tvOS)
+                for _ in 0..<4 where !button("Delete Source").exists && !button("Remove Source").exists { uiSurface.swipeUp() }
+                #endif
                 let remove = button("Remove Source")
                 if remove.exists { try activate(remove) }
                 else if button("Delete Source").exists { try activate(button("Delete Source")) }
                 let confirm = button("Remove")
                 if confirm.waitForExistence(timeout: 2) { try activate(confirm) }
                 else if button("Delete").waitForExistence(timeout: 2) { try activate(button("Delete")) }
-                if name == "Home Server" { serverAdded = false } else { liveAdded = false }
+                let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: row)
+                XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 15), .completed, "The demo source was not removed")
             }
+            if name == "Home Server" { serverAdded = false } else { liveAdded = false }
         }
     }
 

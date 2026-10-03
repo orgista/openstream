@@ -4420,3 +4420,11 @@ Movies, episodes and whole seasons from your media server can use the existing D
 Verified on the iPad with an authenticated local fixture: download, pause, resumed byte-range transfer, progress while the app was on Home Screen, and playback with the server stopped. The public Jellyfin demo signed in with its path base and showed a public-domain title, but Download was unavailable through the permission check, so its download remains unverified. All added test sources and files were removed and the iPad was shut down.
 
 Verified: 2728 tests in 343 suites, iOS and tvOS Debug builds, and iOS Release with the no-add-ons scan and SDK floors. One existing catalog-fixture/network-stub race passed in isolation and on a full rerun. Screens are in the requested appstore-b folder. No signing changes, uploads or commits.
+
+
+## 2026-10-03 — App Store screenshot polish
+Discover now fills out a media-server library with real genre rows and shows saved resume progress. The demo uses proper Blender posters, including the corrected Tears of Steel poster and added Sprite Fright and Elephants Dream.
+
+Reviewed exports: seven portrait images each for iPhone and iPad, five native 1080p TV images, and five native Vision images. TV Quick Connect and the iOS download/playback cleanup passed. Vision player menu icons are visible; its Live exit cannot be tapped by XCTest on this runtime, so that exit remains unverified.
+
+Mac compiled in Release, but its test runner did not begin testing. Developer mode is disabled; the requested screenshot README records the owner command, retry and signing limitation. No Mac images are claimed. The package gate passed 2733 tests in 345 suites. All simulators and local fixture/capture processes are stopped; demo sources, downloads and identified demo playback history were removed. Changes remain uncommitted; no uploads or signing-file changes.

@@ -2275,3 +2275,10 @@ brought back on screen after the walk had scrolled past their row.
 - [x] iPad AXe: authenticated fixture downloaded, paused, resumed with a byte-range request, advanced while on Home Screen, and played with the fixture server stopped. Both added sources, download and playback history removed; no pending jobs; iPad shut down. Evidence: `~/Developer/openstream-build/e2e-full-2026-10-02/appstore-b/`.
 - [!] Public Jellyfin demo: sign-in with its path base succeeded and a public-domain title opened; Download was unavailable through the permission gate. No bypass attempted; the actual public-demo download remains unverified.
 - [x] Gates: baseline 2718/342; final 2728/343; iOS/tvOS Debug and iOS Release passed, modified app Swift files recompiled. Release add-on scan and SDK floors passed; zero-byte check clean. An existing catalog-fixture/network-stub race passed in isolation and on the full rerun. Changes remain uncommitted.
+
+
+## 2026-10-03 — App Store screenshot polish
+- [x] Media-server Discover: real genre rails, billboard titles and Continue Watching progress; library-store tests plus gate 2733/345. iPhone/iPad portrait status bars and proper Blender posters; 7 images each inspected.
+- [x] TV remote harness: focus geometry and settled tab transitions; Release Quick Connect/browse/play/resume/Live/credits/notices passed, 5 native 1920×1080 images inspected.
+- [x] Vision transport menu glyphs and runner product name fixed; Release flow passed, 5 native 3840×2160 images inspected. XCTest Live modal exit unverified (zero world transform); relaunch completes cleanup.
+- [!] Mac: Release local test build, no-add-on scan and SDK floors pass; runner stalled before XCTest startup. DevToolsSecurity reports disabled; owner enablement command and retry are in ~/Developer/openstream-build/appstore-screenshots/README.md. No Mac screenshot claimed.

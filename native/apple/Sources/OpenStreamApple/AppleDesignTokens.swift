@@ -476,6 +476,9 @@ public extension View {
     func appleBareMenu() -> some View {
         #if os(macOS)
         self.buttonStyle(.plain).menuIndicator(.hidden)
+        #elseif os(visionOS)
+        // The default tinted capsule hides white transport glyphs in space.
+        self.buttonStyle(.plain)
         #else
         self
         #endif

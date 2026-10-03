@@ -167,7 +167,7 @@ struct AppleDiscoverView: View {
         // first draw at launch.
         let localContinueWatching = continueWatching
         let picks = topPicks(continueWatching: localContinueWatching)
-        let heroes = featuredCandidates(continueWatching: withoutRemoved(localContinueWatching), picks: picks)
+        let heroes = featuredCandidates(continueWatching: withoutRemoved(mergedContinueWatching(local: localContinueWatching)), picks: picks)
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
             hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
@@ -561,6 +561,16 @@ struct AppleDiscoverView: View {
                                     picks: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
         var values = continueWatching
         values += picks
+        // A media-server-only library has no add-on catalog sections, but its
+        // titles belong in the billboard just like every other playable title.
+        values += mediaServerLibrary.shelves.flatMap(\.items)
+            .filter { !$0.name.isEmpty && AppleCatalogDiscoveryPolicy.isTitleType($0.type) }
+            .compactMap { item in
+                guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
+                      let source = sourceStore.sources.first(where: { $0.id == reference.sourceID }) else { return nil }
+                return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+                                          item: item, source: source)
+            }
         // Movies and shows only: a tv or channel shelf is no billboard.
         if let section = visibleSections.first(where: { AppleCatalogDiscoveryPolicy.isTitleType($0.catalog.type) }),
            let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
@@ -643,7 +653,7 @@ struct AppleDiscoverView: View {
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
                   let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
-            let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+            let record = mediaServerLibrary.continueWatchingRecord(for: item, source: source)
             return IndexedCatalogItem(record: record, item: item, source: source)
         }
         // The merge keys on `mediaID`, the shelf keys on `record.id`: a local
@@ -868,8 +878,10 @@ struct AppleDiscoverView: View {
         #if DEBUG
         if isFixture { return AppleContinueWatchingFixture.info(index: index, type: value.item.type) }
         #endif
-        return .live(type: value.item.type, recordID: value.record.id, recordProgress: value.record.progress,
-                     store: store)
+        let key = AppleTitleProgressIdentity.key(
+            among: AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id),
+            progress: { store.progress(for: $0) }) ?? value.record.id
+        return .live(type: value.item.type, recordID: key, recordProgress: value.record.progress, store: store)
     }
 
     #if DEBUG
@@ -1356,7 +1368,7 @@ struct AppleDiscoverView: View {
                         item: value.item,
                         sizing: showsProgress ? .continueWatching : .featured,
                         progress: showsProgress ? (AppleContinueWatchingResolver.progress(
-                            isSeries: value.item.type == "series", saved: store.progress(for: value.record.id),
+                            isSeries: value.item.type == "series", saved: store.progress(for: value.item.mediaID) ?? store.progress(for: value.record.id),
                             recordProgress: value.record.progress) ?? 0) : nil)
                 }
                 .contextMenu {

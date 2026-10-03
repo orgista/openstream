@@ -38,6 +38,12 @@ def main():
                     # are the displayed dimensions, without resizing the image.
                     with Image.open(destination) as screenshot:
                         oriented = ImageOps.exif_transpose(screenshot)
+                        # simctl's native Vision PNG has an opaque alpha channel.
+                        # Drop that channel without changing any RGB pixel.
+                        if oriented.mode == "RGBA":
+                            if oriented.getchannel("A").getextrema() != (255, 255):
+                                raise ValueError("Screenshot contains transparent pixels: " + destination.name)
+                            oriented = oriented.convert("RGB")
                         oriented.save(destination)
                     size = subprocess.check_output(
                         ["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(destination)],

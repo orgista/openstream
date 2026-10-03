@@ -13,16 +13,62 @@ import pathlib
 import plistlib
 import subprocess
 import tempfile
+import contextlib
+import http.server
+import threading
 
+
+
+@contextlib.contextmanager
+def native_capture(simulator):
+    """A loopback-only capture service owned by this foreground test run."""
+    if not simulator:
+        yield None
+        return
+
+    class Capture(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.path != "/capture":
+                self.send_error(404)
+                return
+            with tempfile.TemporaryDirectory(prefix="openstream-native-capture-", dir="/tmp") as scratch:
+                path = pathlib.Path(scratch) / "frame.png"
+                result = subprocess.run(["xcrun", "simctl", "io", simulator, "screenshot", str(path)],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if result.returncode:
+                    self.send_error(503, "Simulator capture failed")
+                    return
+                data = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Capture)
+    thread = threading.Thread(target=server.serve_forever, name="native-screenshot-capture")
+    thread.start()
+    try:
+        yield "http://127.0.0.1:" + str(server.server_port) + "/capture"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xctestrun", required=True, type=pathlib.Path)
     parser.add_argument("--destination", required=True)
+    parser.add_argument("--capture-simulator", help="Attach native Vision compositor captures at XCTest checkpoints")
     parser.add_argument("--server", required=True)
     parser.add_argument("--playlist", required=True)
     parser.add_argument("--credentials-file", required=True)
     parser.add_argument("--credentials-ssh")
+    parser.add_argument("--clean-stale-demo", action="store_true",
+                        help="Remove only known demo-name/host sources left by an interrupted demo pass")
     parser.add_argument("--result", required=True, type=pathlib.Path)
     parser.add_argument("--log", required=True, type=pathlib.Path)
     args = parser.parse_args()
@@ -36,6 +82,17 @@ def main():
     values = dict(line.split("=", 1) for line in credentials.splitlines() if "=" in line)
     config = {"OPENSTREAM_DEMO_SERVER": args.server, "OPENSTREAM_TEST_M3U": args.playlist,
               "OPENSTREAM_DEMO_USER": values["username"], "OPENSTREAM_DEMO_PASSWORD": values["password"]}
+    if args.clean_stale_demo:
+        config["OPENSTREAM_DEMO_CLEAN_STALE"] = "YES"
+    if args.capture_simulator and args.destination != "id=" + args.capture_simulator:
+        parser.error("The capture simulator must be the test destination")
+    with native_capture(args.capture_simulator) as capture_url:
+        if capture_url:
+            config["OPENSTREAM_DEMO_CAPTURE_URL"] = capture_url
+        return run_test(args, config)
+
+
+def run_test(args, config):
     # Xcode mangles literal URL values in runner environments. One hex JSON value
     # preserves URLs and passwords exactly; it remains private, never an attachment.
     encoded = json.dumps(config).encode().hex()

@@ -81,6 +81,17 @@ public final class AppleMediaServerLibraryStore {
         index[reference]
     }
     
+    /// Keep the server's resume fraction on the shelf record as well as its title page.
+    public func continueWatchingRecord(for catalogItem: AppleCatalogItem, source: AppleSource) -> AppleMediaRecord {
+        var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: catalogItem)
+        guard let reference = AppleMediaServerItemReference.parse(catalogItem.mediaID),
+              let item = index[reference], let data = item.userData, !data.played,
+              let duration = item.runtimeSeconds, duration.isFinite, duration > 0,
+              data.positionSeconds.isFinite, data.positionSeconds > 0 else { return record }
+        record.progress = min(data.positionSeconds / duration, 1)
+        return record
+    }
+
     public func source(for reference: AppleMediaServerItemReference) -> AppleSource? {
         sourceIndex[reference.sourceID]
     }
@@ -198,6 +209,17 @@ public final class AppleMediaServerLibraryStore {
         )
     }
     
+    /// Genre rails from the loaded library page: no extra requests and no invented categories.
+    nonisolated static func genreShelves(items: [AppleCatalogItem], sourceID: UUID, libraryID: String) -> [Shelf] {
+        let genres = Set(items.flatMap { $0.genres ?? [] }.filter { !$0.isEmpty }).sorted()
+        return genres.compactMap { genre in
+            let matches = items.filter { $0.genres?.contains(genre) == true }
+            guard matches.count >= 2 else { return nil }
+            return Shelf(id: "ms:\(sourceID.uuidString.lowercased()):\(libraryID):genre:\(genre)",
+                         title: genre, sourceID: sourceID, items: matches)
+        }
+    }
+
     public func reload(sources: [AppleSource], session: @MainActor @Sendable (AppleSource) throws -> AppleMediaServerSession?) async {
         generation += 1
         let currentGeneration = generation
@@ -294,6 +316,9 @@ public final class AppleMediaServerLibraryStore {
                                 items: shelfItems,
                                 rawItems: latestItems
                             ))
+                            rawShelves += Self.genreShelves(items: shelfItems, sourceID: source.id, libraryID: library.id)
+                                .map { RawShelf(id: $0.id, title: $0.title, sourceID: $0.sourceID,
+                                               items: $0.items, rawItems: []) }
                         }
                         
                         return SourceResult(

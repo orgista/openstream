@@ -6,6 +6,21 @@ import Foundation
 @MainActor
 struct AppleMediaServerLibraryStoreTests {
 
+    @Test("Genre shelves use real library metadata and skip singleton genres")
+    func genreShelves() {
+        let sourceID = UUID()
+        let items = [
+            AppleCatalogItem(mediaID: "one", type: "movie", name: "One", genres: ["Animation", "Adventure"]),
+            AppleCatalogItem(mediaID: "two", type: "movie", name: "Two", genres: ["Animation", "Animation"]),
+            AppleCatalogItem(mediaID: "three", type: "movie", name: "Three", genres: ["Drama"])
+        ]
+        let shelves = AppleMediaServerLibraryStore.genreShelves(items: items, sourceID: sourceID, libraryID: "movies")
+        #expect(shelves.map(\.title) == ["Animation"])
+        #expect(shelves.first?.items.map(\.mediaID) == ["one", "two"])
+        #expect(shelves.first?.sourceID == sourceID)
+        #expect(AppleMediaServerLibraryStore.genreShelves(items: [], sourceID: sourceID, libraryID: "movies").isEmpty)
+    }
+
     @Test("Reference parse round trips mediaID and rejects garbage")
     func testReferenceParse() {
         let sourceID = UUID()
@@ -56,8 +71,8 @@ struct AppleMediaServerLibraryStoreTests {
                 json = """
                 {
                     "Items": [
-                        { "Id": "item1", "Name": "Resume 1", "Type": "Movie" },
-                        { "Id": "item1", "Name": "Resume 1", "Type": "Movie" }
+                        { "Id": "item1", "Name": "Resume 1", "Type": "Movie", "RunTimeTicks": 10000000000, "UserData": { "PlaybackPositionTicks": 2000000000, "Played": false } },
+                        { "Id": "item1", "Name": "Resume 1", "Type": "Movie", "RunTimeTicks": 10000000000, "UserData": { "PlaybackPositionTicks": 2000000000, "Played": false } }
                     ],
                     "TotalRecordCount": 2
                 }
@@ -105,7 +120,11 @@ struct AppleMediaServerLibraryStoreTests {
         #expect(items[1].posterURL == nil)
         
         #expect(store.continueWatching.count == 1)
-        
+        let resumedItem = try #require(store.continueWatching.first)
+        let resumedRecord = store.continueWatchingRecord(for: resumedItem, source: source1)
+        #expect(resumedRecord.progress == 0.2)
+        #expect(resumedRecord.id == AppleMediaIngestion.catalogRecord(instanceID: source1ID, item: resumedItem).id)
+
         let ref = AppleMediaServerItemReference(sourceID: source1ID, itemID: "item2")
         #expect(store.item(for: ref) != nil)
         #expect(store.source(for: ref)?.id == source1ID)
