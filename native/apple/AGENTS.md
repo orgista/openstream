@@ -83,14 +83,15 @@ except the full-screen player, which follows the device orientation and also pla
 
 ## 5. Architecture traps (each one cost an hour)
 - **Add-on distribution boundary:** `OPENSTREAM_ADDONS` is defined for Debug in the app project and
-  SwiftPM module/tests. App Store and TestFlight Release builds leave it undefined. Manifest,
+  SwiftPM module/tests. App Store Release builds leave it undefined (owner 2026-10-02: TestFlight
+  builds for internal testers KEEP add-ons — archive them with the override below; never submit that build to App Review). Manifest,
   catalog, meta, stream and add-on subtitle transports and their add/edit UI are compiled out.
   Saved unsupported source payloads are ignored and retained in storage and backups.
-  Only for a sideload or future Mac Developer-ID Release build, append the single xcodebuild
+  For internal TestFlight, sideload or the Mac Developer-ID download, append the single xcodebuild
   setting `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'` (equivalently,
   `SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) OPENSTREAM_ADDONS` in a local xcconfig).
   For the developer sweep or SwiftPM Release, use `-Xswiftc -DOPENSTREAM_ADDONS`.
-  Never pass either override to an App Store/TestFlight archive. Run
+  Never pass either override to an App Store submission archive. Run
   `bash scripts/check-no-addons-in-release.sh` before shipping (SHIP-CHECKLIST.md §4).
 
 - The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
