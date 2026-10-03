@@ -64,6 +64,8 @@ import Testing
         defaults.set(original, forKey: "sources")
         let store = AppleSourceStore(defaults: defaults, storageKey: "sources", keychain: ReleasePreservationCredentials())
         #expect(store.sources.isEmpty)
+        #expect(store.credentialError == nil)
+        #expect(AppleDiscoverEmptyState(sources: store.sources, catalogFailureCount: 0, hasSourceError: true) == .noSources)
         #expect(defaults.data(forKey: "sources") == original)
         #expect(store.preservedConfigurationSources.count == 1)
         #expect(AppleWebManagementPage.defaultSourceType == "m3u")

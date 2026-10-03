@@ -10,11 +10,15 @@ import Foundation
 public enum AppleTitleProgressIdentity {
     /// The page's own record id first, then the IMDb-keyed record (from the
     /// item or the id the page resolved), then the title-and-year record.
+    /// Media servers save playback under their source/item reference instead.
     public static func candidates(item: AppleCatalogItem, sourceID: AppleSource.ID,
                                   resolvedMediaID: String? = nil) -> [String] {
         let kind: AppleMediaKind = item.type == "series" ? .series : .movie
         let year = item.releaseInfo.flatMap { Int($0.prefix(4)) }
         var keys = [AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: item).id]
+        if let serverItem = AppleMediaServerItemReference.parse(item.mediaID) {
+            keys.append(serverItem.mediaID)
+        }
         let imdb = [item.imdbID, item.mediaID, resolvedMediaID]
             .compactMap { $0 }
             .first(where: AppleStremioMetadataClient.isIMDBIdentifier)

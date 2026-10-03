@@ -25,6 +25,14 @@ public enum AppleDiscoverEmptyState: Equatable, Sendable {
         }
     }
 
+    /// Only active catalog sources can turn a source credential failure into a
+    /// catalog error. Live TV and network credentials belong to their own flows;
+    /// retained add-on payloads are absent from `sources` in App Store builds.
+    public init(sources: [AppleSource], catalogFailureCount: Int, hasSourceError: Bool) {
+        self.init(sourceCount: sources.count, catalogFailureCount: catalogFailureCount,
+                  hasSourceError: hasSourceError && sources.contains { $0.isAddon && $0.isEnabled })
+    }
+
     /// Whether an empty Discover is still waiting for its catalogs rather
     /// than empty: sources exist and either a load is running or the
     /// current sources have not finished their first refresh yet. After a

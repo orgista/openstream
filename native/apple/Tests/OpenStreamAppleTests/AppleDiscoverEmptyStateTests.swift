@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import OpenStreamApple
 
@@ -52,4 +53,22 @@ struct AppleDiscoverEmptyStateTests {
         #expect(!AppleDiscoverEmptyState.couldNotLoad.offersICloudRestore(.available))
         #expect(!AppleDiscoverEmptyState.nothingToShow.offersICloudRestore(.available))
     }
+}
+
+@Suite struct AppleDiscoverSourceErrorScopeTests {
+    @Test func nonCatalogCredentialFailureDoesNotBecomeCatalogError() {
+        let source = AppleSource(kind: .nas, name: "Home Server", url: URL(string: "https://fixture.example/share")!)
+        let state = AppleDiscoverEmptyState(sources: [source], catalogFailureCount: 0, hasSourceError: true)
+        #expect(state == .nothingToShow)
+        #expect(state.offersRetry == false)
+    }
+    @Test func ignoredSourcesShowWelcomeDespiteCredentialFailure() {
+        #expect(AppleDiscoverEmptyState(sources: [], catalogFailureCount: 0, hasSourceError: true) == .noSources)
+    }
+    #if OPENSTREAM_ADDONS
+    @Test func activeCatalogCredentialFailureStillOffersRetry() {
+        let source = AppleSource(kind: .stremio, name: "Catalog", url: URL(string: "https://fixture.example/manifest.json")!)
+        #expect(AppleDiscoverEmptyState(sources: [source], catalogFailureCount: 0, hasSourceError: true) == .couldNotLoad)
+    }
+    #endif
 }

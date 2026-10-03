@@ -1465,7 +1465,7 @@ struct AppleDiscoverView: View {
     @ViewBuilder
     private var discoverEmptyState: some View {
         let state = AppleDiscoverEmptyState(
-            sourceCount: sourceStore.sources.count,
+            sources: sourceStore.sources,
             catalogFailureCount: catalogStore.partialErrors.count,
             hasSourceError: sourceStore.credentialError != nil
         )
