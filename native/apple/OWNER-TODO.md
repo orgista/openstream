@@ -25,11 +25,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
-- [ ] **Ship 15 (owner 2026-10-03, TestFlight, all 4 platforms, test first):** running on Codex per SHIP-CHECKLIST —
-      add-on builds go to internal TestFlight only if "TraceEnabled" turns out to be an external (reviewed) group.
-- [ ] **CarPlay video while parked (owner ask 2026-10-03):** needs Apple's new CarPlay video entitlement (request it in
-      the developer account for com.orgista.openstream), then we build the CarPlay scene and test in Xcode's CarPlay
-      simulator; plays only in Park and only in cars whose maker enabled it. YOU: request the entitlement.
+- [ ] **CarPlay (owner ask 2026-10-03) — not in build 15:** YOU request at developer.apple.com/contact/carplay/ for
+      com.orgista.openstream: Video (`com.apple.developer.carplay-video`, iOS 27+) AND Audio (so it appears in every
+      CarPlay car; video-only shows only in cars with parked video). After Apple grants it: CarPlay scene + icon,
+      parked video, Live TV/audio while driving, gate video behind a capability check (iOS 27 beta blank-screen bug
+      on non-video head units), test in CarPlay Simulator. Research: muse-results/34-carplay-video-parked.md.
+- [x] **Build 15 shipped 2026-10-03** to TestFlight Internal (iOS, tvOS, visionOS, macOS; add-ons kept), all VALID —
+      see DELIVERIES.md.
 - [ ] **App Store push (owner 2026-10-02: assume the bridge works, get the app ready to publish, then move on to the
       next app).** Running: Codex batch A (server discovery on your network, Quick Connect as the default on Apple TV,
       Dolby Vision/HDR/SDR + audio line in player info, Release first-run leads with Media Server); work Claude
