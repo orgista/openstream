@@ -91,31 +91,33 @@ struct AppleSourcesSettingsView: View {
 
     var body: some View {
         AppleSettingsCollection {
-            Section {
+            Section("Add") {
+                NavigationLink(value: AppleSourceRoute.addMediaServer) {
+                    AppleTVNavigationLabel("Media Server", systemImage: "server.rack")
+                }
+                .appleTVReadableFocus()
+                NavigationLink(value: AppleSourceRoute.addNetworkShare) {
+                    AppleTVNavigationLabel("Network Share", systemImage: "externaldrive.badge.plus")
+                }
+                .appleTVReadableFocus()
+                NavigationLink(value: AppleSourceRoute.addLiveTV) {
+                    AppleTVNavigationLabel("Live TV", systemImage: "dot.radiowaves.left.and.right")
+                }
+                .appleTVReadableFocus()
                 NavigationLink(value: AppleSourceRoute.addFiles) {
-                    AppleTVNavigationLabel("Add Files", systemImage: "folder.badge.plus")
+                    AppleTVNavigationLabel("Files", systemImage: "folder.badge.plus")
                 }
                 .appleTVReadableFocus()
                 NavigationLink(value: AppleSourceRoute.addInstance) {
-                    AppleTVNavigationLabel("Add Instance", systemImage: "plus.circle")
+                    AppleTVNavigationLabel("Instance", systemImage: "plus.circle")
                 }
                 .appleTVReadableFocus()
-
 #if OPENSTREAM_ADDONS
                 NavigationLink(value: AppleSourceRoute.addManifest) {
                     AppleTVNavigationLabel("Add Catalog", systemImage: "square.stack.3d.up")
                 }
                 .appleTVReadableFocus()
 #endif
-                NavigationLink(value: AppleSourceRoute.addLiveTV) {
-                    AppleTVNavigationLabel("Add Live TV", systemImage: "dot.radiowaves.left.and.right")
-                }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.addMediaServer) {
-                    AppleTVNavigationLabel("Add Media Server", systemImage: "server.rack")
-                }
-                .appleTVReadableFocus()
-
                 NavigationLink(value: AppleSourceRoute.webManagement) {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }

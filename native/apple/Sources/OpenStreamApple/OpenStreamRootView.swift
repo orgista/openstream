@@ -512,6 +512,12 @@ public struct OpenStreamRootView: View {
             else { selectedTab = OpenStreamTabVisibility.selection(current: selectedTab, visible: visibleTabs) }
         }
         .environment(\.appleOpenSourcesSettings, AppleOpenSourcesSettingsAction { openSourcesSettings() })
+        .environment(\.appleMediaServerConnected, AppleMediaServerConnectionAction {
+            // Media-server libraries are rendered by Discover, not the local
+            // files tab. Clear its old detail stack before showing the shelves.
+            navigationPaths[.home] = NavigationPath()
+            selectedTab = .home
+        })
         .environment(\.appleSettingsNavigator, settingsNavigator)
         .preferredColorScheme(.dark)
         #if !os(tvOS)
@@ -540,10 +546,7 @@ public struct OpenStreamRootView: View {
         )) {
             AppleFirstRunGuidanceContainer {
                 AppleFirstRunGuidanceView {
-                    // The button says Open Sources. Off visionOS it only
-                    // switched tabs and left the viewer on the Settings root,
-                    // one row short of the thing they asked for (2026-09-19).
-                    openSourcesSettings()
+                    openMediaServerSetup()
                     firstRunGuidanceSeen = true
                     #if DEBUG
                     // The debug route forces the card; without this the card
@@ -635,6 +638,14 @@ public struct OpenStreamRootView: View {
                 navigationPaths[.settings] = path
             }
         )
+    }
+
+    private func openMediaServerSetup() {
+        selectedTab = .settings
+        var path = NavigationPath()
+        path.append(AppleSettingsRoute.sources)
+        path.append(AppleSourceRoute.addMediaServer)
+        navigationPaths[.settings] = path
     }
 
     /// Settings › Sources, in place of whatever the Settings tab had open.
@@ -855,7 +866,7 @@ private struct AppleFirstRunGuidanceView: View {
                 AppleAttributionInfoButton()
             }
             Spacer(minLength: 0)
-            Button("Open Sources", action: openSettings)
+            Button("Connect Media Server", action: openSettings)
                 .buttonStyle(.brandPrimary)
             Button("Not Now") { dismiss() }
                 .buttonStyle(.brandSecondary)
@@ -891,7 +902,7 @@ private struct AppleFirstRunGuidanceView: View {
             // The same gap the billboard uses, which is wide enough that a
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {
-                Button("Open Sources", action: openSettings)
+                Button("Connect Media Server", action: openSettings)
                     .buttonStyle(.brandPrimary)
                 Button("Not Now") { dismiss() }
                     .buttonStyle(.brandSecondary)

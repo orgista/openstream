@@ -87,6 +87,25 @@ struct AppleMediaServerTests {
 struct AppleMediaServerQuickConnectTests {
     let baseURL = URL(string: "https://fixture.example/jellyfin/")!
 
+    @Test(arguments: [404, 405])
+    func quickConnectUnsupportedFallsBackToPassword(_ status: Int) async throws {
+        let client = AppleMediaServerClient(loader: { request in
+            let url = try #require(request.url)
+            return (Data(), try #require(HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)))
+        })
+        #expect(try await client.quickConnectEnabled(baseURL: baseURL) == false)
+    }
+
+    @Test func quickConnectMalformedSupportIsNotEnabled() async throws {
+        let client = AppleMediaServerClient(loader: { request in
+            let url = try #require(request.url)
+            return (Data("unknown".utf8), try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        })
+        await #expect(throws: AppleMediaServerError.malformedResponse) {
+            try await client.quickConnectEnabled(baseURL: baseURL)
+        }
+    }
+
     @Test("quickConnect flows")
     func testQuickConnect() async throws {
         let client = AppleMediaServerClient(loader: { req in

@@ -1204,7 +1204,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -1243,7 +1243,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -1281,7 +1281,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_PREPROCESS = YES;
@@ -1313,7 +1313,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_PREPROCESS = YES;
@@ -1346,7 +1346,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_PREPROCESS = YES;
@@ -1377,7 +1377,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_PREPROCESS = YES;
@@ -1415,7 +1415,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1448,7 +1448,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream uses your local network to manage streaming sources from a web browser.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OpenStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

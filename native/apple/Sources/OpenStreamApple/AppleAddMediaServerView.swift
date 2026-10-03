@@ -59,6 +59,10 @@ public struct AppleMediaServerFormPolicy {
         }
     }
 
+    public static func prefersQuickConnect(isTV: Bool, kind: AppleMediaServerKind, enabled: Bool) -> Bool {
+        isTV && kind == .jellyfin && enabled
+    }
+
     public static let quickConnectPollInterval: Duration = .seconds(3)
 }
 
@@ -90,6 +94,7 @@ private enum EmbyMode: String, Hashable, CaseIterable {
 @MainActor
 struct AppleAddMediaServerView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appleMediaServerConnected) private var mediaServerConnected
     let sourceStore: AppleSourceStore
     
     @State private var plexModel: PlexSignInModel
@@ -122,6 +127,19 @@ struct AppleAddMediaServerView: View {
     /// Each press runs once; a task rerun on reappear must not repeat it.
     @State private var actionLedger = AppleOneShotRequestLedger()
     
+    @State private var discoveredServers: [AppleDiscoveredMediaServer] = []
+    @State private var quickConnectSupported = false
+    @State private var usePassword = false
+    @State private var connectDiscoveredServer = false
+
+    private var showPassword: Bool {
+        #if os(tvOS)
+        return !AppleMediaServerFormPolicy.prefersQuickConnect(isTV: true, kind: kind, enabled: quickConnectSupported) || usePassword
+        #else
+        return true
+        #endif
+    }
+
     @State private var ticket: AppleQuickConnectTicket?
     @State private var quickConnectTask: Task<Void, Never>?
     
@@ -141,13 +159,47 @@ struct AppleAddMediaServerView: View {
     }
     
     var body: some View {
-        #if os(tvOS)
-        tvOSBody
-        #else
-        standardBody
-        #endif
+        Group {
+            #if os(tvOS)
+            tvOSBody
+            #else
+            standardBody
+            #endif
+        }
+        .task { discoveredServers = await AppleMediaServerDiscovery.discover() }
+        .task(id: "\(kind.rawValue)|\(url)") { await checkQuickConnectSupport() }
     }
-    
+
+    private func selectDiscoveredServer(_ server: AppleDiscoveredMediaServer) {
+        cancelQuickConnect()
+        kind = .jellyfin
+        name = server.name
+        url = server.baseURL.absoluteString
+        usePassword = false
+        connectDiscoveredServer = true
+    }
+
+    private func checkQuickConnectSupport() async {
+        cancelQuickConnect()
+        connectionAction = nil
+        quickConnectSupported = false
+        usePassword = false
+        guard kind == .jellyfin, let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
+        do {
+            try await Task.sleep(for: .milliseconds(600))
+            let enabled = try await client.quickConnectEnabled(baseURL: baseURL)
+            try Task.checkCancellation()
+            quickConnectSupported = enabled
+            #if os(tvOS)
+            let autoConnect = true
+            #else
+            let autoConnect = connectDiscoveredServer
+            #endif
+            connectDiscoveredServer = false
+            if enabled && autoConnect { connectionAction = .connect(UUID()) }
+        } catch { /* Password sign-in remains available. */ }
+    }
+
     private var nameField: some View {
         TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
             .accessibilityLabel("Name")
@@ -212,6 +264,16 @@ struct AppleAddMediaServerView: View {
         let metrics = AppleTVSettingsMetrics.standard
         return ScrollView {
             VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                if !discoveredServers.isEmpty {
+                    AppleTVFormGroup("Found on your network") {
+                        ForEach(discoveredServers) { server in
+                            Button(server.name) { selectDiscoveredServer(server) }
+                                .buttonStyle(.brandSecondary)
+                                .accessibilityIdentifier("sources.mediaServer.discovered.\(server.id)")
+                        }
+                    }
+                    .focusSection()
+                }
                 VStack(alignment: .leading, spacing: metrics.groupSpacing) {
                     AppleTVFormField("Server") {
                         HStack(spacing: metrics.iconSpacing) {
@@ -259,6 +321,7 @@ struct AppleAddMediaServerView: View {
                                     .focused($focusedField, equals: .url)
                                     .accessibilityIdentifier("sources.mediaServer.url")
                             }
+                            if showPassword {
                             AppleTVFormField("Username") {
                                 usernameField
                                     .focused($focusedField, equals: .username)
@@ -267,6 +330,7 @@ struct AppleAddMediaServerView: View {
                             AppleTVFormField("Password") {
                                 passwordField
                                     .accessibilityIdentifier("sources.mediaServer.password")
+                            }
                             }
                         }
                     }
@@ -283,7 +347,7 @@ struct AppleAddMediaServerView: View {
                             .accessibilityIdentifier("sources.mediaServer.embySignIn")
                     }
                     .focusSection()
-                } else {
+                } else if showPassword && kind != .plex {
                     HStack(spacing: metrics.pillSpacing) {
                         Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
                             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
@@ -297,7 +361,7 @@ struct AppleAddMediaServerView: View {
                     .focusSection()
                 }
                 
-                if kind == .jellyfin {
+                if kind == .jellyfin && quickConnectSupported {
                     VStack(alignment: .leading, spacing: metrics.groupSpacing) {
                         AppleTVFormGroup("Quick Connect") {
                             HStack(spacing: metrics.pillSpacing) {
@@ -306,10 +370,18 @@ struct AppleAddMediaServerView: View {
                                     .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
                                     .accessibilityIdentifier("sources.mediaServer.quickConnect")
                             }
+                            if !showPassword {
+                                Button("Use Password") {
+                                    cancelQuickConnect()
+                                    usePassword = true
+                                }
+                                .buttonStyle(.brandSecondary)
+                                .accessibilityIdentifier("sources.mediaServer.usePassword")
+                            }
                             if let ticket {
                                 AppleTVFormField("Code") {
                                     Text(ticket.code)
-                                        .font(.system(.title2, design: .monospaced))
+                                        .font(.system(size: 64, weight: .semibold, design: .monospaced))
                                         .accessibilityIdentifier("sources.mediaServer.quickConnect.code")
                                 }
                                 HStack(spacing: metrics.pillSpacing) {
@@ -439,6 +511,15 @@ struct AppleAddMediaServerView: View {
     #else
     private var standardBody: some View {
         Form {
+            if !discoveredServers.isEmpty {
+                Section("Found on your network") {
+                    ForEach(discoveredServers) { server in
+                        Button(server.name) { selectDiscoveredServer(server) }
+                            .foregroundStyle(.primary)
+                            .accessibilityIdentifier("sources.mediaServer.discovered.\(server.id)")
+                    }
+                }
+            }
             Section {
                 Picker("Server", selection: $kind) {
                     Text(AppleMediaServerKind.jellyfin.title).tag(AppleMediaServerKind.jellyfin)
@@ -510,7 +591,7 @@ struct AppleAddMediaServerView: View {
                 // edge. Quick Connect joins them, so its section only appears
                 // once there is a code to show.
                 AppleFormActionSection {
-                    if kind == .jellyfin { quickConnectButton }
+                    if kind == .jellyfin && quickConnectSupported { quickConnectButton }
                     testConnectionButton
                     saveConnectionButton
                 }
@@ -525,7 +606,7 @@ struct AppleAddMediaServerView: View {
                 .listRowBackground(Color.clear)
                 #endif
 
-                if kind == .jellyfin, AppleFormActionLayout.current == .formRow || ticket != nil {
+                if kind == .jellyfin && quickConnectSupported, AppleFormActionLayout.current == .formRow || ticket != nil {
                     Section("Quick Connect") {
                         #if !os(macOS)
                         quickConnectButton
@@ -760,6 +841,7 @@ struct AppleAddMediaServerView: View {
             }
             
         case .connect(_):
+            cancelQuickConnect()
             guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
             do {
                 let enabled = try await client.quickConnectEnabled(baseURL: baseURL)
@@ -769,25 +851,26 @@ struct AppleAddMediaServerView: View {
                     return
                 }
                 let newTicket = try await client.quickConnectInitiate(baseURL: baseURL)
+                try Task.checkCancellation()
+                guard kind == .jellyfin, AppleMediaServerFormPolicy.normalizedBaseURL(url) == baseURL else { return }
                 self.ticket = newTicket
                 
+                quickConnectTask?.cancel()
                 quickConnectTask = Task {
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: AppleMediaServerFormPolicy.quickConnectPollInterval)
-                        if Task.isCancelled { break }
-                        do {
-                            let authenticated = try await client.quickConnectState(baseURL: baseURL, secret: newTicket.secret)
-                            if authenticated {
-                                let session = try await client.authenticateWithQuickConnect(baseURL: baseURL, secret: newTicket.secret)
-                                let info = try? await client.publicInfo(baseURL: baseURL)
-                                let finalName = AppleMediaServerFormPolicy.defaultName(kind: .jellyfin, typedName: name, publicInfo: info, host: baseURL.host)
-                                _ = try sourceStore.addMediaServer(kind: .jellyfin, name: finalName, session: session)
-                                dismiss()
-                                break
-                            }
-                        } catch {
-                            // ignore errors during poll
-                        }
+                    do {
+                        let session = try await client.waitForQuickConnect(baseURL: baseURL, ticket: newTicket)
+                        let info = try? await client.publicInfo(baseURL: baseURL)
+                        try Task.checkCancellation()
+                        guard kind == .jellyfin, AppleMediaServerFormPolicy.normalizedBaseURL(url) == baseURL else { return }
+                        let finalName = AppleMediaServerFormPolicy.defaultName(kind: .jellyfin, typedName: name, publicInfo: info, host: baseURL.host)
+                        _ = try sourceStore.addMediaServer(kind: .jellyfin, name: finalName, session: session)
+                        dismiss()
+                        mediaServerConnected?()
+                    } catch {
+                        if Task.isCancelled { return }
+                        ticket = nil
+                        isError = true
+                        message = "Quick Connect could not finish. Try again or use your password."
                     }
                 }
             } catch let err as AppleMediaServerError {

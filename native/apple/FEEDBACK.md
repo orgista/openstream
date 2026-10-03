@@ -4402,3 +4402,11 @@ Checked on the review iPad with physical taps and the local Live fixture. Packag
 App Store and TestFlight builds now compile out add-on fetching and controls. Debug builds keep them, and a single documented setting enables them for sideload or future Developer-ID Release builds. Saved add-ons and their backup credentials stay intact. Local/network files, media servers, Live TV, TMDB and Watch On remain available in both.
 
 Verified: 2,707 tests in 338 suites, iOS and tvOS Debug builds, and the iOS Release binary scan and SDK floors. No simulator was launched.
+
+
+## 2026-10-03 — Media-server setup, batch A
+The welcome button now opens Media Server setup. Sources lists Media Server, Network Share and Live TV first. Supported Jellyfin servers use Quick Connect first on Apple TV, with a large code and password sign-in available. The iPad received a real demo-server code, which was cancelled without saving a source. Successful Quick Connect opens the server libraries on Discover.
+
+Nearby Jellyfin servers can be found automatically, but physical iPhones and iPads still need Apple's broadcast-network permission added through the signing setup. Signing was left unchanged. The default playback engine supplies the output format to the existing player Info panel; the Native AVPlayer fallback still cannot report a confirmed output range and leaves it out.
+
+Verified: 2718 tests in 342 suites, iOS and tvOS Debug builds, iPad Release build, Release no-addons scan and SDK floors. Welcome and Add-flow screenshots are in the requested appstore-a evidence folder. Changes remain uncommitted; both simulators are shut down.

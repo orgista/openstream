@@ -2258,3 +2258,11 @@ brought back on screen after the walk had scrolled past their row.
 - [F] Inline catch-up: Watch Live sits bottom-left on system material, clear of top-right mute; label is Watch Live; hides with existing controls. iPad capture and return-to-live tap.
 - [F] Full-screen catch-up: Watch Live in existing transport/Channels strip; Back to guide closes. Physical taps verified with local IPTV fixture.
 - Gate: 2705 tests / 337 suites; iOS and generic tvOS simulator builds passed, all nine edited source files confirmed recompiled. Captures: `~/Developer/openstream-build/e2e-full-2026-10-02/ipad-fixes/`; samples: `/tmp/ipad-before.sample`, `/tmp/ipad-dune-final.sample`.
+
+
+## 2026-10-03 — App Store readiness, batch A
+- [!] Jellyfin UDP discovery and top-of-form server choices implemented; physical iOS/iPadOS still need Apple's multicast entitlement (signing unchanged). Announcement validation and preference policy covered by `AppleMediaServerDiscoveryTests`.
+- [x] Quick Connect: tvOS defaults to supported servers, large code, password secondary; bounded/cancellable polling and success opens Discover's server libraries. Demo server issued a code on Release iPad; cancelled without saving. Approval, expiry, cancellation and unsupported responses tested. TV physical taps blocked by AXe orientation probe; default policy unit-tested and tvOS compiled.
+- [!] Playback output line uses Aether's presented video format and selected audio in AVKit Info. Native AVPlayer output range remains unknown and omitted; no hardware HDR confirmation. `ApplePlaybackOutputInfoTests` covers all five labels.
+- [x] Release welcome opens Media Server; Sources Add order is Media Server, Network Share, Live TV. Release iPad physical taps and three screenshots verified; no add-on copy in these screens. Evidence: `~/Developer/openstream-build/e2e-full-2026-10-02/appstore-a/` (owner-requested location).
+- [x] Gates: baseline 2707/338; final 2718/342; iOS/tvOS Debug and iPad Release passed, all ten changed app Swift files recompiled. `check-no-addons-in-release.sh` and SDK floors passed; zero-byte check clean. Generated local-network description verified. No signing changes or uploads; simulators shut down, no new saved sources.

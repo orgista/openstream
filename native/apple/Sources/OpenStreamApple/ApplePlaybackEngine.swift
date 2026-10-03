@@ -210,6 +210,7 @@ public protocol ApplePlaybackEngine: AnyObject {
     /// all. Nil while unknown, and on routes that cannot report it; callers
     /// fall back to `AppleVideoFitting.assumedAspect`.
     var videoSize: CGSize? { get }
+    var outputInfo: ApplePlaybackOutputInfo { get }
     /// Decoded cues for the active subtitle track, for the app to draw: the
     /// transport overlay on `.surface`, `AppleStockPlayerCueLayer` over the
     /// stock player on `.avPlayer`. The native engine leaves it empty; AVKit
@@ -258,6 +259,7 @@ public extension ApplePlaybackEngine {
     var activeAudioTrackID: Int? { nil }
     /// Most routes cannot report this; the fitting falls back to 16:9.
     var videoSize: CGSize? { nil }
+    var outputInfo: ApplePlaybackOutputInfo { ApplePlaybackOutputInfo(dynamicRange: nil) }
 
     /// Engines that know nothing about their seekable span report none, and
     /// the transport treats the stream as live-edge-only.

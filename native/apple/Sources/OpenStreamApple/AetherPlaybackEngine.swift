@@ -627,6 +627,25 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         rebuildSubtitleTracks()
     }
 
+    public var outputInfo: ApplePlaybackOutputInfo {
+        guard (phase == .playing || phase == .paused), route != .none, route != .audioOnly else { return ApplePlaybackOutputInfo(dynamicRange: nil) }
+        let range: ApplePlaybackOutputInfo.DynamicRange
+        switch aether.videoFormat {
+        case .sdr: range = .sdr
+        case .hdr10: range = .hdr10
+        case .hdr10Plus: range = .hdr10Plus
+        case .dolbyVision: range = .dolbyVision
+        case .hlg: range = .hlg
+        }
+        let track = audioTracks.first { $0.id == activeAudioTrackID }
+        // A decoded TrueHD/PCM bridge drops Atmos objects. Claim Atmos only
+        // when the engine reports an Atmos stream-copy pipeline.
+        let atmos = track?.isAtmos == true &&
+            aether.activeAudioDecoder?.contains("Stream-copy") == true &&
+            aether.activeAudioDecoder?.contains("Atmos") == true
+        return ApplePlaybackOutputInfo(dynamicRange: range, channels: track?.channels ?? 0, isAtmos: atmos)
+    }
+
     // MARK: - Combine bridging
 
     private func bind() {

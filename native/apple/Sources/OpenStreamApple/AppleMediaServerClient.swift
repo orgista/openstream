@@ -183,6 +183,7 @@ public struct AppleMediaServerClient: Sendable {
     func request(url: URL, method: String = "GET", token: String? = nil) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
+        if url.path.contains("/QuickConnect/") || url.path.hasSuffix("/AuthenticateWithQuickConnect") { req.timeoutInterval = 10 }
         let auth = authorizationHeaderValue(token: token)
         req.setValue(auth, forHTTPHeaderField: "Authorization")
         req.setValue(auth, forHTTPHeaderField: "X-Emby-Authorization")
@@ -263,10 +264,14 @@ public struct AppleMediaServerClient: Sendable {
     public func quickConnectEnabled(baseURL: URL) async throws -> Bool {
         let url = try normalizedURL(base: baseURL, path: "QuickConnect/Enabled")
         let req = request(url: url)
-        let data = try await perform(req)
+        let data: Data
+        do { data = try await perform(req) }
+        catch AppleMediaServerError.server(let status) where status == 404 || status == 405 { return false }
+        catch AppleMediaServerError.unsupported { return false }
         guard let string = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
             throw AppleMediaServerError.malformedResponse
         }
+        guard string == "true" || string == "false" else { throw AppleMediaServerError.malformedResponse }
         return string == "true"
     }
 
@@ -291,6 +296,38 @@ public struct AppleMediaServerClient: Sendable {
             throw AppleMediaServerError.malformedResponse
         }
         return authenticated
+    }
+
+    /// Bounded polling with cooperative cancellation. Authentication errors
+    /// are surfaced immediately rather than minting a second session.
+    public func waitForQuickConnect(
+        baseURL: URL, ticket: AppleQuickConnectTicket,
+        pollInterval: Duration = .seconds(3), maximumPolls: Int = 40
+    ) async throws -> AppleMediaServerSession {
+        var consecutiveFailures = 0
+        let deadline = ContinuousClock.now + .seconds(120)
+        for _ in 0..<max(0, maximumPolls) {
+            try await Task.sleep(for: pollInterval)
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else { throw AppleMediaServerError.unsupported }
+            let authenticated: Bool
+            do {
+                authenticated = try await quickConnectState(baseURL: baseURL, secret: ticket.secret)
+                consecutiveFailures = 0
+            } catch {
+                try Task.checkCancellation()
+                consecutiveFailures += 1
+                if consecutiveFailures >= 5 { throw error }
+                continue
+            }
+            if authenticated {
+                try Task.checkCancellation()
+                let session = try await authenticateWithQuickConnect(baseURL: baseURL, secret: ticket.secret)
+                try Task.checkCancellation()
+                return session
+            }
+        }
+        throw AppleMediaServerError.unsupported
     }
 
     public func authenticateWithQuickConnect(baseURL: URL, secret: String) async throws -> AppleMediaServerSession {

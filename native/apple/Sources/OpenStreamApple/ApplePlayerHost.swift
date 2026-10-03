@@ -311,6 +311,7 @@ public final class ApplePlayerHost {
         }
         if let player { coordinator.configureExternalPlayback(on: player) }
         refreshPictureWhereabouts()
+        refreshOutputInfo(on: player?.currentItem)
         #if os(iOS) || os(macOS)
         // The item can change without replacing the AVPlayer (recovery/seek).
         if mirrorsSubtitleSelection { subtitleSelection.bind(to: player?.currentItem) }
@@ -321,6 +322,27 @@ public final class ApplePlayerHost {
         _playerView.player = player
         #else
         _viewController.player = player
+        #endif
+    }
+
+    /// AVKit presents description metadata in its existing Info panel. Keep
+    /// it current across seeks, item replacement and display-mode changes.
+    private func refreshOutputInfo(on item: AVPlayerItem?) {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard let item else { return }
+        let identifier = AVMetadataIdentifier.commonIdentifierDescription
+        let line = coordinator.engine.outputInfo.line
+        let current = item.externalMetadata.first { $0.identifier == identifier }?.stringValue
+        guard current != line else { return }
+        var metadata = item.externalMetadata.filter { $0.identifier != identifier }
+        if let line {
+            let description = AVMutableMetadataItem()
+            description.identifier = identifier
+            description.value = line as NSString
+            description.extendedLanguageTag = "und"
+            metadata.append(description)
+        }
+        item.externalMetadata = metadata
         #endif
     }
 
