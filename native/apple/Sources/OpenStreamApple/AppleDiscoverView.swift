@@ -6808,8 +6808,20 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private func reveal(muted: Bool) {
             guard playbackIntent, let webView, let container else { return }
             let generation = revealGeneration
-            if container.settlesPictureBeforeReveal {
+            if container.settlesPictureBeforeReveal, AppleTrailerPictureSettle.snapshotsShowVideo {
                 settlePicture(generation: generation, gate: AppleTrailerPictureSettle(), muted: muted)
+                return
+            }
+            if !AppleTrailerPictureSettle.snapshotsShowVideo {
+                // Nothing to measure on a device: show the whole raster now,
+                // as the gate's unmeasured timeout did, minus the 8 s wait.
+                container.pictureWindow = 0...1
+                container.hasMeasuredPicture = true
+                container.layoutIfNeeded()
+                webView.alpha = 1
+                container.setPreviewVisible(true)
+                appleTrace("trailer native reveal: live viewport (device, unmeasured)")
+                onStateChange?("revealed", muted, nil)
                 return
             }
             measurePicture(webView: webView) { [weak self] window in

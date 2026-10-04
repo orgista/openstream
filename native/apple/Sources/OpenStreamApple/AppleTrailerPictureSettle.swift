@@ -25,6 +25,17 @@ struct AppleTrailerPictureSettle {
     /// Raster fraction two measurements may differ by and still be the same
     /// band: two rows of the 256 × 144 snapshot a band is read from.
     static let tolerance: CGFloat = 0.015
+    /// Whether a WKWebView snapshot contains the playing video. On a real
+    /// iPhone or iPad the video is a hardware layer the snapshot never sees:
+    /// build 15's trace measured nothing in every frame, so the art held for
+    /// the full `blankTimeout` while the trailer played unseen behind it.
+    /// Only the simulator renders video into snapshots; on a device the
+    /// trailer reveals as soon as the page reports real playback.
+    #if targetEnvironment(simulator)
+    static let snapshotsShowVideo = true
+    #else
+    static let snapshotsShowVideo = false
+    #endif
 
     enum Verdict: Equatable {
         case wait
