@@ -7,6 +7,20 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **(2026-10-04) App Store submission, what's left.** App Store Connect is filled for all four platforms: name
+      **oStream**, subtitle, description, keywords, promo text, support/privacy/marketing URLs, copyright "2026 Raster
+      Inc", categories Entertainment + Photo & Video, content rights, age rating 16+, review notes with Apple's public
+      sample playlist (the public Jellyfin demo now needs a password, so it's no longer in the notes), and screenshots
+      for iPhone, iPad, Apple TV and Vision Pro. Validation: iPhone/iPad 0 errors. Left: **you** fill App Privacy → "Data
+      Not Collected" (website only); **"ship N"** builds the App Store (no add-ons) build and attaches it to all four
+      platforms — the iPhone listing currently has old build 10 attached, which must be swapped; Mac screenshots need
+      `sudo /usr/sbin/DevToolsSecurity -enable` first.
+- [ ] **(2026-10-04) Channel lineup back as "Complete Guide".** You asked to bring back the biggest US package preset
+      under another name. Codex is restoring it in all builds; it only organises your own IPTV playlist and defaults to
+      Everything when your playlist doesn't match it.
+- [x] **(2026-10-04) Short app names.** Under the icon: oStream (all platforms, Share, Messages, Watch, widgets);
+      App Store name oStream. Inside the app it's still OpenStream. (368be0c)
+
 - [ ] **Apple TV regression on the overnight code (2026-10-01 morning):** fixes committed 2026-10-01 (gate 2519/303).
       Done, checked on the sim: 3 dead IPTV panel (error + Retry by ~9 s, was ~21 s), 5 Clear Cache label, 6 search
       exact title first (stale half-typed results re-ranked), Show Captions opens on the checked value, My Channels
