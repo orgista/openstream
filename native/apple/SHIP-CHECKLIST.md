@@ -57,6 +57,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] The Release build launches once on a simulator per platform and reaches the home screen.
 - [ ] Smoke on iPhone + Apple TV: a title plays and resumes, the title-page trailer plays (hero + Trailers shelf),
       and no screen shows duplicate or dead controls.
+- [ ] Trailers on a REAL iPhone (not only a simulator): the video must appear over the art within ~2 s. Simulators render video into WKWebView snapshots and devices don't, so build 15's hidden-trailer bug only showed on hardware.
 
 ## 7. Upload and record
 - [ ] `asc publish testflight --app 6807530757 --ipa <ipa> --platform IOS|TV_OS|VISION_OS --group "Internal,TraceEnabled" --submit --confirm`
