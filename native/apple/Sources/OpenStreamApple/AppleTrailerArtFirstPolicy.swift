@@ -10,6 +10,21 @@ public enum AppleTrailerArtFirstPolicy {
     /// page before it quietly gives up and the art stays.
     public static let pressedTrailerGiveUp: Double = 30
 
+    public static let startupTimeout: Double = 15
+
+    static func autoplayRequestID(itemID: String, enabled: Bool, art: Art, keys: [String]) -> String {
+        "\(itemID):\(enabled):\(art == .loaded):\(keys.joined(separator: ","))"
+    }
+
+    static func acceptsMessage(messageKey: String?, currentKey: String?) -> Bool {
+        guard let messageKey, let currentKey else { return false }
+        return messageKey == currentKey
+    }
+
+    static func startupHasTimedOut(active: Bool, videoIsOnScreen: Bool, elapsed: Double) -> Bool {
+        active && !videoIsOnScreen && elapsed >= startupTimeout
+    }
+
     /// Where a hero's or title page's art stands.
     public enum Art: Equatable, Sendable {
         case loading, loaded, failed

@@ -19,13 +19,14 @@ struct AppleTabToolbar: ToolbarContent {
     /// its Search and Refresh were taken for the tab's, already placed
     /// (N49 #21). A page pushed by `navigationDestination` was unaffected.
     var scope = "tab"
+    var isTitlePage = false
 
     var body: some ToolbarContent {
         // On the Mac, Refresh is a new item when it starts or stops: its toolbar
         // caches an item's view by identity, so on a pushed page (a title
         // page, N37) the busy state it was first given never went away. iOS
         // keeps one identity (`AppleTabToolbarPolicy.slotID`).
-        ForEach(AppleTabToolbarPolicy.items(for: tab).map { Slot(scope: scope, item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
+        ForEach(AppleTabToolbarPolicy.items(for: tab, isTitlePage: isTitlePage).map { Slot(scope: scope, item: $0, isRefreshing: $0 == .refresh && isRefreshing) }) { slot in
             let item = slot.item
             ToolbarItem(placement: Self.placement) {
                 switch item {

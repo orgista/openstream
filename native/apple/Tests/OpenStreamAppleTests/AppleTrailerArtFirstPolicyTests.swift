@@ -5,6 +5,25 @@ import Testing
 @Suite struct AppleTrailerArtFirstPolicyTests {
     typealias Policy = AppleTrailerArtFirstPolicy
 
+    @Test func lateTrailerMetadataChangesTheAutoplayRequest() {
+        let empty = Policy.autoplayRequestID(itemID: "fixture", enabled: true, art: .loaded, keys: [])
+        let filled = Policy.autoplayRequestID(itemID: "fixture", enabled: true, art: .loaded, keys: ["fixture-key"])
+        #expect(empty != filled)
+    }
+
+    @Test func aPreviousCandidateCannotPauseTheNewTrailer() {
+        #expect(Policy.acceptsMessage(messageKey: "old", currentKey: "new") == false)
+        #expect(Policy.acceptsMessage(messageKey: "new", currentKey: "new"))
+        #expect(Policy.acceptsMessage(messageKey: nil, currentKey: "new") == false)
+    }
+
+    @Test func startupOnlyTimesOutWhileWaitingForVideo() {
+        #expect(Policy.startupHasTimedOut(active: true, videoIsOnScreen: false, elapsed: 15))
+        #expect(Policy.startupHasTimedOut(active: true, videoIsOnScreen: false, elapsed: 14) == false)
+        #expect(Policy.startupHasTimedOut(active: false, videoIsOnScreen: false, elapsed: 30) == false)
+        #expect(Policy.startupHasTimedOut(active: true, videoIsOnScreen: true, elapsed: 30) == false)
+    }
+
     @Test(arguments: [false, true])
     func noTrailerIsAskedForWhileTheArtIsLoading(pressed: Bool) {
         #expect(Policy.mayRequestTrailer(art: .loading, pressed: pressed) == false)

@@ -1,19 +1,7 @@
 import SwiftUI
 
-/// The tab's toolbar, handed down to the pages pushed on it.
-///
-/// A title page covered Discover's and Library's `.toolbar`, so opening one
-/// swapped the bar: Search and Refresh went and a different back button came
-/// (owner, 2026-09-24: "content page changes the nav bar — let's make the GUI
-/// consistent"). Discover and Library put their own items here; a title page
-/// draws them unchanged with its back button beside them
-/// (`appleTitlePageToolbar`), as the Apple TV app on the Mac keeps its bar.
-/// The title page takes this as a required init argument
-/// (`AppleCatalogItemDetailView.tabToolbar`), so no entry point can open it
-/// without the bar, and sets it on its own bar. Its items carry their own ids
-/// (`AppleTabToolbar.scope`): with the tab's ids, a page pushed by a
-/// `NavigationLink` (a Discover poster, a search result) drew Back alone
-/// (N49 #21).
+/// Root toolbar actions passed to pushed pages. Title pages keep Search;
+/// Refresh belongs to the Discover and Library roots.
 struct AppleTabToolbarContext {
     let tab: OpenStreamTab
     /// Read by the page's bar as it draws, not when the page was pushed: a
@@ -30,8 +18,7 @@ extension EnvironmentValues {
 
 #if !os(tvOS)
 extension View {
-    /// The title page's bar: a round ‹ at the leading edge, then the tab's
-    /// own Search and Refresh. ⌘[ and Esc go back too, except while
+    /// The title page's bar: a round ‹ at the leading edge, then Search. ⌘[ and Esc go back too, except while
     /// `backIsBlocked` (a player is up and owns Esc). `pageID` keeps this
     /// page's items apart from the tab's and from a title page under it
     /// (`AppleTabToolbar.scope`).
@@ -65,7 +52,7 @@ private struct AppleTitlePageToolbar: ViewModifier {
                 if let tabToolbar {
                     AppleTabToolbar(tab: tabToolbar.tab, isRefreshing: isRefreshing,
                                     onSearch: tabToolbar.onSearch, onRefresh: tabToolbar.onRefresh,
-                                    scope: "title.\(pageID)")
+                                    scope: "title.\(pageID)", isTitlePage: true)
                 }
             }
             #if os(macOS)

@@ -2985,7 +2985,9 @@ struct AppleCatalogItemDetailView: View {
         }
         // Art-first: the autoplaying trailer is not even looked for until the
         // hero still is on screen, and at low priority behind the page.
-        .task(id: "trailer-autoplay:\(item.id):\(allowsTrailerAutoplay):\(heroStill.art == .loaded)", priority: .low) {
+        .task(id: AppleTrailerArtFirstPolicy.autoplayRequestID(
+            itemID: item.id, enabled: allowsTrailerAutoplay, art: heroStill.art, keys: trailerCandidates
+        ), priority: .low) {
             guard allowsTrailerAutoplay,
                   AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroStill.art, pressed: false) else { return }
             try? await Task.sleep(for: .seconds(2))
@@ -2995,11 +2997,23 @@ struct AppleCatalogItemDetailView: View {
             // …or while its first candidate was being probed.
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
             heroTrailer.candidateIndex = playableIndex
+            heroTrailer.muted = true
             guard prepareTrailerAudio() else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
                 heroTrailer.hasStarted = true
                 heroTrailer.isActive = true
             }
+        }
+        .task(id: "trailer-startup:\(trailerKey ?? "none"):\(heroTrailer.replayGeneration):\(heroTrailer.isActive):\(heroTrailer.isPlaying)") {
+            guard heroTrailer.isActive, !heroTrailer.isPlaying else { return }
+            try? await Task.sleep(for: .seconds(AppleTrailerArtFirstPolicy.startupTimeout))
+            guard !Task.isCancelled,
+                  AppleTrailerArtFirstPolicy.startupHasTimedOut(
+                    active: heroTrailer.isActive, videoIsOnScreen: heroTrailer.isPlaying,
+                    elapsed: AppleTrailerArtFirstPolicy.startupTimeout
+                  ) else { return }
+            appleTrace("title trailer startup timed out: \(item.name)")
+            handleTrailerState("error", muted: heroTrailer.muted, errorCode: nil)
         }
         .onChange(of: settings.autoMuteTrailer) { _, muted in heroTrailer.muted = muted }
         // A pressed trailer that never comes on screen stops saying it is
@@ -3392,7 +3406,12 @@ struct AppleCatalogItemDetailView: View {
                 allowsSound: heroTrailer.allowsSound,
                 replayGeneration: $heroTrailer.replayGeneration,
                 showsReplay: !heroTrailer.isActive,
-                onStateChange: handleTrailerState,
+                onStateChange: { state, muted, errorCode in
+                    guard AppleTrailerArtFirstPolicy.acceptsMessage(
+                        messageKey: embedURL.lastPathComponent, currentKey: trailerKey
+                    ) else { return }
+                    handleTrailerState(state, muted: muted, errorCode: errorCode)
+                },
                 onTap: toggleTrailerPlayback,
                 onMute: { heroTrailer.muted.toggle() },
                 onReplay: restartTrailer,
@@ -3401,6 +3420,7 @@ struct AppleCatalogItemDetailView: View {
                 // page revealed first and grew 1.35→1.80× in view (N50).
                 settlesPictureBeforeReveal: true
             )
+                .id(embedURL.lastPathComponent)
                 .frame(maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
                 .transition(.opacity)
@@ -4280,6 +4300,12 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var trailerCandidates: [String] {
+        #if DEBUG
+        // Deterministic embed-error checks on the existing simulators.
+        if let keys = UserDefaults.standard.string(forKey: "OpenStreamDebugTrailerKeys") {
+            return keys.split(separator: ",").compactMap { AppleTrailerPreviewPolicy.validYouTubeKey(String($0)) }
+        }
+        #endif
         let keys = (pageMetadata.details?.trailerYouTubeKeys ?? [])
             + (pageMetadata.previewAssets?.trailerYouTubeKeys ?? [])
         var seen = Set<String>()
@@ -4475,22 +4501,18 @@ struct AppleCatalogItemDetailView: View {
 
     private func handleTrailerState(_ state: String, muted: Bool, errorCode: Int?) {
         print("[OpenStream] trailer title=\(item.name) candidate=\(heroTrailer.candidateIndex) state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
-        if state == "autoplay-blocked" {
-            showTrailerArtworkOnly()
-            logTrailerFailure("autoplay was blocked by the video provider")
-            return
-        }
         if state == AppleTrailerArtFirstPolicy.webContentTerminatedState {
             // No next candidate: the web view itself died, not the video.
+            heroTrailer.failedKeys.formUnion(trailerCandidates)
+            heroTrailer.candidateIndex = trailerCandidates.count
             showTrailerArtworkOnly()
             logTrailerFailure("the trailer's web content process stopped")
             return
         }
-        if state == "error" {
+        if state == "error" || state == "autoplay-blocked" {
+            if let key = trailerKey { heroTrailer.failedKeys.insert(key) }
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
-            heroTrailer.muted = settings.autoMuteTrailer
-            heroTrailer.allowsSound = false
             let nextIndex = heroTrailer.candidateIndex + 1
             let candidates = trailerCandidates
             let code = errorCode.map(String.init) ?? "none"
@@ -4552,13 +4574,16 @@ struct AppleCatalogItemDetailView: View {
         var searchIndex = index
         while let candidateIndex = AppleTrailerPreviewPolicy.firstPlayableCandidate(
             keys,
-            portraitKeys: heroTrailer.portraitKeys,
+            portraitKeys: heroTrailer.portraitKeys.union(heroTrailer.failedKeys),
             startingAt: searchIndex
         ) {
+            guard !Task.isCancelled else { return nil }
             let key = keys[candidateIndex]
+            appleTrace("title trailer candidate \(candidateIndex + 1)/\(keys.count) key=\(key)")
             if !heroTrailer.landscapeKeys.contains(key) {
                 await probeTrailerFrameAspect(for: key)
             }
+            guard !Task.isCancelled else { return nil }
             if heroTrailer.portraitKeys.contains(key) {
                 searchIndex = candidateIndex + 1
                 continue
@@ -4595,6 +4620,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func logTrailerFailure(_ reason: String) {
+        appleTrace("title trailer unavailable: \(item.name) reason=\(reason)")
         print("[OpenStream] trailer unavailable title=\(item.name) candidate=\(heroTrailer.candidateIndex) reason=\(reason)")
     }
 
@@ -6892,6 +6918,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 return
             }
             #endif
+            guard AppleTrailerArtFirstPolicy.acceptsMessage(
+                messageKey: payload["videoKey"] as? String, currentKey: loadedURL?.lastPathComponent
+            ) else {
+                appleTrace("trailer ignored state from previous candidate")
+                return
+            }
             appleTrace("trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             #if DEBUG && os(iOS)
             if state == "playing" { container?.probe?.begin() }
@@ -6919,6 +6951,26 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 webView?.alpha = 1
             }
             onStateChange?(state, muted, errorCode)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            appleTrace("trailer web document loaded")
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            reportNavigationFailure(error)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            reportNavigationFailure(error)
+        }
+
+        private func reportNavigationFailure(_ error: Error) {
+            let failure = error as NSError
+            guard failure.code != NSURLErrorCancelled else { return }
+            appleTrace("trailer web load failed domain=\(failure.domain) code=\(failure.code)")
+            hidePreview(animated: true)
+            onStateChange?("error", lastMuted, nil)
         }
 
         /// WebKit's content process died under a trailer (the iPad sim's
@@ -6958,6 +7010,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private var isPlaying = true
         private var showsReplay = false
         private var previewVisible = false
+        var hasPlayedPreview = false
 
         init(frame: CGRect, messageHandler: WKScriptMessageHandler, artworkURL: URL?) {
             self.artworkURL = artworkURL
@@ -7109,7 +7162,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             touchShield.accessibilityLabel = isPlaying ? "Pause trailer preview" : "Play trailer preview"
             muteButton.setImage(
                 UIImage(systemName: showsReplay
-                    ? "arrow.counterclockwise"
+                    ? "play.circle"
                     : (isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")),
                 for: .normal
             )
@@ -7144,6 +7197,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             if visible, !wasVisible { probe?.markFade() }
             #endif
             previewVisible = visible
+            if visible { hasPlayedPreview = true }
             cover.layer.removeAllAnimations()
             let duration = AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: UIAccessibility.isReduceMotionEnabled)
             if visible != wasVisible, animated, duration > 0 {
@@ -7165,13 +7219,13 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         /// art and VoiceOver hears nothing about it — no "Loading", no
         /// control. Once it plays, the shield pauses it and speaks for it.
         private func updatePlaybackValue() {
-            let loading = isPlaying && !previewVisible
+            let loading = !hasPlayedPreview || (isPlaying && !previewVisible)
             touchShield.isAccessibilityElement = !loading
             touchShield.accessibilityValue = isPlaying ? "Playing" : "Paused"
             // Web previews stay silent to avoid WebKit's automatic Now Playing
             // session. Keep replay available without offering an inert unmute.
-            muteButton.isHidden = !showsReplay
-                && (ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback || loading)
+            muteButton.isHidden = !hasPlayedPreview || (!showsReplay
+                && (ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback || loading))
         }
 
         #if DEBUG && os(iOS)
@@ -7278,6 +7332,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         // YouTube player. Keep the WKWebView alive and let layoutSubviews plus
         // the page resize handler update its frame in place.
         if context.coordinator.loadedURL != url {
+            view.hasPlayedPreview = false
             view.pictureWindow = 0...1
             view.hasMeasuredPicture = false
             context.coordinator.prepareForPlayback()
@@ -7342,6 +7397,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             startsMuted: isMuted,
             allowsSound: allowsSound
         )
+        appleTrace("trailer web load key=\(url.lastPathComponent) autoplay=\(isPlaying) allowsSound=\(allowsSound)")
         view.loadHTMLString(html, baseURL: URL(string: "https://openstream.app"))
     }
 }
@@ -7504,6 +7560,7 @@ private struct AppleTitlePageTrailerState {
     var allowsSound = false
     var candidateIndex = 0
     var portraitKeys: Set<String> = []
+    var failedKeys: Set<String> = []
     var landscapeKeys: Set<String> = []
     var replayGeneration = 0
     var interactionGlyph: String?
@@ -8897,7 +8954,7 @@ extension AppleCatalogItemDetailView {
     /// clips are left out, as the hero skips them.
     private var titlePageTrailerKeys: [String] {
         #if os(iOS) || os(macOS)
-        trailerCandidates.filter { !heroTrailer.portraitKeys.contains($0) }
+        trailerCandidates.filter { !heroTrailer.portraitKeys.contains($0) && !heroTrailer.failedKeys.contains($0) }
         #else
         []
         #endif

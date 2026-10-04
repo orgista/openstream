@@ -12,6 +12,12 @@ struct AppleTabToolbarAndArtworkTests {
         #expect(AppleTabToolbarPolicy.items(for: .home, isTV: false) == AppleTabToolbarPolicy.items(for: .library, isTV: false))
     }
 
+    @Test(arguments: [OpenStreamTab.home, .library])
+    func titlePagesKeepSearchAndLeaveRefreshAtTheRoot(tab: OpenStreamTab) {
+        #expect(AppleTabToolbarPolicy.items(for: tab, isTV: false, isTitlePage: true) == [.search])
+        #expect(AppleTabToolbarPolicy.items(for: tab, isTV: true, isTitlePage: true).isEmpty)
+    }
+
     @Test func libraryHasNoSortControl() {
         #expect(AppleTabToolbarPolicy.Item.allCases.map(\.rawValue) == ["search", "refresh"])
     }

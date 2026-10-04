@@ -50,6 +50,8 @@ enum AppleYouTubePreviewHTML {
             + [URLQueryItem(name: "mute", value: effectiveMuted ? "1" : "0"),
                URLQueryItem(name: "autoplay", value: startsPlaying ? "1" : "0"),
                URLQueryItem(name: "playsinline", value: "1")]
+        let videoKeyJSON = (try? JSONEncoder().encode(embedURL.lastPathComponent))
+            .map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
         let safeSource = htmlEscaped((components?.url ?? embedURL).absoluteString)
         let safeAutoplay = startsPlaying ? 1 : 0
         let safeDesiredPlaying = startsPlaying ? "true" : "false"
@@ -115,7 +117,7 @@ enum AppleYouTubePreviewHTML {
               : (player && typeof player.isMuted === 'function' ? player.isMuted() : desiredMuted);
             var mediaTime = player && typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
             var quality = player && typeof player.getPlaybackQuality === 'function' ? player.getPlaybackQuality() : '';
-            var payload = {state: state, muted: Boolean(muted), mediaTime: mediaTime, quality: quality};
+            var payload = {videoKey: \(videoKeyJSON), state: state, muted: Boolean(muted), mediaTime: mediaTime, quality: quality};
             if (typeof errorCode === 'number') payload.errorCode = errorCode;
             window.webkit.messageHandlers.trailerState.postMessage(payload);
           } catch (_) {}

@@ -8,10 +8,10 @@
 enum AppleTabToolbarPolicy {
     enum Item: String, CaseIterable, Sendable { case search, refresh }
 
-    static func items(for tab: OpenStreamTab, isTV: Bool = isTVPlatform) -> [Item] {
+    static func items(for tab: OpenStreamTab, isTV: Bool = isTVPlatform, isTitlePage: Bool = false) -> [Item] {
         guard !isTV else { return [] }
         switch tab {
-        case .home, .library: return [.search, .refresh]
+        case .home, .library: return isTitlePage ? [.search] : [.search, .refresh]
         case .search, .live, .settings: return []
         }
     }
