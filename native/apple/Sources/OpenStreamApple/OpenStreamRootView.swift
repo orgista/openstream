@@ -740,7 +740,7 @@ public struct OpenStreamRootView: View {
         case .search:
             // Apple TV has a Search tab; selecting it *is* the navigation.
             selectedTab = visibleTabs.contains(.search) ? .search : target
-        case .media:
+        case .media, .sharedLink:
             selectedTab = target
         case .continueWatching:
             selectedTab = target

@@ -9,6 +9,7 @@ struct OpenStreamPlatformApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(OpenStreamAppDelegate.self) private var appDelegate
     #endif
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showLaunch = true
     @State private var launchReadiness = AppleLaunchReadiness.shared
     @State private var launchCoverShownAt: ContinuousClock.Instant?
@@ -116,6 +117,10 @@ struct OpenStreamPlatformApp: App {
             // it." Green toggles stay (system on/off), red stays destructive.
             .tint(.white)
             .onOpenURL { router.open($0) }
+            .task { router.consumePendingSharedLink() }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active { router.consumePendingSharedLink() }
+            }
             .appleSpotlightContinuation(router)
             .onChange(of: resetGeneration.value) { Task { await webManagement.stop() } }
             // The cover lifts as soon as the Discover billboard has drawn,

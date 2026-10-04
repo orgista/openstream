@@ -34,7 +34,7 @@ public enum AppleSearchRoutePolicy {
     public static func discoverShowsSearch(for route: AppleAppRoute, hasDedicatedSearchTab: Bool) -> Bool {
         switch route {
         case .search: discoverPushesSearch(hasDedicatedSearchTab: hasDedicatedSearchTab)
-        case .media: true
+        case .media, .sharedLink: true
         case .continueWatching: false
         }
     }

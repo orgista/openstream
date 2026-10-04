@@ -9,6 +9,7 @@ public enum AppleMediaRouteAction: String, Equatable, Sendable {
 public enum AppleAppRoute: Equatable, Sendable {
     case search(String)
     case media(id: String, action: AppleMediaRouteAction)
+    case sharedLink(SharedLink)
     case continueWatching
 
     public init?(url: URL) {
@@ -16,6 +17,13 @@ public enum AppleAppRoute: Equatable, Sendable {
         let host = url.host?.lowercased() ?? ""
         let pieces = url.path.split(separator: "/").map(String.init)
         switch host {
+        case "open":
+            guard pieces.isEmpty,
+                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let raw = components.queryItems?.first(where: { $0.name == "url" })?.value,
+                  let sharedURL = URL(string: raw),
+                  let link = AppleSharedLinkResolver.parse(sharedURL) else { return nil }
+            self = .sharedLink(link)
         case "search":
             guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                   let value = components.queryItems?.first(where: { $0.name == "query" })?.value?
@@ -59,7 +67,14 @@ public final class AppleAppRouter {
 
     public func open(_ url: URL) {
         guard let value = AppleAppRoute(url: url) else { return }
+        if case .sharedLink = value { AppleSharedLinkHandoff.clear(matching: url) }
         open(value)
+    }
+
+    public func consumePendingSharedLink() {
+        guard let url = AppleSharedLinkHandoff.take() else { return }
+        appleTrace("shared link pending handoff")
+        open(url)
     }
 
     /// A route that did not come from a URL: an App Intent (Siri, Shortcuts,
@@ -67,6 +82,7 @@ public final class AppleAppRouter {
     public func open(_ value: AppleAppRoute) {
         route = value
         if case .search(let query) = value { searchQuery = query }
+        if case .sharedLink = value { searchQuery = "" }
         revision &+= 1
     }
 

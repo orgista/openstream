@@ -4434,3 +4434,14 @@ Mac compiled in Release, but its test runner did not begin testing. Developer mo
 Title pages now keep Search and leave Refresh on the root page. Trailer replay uses a play symbol and appears only after a trailer has actually played. Switching shelf trailers no longer lets a pause from the old video stop the new one. Late trailer metadata starts autoplay; failed or stalled candidates fall back cleanly to artwork, without dead trailer controls.
 
 Masters of the Universe (2026) autoplayed muted and its second shelf trailer played after physical taps on iOS 18.6 and iOS 27. A deliberately missing candidate returned YouTube error 150 on both and left the artwork with no trailer controls. The sound request is confirmed in the trace; output stayed muted by the required launch flag. Baseline autoplay already worked, so the exact TestFlight 15 real-device failure is still unconfirmed. iPad and tvOS title pages were checked for duplicate Refresh. Package tests: 2737 in 345 suites; iOS and tvOS Debug builds passed and recompiled edited sources. Evidence is in the requested trailers folder. Seeded data was removed, all four checked simulators were shut down, and changes remain uncommitted. No uploads or signing changes.
+
+
+## 2026-10-04 — Shared links
+OpenStream can now resolve supported links typed or pasted in Search, or delivered through its own open-link URL. Apple TV Mayday and Netflix Sleepless in Seattle opened their normal title pages on the iPhone simulator. Search has an Open Copied Link control that detects a URL without requesting clipboard access; tapping it opened Mayday.
+
+OpenStream also appears in the iPhone/iPad share sheet. Safari sharing saved the Netflix link, and opening OpenStream consumed it and showed the title. The immediate app-opening attempt failed on this simulator; the saved-link fallback worked. That immediate hand-off still needs a real-device check. YouTube playback needs an installed compatible source in developer builds; App Store builds display a neutral unsupported message. Installed YouTube playback was not available to verify.
+
+Screenshots are in `~/Developer/openstream-build/verification/shared-links/`. Simulator preferences were restored, test title data removed, and the simulator shut down. Changes remain uncommitted; no upload or push.
+
+Verified: 2753 tests in 346 suites, iOS device and simulator Debug builds, and AppStore-iOS device Release with SDK floors. The existing catalog-fixture network-stub race passed on a full rerun.
+The final Release binary scan also passed with no add-on markers or YouTube add-on wording; all 30 simulator SDK-floor checks passed.

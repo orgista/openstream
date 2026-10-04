@@ -1544,6 +1544,15 @@ struct AppleDiscoverView: View {
 struct AppleSearchView: View {
     @Environment(\.appleTabToolbar) private var tabToolbar
     @State private var query = ""
+    @State private var sharedLinkError = ""
+    @State private var showsSharedLinkError = false
+    @State private var sharedLinkLoading = false
+    @State private var sharedLinkGeneration = 0
+    @State private var sharedPlayer: AppleStremioPlayerPresentation?
+    #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var hasCopiedURL = false
+    #endif
     @State private var searchStore = AppleCatalogSearchStore()
     @State private var routedResult: RoutedResult?
     @State private var deliveredRouteRevision: Int?
@@ -1575,7 +1584,9 @@ struct AppleSearchView: View {
 
     var body: some View {
         Group {
-            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if sharedLinkLoading {
+                ProgressView()
+            } else if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 // With sources configured the description read "Search movies,
                 // shows, files, and channels" — the field's own placeholder,
                 // restated a few hundred points lower. The standing rule is
@@ -1631,7 +1642,25 @@ struct AppleSearchView: View {
         #else
         .searchable(text: $query, prompt: "Search movies, shows, and channels")
         #endif
-        .onSubmit(of: .search) { recentSearches.record(query) }
+        .onSubmit(of: .search) {
+            if AppleSharedLinkResolver.link(in: query) == nil { recentSearches.record(query) }
+        }
+        .alert(sharedLinkError, isPresented: $showsSharedLinkError) { }
+        .modifier(AppleMediaPlayerPresentationModifier(presentation: $sharedPlayer))
+        #if os(iOS)
+        .safeAreaInset(edge: .bottom) {
+            if hasCopiedURL {
+                AppleCopiedLinkButton(query: $query)
+            }
+        }
+        .task { await detectCopiedURL() }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await detectCopiedURL() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+            Task { await detectCopiedURL() }
+        }
+        #endif
         .navigationDestination(item: $routedResult) { value in
             AppleCatalogItemDetailView(
                 item: value.item,
@@ -1647,12 +1676,31 @@ struct AppleSearchView: View {
                 initialAutoPlay: value.action == .play,
                 tabToolbar: tabToolbar
             )
+            .task(id: router.revision) {
+                // Search's task sleeps while this title covers it. The visible page
+                // closes itself for a newer shared link, then Search resolves that route.
+                if router.revision != value.revision, case .sharedLink = router.route {
+                    routedResult = nil
+                }
+            }
         }
         .task(id: router.searchQuery) {
             if !router.searchQuery.isEmpty { query = router.searchQuery }
         }
+        .onChange(of: router.revision) {
+            if case .sharedLink = router.route {
+                routedResult = nil
+                sharedPlayer = nil
+            }
+        }
         .task(id: router.revision) {
             let revision = router.revision
+            if case .sharedLink(let link) = router.route {
+                guard deliveredRouteRevision != revision else { return }
+                routedResult = nil
+                await openSharedLink(link, revision: revision)
+                return
+            }
             guard case .media(let id, _) = router.route else {
                 routedResult = nil
                 return
@@ -1670,6 +1718,10 @@ struct AppleSearchView: View {
         }
         .task(id: query) {
             let revision = router.revision
+            if let link = AppleSharedLinkResolver.link(in: query) {
+                await openSharedLink(link, revision: revision)
+                return
+            }
             await searchStore.search(
                 query: query,
                 sources: sourceStore.sources,
@@ -1741,6 +1793,81 @@ struct AppleSearchView: View {
             }
         }
         #endif
+    }
+
+    #if os(iOS)
+    private func detectCopiedURL() async {
+        hasCopiedURL = await AppleCopiedLinkDetection.detect()
+    }
+    #endif
+
+    private func openSharedLink(_ link: SharedLink, revision: Int) async {
+        appleTrace("shared link parse \(link.provider)")
+        sharedLinkGeneration &+= 1
+        let generation = sharedLinkGeneration
+        sharedLinkLoading = true
+        defer { if generation == sharedLinkGeneration { sharedLinkLoading = false } }
+        do {
+            if case .youtube(let videoID) = link {
+                #if OPENSTREAM_ADDONS
+                // Only installed sources that advertise a YouTube catalog or identity are eligible.
+                let sources = AppleSharedLinkYouTubePolicy.sources(in: sourceStore.sources)
+                for source in sources {
+                    let item = AppleSharedLinkYouTubePolicy.item(videoID: videoID, source: source)
+                    do {
+                        let resolved = try await AppleMediaPlaybackResolver().resolve(source: source, item: item, gatewayConfig: gatewayConfig)
+                        try Task.checkCancellation()
+                        guard revision == router.revision, generation == sharedLinkGeneration else { return }
+                        sharedPlayer = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(
+                            url: resolved.preparedPlayback.url, headers: resolved.preparedPlayback.requestHeaders,
+                            mediaID: item.mediaID, title: item.name, sourceKind: .catalog,
+                            hints: .init(addonMediaID: item.mediaID, addonMediaType: item.type)), settings: settings)
+                        if case .sharedLink = router.route { deliveredRouteRevision = revision }
+                        appleTrace("shared link YouTube playable stream")
+                        return
+                    } catch is CancellationError { throw CancellationError() }
+                    catch { continue }
+                }
+                #endif
+                throw AppleSharedLinkError.unsupportedYouTube
+            }
+            await mediaIndex.load()
+            await catalogStore.loadCachedSections(sources: sourceStore.sources)
+            await rebuildCatalogLookup()
+            try Task.checkCancellation()
+            let resolution = try await AppleSharedLinkResolution.resolve(link, records: mediaIndex.records,
+                sources: sourceStore.sources, configuration: metadataConfiguration) { name in
+                    await searchStore.search(query: name, sources: sourceStore.sources, baseSections: catalogStore.sections) {
+                        await mediaIndex.search($0)
+                    }
+                    return searchStore.results
+                }
+            try Task.checkCancellation()
+            guard revision == router.revision, generation == sharedLinkGeneration else { return }
+            if case .sharedLink = router.route { deliveredRouteRevision = revision }
+            if let record = resolution.record, let match = searchMatch(for: record) {
+                query = record.title
+                routedResult = .init(record: record, item: match.item, source: match.source, action: .display, revision: revision)
+                appleTrace("shared link match title page \(record.title)")
+            } else if let item = resolution.item {
+                let source = sourceStore.sources.first { $0.isEnabled && $0.isAddon }
+                    ?? AppleSource(kind: .library, name: "OpenStream", url: URL(string: "https://fixture.example/shared-link")!)
+                let record = AppleMediaRecord(canonicalID: item.mediaID, kind: item.type == "movie" ? .movie : .series,
+                                             title: item.name, year: item.year, availability: [])
+                query = item.name
+                routedResult = .init(record: record, item: item, source: source, action: .display, revision: revision)
+                appleTrace("shared link match metadata title page \(item.name)")
+            } else if let title = resolution.title {
+                query = title.name
+                appleTrace("shared link match ambiguous or unavailable → search")
+            } else { throw AppleSharedLinkError.unreadable }
+        } catch {
+            guard !Task.isCancelled, revision == router.revision, generation == sharedLinkGeneration else { return }
+            if case .sharedLink = router.route { deliveredRouteRevision = revision }
+            sharedLinkError = (error as? AppleSharedLinkError)?.errorDescription ?? "Couldn't read that link"
+            showsSharedLinkError = true
+            appleTrace("shared link resolution failed \(link.provider)")
+        }
     }
 
     /// The last searches, newest first, while the field is empty: a row

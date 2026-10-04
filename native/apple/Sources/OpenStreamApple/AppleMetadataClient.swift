@@ -374,6 +374,80 @@ public struct AppleTMDBClient: Sendable {
         return Self.details(from: envelope)
     }
 
+    /// Shared links use the same credential-safe TMDB transport as title metadata.
+    public func sharedLinkSearch(title: AppleSharedLinkResolver.Title,
+                                 configuration: AppleTMDBConfiguration) async throws -> [AppleCatalogItem] {
+        let kinds: [SharedLink.Kind] = title.kind.map { [$0 == .movie ? .movie : .show] } ?? [.movie, .show]
+        var items: [AppleCatalogItem] = []
+        for kind in kinds {
+            let result = try await load(path: "/3/search/\(kind == .movie ? "movie" : "tv")",
+                                        queryItems: [.init(name: "query", value: title.name)],
+                                        configuration: configuration, as: SharedSearchEnvelope.self)
+            items += result.results.compactMap { $0.item(kind: kind) }
+        }
+        return items
+    }
+
+    public func sharedLinkDetails(id: Int, kind: SharedLink.Kind,
+                                  configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem {
+        guard id > 0 else { throw AppleTMDBError.invalidIdentifier }
+        let value = try await load(path: "/3/\(kind == .movie ? "movie" : "tv")/\(id)",
+                                   queryItems: [.init(name: "append_to_response", value: "external_ids")],
+                                   configuration: configuration, as: SharedTitleEnvelope.self)
+        guard let item = value.item(kind: kind) else { throw AppleTMDBError.titleNotFound }
+        return item
+    }
+
+    public func sharedLinkDetails(imdbID: String,
+                                  configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem {
+        guard AppleStremioMetadataClient.isIMDBIdentifier(imdbID) else { throw AppleTMDBError.invalidIdentifier }
+        let find = try await load(path: "/3/find/\(imdbID)",
+                                  queryItems: [.init(name: "external_source", value: "imdb_id")],
+                                  configuration: configuration, as: FindEnvelope.self)
+        if let id = find.movieResults.first?.id {
+            return try await sharedLinkDetails(id: id, kind: .movie, configuration: configuration)
+        }
+        if let id = find.tvResults.first?.id {
+            return try await sharedLinkDetails(id: id, kind: .show, configuration: configuration)
+        }
+        throw AppleTMDBError.titleNotFound
+    }
+
+    private struct SharedSearchEnvelope: Decodable, Sendable { let results: [SharedTitleEnvelope] }
+    private struct SharedTitleEnvelope: Decodable, Sendable {
+        let id: Int
+        let title: String?
+        let name: String?
+        let releaseDate: String?
+        let firstAirDate: String?
+        let posterPath: String?
+        let backdropPath: String?
+        let overview: String?
+        let imdbID: String?
+        let externalIDs: ExternalIDs?
+        struct ExternalIDs: Decodable, Sendable {
+            let imdbID: String?
+            enum CodingKeys: String, CodingKey { case imdbID = "imdb_id" }
+        }
+        enum CodingKeys: String, CodingKey {
+            case id, title, name, overview
+            case releaseDate = "release_date", firstAirDate = "first_air_date"
+            case posterPath = "poster_path", backdropPath = "backdrop_path"
+            case imdbID = "imdb_id", externalIDs = "external_ids"
+        }
+        func item(kind: SharedLink.Kind) -> AppleCatalogItem? {
+            guard id > 0, let title = title ?? name, !title.isEmpty else { return nil }
+            let imdb = imdbID ?? externalIDs?.imdbID
+            return AppleCatalogItem(mediaID: imdb ?? "tmdb:\(kind == .movie ? "movie" : "tv"):\(id)",
+                                    type: kind == .movie ? "movie" : "series", name: title,
+                                    posterURL: AppleTMDBClient.imageURL(path: posterPath, width: "w500"),
+                                    backgroundURL: AppleTMDBClient.imageURL(path: backdropPath, width: "w1280"),
+                                    summary: overview,
+                                    releaseInfo: releaseDate ?? firstAirDate,
+                                    year: (releaseDate ?? firstAirDate).flatMap { Int($0.prefix(4)) })
+        }
+    }
+
     private func load<Value: Decodable & Sendable>(
         path: String,
         queryItems: [URLQueryItem],
