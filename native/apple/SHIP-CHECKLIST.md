@@ -10,8 +10,8 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
   as the App Store, so an add-on build there can be rejected.
 - **App Store** submissions are a SEPARATE archive and build number WITHOUT the flag (add-ons compiled out);
   `scripts/check-no-addons-in-release.sh` must pass on it. Never submit a TestFlight add-on build for App Store review.
-- **Mac with add-ons** ships outside the App Store as a Developer ID–signed, notarized download on orgista's
-  website (needs a Developer ID Application certificate — owner creates it; not yet set up).
+- **Public sideload downloads** include add-ons on every platform. The Mac download is ad-hoc signed and
+  unnotarized until a Developer ID certificate exists; document right-click → Open.
 
 ## 1. Authorization and numbers
 - [ ] The owner said "ship N" (or "push N") for this exact build number. Nothing else authorizes an upload.
@@ -63,3 +63,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] `asc publish testflight --app 6807530757 --ipa <ipa> --platform IOS|TV_OS|VISION_OS --group "Internal,TraceEnabled" --submit --confirm`
       Mac: `--pkg <pkg> --version 1.0 --build-number N --platform MAC_OS` with the same group flags.
 - [ ] Read back VALID for each platform; write the build IDs, sha, gate counts and any new profiles to `DELIVERIES.md`.
+
+## 8. GitHub release (after TestFlight)
+- [ ] Under the same owner authorization **"ship N"**, run `scripts/release/github-release.sh <version> N` to prepare all four platform downloads, checksums, notes, and the committed public checkout.
+- [ ] The owner's lead reviews the scrub/gitleaks gates and every artifact, then runs the printed publish commands. Nothing ships to GitHub without the same "ship N"; preparation never pushes, creates releases, or uploads.

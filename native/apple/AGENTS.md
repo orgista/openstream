@@ -111,6 +111,7 @@ except the full-screen player, which follows the device orientation and also pla
 - Tests are Swift Testing (`@Suite`, `@Test`, `#expect`); pure policy types get pure tests.
 
 ## 6. Where to write things down — and nowhere else
+Public source exports follow `scripts/release/public-export.sh`'s exclusion list: never add owner notes to the public repo.
 The only living documents are `AGENTS.md`, `GUI-AUDIT.md`, `FEEDBACK.md`, `HANDOFF-NEXT-SESSION.md`,
 `DELIVERIES.md`, `OWNER-TODO.md` (the owner's feedback checklist, asked for 2026-09-26), and the
 references under `design/*.md`. Everything else is trash.

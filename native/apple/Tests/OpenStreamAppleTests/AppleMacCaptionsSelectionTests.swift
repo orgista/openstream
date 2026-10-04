@@ -3,6 +3,14 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
+// Generated local media is intentionally absent from sanitized public exports.
+private let macCaptionsSelectionFixture = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Fixtures/out/mp4-h264-aac-subtitles.mp4")
+private let macCaptionsSelectionFixtureAvailable = FileManager.default.fileExists(
+    atPath: macCaptionsSelectionFixture.path
+)
+
 /// The stock player's CC menu against a real asset with two legible tracks
 /// (`Fixtures/out/mp4-h264-aac-subtitles.mp4`: English and French mov_text).
 ///
@@ -16,15 +24,13 @@ import Testing
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct AppleMacCaptionsSelectionTests {
-    private static let fixture = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Fixtures/out/mp4-h264-aac-subtitles.mp4")
+    private static let fixture = macCaptionsSelectionFixture
 
     @Test func theMacHostMirrorsTheStockCaptionsMenu() {
         #expect(ApplePlayerHost.mirrorsStockSubtitleSelection)
     }
 
-    @Test func choosingALanguageSurvivesRediscoveryAndLateAddonSubtitles() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func choosingALanguageSurvivesRediscoveryAndLateAddonSubtitles() async throws {
         let session = try await Session(preference: .off)
         defer { session.stop() }
         try await session.chooseInStockMenu(language: "fr")
@@ -33,7 +39,7 @@ struct AppleMacCaptionsSelectionTests {
         #expect(session.engine.activeSubtitleTrackID == session.trackID(language: "fr"))
     }
 
-    @Test func choosingOnSurvivesRediscovery() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func choosingOnSurvivesRediscovery() async throws {
         let session = try await Session(preference: .off)
         defer { session.stop() }
         try await session.chooseInStockMenu(language: "en")
@@ -42,7 +48,7 @@ struct AppleMacCaptionsSelectionTests {
         #expect(session.engine.activeSubtitleTrackID == session.trackID(language: "en"))
     }
 
-    @Test func offStaysOffAfterTheSettingTurnedCaptionsOn() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func offStaysOffAfterTheSettingTurnedCaptionsOn() async throws {
         let session = try await Session(preference: .always)
         defer { session.stop() }
         #expect(session.selectedLanguage == "en")
@@ -53,7 +59,7 @@ struct AppleMacCaptionsSelectionTests {
         #expect(session.engine.subtitleCues.isEmpty)
     }
 
-    @Test func switchingBetweenLanguagesKeepsTheLastChoice() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func switchingBetweenLanguagesKeepsTheLastChoice() async throws {
         let session = try await Session(preference: .off)
         defer { session.stop() }
         try await session.chooseInStockMenu(language: "en")
@@ -64,7 +70,7 @@ struct AppleMacCaptionsSelectionTests {
 
     /// Without the mirror the Mac had before this fix: the late add-on batch
     /// re-applies the Off setting and takes the viewer's captions away.
-    @Test func withoutTheMirrorALateAddonBatchUndoesTheChoice() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func withoutTheMirrorALateAddonBatchUndoesTheChoice() async throws {
         let session = try await Session(preference: .off, mirrors: false)
         defer { session.stop() }
         try await session.chooseInStockMenu(language: "en")
@@ -161,7 +167,7 @@ struct AppleMacCaptionsSelectionTests {
 /// group deselected while the app owns captions (AetherEngine Sodalite#38/#65)
 /// — the reason the Mac's menu did nothing at all. Opt-in: it runs the real
 /// engine and its loopback server, which the gate keeps out of parallel runs.
-@Test(.enabled(if: ProcessInfo.processInfo.environment["OPENSTREAM_MAC_CAPTIONS_AETHER"] == "1"))
+@Test(.enabled(if: ProcessInfo.processInfo.environment["OPENSTREAM_MAC_CAPTIONS_AETHER"] == "1" && macCaptionsSelectionFixtureAvailable))
 @MainActor
 func aetherKeepsTheStockMenusChoice() async throws {
     let fixture = URL(fileURLWithPath: #filePath)
