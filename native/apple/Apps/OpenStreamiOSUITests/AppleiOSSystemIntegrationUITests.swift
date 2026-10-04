@@ -56,9 +56,9 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
     }
 
     /// The placed widget, as opposed to the app icon: both carry the
-    /// identifier `OpenStream`, and only the widget's value says so.
+    /// identifier `oStream`, and only the widget's value says so.
     private func placedWidget() -> XCUIElement? {
-        let icons = springboard.icons.matching(NSPredicate(format: "identifier == %@", "OpenStream"))
+        let icons = springboard.icons.matching(NSPredicate(format: "identifier == %@", "oStream"))
         for icon in icons.allElementsBoundByIndex where icon.exists {
             if String(describing: icon.value).contains("Widget") { return icon }
         }
@@ -130,11 +130,11 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
         let search = springboard.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 20), "the widget gallery had no search field")
         search.tap()
-        search.typeText("OpenStream")
+        search.typeText("oStream")
         Thread.sleep(forTimeInterval: 3)
         attach("04-gallery-search")
 
-        guard let result = firstHittable(["OpenStream"], in: springboard) else {
+        guard let result = firstHittable(["oStream"], in: springboard) else {
             dump("gallery-no-result")
             return XCTFail("searching the gallery for OpenStream matched nothing — tree above")
         }
