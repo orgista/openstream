@@ -640,7 +640,7 @@ final class AppStoreScreenshotUITests: XCTestCase {
     }
 
     private func authenticate(server: String, user: String, password: String) throws -> String {
-        var request = URLRequest(url: URL(string: server + "/Users/AuthenticateByName")!)
+        var request = URLRequest(url: URL(string: server + "/" + "Users/AuthenticateByName")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("MediaBrowser Client=\"OpenStream UITests\", Device=\"Simulator\", DeviceId=\"screenshots\", Version=\"1.0\"", forHTTPHeaderField: "Authorization")

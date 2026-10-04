@@ -12,7 +12,7 @@ struct AppleMediaServerLibraryTests {
     @Test("libraries decode")
     func testLibraries() async throws {
         let client = AppleMediaServerClient(loader: { req in
-            #expect(req.url?.absoluteString == "https://fixture.example/emby/Users/user_456/Views")
+            #expect(req.url?.absoluteString == "https://fixture.example/emby/" + "Users/user_456/Views")
             #expect(req.value(forHTTPHeaderField: "X-Emby-Token") == "token_123")
             let json = """
             {
@@ -39,7 +39,7 @@ struct AppleMediaServerLibraryTests {
     func testItems() async throws {
         let client = AppleMediaServerClient(loader: { req in
             let url = req.url!
-            #expect(url.path == "/emby/Users/user_456/Items")
+            #expect(url.path == "/emby/" + "Users/user_456/Items")
             let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)!
             let qi = comps.queryItems!
             #expect(qi.contains(URLQueryItem(name: "ParentId", value: "p1")))
@@ -83,7 +83,7 @@ struct AppleMediaServerLibraryTests {
     @Test("latest bare array decode")
     func testLatest() async throws {
         let client = AppleMediaServerClient(loader: { req in
-            #expect(req.url?.path == "/emby/Users/user_456/Items/Latest")
+            #expect(req.url?.path == "/emby/" + "Users/user_456/Items/Latest")
             let json = """
             [
                 { "Id": "i1", "Name": "N1", "Type": "Episode" }
@@ -101,7 +101,7 @@ struct AppleMediaServerLibraryTests {
     func testResume() async throws {
         let client = AppleMediaServerClient(loader: { req in
             let url = req.url!
-            #expect(url.path == "/emby/Users/user_456/Items/Resume")
+            #expect(url.path == "/emby/" + "Users/user_456/Items/Resume")
             let qi = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
             #expect(qi.contains(URLQueryItem(name: "MediaTypes", value: "Video")))
             

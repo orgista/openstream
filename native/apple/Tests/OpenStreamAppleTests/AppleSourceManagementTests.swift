@@ -37,7 +37,7 @@ import Testing
     let suite = "openstream-import-external-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
-    let external = AppleSource(kind: .library, name: "Imports", url: URL(fileURLWithPath: "/Volumes/External/Imports"))
+    let external = AppleSource(kind: .library, name: "Imports", url: URL(fileURLWithPath: "/fixture/External/Imports"))
     let bookmarked = AppleSource(kind: .library, name: "Imports",
         url: URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/\(UUID())/Documents/Imports"),
         bookmarkData: Data([1]))

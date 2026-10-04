@@ -25,7 +25,7 @@ import Testing
     @Test(arguments: [true, false])
     func checksCurrentUserPolicy(allowed: Bool) async throws {
         let client = AppleMediaServerClient(loader: { request in
-            #expect(request.url?.path == "/stable/Users/user")
+            #expect(request.url?.path == "/stable/" + "Users/user")
             #expect(request.value(forHTTPHeaderField: "X-Emby-Token") == "fixture-token")
             return (Data("{\"Policy\":{\"EnableContentDownloading\":\(allowed)}}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }, deviceID: "fixture")

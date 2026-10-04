@@ -564,7 +564,7 @@ private struct AppleSourceRow: View {
     /// otherwise fell back to the exact same glyph as a source with no
     /// manifest at all, which read as broken rather than "no icon." An
     /// add-on keeps its own mark, its initial, instead; only the truly
-    /// iconless kinds (IPTV, ServerPlus, Library) use the shared glyph.
+    /// iconless kinds (IPTV, a home server, Library) use the shared glyph.
     private var sourceFallbackIcon: some View {
         Group {
             if source.isAddon, let initial = source.name.trimmingCharacters(in: .whitespaces).first {

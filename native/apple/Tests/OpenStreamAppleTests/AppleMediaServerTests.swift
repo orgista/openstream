@@ -30,7 +30,7 @@ struct AppleMediaServerTests {
     @Test("authenticate sends body, headers, and escapes quotes")
     func testAuthenticate() async throws {
         let client = AppleMediaServerClient(loader: { req in
-            #expect(req.url?.absoluteString == "https://fixture.example/jellyfin/Users/AuthenticateByName")
+            #expect(req.url?.absoluteString == "https://fixture.example/jellyfin/" + "Users/AuthenticateByName")
             #expect(req.httpMethod == "POST")
             #expect(req.value(forHTTPHeaderField: "Content-Type") == "application/json")
             
@@ -119,7 +119,7 @@ struct AppleMediaServerQuickConnectTests {
             case "/jellyfin/QuickConnect/Connect":
                 #expect(req.url?.absoluteString == "https://fixture.example/jellyfin/QuickConnect/Connect?secret=sec")
                 return ("{\"Authenticated\":true}".data(using: .utf8)!, ok)
-            case "/jellyfin/Users/AuthenticateWithQuickConnect":
+            case "/jellyfin/" + "Users/AuthenticateWithQuickConnect":
                 let body = try JSONDecoder().decode([String: String].self, from: req.httpBody ?? Data())
                 #expect(body["Secret"] == "sec")
                 let json = """

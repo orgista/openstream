@@ -50,11 +50,11 @@ import Testing
         kind: .video,
         title: "Amélie Holiday Cut",
         aliases: ["Le Fabuleux Destin"],
-        artworkURL: URL(fileURLWithPath: "/Volumes/Private/poster.jpg"),
+        artworkURL: URL(fileURLWithPath: "/fixture/Private/poster.jpg"),
         availability: [.init(
             instanceID: sourceID,
             capability: .direct,
-            itemReference: "/Volumes/Private/Movies/Amelie.mp4"
+            itemReference: "/fixture/Private/Movies/Amelie.mp4"
         )],
         isPrivate: true
     )
@@ -63,7 +63,7 @@ import Testing
     #expect(await repository.search("amelie holiday").map(\.id) == [record.id])
     #expect(await repository.search("fabuleux").map(\.id) == [record.id])
     let persisted = try String(decoding: Data(contentsOf: url), as: UTF8.self)
-    #expect(!persisted.contains("/Volumes/Private"))
+    #expect(!persisted.contains("/fixture/Private"))
 }
 
 @Test func mediaIndexSearchAppliesItsLimitInStableTitleOrderAcrossReloads() async throws {
