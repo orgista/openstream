@@ -55,6 +55,8 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Mac: `pkgutil --check-signature` shows "3rd Party Mac Developer Installer: Raster Inc".
 - [ ] `bash scripts/sdk-floor-check.sh` exits 0 on each archive (run with bash, not zsh).
 - [ ] The Release build launches once on a simulator per platform and reaches the home screen.
+- [ ] Smoke on iPhone + Apple TV: a title plays and resumes, the title-page trailer plays (hero + Trailers shelf),
+      and no screen shows duplicate or dead controls.
 
 ## 7. Upload and record
 - [ ] `asc publish testflight --app 6807530757 --ipa <ipa> --platform IOS|TV_OS|VISION_OS --group "Internal,TraceEnabled" --submit --confirm`

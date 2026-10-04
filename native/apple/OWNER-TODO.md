@@ -25,6 +25,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
+- [ ] **Build 15 feedback (owner, real iPhone, 2026-10-03):** (1) trailers still don't play (title page hero stays
+      dark; Masters of the Universe 2026) — build 15's pre-ship test covered playback/resume, not trailers;
+      (2) title page shows two refresh-looking buttons (global refresh + trailer replay). Fixing on Codex with
+      iOS 18.6 + iOS 27 sim proof; trailers added to the pre-ship test list.
 - [ ] **CarPlay (owner ask 2026-10-03) — not in build 15:** YOU request at developer.apple.com/contact/carplay/ for
       com.orgista.openstream: Video (`com.apple.developer.carplay-video`, iOS 27+) AND Audio (so it appears in every
       CarPlay car; video-only shows only in cars with parked video). After Apple grants it: CarPlay scene + icon,
