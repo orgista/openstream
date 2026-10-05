@@ -4453,3 +4453,12 @@ Complete Guide organises the channels in your own playlist using the full US num
 ## 2026-10-04 — oStream app name
 
 The apps now show oStream in the updated screens and system labels, and the Mac build/download use oStream.app. About keeps the OpenStream, Orgista and Raster credit. The five requested app builds, the no-add-ons check and OS version checks passed. The Mac download path was checked without running a release. One protected SMB error message still uses the old name; permission to edit it is pending, and the new name test flags it. iPhone, Apple TV and Mac About screenshots are saved in the requested verification folder; Mac menu wording is verified, but its open-menu screenshot is pending.
+
+
+## 2026-10-05 — Apple TV Multiview
+
+Hold a channel in the Live guide or player footer and choose Watch in Multiview, or use Multiview in the player's Playback menu. Two to four channels play together; moving focus changes the sound and captions. Tiles can change channel, become large or be removed. Select opens a normal player; Back returns to the grid, and Back from the grid opens the sound channel full screen.
+
+Local simulator checks covered layouts, menus, captions, reconnecting, provider refusals and background restoration. Four HLS streams and four Aether streams ran with no reported frame drops in healthy samples. Memory ranged roughly 344–467 MiB, including reconnecting; this does not establish real Apple TV limits. Audio stayed muted as requested, with routing checked in traces. Physical device decoding, heat and provider limits still need the owner's check; iPad multiview was not added.
+
+Package gate: 2768 tests in 347 suites. tvOS/iOS simulator builds, unsigned AppStore-iOS device Release, SDK floors and the no-add-ons Release scan passed. Existing catalog/manifest network-stub races passed on full reruns. Evidence is in `~/Developer/openstream-build/verification/multiview/`. No test sources were saved; simulator and fixture servers are stopped. Changes remain uncommitted; no upload or push.

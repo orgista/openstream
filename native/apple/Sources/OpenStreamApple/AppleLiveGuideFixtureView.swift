@@ -9,6 +9,11 @@ public struct AppleLiveGuideFixtureView: View {
     @State private var category = "All"
     @State private var query = ""
     @State private var errorMessage: String?
+    @State private var player: AppleTVLivePlayerPresentation?
+    @State private var playingChannel: AppleIPTVChannel?
+    @State private var coordinator = ApplePlaybackCoordinator()
+    @State private var footer = AppleTVLiveFooterState()
+    @State private var multiviewChannels: [AppleIPTVChannel] = []
 
     public init() {}
 
@@ -19,10 +24,12 @@ public struct AppleLiveGuideFixtureView: View {
                     if !channels.isEmpty {
                         AppleTVLiveGuideScreen(
                             channels: channels, channelIndex: channelIndex, categories: ["All", "Favorites"], selectedCategory: $category,
-                            guide: guide, guideRevision: 1, entries: [], favoriteIDs: [], nowPlaying: channels.first,
+                            guide: guide, guideRevision: 1, entries: [], favoriteIDs: [], nowPlaying: playingChannel ?? channels.first,
                             previewsEnabled: UserDefaults.standard.bool(forKey: "openstream.settings.trailer.autoplay.v1"),
+                            isPlayerOpen: player != nil,
                             focusRestoreToken: 0, focusRestoreChannelID: "", searchDestination: { AppleTVChannelSearchEditor(query: $query) },
-                            onSelect: { _ in }, onToggleFavorite: { _ in }, onVisibleChannels: { _ in })
+                            onSelect: play, onToggleFavorite: { _ in }, onVisibleChannels: { _ in },
+                            onMultiview: { beginMultiview($0) })
                     } else if let errorMessage {
                         Text(errorMessage)
                     } else {
@@ -32,6 +39,16 @@ public struct AppleLiveGuideFixtureView: View {
             }
         }
         .tint(.white)
+        .fullScreenCover(item: $player) { _ in
+            if !multiviewChannels.isEmpty {
+                AppleTVMultiviewScreen(initial: multiviewChannels, channels: channels, guide: guide,
+                    onExit: { multiviewChannels = []; play($0) })
+            } else if let channel = playingChannel {
+                AppleTVLivePlayerScreen(channel: channel, coordinator: coordinator, footerChannels: channels,
+                    footer: $footer, guide: guide, onMultiview: beginMultiview, onSwitch: play)
+                    .id(ObjectIdentifier(coordinator))
+            }
+        }
         .task {
             AppleLaunchClock.begin()
             AppleTVGuideLatencyProbe.shared.install()
@@ -45,7 +62,7 @@ public struct AppleLiveGuideFixtureView: View {
                 let fixture = try await Task.detached(priority: .userInitiated) {
                     let sourceID = UUID(uuidString: "D4000000-0000-0000-0000-000000000001")!
                     let channels = try AppleIPTVClient.parseM3U(playlist, sourceID: sourceID, baseURL: m3u)
-                    guard channels.count == 300, channels.allSatisfy({ channel in
+                    guard !channels.isEmpty, channels.count <= 300, channels.allSatisfy({ channel in
                         Self.isLocal(channel.streamURL) && channel.logoURL.map(Self.isLocal) == true
                     }) else { throw AppleIPTVError.invalidPlaylist }
                     let mapping = Dictionary(channels.compactMap { channel in channel.guideID.map { ($0, channel.id) } }, uniquingKeysWith: { first, _ in first })
@@ -65,6 +82,23 @@ public struct AppleLiveGuideFixtureView: View {
                 appleTrace("guide.fixture failed")
             }
         }
+    }
+
+    private func play(_ channel: AppleIPTVChannel) {
+        coordinator.stop()
+        let native = AppleLiveStreamRoutePolicy.nativeRemoteHLS(url: channel.streamURL, probedKind: channel.probedMediaKind)
+        let (engine, _) = ApplePlaybackEngineFactory.make(preferred: native ? .native : .openStream)
+        coordinator = ApplePlaybackCoordinator(engine: engine)
+        playingChannel = channel
+        if player == nil { player = AppleTVLivePlayerPresentation() }
+    }
+
+    private func beginMultiview(_ held: AppleIPTVChannel?) {
+        guard let current = playingChannel ?? channels.first,
+              let other = held?.id != current.id ? held : channels.first(where: { $0.id != current.id }) else { return }
+        coordinator.stop()
+        multiviewChannels = [current, other]
+        if player == nil { player = AppleTVLivePlayerPresentation() }
     }
 
     nonisolated private static func isLocal(_ url: URL) -> Bool {

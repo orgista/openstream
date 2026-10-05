@@ -9,10 +9,15 @@ public struct AppleLiveInlineFixtureView: View {
     private var request: ApplePlaybackRequest? { channel?.playbackRequest() }
     #if os(tvOS)
     @State private var footer = AppleTVLiveFooterState()
+    @State private var multiview = false
+    @State private var fixtureSelected: AppleIPTVChannel?
     #endif
 
     public init() {
         let defaults = UserDefaults.standard
+        #if os(tvOS)
+        _multiview = State(initialValue: defaults.bool(forKey: "OpenStreamMultiviewFixture"))
+        #endif
         if defaults.bool(forKey: "OpenStreamVisionPlaybackIsLive"),
            let raw = defaults.string(forKey: "OpenStreamVisionPlaybackURL"),
            let url = URL(string: raw), url.scheme == "http", url.host == "127.0.0.1" {
@@ -30,11 +35,32 @@ public struct AppleLiveInlineFixtureView: View {
         _coordinator = State(initialValue: ApplePlaybackCoordinator(engine: engine))
     }
 
+    #if os(tvOS)
+    private var fixtureChannels: [AppleIPTVChannel] {
+        guard let channel else { return [] }
+        return (1...4).map { index in
+            var streamURL = channel.streamURL
+            if let template = UserDefaults.standard.string(forKey: "OpenStreamMultiviewTemplate"),
+               let url = URL(string: template.replacingOccurrences(of: "{channel}", with: String(index))),
+               url.scheme == "http", url.host == "127.0.0.1" { streamURL = url }
+            if let urls = UserDefaults.standard.stringArray(forKey: "OpenStreamMultiviewURLs"), urls.count >= index,
+               let url = URL(string: urls[index - 1]), url.scheme == "http", url.host == "127.0.0.1" {
+                streamURL = url
+            }
+            return AppleIPTVChannel(id: "multiview-fixture-\(index)", sourceID: channel.sourceID,
+                                    name: "Channel \(index)", streamURL: streamURL)
+        }
+    }
+    #endif
+
     public var body: some View {
         #if os(tvOS)
-        if let channel {
+        if channel != nil, multiview {
+            AppleTVMultiviewScreen(initial: Array(fixtureChannels.prefix(max(2, min(4, UserDefaults.standard.integer(forKey: "OpenStreamMultiviewCount"))))), channels: fixtureChannels,
+                                  onExit: { fixtureSelected = $0; multiview = false })
+        } else if let channel = fixtureSelected ?? channel {
             AppleTVLivePlayerScreen(channel: channel, coordinator: coordinator,
-                                    footerChannels: [channel], footer: $footer, onSwitch: { _ in })
+                                    footerChannels: fixtureChannels, footer: $footer, onMultiview: { _ in multiview = true }, onSwitch: { fixtureSelected = $0 })
         }
         #else
         TabView {

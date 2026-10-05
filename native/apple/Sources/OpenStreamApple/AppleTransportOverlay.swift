@@ -33,6 +33,7 @@ struct AppleTransportOverlay: View {
     let request: ApplePlaybackRequest
     let otherSources: (() -> Void)?
     let onShowChannels: (() -> Void)?
+    let onPlaybackMenu: (() -> Void)?
     /// True while another surface — the live channel panel — is drawn over the
     /// player. `allowsHitTesting(false)` is not enough on its own: the clear
     /// full-screen "Show playback controls" button stays in the accessibility
@@ -89,6 +90,7 @@ struct AppleTransportOverlay: View {
         request: ApplePlaybackRequest,
         otherSources: (() -> Void)? = nil,
         onShowChannels: (() -> Void)? = nil,
+        onPlaybackMenu: (() -> Void)? = nil,
         isObscured: Bool = false,
         onBackgroundTap: ((_ wasHidden: Bool) -> Void)? = nil,
         onControlsVisibilityChanged: ((Bool) -> Void)? = nil,
@@ -104,6 +106,7 @@ struct AppleTransportOverlay: View {
         self.request = request
         self.otherSources = otherSources
         self.onShowChannels = onShowChannels
+        self.onPlaybackMenu = onPlaybackMenu
         self.isObscured = isObscured
         self.onBackgroundTap = onBackgroundTap
         self.onControlsVisibilityChanged = onControlsVisibilityChanged
@@ -172,12 +175,15 @@ struct AppleTransportOverlay: View {
                 .accessibilityIdentifier("player.controls.show")
                 #if os(tvOS)
                 .focused($tvFocus, equals: .surface)
+                .onLongPressGesture { onPlaybackMenu?() }
                 .onMoveCommand { direction in
                     // The surface holds focus while the video plays, so the
                     // clickpad edges skip and a swipe down reveals the controls.
                     switch direction {
                     case .left where model.canSkip: Task { await model.skip(by: -chrome.moveSkipSeconds) }
                     case .right where model.canSkip: Task { await model.skip(by: chrome.moveSkipSeconds) }
+                    case .up where onPlaybackMenu != nil: onPlaybackMenu?()
+                    case .down where onShowChannels != nil: onShowChannels?()
                     case .down:
                         model.bumpActivity()
                         if model.nextEpisodePrompt != nil {

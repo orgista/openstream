@@ -64,6 +64,7 @@ struct AppleLiveTVView: View {
     @State private var viewportSize: CGSize = .zero
     #endif
     #if os(tvOS)
+    @State private var tvMultiviewChannels: [AppleIPTVChannel] = []
     @State private var tvPlayer: AppleTVLivePlayerPresentation?
     @State private var tvFocusRestore = 0
     /// Owned here, not by the player screen: switching to a channel that
@@ -878,12 +879,19 @@ struct AppleLiveTVView: View {
             health: channelHealth,
             healthRevision: channelHealthRevision,
             onShowHealth: { healthDetailChannel = $0 },
+            onMultiview: { beginMultiview(held: $0) },
             onSelectProgramme: playProgramme
         )
         // The tab root draws no page title on a television; the tab bar names it.
         .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(item: $tvPlayer, onDismiss: { tvFocusRestore &+= 1 }) { _ in
-            if let channel = selectedChannel {
+            if !tvMultiviewChannels.isEmpty {
+                AppleTVMultiviewScreen(initial: tvMultiviewChannels, channels: channelSnapshot.channels,
+                    guide: guideStore.guide(for: channelSnapshot.channelIDs), onExit: { channel in
+                        tvMultiviewChannels = []
+                        startChannel(channel, shareSelection: true)
+                    })
+            } else if let channel = selectedChannel {
                 AppleTVLivePlayerScreen(
                     channel: channel,
                     coordinator: playbackCoordinator,
@@ -893,6 +901,7 @@ struct AppleLiveTVView: View {
                     sourceNames: liveSourceNames,
                     guide: guideStore.guide(for: channelSnapshot.channelIDs),
                     programme: catchUp,
+                    onMultiview: { beginMultiview(held: $0) },
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .id(ObjectIdentifier(playbackCoordinator))
@@ -918,6 +927,22 @@ struct AppleLiveTVView: View {
                 }
             }
         }
+    }
+
+    private func beginMultiview(held: AppleIPTVChannel?) {
+        let current = selectedChannel ?? lastWatchedChannel ?? channelSnapshot.channels.first
+        guard let current else { return }
+        let other = held?.id != current.id ? held : channelSnapshot.channels.first { $0.id != current.id }
+        guard let other else { return }
+        guard AppleTVMultiviewSession.thermal != .serious && AppleTVMultiviewSession.thermal != .critical else {
+            probeFailureMessage = AppleMultiviewPolicy.Refusal.thermal.message
+            return
+        }
+        playbackCoordinator.stop()
+        pendingProbe = nil
+        catchUp = nil
+        tvMultiviewChannels = [current, other]
+        if tvPlayer == nil { tvPlayer = AppleTVLivePlayerPresentation() }
     }
 
     /// Task 9: the stock AVPlayer route whenever the container allows it. The

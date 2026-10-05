@@ -143,6 +143,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
     let onShowHealth: (AppleIPTVChannel) -> Void
+    let onMultiview: (AppleIPTVChannel) -> Void
 
     @FocusState private var focus: AppleTVGuideFocus?
     /// Days the guide may scroll back into, from the lineup's catch-up
@@ -187,6 +188,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         health: [String: AppleChannelHealthResult] = [:],
         healthRevision: Int = 0,
         onShowHealth: @escaping (AppleIPTVChannel) -> Void = { _ in },
+        onMultiview: @escaping (AppleIPTVChannel) -> Void = { _ in },
         onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in }
     ) {
         self.metrics = metrics
@@ -212,6 +214,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         self.health = health
         self.healthRevision = healthRevision
         self.onShowHealth = onShowHealth
+        self.onMultiview = onMultiview
         self.onSelectProgramme = onSelectProgramme
     }
 
@@ -637,6 +640,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             health: health,
             healthRevision: healthRevision,
             onShowHealth: onShowHealth,
+            onMultiview: onMultiview,
             onRailMoveLeft: { focusCategories(from: "rail") }
         )
         .equatable()
@@ -672,6 +676,7 @@ private struct AppleTVGuideGrid: View, Equatable {
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
     let onShowHealth: (AppleIPTVChannel) -> Void
+    let onMultiview: (AppleIPTVChannel) -> Void
     let onRailMoveLeft: () -> Void
 
     // `View` infers `@MainActor` for the whole type; the comparison reads only
@@ -715,6 +720,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
                                 onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
+                                onMultiview: { onMultiview(row.channel) },
                                 onMoveLeft: onRailMoveLeft,
                                 onMoveRight: { focusEntryCell(of: row.id) }
                             )
@@ -735,7 +741,8 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onSelectCell: { onSelectProgramme(row.channel, $0.programme) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
-                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) }
+                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
+                                onMultiview: { onMultiview(row.channel) }
                             )
                             .frame(width: metrics.timelineWidth)
                             .focusSection()
@@ -851,6 +858,7 @@ private struct AppleTVGuideRailCell: View {
     /// The health detail, from the long-press menu, so the row keeps one
     /// focus stop. Nil when the channel has never been checked.
     let onShowHealth: (() -> Void)?
+    var onMultiview: (() -> Void)? = nil
     /// Left from the rail: nothing lies to its left, so the press goes to
     /// the categories instead of being swallowed.
     let onMoveLeft: () -> Void
@@ -905,6 +913,7 @@ private struct AppleTVGuideRailCell: View {
             if direction == .right, let onMoveRight { onMoveRight() }
         }
         .contextMenu {
+            if let onMultiview { Button("Watch in Multiview", action: onMultiview) }
             Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
             if let onShowHealth {
                 Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
@@ -978,8 +987,10 @@ private struct AppleTVChannelActions: View {
     let onPlay: () -> Void
     let onToggleFavorite: () -> Void
     let onShowHealth: (() -> Void)?
+    var onMultiview: (() -> Void)? = nil
 
     var body: some View {
+        if let onMultiview { Button("Watch in Multiview", action: onMultiview) }
         ForEach(model.contextActions, id: \.self) { action in
             switch action {
             case .play:
@@ -1014,6 +1025,7 @@ private struct AppleTVGuideScheduleRow: View {
     let onSelectCell: (AppleGuideGridCell) -> Void
     let onToggleFavorite: () -> Void
     let onShowHealth: (() -> Void)?
+    var onMultiview: (() -> Void)? = nil
     @State private var position: ScrollPosition
 
     init(channel: AppleIPTVChannel, cells: [AppleGuideGridCell], window: DateInterval, now: Date,
@@ -1022,7 +1034,8 @@ private struct AppleTVGuideScheduleRow: View {
          onSelect: @escaping () -> Void,
          onSelectCell: @escaping (AppleGuideGridCell) -> Void = { _ in },
          onToggleFavorite: @escaping () -> Void,
-         onShowHealth: (() -> Void)? = nil) {
+         onShowHealth: (() -> Void)? = nil,
+         onMultiview: (() -> Void)? = nil) {
         self.channel = channel
         self.onSelectCell = onSelectCell
         self.cells = cells
@@ -1035,6 +1048,7 @@ private struct AppleTVGuideScheduleRow: View {
         self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
         self.onShowHealth = onShowHealth
+        self.onMultiview = onMultiview
         // `untracked`, never `x`: this init runs inside the screen's body, and
         // reading the tracked value here would put the whole screen back on
         // the scroll's invalidation path.
@@ -1072,7 +1086,7 @@ private struct AppleTVGuideScheduleRow: View {
                     .focused(focus, equals: .cell(AppleTVGuideCellFocus(cell: cell)))
                     .contextMenu {
                         AppleTVChannelActions(model: actions, onPlay: onSelect, onToggleFavorite: onToggleFavorite,
-                            onShowHealth: onShowHealth)
+                            onShowHealth: onShowHealth, onMultiview: onMultiview)
                     }
                     .frame(width: width, height: metrics.cellHeight)
                     .padding(.trailing, metrics.cellGap)
@@ -1390,6 +1404,7 @@ struct AppleTVLiveChannelFooter: View {
     /// without opening the guide (owner 2026-09-15).
     var guide: AppleIPTVGuide = AppleIPTVGuide(programmes: [])
     let onSelect: (AppleIPTVChannel) -> Void
+    var onMultiview: ((AppleIPTVChannel) -> Void)? = nil
 
     /// Same reason as `playerDefaultFocus`: the footer's body re-runs on every
     /// focus move, so this never builds an array of the whole lineup.
@@ -1448,6 +1463,9 @@ struct AppleTVLiveChannelFooter: View {
                         .buttonStyle(AppleTVGuideCellStyle(isCurrent: isCurrent, isGap: false, cornerRadius: 14))
                         .focused(focus, equals: .card(channel.id))
                         .accessibilityLabel(isCurrent ? "\(channel.name), live now" : "Play \(channel.name)")
+                        .contextMenu {
+                            if let onMultiview { Button("Watch in Multiview") { onMultiview(channel) } }
+                        }
                         .accessibilityIdentifier("live.footer.\(channel.id)")
                         .id(channel.id)
                     }
@@ -1489,6 +1507,7 @@ private struct AppleTVFooterDefaultFocus: ViewModifier {
 /// stream connects the screen is black with one centered spinner.
 @MainActor
 struct AppleTVLivePlayerScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var host: ApplePlayerHost
     @State private var audioSession: AppleAudioSessionCoordinator
@@ -1496,6 +1515,7 @@ struct AppleTVLivePlayerScreen: View {
     /// Whether the channel on screen has ever played a frame. Reset per
     /// channel; it decides what Menu means while the picture is still black.
     @State private var hasPlayed = false
+    @State private var playbackMenu = false
     /// "Captions on" / "off" / "none", shown briefly after a swipe up.
     @State private var captionsNotice: String?
     @State private var captionsNoticeTask: Task<Void, Never>?
@@ -1521,6 +1541,8 @@ struct AppleTVLivePlayerScreen: View {
     /// `onSwitch(channel)`.
     let programme: AppleIPTVProgramme?
     let onSwitch: (AppleIPTVChannel) -> Void
+    let onMultiview: ((AppleIPTVChannel?) -> Void)?
+    let onBack: (() -> Void)?
 
     init(channel: AppleIPTVChannel, coordinator: ApplePlaybackCoordinator, footerChannels: [AppleIPTVChannel],
          footer: Binding<AppleTVLiveFooterState>, alternateLineup: [AppleIPTVChannel] = [],
@@ -1528,6 +1550,8 @@ struct AppleTVLivePlayerScreen: View {
          guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []),
          metrics: AppleTVGuideMetrics = .standard,
          programme: AppleIPTVProgramme? = nil,
+         onMultiview: ((AppleIPTVChannel?) -> Void)? = nil,
+         onBack: (() -> Void)? = nil,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
         self.channel = channel
         self.programme = programme
@@ -1539,6 +1563,8 @@ struct AppleTVLivePlayerScreen: View {
         self.guide = guide
         self.metrics = metrics
         self.onSwitch = onSwitch
+        self.onMultiview = onMultiview
+        self.onBack = onBack
         let audioSession = AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
         _host = State(initialValue: ApplePlayerHost(coordinator: coordinator, audioSession: audioSession))
@@ -1574,8 +1600,12 @@ struct AppleTVLivePlayerScreen: View {
                 .ignoresSafeArea()
             // The overlay owns the remote on this route: Menu closes,
             // Play/Pause toggles, the clickpad edges skip.
-            AppleTransportOverlay(coordinator: coordinator, request: request, onClose: { dismiss() },
+            AppleTransportOverlay(coordinator: coordinator, request: request,
+                                  onShowChannels: { apply(.swipeDown) },
+                                  onPlaybackMenu: { playbackMenu = true },
+                                  isObscured: footer.isVisible, onClose: { closePlayer() },
                                   onWatchLive: watchLiveAction)
+            footerOverlay
         } else {
             stockPlayerWithFooter
         }
@@ -1618,7 +1648,8 @@ struct AppleTVLivePlayerScreen: View {
                         footer.reset()
                         focus = .surface
                         onSwitch(selected)
-                    }
+                    },
+                    onMultiview: onMultiview.map { action in { action($0) } }
                 )
                 .padding(.bottom, metrics.verticalSafeInset - 20)
             }
@@ -1655,6 +1686,10 @@ struct AppleTVLivePlayerScreen: View {
                     .accessibilityLabel("Connecting to \(channel.name)")
             }
         }
+        .confirmationDialog("Playback", isPresented: $playbackMenu) {
+            if let onMultiview { Button("Multiview") { onMultiview(nil) } }
+            Button("Captions", action: toggleCaptions)
+        }
         .onChange(of: coordinator.phase) { _, phase in
             if phase == .playing { hasPlayed = true }
             #if DEBUG
@@ -1676,9 +1711,10 @@ struct AppleTVLivePlayerScreen: View {
             AppleInteractionTrace.record(.focus, "live player \(value.map(String.init(describing:)) ?? "none")")
             #endif
         }
-        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")") {
+        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")|\(onBack != nil && scenePhase == .background)") {
             hasPlayed = false
             coordinator.stop()
+            if onBack != nil && scenePhase == .background { host.teardown(); return }
             // Drop the controller's reference to the channel that just
             // stopped before the next one starts loading. Without this the
             // AVPlayerViewController kept the previous player until the host's
@@ -1809,6 +1845,7 @@ struct AppleTVLivePlayerScreen: View {
                 .buttonStyle(AppleTVBareButtonStyle())
                 .focused($focus, equals: .surface)
                 .accessibilityLabel("Show channels")
+                .onLongPressGesture { playbackMenu = true }
                 .accessibilityIdentifier("live.player.surface")
             }
 
@@ -1928,7 +1965,13 @@ struct AppleTVLivePlayerScreen: View {
         return .surface
     }
 
+    private func closePlayer() {
+        if let onBack { onBack() } else { dismiss() }
+    }
+
     private func apply(_ command: AppleTVLiveFooterState.Command) {
+        if command == .menu, onBack != nil { closePlayer(); return }
+        if command == .swipeUp, onMultiview != nil { playbackMenu = true; return }
         #if DEBUG
         AppleInteractionTrace.record(.press, "live player \(command) footer=\(footer.phase) played=\(hasPlayed)")
         #endif
@@ -1937,7 +1980,7 @@ struct AppleTVLivePlayerScreen: View {
         // normal answer to Menu — is what read as being stuck with no way out
         // (owner 18:55). Once a frame has played, Menu means the row again.
         if command == .menu, !footer.isVisible, !hasPlayed {
-            dismiss()
+            closePlayer()
             return
         }
         switch footer.apply(command) {
@@ -1946,7 +1989,7 @@ struct AppleTVLivePlayerScreen: View {
         case .hide:
             focus = .surface
         case .exit:
-            dismiss()
+            closePlayer()
         case .toggleCaptions:
             toggleCaptions()
         case .none, .switchChannel:

@@ -219,6 +219,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// SwiftUI surface on `.surface` routes.
     internal var aetherEngine: AetherEngine { aether }
 
+    /// Reapply before every phase, including the software audio host's load.
+    var multiviewMuted = false {
+        didSet { aether.volume = multiviewMuted || AppleTestAudioMute.isActive ? 0 : 1 }
+    }
+
     public var events: AsyncStream<ApplePlaybackEngineEvent> {
         eventStream.stream()
     }
@@ -754,7 +759,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // `load`, so the 0 from `init` landed on nothing and the `swift test`
         // Matroska fixture played out loud (2026-09-30). Every phase change
         // re-applies it, before any sample is rendered.
-        if AppleTestAudioMute.isActive { aether.volume = 0 }
+        if multiviewMuted || AppleTestAudioMute.isActive { aether.volume = 0 }
         self.phase = Self.mapPhase(phase)
         // The pixel aspect is set after the coded size and is not published;
         // the next phase change picks it up.

@@ -121,6 +121,18 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         }
     }
 
+    /// Multiview settings survive item replacement and automatic reconnects.
+    var multiviewMuted = false {
+        didSet { player?.isMuted = multiviewMuted || AppleTestAudioMute.isActive }
+    }
+    var multiviewQualityLimited = false {
+        didSet { applyMultiviewQuality() }
+    }
+    private func applyMultiviewQuality() {
+        item?.preferredMaximumResolution = multiviewQualityLimited ? CGSize(width: 1280, height: 720) : .zero
+        item?.preferredPeakBitRate = multiviewQualityLimited ? 3_000_000 : 0
+    }
+
     public var avPlayer: AVPlayer? { player }
 
     /// The item's own seekable span. On this route `position` is the player's
@@ -186,8 +198,9 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             forMediaCharacteristic: .audible)
         appleTrace("audio language preference \(audioLanguages.joined(separator: ","))")
         avPlayer.replaceCurrentItem(with: playerItem)
-        if AppleTestAudioMute.isActive { avPlayer.isMuted = true }
+        avPlayer.isMuted = multiviewMuted || AppleTestAudioMute.isActive
         self.item = playerItem
+        applyMultiviewQuality()
         self.player = avPlayer
         route = .avPlayer
         phase = .loading
