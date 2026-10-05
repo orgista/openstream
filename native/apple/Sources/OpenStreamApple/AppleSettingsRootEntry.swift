@@ -9,11 +9,12 @@
 /// (`AppleConfigurationSyncPolicy`) — so its split view has no such row.
 public enum AppleSettingsRootEntry: String, CaseIterable, Sendable {
     case sources
+    case restrictions
     case channels
     case backup
 
     public static let leadingSections: [[AppleSettingsRootEntry]] = [
-        [.sources, .channels],
+        [.sources, .channels, .restrictions],
         [.backup],
     ]
 
@@ -21,6 +22,7 @@ public enum AppleSettingsRootEntry: String, CaseIterable, Sendable {
         switch self {
         case .sources: "Sources"
         case .channels: "Channel Manager"
+        case .restrictions: "Restrictions"
         case .backup: "Backup & Sync"
         }
     }
@@ -29,6 +31,7 @@ public enum AppleSettingsRootEntry: String, CaseIterable, Sendable {
         switch self {
         case .sources: "rectangle.stack.badge.plus"
         case .channels: "list.star"
+        case .restrictions: "lock.shield"
         case .backup: "icloud.and.arrow.up"
         }
     }

@@ -162,6 +162,10 @@ struct AppleMediaPlayerView: View {
     }
 
     var body: some View {
+        playbackContent.modifier(ApplePINPresenter())
+    }
+
+    private var playbackContent: some View {
         ZStack {
             if coordinator.route == .surface {
                 ApplePlaybackSurfaceView(engine: coordinator.engine)

@@ -127,7 +127,6 @@ public final class AppleIPTVGuideStore {
                 case .xmltv(let url, let mapping, let offset, _, _):
                     guide = try await loader.load(xmltvURL: url, defaultOffsetHours: offset)
                     guard !Task.isCancelled, configurations[key] == configuration else { continue }
-                    channelNames[key] = guide.channelNames
                     for id in ids {
                         if let manual = manualChannelMapping[id] { providerIDs[id] = manual }
                         else if let exact = mapping[id], !guide.programmes(channelID: exact, in: DateInterval(start: .distantPast, end: .distantFuture)).isEmpty { providerIDs[id] = exact }
@@ -146,9 +145,9 @@ public final class AppleIPTVGuideStore {
                         streamIDs: providerIDs.values.compactMap(Int.init).sorted(), archiveStreamIDs: archive)
                 }
                 guard !Task.isCancelled, configurations[key] == configuration else { continue }
+                var stagedCaches: [String: ChannelCache] = [:]
                 for (index, id) in ids.enumerated() {
                     if index.isMultiple(of: 100) {
-                        if index > 0 { revision &+= 1 }
                         await Task.yield()
                         guard !Task.isCancelled, configurations[key] == configuration else { break }
                     }
@@ -164,9 +163,12 @@ public final class AppleIPTVGuideStore {
                             subtitle: programme.subtitle, description: programme.description, start: programme.start.addingTimeInterval(shift * 3600),
                             end: programme.end.addingTimeInterval(shift * 3600), category: programme.category, isLive: programme.isLive)
                     }
-                    caches[id] = ChannelCache(programmes: programmes, fetchTime: now)
+                    stagedCaches[id] = ChannelCache(programmes: programmes, fetchTime: now)
                 }
                 guard !Task.isCancelled, configurations[key] == configuration else { continue }
+                // Commit only the completed replacement. A cancelled mapping keeps the old guide.
+                caches.merge(stagedCaches) { _, new in new }
+                if case .xmltv = configuration { channelNames[key] = guide.channelNames }
                 revision &+= 1
                 let sourceProgrammes = caches.filter { cacheKey, _ in
                     key.isEmpty ? !cacheKey.contains(":") : cacheKey.hasPrefix(key + ":")

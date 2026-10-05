@@ -137,6 +137,7 @@ public struct OpenStreamRootView: View {
     @State private var rootViewportSize: CGSize = .zero
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
+    @Environment(\.scenePhase) private var restrictionScenePhase
     @State private var sourceStore = AppleSourceStore()
     @State private var catalogStore = AppleCatalogStore()
     @State private var settingsStore = AppleSettingsStore()
@@ -217,6 +218,7 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
+                .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
                 #elseif os(iOS)
@@ -240,6 +242,7 @@ public struct OpenStreamRootView: View {
                         }
                     }
                 }
+                .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem {
                     Label(tab.title, systemImage: tab.systemImage)
                 }
@@ -256,6 +259,7 @@ public struct OpenStreamRootView: View {
                 .id(tabMountGeneration[tab] ?? 0)
                 .onAppear { mountedTabs.insert(tab) }
                 .onDisappear { mountedTabs.remove(tab) }
+                .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem {
                     if tab.showsTitleInTabBar {
                         Label(tab.title, systemImage: tab.systemImage)
@@ -285,6 +289,7 @@ public struct OpenStreamRootView: View {
                 )) {
                     content(for: tab)
                 }
+                .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
                 #endif
@@ -365,6 +370,11 @@ public struct OpenStreamRootView: View {
         #if os(macOS)
         .appleMacPlayerStage(macPlayerStage)
         #endif
+        .modifier(ApplePINPresenter())
+        .onChange(of: restrictionScenePhase) { _, phase in
+            if phase == .background { AppleRestrictionStore.shared.background() }
+        }
+        .safeAreaInset(edge: .bottom) { AppleImportProgressView() }
         .modifier(AppleProgrammeReminderBanner())
         .onChange(of: AppleProgrammeReminderStore.shared.requestedChannelID, initial: true) { _, id in
             guard id != nil else { return }
@@ -795,6 +805,7 @@ public struct OpenStreamRootView: View {
     private static var debugTopLevelSettingsRoutes: [String: AppleSettingsRoute] {
         var routes: [String: AppleSettingsRoute] = [
         "channels": .channels,
+        "restrictions": .restrictions,
         "playback-settings": .playback,
         "metadata": .metadata,
         "server-downloads": .serverDownloads,

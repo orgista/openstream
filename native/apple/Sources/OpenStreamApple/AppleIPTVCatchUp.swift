@@ -257,6 +257,8 @@ public enum AppleIPTVCatchUp: Sendable {
             sourceKind: .liveTV
         )
         request.artworkURL = channel.logoURL
+        request.restrictionChannelID = channel.id
+        request.restrictionGroup = channel.group
         return request
     }
 

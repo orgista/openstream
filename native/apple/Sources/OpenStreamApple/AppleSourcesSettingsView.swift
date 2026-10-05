@@ -1517,7 +1517,10 @@ private struct AppleAddLiveTVSourceView: View {
                 : nil
             let channels: [AppleIPTVChannel]
             if importingFile {
-                channels = try AppleIPTVClient.parseM3U(Data(pastedPlaylist.utf8), sourceID: source.id, baseURL: source.url)
+                let data = Data(pastedPlaylist.utf8)
+                channels = try await AppleImportStore.shared.run(title: source.name, unit: "channels") { progress in
+                    try await AppleIPTVClient.parseM3UOffMain(data, sourceID: source.id, baseURL: source.url, progress: progress)
+                }
                 guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
             } else {
                 channels = try await client.validate(source: source, credentials: credentials)

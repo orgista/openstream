@@ -48,6 +48,11 @@ final class AppleTVMultiviewTile: Identifiable {
         routeFailure = nil
         openTask = Task { [weak self] in
             guard let self else { return }
+            guard await AppleRestrictionStore.shared.authorize(channelID: self.channel.id,
+                group: self.channel.group, title: self.channel.name), !Task.isCancelled else {
+                self.started = false
+                return
+            }
             var channel = self.channel
             // Preserve origin HTTP failures that AVPlayer can flatten into a
             // generic media error; the bounded probe closes before playback.

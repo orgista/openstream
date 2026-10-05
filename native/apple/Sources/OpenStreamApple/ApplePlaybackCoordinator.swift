@@ -565,6 +565,15 @@ public final class ApplePlaybackCoordinator {
     private func beginAttempt(_ request: ApplePlaybackRequest) async {
         generation &+= 1
         let attempt = generation
+        if let channelID = request.restrictionChannelID {
+            let restrictions = AppleRestrictionStore.shared
+            guard await restrictions.authorize(channelID: channelID, group: request.restrictionGroup ?? "",
+                title: request.title ?? "Channel"), !Task.isCancelled, generation == attempt,
+                  !restrictions.needsUnlock(channelID: channelID, group: request.restrictionGroup ?? "") else { return }
+            if restrictions.hasPIN && restrictions.policy.isLocked(channelID: channelID, group: request.restrictionGroup ?? "") {
+                restrictions.protect(self)
+            }
+        }
         loadTask?.cancel()
         lastRequest = request
         if subtitleTimingMediaID != request.mediaID {

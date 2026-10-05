@@ -69,6 +69,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         }
     }
 
+    public var restrictionChannelID: String?
+    public var restrictionGroup: String?
     public var url: URL
     public var headers: [String: String]
     public var isLive: Bool

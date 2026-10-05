@@ -502,6 +502,7 @@ public struct AppleIPTVClient: Sendable {
     static let accountProbeTimeout: TimeInterval = 7
 
     private let loader: Loader
+    private let usesLiveLoader: Bool
     private let protectedPlaybackURL: ProtectedPlaybackURL
 
     public init(
@@ -509,6 +510,7 @@ public struct AppleIPTVClient: Sendable {
         protectedPlaybackURL: @escaping ProtectedPlaybackURL = AppleIPTVClient.liveProtectedPlaybackURL
     ) {
         self.loader = loader
+        self.usesLiveLoader = false
         self.protectedPlaybackURL = protectedPlaybackURL
     }
 
@@ -516,6 +518,7 @@ public struct AppleIPTVClient: Sendable {
         protectedPlaybackURL: @escaping ProtectedPlaybackURL = AppleIPTVClient.liveProtectedPlaybackURL
     ) {
         self.loader = { request in try await AppleIPTVClient.liveLoader(request) }
+        self.usesLiveLoader = true
         self.protectedPlaybackURL = protectedPlaybackURL
     }
 
@@ -523,6 +526,13 @@ public struct AppleIPTVClient: Sendable {
         source: AppleSource,
         credentials: AppleIPTVCredentials? = nil
     ) async throws -> [AppleIPTVChannel] {
+        try await AppleImportStore.shared.run(title: source.name, unit: "channels") { progress in
+            try await channelsImport(source: source, credentials: credentials, progress: progress)
+        }
+    }
+
+    private func channelsImport(source: AppleSource, credentials: AppleIPTVCredentials?,
+        progress: @escaping @Sendable (AppleImportProgress) -> Void) async throws -> [AppleIPTVChannel] {
         guard source.kind == .liveTV, source.isEnabled, let type = source.iptvType else {
             throw AppleIPTVError.invalidSource
         }
@@ -532,7 +542,7 @@ public struct AppleIPTVClient: Sendable {
             endpoint = try AppleIPTVEndpointPolicy.normalize(source.url.absoluteString)
             if AppleLocalPlaylistStore.isLocal(endpoint) {
                 let data = try AppleLocalPlaylistStore.shared.read(endpoint)
-                let values = try Self.parseM3U(data, sourceID: source.id, baseURL: endpoint)
+                let values = try await Self.parseM3UOffMain(data, sourceID: source.id, baseURL: endpoint, progress: progress)
                 guard !values.isEmpty else { throw AppleIPTVError.noChannels }
                 return source.epgURL.map { epgURL in
                     values.map { channel in channel.withGuideURL(channel.guideURL ?? epgURL) }
@@ -555,7 +565,13 @@ public struct AppleIPTVClient: Sendable {
             forHTTPHeaderField: "Accept"
         )
         request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await loader(request)
+        let data: Data
+        let response: URLResponse
+        if usesLiveLoader {
+            (data, response) = try await Self.liveLoader(request) { bytes, total in
+                progress(.init(items: 0, bytes: bytes, totalBytes: total > 0 ? Int(total) : 0, phase: .downloading))
+            }
+        } else { (data, response) = try await loader(request) }
         guard data.count <= Self.maximumResponseBytes,
               response.expectedContentLength <= Int64(Self.maximumResponseBytes) else {
             throw AppleIPTVError.responseTooLarge
@@ -564,7 +580,7 @@ public struct AppleIPTVClient: Sendable {
         guard (200 ... 299).contains(http.statusCode) else { throw AppleIPTVError.requestFailed(http.statusCode) }
         let finalURL = http.url ?? endpoint
         guard AppleIPTVEndpointPolicy.isPlayable(finalURL) else { throw AppleIPTVError.invalidEndpoint }
-        let values = try Self.parseM3U(data, sourceID: source.id, baseURL: finalURL)
+        let values = try await Self.parseM3UOffMain(data, sourceID: source.id, baseURL: finalURL, progress: progress)
         guard !values.isEmpty else { throw AppleIPTVError.noChannels }
         return source.epgURL.map { epgURL in
             values.map { channel in channel.withGuideURL(channel.guideURL ?? epgURL) }
@@ -777,11 +793,19 @@ public struct AppleIPTVClient: Sendable {
         return data
     }
 
+    @concurrent
+    static func parseM3UOffMain(_ data: Data, sourceID: AppleSource.ID, baseURL: URL,
+        progress: @Sendable (AppleImportProgress) -> Void) async throws -> [AppleIPTVChannel] {
+        try parseM3U(data, sourceID: sourceID, baseURL: baseURL, progress: progress)
+    }
+
     public static func parseM3U(
         _ data: Data,
         sourceID: AppleSource.ID,
-        baseURL: URL
+        baseURL: URL,
+        progress: @Sendable (AppleImportProgress) -> Void = { _ in }
     ) throws -> [AppleIPTVChannel] {
+        try Task.checkCancellation()
         guard data.count <= maximumResponseBytes,
               let text = String(data: data, encoding: .utf8)
                 ?? String(data: data, encoding: .isoLatin1) else {
@@ -808,7 +832,13 @@ public struct AppleIPTVClient: Sendable {
         var seenEntries = Set<String>()
         var channels: [AppleIPTVChannel] = []
 
-        for rawLine in lines {
+        var parsedBytes = 0
+        for (index, rawLine) in lines.enumerated() {
+            try Task.checkCancellation()
+            parsedBytes += rawLine.utf8.count + 1
+            if index.isMultiple(of: 256) {
+                progress(AppleImportProgress(items: channels.count, bytes: parsedBytes, totalBytes: data.count))
+            }
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
             if line.uppercased().hasPrefix("#EXTINF:") {
@@ -890,6 +920,8 @@ public struct AppleIPTVClient: Sendable {
                 break
             }
         }
+        try Task.checkCancellation()
+        progress(AppleImportProgress(items: channels.count, bytes: data.count, totalBytes: data.count))
         return channels
     }
 
@@ -967,10 +999,16 @@ public struct AppleIPTVClient: Sendable {
     }
 
     public static func liveLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await liveLoader(request, progress: { _, _ in })
+    }
+
+    private static func liveLoader(_ request: URLRequest,
+        progress: @escaping @Sendable (Int, Int64) -> Void) async throws -> (Data, URLResponse) {
         do {
             return try await AppleBoundedHTTPDataLoader.load(
                 request,
-                maximumBytes: maximumResponseBytes
+                maximumBytes: maximumResponseBytes,
+                progress: progress
             )
         } catch AppleBoundedHTTPError.responseTooLarge {
             throw AppleIPTVError.responseTooLarge

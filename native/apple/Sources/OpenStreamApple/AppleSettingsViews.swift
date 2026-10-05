@@ -3,6 +3,7 @@ import SwiftUI
 enum AppleSettingsRoute: Hashable {
     case sources
     case channels
+    case restrictions
     case metadata
     case serverDownloads
     case trakt
@@ -65,6 +66,10 @@ struct AppleSettingsView: View {
     @State private var splitSelection: AppleSettingsRoute = .sources
 
     var body: some View {
+        settingsContent.modifier(AppleSettingsPINLock())
+    }
+
+    @ViewBuilder private var settingsContent: some View {
         #if os(tvOS)
         AppleTVSettingsSplitView(settings: settings, sourceStore: sourceStore, webManagement: webManagement)
             .navigationDestination(for: AppleSettingsRoute.self) { route in
@@ -127,6 +132,8 @@ struct AppleSettingsView: View {
             )
         case .channels:
             AppleChannelManagerView(settings: settings, sourceStore: sourceStore)
+        case .restrictions:
+            AppleRestrictionsView(sourceStore: sourceStore)
         case .metadata:
             AppleMetadataSettingsView(settings: settings)
         case .serverDownloads:
@@ -253,6 +260,7 @@ private extension AppleSettingsRootEntry {
         switch self {
         case .sources: .sources
         case .channels: .channels
+        case .restrictions: .restrictions
         case .backup: .backup
         }
     }
@@ -366,6 +374,8 @@ private struct AppleTVSettingsSplitView: View {
             )
         case .channels:
             AppleChannelManagerView(settings: settings, sourceStore: sourceStore, embeddedInSplit: true)
+        case .restrictions:
+            AppleRestrictionsView(sourceStore: sourceStore, embeddedInSplit: true)
         case .liveTV:
             AppleTVLiveTabPane(settings: settings, sourceStore: sourceStore, webManagement: webManagement)
         case .discover:

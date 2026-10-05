@@ -500,6 +500,7 @@ struct AppleLiveTVView: View {
             settings.liveChannelPackage.rawValue,
             settings.customChannelPackage.identity,
             settings.favoriteChannelIDs.sorted().joined(separator: "\u{1f}"),
+            String(AppleRestrictionStore.shared.revision),
             settings.hiddenLiveChannelIDs.sorted().joined(separator: "\u{1f}"),
             settings.hiddenLiveGroups.sorted().joined(separator: "\u{1f}"),
             settings.favoriteLiveChannelOrder.joined(separator: "\u{1f}"),
@@ -720,7 +721,9 @@ struct AppleLiveTVView: View {
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
         }
-        let visible = AppleLiveChannelPreferences.visible(channels, hiddenIDs: settings.hiddenLiveChannelIDs, hiddenGroups: settings.hiddenLiveGroups)
+        let restrictions = AppleRestrictionStore.shared
+        let permitted = channels.filter { restrictions.policy.isVisible(channelID: $0.id, group: $0.group, hasPIN: restrictions.hasPIN) }
+        let visible = AppleLiveChannelPreferences.visible(permitted, hiddenIDs: settings.hiddenLiveChannelIDs, hiddenGroups: settings.hiddenLiveGroups)
         let updated = await AppleChannelProjection.buildGroupsOffMain(
             from: visible,
             scope: settings.liveChannelScope,
@@ -938,8 +941,28 @@ struct AppleLiveTVView: View {
     /// gets one 32 KB look first so HLS goes to AVPlayer and raw TS to the
     /// engine (`AppleLiveStreamRoutePolicy`); the verdict is kept for the
     /// session. Anything with a telling extension starts at once.
+    @State private var parentalPlayTask: Task<Void, Never>?
     private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true,
                               programme: AppleIPTVProgramme? = nil) {
+        parentalPlayTask?.cancel()
+        let restrictions = AppleRestrictionStore.shared
+        guard restrictions.needsUnlock(channelID: channel.id, group: channel.group) else {
+            startAuthorizedChannel(channel, shareSelection: shareSelection, present: present, programme: programme)
+            return
+        }
+        // Retire the previous player's failure alert before presenting the PIN.
+        playbackCoordinator.stop()
+        pendingProbe = nil
+        probeFailureMessage = nil
+        parentalPlayTask = Task {
+            guard await restrictions.authorize(channelID: channel.id, group: channel.group, title: channel.name),
+                  !Task.isCancelled, !restrictions.needsUnlock(channelID: channel.id, group: channel.group) else { return }
+            startAuthorizedChannel(channel, shareSelection: shareSelection, present: present, programme: programme)
+        }
+    }
+
+    private func startAuthorizedChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool,
+                                       programme: AppleIPTVProgramme?) {
         if shareSelection { resumePending = false }
         // Synchronously cancel the old load/stream before probing or opening
         // another one. The existing engine load retains its fast-join policy.
@@ -1052,6 +1075,8 @@ struct AppleLiveTVView: View {
                     onMultiview: { beginMultiview(held: $0) },
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
+                .modifier(ApplePINPresenter())
+                .safeAreaInset(edge: .bottom) { AppleImportProgressView() }
                 .id(ObjectIdentifier(playbackCoordinator))
                 .task(id: AppleLiveSystemChannels.shared.requestedChannelID) { consumeLiveChannelRequest() }
                 // A full-screen cover can suspend the underlying view's task.
@@ -1700,6 +1725,7 @@ private struct AppleLiveFullScreenControls: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : Animation.default, value: channelPicker.isPresented)
         .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
+        .modifier(ApplePINPresenter())
         #if os(iOS)
         .simultaneousGesture(DragGesture(minimumDistance: 60).onEnded { gesture in
             if let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,

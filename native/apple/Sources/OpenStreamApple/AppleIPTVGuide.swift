@@ -109,8 +109,18 @@ public actor AppleIPTVGuideLoader {
 
     public func load(xmltvURL: URL?, defaultOffsetHours: Double = 0) async throws -> AppleIPTVGuide {
         guard let url = xmltvURL else { return AppleIPTVGuide(programmes: []) }
-        let data = try await fetch(url)
-        return AppleIPTVGuideXMLTVParser().guide(data: data, defaultOffsetHours: defaultOffsetHours)
+        return try await AppleImportStore.shared.run(title: "Programme Guide", unit: "programmes") { progress in
+            let data = try await self.fetch(url) { bytes, total in
+                progress(.init(items: 0, bytes: bytes, totalBytes: total > 0 ? Int(total) : 0, phase: .downloading))
+            }
+            return try await Self.parseXMLTV(data, defaultOffsetHours: defaultOffsetHours, progress: progress)
+        }
+    }
+
+    @concurrent
+    private static func parseXMLTV(_ data: Data, defaultOffsetHours: Double,
+        progress: @escaping @Sendable (AppleImportProgress) -> Void) async throws -> AppleIPTVGuide {
+        try AppleIPTVGuideXMLTVParser().validatedGuide(data: data, defaultOffsetHours: defaultOffsetHours, progress: progress)
     }
 
     /// - Parameter archiveStreamIDs: channels with catch-up. Those are read
@@ -158,13 +168,13 @@ public actor AppleIPTVGuideLoader {
         return AppleIPTVGuideXtreamParser().parseShortEPG(data: data, streamID: String(id))
     }
 
-    private func fetch(_ url: URL) async throws -> Data {
+    private func fetch(_ url: URL, progress: @escaping @Sendable (Int, Int64) -> Void = { _, _ in }) async throws -> Data {
         guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
               url.host?.isEmpty == false else { throw AppleIPTVError.invalidEndpoint }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.requestTimeout)
         request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
         let (data, response) = try await client.load(request, maximumBytes: maxBytes,
-            redirectPolicy: Self.redirectPolicy, behavior: .rejectOverflow)
+            redirectPolicy: Self.redirectPolicy, behavior: .rejectOverflow, progress: progress)
         guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard 200..<300 ~= response.statusCode else { throw AppleIPTVError.requestFailed(response.statusCode) }
         try Task.checkCancellation()

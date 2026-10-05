@@ -43,6 +43,8 @@ extension AppleIPTVChannel {
                          declaresEmbeddedCaptions: nativeRemoteHLS && wrapsInCaptionMaster != false)
         )
         request.artworkURL = logoURL
+        request.restrictionChannelID = id
+        request.restrictionGroup = group
         return request
     }
 }

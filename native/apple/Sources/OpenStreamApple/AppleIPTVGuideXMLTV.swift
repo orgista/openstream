@@ -12,9 +12,29 @@ final class AppleIPTVGuideXMLTVParser: NSObject, XMLParserDelegate, Sendable {
         parser.parse()
         return AppleIPTVGuide(programmes: delegate.programmes, channelNames: delegate.channelNames)
     }
+    func validatedGuide(data: Data, defaultOffsetHours: Double = 0,
+        progress: @escaping @Sendable (AppleImportProgress) -> Void = { _ in }) throws -> AppleIPTVGuide {
+        try Task.checkCancellation()
+        let stream = XMLTVProgressInputStream(data: data)
+        let parser = XMLParser(stream: stream)
+        let delegate = ParserDelegate(defaultOffsetHours: defaultOffsetHours)
+        delegate.bytesRead = { stream.processedBytes }
+        delegate.progress = progress
+        delegate.totalBytes = data.count
+        parser.delegate = delegate
+        let succeeded = parser.parse()
+        try Task.checkCancellation()
+        guard succeeded else { throw parser.parserError ?? URLError(.cannotParseResponse) }
+        progress(AppleImportProgress(items: delegate.programmes.count, bytes: data.count, totalBytes: data.count))
+        return AppleIPTVGuide(programmes: delegate.programmes, channelNames: delegate.channelNames)
+    }
+
 }
 
 private final class ParserDelegate: NSObject, XMLParserDelegate {
+    var progress: @Sendable (AppleImportProgress) -> Void = { _ in }
+    var totalBytes = 0
+    var bytesRead: () -> Int = { 0 }
     var programmes: [AppleIPTVProgramme] = []
     var channelNames: [String: String] = [:]
     private var catalogueID: String?
@@ -65,6 +85,7 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+        guard !Task.isCancelled else { parser.abortParsing(); return }
         currentElement = elementName
         if elementName == "channel" {
             catalogueID = attributeDict["id"]
@@ -91,6 +112,7 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard !Task.isCancelled else { parser.abortParsing(); return }
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         
@@ -105,6 +127,7 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        guard !Task.isCancelled else { parser.abortParsing(); return }
         if elementName == "channel", let id = catalogueID, channelNames.count < AppleIPTVClient.maximumChannels {
             let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             if !id.isEmpty, !name.isEmpty { channelNames[id] = name }
@@ -125,7 +148,33 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
                 isLive: false // Will be determined by guide querying logic comparing Date() to start/end
             )
             programmes.append(prog)
+            if programmes.count.isMultiple(of: 128) {
+                progress(AppleImportProgress(items: programmes.count, bytes: bytesRead(), totalBytes: totalBytes))
+            }
         }
         currentElement = ""
+    }
+}
+
+/// XMLParser reads bounded chunks; count the actual bytes consumed, including markup.
+private final class XMLTVProgressInputStream: InputStream {
+    private let backing: InputStream
+    private(set) var processedBytes = 0
+    override init(data: Data) {
+        backing = InputStream(data: data)
+        super.init(data: Data())
+    }
+    override func open() { backing.open() }
+    override func close() { backing.close() }
+    override var streamStatus: Stream.Status { backing.streamStatus }
+    override var streamError: (any Error)? { backing.streamError }
+    override var hasBytesAvailable: Bool { backing.hasBytesAvailable }
+    override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength len: Int) -> Int {
+        let count = backing.read(buffer, maxLength: len)
+        if count > 0 { processedBytes += count }
+        return count
+    }
+    override func getBuffer(_ buffer: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>, length len: UnsafeMutablePointer<Int>) -> Bool {
+        false
     }
 }

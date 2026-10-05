@@ -69,6 +69,8 @@ struct AppleTVMultiviewScreen: View {
             .frame(height: 44)
             .focusSection()
         }
+        .modifier(ApplePINPresenter())
+        .safeAreaInset(edge: .bottom) { AppleImportProgressView() }
         .padding(48)
         .background(.black)
         .foregroundStyle(AppleDesignTokens.textPrimary)

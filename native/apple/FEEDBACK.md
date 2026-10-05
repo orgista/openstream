@@ -4491,3 +4491,11 @@ The full suite passed: 2811 tests in 358 suites. Both simulator builds, unsigned
 oStream now shows an Xtream provider’s movies and series in Library, with category rows and full category browsing. Title pages use the provider’s artwork and details; series open seasons and episodes. Playback saves resume progress and watched episodes, offers the next episode, and feeds Continue Watching and search. Optional TMDB details can fill gaps after the provider’s title is ready.
 
 Large libraries load category by category in the background, with limits and a disk cache that refreshes after twelve hours. Synthetic movie/series playback and provider failures were checked on iPhone and Apple TV. The full suite passed: 2,825 tests in 359 suites, including fourteen new tests. Simulator builds, unsigned AppStore-iOS Release, SDK floors and the no-add-ons check passed. Screenshots: ~/Developer/openstream-build/verification/xtream-vod/. Fixture sources were deleted, original simulator data restored, and both simulators and the server stopped. No commits or uploads.
+
+
+## 2026-10-05 — Import progress and parental PIN
+oStream shows download bytes and channel/programme counts while importing Live TV, with Cancel on iPhone and Apple TV. Cancelling keeps the saved lineup and guide; playback and guide navigation stay usable.
+
+Settings › Restrictions now has a four-digit device-only PIN, locked groups and channels, optional Settings locking, and an option to hide locked channels. Live playback, channel switching, Multiview, channel links, catch-up and Start Over share the PIN check. A correct PIN unlocks the session until backgrounding. Forgot PIN asks for confirmation and clears the PIN and locked lists.
+
+Synthetic fixture checks covered both keypads, wrong-PIN rejection, locked-channel links, import cancellation, and iPhone settings/background/guide hiding. The full suite passed: 2,841 tests in 361 suites. Simulator and unsigned device Release builds, SDK floors and the final no-add-ons scan passed; screenshots are in ~/Developer/openstream-build/verification/pin-import/. Test sources and restrictions were removed, both simulators and the local server stopped. No commits or uploads.
