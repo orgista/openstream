@@ -1134,6 +1134,17 @@ private struct ApplePlaybackSettingsView: View {
 
             Section("Playback") {
                 #if os(tvOS)
+                AppleTVChoicePicker("Live buffer", selection: $settings.liveBuffer,
+                    options: AppleLiveBufferPreference.allCases.map { .init(value: $0, title: $0.title) })
+                #else
+                Picker("Live buffer", selection: $settings.liveBuffer) {
+                    ForEach(AppleLiveBufferPreference.allCases, id: \.self) { preference in
+                        Text(preference.title).tag(preference)
+                    }
+                }
+                .accessibilityIdentifier("settings.liveBuffer")
+                #endif
+                #if os(tvOS)
                 AppleTVChoicePicker("Audio Language", selection: $settings.audioLanguage,
                                     options: Self.audioLanguageOptions)
                 #else

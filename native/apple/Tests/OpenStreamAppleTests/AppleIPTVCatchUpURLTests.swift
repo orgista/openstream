@@ -37,6 +37,24 @@ struct AppleIPTVCatchUpURLTests {
         url?.pathComponents.dropLast().last
     }
 
+    @Test func startOverRequiresACurrentProgrammeAndAUsableArchive() throws {
+        let now = utc("2026-10-01T12:00:00Z")
+        let current = programme(start: now.addingTimeInterval(-1800), minutes: 60)
+        let channel = xtreamChannel()
+        #expect(AppleIPTVCatchUp.canStartOver(current, on: channel, now: now))
+        let request = try #require(AppleIPTVCatchUp.startOverRequest(for: channel, programme: current, now: now))
+        #expect(request.isLive == false)
+        #expect(request.url == AppleIPTVCatchUp.catchUpURL(for: channel, programme: current, now: now))
+        #expect(request.resumePosition == nil)
+        #expect(AppleIPTVCatchUp.isCatchUp(request))
+        #expect(AppleIPTVCatchUp.canStartOver(current, on: xtreamChannel(days: nil), now: now) == false)
+        #expect(AppleIPTVCatchUp.canStartOver(programme(start: now, minutes: 60), on: channel, now: now))
+        #expect(AppleIPTVCatchUp.canStartOver(programme(start: now.addingTimeInterval(1), minutes: 60), on: channel, now: now) == false)
+        #expect(AppleIPTVCatchUp.canStartOver(programme(start: now.addingTimeInterval(-3600), minutes: 60), on: channel, now: now) == false)
+        #expect(AppleIPTVCatchUp.canStartOver(current, on: xtreamChannel(url: "https://fixture.example/live.m3u8"), now: now) == false)
+        #expect(AppleIPTVCatchUp.startOverRequest(for: xtreamChannel(days: 0), programme: current, now: now) == nil)
+    }
+
     // MARK: Xtream time zones
 
     @Test("The start is written in the panel's zone, UTC when it reports none")

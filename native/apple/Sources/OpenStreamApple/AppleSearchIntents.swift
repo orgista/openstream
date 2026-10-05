@@ -162,6 +162,11 @@ public struct ContinueWatchingOpenStreamIntent: AppIntent {
 public struct OpenStreamShortcuts: AppShortcutsProvider {
     public static var appShortcuts: [AppShortcut] {
         AppShortcut(
+            intent: WatchOpenStreamChannelIntent(),
+            phrases: ["Watch \(\.$channel) in \(.applicationName)"],
+            shortTitle: "Watch Channel", systemImageName: "tv"
+        )
+        AppShortcut(
             intent: SearchOpenStreamIntent(),
             phrases: ["Search with \(.applicationName)"],
             shortTitle: "Search oStream",

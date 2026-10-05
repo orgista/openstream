@@ -157,6 +157,7 @@ struct AppleLiveTVView: View {
                                 guide: guideStore.guide(for: playbackGuideChannelIDs),
                                 onSwitchChannel: { startChannel($0, shareSelection: true, present: false) },
                                 onLastChannel: lastChannelAction,
+                                onStartOver: startOverAction,
                                 onRequestFullWindow: fullWindowAction
                             )
                             .id(ObjectIdentifier(playbackCoordinator))
@@ -348,6 +349,13 @@ struct AppleLiveTVView: View {
                 AppleProgrammeReminderStore.shared.requestedChannelID = nil
                 play(channel)
             }
+        }
+
+        .task(id: "\(channelsRevision)|\(isLoading)|\(settings.favoriteChannelIDs.sorted())|\(settings.favoriteLiveChannelOrder)|\(watchHistory.history.channelIDs)") {
+            publishLiveChannels()
+        }
+        .task(id: "\(AppleLiveSystemChannels.shared.requestedChannelID ?? "")|\(channelsRevision)|\(isLoading)") {
+            consumeLiveChannelRequest()
         }
 
         .task(id: projectionIdentity) {
@@ -805,6 +813,37 @@ struct AppleLiveTVView: View {
         #endif
     }
 
+    private func publishLiveChannels() {
+        guard !isLoading else { return }
+        AppleLiveSystemChannels.shared.update(channels: channels, favorites: settings.favoriteChannelIDs,
+            favoriteOrder: settings.favoriteLiveChannelOrder, recentIDs: watchHistory.history.channelIDs)
+    }
+
+    private func consumeLiveChannelRequest() {
+        guard !isLoading, !channels.isEmpty, let id = AppleLiveSystemChannels.shared.requestedChannelID else { return }
+        AppleLiveSystemChannels.shared.requestedChannelID = nil
+        if let channel = channelIndex[id] {
+            #if os(tvOS)
+            tvMultiviewChannels = []
+            #endif
+            play(channel)
+        }
+        else { probeFailureMessage = "This channel is no longer available." }
+    }
+
+    private var startOverAction: (() -> Void)? {
+        guard catchUp == nil, let channel = selectedChannel,
+              let programme = guideStore.guide(for: [channel.id]).nowAndNext(channelID: channel.id).now,
+              AppleIPTVCatchUp.canStartOver(programme, on: channel) else { return nil }
+        return {
+            #if os(tvOS)
+            startChannel(channel, shareSelection: false, programme: programme)
+            #else
+            startChannel(channel, shareSelection: false, present: false, programme: programme)
+            #endif
+        }
+    }
+
     private func play(_ channel: AppleIPTVChannel) {
         startChannel(channel, shareSelection: true)
     }
@@ -995,6 +1034,7 @@ struct AppleLiveTVView: View {
                         tvMultiviewChannels = []
                         startChannel(channel, shareSelection: true)
                     })
+                    .task(id: AppleLiveSystemChannels.shared.requestedChannelID) { consumeLiveChannelRequest() }
             } else if let channel = selectedChannel {
                 AppleTVLivePlayerScreen(
                     channel: channel,
@@ -1007,11 +1047,13 @@ struct AppleLiveTVView: View {
                     programme: catchUp,
                     channelNumber: lineupIndex.match(channel.name)?.number ?? channel.channelNumber,
                     playbackRevision: playbackRevision,
+                    onStartOver: startOverAction,
                     onLastChannel: lastChannelAction,
                     onMultiview: { beginMultiview(held: $0) },
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .id(ObjectIdentifier(playbackCoordinator))
+                .task(id: AppleLiveSystemChannels.shared.requestedChannelID) { consumeLiveChannelRequest() }
                 // A full-screen cover can suspend the underlying view's task.
                 // Footer channel switches and their errors belong to this
                 // visible surface; the root is gated off while it is presented.
@@ -1200,6 +1242,7 @@ struct AppleLiveInlinePlayer: View {
     let guide: AppleIPTVGuide
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onLastChannel: (() -> Void)?
+    let onStartOver: (() -> Void)?
     /// macOS: the channel goes to the window's full player
     /// (`AppleMacPlayerStage`), the same one every other title plays in.
     let onRequestFullWindow: (() -> Void)?
@@ -1209,7 +1252,7 @@ struct AppleLiveInlinePlayer: View {
     private let macCommands = AppleMacCommandCenter.shared
     #endif
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], otherListLineup: [AppleIPTVChannel] = [], sourceNames: [UUID: String] = [:], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], otherListLineup: [AppleIPTVChannel] = [], sourceNames: [UUID: String] = [:], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil) {
         self.onRequestFullWindow = onRequestFullWindow
         self.request = request
         self.coordinator = coordinator
@@ -1225,6 +1268,7 @@ struct AppleLiveInlinePlayer: View {
         self.guide = guide
         self.onSwitchChannel = onSwitchChannel
         self.onLastChannel = onLastChannel
+        self.onStartOver = onStartOver
         let audioSession = AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
         _host = State(initialValue: ApplePlayerHost(
@@ -1280,7 +1324,7 @@ struct AppleLiveInlinePlayer: View {
                 channels: channels,
                 guide: guide,
                 currentChannelID: liveChannel?.id,
-                onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel,
+                onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
                 onFullScreenChanged: {
                     lifetime.isFullScreen = $0
                     isFullScreen = $0
@@ -1472,20 +1516,21 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
     let currentChannelID: String?
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onLastChannel: (() -> Void)?
+    let onStartOver: (() -> Void)?
     let onFullScreenChanged: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> AppleLivePlayerContainerViewController {
         AppleLivePlayerContainerViewController(playerViewController: viewController,
             coordinator: coordinator, request: request, liveMenu: liveMenu,
             channels: channels, guide: guide, currentChannelID: currentChannelID,
-            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel,
+            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
             onFullScreenChanged: onFullScreenChanged)
     }
 
     func updateUIViewController(_ vc: AppleLivePlayerContainerViewController, context: Context) {
         vc.update(request: request, liveMenu: liveMenu, channels: channels,
                   guide: guide, currentChannelID: currentChannelID,
-                  onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, fullScreenRevision: fullScreenRevision)
+                  onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver, fullScreenRevision: fullScreenRevision)
         vc.attachPlayerIfNeeded()
     }
 }
@@ -1505,6 +1550,7 @@ private struct AppleLiveFullScreenControls: View {
     let currentChannelID: String?
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onLastChannel: (() -> Void)?
+    let onStartOver: (() -> Void)?
     let onClose: () -> Void
     let channelPicker: AppleLiveChannelPickerState
     @State private var hideChromeSignal = false
@@ -1612,6 +1658,7 @@ private struct AppleLiveFullScreenControls: View {
                 request: request,
                 onShowChannels: channels.isEmpty ? nil : { channelPicker.show() },
                 onLastChannel: lastChannelAction,
+                onStartOver: request.isLive ? onStartOver : nil,
                 isObscured: transportIsObscured,
                 onBackgroundTap: { wasHidden in
                     if wasHidden {
@@ -1691,13 +1738,14 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private var currentChannelID: String?
     private var onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     private var onLastChannel: (() -> Void)?
+    private var onStartOver: (() -> Void)?
     private let onFullScreenChanged: (Bool) -> Void
 
     private var playerObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var muteObservation: NSKeyValueObservation?
 
-    init(playerViewController: AVPlayerViewController, coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), currentChannelID: String? = nil, onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onFullScreenChanged: @escaping (Bool) -> Void) {
+    init(playerViewController: AVPlayerViewController, coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel] = [], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), currentChannelID: String? = nil, onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil, onFullScreenChanged: @escaping (Bool) -> Void) {
         self.playerViewController = playerViewController
         self.onFullScreenChanged = onFullScreenChanged
         self.coordinator = coordinator
@@ -1708,6 +1756,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         self.currentChannelID = currentChannelID
         self.onSwitchChannel = onSwitchChannel
         self.onLastChannel = onLastChannel
+        self.onStartOver = onStartOver
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1739,7 +1788,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         captionsButton.showsMenuAsPrimaryAction = true
         watchLiveButton = UIButton(type: .system)
         var watchLiveConfiguration = UIButton.Configuration.plain()
-        watchLiveConfiguration.title = "Watch Live"
+        watchLiveConfiguration.title = "Back to Live"
         watchLiveConfiguration.baseForegroundColor = .label
         #if os(tvOS)
         watchLiveConfiguration.background.visualEffect = UIBlurEffect(style: .regular)
@@ -1750,7 +1799,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         watchLiveConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
         watchLiveButton.configuration = watchLiveConfiguration
         watchLiveButton.translatesAutoresizingMaskIntoConstraints = false
-        watchLiveButton.accessibilityLabel = "Watch Live"
+        watchLiveButton.accessibilityLabel = "Back to Live"
         watchLiveButton.accessibilityIdentifier = "live.watchLive"
         watchLiveButton.addTarget(self, action: #selector(watchLive), for: .primaryActionTriggered)
         watchLiveButton.isHidden = request.isLive
@@ -1983,7 +2032,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     func update(request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?,
                 channels: [AppleIPTVChannel], guide: AppleIPTVGuide, currentChannelID: String?,
                 onSwitchChannel: ((AppleIPTVChannel) -> Void)?,
-                onLastChannel: (() -> Void)? = nil,
+                onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil,
                 fullScreenRevision: Int) {
         self.request = request
         self.liveMenu = liveMenu
@@ -1992,6 +2041,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         self.currentChannelID = currentChannelID
         self.onSwitchChannel = onSwitchChannel
         self.onLastChannel = onLastChannel
+        self.onStartOver = onStartOver
         self.fullScreenRevision = fullScreenRevision
         if isViewLoaded {
             updateInlineSurface()
@@ -2005,7 +2055,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         }
         presentedFullscreen?.update(request: request, liveMenu: liveMenu,
                                     channels: channels, guide: guide, currentChannelID: currentChannelID,
-                                    onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel)
+                                    onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver)
         // UIKit presentation calls back into SwiftUI state; leave this update first.
         if fullScreenRevision != presentedRevision, presentationTask == nil {
             presentationTask = Task { @MainActor [weak self] in
@@ -2053,7 +2103,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             channels: channels,
             guide: guide,
             currentChannelID: currentChannelID,
-            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel
+            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver
         )
         presentedFullscreen = fullscreen
         // Retain the guide's view hierarchy and its loading task while AVKit
@@ -2074,18 +2124,18 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
          coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest,
          liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel],
          guide: AppleIPTVGuide, currentChannelID: String?,
-         onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil) {
+         onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil) {
         self.playerViewController = playerViewController
         self.inlineContainer = inlineContainer
         self.coordinator = coordinator
         controlsHost = UIHostingController(rootView: AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
             channels: channels, guide: guide, currentChannelID: currentChannelID,
-            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onClose: {},
+            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver, onClose: {},
             channelPicker: channelPicker))
         super.init(nibName: nil, bundle: nil)
         update(request: request, liveMenu: liveMenu, channels: channels,
-               guide: guide, currentChannelID: currentChannelID, onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel)
+               guide: guide, currentChannelID: currentChannelID, onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver)
     }
 
     @available(*, unavailable)
@@ -2093,11 +2143,11 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
 
     func update(request: ApplePlaybackRequest, liveMenu: AppleTransportOverlay.SharePlayMenu?,
                 channels: [AppleIPTVChannel], guide: AppleIPTVGuide, currentChannelID: String?,
-                onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil) {
+                onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil) {
         controlsHost.rootView = AppleLiveFullScreenControls(
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
             channels: channels, guide: guide, currentChannelID: currentChannelID,
-            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel,
+            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
             onClose: { [weak self] in self?.dismiss(animated: true) },
             channelPicker: channelPicker)
     }

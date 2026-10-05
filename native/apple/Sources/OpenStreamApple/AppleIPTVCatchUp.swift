@@ -152,6 +152,22 @@ public enum AppleIPTVCatchUp: Sendable {
         return start >= now.addingTimeInterval(-Double(days) * 86_400)
     }
 
+    /// Current programmes use the provider's archive URL from the original air start.
+    /// Keep this separate from past catch-up eligibility, which requires an ended programme.
+    public static func canStartOver(_ programme: AppleIPTVProgramme, on channel: AppleIPTVChannel,
+                                    now: Date = Date()) -> Bool {
+        guard programme.channelID == channel.id, programme.start <= now, programme.end > now,
+              supportsCatchUp(channel), let days = channel.catchUpDays,
+              programme.start >= now.addingTimeInterval(-Double(days) * 86_400) else { return false }
+        return catchUpURL(for: channel, programme: programme, now: now) != nil
+    }
+
+    public static func startOverRequest(for channel: AppleIPTVChannel, programme: AppleIPTVProgramme,
+                                        now: Date = Date()) -> ApplePlaybackRequest? {
+        guard canStartOver(programme, on: channel, now: now) else { return nil }
+        return playbackRequest(for: channel, programme: programme, now: now)
+    }
+
     /// The archive URL for `programme`, whatever the channel's style; nil when
     /// the channel has no usable archive shape.
     public static func catchUpURL(

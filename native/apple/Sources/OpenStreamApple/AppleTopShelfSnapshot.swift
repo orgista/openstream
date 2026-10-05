@@ -49,6 +49,8 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
     /// nothing in progress. Defaults to empty so snapshots written before
     /// this field existed still decode.
     public let topPicks: [Item]
+    public let favoriteChannels: [Item]
+    public let recentChannels: [Item]
 
     public init(
         version: Int,
@@ -56,7 +58,9 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         continueWatching: [Item],
         recentlyAdded: [Item],
         favorites: [Item],
-        topPicks: [Item] = []
+        topPicks: [Item] = [],
+        favoriteChannels: [Item] = [],
+        recentChannels: [Item] = []
     ) {
         self.version = version
         self.generatedAt = generatedAt
@@ -64,10 +68,12 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         self.recentlyAdded = recentlyAdded
         self.favorites = favorites
         self.topPicks = topPicks
+        self.favoriteChannels = favoriteChannels
+        self.recentChannels = recentChannels
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, generatedAt, continueWatching, recentlyAdded, favorites, topPicks
+        case version, generatedAt, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels, recentChannels
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,6 +83,8 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         continueWatching = try container.decode([Item].self, forKey: .continueWatching)
         recentlyAdded = try container.decode([Item].self, forKey: .recentlyAdded)
         favorites = try container.decode([Item].self, forKey: .favorites)
+        favoriteChannels = try container.decodeIfPresent([Item].self, forKey: .favoriteChannels) ?? []
+        recentChannels = try container.decodeIfPresent([Item].self, forKey: .recentChannels) ?? []
         topPicks = try container.decodeIfPresent([Item].self, forKey: .topPicks) ?? []
     }
 }
@@ -116,6 +124,9 @@ public enum AppleTopShelfContentBuilder {
         [
             snapshot.continueWatching.isEmpty ? nil : AppleTopShelfSection(
                 title: "Continue Watching", items: snapshot.continueWatching
+            ),
+            snapshot.favoriteChannels.isEmpty ? nil : AppleTopShelfSection(
+                title: "Favorite channels", items: snapshot.favoriteChannels
             ),
             snapshot.topPicks.isEmpty ? nil : AppleTopShelfSection(
                 title: "Top Picks", items: snapshot.topPicks
@@ -256,6 +267,8 @@ public actor AppleTopShelfSnapshotWriter {
         sources: [AppleSource]? = nil,
         watchedAt: [String: Date] = [:],
         savedProgress: [String: ApplePlaybackProgress]? = nil,
+        favoriteChannels: [AppleTopShelfSnapshot.Item] = [],
+        recentChannels: [AppleTopShelfSnapshot.Item] = [],
         enabled: Bool
     ) throws {
         guard let root = containerProvider() else { return }
@@ -286,7 +299,8 @@ public actor AppleTopShelfSnapshotWriter {
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
-            topPicks: Self.topPicks(from: sections)
+            topPicks: Self.topPicks(from: sections),
+            favoriteChannels: favoriteChannels, recentChannels: recentChannels
         )
         let data = try JSONEncoder().encode(snapshot)
         #if os(iOS) || os(tvOS) || os(visionOS)

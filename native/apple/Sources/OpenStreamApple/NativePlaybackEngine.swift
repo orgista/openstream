@@ -182,6 +182,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         }
         let asset = AVURLAsset(url: playbackURL)
         let playerItem = AVPlayerItem(asset: asset)
+        playerItem.preferredForwardBufferDuration = AppleLiveBufferPreference.stored()
+            .forwardBufferDuration(isLive: request.isLive)
         playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
         #if !os(macOS)
         if !request.isLive { playerItem.externalMetadata = AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear) }

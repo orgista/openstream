@@ -752,6 +752,10 @@ public struct OpenStreamRootView: View {
             selectedTab = target
         case .continueWatching:
             selectedTab = target
+        case .live(let id):
+            guard visibleTabs.contains(.live) else { return }
+            AppleLiveSystemChannels.shared.requestedChannelID = id
+            selectedTab = .live
         }
     }
 
@@ -984,6 +988,9 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 Task { await publish(records: mediaIndex.records, sections: sections) }
             }
             .onChange(of: sourceStore.sources) {
+                Task { await publish(records: mediaIndex.records, sections: catalogStore.sections) }
+            }
+            .onChange(of: AppleLiveSystemChannels.shared.revision) {
                 Task { await publish(records: mediaIndex.records, sections: catalogStore.sections) }
             }
             .onChange(of: settingsStore.topShelfEnabled) { _, enabled in

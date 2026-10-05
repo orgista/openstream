@@ -40,10 +40,17 @@ public final class AppleTopShelfPublisher {
         }
         let digest = Self.digest(records: records, sections: sections, sources: sources,
                                  savedProgress: savedProgress, enabled: enabled)
-        guard digest != lastDigest else { return }
-        lastDigest = digest
+        let live = AppleLiveSystemChannels.shared
+        let sourceIDs = Set(sources.filter { $0.kind == .liveTV && $0.isEnabled }.map(\.id))
+        let favorites = AppleLiveSystemChannels.supported(live.favorites, sourceIDs: sourceIDs)
+        let recents = AppleLiveSystemChannels.supported(live.recents, sourceIDs: sourceIDs)
+        let liveDigest = ApplePlaybackIdentity.digest(for: String(decoding: (try? JSONEncoder().encode([favorites, recents])) ?? Data(), as: UTF8.self))
+        let combinedDigest = digest + liveDigest
+        guard combinedDigest != lastDigest else { return }
+        lastDigest = combinedDigest
         try? await writer.write(records: records, sections: sections, sources: sources,
-                                watchedAt: watchedAt, savedProgress: savedProgress, enabled: enabled)
+                                watchedAt: watchedAt, savedProgress: savedProgress,
+                                favoriteChannels: favorites, recentChannels: recents, enabled: enabled)
     }
 
     private static func digest(

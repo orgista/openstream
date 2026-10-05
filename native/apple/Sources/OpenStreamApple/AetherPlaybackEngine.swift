@@ -242,7 +242,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     // MARK: - ApplePlaybackEngine
 
+    private var liveBuffer: AppleLiveBufferPreference = .automatic
+    private var isLiveBufferSession = false
+
+    private func applyLiveBuffer() {
+        guard isLiveBufferSession, liveBuffer != .automatic else { return }
+        aether.currentAVPlayer?.currentItem?.preferredForwardBufferDuration =
+            liveBuffer.forwardBufferDuration(isLive: true)
+    }
+
     public func load(_ request: ApplePlaybackRequest) async throws {
+        liveBuffer = .stored()
+        isLiveBufferSession = request.isLive
         loadGeneration &+= 1
         let generation = loadGeneration
         captionObservation?.cancel()
@@ -278,7 +289,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             for: request, headers: headers,
             preferredSubtitleLanguages: preferredSubtitleLanguages,
             captionsPreference: captionsPreference,
-            preferredAudioLanguages: audioLanguages
+            preferredAudioLanguages: audioLanguages,
+            liveBuffer: liveBuffer
         )
         appleTrace("audio language preference \(audioLanguages.joined(separator: ","))")
         // An episode that starts while PiP or AirPlay holds the picture
@@ -306,6 +318,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
         guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
         performCaptionHandoff(captionHandoff.reloadFinished(succeeded: true))
+        applyLiveBuffer()
         observeLiveCaptions(request, generation: generation)
         if !request.autoplay, let resume = request.resumePosition, resume.isFinite, resume > 0 {
             // A paused mount prepares the demuxer at the resume offset but
@@ -416,13 +429,15 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         headers: [String: String],
         preferredSubtitleLanguages: [String] = [],
         captionsPreference: AppleCaptionsPreference = .off,
-        preferredAudioLanguages: [String] = []
+        preferredAudioLanguages: [String] = [],
+        liveBuffer: AppleLiveBufferPreference = .automatic
     ) -> LoadOptions {
         var options = LoadOptions(
             httpHeaders: headers,
             isLive: request.isLive,
             dvrWindowSeconds: request.effectiveDVRWindowSeconds
         )
+        options.forwardBufferSegments = liveBuffer.forwardBufferSegments(isLive: request.isLive)
         options.preferredDecodePath = .automatic
         options.prepareNativeSubtitles = declaresNativeSubtitleRenditions
         // Live HLS from an extension-less URL: AVPlayer plays the origin
@@ -760,6 +775,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // Matroska fixture played out loud (2026-09-30). Every phase change
         // re-applies it, before any sample is rendered.
         if multiviewMuted || AppleTestAudioMute.isActive { aether.volume = 0 }
+        applyLiveBuffer()
         self.phase = Self.mapPhase(phase)
         // The pixel aspect is set after the coded size and is not published;
         // the next phase change picks it up.

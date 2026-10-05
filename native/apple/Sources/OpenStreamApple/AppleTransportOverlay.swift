@@ -54,6 +54,7 @@ struct AppleTransportOverlay: View {
     let sharePlayMenu: SharePlayMenu?
     /// Set while a programme plays from a channel's archive: a "Watch Live"
     /// control returns to the live channel.
+    let onStartOver: (() -> Void)?
     let onWatchLive: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
@@ -95,6 +96,7 @@ struct AppleTransportOverlay: View {
         onShowChannels: (() -> Void)? = nil,
         onZapChannel: ((AppleLiveZappingPolicy.Direction) -> Void)? = nil,
         onLastChannel: (() -> Void)? = nil,
+        onStartOver: (() -> Void)? = nil,
         onPlaybackMenu: (() -> Void)? = nil,
         playbackOptions: AppleLivePlaybackOptions? = nil,
         isObscured: Bool = false,
@@ -107,6 +109,7 @@ struct AppleTransportOverlay: View {
         nextEpisode: AppleNextEpisodeContext? = nil,
         onWatchLive: (() -> Void)? = nil
     ) {
+        self.onStartOver = onStartOver
         self.onWatchLive = onWatchLive
         self.coordinator = coordinator
         self.request = request
@@ -451,6 +454,16 @@ struct AppleTransportOverlay: View {
                 }
                 if controls.contains(.otherSourcesMenu) {
                     Menu {
+                        if let onStartOver {
+                            Button("Start Over", action: onStartOver)
+                                .appleMenuPresence(model)
+                                .accessibilityIdentifier("live.player.startOver")
+                        }
+                        if let onWatchLive {
+                            Button("Back to Live", action: onWatchLive)
+                                .appleMenuPresence(model)
+                                .accessibilityIdentifier("live.player.backToLive")
+                        }
                         AppleSleepTimerMenu(coordinator: coordinator, isLive: request.isLive, transport: model)
                         if !model.chapters.isEmpty {
                             Menu("Chapters", systemImage: "list.bullet") {
@@ -623,7 +636,7 @@ struct AppleTransportOverlay: View {
     @ViewBuilder
     private var watchLiveButton: some View {
         if let onWatchLive {
-            Button("Watch Live") {
+            Button("Back to Live") {
                 #if DEBUG
                 AppleInteractionTrace.record(.press, "player watch live")
                 #endif

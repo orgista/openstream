@@ -30,9 +30,10 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         let recentlyAdded: [Item]
         let favorites: [Item]
         let topPicks: [Item]
+        let favoriteChannels: [Item]
 
         private enum CodingKeys: String, CodingKey {
-            case version, continueWatching, recentlyAdded, favorites, topPicks
+            case version, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels
         }
 
         init(from decoder: Decoder) throws {
@@ -41,6 +42,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             continueWatching = try container.decode([Item].self, forKey: .continueWatching)
             recentlyAdded = try container.decode([Item].self, forKey: .recentlyAdded)
             favorites = try container.decode([Item].self, forKey: .favorites)
+            favoriteChannels = try container.decodeIfPresent([Item].self, forKey: .favoriteChannels) ?? []
             topPicks = try container.decodeIfPresent([Item].self, forKey: .topPicks) ?? []
         }
     }
@@ -71,6 +73,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         // AppleTopShelfContentBuilder.sections(for:) in OpenStreamApple.
         let sections = [
             collection(title: "Continue Watching", values: snapshot.continueWatching),
+            collection(title: "Favorite channels", values: snapshot.favoriteChannels),
             collection(title: "Top Picks", values: snapshot.topPicks),
         ].compactMap { $0 }
         let shapes = sections.map { $0.items.first?.imageShape == .hdtv ? "hdtv" : "poster" }.joined(separator: ",")

@@ -11,6 +11,7 @@ public enum AppleAppRoute: Equatable, Sendable {
     case media(id: String, action: AppleMediaRouteAction)
     case sharedLink(SharedLink)
     case continueWatching
+    case live(channelID: String)
 
     public init?(url: URL) {
         guard url.scheme?.lowercased() == "openstream", url.user == nil, url.password == nil else { return nil }
@@ -37,6 +38,9 @@ public enum AppleAppRoute: Equatable, Sendable {
             let actionValue = components.queryItems?.first(where: { $0.name == "action" })?.value ?? "display"
             guard let action = AppleMediaRouteAction(rawValue: actionValue) else { return nil }
             self = .media(id: id.lowercased(), action: action)
+        case "live":
+            guard pieces.count == 1, let id = pieces.first, Self.liveURL(channelID: id) != nil else { return nil }
+            self = .live(channelID: id)
         case "continue":
             guard pieces.isEmpty else { return nil }
             self = .continueWatching
@@ -47,6 +51,18 @@ public enum AppleAppRoute: Equatable, Sendable {
 }
 
 public extension AppleAppRoute {
+    static func liveURL(channelID: String) -> URL? {
+        guard !channelID.isEmpty, channelID.count <= 512,
+              channelID.unicodeScalars.allSatisfy({
+                  CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:_-").contains($0)
+              }) else { return nil }
+        var components = URLComponents()
+        components.scheme = "openstream"
+        components.host = "live"
+        components.path = "/" + channelID
+        return components.url
+    }
+
     /// A tapped Spotlight result: the item's unique identifier is the media
     /// record id (`AppleSpotlightIndexer`), so it opens that title's page.
     init?(spotlightIdentifier: String) {

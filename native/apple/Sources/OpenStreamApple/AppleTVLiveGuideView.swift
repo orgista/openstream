@@ -1091,6 +1091,10 @@ private struct AppleTVGuideScheduleRow: View {
                     ))
                     .focused(focus, equals: .cell(AppleTVGuideCellFocus(cell: cell)))
                     .contextMenu {
+                        if !isGap, AppleIPTVCatchUp.canStartOver(cell.programme, on: channel, now: now) {
+                            Button("Start Over") { onSelectCell(cell) }
+                                .accessibilityIdentifier("guide.startOver")
+                        }
                         if !isGap {
                             AppleProgrammeReminderAction(channel: channel, title: cell.title, start: cell.airStart, end: cell.airEnd)
                         }
@@ -1557,6 +1561,7 @@ struct AppleTVLivePlayerScreen: View {
     let channelNumber: Int?
     let playbackRevision: Int
     let onSwitch: (AppleIPTVChannel) -> Void
+    let onStartOver: (() -> Void)?
     let onLastChannel: (() -> Void)?
     let onMultiview: ((AppleIPTVChannel?) -> Void)?
     let onBack: (() -> Void)?
@@ -1569,6 +1574,7 @@ struct AppleTVLivePlayerScreen: View {
          programme: AppleIPTVProgramme? = nil,
          channelNumber: Int? = nil,
          playbackRevision: Int = 0,
+         onStartOver: (() -> Void)? = nil,
          onLastChannel: (() -> Void)? = nil,
          onMultiview: ((AppleIPTVChannel?) -> Void)? = nil,
          onBack: (() -> Void)? = nil,
@@ -1585,6 +1591,7 @@ struct AppleTVLivePlayerScreen: View {
         self.guide = guide
         self.metrics = metrics
         self.onSwitch = onSwitch
+        self.onStartOver = onStartOver
         self.onLastChannel = onLastChannel
         self.onMultiview = onMultiview
         self.onBack = onBack
@@ -1651,14 +1658,14 @@ struct AppleTVLivePlayerScreen: View {
                 if let programme, coordinator.route != .surface {
                     // The stock route has no overlay of its own for this;
                     // the pill sits above the channel strip.
-                    Button("Watch Live", action: watchLive)
+                    Button("Back to Live", action: watchLive)
                         .buttonStyle(AppleTVPillStyle(
                             isSelected: true,
                             minimumSize: AppleTVDetailMetrics.pillSize,
                             fontSize: AppleTVDetailMetrics.pillFontSize
                         ))
                         .focused($focus, equals: .watchLive)
-                        .accessibilityLabel("Watch Live, leave \(programme.title)")
+                        .accessibilityLabel("Back to Live, leave \(programme.title)")
                         .accessibilityIdentifier("live.watchLive")
                         .padding(.bottom, 24)
                 }
@@ -2053,7 +2060,8 @@ struct AppleTVLivePlayerScreen: View {
 
     private var playbackOptions: AppleLivePlaybackOptions {
         AppleLivePlaybackOptions(onSleepTimer: openSleepTimer,
-            onMultiview: onMultiview.map { action in { action(nil) } }, onCaptions: toggleCaptions)
+            onMultiview: onMultiview.map { action in { action(nil) } }, onCaptions: toggleCaptions,
+            onStartOver: programme == nil ? onStartOver : nil, onBackToLive: watchLiveAction)
     }
 
     private func openSleepTimer() {

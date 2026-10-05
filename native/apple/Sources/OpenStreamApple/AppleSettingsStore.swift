@@ -471,6 +471,10 @@ public final class AppleSettingsStore {
     /// Settings › Playback › Audio Language as a canonical three-letter
     /// code, or "" for Device Language (`AppleAudioLanguagePreference`).
     /// Engines read the stored value at each load.
+    public var liveBuffer: AppleLiveBufferPreference {
+        didSet { defaults.set(liveBuffer.rawValue, forKey: AppleLiveBufferPreference.defaultsKey) }
+    }
+
     public var audioLanguage: String {
         didSet {
             let clean = AppleSubtitleLanguages.normalized(audioLanguage) ?? ""
@@ -692,6 +696,7 @@ public final class AppleSettingsStore {
         }
         audioLanguage = AppleAudioLanguagePreference.storedChoice(defaults: defaults) ?? ""
         autoPlayTrailer = defaults.object(forKey: DefaultsKey.autoPlayTrailer) as? Bool ?? true
+        liveBuffer = AppleLiveBufferPreference.stored(in: defaults)
         autoPlayNextEpisode = defaults.object(forKey: DefaultsKey.autoPlayNextEpisode) as? Bool ?? true
         storedWatchProviderIDs = Set((defaults.array(forKey: DefaultsKey.watchProviderIDs) as? [Int]) ?? [])
         autoMuteTrailer = defaults.object(forKey: DefaultsKey.autoMuteTrailer) as? Bool ?? false

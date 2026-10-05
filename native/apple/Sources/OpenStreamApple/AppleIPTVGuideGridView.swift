@@ -285,6 +285,10 @@ public struct AppleIPTVGuideGridView: View {
                                 .padding(12).background(AppleDesignTokens.surface)
                             }
                             .contextMenu {
+                                if AppleIPTVCatchUp.canStartOver(programme, on: row.channel) {
+                                    Button("Start Over") { onSelectProgramme(row.channel, programme) }
+                                        .accessibilityIdentifier("guide.startOver")
+                                }
                                 AppleProgrammeReminderAction(channel: row.channel, title: programme.title, start: programme.start, end: programme.end)
                             }
                             .buttonStyle(.plain)
@@ -400,6 +404,13 @@ private struct GuideScheduleRow: View, Equatable {
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(row.channel.name), \(cell.title)" + (cell.isCatchUp ? ", available to watch" : ""))
                 .contextMenu {
+                    if let start = cell.airStart, let end = cell.airEnd,
+                       AppleIPTVCatchUp.canStartOver(AppleIPTVProgramme(id: cell.id, channelID: row.channel.id,
+                           title: cell.title, subtitle: cell.subtitle, description: nil,
+                           start: start, end: end, category: nil, isLive: false), on: row.channel) {
+                        Button("Start Over") { onSelectSpan(cell) }
+                            .accessibilityIdentifier("guide.startOver")
+                    }
                     AppleProgrammeReminderAction(channel: row.channel, title: cell.title, start: cell.airStart, end: cell.airEnd)
                 }
             }

@@ -4477,3 +4477,11 @@ Verified: 2790 tests in 355 suites; iOS/tvOS simulator builds; unsigned AppStore
 Up and Down change channels on Apple TV. Select shows channels and Last Channel; holding Select opens options including Multiview. A brief banner shows the channel and its current/next programmes. iPhone video swipes change channels too, with Last Channel in both player sizes.
 
 Only channels played for at least five seconds enter the device’s last-ten history. Opening Live returns to the last watched channel by default; Settings › Live TV can turn that off. Launching on Discover does not start Live. Local-fixture tests passed on the native and software TV players and on iPhone; screenshots and measured switching times are in `~/Developer/openstream-build/verification/zapping/`. Test sources were removed and simulator preferences restored.
+
+
+## 2026-10-05 — Start Over, live buffer and Apple channel links
+oStream can start the current programme from the beginning when its channel supports catch-up, and return with Back to Live. Settings › Playback adds Automatic, Low latency and Stable live buffering; changes apply when playback next starts. Both features were checked with synthetic channels on iPhone and Apple TV. A failed iPhone archive request shows the existing Playback Failed alert.
+
+Favorite channels now enter the shared Top Shelf snapshot, and Watch Channel uses favorite/recent channel names with app links. A TV favorite link played successfully; an unavailable iPhone link showed Channel Unavailable. These Apple-service suggestions use the existing Top Shelf privacy setting. Spoken Siri and the displayed system Top Shelf row still need checking. Xtream movies/series, import progress and parental PIN were skipped because each needs broader integration.
+
+The full suite passed: 2811 tests in 358 suites. Both simulator builds, unsigned AppStore-iOS Release, SDK floors and the no-add-ons check passed. Screenshots are in ~/Developer/openstream-build/verification/live-more/. Fixture sources and credentials were removed, original simulator data restored, and both simulators and the local server stopped. No commits or uploads.

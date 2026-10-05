@@ -35,7 +35,7 @@ public enum AppleSearchRoutePolicy {
         switch route {
         case .search: discoverPushesSearch(hasDedicatedSearchTab: hasDedicatedSearchTab)
         case .media, .sharedLink: true
-        case .continueWatching: false
+        case .continueWatching, .live: false
         }
     }
 
