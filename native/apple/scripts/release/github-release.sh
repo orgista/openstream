@@ -74,10 +74,10 @@ for platform in iOS tvOS visionOS macOS; do
     grep -Eiq 'manifest[.]json|addonCollection|stremio' "$release/addons-$platform.txt" || { echo "FAIL: $platform add-on marker absent"; exit 1; }
     stage="$(mktemp -d /tmp/openstream-package.XXXXXX)"
     if [[ "$platform" == macOS ]]; then
-        ditto "$app" "$stage/OpenStream macOS.app"
-        codesign --force --deep -s - "$stage/OpenStream macOS.app" > "$release/sign-macOS.log" 2>&1
-        codesign --verify --deep --strict "$stage/OpenStream macOS.app"
-        ditto -c -k --keepParent "$stage/OpenStream macOS.app" "$release/OpenStream-macOS-$version-$build.zip"
+        ditto "$app" "$stage/oStream.app"
+        codesign --force --deep -s - "$stage/oStream.app" > "$release/sign-macOS.log" 2>&1
+        codesign --verify --deep --strict "$stage/oStream.app"
+        ditto -c -k --keepParent "$stage/oStream.app" "$release/oStream-macOS-$version-$build.zip"
     else
         mkdir "$stage/Payload"
         ditto "$app" "$stage/Payload/OpenStream $platform.app"

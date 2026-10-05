@@ -53,10 +53,10 @@ struct AppleWebManagementPageStyleTests {
             #expect(html.contains(".types label{min-height:44px"))
             #expect(html.contains("button.secondary{min-height:44px"))
             
-            // h1 text is "OpenStream" and appears exactly once
+            // h1 text is "oStream" and appears exactly once
             let h1Elements = html.components(separatedBy: "<h1")
             #expect(h1Elements.count == 2)
-            #expect(html.contains("<h1 class=\"visually-hidden\">OpenStream</h1>"))
+            #expect(html.contains("<h1 class=\"visually-hidden\">oStream</h1>"))
             
             // a <h1 precedes the first <h2 (only check if h2 exists)
             if let h2Index = html.range(of: "<h2")?.lowerBound {

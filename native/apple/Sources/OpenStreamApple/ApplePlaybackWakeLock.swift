@@ -33,7 +33,7 @@ public final class AppleSystemWakeAssertion: ApplePlaybackWakeAssertion {
             guard activity == nil else { return }
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.idleDisplaySleepDisabled, .userInitiated],
-                reason: "OpenStream video playback"
+                reason: "oStream video playback"
             )
         } else if let activity {
             ProcessInfo.processInfo.endActivity(activity)

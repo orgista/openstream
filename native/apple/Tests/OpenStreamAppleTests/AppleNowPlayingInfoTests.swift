@@ -51,7 +51,7 @@ struct AppleNowPlayingInfoTests {
         #expect(film.artworkURL == nil)
         #expect(AppleNowPlayingMetadata(title: nil, isLive: false,
                                         artworkURL: URL(string: "file:///tmp/p.jpg")).artworkURL == nil)
-        #expect(AppleNowPlayingMetadata(title: "  ", isLive: false).title == "OpenStream")
+        #expect(AppleNowPlayingMetadata(title: "  ", isLive: false).title == "oStream")
         #expect(AppleNowPlayingMetadata(title: "  ", isLive: false).knownTitle == nil)
     }
 

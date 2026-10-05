@@ -163,7 +163,7 @@ public final class AppleDevicePlaybackBeacon {
         #elseif os(macOS)
         return "Mac"
         #else
-        return "OpenStream"
+        return "oStream"
         #endif
     }
 

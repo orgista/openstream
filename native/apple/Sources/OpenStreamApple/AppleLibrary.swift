@@ -10,7 +10,7 @@ public enum AppleLibrarySourceError: Error, Equatable, LocalizedError, Sendable 
         switch self {
         case .invalidFolder: "Choose a folder from Files."
         case .unavailable: "This folder is no longer available."
-        case .permissionDenied: "OpenStream no longer has permission to read this folder."
+        case .permissionDenied: "oStream no longer has permission to read this folder."
         case .noMedia: "No video files were found."
         }
     }

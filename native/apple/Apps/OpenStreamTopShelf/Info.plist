@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenStream finds media servers and network shares on your local network.</string>
+	<string>oStream finds media servers and network shares on your local network.</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenStream Top Shelf</string>
+	<string>oStream</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

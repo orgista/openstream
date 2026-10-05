@@ -1851,7 +1851,7 @@ struct AppleSearchView: View {
                 appleTrace("shared link match title page \(record.title)")
             } else if let item = resolution.item {
                 let source = sourceStore.sources.first { $0.isEnabled && $0.isAddon }
-                    ?? AppleSource(kind: .library, name: "OpenStream", url: URL(string: "https://fixture.example/shared-link")!)
+                    ?? AppleSource(kind: .library, name: "oStream", url: URL(string: "https://fixture.example/shared-link")!)
                 let record = AppleMediaRecord(canonicalID: item.mediaID, kind: item.type == "movie" ? .movie : .series,
                                              title: item.name, year: item.year, availability: [])
                 query = item.name
@@ -6233,7 +6233,7 @@ struct AppleCatalogItemDetailView: View {
                 itemTitle: selection?.displayTitle ?? offlineDisplayTitle,
                 subtitle: selection?.displayTitle ?? offlineSubtitle,
                 artworkURL: item.posterURL,
-                destinationLabel: "OpenStream Offline Storage"
+                destinationLabel: "oStream Offline Storage"
             ),
             resolvePlans: {
                 // Automatic, by owner decision (2026-09-17): no source sheet.
@@ -6282,7 +6282,7 @@ struct AppleCatalogItemDetailView: View {
                     let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode.id)
                     _ = AppleMediaServerBackgroundDownloads.shared.start(
                         request: .init(mediaID: target.mediaID, itemTitle: "\(item.name) · \(episode.displayTitle)",
-                            subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "OpenStream Offline Storage"),
+                            subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "oStream Offline Storage"),
                         plan: plan, observer: { _ in })
                 }
             }
@@ -6290,7 +6290,7 @@ struct AppleCatalogItemDetailView: View {
             let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: id)
             try await downloadCoordinator.downloadAndWait(
                 request: .init(mediaID: target.mediaID, itemTitle: "\(item.name) · \(episode.displayTitle)",
-                    subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "OpenStream Offline Storage"),
+                    subtitle: episode.displayTitle, artworkURL: item.posterURL, destinationLabel: "oStream Offline Storage"),
                 resolvePlans: {
                     guard let plan = plans[id] else { return [] }
                     return [plan]
@@ -6317,7 +6317,7 @@ struct AppleCatalogItemDetailView: View {
             try await downloadCoordinator.downloadAndWait(
                 request: .init(mediaID: "\(baseID):\(id)", itemTitle: "\(item.name) · \(selection.displayTitle)",
                     subtitle: selection.displayTitle, artworkURL: item.posterURL,
-                    destinationLabel: "OpenStream Offline Storage"),
+                    destinationLabel: "oStream Offline Storage"),
                 resolvePlans: {
                     return try await playbackResolver.resolveDownloadPlans(sources: playbackSources,
                         preferredSourceID: source.id, item: selectedItem)

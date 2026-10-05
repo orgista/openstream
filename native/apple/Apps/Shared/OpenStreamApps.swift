@@ -42,7 +42,7 @@ struct OpenStreamPlatformApp: App {
     #endif
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("oStream") {
             #if DEBUG && os(tvOS)
             if ProcessInfo.processInfo.arguments.contains("-OpenStreamDebugLiveFixture") {
                 AppleLiveGuideFixtureView()
@@ -188,7 +188,7 @@ private struct AppleOpenStreamLaunchView: View {
             withAnimation(.easeOut(duration: 0.52)) { appeared = true }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("OpenStream")
+        .accessibilityLabel("oStream")
     }
 }
 

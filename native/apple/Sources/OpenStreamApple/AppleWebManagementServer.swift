@@ -370,7 +370,7 @@ public final class AppleWebManagementServer {
         let service = NetService(
             domain: "local.",
             type: Self.bonjourServiceType + ".",
-            name: "OpenStream",
+            name: "oStream",
             port: Int32(port)
         )
         service.includesPeerToPeer = false

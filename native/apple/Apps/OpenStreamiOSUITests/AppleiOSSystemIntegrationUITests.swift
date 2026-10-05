@@ -136,7 +136,7 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
 
         guard let result = firstHittable(["oStream"], in: springboard) else {
             dump("gallery-no-result")
-            return XCTFail("searching the gallery for OpenStream matched nothing — tree above")
+            return XCTFail("searching the gallery for oStream matched nothing — tree above")
         }
         result.tap()
         Thread.sleep(forTimeInterval: 3)
@@ -158,7 +158,7 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
 
         guard let widget = placedWidget() else {
             dump("no-widget")
-            return XCTFail("no OpenStream widget on the Home Screen after adding it — tree above")
+            return XCTFail("no oStream widget on the Home Screen after adding it — tree above")
         }
         print("WIDGET label=\(widget.label) value=\(String(describing: widget.value)) frame=\(widget.frame)")
 
@@ -318,7 +318,7 @@ final class AppleiOSConfigurationTransferUITests: OpenStreamUITestCase {
             Thread.sleep(forTimeInterval: 2)
             _ = tap(["On My iPhone"])
             Thread.sleep(forTimeInterval: 2)
-            _ = tap(["OpenStream"])
+            _ = tap(["oStream"])
             Thread.sleep(forTimeInterval: 2)
             _ = tap(["Imports"])
             Thread.sleep(forTimeInterval: 2)

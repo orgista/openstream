@@ -211,10 +211,10 @@ public struct ApplePlexClient: Sendable {
     private func defaultHeaders(token: String? = nil) -> [String: String] {
         var headers: [String: String] = [
             "X-Plex-Client-Identifier": clientIdentifier,
-            "X-Plex-Product": "OpenStream",
+            "X-Plex-Product": "oStream",
             "X-Plex-Version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
             "X-Plex-Platform": platformName,
-            "X-Plex-Device-Name": "OpenStream",
+            "X-Plex-Device-Name": "oStream",
             "Accept": "application/json"
         ]
         if let token = token {

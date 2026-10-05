@@ -18,7 +18,7 @@ struct AppleResetEntry: View {
         NavigationLink {
             AppleResetView()
         } label: {
-            Text("Reset OpenStream")
+            Text("Reset oStream")
                 #if !os(tvOS)
                 .foregroundStyle(.red)
                 #endif
@@ -33,17 +33,17 @@ struct AppleResetView: View {
     var body: some View {
         Form {
             Section {
-                Text("Erases everything OpenStream keeps on this device.")
-                Text("iCloud copies stay. Remove them in Settings > your name > iCloud, and in Passwords (search OpenStream).")
+                Text("Erases everything oStream keeps on this device.")
+                Text("iCloud copies stay. Remove them in Settings > your name > iCloud, and in Passwords (search oStream).")
                     .foregroundStyle(.secondary)
             }
             Section {
-                AppleHoldToConfirmButton(title: "Hold to Reset", confirmationTitle: "Reset OpenStream?") {
+                AppleHoldToConfirmButton(title: "Hold to Reset", confirmationTitle: "Reset oStream?") {
                     AppleDeviceReset.eraseThisDeviceAndRestart()
                 }
             }
         }
-        .appleSettingsPage("Reset OpenStream")
+        .appleSettingsPage("Reset oStream")
         .scrollIndicators(.hidden)
     }
 }

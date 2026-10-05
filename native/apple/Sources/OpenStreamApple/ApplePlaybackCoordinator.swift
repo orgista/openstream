@@ -171,7 +171,7 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
             default:
                 return .init(
                     kind: .network,
-                    message: "OpenStream could not reach the media server. Check the server and network, then try again.",
+                    message: "oStream could not reach the media server. Check the server and network, then try again.",
                     networkCode: urlError.code
                 )
             }

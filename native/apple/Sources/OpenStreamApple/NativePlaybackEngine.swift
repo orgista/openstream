@@ -762,7 +762,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
            nsError.code == -11828 || nsError.code == -11829 {
             return ApplePlaybackFailure(
                 kind: .unsupportedMedia,
-                message: "This stream uses a format OpenStream cannot play on this device."
+                message: "This stream uses a format oStream cannot play on this device."
             )
         }
         // HTTP 401/403 surfaced as the underlying status, either as the error's

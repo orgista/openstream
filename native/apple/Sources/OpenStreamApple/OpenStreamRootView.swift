@@ -860,7 +860,7 @@ private struct AppleFirstRunGuidanceView: View {
             // The no-content statement is behind the (i) beside the title
             // (owner: "just make them (i)").
             HStack(spacing: AppleDesignTokens.spacingSmall) {
-                Text("Welcome to OpenStream")
+                Text("Welcome to oStream")
                     .font(.largeTitle.bold())
                     .multilineTextAlignment(.center)
                 AppleAttributionInfoButton()
@@ -894,7 +894,7 @@ private struct AppleFirstRunGuidanceView: View {
             // The no-content statement is behind the (i) beside the title: a
             // focusable glyph the remote reaches from the pills below.
             HStack(spacing: AppleDesignTokens.spacingMedium) {
-                Text("Welcome to OpenStream")
+                Text("Welcome to oStream")
                     .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
                     .accessibilityAddTraits(.isHeader)
                 AppleAttributionInfoButton()

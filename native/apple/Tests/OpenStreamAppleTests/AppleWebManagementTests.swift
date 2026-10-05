@@ -195,7 +195,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
         address: "192.168.1.95:8090"
     )
 
-    #expect(page.contains("OpenStream"))
+    #expect(page.contains("oStream"))
     #expect(page.contains("Add-on"))
     #expect(page.contains("M3U Playlist"))
     #expect(page.contains("Xtream Account"))

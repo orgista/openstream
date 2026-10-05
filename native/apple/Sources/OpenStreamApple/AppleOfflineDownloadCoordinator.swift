@@ -50,7 +50,7 @@ enum AppleOfflineDownloadFailure: Equatable, Sendable {
         case .invalidResponse:
             "The media server returned an invalid download response."
         case .invalidResume:
-            "The saved download position could not be resumed. OpenStream will restart safely."
+            "The saved download position could not be resumed. oStream will restart safely."
         case .httpStatus(let status):
             "The media server rejected the download with HTTP \(status)."
         case .timedOut:
@@ -58,9 +58,9 @@ enum AppleOfflineDownloadFailure: Equatable, Sendable {
         case .networkUnavailable:
             "The network is unavailable. Reconnect and retry the download."
         case .storageUnavailable:
-            "OpenStream could not save the download. Check available storage and retry."
+            "oStream could not save the download. Check available storage and retry."
         case .preparationFailed:
-            "OpenStream could not prepare this download. Try another source."
+            "oStream could not prepare this download. Try another source."
         }
     }
 }
@@ -226,7 +226,7 @@ final class AppleOfflineDownloadCoordinator {
     func resume() {
         guard case .paused = state else { return }
         if let backgroundID {
-            transition(.resuming(item: request?.itemTitle ?? "Download", destination: request?.destinationLabel ?? "OpenStream Offline Storage", received: receivedBytes, expected: expectedBytes))
+            transition(.resuming(item: request?.itemTitle ?? "Download", destination: request?.destinationLabel ?? "oStream Offline Storage", received: receivedBytes, expected: expectedBytes))
             AppleMediaServerBackgroundDownloads.shared.resume(backgroundID)
             return
         }
@@ -234,7 +234,7 @@ final class AppleOfflineDownloadCoordinator {
         let activeID = operationID
         transition(.resuming(
             item: request?.itemTitle ?? "Download",
-            destination: request?.destinationLabel ?? "OpenStream Offline Storage",
+            destination: request?.destinationLabel ?? "oStream Offline Storage",
             received: receivedBytes,
             expected: expectedBytes
         ))

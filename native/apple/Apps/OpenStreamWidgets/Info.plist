@@ -24,6 +24,6 @@
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenStream finds media servers and network shares on your local network.</string>
+	<string>oStream finds media servers and network shares on your local network.</string>
 </dict>
 </plist>

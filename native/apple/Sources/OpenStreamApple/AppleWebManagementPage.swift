@@ -8,7 +8,7 @@ public enum AppleWebManagementPage {
     /// full-width middle bar between two bars at 72% width, bar height 18%
     /// and gap 12% of the box, capsule ends.
     static let brandMark = """
-    <svg class="mark" viewBox="0 0 74 52" width="37" height="26" fill="currentColor" role="img" aria-label="OpenStream">\
+    <svg class="mark" viewBox="0 0 74 52" width="37" height="26" fill="currentColor" role="img" aria-label="oStream">\
     <rect x="10.36" y="5.72" width="53.28" height="9.36" rx="4.68"/>\
     <rect x="0" y="21.32" width="74" height="9.36" rx="4.68"/>\
     <rect x="10.36" y="36.92" width="53.28" height="9.36" rx="4.68"/>\
@@ -79,13 +79,13 @@ public enum AppleWebManagementPage {
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
           <meta name="color-scheme" content="dark">
-          <title>OpenStream</title>
+          <title>oStream</title>
           <style>\(styles)</style>
         </head>
         <body>
           <main data-paired="\(isPaired)">
-            <header>\(brandMark)<span class="wordmark">OpenStream</span></header>
-            <h1 class="visually-hidden">OpenStream</h1>
+            <header>\(brandMark)<span class="wordmark">oStream</span></header>
+            <h1 class="visually-hidden">oStream</h1>
         \(body)
           </main>
           <script>\(script)</script>

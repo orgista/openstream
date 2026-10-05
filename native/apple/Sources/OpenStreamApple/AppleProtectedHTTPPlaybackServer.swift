@@ -8,7 +8,7 @@ public enum AppleProtectedHTTPPlaybackError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .listenerUnavailable: "OpenStream couldn’t start its private Live TV playback bridge."
+        case .listenerUnavailable: "oStream couldn’t start its private Live TV playback bridge."
         case .invalidUpstream: "The Live TV provider returned an invalid stream address."
         case .invalidRequest: "The private Live TV playback request was invalid."
         }

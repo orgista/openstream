@@ -20,6 +20,57 @@ struct AppleStoreCompliancePolicyTests {
         return defaults
     }
 
+
+    @Test("App UI names oStream; OpenStream is reserved for credits and identifiers")
+    func visibleAppNameIsOStream() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sources = root.appending(path: "Sources/OpenStreamApple")
+        let walker = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        // Disk paths, wire identifiers and log output retain compatibility.
+        let compatibilityLiterals: Set<String> = [
+            "OpenStream", "OpenStream/BackgroundDownloads", "OpenStream Diagnostics.txt",
+            "OpenStream Working Channels.m3u", "OpenStream/1.0 Apple",
+            "OpenStream/", "OpenStream/ (+https://orgista.com/support)",
+            "OpenStream/Offline", "OpenStream/Metadata", "OpenStream/LiveChannels",
+            "OpenStream/Playlists", "OpenStream/ChannelHealth",
+        ]
+        let credits: Set<String> = [
+            "OpenStream by Orgista, a subsidiary of Raster Inc.",
+            "Playback engine, release 6.66.0, linked as dynamic frameworks. OpenStream's fork with its changes: ",
+        ]
+        var offenders: [String] = []
+        var scanned = 0
+        for case let file as URL in walker where file.pathExtension == "swift" {
+            scanned += 1
+            let contents = try String(contentsOf: file, encoding: .utf8)
+            for (number, line) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                let code = line.trimmingCharacters(in: .whitespaces)
+                guard !code.hasPrefix("//"), !code.hasPrefix("*"),
+                      !code.hasPrefix("print("), !code.hasPrefix("appleTrace(") else { continue }
+                for literal in AppleUserFacingBrandingTests.stringLiterals(in: line)
+                    where literal.range(of: #"\bOpenStream\b"#, options: .regularExpression) != nil {
+                    if credits.contains(literal) { continue }
+                    if compatibilityLiterals.contains(literal),
+                       code.contains("appending") || code.contains("fileName") || code.contains("User-Agent")
+                        || code.contains("userAgent:") || code.contains("X-Application")
+                        || file.lastPathComponent == "AppleWikidataStreamingIDs.swift" { continue }
+                    if ["X-OpenStream-Session", "X-OpenStream-Client"].contains(literal), code.contains("forHTTPHeaderField") { continue }
+                    if file.lastPathComponent == "AppleDiagnosticsReport.swift", literal == "OpenStream  ()" { continue }
+                    if literal.hasPrefix("[OpenStream]") || literal.hasPrefix("OpenStream diagnostics [") { continue }
+                    offenders.append("\(file.lastPathComponent):\(number + 1): \(literal)")
+                }
+                // HTML within multiline Swift strings is also user-visible UI.
+                if file.lastPathComponent == "AppleWebManagementPage.swift",
+                   !code.hasPrefix("//"), code.range(of: #">OpenStream<|aria-label=\\?"OpenStream"#, options: .regularExpression) != nil {
+                    offenders.append("\(file.lastPathComponent):\(number + 1): HTML app name")
+                }
+            }
+        }
+        #expect(scanned > 100)
+        #expect(offenders.isEmpty, "Old app name: \(offenders.joined(separator: "; "))")
+    }
+
     // MARK: B4 — no service-brand row titles
 
     /// The Streaming Catalogs add-on's catalogs, as its manifest names them,

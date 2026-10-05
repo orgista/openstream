@@ -142,7 +142,7 @@ public struct AppleMediaServerClient: Sendable {
     public init(
         loader: @escaping Loader = URLSession.shared.data(for:),
         deviceID: String? = nil,
-        clientName: String = "OpenStream",
+        clientName: String = "oStream",
         deviceName: String = AppleMediaServerClient.platformDeviceName,
         appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     ) {

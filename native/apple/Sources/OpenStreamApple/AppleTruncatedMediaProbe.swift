@@ -25,7 +25,7 @@ enum AppleTruncatedMediaProbe {
     /// short is caught by the container probe instead (`endsEarly`, run by
     /// the coordinator for an open failure before anything played).
     static let droppedMessage = "The file ended early or the connection dropped. Try again or choose another source."
-    static let openFailedMessage = "OpenStream could not read this file. Try again or choose another source."
+    static let openFailedMessage = "oStream could not read this file. Try again or choose another source."
 
     static func readableEngineMessage(_ raw: String, midStream: Bool) -> String {
         let markers = ["open failed", "demuxer", "invalid data found", "end of file", "input/output error",

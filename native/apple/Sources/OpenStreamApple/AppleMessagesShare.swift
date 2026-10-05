@@ -108,14 +108,14 @@ public enum AppleMessagesShareCatalog {
         let subcaption: String
         switch item.origin {
         case .continueWatching: subcaption = "Watching now"
-        case .topPick: subcaption = "On OpenStream"
+        case .topPick: subcaption = "On oStream"
         }
         return AppleMessagesShareLayout(
             caption: caption,
             subcaption: subcaption,
             imageURL: item.artworkURL,
             url: item.displayURL,
-            summaryText: "\(caption) on OpenStream"
+            summaryText: "\(caption) on oStream"
         )
     }
 }

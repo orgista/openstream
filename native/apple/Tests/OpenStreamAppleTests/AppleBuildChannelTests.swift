@@ -72,12 +72,12 @@ import Testing
     @Test func infoSheetLinesAreTheRequiredOnes() {
         #expect(AppleAttribution.tmdbNotice == "This product uses the TMDB API but is not endorsed or certified by TMDB.")
         #expect(AppleAttribution.justWatchCredit == "Streaming availability data by JustWatch")
-        #expect(AppleAttribution.noContentDisclaimer == "OpenStream doesn't provide any content. Add your own sources.")
+        #expect(AppleAttribution.noContentDisclaimer == "oStream doesn't provide any content. Add your own sources.")
     }
 
     /// About links the public repository (the origin remote).
     @Test func aboutLinksTheOriginRepository() {
-        #expect(AppleAttribution.sourceCodeURL.absoluteString == "https://github.com/orgista/openstream")
-        #expect(AppleAttribution.sourceCodeDisplay == "github.com/orgista/openstream")
+        #expect(AppleAttribution.sourceCodeURL.absoluteString == "https://github.com/orgista/openstream-apple")
+        #expect(AppleAttribution.sourceCodeDisplay == "github.com/orgista/openstream-apple")
     }
 }

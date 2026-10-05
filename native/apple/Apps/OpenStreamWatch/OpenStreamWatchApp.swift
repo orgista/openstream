@@ -128,14 +128,14 @@ struct OpenStreamWatchWordmark: View {
     var body: some View {
         HStack(spacing: 4) {
             mark
-            Text(verbatim: "OpenStream")
+            Text(verbatim: "oStream")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("OpenStream")
+        .accessibilityLabel("oStream")
         .accessibilityAddTraits(.isHeader)
     }
 

@@ -29,7 +29,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "F00000000000000000000004"
-               BuildableName = "OpenStream macOS.app"
+               BuildableName = "oStream.app"
                BlueprintName = "OpenStream macOS"
                ReferencedContainer = "container:OpenStreamApps.xcodeproj">
             </BuildableReference>

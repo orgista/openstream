@@ -1326,7 +1326,9 @@ private struct AppleAboutView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("App", value: "OpenStream")
+                LabeledContent("App", value: "oStream")
+                Text("OpenStream by Orgista, a subsidiary of Raster Inc.")
+                    .foregroundStyle(.secondary)
                 LabeledContent("Version", value: version)
                 LabeledContent("Build", value: build)
             }
@@ -1365,14 +1367,14 @@ private struct AppleAboutView: View {
 
             #if !os(tvOS)
             Section {
-                ShareLink(item: AppleDiagnosticsFile(), preview: SharePreview("OpenStream Diagnostics")) {
+                ShareLink(item: AppleDiagnosticsFile(), preview: SharePreview("oStream Diagnostics")) {
                     Text("Share Diagnostics")
                 }
                 .accessibilityIdentifier("settings.about.shareDiagnostics")
             }
             #endif
         }
-        .appleSettingsPane("About", embedded: embeddedInSplit)
+        .appleSettingsPane("oStream", embedded: embeddedInSplit)
     }
 }
 

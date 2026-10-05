@@ -136,7 +136,7 @@ struct AppleMessagesShareTests {
                 from: snapshot(topPicks: [item("popular", title: "Popular")])
             )[0]
         )
-        #expect(layout.subcaption == "On OpenStream")
+        #expect(layout.subcaption == "On oStream")
     }
 
     /// Out of the app's context the caption alone does not say where the
@@ -151,7 +151,7 @@ struct AppleMessagesShareTests {
                 origin: .continueWatching
             )
         )
-        #expect(layout.summaryText == "Dune on OpenStream")
+        #expect(layout.summaryText == "Dune on oStream")
     }
 
     /// The caption is clamped the same way Top Shelf clamps its titles.

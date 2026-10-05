@@ -74,7 +74,7 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         for _ in 0..<5 where !entry.waitForExistence(timeout: 2) {
             messages.swipeUp()
         }
-        XCTAssertTrue(entry.exists, "OpenStream is not listed in the Messages send menu")
+        XCTAssertTrue(entry.exists, "oStream is not listed in the Messages send menu")
         entry.tap()
 
         let row = messages.buttons["messages.share.row"].firstMatch
@@ -92,7 +92,7 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         // shelf the title came from.
         let label = row.label
         XCTAssertTrue(
-            label.hasSuffix("Watching now") || label.hasSuffix("On OpenStream"),
+            label.hasSuffix("Watching now") || label.hasSuffix("On oStream"),
             "unexpected row wording: \(label)"
         )
         let title = String(label.split(separator: ",").first ?? "")

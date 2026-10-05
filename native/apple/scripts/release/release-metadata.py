@@ -45,7 +45,7 @@ def verify_zip(path, version, build, platform):
         names = archive.namelist()
         if any(n.startswith('/') or '..' in Path(n).parts for n in names):
             raise SystemExit('FAIL: unsafe archive member')
-        main = f'Payload/OpenStream {platform}.app/Info.plist' if platform != 'macOS' else 'OpenStream macOS.app/Contents/Info.plist'
+        main = f'Payload/OpenStream {platform}.app/Info.plist' if platform != 'macOS' else 'oStream.app/Contents/Info.plist'
         if main not in names:
             raise SystemExit('FAIL: archive app layout is incorrect')
         if platform != 'macOS' and any('_CodeSignature' in Path(n).parts or n.endswith('.mobileprovision') for n in names):
@@ -75,7 +75,7 @@ else:
     checkout, release = map(Path, sys.argv[2:4])
     version, build = sys.argv[4:6]
     tag = f'v{version}-{build}'
-    assets = [release / f'OpenStream-{platform}-{version}-{build}.{suffix}' for platform, suffix in [('iOS', 'ipa'), ('tvOS', 'ipa'), ('visionOS', 'ipa'), ('macOS', 'zip')]]
+    assets = [release / f'{"oStream" if platform == "macOS" else "OpenStream"}-{platform}-{version}-{build}.{suffix}' for platform, suffix in [('iOS', 'ipa'), ('tvOS', 'ipa'), ('visionOS', 'ipa'), ('macOS', 'zip')]]
     if mode == 'notes':
         (release / 'notes.md').write_text(notes(checkout, version, build))
     elif mode == 'finish':

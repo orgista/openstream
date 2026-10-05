@@ -19,11 +19,11 @@ import AppKit
 public enum AppleAttribution {
     public static let tmdbNotice = "This product uses the TMDB API but is not endorsed or certified by TMDB."
     public static let justWatchCredit = "Streaming availability data by JustWatch"
-    public static let noContentDisclaimer = "OpenStream doesn't provide any content. Add your own sources."
+    public static let noContentDisclaimer = "oStream doesn't provide any content. Add your own sources."
     /// The public repository (the origin remote). It may 404 until the owner
     /// flips the repo public after a secret scan; that is expected.
-    public static let sourceCodeURL = URL(string: "https://github.com/orgista/openstream")!
-    public static let sourceCodeDisplay = "github.com/orgista/openstream"
+    public static let sourceCodeURL = URL(string: "https://github.com/orgista/openstream-apple")!
+    public static let sourceCodeDisplay = "github.com/orgista/openstream-apple"
     /// The sheet's title, and the accessibility label of every (i).
     public static let infoTitle = "Data Sources"
 }

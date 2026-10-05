@@ -47,7 +47,7 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         for step in 0..<8 {
             let focused = focusedLabel()
             print("TOPSHELF focus step \(step): \(focused ?? "<none>")")
-            if focused?.localizedCaseInsensitiveContains("OpenStream") == true,
+            if focused?.localizedCaseInsensitiveContains("oStream") == true,
                focused?.localizedCaseInsensitiveContains("UITests") != true {
                 focusedOnOpenStream = true
                 break
@@ -65,7 +65,7 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         print("TOPSHELF visible strings (\(texts.count)): \(texts.joined(separator: " | "))")
         print("TOPSHELF PineBoard tree:\n\(pineBoard.debugDescription)")
 
-        XCTAssertTrue(focusedOnOpenStream, "never managed to focus the OpenStream icon on the home screen")
+        XCTAssertTrue(focusedOnOpenStream, "never managed to focus the oStream icon on the home screen")
         let expected = ProcessInfo.processInfo.environment["OPENSTREAM_TOPSHELF_EXPECT"]?
             .split(separator: "\u{1f}").map(String.init) ?? []
         let wanted = ["Continue Watching", "Top Picks"] + expected

@@ -16,7 +16,7 @@ public struct AppleNowPlayingMetadata: Equatable, Sendable {
 
     public init(title: String?, seriesTitle: String? = nil, isLive: Bool, artworkURL: URL? = nil) {
         let clean = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.title = clean.isEmpty ? "OpenStream" : Self.episodeLine(clean)
+        self.title = clean.isEmpty ? "oStream" : Self.episodeLine(clean)
         hasTitle = !clean.isEmpty
         let series = seriesTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.seriesTitle = series.isEmpty || series == clean ? nil : series

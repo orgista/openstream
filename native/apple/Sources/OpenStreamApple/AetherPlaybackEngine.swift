@@ -959,7 +959,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         if unsupportedKinds.contains(info.kind) {
             return ApplePlaybackFailure(
                 kind: .unsupportedMedia,
-                message: "This stream uses a format OpenStream cannot play on this device."
+                message: "This stream uses a format oStream cannot play on this device."
             )
         }
         // AVFoundation codec/container rejections land as unsupported too.
@@ -967,7 +967,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
            let resolvedCode = code, resolvedCode == -11828 || resolvedCode == -11829 {
             return ApplePlaybackFailure(
                 kind: .unsupportedMedia,
-                message: "This stream uses a format OpenStream cannot play on this device."
+                message: "This stream uses a format oStream cannot play on this device."
             )
         }
         let networkKinds: Set<PlaybackErrorKind> = [

@@ -146,7 +146,7 @@ public enum AppleSMBError: Error, Equatable, LocalizedError, Sendable {
         case .authenticationFailed: "SMB authentication failed. Check the username and password."
         case .accessDenied: "The server refused access to that share. Check the share name and the account’s permissions on the server."
         case .serverUnreachable: "The SMB server is unreachable. Check the host, port, and network connection."
-        case .connectionFailed: "OpenStream couldn’t connect to that network share. Check the server, share, and account."
+        case .connectionFailed: "oStream couldn’t connect to that network share. Check the server, share, and account."
         }
     }
 
@@ -717,7 +717,7 @@ struct AppleSMBDiscoveryReport: Sendable {
     let advertisedCount: Int
 
     var message: String {
-        if permissionDenied { return "Allow Local Network access for OpenStream in Settings, then tap Find Servers." }
+        if permissionDenied { return "Allow Local Network access for oStream in Settings, then tap Find Servers." }
         if !servers.isEmpty { return "Found \(servers.count) server\(servers.count == 1 ? "" : "s")." }
         if advertisedCount > 0 { return "Found nearby servers but couldn’t connect. Check that file sharing is enabled, or enter the server address." }
         return "No SMB shares found. Use the same Wi-Fi network and enable file sharing, or enter a host or IP address."

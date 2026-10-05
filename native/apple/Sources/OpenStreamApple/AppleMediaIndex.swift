@@ -21,7 +21,7 @@ public enum AppleMediaIndexError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case let .unsupportedVersion(version):
-            "This media index was created by a newer OpenStream version (\(version))."
+            "This media index was created by a newer oStream version (\(version))."
         }
     }
 }

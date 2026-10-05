@@ -4449,3 +4449,7 @@ The final Release binary scan also passed with no add-on markers or YouTube add-
 ## 2026-10-04 — Complete Guide restored
 
 Complete Guide organises the channels in your own playlist using the full US numbering and categories. It becomes the default when at least 20 guide channels match; other playlists start with Everything. Saved choices and Custom still work. Both simulator screens show the new name and expected numbers; their original app data was restored after checking.
+
+## 2026-10-04 — oStream app name
+
+The apps now show oStream in the updated screens and system labels, and the Mac build/download use oStream.app. About keeps the OpenStream, Orgista and Raster credit. The five requested app builds, the no-add-ons check and OS version checks passed. The Mac download path was checked without running a release. One protected SMB error message still uses the old name; permission to edit it is pending, and the new name test flags it. iPhone, Apple TV and Mac About screenshots are saved in the requested verification folder; Mac menu wording is verified, but its open-menu screenshot is pending.

@@ -138,7 +138,7 @@ public enum AppleTMDBError: Error, Equatable, LocalizedError, Sendable {
         case .titleNotFound: "TMDB could not find this title."
         case .invalidResponse: "TMDB returned an invalid response."
         case .requestFailed(let status): "TMDB returned HTTP \(status)."
-        case .responseTooLarge: "TMDB returned more metadata than OpenStream can safely process."
+        case .responseTooLarge: "TMDB returned more metadata than oStream can safely process."
         }
     }
 }
