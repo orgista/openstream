@@ -4445,3 +4445,7 @@ Screenshots are in `~/Developer/openstream-build/verification/shared-links/`. Si
 
 Verified: 2753 tests in 346 suites, iOS device and simulator Debug builds, and AppStore-iOS device Release with SDK floors. The existing catalog-fixture network-stub race passed on a full rerun.
 The final Release binary scan also passed with no add-on markers or YouTube add-on wording; all 30 simulator SDK-floor checks passed.
+
+## 2026-10-04 — Complete Guide restored
+
+Complete Guide organises the channels in your own playlist using the full US numbering and categories. It becomes the default when at least 20 guide channels match; other playlists start with Everything. Saved choices and Custom still work. Both simulator screens show the new name and expected numbers; their original app data was restored after checking.

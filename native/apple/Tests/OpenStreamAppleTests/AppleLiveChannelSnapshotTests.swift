@@ -8,7 +8,7 @@ import Testing
         AppleIPTVChannel(id: "news", sourceID: source, name: "CNN HD", group: "News", streamURL: URL(string: "https://fixture.example/news.ts")!),
         AppleIPTVChannel(id: "sports", sourceID: source, name: "ESPN (EAST)", group: "Sports", streamURL: URL(string: "https://fixture.example/sports.ts")!)
     ]
-    let entries = try AppleChannelLineupPresets.premierUS()
+    let entries = try AppleChannelLineupPresets.completeUS()
     let snapshot = AppleLiveChannelSnapshot.build(groups: [.init(name: "All", channels: channels)],
         package: .everything, custom: .init(), entries: entries, favoriteIDs: ["sports"], category: "Favorites")
     #expect(snapshot.channels.map(\.id) == ["sports"])
@@ -21,11 +21,11 @@ import Testing
 }
 
 /// Owner 2026-09-14: "reduce the live line up to the premier safe thing we did
-/// with iPhone and android". `premierGuideGroups` returns the curated lineup
+/// with iPhone and android". `completeGuideGroups` returns the curated lineup
 /// *and* an "Other" group of everything it could not match, and the guide was
 /// flattening both — 4749 of the owner's 9376 channels reached the grid.
-@Suite("Premier Guide lineup")
-struct ApplePremierGuideLineupTests {
+@Suite("Complete Guide lineup")
+struct AppleCompleteGuideLineupTests {
     private let source = UUID()
 
     private func channel(_ id: String, _ name: String) -> AppleIPTVChannel {
@@ -54,7 +54,7 @@ struct ApplePremierGuideLineupTests {
 
     @Test func allShowsOnlyTheCuratedLineup() {
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: channels)], package: .premierGuide,
+            groups: [.init(name: "All", channels: channels)], package: .completeGuide,
             custom: .init(), entries: lineup, favoriteIDs: [], category: "All")
         #expect(snapshot.channelIDs == curatedIDs)
     }
@@ -69,7 +69,7 @@ struct ApplePremierGuideLineupTests {
     /// An empty guide would be worse than an unfiltered one.
     @Test func aLineupThatMatchesNothingFallsBackToTheChannelsWeHave() {
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: channels)], package: .premierGuide,
+            groups: [.init(name: "All", channels: channels)], package: .completeGuide,
             custom: .init(), entries: [], favoriteIDs: [], category: "All")
         #expect(snapshot.channelIDs.count == channels.count)
     }
@@ -83,7 +83,7 @@ struct ApplePremierGuideLineupTests {
         var foreign = (1...40).map { channel("ch\($0)", "Kanal \($0)") }
         foreign.append(channel("collision", "CBS"))
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: foreign)], package: .premierGuide,
+            groups: [.init(name: "All", channels: foreign)], package: .completeGuide,
             custom: .init(), entries: lineup, favoriteIDs: [], category: "All")
         #expect(snapshot.channelIDs.count == 41, "one coincidental match hid \(41 - snapshot.channelIDs.count) channels")
     }
@@ -97,7 +97,7 @@ struct ApplePremierGuideLineupTests {
         var list = (1...floor).map { channel("net\($0)", "Net \($0)") }
         list += (1...20).map { channel("x\($0)", "Unrelated \($0)") }
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: list)], package: .premierGuide,
+            groups: [.init(name: "All", channels: list)], package: .completeGuide,
             custom: .init(), entries: entries, favoriteIDs: [], category: "All")
         #expect(snapshot.channelIDs.count == floor, "at the floor All should be the curated \(floor), got \(snapshot.channelIDs.count)")
     }
@@ -111,14 +111,14 @@ struct ApplePremierGuideLineupTests {
         var list = (1..<floor).map { channel("net\($0)", "Net \($0)") }
         list += (1...20).map { channel("x\($0)", "Unrelated \($0)") }
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: list)], package: .premierGuide,
+            groups: [.init(name: "All", channels: list)], package: .completeGuide,
             custom: .init(), entries: entries, favoriteIDs: [], category: "All")
         #expect(snapshot.channelIDs.count == list.count)
     }
 
     @Test func favoritesAreNotLimitedToTheLineup() {
         let snapshot = AppleLiveChannelSnapshot.build(
-            groups: [.init(name: "All", channels: channels)], package: .premierGuide,
+            groups: [.init(name: "All", channels: channels)], package: .completeGuide,
             custom: .init(), entries: lineup, favoriteIDs: ["rando1"], category: "Favorites")
         #expect(snapshot.channelIDs == ["rando1"])
     }

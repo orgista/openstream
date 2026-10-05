@@ -1,6 +1,6 @@
 // AppleChannelLineupPresets.swift
 // OpenStreamApple
-// Done / hooks needed: AppleChannelLineupPresets.match(channelName:in:) inside the Channel Manager's "Premier Guide" preset
+// Done / hooks needed: AppleChannelLineupPresets.match(channelName:in:) inside the Channel Manager's "Complete Guide" preset
 import Foundation
 
 public struct AppleChannelLineupEntry: Codable, Sendable, Equatable {
@@ -54,65 +54,25 @@ struct LineupFile: Codable, Sendable {
     let markets: [String: String]
 }
 
-/// The US channel lineup is a **test fixture, not a shipped resource**.
-///
-/// Owner, 2026-10-01 (App Store compliance audit B6): "nothing should be
-/// built in — this is just testing". A Release build carries no lineup, so
-/// channel names, numbers and logos come only from the viewer's own playlist
-/// and EPG (`tvg-logo`, then initials). A Debug build — the simulators, the
-/// unit tests, a developer's device — reads the fixture from the source tree
-/// (`Tests/OpenStreamAppleTests/Fixtures/ChannelLineup/`) or from the file
-/// `OPENSTREAM_CHANNEL_LINEUP` names, so the Premier Guide code paths stay
-/// testable once IPTV is set up. Nothing is ever looked up in the app bundle.
+/// Complete Guide organises channels from the viewer's own playlist.
+/// Bundled in every build; it never supplies sources or stream URLs.
 public enum AppleChannelLineupPresets {
-    /// The resource bundle the lineup must never be in (`Bundle.module` of
-    /// the app library, not of a test target).
     static let resourceBundle = Bundle.module
 
-    /// The fixture, relative to this file, in the source tree.
-    static let debugFixtureURL = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Tests/OpenStreamAppleTests/Fixtures/ChannelLineup/premier-us-extended.json")
+    public static var isAvailable: Bool { !((try? completeUS()) ?? []).isEmpty }
 
-    /// Environment variable naming a lineup file to read instead of the fixture (Debug only).
-    static let debugOverrideEnvironmentKey = "OPENSTREAM_CHANNEL_LINEUP"
-
-    #if DEBUG
-    static let isDebugBuild = true
-    #else
-    static let isDebugBuild = false
-    #endif
-
-    /// True when a lineup is loaded: Debug builds with the fixture in reach.
-    /// Release is always false.
-    public static var isAvailable: Bool { !((try? premierUS()) ?? []).isEmpty }
-
-    private static let cachedFile: Result<LineupFile, any Error> = Result { try readFile(allowDebugFixture: isDebugBuild) }
+    private static let cachedFile: Result<LineupFile, any Error> = Result { try readFile() }
     private static func loadFile() throws -> LineupFile { try cachedFile.get() }
 
-    /// The lineup a build of this kind sees: empty for Release, the fixture
-    /// (or the override file) for Debug. `allowDebugFixture` exists so a test
-    /// can run the Release path from a Debug build.
-    static func readFile(allowDebugFixture: Bool) throws -> LineupFile {
-        guard allowDebugFixture else { return LineupFile(channels: [], markets: [:]) }
-        let url: URL
-        if let override = ProcessInfo.processInfo.environment[debugOverrideEnvironmentKey], !override.isEmpty {
-            url = URL(fileURLWithPath: override)
-        } else {
-            url = debugFixtureURL
+    static func readFile() throws -> LineupFile {
+        guard let url = resourceBundle.url(forResource: "complete-us", withExtension: "json", subdirectory: "ChannelLineup") else {
+            throw CocoaError(.fileNoSuchFile)
         }
-        guard FileManager.default.fileExists(atPath: url.path) else { return LineupFile(channels: [], markets: [:]) }
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(LineupFile.self, from: data)
+        return try JSONDecoder().decode(LineupFile.self, from: Data(contentsOf: url))
     }
 
-    static func lineup(allowDebugFixture: Bool) throws -> [AppleChannelLineupEntry] {
-        try readFile(allowDebugFixture: allowDebugFixture).channels
-    }
-
-    /// The lineup entries, or `[]` when this build ships none (Release).
-    public static func premierUS() throws -> [AppleChannelLineupEntry] {
-        return try loadFile().channels
+    public static func completeUS() throws -> [AppleChannelLineupEntry] {
+        try loadFile().channels
     }
 
     public static func match(channelName: String, in entries: [AppleChannelLineupEntry]) -> AppleChannelLineupEntry? {

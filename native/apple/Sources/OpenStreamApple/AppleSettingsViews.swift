@@ -507,7 +507,7 @@ private struct AppleChannelManagerView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var query = ""
-    @State private var premierGuide: [AppleChannelLineupEntry] = []
+    @State private var completeGuide: [AppleChannelLineupEntry] = []
     @State private var lineupIndex = AppleChannelLineupIndex([])
     private let client = AppleIPTVClient()
 
@@ -659,7 +659,7 @@ private struct AppleChannelManagerView: View {
             }
         }
         #endif
-        .task(id: sourceIdentity) { await reload(); premierGuide = (try? AppleChannelLineupPresets.premierUS()) ?? []; lineupIndex = AppleChannelLineupIndex(premierGuide) }
+        .task(id: sourceIdentity) { await reload(); completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []; lineupIndex = AppleChannelLineupIndex(completeGuide) }
         .task(id: projectionIdentity) { await rebuildFilteredChannels() }
     }
 
@@ -791,7 +791,7 @@ private struct AppleChannelManagerView: View {
     }
 
     private var numberedChannels: [AppleIPTVChannel] {
-        AppleGuideChannelProjection.rows(channels: filteredChannels, entries: premierGuide,
+        AppleGuideChannelProjection.rows(channels: filteredChannels, entries: completeGuide,
             favoriteIDs: [], favoritesOnly: false, sortByNumber: true).map(\.channel)
     }
 
@@ -805,6 +805,7 @@ private struct AppleChannelManagerView: View {
     private func reload() async {
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         guard !sources.isEmpty else {
+            settings.updateAutomaticLiveChannelPackage(channels: [])
             channels = []
             filteredChannels = []
             channelsRevision &+= 1
@@ -821,6 +822,7 @@ private struct AppleChannelManagerView: View {
                 cached += await AppleIPTVChannelCache.shared.snapshot(for: source.id)?.channels ?? []
             }
             if !cached.isEmpty {
+                settings.updateAutomaticLiveChannelPackage(channels: cached)
                 channels = cached
                 channelsRevision &+= 1
             }
@@ -848,6 +850,7 @@ private struct AppleChannelManagerView: View {
                 loaded += await AppleIPTVChannelCache.shared.snapshot(for: source.id)?.channels ?? []
             }
         }
+        settings.updateAutomaticLiveChannelPackage(channels: loaded)
         channels = loaded
         channelsRevision &+= 1
         errorMessage = errors.first

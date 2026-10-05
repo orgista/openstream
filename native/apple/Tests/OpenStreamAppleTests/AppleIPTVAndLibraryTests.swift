@@ -457,7 +457,7 @@ private actor IPTVRequestRecorder {
     #expect(AppleChannelProjection.matchingChannels(from: [channels[2]], query: "Comedy").map(\.id) == ["real"])
 }
 
-@Test func premierGuideGroupsSortsNumbersAndTrailsOther() {
+@Test func completeGuideGroupsSortsNumbersAndTrailsOther() {
     let sourceID = UUID()
     let entries = [
         AppleChannelLineupEntry(number: 42, name: "Comedy Central", aliases: [], category: "Entertainment"),
@@ -468,8 +468,8 @@ private actor IPTVRequestRecorder {
         AppleIPTVChannel(id: "comedy", sourceID: sourceID, name: "Comedy Central", streamURL: URL(string: "https://tv.example/c")!),
         AppleIPTVChannel(id: "cbs", sourceID: sourceID, name: "CBS", streamURL: URL(string: "https://tv.example/cbs")!),
     ]
-    let groups = AppleChannelProjection.premierGuideGroups(from: channels, entries: entries)
-    #expect(groups.map(\.name) == ["Premier Guide", "Other"])
+    let groups = AppleChannelProjection.completeGuideGroups(from: channels, entries: entries)
+    #expect(groups.map(\.name) == ["Complete Guide", "Other"])
     #expect(groups[0].channels.map(\.id) == ["cbs", "comedy"])
     #expect(groups[1].channels.map(\.id) == ["other"])
 }

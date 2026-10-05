@@ -193,7 +193,7 @@ public enum AppleChannelVisibilityPolicy {
             guard let normalizedZIP = AppleZIPCodePolicy.normalize(zipCode) else { return false }
             let text = normalizedRegionalText("\(channel.name) \(channel.group)")
             return text.contains(normalizedZIP) || text.contains("local") ||
-                (try? AppleChannelLineupPresets.premierUS()).map {
+                (try? AppleChannelLineupPresets.completeUS()).map {
                     AppleChannelLineupPresets.matchesLocalChannel(
                         name: channel.name,
                         zip: normalizedZIP,
@@ -310,7 +310,7 @@ public enum AppleChannelProjection {
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    public static func premierGuideGroups(from channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [AppleIPTVChannelGroup] {
+    public static func completeGuideGroups(from channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [AppleIPTVChannelGroup] {
         let index = AppleChannelLineupIndex(entries)
         let east = AppleChannelVisibilityPolicy.deduplicatedEastChannels(channels)
         var seenLineupNumbers = Set<Int>()
@@ -321,7 +321,7 @@ public enum AppleChannelProjection {
         }.sorted { $0.0.number == $1.0.number ? $0.1.name.localizedCaseInsensitiveCompare($1.1.name) == .orderedAscending : $0.0.number < $1.0.number }
         let other = east.filter { index.match($0.name) == nil }
         return [
-            numbered.isEmpty ? nil : AppleIPTVChannelGroup(name: "Premier Guide", channels: numbered.map { $0.1 }),
+            numbered.isEmpty ? nil : AppleIPTVChannelGroup(name: "Complete Guide", channels: numbered.map { $0.1 }),
             other.isEmpty ? nil : AppleIPTVChannelGroup(name: "Other", channels: other),
         ].compactMap { $0 }
     }

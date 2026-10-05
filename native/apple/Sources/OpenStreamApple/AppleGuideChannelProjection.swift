@@ -22,7 +22,7 @@ enum AppleGuideChannelProjection {
         let rows = channels.compactMap { channel -> AppleGuideChannel? in
             guard seen.insert(channel.id).inserted,
                   !favoritesOnly || favoriteIDs.contains(channel.id) else { return nil }
-            // The curated lineup's number first (it is what the Premier Guide
+            // The curated lineup's number first (it is what the Complete Guide
             // is ordered by), then the playlist's own (`tvg-chno` / Xtream
             // `num`). Only the lineup was ever read, so a provider list showed
             // logo and name with no number at all (Apple TV pass, 2026-10-02).

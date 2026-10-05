@@ -35,7 +35,7 @@ struct AppleLiveTVView: View {
     @State private var fullScreenRevision = 0
     @AppStorage("openstream.live.lastChannelID") private var lastWatchedChannelID = ""
     @State private var guideStore = AppleIPTVGuideStore()
-    @State private var premierGuide: [AppleChannelLineupEntry] = []
+    @State private var completeGuide: [AppleChannelLineupEntry] = []
     @State private var lineupIndex = AppleChannelLineupIndex([])
     @State private var playbackCoordinator = ApplePlaybackCoordinator()
     @State private var configuredEngine: ApplePlaybackEngineKind?
@@ -250,7 +250,7 @@ struct AppleLiveTVView: View {
                         channels: channelSnapshot.channels,
                         guide: guideStore.guide(for: channelSnapshot.channelIDs),
                         guideRevision: guideStore.revision,
-                        entries: premierGuide,
+                        entries: completeGuide,
                         favoriteIDs: settings.favoriteChannelIDs,
                         onSelect: play,
                         onToggleFavorite: toggleFavorite,
@@ -292,7 +292,7 @@ struct AppleLiveTVView: View {
                 channels: channelSnapshot.channels,
                 guide: guideStore.guide(for: channelSnapshot.channelIDs),
                 guideRevision: guideStore.revision,
-                entries: premierGuide,
+                entries: completeGuide,
                 favoriteIDs: settings.favoriteChannelIDs,
                 onSelect: play,
                 onToggleFavorite: toggleFavorite,
@@ -459,11 +459,12 @@ struct AppleLiveTVView: View {
     private func reload() async {
         guard reloadGate.begin() else { return }
         defer { reloadGate.end() }
-        premierGuide = (try? AppleChannelLineupPresets.premierUS()) ?? []
-        lineupIndex = AppleChannelLineupIndex(premierGuide)
+        completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []
+        lineupIndex = AppleChannelLineupIndex(completeGuide)
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         await AppleIPTVChannelCache.shared.retain(Set(sources.map(\.id)))
         guard !sources.isEmpty else {
+            settings.updateAutomaticLiveChannelPackage(channels: [])
             channelIndex = AppleIPTVChannelIndex([])
             channelGroups = []
             channelsRevision &+= 1
@@ -487,6 +488,7 @@ struct AppleLiveTVView: View {
         var load = AppleLiveSourceLoad(sources: sources, cached: cached)
         if channels.isEmpty, !load.channels.isEmpty, !Task.isCancelled {
             channelIndex = AppleIPTVChannelIndex(load.channels)
+            settings.updateAutomaticLiveChannelPackage(channels: load.channels)
             channelsRevision &+= 1
             #if DEBUG
             AppleLaunchClock.mark("live.cached(\(load.channels.count))")
@@ -540,6 +542,7 @@ struct AppleLiveTVView: View {
                     load.failed(source.id, message: error.localizedDescription)
                 }
                 channelIndex = AppleIPTVChannelIndex(load.channels)
+                settings.updateAutomaticLiveChannelPackage(channels: load.channels)
                 channelsRevision &+= 1
                 sourceFailures = load.failures
                 if !load.channels.isEmpty { isLoading = false }
@@ -549,6 +552,7 @@ struct AppleLiveTVView: View {
         }
         guard !cancelled else { return }
         channelIndex = AppleIPTVChannelIndex(load.channels)
+        settings.updateAutomaticLiveChannelPackage(channels: load.channels)
         channelsRevision &+= 1
         #if DEBUG
         AppleLaunchClock.mark("live.channels(\(load.channels.count))")
@@ -676,7 +680,7 @@ struct AppleLiveTVView: View {
         #endif
         let package = settings.liveChannelPackage
         let custom = settings.customChannelPackage
-        let entries = premierGuide
+        let entries = completeGuide
         let favorites = settings.favoriteChannelIDs
         let category = selectedCategory
         let snapshot = await Task.detached(priority: .userInitiated) {
@@ -685,7 +689,7 @@ struct AppleLiveTVView: View {
         }.value
         guard !Task.isCancelled else { return }
         #if DEBUG
-        print("[OpenStream] live lineup source=\(channels.count) package=\(package.rawValue) guide=\(snapshot.channels.count) categories=\(snapshot.categories.count)")
+        print("[OpenStream] live lineup source=\(channels.count) package=\(package.title) guide=\(snapshot.channels.count) categories=\(snapshot.categories.count)")
         AppleLaunchClock.mark("live.snapshot(\(snapshot.channels.count))")
         #endif
         channelGroups = updated
@@ -859,7 +863,7 @@ struct AppleLiveTVView: View {
             selectedCategory: $selectedCategory,
             guide: guideStore.guide(for: channelSnapshot.channelIDs),
             guideRevision: guideStore.revision,
-            entries: premierGuide,
+            entries: completeGuide,
             favoriteIDs: settings.favoriteChannelIDs,
             nowPlaying: selectedChannel ?? lastWatchedChannel ?? channels.first,
             hasActiveSearch: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

@@ -79,7 +79,7 @@ struct AppleLiveChannelSnapshot: Sendable {
     @TaskLocal static var debugMatchCache: AppleLiveChannelMatchCache?
 #endif
 
-    /// How many lineup numbers the Premier Guide must match before All is
+    /// How many lineup numbers the Complete Guide must match before All is
     /// allowed to show only the lineup.
     ///
     /// Eight is far below the owner's real provider (a few hundred of 9,376) and
@@ -88,9 +88,9 @@ struct AppleLiveChannelSnapshot: Sendable {
     /// channel name with it" with room on both sides.
     static let minimumLineupMatches = 8
 
-    /// The group `AppleChannelProjection.premierGuideGroups` gives the curated
+    /// The group `AppleChannelProjection.completeGuideGroups` gives the curated
     /// lineup; anything it could not match lands in its sibling "Other" group.
-    static let premierGroupName = "Premier Guide"
+    static let completeGroupName = "Complete Guide"
 
     /// The most channels the guide will ever draw. Owner, 2026-09-17: "no one
     /// ever needs 3k channels… note to the user if they try to add more than
@@ -134,13 +134,13 @@ struct AppleLiveChannelSnapshot: Sendable {
         switch package {
         case .custom: selected = custom.selected(from: all)
         case .everything: selected = all.filter { !AppleChannelVisibilityPolicy.isPlaceholder($0) }
-        case .premierGuide: selected = AppleChannelVisibilityPolicy.deduplicatedEastChannels(all)
+        case .completeGuide: selected = AppleChannelVisibilityPolicy.deduplicatedEastChannels(all)
         }
 
         // One fuzzy match per channel, reused by the category list, the
-        // category filter and the Premier Guide ordering. These were three
+        // category filter and the Complete Guide ordering. These were three
         // separate passes over the whole lineup — `categoryByID`, then
-        // `premierGuideGroups` (which also re-deduplicated an already
+        // `completeGuideGroups` (which also re-deduplicated an already
         // deduplicated list), then the grouping below — and on the owner's
         // 9376 channels they cost **761 ms** of the Live tab's start-up
         // (measured 2026-09-15).
@@ -171,16 +171,16 @@ struct AppleLiveChannelSnapshot: Sendable {
         let categories = ["All", "Favorites"] + order.filter { available.contains($0) }
         let channels: [AppleIPTVChannel]
         if category == "All" {
-            if package == .premierGuide {
-                // Premier Guide is the curated lineup — not the lineup plus
-                // everything that failed to match it. `premierGuideGroups`
+            if package == .completeGuide {
+                // Complete Guide is the curated lineup — not the lineup plus
+                // everything that failed to match it. `completeGuideGroups`
                 // also returns an "Other" group, and flattening both put the
                 // whole provider list back into the guide: 4749 of the owner's
                 // 9376 channels, where the phone shows a few hundred (owner
-                // 2026-09-14: "reduce the live line up to the premier safe
-                // thing we did with iPhone and android"). Unmatched channels
+                // 2026-09-14: use the curated lineup on every platform).
+                // Unmatched channels
                 // stay reachable through Search and the Everything package.
-                // Same ordering `premierGuideGroups` produced — one channel per
+                // Same ordering `completeGuideGroups` produced — one channel per
                 // lineup number, by number then name — built from the matches
                 // already in hand.
                 var seenNumbers = Set<Int>()

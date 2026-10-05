@@ -384,7 +384,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         shoot("01-package-row")
         press(.select, wait: 2)
         shoot("02-package-page")
-        for title in ["Premier Guide", "Everything", "Custom"] {
+        for title in ["Complete Guide", "Everything", "Custom"] {
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.waitForExistence(timeout: 5),
                           "The Package page does not list \(title)")
         }

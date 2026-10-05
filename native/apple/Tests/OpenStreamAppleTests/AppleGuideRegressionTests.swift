@@ -25,14 +25,14 @@ import Testing
         #expect(cells.last?.start == Date(timeIntervalSince1970: 2400))
     }
 
-    @Test func premierLineupDoesNotRepeatNumbersForHDAndEastVariants() {
+    @Test func completeLineupDoesNotRepeatNumbersForHDAndEastVariants() {
         let source = UUID()
         let channels = ["CBS", "CBS HD", "CBS (EAST)", "CBS (WEST)"].enumerated().map { index, name in
             AppleIPTVChannel(id: String(index), sourceID: source, name: name,
                 streamURL: URL(string: "http://127.0.0.1/fixture.mp4")!)
         }
         let entries = [AppleChannelLineupEntry(number: 2, name: "CBS", aliases: ["CBS HD", "CBS (EAST)"], category: "Local")]
-        let result = AppleChannelProjection.premierGuideGroups(from: channels, entries: entries).flatMap(\.channels)
+        let result = AppleChannelProjection.completeGuideGroups(from: channels, entries: entries).flatMap(\.channels)
         #expect(result.count == 1)
         #expect(result.first?.name == "CBS")
     }

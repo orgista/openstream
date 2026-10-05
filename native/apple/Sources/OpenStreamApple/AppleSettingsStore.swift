@@ -244,26 +244,39 @@ public enum AppleLiveChannelScope: String, Codable, CaseIterable, Identifiable, 
 }
 
 public enum AppleLiveChannelPackage: String, Codable, CaseIterable, Identifiable, Sendable {
-    case premierGuide
+    case completeGuide
     case everything
     case custom
 
     public var id: String { rawValue }
 
-    /// The packages this build can offer: Premier Guide needs the channel
-    /// lineup, which only Debug builds carry (owner, 2026-10-01 — a Release
-    /// build shows only what the viewer's own playlist contains).
-    public static var available: [AppleLiveChannelPackage] {
-        AppleChannelLineupPresets.isAvailable ? allCases : allCases.filter { $0 != .premierGuide }
+    /// All builds carry the organisation preset; none supply channels.
+    public static var available: [AppleLiveChannelPackage] { allCases }
+
+    /// Count distinct guide numbers so duplicate quality feeds cannot qualify a playlist.
+    public static func defaultPackage(for channels: [AppleIPTVChannel]) -> AppleLiveChannelPackage {
+        let index = AppleChannelLineupIndex((try? AppleChannelLineupPresets.completeUS()) ?? [])
+        let matched = Set(AppleChannelVisibilityPolicy.deduplicatedEastChannels(channels)
+            .compactMap { index.match($0.name)?.number })
+        return matched.count >= 20 ? .completeGuide : .everything
     }
 
-    /// Premier Guide where the lineup exists, else everything in the playlist.
-    public static var defaultPackage: AppleLiveChannelPackage {
-        AppleChannelLineupPresets.isAvailable ? .premierGuide : .everything
+    public init?(storedValue: String) {
+        self.init(rawValue: storedValue == "premierGuide" ? "completeGuide" : storedValue)
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let package = Self(storedValue: value) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown Live TV package")
+        }
+        self = package
+    }
+
     public var title: String {
         switch self {
-        case .premierGuide: "Premier Guide"
+        case .completeGuide: "Complete Guide"
         case .everything: "Everything"
         case .custom: "Custom"
         }
@@ -562,8 +575,21 @@ public final class AppleSettingsStore {
         didSet { defaults.set(liveChannelScope.rawValue, forKey: DefaultsKey.liveChannelScope) }
     }
 
+    private var selectedLiveChannelPackage: AppleLiveChannelPackage?
+    private var automaticLiveChannelPackage: AppleLiveChannelPackage = .everything
+
     public var liveChannelPackage: AppleLiveChannelPackage {
-        didSet { defaults.set(liveChannelPackage.rawValue, forKey: DefaultsKey.liveChannelPackage) }
+        get { selectedLiveChannelPackage ?? automaticLiveChannelPackage }
+        set {
+            selectedLiveChannelPackage = newValue
+            defaults.set(newValue.rawValue, forKey: DefaultsKey.liveChannelPackage)
+        }
+    }
+
+    /// Automatic choices stay unsaved, so new or changed playlists are evaluated again.
+    public func updateAutomaticLiveChannelPackage(channels: [AppleIPTVChannel]) {
+        guard selectedLiveChannelPackage == nil else { return }
+        automaticLiveChannelPackage = AppleLiveChannelPackage.defaultPackage(for: channels)
     }
 
     public var customChannelPackage: AppleCustomChannelPackage {
@@ -662,8 +688,12 @@ public final class AppleSettingsStore {
         discoverRowOrder = defaults.stringArray(forKey: DefaultsKey.discoverRowOrder)
         liveChannelScope = defaults.string(forKey: DefaultsKey.liveChannelScope)
             .flatMap(AppleLiveChannelScope.init(rawValue:)) ?? .providerLineup
-        liveChannelPackage = defaults.string(forKey: DefaultsKey.liveChannelPackage)
-            .flatMap(AppleLiveChannelPackage.init(rawValue:)) ?? AppleLiveChannelPackage.defaultPackage
+        let storedPackage = defaults.string(forKey: DefaultsKey.liveChannelPackage)
+            .flatMap(AppleLiveChannelPackage.init(storedValue:))
+        selectedLiveChannelPackage = storedPackage
+        if let storedPackage {
+            defaults.set(storedPackage.rawValue, forKey: DefaultsKey.liveChannelPackage)
+        }
         customChannelPackage = defaults.data(forKey: "openstream.settings.live.custom.v1")
             .flatMap { try? JSONDecoder().decode(AppleCustomChannelPackage.self, from: $0) } ?? .init()
         showPayPerViewChannels = defaults.object(forKey: DefaultsKey.showPayPerViewChannels) as? Bool ?? true
@@ -831,7 +861,7 @@ public final class AppleSettingsStore {
         top10ListsEnabled = restored.top10ListsEnabled
         discoverRowOrder = restored.discoverRowOrder
         liveChannelScope = restored.liveChannelScope
-        liveChannelPackage = restored.liveChannelPackage
+        selectedLiveChannelPackage = restored.selectedLiveChannelPackage
         customChannelPackage = restored.customChannelPackage
         showPayPerViewChannels = restored.showPayPerViewChannels
         show24x7Channels = restored.show24x7Channels

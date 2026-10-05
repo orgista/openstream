@@ -77,37 +77,18 @@ struct AppleStoreCompliancePolicyTests {
         #expect(!ids.contains(AppleDiscoverRowOrder.top10Shows))
     }
 
-    // MARK: B6 — no bundled channel lineup
+    // MARK: B6 — bundled organisation preset, never a channel source
 
-    @Test("The app's resource bundle ships no channel lineup")
-    func resourceBundleHasNoChannelLineup() throws {
+    @Test("Every build bundles Complete Guide")
+    func resourceBundleContainsChannelLineup() throws {
         let bundle = AppleChannelLineupPresets.resourceBundle
-        #expect(bundle.url(forResource: "premier-us-extended", withExtension: "json") == nil)
-        #expect(bundle.url(forResource: "premier-us", withExtension: "json") == nil)
-        #expect(bundle.urls(forResourcesWithExtension: "json", subdirectory: "ChannelLineup")?.isEmpty ?? true)
-        if let resourcePath = bundle.resourcePath {
-            let contents = (try? FileManager.default.subpathsOfDirectory(atPath: resourcePath)) ?? []
-            #expect(!contents.contains { $0.localizedCaseInsensitiveContains("ChannelLineup") || $0.hasPrefix("premier-us") })
-        }
-        // The package manifest no longer copies it in either.
-        // …/Tests/OpenStreamAppleTests/Fixtures/ChannelLineup/premier-us-extended.json → package root
-        let manifest = AppleChannelLineupPresets.debugFixtureURL
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Package.swift")
-        let text = try String(contentsOf: manifest, encoding: .utf8)
-        #expect(!text.contains("ChannelLineup"))
-        #expect(!FileManager.default.fileExists(atPath: manifest.deletingLastPathComponent()
-            .appendingPathComponent("Sources/OpenStreamApple/Resources/ChannelLineup").path))
+        #expect(bundle.url(forResource: "complete-us", withExtension: "json", subdirectory: "ChannelLineup") != nil)
+        #expect(try AppleChannelLineupPresets.readFile().channels.count >= 300)
     }
 
-    @Test("A Release build has an empty lineup and falls back to the playlist")
-    func releaseLineupIsEmpty() throws {
-        #expect(try AppleChannelLineupPresets.lineup(allowDebugFixture: false).isEmpty)
-        // Debug keeps the fixture so the Premier Guide paths stay testable.
-        #expect(try AppleChannelLineupPresets.lineup(allowDebugFixture: true).count >= 300)
-        #expect(AppleChannelLineupPresets.debugFixtureURL.path.contains("/Tests/OpenStreamAppleTests/Fixtures/ChannelLineup/"))
-
-        // Without a lineup, the Premier Guide groups nothing by number and the
+    @Test("A missing lineup falls back to the viewer's playlist")
+    func unavailableLineupFallsBackToPlaylist() throws {
+        // Without a lineup, the Complete Guide groups nothing by number and the
         // snapshot shows every playlist channel, named and logo'd by the playlist.
         let channels = [
             AppleIPTVChannel(id: "1", sourceID: UUID(), name: "ESPN", group: "Sports",
@@ -115,10 +96,10 @@ struct AppleStoreCompliancePolicyTests {
             AppleIPTVChannel(id: "2", sourceID: UUID(), name: "Local News 7", group: "News",
                              streamURL: URL(string: "http://x/2")!),
         ]
-        let groups = AppleChannelProjection.premierGuideGroups(from: channels, entries: [])
+        let groups = AppleChannelProjection.completeGuideGroups(from: channels, entries: [])
         #expect(groups.map(\.name) == ["Other"])
         #expect(groups.flatMap(\.channels).map(\.id) == ["1", "2"])
-        let snapshot = AppleLiveChannelSnapshot.build(groups: groups, package: .premierGuide, custom: .init(),
+        let snapshot = AppleLiveChannelSnapshot.build(groups: groups, package: .completeGuide, custom: .init(),
                                                       entries: [], favoriteIDs: [], category: "All")
         #expect(snapshot.channels.map(\.id) == ["1", "2"])
         #expect(snapshot.channels.first?.logoURL == URL(string: "http://x/espn.png"))
@@ -126,14 +107,9 @@ struct AppleStoreCompliancePolicyTests {
         #expect(snapshot.categories == ["All", "Favorites", "News", "Sports"])
     }
 
-    @Test("Package choices follow the lineup: no Premier Guide without one")
+    @Test("Package picker titles are the same in every build")
     func packageChoicesFollowTheLineup() {
-        if AppleChannelLineupPresets.isAvailable {
-            #expect(AppleLiveChannelPackage.available == AppleLiveChannelPackage.allCases)
-            #expect(AppleLiveChannelPackage.defaultPackage == .premierGuide)
-        } else {
-            #expect(AppleLiveChannelPackage.available == [.everything, .custom])
-            #expect(AppleLiveChannelPackage.defaultPackage == .everything)
-        }
+        #expect(AppleLiveChannelPackage.available.map(\.title) == ["Complete Guide", "Everything", "Custom"])
+        #expect(AppleLiveChannelPackage.defaultPackage(for: []) == .everything)
     }
 }

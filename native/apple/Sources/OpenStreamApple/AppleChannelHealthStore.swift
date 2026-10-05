@@ -79,6 +79,7 @@ public final class AppleChannelHealthStore {
                 cached.append(contentsOf: snapshot.channels)
             }
         }
+        settings.updateAutomaticLiveChannelPackage(channels: cached)
         guard !cached.isEmpty else { return }
         let groups = await AppleChannelProjection.buildGroupsOffMain(
             from: cached,
@@ -94,7 +95,7 @@ public final class AppleChannelHealthStore {
         let favorites = settings.favoriteChannelIDs
         let snapshot = await Task.detached(priority: .userInitiated) {
             AppleLiveChannelSnapshot.build(groups: groups, package: package, custom: custom,
-                entries: (try? AppleChannelLineupPresets.premierUS()) ?? [],
+                entries: (try? AppleChannelLineupPresets.completeUS()) ?? [],
                 favoriteIDs: favorites, category: "All")
         }.value
         guard lineup.isEmpty else { return }

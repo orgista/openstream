@@ -398,3 +398,42 @@ func devSeedTMDBKeyTurnsMetadataOn() {
     #expect(store.tmdbAPIKey == "fixture-key")
 }
 #endif
+
+@MainActor
+@Test func packageDefaultTracksPlaylistWithoutSavingAnExplicitChoice() throws {
+    let defaults = makeIsolatedDefaults()
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    let entries = Array(try AppleChannelLineupPresets.completeUS().prefix(20))
+    let channels = entries.map {
+        AppleIPTVChannel(id: String($0.number), sourceID: UUID(), name: $0.name, group: "All",
+                         streamURL: URL(string: "https://fixture.example/channel.ts")!)
+    }
+    #expect(store.liveChannelPackage == .everything)
+    store.updateAutomaticLiveChannelPackage(channels: channels)
+    #expect(store.liveChannelPackage == .completeGuide)
+    #expect(defaults.string(forKey: "openstream.settings.live.package.v1") == nil)
+    store.updateAutomaticLiveChannelPackage(channels: [])
+    #expect(store.liveChannelPackage == .everything)
+    for choice in AppleLiveChannelPackage.allCases {
+        store.liveChannelPackage = choice
+        store.updateAutomaticLiveChannelPackage(channels: channels)
+        store.updateAutomaticLiveChannelPackage(channels: [])
+        #expect(store.liveChannelPackage == choice)
+        let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+        #expect(reread.liveChannelPackage == choice)
+    }
+}
+
+@MainActor
+@Test func savedLegacyPackageMigratesAndRemainsExplicit() throws {
+    let defaults = makeIsolatedDefaults()
+    defaults.set("premierGuide", forKey: "openstream.settings.live.package.v1")
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    #expect(store.liveChannelPackage == .completeGuide)
+    #expect(defaults.string(forKey: "openstream.settings.live.package.v1") == "completeGuide")
+    store.updateAutomaticLiveChannelPackage(channels: [])
+    #expect(store.liveChannelPackage == .completeGuide)
+    let backup = try store.configurationValues()
+    try store.restoreConfiguration(backup)
+    #expect(store.liveChannelPackage == .completeGuide)
+}
