@@ -13,6 +13,9 @@ public enum AppleTitleProgressIdentity {
     /// Media servers save playback under their source/item reference instead.
     public static func candidates(item: AppleCatalogItem, sourceID: AppleSource.ID,
                                   resolvedMediaID: String? = nil) -> [String] {
+        if AppleXtreamReference.parse(item.mediaID) != nil {
+            return [AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: item).id]
+        }
         let kind: AppleMediaKind = item.type == "series" ? .series : .movie
         let year = item.releaseInfo.flatMap { Int($0.prefix(4)) }
         var keys = [AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: item).id]

@@ -1132,7 +1132,7 @@ public final class ApplePlaybackCoordinator {
             avPlayerProgressObserverPlayer = nil
         }
         surfaceProgressIdentity = request.isLive ? nil : request.mediaID
-        surfaceProgressPartID = AppleDetailResume.partID(type: request.hints.addonMediaType,
+        surfaceProgressPartID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType,
             mediaID: request.hints.addonMediaID)
         switch route {
         case .avPlayer:

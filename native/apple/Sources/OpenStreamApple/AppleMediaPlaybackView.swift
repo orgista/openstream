@@ -498,7 +498,7 @@ struct AppleMediaPlayerView: View {
             writer(position, duration)
         } else {
             ApplePlaybackStore().save(mediaID: request.mediaID, position: position, duration: duration,
-                partID: AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID))
+                partID: request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID))
         }
     }
 

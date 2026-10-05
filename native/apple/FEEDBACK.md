@@ -4485,3 +4485,9 @@ oStream can start the current programme from the beginning when its channel supp
 Favorite channels now enter the shared Top Shelf snapshot, and Watch Channel uses favorite/recent channel names with app links. A TV favorite link played successfully; an unavailable iPhone link showed Channel Unavailable. These Apple-service suggestions use the existing Top Shelf privacy setting. Spoken Siri and the displayed system Top Shelf row still need checking. Xtream movies/series, import progress and parental PIN were skipped because each needs broader integration.
 
 The full suite passed: 2811 tests in 358 suites. Both simulator builds, unsigned AppStore-iOS Release, SDK floors and the no-add-ons check passed. Screenshots are in ~/Developer/openstream-build/verification/live-more/. Fixture sources and credentials were removed, original simulator data restored, and both simulators and the local server stopped. No commits or uploads.
+
+
+## 2026-10-05 — Your provider’s movies and series
+oStream now shows an Xtream provider’s movies and series in Library, with category rows and full category browsing. Title pages use the provider’s artwork and details; series open seasons and episodes. Playback saves resume progress and watched episodes, offers the next episode, and feeds Continue Watching and search. Optional TMDB details can fill gaps after the provider’s title is ready.
+
+Large libraries load category by category in the background, with limits and a disk cache that refreshes after twelve hours. Synthetic movie/series playback and provider failures were checked on iPhone and Apple TV. The full suite passed: 2,825 tests in 359 suites, including fourteen new tests. Simulator builds, unsigned AppStore-iOS Release, SDK floors and the no-add-ons check passed. Screenshots: ~/Developer/openstream-build/verification/xtream-vod/. Fixture sources were deleted, original simulator data restored, and both simulators and the server stopped. No commits or uploads.

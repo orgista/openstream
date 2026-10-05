@@ -171,6 +171,7 @@ struct AppleDiscoverView: View {
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
             hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
+                || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty
         )
         Group {
             if !hasContent && (catalogIsStillLoading || mediaServerLibrary.isLoading) {
@@ -641,7 +642,7 @@ struct AppleDiscoverView: View {
     }
 
     private func mergedContinueWatching(local: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
-        let serverItems = mediaServerLibrary.continueWatching
+        let serverItems = mediaServerLibrary.continueWatching + AppleXtreamLibraryStore.shared.continueWatching
         // Once per pass: `continueWatching` filters the whole media index, and
         // it was being rebuilt again for every merged item below.
         let localItems = local.map { $0.item }
@@ -650,6 +651,14 @@ struct AppleDiscoverView: View {
         let resolved = mergedItems.compactMap { item -> IndexedCatalogItem? in
             if let existing = local.first(where: { $0.item.mediaID == item.mediaID }) {
                 return existing
+            }
+            if let reference = AppleXtreamReference.parse(item.mediaID),
+               let source = AppleXtreamLibraryStore.shared.source(reference) {
+                var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+                if let progress = ApplePlaybackStore().progress(for: record.id) {
+                    record.progress = AppleWatchProgress.fraction(position: progress.position, duration: progress.duration)
+                }
+                return IndexedCatalogItem(record: record, item: item, source: source)
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
                   let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
@@ -1716,7 +1725,7 @@ struct AppleSearchView: View {
             await rebuildCatalogLookup()
             deliverMediaRoute(revision: revision)
         }
-        .task(id: query) {
+        .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
             let revision = router.revision
             if let link = AppleSharedLinkResolver.link(in: query) {
                 await openSharedLink(link, revision: revision)
@@ -1727,7 +1736,7 @@ struct AppleSearchView: View {
                 sources: sourceStore.sources,
                 baseSections: catalogStore.sections
             ) { value in
-                await mediaIndex.search(value)
+                await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
             }
             deliverMediaRoute(revision: revision)
             // A query that stayed put and found something is a search worth
@@ -1782,7 +1791,7 @@ struct AppleSearchView: View {
                             sources: sourceStore.sources,
                             baseSections: catalogStore.sections
                         ) { value in
-                            await mediaIndex.search(value)
+                            await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
                         }
                     }
                 } label: {
@@ -1925,7 +1934,7 @@ struct AppleSearchView: View {
     }
 
     private func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
-        AppleCatalogSearchLookup.match(for: record, in: [searchStore.lookup, catalogLookup])
+        AppleXtreamLibraryStore.shared.match(record) ?? AppleCatalogSearchLookup.match(for: record, in: [searchStore.lookup, catalogLookup])
     }
 
     /// Every row either opens its title page or is not a catalog title at all
@@ -6063,6 +6072,20 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.unavailableMessage = nil
         playbackCoordinator.beginResolving()
         do {
+            if let reference = AppleXtreamReference.parse(item.mediaID) {
+                let partID = item.type == "series" ? episodeList.selectedEpisodeID : nil
+                let request = try await AppleXtreamLibraryStore.shared.request(reference: reference,
+                    episodeID: partID, mediaID: progressRecordID, fromBeginning: fromBeginning)
+                let presentation = AppleStremioPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
+                let identity = progressRecordID
+                let store = ApplePlaybackStore()
+                presentation.coordinator.progressWriter = { position, duration in
+                    store.save(mediaID: identity, position: position, duration: duration, partID: partID)
+                }
+                playbackCoordinator = presentation.coordinator
+                playbackUI.presentation = configuredSources(presentation)
+                return
+            }
             if AppleMediaServerItemReference.parse(item.mediaID) != nil,
                let offline = await downloadCoordinator.record(for: offlineRecordID) {
                 let request = try AppleMediaServerLibraryStore.offlinePlaybackRequest(record: offline,
@@ -6366,6 +6389,47 @@ struct AppleCatalogItemDetailView: View {
         fillTimeline.mark(.episodes, detail: "\(episodeList.episodes.count)")
     }
 
+    private func prepareXtream(_ reference: AppleXtreamReference, generation: UUID) async {
+        pageMetadata.isPreparing = item.type == "series"
+        episodeList.isLoading = item.type == "series"
+        pageMetadata.resolvedMediaID = item.mediaID
+        do {
+            let detail = try await AppleXtreamLibraryStore.shared.detail(reference)
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
+            let title = detail.title
+            pageMetadata.details = AppleTMDBDetails(title: title.name, imdbRating: title.rating, year: title.year,
+                overview: title.plot, posterURL: title.poster, backdropURL: title.backdrop)
+            episodeList.episodes = AppleXtreamLibraryStore.shared.episodes(detail, sourceID: reference.sourceID)
+            episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
+                ?? upNextEpisode(in: episodeList.episodes)?.season
+                ?? AppleStremioEpisodePolicy.initialSeason(in: episodeList.episodes)
+            episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: episodeList.selectedSeason, from: episodeList.episodes)
+                ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodeList.episodes)
+            pageMetadata.isPreparing = false
+            episodeList.isLoading = false
+            episodeList.loadFinished = true
+            markMetadataArrived()
+            // Provider metadata and playback are usable before optional TMDB enrichment.
+            if let id = title.tmdbID.flatMap(Int.init), id > 0, let configuration = metadataConfiguration,
+               let enriched = try? await AppleTMDBClient().sharedLinkDetails(id: id,
+                    kind: item.type == "series" ? .show : .movie, configuration: configuration),
+               !Task.isCancelled, preparationGeneration == generation {
+                pageMetadata.details = AppleTMDBDetails(title: title.name, imdbRating: title.rating, year: title.year ?? enriched.year,
+                    overview: title.plot ?? enriched.summary, posterURL: title.poster ?? enriched.posterURL,
+                    backdropURL: title.backdrop ?? enriched.backgroundURL)
+            }
+        } catch is CancellationError { return }
+        catch {
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
+            pageMetadata.isPreparing = false
+            episodeList.isLoading = false
+            episodeList.loadFinished = true
+            if item.type == "series" {
+                playbackUI.unavailableMessage = AppleXtreamLibraryError.unavailable.localizedDescription
+            }
+        }
+    }
+
     private func markMetadataArrived() {
         fillTimeline.mark(.metadata, detail: pageMetadata.details?.overview?.isEmpty == false ? "overview" : "no-overview")
         markOverviewIfVisible(source: "enriched")
@@ -6395,6 +6459,11 @@ struct AppleCatalogItemDetailView: View {
         pageMetadata.resolvedMediaID = nil
         pageMetadata.watchProviders = []
         pageMetadata.streamingIDs = nil
+
+        if let reference = AppleXtreamReference.parse(item.mediaID) {
+            await prepareXtream(reference, generation: generation)
+            return
+        }
 
         if let msLibrary = mediaServerLibrary, let msRef = AppleMediaServerItemReference.parse(item.mediaID) {
             pageMetadata.isPreparing = true
@@ -8659,6 +8728,10 @@ extension AppleCatalogItemDetailView {
     /// an enabled add-on that serves streams — and, for a series, an episode
     /// list to play from.
     private var hasPlaybackRoute: Bool {
+        if let reference = AppleXtreamReference.parse(item.mediaID) {
+            return AppleXtreamLibraryStore.shared.source(reference)?.isEnabled == true
+                && (item.type != "series" || !episodeList.episodes.isEmpty)
+        }
         return AppleTitlePagePolicy.hasPlaybackRoute(
             item: item, sources: playbackSources,
             hasLocalGroup: hasMatchingLocalGroup,

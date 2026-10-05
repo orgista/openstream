@@ -102,6 +102,9 @@ public final class ApplePlaybackStore {
         self.defaults = defaults
     }
 
+    /// Saved entries for library adapters; avoids scanning every provider title on each save.
+    func savedProgress() -> [String: ApplePlaybackProgress] { entries() }
+
     public func progress(for mediaID: String) -> ApplePlaybackProgress? {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
         return entries()[storageKey]

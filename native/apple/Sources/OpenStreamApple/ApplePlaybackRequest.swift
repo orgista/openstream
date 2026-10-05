@@ -17,6 +17,8 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         public var notWebReady: Bool
         public var proxyHeaders: [String: String]
         public var filename: String?
+        /// Stable episode identity supplied by provider libraries on every player route.
+        public var progressPartID: String? = nil
         /// Original library file, before local export or the SMB playback proxy.
         public var libraryFileURL: URL?
         /// The add-on media id for this title (`tt0111161`, or `tt0903747:1:2`

@@ -73,6 +73,12 @@ public struct AppleMediaEpisodeSelection: Equatable, Sendable {
     public let episode: AppleStremioEpisode
 
     public init?(seriesMediaID: String, episode: AppleStremioEpisode) {
+        if let reference = AppleXtreamReference.parse(seriesMediaID), reference.kind == .series,
+           let season = episode.season, season >= 0, let number = episode.episode, number > 0,
+           episode.id == reference.mediaID + ":\(season):\(number)" {
+            self.episode = episode
+            return
+        }
         guard let identity = AppleStremioMetadataClient.episodeIdentity(
             episode.id,
             expectedSeriesID: seriesMediaID

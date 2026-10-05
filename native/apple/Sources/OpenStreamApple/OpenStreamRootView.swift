@@ -482,6 +482,12 @@ public struct OpenStreamRootView: View {
             }
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
         }
+        .task(id: sourceAvailabilityIdentity) {
+            await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore)
+        }
+        .onChange(of: ApplePlaybackProgressFeed.shared.revision) {
+            AppleXtreamLibraryStore.shared.refreshProgress()
+        }
         .onChange(of: settingsStore.liveTVEnabled) { _, enabled in
             if !enabled { sharePlay.leave() }
         }

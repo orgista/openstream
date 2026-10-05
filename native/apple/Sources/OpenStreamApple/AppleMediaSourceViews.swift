@@ -2441,7 +2441,8 @@ struct AppleLibraryView: View {
     /// y=598 (owner: "when you flip the placement of open settings changes",
     /// 2026-09-16).
     private var hasNothingToShow: Bool {
-        groups.isEmpty && library.continueWatching.isEmpty
+        AppleXtreamLibraryStore.shared.shelves.isEmpty && AppleXtreamLibraryStore.shared.failures.isEmpty
+            && !AppleXtreamLibraryStore.shared.isLoading && groups.isEmpty && library.continueWatching.isEmpty
             && library.featuredCandidates.isEmpty && !library.isLoading
     }
 
@@ -2674,6 +2675,7 @@ struct AppleLibraryView: View {
                 let resumable = library.continueWatching
                 if !resumable.isEmpty { shelf("Continue Watching", resumable, progress: true) }
                 sourceShelves
+                AppleXtreamLibrarySections(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
                 if !groups.isEmpty { shelf("Recently Added", library.sorted(.added).prefix(24).map { $0 }) }
                 if library.isLoading && groups.isEmpty {
                     AppleSourceLoadingState()
@@ -2708,9 +2710,12 @@ struct AppleLibraryView: View {
         #endif
         .refreshable { await reload() }
         .task { library.refreshProgress(); if library.groups.isEmpty { await reload() } }
-        .onAppear { library.refreshProgress() }
+        .onAppear { library.refreshProgress(); AppleXtreamLibraryStore.shared.refreshProgress() }
     }
-    private func reload() async { await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings) }
+    private func reload() async {
+        await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings)
+        await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore, force: true)
+    }
     private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil) -> some View {
         AppleLocalTitleShelf(title: title, groups: groups, sourceStore: sourceStore,
             mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, tabToolbar: titlePageToolbar,
