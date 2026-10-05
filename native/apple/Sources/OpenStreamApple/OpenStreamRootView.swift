@@ -365,6 +365,13 @@ public struct OpenStreamRootView: View {
         #if os(macOS)
         .appleMacPlayerStage(macPlayerStage)
         #endif
+        .modifier(AppleProgrammeReminderBanner())
+        .onChange(of: AppleProgrammeReminderStore.shared.requestedChannelID, initial: true) { _, id in
+            guard id != nil else { return }
+            settingsStore.liveTVEnabled = true
+            navigationPaths[.live] = NavigationPath()
+            selectedTab = .live
+        }
         .appleTraceSelection("tab", value: selectedTab)
         .modifier(AppleConfigurationSync(
             controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex

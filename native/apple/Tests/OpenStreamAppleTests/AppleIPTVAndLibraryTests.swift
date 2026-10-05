@@ -588,7 +588,7 @@ private actor IPTVRequestRecorder {
         Issue.record("Expected authenticationFailed to be thrown")
     } catch let error as AppleIPTVError {
         #expect(error == .authenticationFailed(status: "Expired"))
-        #expect(error.errorDescription?.contains("status: Expired") == true)
+        #expect(error.errorDescription?.contains("expired") == true)
     }
 }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AppleIPTVProgramme: Identifiable, Sendable, Equatable {
+public struct AppleIPTVProgramme: Identifiable, Sendable, Equatable, Codable {
     public let id: String
     public let channelID: String
     public let title: String
@@ -25,12 +25,16 @@ public struct AppleIPTVProgramme: Identifiable, Sendable, Equatable {
 }
 
 public struct AppleIPTVGuide: Sendable {
+    public let channelNames: [String: String]
+    let channelMatchIndex: AppleIPTVGuideMatching.Index
     private let programmesByChannel: [String: [AppleIPTVProgramme]]
     /// Prefix maxima let a lookup stop once no earlier programme can still
     /// be on air. This preserves overlapping XMLTV entries and schedule gaps.
     private let maximumEndsByChannel: [String: [Date]]
 
-    public init(programmes: [AppleIPTVProgramme]) {
+    public init(programmes: [AppleIPTVProgramme], channelNames: [String: String] = [:]) {
+        self.channelNames = channelNames
+        channelMatchIndex = AppleIPTVGuideMatching.Index(names: channelNames)
         var grouped = [String: [AppleIPTVProgramme]]()
         for p in programmes {
             grouped[p.channelID, default: []].append(p)
@@ -47,6 +51,8 @@ public struct AppleIPTVGuide: Sendable {
             }
         }
     }
+
+    var allProgrammes: [AppleIPTVProgramme] { programmesByChannel.values.flatMap { $0 } }
 
     public func nowAndNext(channelID: String, at time: Date = Date()) -> (now: AppleIPTVProgramme?, next: AppleIPTVProgramme?) {
         guard let programmes = programmesByChannel[channelID],
@@ -101,10 +107,10 @@ public actor AppleIPTVGuideLoader {
         client = AppleBoundedHTTPClient(configuration: configuration)
     }
 
-    public func load(xmltvURL: URL?) async throws -> AppleIPTVGuide {
+    public func load(xmltvURL: URL?, defaultOffsetHours: Double = 0) async throws -> AppleIPTVGuide {
         guard let url = xmltvURL else { return AppleIPTVGuide(programmes: []) }
         let data = try await fetch(url)
-        return AppleIPTVGuide(programmes: AppleIPTVGuideXMLTVParser().parse(data: data))
+        return AppleIPTVGuideXMLTVParser().guide(data: data, defaultOffsetHours: defaultOffsetHours)
     }
 
     /// - Parameter archiveStreamIDs: channels with catch-up. Those are read

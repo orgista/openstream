@@ -608,6 +608,24 @@ public final class AppleSettingsStore {
         didSet { defaults.set(show24x7Channels, forKey: DefaultsKey.show24x7Channels) }
     }
 
+    public var hiddenLiveChannelIDs: Set<String> {
+        didSet { defaults.set(hiddenLiveChannelIDs.sorted(), forKey: DefaultsKey.hiddenLiveChannelIDs) }
+    }
+    public var hiddenLiveGroups: Set<String> {
+        didSet { defaults.set(hiddenLiveGroups.sorted(), forKey: DefaultsKey.hiddenLiveGroups) }
+    }
+    public var favoriteLiveChannelOrder: [String] {
+        didSet { defaults.set(favoriteLiveChannelOrder, forKey: DefaultsKey.favoriteLiveChannelOrder) }
+    }
+
+    public var guideChannelAssignments: [String: String] {
+        didSet { defaults.set(guideChannelAssignments, forKey: DefaultsKey.guideChannelAssignments) }
+    }
+
+    public var guideTimeOffsets: [String: Int] {
+        didSet { defaults.set(guideTimeOffsets, forKey: DefaultsKey.guideTimeOffsets) }
+    }
+
     public var favoriteChannelIDs: Set<String> {
         didSet { defaults.set(favoriteChannelIDs.sorted(), forKey: DefaultsKey.favoriteChannelIDs) }
     }
@@ -698,6 +716,11 @@ public final class AppleSettingsStore {
             .flatMap { try? JSONDecoder().decode(AppleCustomChannelPackage.self, from: $0) } ?? .init()
         showPayPerViewChannels = defaults.object(forKey: DefaultsKey.showPayPerViewChannels) as? Bool ?? true
         show24x7Channels = defaults.object(forKey: DefaultsKey.show24x7Channels) as? Bool ?? false
+        hiddenLiveChannelIDs = Set(defaults.stringArray(forKey: DefaultsKey.hiddenLiveChannelIDs) ?? [])
+        hiddenLiveGroups = Set(defaults.stringArray(forKey: DefaultsKey.hiddenLiveGroups) ?? [])
+        favoriteLiveChannelOrder = defaults.stringArray(forKey: DefaultsKey.favoriteLiveChannelOrder) ?? []
+        guideChannelAssignments = defaults.dictionary(forKey: DefaultsKey.guideChannelAssignments) as? [String: String] ?? [:]
+        guideTimeOffsets = (defaults.dictionary(forKey: DefaultsKey.guideTimeOffsets) as? [String: Int] ?? [:]).mapValues { min(14, max(-12, $0)) }
         favoriteChannelIDs = Set(defaults.stringArray(forKey: DefaultsKey.favoriteChannelIDs) ?? [])
         regionalZIPCode = defaults.string(forKey: DefaultsKey.regionalZIPCode) ?? ""
         playbackEngine = ApplePlaybackEngineKind.resolved(launchArguments: ProcessInfo.processInfo.arguments)
@@ -798,6 +821,11 @@ public final class AppleSettingsStore {
             DefaultsKey.showPayPerViewChannels,
             DefaultsKey.show24x7Channels,
             DefaultsKey.favoriteChannelIDs,
+            DefaultsKey.guideTimeOffsets,
+            DefaultsKey.guideChannelAssignments,
+            DefaultsKey.hiddenLiveChannelIDs,
+            DefaultsKey.hiddenLiveGroups,
+            DefaultsKey.favoriteLiveChannelOrder,
             DefaultsKey.regionalZIPCode,
             AppleSubtitleLanguages.defaultsKey,
             AppleAudioLanguagePreference.defaultsKey,
@@ -866,6 +894,11 @@ public final class AppleSettingsStore {
         showPayPerViewChannels = restored.showPayPerViewChannels
         show24x7Channels = restored.show24x7Channels
         favoriteChannelIDs = restored.favoriteChannelIDs
+        guideTimeOffsets = restored.guideTimeOffsets
+        guideChannelAssignments = restored.guideChannelAssignments
+        hiddenLiveChannelIDs = restored.hiddenLiveChannelIDs
+        hiddenLiveGroups = restored.hiddenLiveGroups
+        favoriteLiveChannelOrder = restored.favoriteLiveChannelOrder
         regionalZIPCode = restored.regionalZIPCode
     }
 
@@ -940,6 +973,11 @@ public final class AppleSettingsStore {
         static let liveChannelPackage = "openstream.settings.live.package.v1"
         static let showPayPerViewChannels = "openstream.settings.live.showPPV.v1"
         static let show24x7Channels = "openstream.settings.live.show24x7.v1"
+        static let hiddenLiveChannelIDs = "openstream.settings.live.hiddenChannelIDs.v1"
+        static let hiddenLiveGroups = "openstream.settings.live.hiddenGroups.v1"
+        static let favoriteLiveChannelOrder = "openstream.settings.live.favoriteOrder.v1"
+        static let guideChannelAssignments = "openstream.settings.live.guideChannelAssignments.v1"
+        static let guideTimeOffsets = "openstream.settings.live.guideTimeOffsets.v1"
         static let favoriteChannelIDs = "openstream.settings.live.favoriteChannelIDs.v1"
         static let regionalZIPCode = "openstream.settings.live.regionalZIPCode.v1"
         /// The old Player picker's key, cleared at launch; also the DEBUG

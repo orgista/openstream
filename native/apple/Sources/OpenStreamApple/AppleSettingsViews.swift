@@ -540,6 +540,8 @@ private struct AppleChannelManagerView: View {
                 Toggle("Show 24/7 channels", isOn: $settings.show24x7Channels)
             }
 
+            AppleLiveChannelPreferencesSection(channels: channels, settings: settings)
+
             if settings.liveChannelPackage == .custom {
                 Section("Custom Package") {
                     Toggle("Include West feeds", isOn: $settings.customChannelPackage.includeWestFeeds)

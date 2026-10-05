@@ -35,11 +35,11 @@ public struct AppleLiveSourceLoad: Sendable {
         failureMessages[id] = message
     }
 
-    /// Fresh channels where a playlist answered, its saved copy while it has
-    /// not, nothing once it failed; in source order.
+    /// Fresh channels where a playlist answered, otherwise its saved copy,
+    /// including during a failed refresh; in source order.
     public var channels: [AppleIPTVChannel] {
         order.flatMap { id in
-            loaded[id] ?? (failureMessages[id] == nil ? cached[id] ?? [] : [])
+            loaded[id] ?? cached[id] ?? []
         }
     }
 

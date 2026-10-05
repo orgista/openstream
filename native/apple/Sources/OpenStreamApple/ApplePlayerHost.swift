@@ -89,7 +89,7 @@ public final class ApplePlayerHost {
         controller.delegate = pictureInPicture
         #endif
         #if os(tvOS)
-        controller.appliesPreferredDisplayCriteriaAutomatically = false
+        controller.appliesPreferredDisplayCriteriaAutomatically = AppleDisplayCriteriaPolicy.automaticAVKitMatching(engine: coordinator.engine.kind)
         // AVKit treats an empty language array as unrestricted on tvOS 26.
         // zxx (no linguistic content) excludes spoken-language renditions;
         // the app owns Off/Auto too, so remove those rows before binding.
@@ -306,6 +306,9 @@ public final class ApplePlayerHost {
         AppleDevicePlaybackBeacon.shared.publish()
         #endif
         let player = coordinator.engine.avPlayer
+        #if os(tvOS)
+        _viewController.appliesPreferredDisplayCriteriaAutomatically = AppleDisplayCriteriaPolicy.automaticAVKitMatching(engine: coordinator.engine.kind)
+        #endif
         if let channel = coordinator.sharePlayChannel {
             AppleSharePlaySessionStore.shared.refreshPlayback(coordinator, channel: channel)
         }

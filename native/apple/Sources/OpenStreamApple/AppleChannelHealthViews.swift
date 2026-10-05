@@ -38,6 +38,8 @@ struct AppleChannelHealthDot: View {
 struct AppleChannelHealthDetailView: View {
     let channel: AppleIPTVChannel
     let store: AppleChannelHealthStore
+    let guideStore: AppleIPTVGuideStore
+    let settings: AppleSettingsStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -52,6 +54,7 @@ struct AppleChannelHealthDetailView: View {
                     Section {
                         ForEach(rows) { LabeledContent($0.label, value: $0.value) }
                     }
+                    AppleGuideChannelAssignmentPicker(channel: channel, guideStore: guideStore, settings: settings)
                     AppleFormActionSection {
                         Button(store.isSweeping ? "Checking" : "Check Again") { store.recheck(channel) }
                             .accessibilityIdentifier("health.detail.recheck")
@@ -92,6 +95,7 @@ struct AppleChannelHealthDetailView: View {
                 .background(AppleDesignTokens.surface, in: RoundedRectangle(cornerRadius: metrics.rowCornerRadius, style: .continuous))
                 .accessibilityElement(children: .combine)
             }
+            AppleGuideChannelAssignmentPicker(channel: channel, guideStore: guideStore, settings: settings)
             Button { store.recheck(channel) } label: {
                 Text(store.isSweeping ? "Checking" : "Check Again")
                     .padding(.horizontal, metrics.rowHorizontalPadding)

@@ -21,13 +21,23 @@ struct AppleLiveSourceLoadTests {
         #expect(load.failures.isEmpty)
     }
 
-    @Test func aFailedPlaylistReportsItsErrorAndDropsItsSavedChannels() {
+    @Test func aFailedPlaylistReportsItsErrorAndRetainsItsSavedChannels() {
         var load = AppleLiveSourceLoad(sources: [dead, healthy], cached: [dead.id: [channel("Old", source: dead)]])
         #expect(load.channels.map(\.name) == ["Old"])
         load.succeeded(healthy.id, channels: [channel("One", source: healthy)])
         load.failed(dead.id, message: "The request timed out.")
-        #expect(load.channels.map(\.name) == ["One"])
+        #expect(load.channels.map(\.name) == ["Old", "One"])
         #expect(load.failures.map(\.text) == ["Dead Panel: The request timed out."])
+        #expect(load.isComplete)
+    }
+
+    @Test func aSuccessfulEmptyRefreshReplacesTheSavedLineup() {
+        var load = AppleLiveSourceLoad(sources: [dead], cached: [dead.id: [channel("Old", source: dead)]])
+        load.failed(dead.id, message: "Offline")
+        #expect(load.channels.map(\.name) == ["Old"])
+        load.succeeded(dead.id, channels: [])
+        #expect(load.channels.isEmpty)
+        #expect(load.failures.isEmpty)
         #expect(load.isComplete)
     }
 

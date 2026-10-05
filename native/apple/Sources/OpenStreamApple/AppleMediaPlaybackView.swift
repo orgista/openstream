@@ -101,6 +101,7 @@ struct AppleMediaPlayerView: View {
     /// after three seconds (full test 2026-09-30), so it waits while > 0.
     @State private var nativeMenuOpenItems = 0
     @State private var showsOtherSources = false
+    @State private var sleepTimerMenu = false
     /// What the fallback loop walks after a failure: Automatic's order, or
     /// the picked resolution's once one is picked.
     @State private var otherSources: [ApplePlaybackSourceOption] = []
@@ -190,7 +191,7 @@ struct AppleMediaPlayerView: View {
                     nextEpisode: nextEpisode)
                 #else
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, nextEpisode: nextEpisode)
+                    otherSources: qualityPickerAction, onPlaybackMenu: { sleepTimerMenu = true }, nextEpisode: nextEpisode)
                 #endif
             }
         }
@@ -241,6 +242,10 @@ struct AppleMediaPlayerView: View {
                     start: { _ = startNextEpisodeFromStockRoute(manual: true) })
             }
         }
+        .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
+        .confirmationDialog("Sleep Timer", isPresented: $sleepTimerMenu) {
+            AppleSleepTimerChoices(coordinator: coordinator)
+        }
         .onChange(of: stockSubtitles.menuEntries) { installSourceMenu() }
         .onChange(of: stockSubtitles.moreEntries) { installSourceMenu() }
         .onChange(of: coordinator.subtitleTiming) { installSourceMenu() }
@@ -258,9 +263,9 @@ struct AppleMediaPlayerView: View {
         #endif
         #if os(iOS) || os(visionOS)
         .overlay(alignment: .topTrailing) {
-            if coordinator.route == .avPlayer && nativeMenuVisible
-                && (sourceOptionsLoader != nil || showsAppSubtitleMenu) {
+            if coordinator.route == .avPlayer && nativeMenuVisible {
                 Menu {
+                    AppleSleepTimerMenu(coordinator: coordinator)
                     if sourceOptionsLoader != nil {
                         Button("Quality", systemImage: "slider.horizontal.3") { showsOtherSources = true }
                             .onAppear { nativeMenuOpenItems += 1 }
@@ -591,6 +596,7 @@ struct AppleMediaPlayerView: View {
                 ))
             }
         }
+        items.append(AppleSleepTimerMenu.uiMenu(coordinator: coordinator))
         host.viewController.transportBarCustomMenuItems = items
         #endif
     }

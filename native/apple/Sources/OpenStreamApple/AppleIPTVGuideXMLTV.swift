@@ -1,44 +1,24 @@
 import Foundation
 
 final class AppleIPTVGuideXMLTVParser: NSObject, XMLParserDelegate, Sendable {
-    private final class State {
-        var programmes: [AppleIPTVProgramme] = []
-        
-        var currentElement: String = ""
-        
-        var currentChannel: String = ""
-        var currentStart: Date?
-        var currentEnd: Date?
-        
-        var currentTitle: String = ""
-        var currentSubtitle: String = ""
-        var currentDesc: String = ""
-        var currentCategory: String = ""
-        
-        func resetCurrent() {
-            currentChannel = ""
-            currentStart = nil
-            currentEnd = nil
-            currentTitle = ""
-            currentSubtitle = ""
-            currentDesc = ""
-            currentCategory = ""
-        }
+    func parse(data: Data, defaultOffsetHours: Double = 0) -> [AppleIPTVProgramme] {
+        guide(data: data, defaultOffsetHours: defaultOffsetHours).allProgrammes
     }
-    
-    // We cannot use non-Sendable `XMLParser` inside a Sendable method if it mutates state.
-    // Instead we can wrap the parsing logically.
-    func parse(data: Data) -> [AppleIPTVProgramme] {
+
+    func guide(data: Data, defaultOffsetHours: Double = 0) -> AppleIPTVGuide {
         let parser = XMLParser(data: data)
-        let delegate = ParserDelegate()
+        let delegate = ParserDelegate(defaultOffsetHours: defaultOffsetHours)
         parser.delegate = delegate
         parser.parse()
-        return delegate.programmes
+        return AppleIPTVGuide(programmes: delegate.programmes, channelNames: delegate.channelNames)
     }
 }
 
 private final class ParserDelegate: NSObject, XMLParserDelegate {
     var programmes: [AppleIPTVProgramme] = []
+    var channelNames: [String: String] = [:]
+    private var catalogueID: String?
+    private var displayName = ""
     
     private var currentElement: String = ""
     private var currentChannel: String = ""
@@ -65,6 +45,14 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
         return df
     }()
     
+    init(defaultOffsetHours: Double) {
+        super.init()
+        let hours = defaultOffsetHours.isFinite ? min(14, max(-12, defaultOffsetHours)) : 0
+        dateFormatterNoOffset.timeZone = TimeZone(secondsFromGMT: Int(hours * 3600))
+        dateFormatterNoOffset.isLenient = false
+        dateFormatterWithOffset.isLenient = false
+    }
+
     private func parseDate(_ string: String) -> Date? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         if let d = dateFormatterWithOffset.date(from: trimmed) {
@@ -78,6 +66,10 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         currentElement = elementName
+        if elementName == "channel" {
+            catalogueID = attributeDict["id"]
+            displayName = ""
+        }
         if elementName == "programme" {
             currentChannel = attributeDict["channel"] ?? ""
             if let startStr = attributeDict["start"] {
@@ -103,6 +95,7 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
         if trimmed.isEmpty { return }
         
         switch currentElement {
+        case "display-name" where catalogueID != nil: displayName += string
         case "title": currentTitle += string
         case "sub-title": currentSubtitle += string
         case "desc": currentDesc += string
@@ -112,8 +105,13 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName == "channel", let id = catalogueID, channelNames.count < AppleIPTVClient.maximumChannels {
+            let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !id.isEmpty, !name.isEmpty { channelNames[id] = name }
+            catalogueID = nil
+        }
         if elementName == "programme" {
-            guard let start = currentStart, let end = currentEnd, !currentChannel.isEmpty else { return }
+            guard let start = currentStart, let end = currentEnd, !currentChannel.isEmpty, end > start, !currentTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, programmes.count < AppleIPTVGuideDiskCache.maximumProgrammes else { return }
             
             let prog = AppleIPTVProgramme(
                 id: UUID().uuidString,

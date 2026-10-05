@@ -137,13 +137,17 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
             case .missingCredentials, .authenticationFailed:
                 return .init(
                     kind: .authentication,
-                    message: "The Live TV account needs a valid username and password."
+                    message: iptv.localizedDescription
                 )
-            case .requestFailed(let status) where status == 401 || status == 403:
+            case .requestFailed(let status) where status == 401 || status == 403,
+                 .streamRequestFailed(let status) where status == 401 || status == 403:
                 return .init(
                     kind: .authentication,
-                    message: "The Live TV provider rejected the account or required request headers (HTTP \(status))."
+                    message: "The Live TV provider rejected the account or required request headers (HTTP \(status)).",
+                    httpStatus: status
                 )
+            case .requestFailed(let status), .streamRequestFailed(let status):
+                return .init(kind: .network, message: iptv.localizedDescription, httpStatus: status)
             case .invalidSource, .invalidPlaylist:
                 return .init(kind: .unavailable, message: iptv.localizedDescription)
             default:
@@ -627,7 +631,19 @@ public final class ApplePlaybackCoordinator {
         liveRetryAttempted = retriedLive
     }
 
+    public let sleepTimer = ApplePlaybackSleepTimer()
+    public var sleepProgrammeEnd: Date?
+
+    public func armSleepTimer(minutes: Int) {
+        sleepTimer.arm(minutes: minutes) { [weak self] in self?.engine.pause() }
+    }
+
+    public func armSleepTimer(deadline: Date) {
+        sleepTimer.arm(deadline: deadline) { [weak self] in self?.engine.pause() }
+    }
+
     public func stop() {
+        sleepTimer.cancel()
         sharedPlayback?.suspendForLocalTransition()
         generation &+= 1
         externalSubtitleTask?.cancel()
@@ -753,6 +769,11 @@ public final class ApplePlaybackCoordinator {
     /// ranked candidate. When the list is exhausted, report a single
     /// `.unsupportedMedia` failure naming how many streams were tried.
     private func handleFailure(_ failure: ApplePlaybackFailure) async {
+        if let request = lastRequest, let unavailable = AppleIPTVCatchUp.unavailableFailure(for: failure, request: request) {
+            engine.stop()
+            fail(unavailable)
+            return
+        }
         var failure = failure
         // A file cut short opens like an unplayable format or an unreadable
         // file; it is an incomplete download, which Retry (or another source)

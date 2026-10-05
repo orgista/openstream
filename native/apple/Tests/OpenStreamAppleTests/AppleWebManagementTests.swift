@@ -403,7 +403,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     ])
     let (xtreamData, xtreamResponse) = try await dataResponse(for: xtream, using: session)
     #expect(xtreamResponse.statusCode == 400)
-    #expect(String(decoding: xtreamData, as: UTF8.self).contains("auth=0"))
+    #expect(String(decoding: xtreamData, as: UTF8.self).contains("account is disabled"))
     #expect(store.sources.count == 1)
 }
 

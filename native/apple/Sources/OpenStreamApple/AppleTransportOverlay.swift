@@ -75,7 +75,7 @@ struct AppleTransportOverlay: View {
         AppleTVPlaybackPresentationPolicy.visibleControls(
             route: .surface,
             isScrubbable: model.isScrubbable,
-            hasOtherSources: otherSources != nil || !model.chapters.isEmpty,
+            hasOtherSources: true,
             hasSharePlay: sharePlayMenu != nil
         )
     }
@@ -426,6 +426,7 @@ struct AppleTransportOverlay: View {
                 }
                 if controls.contains(.otherSourcesMenu) {
                     Menu {
+                        AppleSleepTimerMenu(coordinator: coordinator, isLive: request.isLive, transport: model)
                         if !model.chapters.isEmpty {
                             Menu("Chapters", systemImage: "list.bullet") {
                                 ForEach(Array(model.chapters.enumerated()), id: \.offset) { _, chapter in
@@ -446,14 +447,22 @@ struct AppleTransportOverlay: View {
                                 .appleMenuPresence(model)
                                 .accessibilityIdentifier("player.quality")
                         }
+                        if liveTopControls, let sharePlayMenu, controls.contains(.sharePlayMenu) {
+                            Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
+                            if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
+                                Button(title, role: .destructive, action: action)
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                             .contentShape(.rect)
                     }
                     .appleBareMenu()
                     .accessibilityLabel("More")
+                    .accessibilityIdentifier("player.options")
                 }
-                if let sharePlayMenu, controls.contains(.sharePlayMenu) {
+                if let sharePlayMenu, controls.contains(.sharePlayMenu),
+                   !liveTopControls || !controls.contains(.otherSourcesMenu) {
                     Menu {
                         Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
                         if let secondaryTitle = sharePlayMenu.secondaryTitle, let secondaryAction = sharePlayMenu.secondaryAction {

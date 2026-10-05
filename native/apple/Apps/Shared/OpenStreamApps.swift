@@ -197,6 +197,7 @@ private struct AppleOpenStreamLaunchView: View {
 private final class OpenStreamAppDelegate: NSObject, UIApplicationDelegate {
     private var backgroundSessionCompletion: (() -> Void)?
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        AppleProgrammeReminderStore.shared.activateNotifications()
         AppleMediaServerBackgroundDownloads.shared.activate()
         return true
     }

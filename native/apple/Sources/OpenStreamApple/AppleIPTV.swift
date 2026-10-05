@@ -36,6 +36,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// The playlist's own channel number (M3U `tvg-chno`, Xtream `num`);
     /// nil when it gives none. Optional so cached channels decode unchanged.
     public var channelNumber: Int? = nil
+    public var guideDefaultOffsetHours: Double? = nil
+    public var guideShiftHours: Double? = nil
 
     /// A playlist channel number as the guide shows it: a positive whole
     /// number, nothing else ("5.1", "", "0", "-3" are not numbers here).
@@ -117,6 +119,8 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         copy.catchUpTimeZoneID = catchUpTimeZoneID
         copy.catchUp = catchUp
         copy.channelNumber = channelNumber
+        copy.guideDefaultOffsetHours = guideDefaultOffsetHours
+        copy.guideShiftHours = guideShiftHours
         return copy
     }
 }
@@ -392,10 +396,11 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
         case .missingCredentials: "Username and password are required."
         case .credentialsContainWhitespace: "Username and password must not contain spaces."
         case .authenticationFailed(let status):
-            if let status, !status.isEmpty {
-                "The IPTV provider rejected the account (auth=0, status: \(status)). Check the username and password, including capitalization."
-            } else {
-                "The IPTV provider rejected the account (auth=0). Check the username and password, including capitalization."
+            switch status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "expired": "Your Live TV account has expired. Contact your provider."
+            case "disabled", "banned": "Your Live TV account is disabled. Contact your provider."
+            case "maxconnections": "Your Live TV account has reached its stream limit. Stop playback on another device."
+            default: "The Live TV username or password is incorrect."
             }
         case .unreachable(let reason):
             // URLError reasons end in their own full stop ("The request timed
@@ -665,7 +670,9 @@ public struct AppleIPTVClient: Sendable {
     /// generic "rejected" error.
     private func verifyXtreamAccount(
         source: AppleSource,
-        credentials: AppleIPTVCredentials
+        credentials: AppleIPTVCredentials,
+        checkConnections: Bool = true,
+        validateAccount: Bool = true
     ) async throws -> XtreamAccount {
         let accountURL = try Self.xtreamAPIURL(baseURL: source.url, credentials: credentials, action: nil)
         var request = URLRequest(url: accountURL)
@@ -698,15 +705,29 @@ public struct AppleIPTVClient: Sendable {
               let userInfo = account.userInfo else {
             throw AppleIPTVError.unexpectedResponse(contentType: contentType)
         }
+        let info = AppleIPTVAccountInfo(expiration: userInfo.expiration?.value,
+            maxConnections: userInfo.maxConnections?.value, activeConnections: userInfo.activeConnections?.value,
+            status: userInfo.status?.value)
+        if validateAccount, let status = info.rejection(checkConnections: false) {
+            throw AppleIPTVError.authenticationFailed(status: status)
+        }
         guard userInfo.auth?.value == "1" else {
             throw AppleIPTVError.authenticationFailed(status: userInfo.status?.value)
+        }
+        if validateAccount, let status = info.rejection(checkConnections: checkConnections) {
+            throw AppleIPTVError.authenticationFailed(status: status)
         }
         return XtreamAccount(
             preferredExtension: AppleXtreamOutputFormat.preferred(
                 allowedOutputFormats: userInfo.allowedOutputFormats ?? []
             ).rawValue,
-            timeZoneID: Self.serverTimeZoneID(account.serverInfo?.timezone?.value)
+            timeZoneID: Self.serverTimeZoneID(account.serverInfo?.timezone?.value),
+            info: info
         )
+    }
+
+    public func accountInfo(source: AppleSource, credentials: AppleIPTVCredentials) async throws -> AppleIPTVAccountInfo {
+        try await verifyXtreamAccount(source: source, credentials: credentials, checkConnections: false, validateAccount: false).info
     }
 
     /// What the login told us beyond "yes": the stream extension to use and
@@ -714,6 +735,7 @@ public struct AppleIPTVClient: Sendable {
     struct XtreamAccount {
         var preferredExtension: String?
         var timeZoneID: String?
+        var info: AppleIPTVAccountInfo
     }
 
     /// The panel's `server_info.timezone` as a zone the system knows
@@ -852,6 +874,8 @@ public struct AppleIPTVClient: Sendable {
                 originalEXTINF: details.extinf
             )
             channel.channelNumber = AppleIPTVChannel.playlistChannelNumber(details.attributes["tvg-chno"])
+            channel.guideDefaultOffsetHours = (attributes["tvg-shift"] ?? guideURL.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { ["tvg-shift", "offset"].contains($0.name.lowercased()) }?.value }).flatMap(Double.init).flatMap { $0.isFinite ? min(14, max(-12, $0)) : nil }
+            channel.guideShiftHours = details.attributes["tvg-shift"].flatMap(Double.init).flatMap { $0.isFinite ? min(14, max(-12, $0)) : nil }
             if let spec = AppleIPTVCatchUpSpec.from(attributes: details.attributes) {
                 channel.catchUp = spec
                 channel.catchUpDays = AppleIPTVCatchUpSpec.days(attributes: details.attributes) ?? 1
@@ -1161,11 +1185,17 @@ private struct XtreamUserInfo: Decodable {
     let auth: XtreamFlexibleString?
     let status: XtreamFlexibleString?
     let allowedOutputFormats: [String]?
+    let expiration: XtreamFlexibleString?
+    let maxConnections: XtreamFlexibleString?
+    let activeConnections: XtreamFlexibleString?
 
     private enum CodingKeys: String, CodingKey {
         case auth
         case status
         case allowedOutputFormats = "allowed_output_formats"
+        case expiration = "exp_date"
+        case maxConnections = "max_connections"
+        case activeConnections = "active_cons"
     }
 }
 

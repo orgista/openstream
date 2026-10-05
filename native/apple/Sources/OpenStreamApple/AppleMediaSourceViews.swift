@@ -253,6 +253,7 @@ struct AppleLiveTVView: View {
                         guideRevision: guideStore.revision,
                         entries: completeGuide,
                         favoriteIDs: settings.favoriteChannelIDs,
+                favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
                         onSelect: play,
                         onToggleFavorite: toggleFavorite,
                         onVisibleChannels: refreshGuide,
@@ -295,6 +296,7 @@ struct AppleLiveTVView: View {
                 guideRevision: guideStore.revision,
                 entries: completeGuide,
                 favoriteIDs: settings.favoriteChannelIDs,
+                        favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
                 onSelect: play,
                 onToggleFavorite: toggleFavorite,
                 onVisibleChannels: refreshGuide,
@@ -306,6 +308,7 @@ struct AppleLiveTVView: View {
         #if os(iOS)
         .toolbar(UIDevice.current.userInterfaceIdiom == .pad && verticalSizeClass == .compact ? .hidden : .visible, for: .navigationBar)
         #endif
+        .environment(\.liveChannelSettings, settings)
         .task(id: settings.playbackEngine) {
             guard configuredEngine != settings.playbackEngine else { return }
             configuredEngine = settings.playbackEngine
@@ -322,6 +325,18 @@ struct AppleLiveTVView: View {
             playbackCoordinator.engine.applyCaptionPreference(preference)
         }
         .task(id: reloadIdentity) { await reload() }
+        .task(id: "\(channelsRevision)|\(settings.guideTimeOffsets.sorted { $0.key < $1.key })|\(settings.guideChannelAssignments.sorted { $0.key < $1.key })") {
+            await refreshGuide(Set(channelSnapshot.channelIDs))
+        }
+
+        .task(id: "\(AppleProgrammeReminderStore.shared.requestedChannelID ?? "")|\(channelsRevision)") {
+            if let id = AppleProgrammeReminderStore.shared.requestedChannelID,
+               let channel = channels.first(where: { $0.id == id }) {
+                AppleProgrammeReminderStore.shared.requestedChannelID = nil
+                play(channel)
+            }
+        }
+
         .task(id: projectionIdentity) {
             await rebuildChannelGroups()
         }
@@ -336,7 +351,7 @@ struct AppleLiveTVView: View {
             #endif
         }
         .sheet(item: $healthDetailChannel) { channel in
-            AppleChannelHealthDetailView(channel: channel, store: healthStore)
+            AppleChannelHealthDetailView(channel: channel, store: healthStore, guideStore: guideStore, settings: settings)
                 #if os(iOS)
                 .presentationDetents([.medium, .large])
                 #endif
@@ -454,6 +469,9 @@ struct AppleLiveTVView: View {
             settings.liveChannelPackage.rawValue,
             settings.customChannelPackage.identity,
             settings.favoriteChannelIDs.sorted().joined(separator: "\u{1f}"),
+            settings.hiddenLiveChannelIDs.sorted().joined(separator: "\u{1f}"),
+            settings.hiddenLiveGroups.sorted().joined(separator: "\u{1f}"),
+            settings.favoriteLiveChannelOrder.joined(separator: "\u{1f}"),
         ].joined(separator: "\u{1e}"))
     }
 
@@ -643,18 +661,25 @@ struct AppleLiveTVView: View {
     private func refreshGuide(_ visibleIDs: Set<String>) async {
         guard !visibleIDs.isEmpty else { return }
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
+        guideStore.channelDisplayNames = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0.name) })
+        guideStore.manualChannelMapping = settings.guideChannelAssignments
         guideStore.retainSources(Set(sources.map(\.id)))
         guideStore.archiveChannelIDs = Set(channels.lazy.filter(AppleIPTVCatchUp.supportsCatchUp).map(\.id))
         for source in sources {
             if source.iptvType == .xtream {
                 guard let credentials = try? sourceStore.iptvCredentials(for: source) else { continue }
-                guideStore.configure(xtreamBase: source.url, username: credentials.username, password: credentials.password, sourceID: source.id)
+                guideStore.configure(xtreamBase: source.url, username: credentials.username, password: credentials.password, sourceID: source.id,
+                    timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
             } else {
                 let sourceChannels = channels.filter { $0.sourceID == source.id }
                 let mapping = sourceChannels.reduce(into: [String: String]()) { result, channel in
-                    if let id = channel.guideID { result[channel.id] = id }
+                    if let id = settings.guideChannelAssignments[channel.id] ?? channel.guideID { result[channel.id] = id }
                 }
-                guideStore.configure(xmltvURL: sourceChannels.first?.guideURL, sourceID: source.id, channelMapping: mapping)
+                guideStore.configure(xmltvURL: sourceChannels.first?.guideURL, sourceID: source.id, channelMapping: mapping,
+                    defaultOffsetHours: sourceChannels.first?.guideDefaultOffsetHours ?? 0,
+                    channelShifts: Dictionary(uniqueKeysWithValues: sourceChannels.compactMap { channel in
+                        channel.guideShiftHours.map { (channel.id, $0) }
+                    }), timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
             }
         }
         await guideStore.refreshVisible(channelIDs: visibleIDs)
@@ -666,8 +691,9 @@ struct AppleLiveTVView: View {
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
         }
+        let visible = AppleLiveChannelPreferences.visible(channels, hiddenIDs: settings.hiddenLiveChannelIDs, hiddenGroups: settings.hiddenLiveGroups)
         let updated = await AppleChannelProjection.buildGroupsOffMain(
-            from: channels,
+            from: visible,
             scope: settings.liveChannelScope,
             showPayPerView: settings.showPayPerViewChannels,
             favoriteIDs: settings.favoriteChannelIDs,
@@ -866,6 +892,7 @@ struct AppleLiveTVView: View {
             guideRevision: guideStore.revision,
             entries: completeGuide,
             favoriteIDs: settings.favoriteChannelIDs,
+            favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
             nowPlaying: selectedChannel ?? lastWatchedChannel ?? channels.first,
             hasActiveSearch: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             previewsEnabled: settings.autoPlayTrailer,
@@ -1217,6 +1244,10 @@ struct AppleLiveInlinePlayer: View {
             host.viewController.allowsPictureInPicturePlayback = isFullScreen
             #endif
         }
+        .modifier(AppleSleepTimerPresentation(coordinator: coordinator, enabled: !isFullScreen))
+        .onChange(of: guide.nowAndNext(channelID: liveChannel?.id ?? "").now?.end, initial: true) { _, end in
+            coordinator.sleepProgrammeEnd = end
+        }
         .task(id: "\(requestIdentity):\(playbackRevision):\(scenePhase == .background)") {
             coordinator.sharePlayChannel = sharedChannel
             if scenePhase == .background, !request.isLive {
@@ -1505,6 +1536,7 @@ private struct AppleLiveFullScreenControls: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : Animation.default, value: channelPicker.isPresented)
+        .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
     }
 }
 

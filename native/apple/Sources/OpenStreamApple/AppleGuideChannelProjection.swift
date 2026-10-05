@@ -8,7 +8,7 @@ struct AppleGuideChannel: Identifiable, Equatable, Sendable {
 
 enum AppleGuideChannelProjection {
     static func rows(channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry],
-                     favoriteIDs: Set<String>, favoritesOnly: Bool, sortByNumber: Bool) -> [AppleGuideChannel] {
+                     favoriteIDs: Set<String>, favoritesOnly: Bool, sortByNumber: Bool, favoriteOrder: [String] = []) -> [AppleGuideChannel] {
         // Normalize the small lineup once, not every entry in every comparison
         // of a several-thousand-channel sort on the main actor.
         var lookup: [String: Int] = [:]
@@ -29,7 +29,10 @@ enum AppleGuideChannelProjection {
             let number = lookup[AppleChannelLineupPresets.normalize(name: channel.name)] ?? channel.channelNumber
             return AppleGuideChannel(channel: channel, number: number)
         }
+        let order = AppleLiveChannelPreferences.order(favoriteOrder, favoriteIDs: favoriteIDs)
+        let ranks = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element, $0.offset) })
         return rows.sorted {
+            if !favoriteOrder.isEmpty, ranks[$0.id] != ranks[$1.id] { return (ranks[$0.id] ?? .max) < (ranks[$1.id] ?? .max) }
             if sortByNumber, $0.number != $1.number { return ($0.number ?? .max) < ($1.number ?? .max) }
             let comparison = $0.channel.name.localizedStandardCompare($1.channel.name)
             return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending

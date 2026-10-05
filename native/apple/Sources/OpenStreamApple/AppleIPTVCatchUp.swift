@@ -249,6 +249,13 @@ public enum AppleIPTVCatchUp: Sendable {
         request.sourceKind == .liveTV && !request.isLive && request.mediaID.contains("#catchup-")
     }
 
+    /// An unavailable archive is final: retrying or opening the live fallback would play the wrong programme.
+    public static func unavailableFailure(for failure: ApplePlaybackFailure, request: ApplePlaybackRequest) -> ApplePlaybackFailure? {
+        guard isCatchUp(request), failure.httpStatus == 403 || failure.httpStatus == 404 else { return nil }
+        return ApplePlaybackFailure(kind: .unavailable, message: "Catch-up isn't available for this programme",
+            httpStatus: failure.httpStatus)
+    }
+
     // MARK: - Templates
 
     /// Fills a `catchup-source` template. Both vocabularies are accepted:

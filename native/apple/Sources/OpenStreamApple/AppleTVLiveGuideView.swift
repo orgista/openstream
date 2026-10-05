@@ -122,6 +122,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let guideRevision: Int
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
+    let favoriteOrder: [String]
     let nowPlaying: AppleIPTVChannel?
     let hasActiveSearch: Bool
     /// Previews follow the trailer-autoplay preference rather than adding a
@@ -175,6 +176,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         guideRevision: Int = 0,
         entries: [AppleChannelLineupEntry],
         favoriteIDs: Set<String>,
+        favoriteOrder: [String] = [],
         nowPlaying: AppleIPTVChannel?,
         hasActiveSearch: Bool = false,
         previewsEnabled: Bool = true,
@@ -201,6 +203,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         self.guideRevision = guideRevision
         self.entries = entries
         self.favoriteIDs = favoriteIDs
+        self.favoriteOrder = favoriteOrder
         self.nowPlaying = nowPlaying
         self.hasActiveSearch = hasActiveSearch
         self.previewsEnabled = previewsEnabled
@@ -290,7 +293,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             let input = projectionInput
             let projected = await Task.detached(priority: .userInitiated) {
                 AppleGuideChannelProjection.rows(channels: input.channels, entries: input.entries,
-                    favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true)
+                    favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true, favoriteOrder: input.favoriteOrder)
             }.value
             guard !Task.isCancelled else { return }
             rows = projected
@@ -404,7 +407,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     }
 
     private var projectionInput: AppleTVGuideProjectionInput {
-        AppleTVGuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs)
+        AppleTVGuideProjectionInput(channels: channels, entries: entries, favoriteIDs: favoriteIDs, favoriteOrder: favoriteOrder)
     }
 
     /// The guide opens on the current slot, however far back the window
@@ -719,7 +722,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 focus: focus,
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
-                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
+                                onShowHealth: { onShowHealth(row.channel) },
                                 onMultiview: { onMultiview(row.channel) },
                                 onMoveLeft: onRailMoveLeft,
                                 onMoveRight: { focusEntryCell(of: row.id) }
@@ -741,7 +744,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onSelectCell: { onSelectProgramme(row.channel, $0.programme) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
-                                onShowHealth: health[row.id] == nil ? nil : { onShowHealth(row.channel) },
+                                onShowHealth: { onShowHealth(row.channel) },
                                 onMultiview: { onMultiview(row.channel) }
                             )
                             .frame(width: metrics.timelineWidth)
@@ -764,6 +767,7 @@ private struct AppleTVGuideProjectionInput: Equatable, Sendable {
     let channels: [AppleIPTVChannel]
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
+    var favoriteOrder: [String] = []
 }
 
 private struct AppleTVGuideGridIdentity: Equatable {
@@ -913,10 +917,11 @@ private struct AppleTVGuideRailCell: View {
             if direction == .right, let onMoveRight { onMoveRight() }
         }
         .contextMenu {
+            AppleChannelQuickActions(channel: row.channel)
             if let onMultiview { Button("Watch in Multiview", action: onMultiview) }
             Button(model.favoriteActionTitle, systemImage: model.favoriteGlyph, action: onToggleFavorite)
             if let onShowHealth {
-                Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
+                Button("Channel Info", systemImage: "info.circle", action: onShowHealth)
             }
         }
         .accessibilityLabel(model.playAccessibilityLabel)
@@ -1000,7 +1005,7 @@ private struct AppleTVChannelActions: View {
             }
         }
         if let onShowHealth {
-            Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
+            Button("Channel Info", systemImage: "info.circle", action: onShowHealth)
         }
     }
 }
@@ -1085,6 +1090,10 @@ private struct AppleTVGuideScheduleRow: View {
                     ))
                     .focused(focus, equals: .cell(AppleTVGuideCellFocus(cell: cell)))
                     .contextMenu {
+                        if !isGap {
+                            AppleProgrammeReminderAction(channel: channel, title: cell.title, start: cell.airStart, end: cell.airEnd)
+                        }
+                        AppleChannelQuickActions(channel: channel)
                         AppleTVChannelActions(model: actions, onPlay: onSelect, onToggleFavorite: onToggleFavorite,
                             onShowHealth: onShowHealth, onMultiview: onMultiview)
                     }
@@ -1516,6 +1525,7 @@ struct AppleTVLivePlayerScreen: View {
     /// channel; it decides what Menu means while the picture is still black.
     @State private var hasPlayed = false
     @State private var playbackMenu = false
+    @State private var sleepTimerMenu = false
     /// "Captions on" / "off" / "none", shown briefly after a swipe up.
     @State private var captionsNotice: String?
     @State private var captionsNoticeTask: Task<Void, Never>?
@@ -1686,7 +1696,20 @@ struct AppleTVLivePlayerScreen: View {
                     .accessibilityLabel("Connecting to \(channel.name)")
             }
         }
+        .modifier(AppleProgrammeReminderBanner())
+        .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
+        .confirmationDialog("Sleep Timer", isPresented: $sleepTimerMenu) {
+            AppleSleepTimerChoices(coordinator: coordinator, isLive: programme == nil)
+        }
         .confirmationDialog("Playback", isPresented: $playbackMenu) {
+            Button("Sleep Timer") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    coordinator.sleepProgrammeEnd = guide.nowAndNext(channelID: channel.id).now?.end
+                    sleepTimerMenu = true
+                }
+            }
             if let onMultiview { Button("Multiview") { onMultiview(nil) } }
             Button("Captions", action: toggleCaptions)
         }

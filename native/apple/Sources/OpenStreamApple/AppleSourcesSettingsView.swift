@@ -668,6 +668,13 @@ private struct AppleSourceDetailView: View {
                         }
                     }
 
+                    if source.kind == .liveTV {
+                        AppleGuideTimeOffsetSection(sourceID: source.id, settings: settings)
+                        if source.iptvType == .xtream {
+                            AppleIPTVAccountSection(source: source, sourceStore: sourceStore)
+                        }
+                    }
+
                     if source.kind == .nas {
                         AppleNetworkShareEditRows(source: source, sourceStore: sourceStore)
                     }

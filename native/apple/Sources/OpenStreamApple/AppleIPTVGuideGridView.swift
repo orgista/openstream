@@ -19,6 +19,7 @@ public struct AppleIPTVGuideGridView: View {
     let guideRevision: Int
     let entries: [AppleChannelLineupEntry]
     let favoriteIDs: Set<String>
+    let favoriteOrder: [String]
     let onSelect: (AppleIPTVChannel) -> Void
     /// A programme that already aired on a channel with catch-up; the live
     /// channel is `onSelect`.
@@ -48,7 +49,7 @@ public struct AppleIPTVGuideGridView: View {
 
     public init(channels: [AppleIPTVChannel], guide: AppleIPTVGuide, guideRevision: Int = 0,
                 entries: [AppleChannelLineupEntry],
-                favoriteIDs: Set<String>, onSelect: @escaping (AppleIPTVChannel) -> Void,
+                favoriteIDs: Set<String>, favoriteOrder: [String] = [], onSelect: @escaping (AppleIPTVChannel) -> Void,
                 onToggleFavorite: @escaping (String) -> Void,
                 onVisibleChannels: @escaping (Set<String>) async -> Void,
                 health: [String: AppleChannelHealthResult] = [:],
@@ -60,6 +61,7 @@ public struct AppleIPTVGuideGridView: View {
         self.guideRevision = guideRevision
         self.entries = entries
         self.favoriteIDs = favoriteIDs
+        self.favoriteOrder = favoriteOrder
         self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
         self.onVisibleChannels = onVisibleChannels
@@ -94,7 +96,7 @@ public struct AppleIPTVGuideGridView: View {
                                                     health: AppleChannelHealthIndicator(result: health[row.id]),
                                                     scrollState: scrollState, railWidth: railWidth,
                                                     onSelect: { onSelect(row.channel) }, onToggleFavorite: { onToggleFavorite(row.id) },
-                                                    onShowHealth: health[row.id] == nil ? nil : onShowHealth.map { show in { show(row.channel) } })
+                                                    onShowHealth: onShowHealth.map { show in { show(row.channel) } })
                                                     .frame(width: railWidth, height: rowHeight)
                                                     .background(Color.black)
                                                     .offset(x: scrollState.horizontalOffset)
@@ -153,13 +155,13 @@ public struct AppleIPTVGuideGridView: View {
                 }
             }
             .background(Color.black)
-            .task(id: GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)) {
-                let input = GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick)
+            .task(id: GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick, favoriteOrder: favoriteOrder)) {
+                let input = GuideProjectionInput(channels: channels, guideRevision: guideRevision, entries: entries, favoriteIDs: favoriteIDs, window: window, tick: tick, favoriteOrder: favoriteOrder)
                 let now = context.date
                 
                 let result = await Task.detached(priority: .userInitiated) {
                     let projected = AppleGuideChannelProjection.rows(channels: input.channels, entries: input.entries,
-                        favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true)
+                        favoriteIDs: input.favoriteIDs, favoritesOnly: false, sortByNumber: true, favoriteOrder: input.favoriteOrder)
                     let channelIDs = projected.map { $0.id }
                     
                     let gridIndex = AppleGuideGridModel.index(
@@ -249,8 +251,9 @@ public struct AppleIPTVGuideGridView: View {
                             .accessibilityLabel("Play \(row.channel.name)")
                             .accessibilityValue(indicator?.accessibilityLabel ?? "")
                             .contextMenu {
-                                if health[row.id] != nil, let onShowHealth {
-                                    Button("Channel Health", systemImage: "info.circle") { onShowHealth(row.channel) }
+                                AppleChannelQuickActions(channel: row.channel)
+                                if let onShowHealth {
+                                    Button("Channel Info", systemImage: "info.circle") { onShowHealth(row.channel) }
                                 }
                             }
                             Button { onToggleFavorite(row.id) } label: {
@@ -281,6 +284,9 @@ public struct AppleIPTVGuideGridView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(12).background(AppleDesignTokens.surface)
                             }
+                            .contextMenu {
+                                AppleProgrammeReminderAction(channel: row.channel, title: programme.title, start: programme.start, end: programme.end)
+                            }
                             .buttonStyle(.plain)
                         }
                     }
@@ -301,6 +307,7 @@ private struct GuideProjectionInput: Equatable, Sendable {
     let favoriteIDs: Set<String>
     let window: DateInterval
     let tick: Double
+    var favoriteOrder: [String] = []
 }
 
 private struct GuideChannelRail: View {
@@ -345,11 +352,12 @@ private struct GuideChannelRail: View {
             .accessibilityValue(health?.accessibilityLabel ?? "")
             .accessibilityIdentifier("guide.play.\(row.id)")
             .contextMenu {
+                AppleChannelQuickActions(channel: row.channel)
                 Button("Play", systemImage: "play.fill", action: onSelect)
                 Button(isFavorite ? "Remove from Favorites" : "Add to Favorites",
                        systemImage: isFavorite ? "heart.fill" : "heart", action: onToggleFavorite)
                 if let onShowHealth {
-                    Button("Channel Health", systemImage: "info.circle", action: onShowHealth)
+                    Button("Channel Info", systemImage: "info.circle", action: onShowHealth)
                 }
             }
             Button(action: onToggleFavorite) {
@@ -391,6 +399,9 @@ private struct GuideScheduleRow: View, Equatable {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(row.channel.name), \(cell.title)" + (cell.isCatchUp ? ", available to watch" : ""))
+                .contextMenu {
+                    AppleProgrammeReminderAction(channel: row.channel, title: cell.title, start: cell.airStart, end: cell.airEnd)
+                }
             }
         }
     }
