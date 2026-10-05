@@ -1535,4 +1535,72 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             Thread.sleep(forTimeInterval: max(0, hold - 3))
         }
     }
+    /// Local live fixture only: the runner supplies its playlist through the
+    /// environment, so this test never needs an owner's provider credentials.
+    func testLiveZappingRecallAndMultiviewRemoteMapping() throws {
+        let value = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"] ?? ""
+        guard let url = URL(string: value), url.host == "127.0.0.1", url.scheme == "http" else {
+            throw XCTSkip("Set OPENSTREAM_TEST_M3U to the local IPTV fixture")
+        }
+        app.launchArguments = ["-OpenStreamDebugLiveFixture", value,
+            url.deletingLastPathComponent().appendingPathComponent("epg.xml").absoluteString,
+            "-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES",
+            "-openstream.settings.trailer.autoplay.v1", "NO"]
+        app.launch()
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'guide.play.'")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 20))
+        for _ in 0..<10 where !first.hasFocus { remote.press(.down) }
+        XCTAssertTrue(first.hasFocus)
+        remote.press(.select)
+        let surface = element("live.player.surface")
+        XCTAssertTrue(surface.waitForExistence(timeout: 20))
+        let firstName = try XCTUnwrap(surface.value as? String)
+        Thread.sleep(forTimeInterval: 7)
+        remote.press(.up)
+        let changed = NSPredicate(format: "exists == true AND value != %@", firstName)
+        expectation(for: changed, evaluatedWith: surface)
+        waitForExpectations(timeout: 10)
+        let secondName = try XCTUnwrap(surface.value as? String)
+        let banner = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        banner.name = "zapping-up-banner"
+        banner.lifetime = .keepAlways
+        add(banner)
+        Thread.sleep(forTimeInterval: 7)
+        remote.press(.down)
+        expectation(for: NSPredicate(format: "value == %@", firstName), evaluatedWith: surface)
+        waitForExpectations(timeout: 10)
+        // Both channels qualified. Select opens info; Up reaches Last Channel.
+        for expected in [secondName, firstName] {
+            XCTAssertTrue(surface.waitForExistence(timeout: 10))
+            remote.press(.select)
+            let last = element("live.player.lastChannel")
+            XCTAssertTrue(last.waitForExistence(timeout: 3))
+            for _ in 0..<4 where !last.hasFocus { remote.press(.up) }
+            XCTAssertTrue(last.hasFocus)
+            remote.press(.select)
+            expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: surface)
+            waitForExpectations(timeout: 10)
+        }
+        remote.press(.select, forDuration: 1)
+        let multiview = element("live.player.multiview")
+        XCTAssertTrue(multiview.waitForExistence(timeout: 5))
+        let multiviewCell = app.cells.containing(.any, identifier: "live.player.multiview").firstMatch
+        for _ in 0..<8 where !multiviewCell.hasFocus { remote.press(.down) }
+        XCTAssertTrue(multiviewCell.hasFocus)
+        remote.press(.select)
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'multiview.tile.'"))
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 20))
+        let tileIDs = Set(tiles.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertEqual(tileIDs.count, 2)
+        remote.press(.down)
+        remote.press(.up)
+        XCTAssertEqual(Set(tiles.allElementsBoundByIndex.map(\.identifier)), tileIDs)
+        XCTAssertFalse(surface.exists, "Multiview arrows must keep focus navigation instead of zapping")
+        let grid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        grid.name = "zapping-multiview-focus"
+        grid.lifetime = .keepAlways
+        add(grid)
+        remote.press(.menu)
+    }
+
 }

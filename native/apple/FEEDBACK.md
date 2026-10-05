@@ -4471,3 +4471,9 @@ oStream now saves guide data between launches, keeps the saved lineup when a pro
 The iPhone fixture checks covered offline guide relaunch, a one-hour shift, account details, hide/restore, reminder permission/save/cancel, and a one-minute sleep timer that paused playback and showed Still watching?. Apple TV guide, playback start and a persisted reminder banner were checked. AXe could not drive this TV simulator because its orientation probe failed; TV timer/move/restore interactions, actual notification delivery, iCloud propagation and physical display switching still need checking. Screenshots are in `~/Developer/openstream-build/verification/live-essentials/`.
 
 Verified: 2790 tests in 355 suites; iOS/tvOS simulator builds; unsigned AppStore-iOS device Release; SDK floors and the Release no-add-ons scan. Existing fixture network-stub races passed on reruns. Original simulator preferences were restored and test sources, credentials, caches and reminders removed; both sims and the fixture server are stopped. Changes remain uncommitted; no upload or push.
+
+
+## 2026-10-05 — Live TV channel switching
+Up and Down change channels on Apple TV. Select shows channels and Last Channel; holding Select opens options including Multiview. A brief banner shows the channel and its current/next programmes. iPhone video swipes change channels too, with Last Channel in both player sizes.
+
+Only channels played for at least five seconds enter the device’s last-ten history. Opening Live returns to the last watched channel by default; Settings › Live TV can turn that off. Launching on Discover does not start Live. Local-fixture tests passed on the native and software TV players and on iPhone; screenshots and measured switching times are in `~/Developer/openstream-build/verification/zapping/`. Test sources were removed and simulator preferences restored.

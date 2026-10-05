@@ -95,7 +95,8 @@ public struct AppleLiveGuideFixtureView: View {
 
     private func beginMultiview(_ held: AppleIPTVChannel?) {
         guard let current = playingChannel ?? channels.first,
-              let other = held?.id != current.id ? held : channels.first(where: { $0.id != current.id }) else { return }
+              let otherID = AppleMultiviewPolicy.companionID(currentID: current.id, heldID: held?.id, orderedIDs: channels.map(\.id)),
+              let other = held?.id == otherID ? held : channels.first(where: { $0.id == otherID }) else { return }
         coordinator.stop()
         multiviewChannels = [current, other]
         if player == nil { player = AppleTVLivePlayerPresentation() }

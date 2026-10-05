@@ -17,6 +17,10 @@
     ],
     "environmentVariableEntries": [
       {
+        "key": "OPENSTREAM_TEST_M3U",
+        "value": "$(OPENSTREAM_TEST_M3U)"
+      },
+      {
         "key": "OPENSTREAM_STUB_DIR",
         "value": "$(SRCROOT)/TestPlans/Stubs"
       }

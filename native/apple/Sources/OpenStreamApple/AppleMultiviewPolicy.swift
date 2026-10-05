@@ -4,6 +4,11 @@ import Foundation
 /// Pure multiview geometry and transitions. Channel order is insertion order,
 /// so thermal shedding always retires the oldest stream without audio.
 public enum AppleMultiviewPolicy {
+    static func companionID(currentID: String, heldID: String?, orderedIDs: [String]) -> String? {
+        if let heldID, heldID != currentID { return heldID }
+        return orderedIDs.first { $0 != currentID }
+    }
+
     public enum Layout: String, CaseIterable, Sendable { case grid, bigAndSmalls }
     public enum Thermal: Sendable { case nominal, fair, serious, critical }
     public enum Refusal: Sendable, Equatable {

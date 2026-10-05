@@ -191,6 +191,7 @@ struct AppleSettingsView: View {
             }
 
             Section("Live TV") {
+                AppleLiveResumeSetting()
                 Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
                     .disabled(!appleCanToggleTab(.live, settings: settings))
                     .accessibilityIdentifier("settings.live.enabled")
@@ -429,6 +430,7 @@ private struct AppleTVLiveTabPane: View {
         @Bindable var settings = settings
 
         return Form {
+            AppleLiveResumeSetting()
             Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
                 .disabled(!appleCanToggleTab(.live, settings: settings))
                 .accessibilityIdentifier("settings.live.enabled")

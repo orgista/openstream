@@ -41,6 +41,7 @@ struct AppleTVGuideCellFocus: Hashable {
 /// Focus targets inside the full-screen live player: the invisible surface
 /// that holds focus while the video plays, or one card of the channel footer.
 enum AppleTVLivePlayerFocus: Hashable {
+    case lastChannel
     case surface
     case card(String)
     /// "Watch on <other list>" over a channel that could not be recovered.
@@ -281,7 +282,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         .background(Color.black.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
         .onChange(of: focusRestoreToken) { _, _ in
-            let id = focusRestoreChannelID
+            let id = rows.first(where: { $0.id == focusRestoreChannelID })?.id ?? rows.first?.id ?? ""
             guard !id.isEmpty else { return }
             Task { @MainActor in
                 // Let the cover finish dismissing before the rail takes focus.
@@ -1525,6 +1526,9 @@ struct AppleTVLivePlayerScreen: View {
     /// channel; it decides what Menu means while the picture is still black.
     @State private var hasPlayed = false
     @State private var playbackMenu = false
+    @State private var watchHistory = AppleLiveWatchHistoryStore.shared
+    @AppStorage("openstream.live.zappingHintSeen") private var zappingHintSeen = false
+    @State private var showsZappingHint = false
     @State private var sleepTimerMenu = false
     /// "Captions on" / "off" / "none", shown briefly after a swipe up.
     @State private var captionsNotice: String?
@@ -1550,7 +1554,10 @@ struct AppleTVLivePlayerScreen: View {
     /// stream (`AppleIPTVCatchUp`); nil for live. "Watch Live" is
     /// `onSwitch(channel)`.
     let programme: AppleIPTVProgramme?
+    let channelNumber: Int?
+    let playbackRevision: Int
     let onSwitch: (AppleIPTVChannel) -> Void
+    let onLastChannel: (() -> Void)?
     let onMultiview: ((AppleIPTVChannel?) -> Void)?
     let onBack: (() -> Void)?
 
@@ -1560,11 +1567,16 @@ struct AppleTVLivePlayerScreen: View {
          guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []),
          metrics: AppleTVGuideMetrics = .standard,
          programme: AppleIPTVProgramme? = nil,
+         channelNumber: Int? = nil,
+         playbackRevision: Int = 0,
+         onLastChannel: (() -> Void)? = nil,
          onMultiview: ((AppleIPTVChannel?) -> Void)? = nil,
          onBack: (() -> Void)? = nil,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
         self.channel = channel
         self.programme = programme
+        self.channelNumber = channelNumber ?? channel.channelNumber
+        self.playbackRevision = playbackRevision
         self.coordinator = coordinator
         self.footerChannels = footerChannels
         self.alternateLineup = alternateLineup
@@ -1573,6 +1585,7 @@ struct AppleTVLivePlayerScreen: View {
         self.guide = guide
         self.metrics = metrics
         self.onSwitch = onSwitch
+        self.onLastChannel = onLastChannel
         self.onMultiview = onMultiview
         self.onBack = onBack
         let audioSession = AppleAudioSessionCoordinator()
@@ -1601,6 +1614,11 @@ struct AppleTVLivePlayerScreen: View {
         onSwitch(channel)
     }
 
+    private var zapAction: ((AppleLiveZappingPolicy.Direction) -> Void)? {
+        guard programme == nil else { return nil }
+        return { direction in zap(direction) }
+    }
+
     /// The picture: the engine's surface with the overlay, or the stock
     /// player. Split out of `body` so the type-checker can still finish it.
     @ViewBuilder
@@ -1611,8 +1629,10 @@ struct AppleTVLivePlayerScreen: View {
             // The overlay owns the remote on this route: Menu closes,
             // Play/Pause toggles, the clickpad edges skip.
             AppleTransportOverlay(coordinator: coordinator, request: request,
-                                  onShowChannels: { apply(.swipeDown) },
+                                  onShowChannels: { apply(.select) },
+                                  onZapChannel: zapAction,
                                   onPlaybackMenu: { playbackMenu = true },
+                                  playbackOptions: playbackOptions,
                                   isObscured: footer.isVisible, onClose: { closePlayer() },
                                   onWatchLive: watchLiveAction)
             footerOverlay
@@ -1641,6 +1661,17 @@ struct AppleTVLivePlayerScreen: View {
                         .accessibilityLabel("Watch Live, leave \(programme.title)")
                         .accessibilityIdentifier("live.watchLive")
                         .padding(.bottom, 24)
+                }
+                if programme == nil, onLastChannel != nil || previousChannel != nil {
+                    Button("Last Channel", action: recallLastChannel)
+                        .buttonStyle(AppleTVPillStyle(isSelected: false,
+                            minimumSize: AppleTVDetailMetrics.pillSize,
+                            fontSize: AppleTVDetailMetrics.pillFontSize))
+                        .focused($focus, equals: .lastChannel)
+                        .accessibilityIdentifier("live.player.lastChannel")
+                        .frame(maxWidth: .infinity)
+                        .focusSection()
+                        .padding(.bottom, 20)
                 }
                 AppleTVLiveChannelFooter(
                     channels: footerChannels,
@@ -1696,25 +1727,51 @@ struct AppleTVLivePlayerScreen: View {
                     .accessibilityLabel("Connecting to \(channel.name)")
             }
         }
+        .overlay {
+            if programme == nil {
+                AppleLiveChannelBanner(channel: channel, number: channelNumber, guide: guide)
+                    .padding(metrics.verticalSafeInset)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if showsZappingHint {
+                Text(AppleLiveZappingPolicy.remoteHint)
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black, radius: 3)
+                    .padding(metrics.verticalSafeInset)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("live.player.remoteHint")
+            }
+        }
+        .modifier(AppleLiveWatchTracking(channelID: channel.id, coordinator: coordinator,
+            revision: playbackRevision, isLive: programme == nil))
+        .task {
+            guard programme == nil, !zappingHintSeen else { return }
+            showsZappingHint = true
+            do { try await Task.sleep(for: .seconds(6)) } catch { return }
+            showsZappingHint = false
+            zappingHintSeen = true
+        }
+        .task(id: footer.isVisible) {
+            guard footer.isVisible else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            footer.reset()
+            focus = .surface
+        }
         .modifier(AppleProgrammeReminderBanner())
         .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
         .confirmationDialog("Sleep Timer", isPresented: $sleepTimerMenu) {
             AppleSleepTimerChoices(coordinator: coordinator, isLive: programme == nil)
         }
         .confirmationDialog("Playback", isPresented: $playbackMenu) {
-            Button("Sleep Timer") {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(250))
-                    guard !Task.isCancelled else { return }
-                    coordinator.sleepProgrammeEnd = guide.nowAndNext(channelID: channel.id).now?.end
-                    sleepTimerMenu = true
-                }
-            }
-            if let onMultiview { Button("Multiview") { onMultiview(nil) } }
-            Button("Captions", action: toggleCaptions)
+            playbackOptions
         }
         .onChange(of: coordinator.phase) { _, phase in
-            if phase == .playing { hasPlayed = true }
+            if phase == .playing {
+                hasPlayed = true
+                if focus == nil, !footer.isVisible { focus = .surface }
+            }
             #if DEBUG
             AppleInteractionTrace.record(.playback, "live \(channel.name) phase=\(phase) route=\(coordinator.route)")
             #endif
@@ -1734,7 +1791,7 @@ struct AppleTVLivePlayerScreen: View {
             AppleInteractionTrace.record(.focus, "live player \(value.map(String.init(describing:)) ?? "none")")
             #endif
         }
-        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")|\(onBack != nil && scenePhase == .background)") {
+        .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")|\(playbackRevision)|\(onBack != nil && scenePhase == .background)") {
             hasPlayed = false
             coordinator.stop()
             if onBack != nil && scenePhase == .background { host.teardown(); return }
@@ -1778,7 +1835,7 @@ struct AppleTVLivePlayerScreen: View {
             host.rebind()
         }
         .onAppear {
-            if footer.isVisible { focusFooter() }
+            if footer.isVisible { focusFooter() } else { focus = .surface }
         }
         #if DEBUG
         // Whether a given channel is dead changes hour to hour, so the failure
@@ -1868,7 +1925,8 @@ struct AppleTVLivePlayerScreen: View {
                 .buttonStyle(AppleTVBareButtonStyle())
                 .focused($focus, equals: .surface)
                 .accessibilityLabel("Show channels")
-                .onLongPressGesture { playbackMenu = true }
+                .accessibilityValue(channel.name)
+                .contextMenu { playbackOptions }
                 .accessibilityIdentifier("live.player.surface")
             }
 
@@ -1964,6 +2022,11 @@ struct AppleTVLivePlayerScreen: View {
         .onExitCommand { apply(.menu) }
         .onMoveCommand { direction in
             switch direction {
+            case .down where programme == nil:
+                if case .zap(let direction) = AppleLiveZappingPolicy.action(.down, infoVisible: footer.isVisible) { zap(direction) }
+            case .up where programme == nil:
+                if footer.isVisible, onLastChannel != nil || previousChannel != nil { focus = .lastChannel }
+                else if case .zap(let direction) = AppleLiveZappingPolicy.action(.up, infoVisible: footer.isVisible) { zap(direction) }
             case .down: apply(.swipeDown)
             case .up: apply(.swipeUp)
             // Left/right rewind and catch up inside what the stream really
@@ -1988,13 +2051,58 @@ struct AppleTVLivePlayerScreen: View {
         return .surface
     }
 
+    private var playbackOptions: AppleLivePlaybackOptions {
+        AppleLivePlaybackOptions(onSleepTimer: openSleepTimer,
+            onMultiview: onMultiview.map { action in { action(nil) } }, onCaptions: toggleCaptions)
+    }
+
+    private func openSleepTimer() {
+        Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            coordinator.sleepProgrammeEnd = guide.nowAndNext(channelID: channel.id).now?.end
+            sleepTimerMenu = true
+        }
+    }
+
+    private var previousChannel: AppleIPTVChannel? {
+        guard let id = watchHistory.history.previous(currentID: channel.id,
+            availableIDs: Set(footerChannels.map(\.id))) else { return nil }
+        return footerChannels.first { $0.id == id }
+    }
+
+    private func recallLastChannel() {
+        if let onLastChannel {
+            footer.reset()
+            focus = .surface
+            onLastChannel()
+            return
+        }
+        guard let previousChannel else { return }
+        switchLiveChannel(previousChannel)
+    }
+
+    private func zap(_ direction: AppleLiveZappingPolicy.Direction) {
+        guard programme == nil, !playbackMenu,
+              let id = AppleLiveZappingPolicy.target(currentID: channel.id,
+                orderedIDs: footerChannels.map(\.id), direction: direction),
+              let target = footerChannels.first(where: { $0.id == id }) else { return }
+        switchLiveChannel(target)
+    }
+
+    private func switchLiveChannel(_ target: AppleIPTVChannel) {
+        AppleInteractionTrace.record(.press, "live zap \(channel.name) → \(target.name)")
+        footer.reset()
+        focus = .surface
+        onSwitch(target)
+    }
+
     private func closePlayer() {
         if let onBack { onBack() } else { dismiss() }
     }
 
     private func apply(_ command: AppleTVLiveFooterState.Command) {
         if command == .menu, onBack != nil { closePlayer(); return }
-        if command == .swipeUp, onMultiview != nil { playbackMenu = true; return }
+        if programme != nil, command == .swipeUp, onMultiview != nil { playbackMenu = true; return }
         #if DEBUG
         AppleInteractionTrace.record(.press, "live player \(command) footer=\(footer.phase) played=\(hasPlayed)")
         #endif

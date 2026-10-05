@@ -702,7 +702,8 @@ public struct OpenStreamRootView: View {
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 settings: settingsStore,
-                openSettings: { selectedTab = .settings }
+                openSettings: { selectedTab = .settings },
+                isActive: selectedTab == .live
             )
             .appleAlignedTabTitle(tab.title, isLive: true)
         case .settings:

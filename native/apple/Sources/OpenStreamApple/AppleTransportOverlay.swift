@@ -32,8 +32,11 @@ struct AppleTransportOverlay: View {
     let coordinator: ApplePlaybackCoordinator
     let request: ApplePlaybackRequest
     let otherSources: (() -> Void)?
+    let onZapChannel: ((AppleLiveZappingPolicy.Direction) -> Void)?
+    let onLastChannel: (() -> Void)?
     let onShowChannels: (() -> Void)?
     let onPlaybackMenu: (() -> Void)?
+    let playbackOptions: AppleLivePlaybackOptions?
     /// True while another surface — the live channel panel — is drawn over the
     /// player. `allowsHitTesting(false)` is not enough on its own: the clear
     /// full-screen "Show playback controls" button stays in the accessibility
@@ -90,7 +93,10 @@ struct AppleTransportOverlay: View {
         request: ApplePlaybackRequest,
         otherSources: (() -> Void)? = nil,
         onShowChannels: (() -> Void)? = nil,
+        onZapChannel: ((AppleLiveZappingPolicy.Direction) -> Void)? = nil,
+        onLastChannel: (() -> Void)? = nil,
         onPlaybackMenu: (() -> Void)? = nil,
+        playbackOptions: AppleLivePlaybackOptions? = nil,
         isObscured: Bool = false,
         onBackgroundTap: ((_ wasHidden: Bool) -> Void)? = nil,
         onControlsVisibilityChanged: ((Bool) -> Void)? = nil,
@@ -106,7 +112,10 @@ struct AppleTransportOverlay: View {
         self.request = request
         self.otherSources = otherSources
         self.onShowChannels = onShowChannels
+        self.onZapChannel = onZapChannel
+        self.onLastChannel = onLastChannel
         self.onPlaybackMenu = onPlaybackMenu
+        self.playbackOptions = playbackOptions
         self.isObscured = isObscured
         self.onBackgroundTap = onBackgroundTap
         self.onControlsVisibilityChanged = onControlsVisibilityChanged
@@ -152,7 +161,9 @@ struct AppleTransportOverlay: View {
             // target.
             if !isObscured {
                 Button {
-                    if chrome.selectTogglesPlayback { 
+                    if onZapChannel != nil, let onShowChannels {
+                        onShowChannels()
+                    } else if chrome.selectTogglesPlayback {
                         model.togglePlayPause() 
                     } else { 
                         let wasHidden = !model.controlsVisible
@@ -172,16 +183,22 @@ struct AppleTransportOverlay: View {
                 #endif
                 .appleHoverAffordance()
                 .accessibilityLabel(chrome.selectTogglesPlayback ? "Play or pause" : "Show playback controls")
-                .accessibilityIdentifier("player.controls.show")
+                .accessibilityValue(onZapChannel == nil ? "" : request.title ?? "")
+                .accessibilityIdentifier(onZapChannel == nil ? "player.controls.show" : "live.player.surface")
                 #if os(tvOS)
                 .focused($tvFocus, equals: .surface)
-                .onLongPressGesture { onPlaybackMenu?() }
+                .contextMenu {
+                    if let playbackOptions { playbackOptions }
+                    else if let onPlaybackMenu { Button("Playback Options", action: onPlaybackMenu) }
+                }
                 .onMoveCommand { direction in
                     // The surface holds focus while the video plays, so the
                     // clickpad edges skip and a swipe down reveals the controls.
                     switch direction {
                     case .left where model.canSkip: Task { await model.skip(by: -chrome.moveSkipSeconds) }
                     case .right where model.canSkip: Task { await model.skip(by: chrome.moveSkipSeconds) }
+                    case .up where onZapChannel != nil: onZapChannel?(.next)
+                    case .down where onZapChannel != nil: onZapChannel?(.previous)
                     case .up where onPlaybackMenu != nil: onPlaybackMenu?()
                     case .down where onShowChannels != nil: onShowChannels?()
                     case .down:
@@ -212,10 +229,12 @@ struct AppleTransportOverlay: View {
             #if os(tvOS)
             // The focus engine needs the chrome mounted: a swipe down sets
             // `tvFocus` in the same update that reveals it.
-            transportChrome
+            if onZapChannel == nil {
+                transportChrome
                 .opacity(model.controlsVisible ? 1 : 0)
                 .allowsHitTesting(model.controlsVisible)
                 .accessibilityHidden(!model.controlsVisible)
+            }
             #else
             // Removed, not faded. Fading it left every button on screen as far
             // as touch and assistive technology were concerned: after the
@@ -405,6 +424,12 @@ struct AppleTransportOverlay: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("player.channels")
+            }
+            if let onLastChannel {
+                Button("Last Channel", action: onLastChannel)
+                    .buttonStyle(.plain)
+                    .frame(minWidth: AppleDesignTokens.minimumActionSize, minHeight: AppleDesignTokens.minimumActionSize)
+                    .accessibilityIdentifier("live.player.lastChannel")
             }
             Spacer(minLength: 0)
 
