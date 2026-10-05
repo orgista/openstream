@@ -7,6 +7,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
+      a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
+      sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
+      (8ed357d). Research + gap report: ~/Developer/openstream-build/specs/live-tv/gap-report-2026-10-05.md. Still open:
+      recording/DVR (your call — scheduled recording needs an always-on server), start-over, PiP on Apple TV, Xtream
+      movies/series, buffer settings, parental PIN, Live in Top Shelf/Siri, import progress UI.
+
 - [ ] **(2026-10-04) App Store submission, what's left.** App Store Connect is filled for all four platforms: name
       **oStream**, subtitle, description, keywords, promo text, support/privacy/marketing URLs, copyright "2026 Raster
       Inc", categories Entertainment + Photo & Video, content rights, age rating 16+, review notes with Apple's public
