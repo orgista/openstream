@@ -204,53 +204,15 @@ struct AppleDiscoverView: View {
                             #if DEBUG
                             let _ = AppleLaunchClock.mark("discover.hero")
                             #endif
-                            Group {
-                                #if os(macOS)
-                                // The Apple TV app's Mac hero: edge to edge
-                                // from under the toolbar, copy bottom-left.
-                                AppleHomeMacHeroCarousel(pageIDs: heroes.map(\.id), layout: macHeroLayout) { index in
-                                    featuredHero(heroes[index], mac: true)
-                                } preload: { index in
-                                    AppleHomeMacHeroPreload(item: heroItem(heroes[index].item),
-                                                            wordmark: heroWordmark(heroes[index], item: heroItem(heroes[index].item)),
-                                                            layout: macHeroLayout)
-                                }
-                                .padding(.top, -macHeroLayout.topOverlap)
-                                #elseif !os(tvOS)
-                                if usesPhoneHero {
-                                    // iPhone portrait: the Apple TV app's hero,
-                                    // edge to edge, with a cycle that can be
-                                    // swiped, jumped and held.
-                                    AppleHomePhoneHeroCarousel(pageIDs: heroes.map(\.id)) { index in
-                                        featuredHero(heroes[index], phone: true)
-                                    } preload: { index in
-                                        AppleHomePhoneHeroPreload(item: heroItem(heroes[index].item),
-                                                                  wordmark: heroWordmark(heroes[index], item: heroItem(heroes[index].item)),
-                                                                  width: viewportSize.width,
-                                                                  artHeight: phoneHeroLayout.artHeight)
-                                    }
-                                    // The art starts at the top edge of the
-                                    // screen, under the status bar and the
-                                    // title, as the Apple TV app's does; the
-                                    // bar stays transparent until the page
-                                    // scrolls, then takes its usual material.
-                                    .padding(.top, -phoneHeroLayout.topOverlap)
-                                    .padding(.bottom, -AppleHomePhoneHeroLayout.trailingOverlap)
-                                } else if usesPadHero {
-                                    padHero(heroes)
-                                } else {
-                                    rotatingHero(heroes)
-                                }
-                                #else
-                                // The Apple TV app's hero: Resume/Play, My
-                                // List and Details, pages that cycle, hold
-                                // while focused and turn with the remote.
-                                AppleHomeTVHeroCarousel(pages: heroes.map(heroPageArt), slots: heroPageSlots) { shown, wordmarkFailed, context in
-                                    featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
-                                                 wordmarkFailed: wordmarkFailed, tv: context)
-                                }
-                                .padding(.horizontal, heroHorizontalPadding)
-                                #endif
+                            AppleHomeHeroCarousel(
+                                pageIDs: heroes.map(\.id), items: heroes.map { heroItem($0.item) },
+                                wordmarks: heroes.map { heroWordmark($0, item: heroItem($0.item)) },
+                                viewportSize: viewportSize, phoneLayout: phoneHeroLayout,
+                                wideLayout: usesPadHero ? padHeroLayout : macHeroLayout
+                            ) { index, failed, mode, count, shown, tv in
+                                featuredHero(heroes[index], rotationCount: count, rotationIndex: shown,
+                                    wordmarkFailed: failed, phone: mode == .phone, mac: mode == .mac,
+                                    pad: mode == .pad, tv: tv)
                             }
                             .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
                                 // What the cache already knows draws at once;
@@ -294,6 +256,9 @@ struct AppleDiscoverView: View {
                     .environment(\.appleDiscoverRows, discoverRowStyle)
                 }
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+                #if os(iOS)
+                .refreshable { await refreshContent() }
+                #endif
                 #if DEBUG
                 .scrollPosition($reviewScrollPosition)
                 #endif
@@ -819,7 +784,7 @@ struct AppleDiscoverView: View {
         case .library:
             AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
                 sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings,
-                tabToolbar: tabToolbarContext)
+                tabToolbar: tabToolbarContext, opensFullList: false)
                 .accessibilityIdentifier("home.your-library")
         case .mediaServer(let id):
             if let shelf = mediaServerLibrary.shelves.first(where: { $0.id == id }) {
@@ -979,61 +944,6 @@ struct AppleDiscoverView: View {
         )
     }
 
-    /// The iPad, either way up (N20): the Mac's hero, edge to edge from the
-    /// top of the screen under the status bar and the floating tab bar, with
-    /// the iPhone's swipeable cycle and its dots centred at the bottom.
-    @ViewBuilder
-    private func padHero(_ heroes: [IndexedCatalogItem]) -> some View {
-        #if os(iOS)
-        AppleHomePhoneHeroCarousel(pageIDs: heroes.map(\.id),
-                                   dotsCentreInset: AppleMacHeroLayout.padDotsCentreInset) { index in
-            featuredHero(heroes[index], pad: true)
-        } preload: { index in
-            let item = heroItem(heroes[index].item)
-            AppleHomeMacHeroPreload(item: item, wordmark: heroWordmark(heroes[index], item: item),
-                                    layout: padHeroLayout)
-        }
-        .padding(.top, -padHeroLayout.topOverlap)
-        #else
-        rotatingHero(heroes)
-        #endif
-    }
-
-    /// A phone on its side, Vision Pro and the iPad at the accessibility text
-    /// sizes: the page the rotation clock picks, held until that page's art
-    /// is ready (`AppleHeroPageGate`).
-    private func rotatingHero(_ heroes: [IndexedCatalogItem]) -> some View {
-        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
-            if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
-                AppleHeroPageGate(pages: heroes.map(heroPageArt), requested: index, slots: heroPageSlots) { shown, wordmarkFailed in
-                    featuredHero(heroes[shown], rotationCount: heroes.count, rotationIndex: shown,
-                                 wordmarkFailed: wordmarkFailed)
-                }
-                .padding(.horizontal, heroHorizontalPadding)
-            }
-        }
-    }
-
-    /// Where `featuredHero` draws a page's backdrop and wordmark.
-    private var heroPageSlots: AppleHeroPageSlots {
-        #if os(tvOS)
-        AppleHeroPageSlots(
-            backdropWidth: AppleTVBillboardMetrics.screenSize.width,
-            backdropHeight: AppleTVBillboardMetrics.artHeight,
-            wordmark: CGSize(width: AppleTVBillboardMetrics.copyColumnWidth * 0.62,
-                             height: AppleTVBillboardMetrics.titleFontSize * 2.2)
-        )
-        #else
-        AppleHeroPageSlots(
-            backdropWidth: nil,
-            backdropHeight: dynamicTypeSize.isAccessibilitySize
-                ? AppleFeaturedHeroMetrics.accessibilityArtHeight
-                : AppleFeaturedHeroMetrics.artHeight(viewport: viewportSize),
-            wordmark: AppleFeaturedHeroMetrics.wordmarkSize(viewport: viewportSize)
-        )
-        #endif
-    }
-
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
     /// explicit `return`, which would switch the builder off anyway.
     private func featuredHero(
@@ -1061,44 +971,11 @@ struct AppleDiscoverView: View {
             mac: mac || pad ? .init(layout: pad ? padHeroLayout : macHeroLayout) : nil,
             tv: tv.map { .init(cycle: $0.cycle) }
         ) { button, perform in
-            #if os(macOS)
-            if mac {
-                AppleHomeMacHeroActions(
-                    button: button,
-                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    onPlay: perform,
-                    onToggleList: { toggleHeroInList(value) }
-                )
-            } else {
-                featuredActions(value, button: button, onPlay: perform)
-            }
-            #elseif os(tvOS)
-            if let tv {
-                AppleHomeTVHeroActions(
-                    button: button,
-                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    focus: tv.focus,
-                    pagingEnabled: tv.pagingEnabled,
-                    willOpenPage: tv.willOpenPage,
-                    onPlay: perform,
-                    onToggleList: { toggleHeroInList(value) },
-                    onDetails: { selectHero(value, autoPlay: false) }
-                )
-            } else {
-                featuredActions(value, button: button, onPlay: perform)
-            }
-            #else
-            if phone || pad {
-                AppleHomePhoneHeroActions(
-                    button: button,
-                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    onPlay: perform,
-                    onToggleList: { toggleHeroInList(value) }
-                )
-            } else {
-                featuredActions(value, button: button, onPlay: perform)
-            }
-            #endif
+            AppleHomeHeroActions(mode: phone ? .phone : pad ? .pad : mac ? .mac : tv != nil ? .tv : .rotating,
+                viewportSize: viewportSize, button: button,
+                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false, tv: tv,
+                onPlay: perform, onToggleList: { toggleHeroInList(value) },
+                onDetails: { selectHero(value, autoPlay: false) })
         }
     }
 
@@ -1117,52 +994,30 @@ struct AppleDiscoverView: View {
     /// and the Mac. The iPad, a phone on its side, Apple TV and Vision Pro keep
     /// their own rows.
     private var discoverRowStyle: AppleDiscoverRowStyle? {
-        #if os(macOS)
-        .mac(contentWidth: macHeroLayout.contentWidth, inset: macHeroLayout.horizontalPadding)
-        #else
-        usesPhoneHero ? .phone : nil
-        #endif
+        AppleHomePresentationPolicy.rows(hero: heroPresentation,
+            width: macHeroLayout.contentWidth, inset: macHeroLayout.horizontalPadding)
     }
 
     /// Discover's hero on an iPad, either way up (N20): the Mac's full-bleed
     /// hero. The accessibility text sizes keep the featured hero, which
     /// moves the copy under a shorter still instead of over it.
     private var usesPadHero: Bool {
-        #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad && !dynamicTypeSize.isAccessibilitySize
-        #else
-        false
-        #endif
+        heroPresentation == .pad
     }
 
     /// Discover's hero on an iPhone held upright. The iPad has its own; a
     /// phone on its side and every other platform keep the featured hero.
     private var usesPhoneHero: Bool {
-        #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone
-            && horizontalSizeClass == .compact
-            && !AppleDetailMetrics.isLandscapeLayout(viewport: viewportSize)
-        #else
-        false
-        #endif
+        heroPresentation == .phone
+    }
+
+    private var heroPresentation: AppleHomePresentationPolicy.Hero {
+        AppleHomeHeroCarousel<EmptyView>.presentation(viewport: viewportSize,
+            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize)
     }
 
     private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
         heroWordmarks[value.item.mediaID] ?? item.logoURL
-    }
-
-    /// The art `featuredHero` will draw for a page, for `AppleHeroPageGate`
-    /// to warm before the page is shown.
-    private func heroPageArt(_ value: IndexedCatalogItem) -> AppleHeroPageArt {
-        let item = heroItem(value.item)
-        // Every hero page draws a title (`AppleHeroTitleLockup`), so its
-        // wordmark is warmed whatever the art.
-        var wordmark = heroWordmark(value, item: item)
-        #if !os(tvOS)
-        // The accessibility layout draws the name, never the wordmark.
-        if dynamicTypeSize.isAccessibilitySize { wordmark = nil }
-        #endif
-        return AppleHeroPageArt(id: value.item.mediaID, backdrop: item.backgroundURL ?? item.posterURL, wordmark: wordmark)
     }
 
     /// The hero's own record, with any textless art that has since arrived.
@@ -1315,16 +1170,6 @@ struct AppleDiscoverView: View {
         )
     }
 
-    /// The tvOS billboard is 1920 wide inside the safe-area column, so it is
-    /// pulled out by the inset on both sides; other platforms keep the card margin.
-    private var heroHorizontalPadding: CGFloat {
-        #if os(tvOS)
-        -AppleTVChromeMetrics.horizontalSafeInset
-        #else
-        16
-        #endif
-    }
-
     #if DEBUG
     private var visionReviewItem: IndexedCatalogItem? {
         // "detail-movie" is "detail" for the first film instead of the first
@@ -1343,16 +1188,6 @@ struct AppleDiscoverView: View {
         return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source)
     }
     #endif
-
-    private func featuredActions(_ value: IndexedCatalogItem, button: AppleTitlePagePolicy.HeroButton,
-                                 onPlay: @escaping () -> Void) -> some View {
-        AppleFeaturedActions(
-            viewportSize: viewportSize,
-            button: button,
-            onPlay: onPlay,
-            onDetails: { selectHero(value, autoPlay: false) }
-        )
-    }
 
     private func selectHero(_ value: IndexedCatalogItem, autoPlay: Bool) {
         // Capture the tapped title outside the rotating hero. Timeline ticks
@@ -1527,16 +1362,19 @@ struct AppleDiscoverView: View {
     }
 
     private func refresh() {
-        Task { @MainActor in
-            isRefreshing = true
-            let started = ContinuousClock.now
-            defer { isRefreshing = false }
-            await catalogStore.refresh(sources: sourceStore.sources, force: true)
-            await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
-            applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
-            await indexCatalogs()
-            try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
-        }
+        Task { await refreshContent() }
+    }
+
+    private func refreshContent() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        let started = ContinuousClock.now
+        defer { isRefreshing = false }
+        await catalogStore.refresh(sources: sourceStore.sources, force: true)
+        await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
+        applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
+        await indexCatalogs()
+        try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
     }
 
     private func indexCatalogs() async {
@@ -2015,8 +1853,8 @@ private struct AppleCatalogSectionView: View {
     }
 
     var body: some View {
-        AppleMediaShelf(title: title, onOpen: onOpen,
-                        headingIdentifier: "discover.shelf.\(source.manifestID ?? source.id.uuidString).\(section.catalog.type).\(section.catalog.id)") {
+        AppleHomeShelf(title: title,
+                        headingIdentifier: "discover.shelf.\(source.manifestID ?? source.id.uuidString).\(section.catalog.type).\(section.catalog.id)", onOpen: onOpen) {
             ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
                 NavigationLink {
                     detail(item)
@@ -2033,7 +1871,7 @@ private struct AppleCatalogSectionView: View {
                 .accessibilityIdentifier("home.media.\(item.id)")
                 .onAppear { requestMoreIfNearEnd(item) }
             }
-        }
+        } destination: { catalogList }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.catalog.\(section.id)")
         #if os(tvOS)

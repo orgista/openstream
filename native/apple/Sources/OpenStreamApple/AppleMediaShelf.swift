@@ -6,6 +6,7 @@ struct AppleMediaShelf<Content: View>: View {
     /// Sort menu on tvOS), so nothing has to float over the billboard.
     var accessory: AnyView? = nil
     var onOpen: (() -> Void)? = nil
+    var header: AnyView? = nil
     var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
     @Environment(\.appleDiscoverRows) private var rowStyle
@@ -15,17 +16,11 @@ struct AppleMediaShelf<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: titleSpacing) {
             HStack(alignment: .center) {
-                if let onOpen {
+                if let header {
+                    header
+                } else if let onOpen {
                     Button(action: onOpen) {
-                        HStack(spacing: 8) {
-                            Text(title).font(titleFont)
-                            Image(systemName: "chevron.right")
-                                .font(rowStyle?.headerChevronFont ?? .headline.bold())
-                                .foregroundStyle(rowStyle != nil ? .secondary : .primary)
-                        }
-                        .multilineTextAlignment(.leading)
-                        .frame(minHeight: 44, alignment: .leading)
-                        .contentShape(.rect)
+                        AppleShelfHeading(title: title)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)

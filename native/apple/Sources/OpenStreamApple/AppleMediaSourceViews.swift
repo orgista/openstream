@@ -2448,6 +2448,10 @@ enum AppleSMBPlaybackRequestFactory {
 
 @MainActor
 struct AppleLibraryView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
+    @State private var padHeroLayout = AppleMacHeroLayout(platform: .pad)
     @State private var library = AppleLocalLibraryStore.shared
     @State private var viewportSize: CGSize = .zero
     @State private var selectedHero: AppleLibrarySeries?
@@ -2460,13 +2464,8 @@ struct AppleLibraryView: View {
     /// The same hero geometry as Discover's (`AppleMacHeroLayout`).
     @State private var macHeroLayout = AppleMacHeroLayout()
     #endif
-    #if os(tvOS)
     @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
-    #else
-    /// Newest first, fixed. The Sort menu went from every toolbar (owner,
-    /// 2026-09-24: "don't need it"); Apple TV keeps its glyph on the first
-    /// shelf's header line.
-    private let sort = AppleLibrarySort.added
+    #if !os(tvOS)
     @State private var showsSearch = false
     #endif
     let catalogStore: AppleCatalogStore
@@ -2479,10 +2478,8 @@ struct AppleLibraryView: View {
 
     #if os(tvOS)
     private let sectionSpacing: CGFloat = AppleTVBillboardMetrics.sectionSpacing
-    private let heroHorizontalPadding: CGFloat = -AppleTVChromeMetrics.horizontalSafeInset
     #else
-    private let sectionSpacing: CGFloat = 30
-    private let heroHorizontalPadding: CGFloat = 16
+    private let sectionSpacing: CGFloat = 32
     #endif
 
     /// Nothing at all to draw: no titles, nothing in progress, no hero.
@@ -2523,7 +2520,15 @@ struct AppleLibraryView: View {
         #if !os(tvOS)
         // The same Search and Refresh as Discover, in the empty state too.
         .toolbar {
-            AppleTabToolbar(tab: .library, isRefreshing: library.isLoading,
+            ToolbarItem(placement: libraryToolbarPlacement) {
+                Menu {
+                    Picker("Sort", selection: $sort) {
+                        ForEach(AppleLibrarySort.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                } label: { Label("Sort library", systemImage: "arrow.up.arrow.down") }
+                .accessibilityIdentifier("library.sort")
+            }
+            AppleTabToolbar(tab: .library, isRefreshing: library.isLoading || AppleXtreamLibraryStore.shared.isLoading,
                             onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
         }
         #if os(macOS)
@@ -2552,40 +2557,72 @@ struct AppleLibraryView: View {
         .appleTraceScreen("library", detail: "\(groups.count) titles, loading=\(library.isLoading)")
     }
 
-    /// Extracted from `libraryScroll` because the whole scroll body stopped
-    /// type-checking on visionOS — "unable to type-check this expression in
-    /// reasonable time", which is what had kept that target from building at all
-    /// (2026-09-17). The visionOS branches add enough overloads to tip an
-    /// expression the other platforms still managed. Same shape, one level of
-    /// nesting moved out.
-    @ViewBuilder
-    private func rotatingHero(_ heroes: [AppleLibrarySeries]) -> some View {
-        TimelineView(.periodic(from: .now, by: AppleHeroRotation.interval)) { context in
-            if let index = AppleHeroRotation.index(at: context.date, count: heroes.count) {
-                let featured = heroes[index]
-                let item = heroItem(featured)
-                // The wordmark was never passed. `AppleFeaturedHero.wordmark`
-                // defaults to nil, so `AppleTVBillboardTitleTreatment` could
-                // only ever answer `.text` here, which is exactly what the
-                // owner saw on the Apple TV Library hero (2026-09-20).
-                AppleFeaturedHero(
-                    item: item,
-                    viewportSize: viewportSize,
-                    wordmark: item.logoURL,
-                    rotationCount: heroes.count,
-                    rotationIndex: index
-                ) {
-                    AppleFeaturedActions(
-                        viewportSize: viewportSize,
-                        button: heroButton(featured, item: item),
-                        onPlay: { selectHero(featured, autoPlay: true) },
-                        onDetails: { selectHero(featured, autoPlay: false) }
-                    )
-                }
-                .padding(.horizontal, heroHorizontalPadding)
-            }
+    private var heroPresentation: AppleHomePresentationPolicy.Hero {
+        AppleHomeHeroCarousel<EmptyView>.presentation(viewport: viewportSize,
+            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize)
+    }
+
+    private var rowStyle: AppleDiscoverRowStyle? {
+        #if os(macOS)
+        AppleHomePresentationPolicy.rows(hero: heroPresentation,
+            width: macHeroLayout.contentWidth, inset: macHeroLayout.horizontalPadding)
+        #else
+        AppleHomePresentationPolicy.rows(hero: heroPresentation, width: viewportSize.width, inset: 16)
+        #endif
+    }
+
+    private func homeHero(_ heroes: [AppleLibrarySeries]) -> some View {
+        #if os(macOS)
+        let wideLayout = macHeroLayout
+        #else
+        let wideLayout = padHeroLayout
+        #endif
+        return AppleHomeHeroCarousel(pageIDs: heroes.map(\.id), items: heroes.map(heroItem),
+            wordmarks: heroes.map { heroItem($0).logoURL }, viewportSize: viewportSize,
+            phoneLayout: phoneHeroLayout, wideLayout: wideLayout) { index, failed, mode, count, shown, tv in
+            heroPage(heroes[index], mode: mode, failed: failed, count: count, index: shown, tv: tv)
         }
         .task(id: heroUpgradeIdentity(heroes)) { await upgradeHeroArtwork(heroes) }
+    }
+
+    private func heroPage(_ group: AppleLibrarySeries, mode: AppleHomePresentationPolicy.Hero,
+                          failed: Bool, count: Int, index: Int, tv: AppleHomeTVHeroContext?) -> some View {
+        let item = heroItem(group)
+        let recordID = group.items.first.map(library.playbackID) ?? group.id
+        let listID = group.items.first.map { AppleMediaIngestion.catalogRecord(instanceID: $0.sourceID, item: item).id }
+        let isInList = listID.flatMap { mediaIndex.record(id: $0) }?.isFavorite ?? false
+        return AppleHomeBillboard(item: item, sources: sourceStore.sources, progressID: recordID,
+            preferredSourceID: group.items.first?.sourceID ?? AppleSource.ID(),
+            onPlay: { selectHero(group, autoPlay: true) }, onOpenDetails: { selectHero(group, autoPlay: false) },
+            settings: settings, viewportSize: viewportSize, wordmark: failed ? nil : item.logoURL,
+            rotationCount: count, rotationIndex: index,
+            phone: mode == .phone ? .init(artHeight: phoneHeroLayout.artHeight, copyFadeLine: phoneHeroLayout.topInset) : nil,
+            mac: mode == .mac || mode == .pad ? .init(layout: wideHeroLayout) : nil,
+            tv: tv.map { .init(cycle: $0.cycle) }, libraryButton: heroButton(group, item: item)
+        ) { button, perform in
+            AppleHomeHeroActions(mode: mode, viewportSize: viewportSize, button: button,
+                isInList: isInList, tv: tv, onPlay: perform,
+                onToggleList: { toggleList(group) }, onDetails: { selectHero(group, autoPlay: false) })
+        }
+    }
+
+    private var wideHeroLayout: AppleMacHeroLayout {
+        #if os(macOS)
+        macHeroLayout
+        #else
+        padHeroLayout
+        #endif
+    }
+
+    private func toggleList(_ group: AppleLibrarySeries) {
+        guard let file = group.items.first,
+              let source = library.sources.first(where: { $0.id == file.sourceID }) else { return }
+        let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: library.catalogItem(for: group))
+        Task {
+            let favorite = mediaIndex.record(id: record.id)?.isFavorite ?? false
+            if mediaIndex.record(id: record.id) == nil { try? await mediaIndex.upsert(record) }
+            try? await mediaIndex.setFavorite(!favorite, recordID: record.id)
+        }
     }
 
     /// Play or Resume from the file on disk, whatever the catalog sources say.
@@ -2598,50 +2635,6 @@ struct AppleLibraryView: View {
                 item: item, sources: sourceStore.sources, hasLocalGroup: true),
             trailer: .none))
     }
-
-    #if os(macOS)
-    /// Discover's Mac hero, page for page: the same carousel, billboard,
-    /// geometry and trailer (owner, 2026-09-24: Library's was an inset
-    /// rounded card with margins). Runs under the toolbar to the window's
-    /// top edge.
-    private func macHero(_ heroes: [AppleLibrarySeries]) -> some View {
-        AppleHomeMacHeroCarousel(pageIDs: heroes.map(\.id), layout: macHeroLayout) { index in
-            macHeroPage(heroes[index], index: index, count: heroes.count)
-        } preload: { index in
-            let item = heroItem(heroes[index])
-            AppleHomeMacHeroPreload(item: item, wordmark: item.logoURL, layout: macHeroLayout)
-        }
-        .padding(.top, -macHeroLayout.topOverlap)
-        .task(id: heroUpgradeIdentity(heroes)) { await upgradeHeroArtwork(heroes) }
-    }
-
-    private func macHeroPage(_ featured: AppleLibrarySeries, index: Int, count: Int) -> some View {
-        let item = heroItem(featured)
-        // The file's own record: what its title page resumes and saves.
-        let recordID = featured.items.first.map(library.playbackID)
-        let isInList = recordID.flatMap { mediaIndex.record(id: $0) }.map(\.isFavorite)
-        return AppleHomeBillboard(
-            item: item,
-            sources: sourceStore.sources,
-            progressID: recordID ?? featured.id,
-            preferredSourceID: featured.items.first?.sourceID ?? AppleSource.ID(),
-            onPlay: { selectHero(featured, autoPlay: true) },
-            onOpenDetails: { selectHero(featured, autoPlay: false) },
-            settings: settings,
-            viewportSize: viewportSize,
-            wordmark: item.logoURL,
-            rotationCount: count,
-            rotationIndex: index,
-            mac: .init(layout: macHeroLayout),
-            libraryButton: heroButton(featured, item: item)
-        ) { button, perform in
-            AppleHomeMacHeroActions(button: button, isInList: isInList, onPlay: perform) {
-                guard let recordID, let isInList else { return }
-                Task { try? await mediaIndex.setFavorite(!isInList, recordID: recordID) }
-            }
-        }
-    }
-    #endif
 
     /// The hero's own record, with any textless art that has since arrived.
     private func heroItem(_ group: AppleLibrarySeries) -> AppleCatalogItem {
@@ -2687,9 +2680,8 @@ struct AppleLibraryView: View {
         showsSelectedHero = true
     }
 
-    /// The per-source, per-kind shelves. Extracted for the same reason as
-    /// `rotatingHero`: two nested `ForEach`es carrying four `let` bindings and a
-    /// closure were more than the visionOS type-checker would finish.
+    /// The per-source, per-kind shelves, kept separate from the scroll body
+    /// so every platform can type-check each section independently.
     private var sourceShelves: some View {
         // Once, not once per shelf: it filters every group per source.
         let accessory = accessoryShelf
@@ -2717,11 +2709,16 @@ struct AppleLibraryView: View {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 let heroes = library.featuredCandidates
                 if !heroes.isEmpty {
-                    #if os(macOS)
-                    macHero(heroes)
-                    #else
-                    rotatingHero(heroes)
-                    #endif
+                    homeHero(heroes)
+                } else {
+                    let providerHeroes = AppleHeroRotation.candidates(
+                        AppleXtreamLibraryStore.shared.shelves.flatMap(\.preview), id: \.id,
+                        hasBackdrop: AppleHeroRotation.hasBackdrop)
+                    if !providerHeroes.isEmpty {
+                        AppleXtreamLibraryHero(items: providerHeroes, sourceStore: sourceStore, mediaIndex: mediaIndex,
+                            settings: settings, openSettings: openSettings, viewportSize: viewportSize,
+                            phoneLayout: phoneHeroLayout, wideLayout: wideHeroLayout)
+                    }
                 }
                 if let error = library.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle").padding(.horizontal, 16)
@@ -2729,13 +2726,15 @@ struct AppleLibraryView: View {
                 let resumable = library.continueWatching
                 if !resumable.isEmpty { shelf("Continue Watching", resumable, progress: true) }
                 sourceShelves
-                AppleXtreamLibrarySections(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
-                if !groups.isEmpty { shelf("Recently Added", library.sorted(.added).prefix(24).map { $0 }) }
-                if library.isLoading && groups.isEmpty {
+                AppleXtreamLibrarySections(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, accessory: accessoryShelf == nil ? sortAccessory : nil)
+                if !groups.isEmpty { shelf("Recently Added", library.sorted(.added), previewLimit: 24) }
+                if (library.isLoading || AppleXtreamLibraryStore.shared.isLoading) && groups.isEmpty
+                    && AppleXtreamLibraryStore.shared.shelves.isEmpty {
                     AppleSourceLoadingState()
                         .appleCentredInViewport(viewportSize)
                 }
             }
+            .environment(\.appleDiscoverRows, rowStyle)
             #if os(tvOS)
             .padding(.bottom, AppleTVBillboardMetrics.contentBottomInset)
             #else
@@ -2743,7 +2742,17 @@ struct AppleLibraryView: View {
             #endif
         }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
-        #if os(macOS)
+        #if os(iOS)
+        .onScrollGeometryChange(for: AppleHomePhoneHeroLayout.self) { geometry in
+            AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                topInset: geometry.contentInsets.top, bottomInset: geometry.contentInsets.bottom)
+        } action: { _, layout in phoneHeroLayout = layout }
+        .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
+            AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
+                windowHeight: geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
+                topInset: geometry.contentInsets.top, platform: .pad)
+        } action: { _, layout in padHeroLayout = layout }
+        #elseif os(macOS)
         .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
             AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
                                windowHeight: geometry.containerSize.height
@@ -2770,10 +2779,10 @@ struct AppleLibraryView: View {
         await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings)
         await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore, force: true)
     }
-    private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil) -> some View {
+    private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil, previewLimit: Int? = nil) -> some View {
         AppleLocalTitleShelf(title: title, groups: groups, sourceStore: sourceStore,
             mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, tabToolbar: titlePageToolbar,
-            showsProgress: progress, accessory: accessory)
+            showsProgress: progress, accessory: accessory, previewLimit: previewLimit)
     }
 
     /// The first kind a source actually has, so the Sort control lands on the
@@ -2792,10 +2801,6 @@ struct AppleLibraryView: View {
         guard let pick = AppleLibraryShelfLayout.accessoryShelf(sourcesWithKinds: perSource),
               let kind = AppleLibraryTitle.Kind(rawValue: pick.kind) else { return nil }
         return (pick.sourceIndex, kind)
-    }
-
-    private func firstKind(in local: [AppleLibrarySeries]) -> AppleLibraryTitle.Kind? {
-        [AppleLibraryTitle.Kind.movie, .show, .other].first { kind in local.contains { $0.parsed.kind == kind } }
     }
 
     /// tvOS only: the Sort menu as a bare glyph on the first shelf's header
@@ -2831,9 +2836,17 @@ struct AppleLibraryView: View {
     }
 
     #if !os(tvOS)
+    private var libraryToolbarPlacement: ToolbarItemPlacement {
+        #if os(visionOS)
+        .bottomOrnament
+        #else
+        .primaryAction
+        #endif
+    }
+
     /// Library's Search and Refresh, for the pages pushed from here.
     private var tabToolbarContext: AppleTabToolbarContext {
-        AppleTabToolbarContext(tab: .library, isRefreshing: { library.isLoading },
+        AppleTabToolbarContext(tab: .library, isRefreshing: { library.isLoading || AppleXtreamLibraryStore.shared.isLoading },
                                onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
     }
     #endif

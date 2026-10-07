@@ -5,14 +5,22 @@ struct AppleXtreamLibrarySections: View {
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    var accessory: AnyView? = nil
+    @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
     @State private var library = AppleXtreamLibraryStore.shared
     var body: some View {
         if !library.continueWatching.isEmpty {
-            AppleMediaShelf(title: "Continue Watching") {
+            AppleHomeShelf(title: "Continue Watching", headingIdentifier: "library.xtream.continue") {
                 ForEach(library.continueWatching) { item in
                     AppleXtreamTitleLink(item: item, sourceStore: sourceStore, mediaIndex: mediaIndex,
                         settings: settings, openSettings: openSettings, showsProgress: true)
                 }
+            } destination: {
+                List(library.continueWatching) { item in
+                    AppleXtreamTitleLink(item: item, sourceStore: sourceStore, mediaIndex: mediaIndex,
+                        settings: settings, openSettings: openSettings, showsProgress: true)
+                }.navigationTitle("Continue Watching")
+                    .task { library.refreshProgress() }
             }
         }
         ForEach(library.failures.keys.sorted(by: { $0.uuidString < $1.uuidString }), id: \.self) { id in
@@ -22,20 +30,9 @@ struct AppleXtreamLibrarySections: View {
             }
         }
         ForEach(library.shelves.filter { !$0.preview.isEmpty }) { shelf in
-            AppleMediaShelf(title: shelf.title) {
-                ForEach(shelf.preview) { item in
-                    AppleXtreamTitleLink(item: item, sourceStore: sourceStore, mediaIndex: mediaIndex,
-                        settings: settings, openSettings: openSettings)
-                }
-                NavigationLink {
-                    AppleXtreamCategoryView(shelf: shelf, sourceStore: sourceStore, mediaIndex: mediaIndex,
-                        settings: settings, openSettings: openSettings)
-                } label: { Text("See All").frame(minWidth: 120, minHeight: 60) }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("library.xtream.category.\(shelf.id)")
-            }
+            AppleXtreamLibraryShelf(shelf: shelf, sort: sort, accessory: shelf.id == library.shelves.first(where: { !$0.preview.isEmpty })?.id ? accessory : nil, sourceStore: sourceStore,
+                mediaIndex: mediaIndex, settings: settings, openSettings: openSettings)
         }
-        if library.isLoading { ProgressView().accessibilityLabel("Loading your provider’s movies and series") }
     }
 }
 
@@ -47,25 +44,59 @@ struct AppleXtreamTitleLink: View {
     let openSettings: () -> Void
     var showsProgress = false
     @Environment(\.appleTabToolbar) private var tabToolbar
+    @State private var showsDetails = false
+    private var record: AppleMediaRecord? {
+        guard let reference = AppleXtreamReference.parse(item.mediaID) else { return nil }
+        return AppleMediaIngestion.catalogRecord(instanceID: reference.sourceID, item: item)
+    }
+    private var isInList: Bool { record.flatMap { mediaIndex.record(id: $0.id) }?.isFavorite ?? false }
+
     var body: some View {
-        if let reference = AppleXtreamReference.parse(item.mediaID), let source = AppleXtreamLibraryStore.shared.source(reference) {
-            NavigationLink {
-                AppleCatalogItemDetailView(item: item, source: source, mediaIndex: mediaIndex,
-                    playbackSources: sourceStore.sources, metadataConfiguration: settings.tmdbConfiguration,
-                    gatewayConfig: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
-                    openSettings: openSettings, tabToolbar: tabToolbar)
-            } label: {
-                AppleCatalogCard(item: item, progress: progress)
+        Group {
+            if let reference = AppleXtreamReference.parse(item.mediaID), let source = AppleXtreamLibraryStore.shared.source(reference) {
+                Group {
+                    if showsProgress, let record {
+                        AppleContinueWatchingTile(item: item,
+                            info: .live(type: item.type, recordID: record.id, recordProgress: nil, store: ApplePlaybackStore()),
+                            isInList: isInList, onOpenTitle: { showsDetails = true }, onToggleList: toggleList, onRemove: remove) {
+                            detail(source)
+                        }
+                    } else {
+                        NavigationLink { detail(source) } label: { AppleCatalogCard(item: item) }
+
+                    }
+                }
+                .navigationDestination(isPresented: $showsDetails) { detail(source) }
+
             }
-            .appleCatalogCardButtonStyle()
-            .accessibilityIdentifier("library.xtream.title.\(item.name)")
+        }
+        .appleCatalogCardButtonStyle()
+        .accessibilityIdentifier("library.xtream.title.\(item.name)")
+    }
+
+    private func detail(_ source: AppleSource) -> some View {
+        AppleCatalogItemDetailView(item: item, source: source, mediaIndex: mediaIndex,
+            playbackSources: sourceStore.sources, metadataConfiguration: settings.tmdbConfiguration,
+            gatewayConfig: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
+            openSettings: openSettings, tabToolbar: tabToolbar)
+            .environment(\.appleDiscoverRows, nil)
+    }
+
+    private func toggleList() {
+        guard let record else { return }
+        Task {
+            let favorite = mediaIndex.record(id: record.id)?.isFavorite ?? false
+            if mediaIndex.record(id: record.id) == nil { try? await mediaIndex.upsert(record) }
+            try? await mediaIndex.setFavorite(!favorite, recordID: record.id)
         }
     }
-    private var progress: Double? {
-        guard showsProgress, let reference = AppleXtreamReference.parse(item.mediaID), let saved = ApplePlaybackStore().progress(for: AppleMediaIngestion.catalogRecord(instanceID:
-            reference.sourceID, item: item).id) else { return nil }
-        return AppleWatchProgress.fraction(position: saved.position, duration: saved.duration)
+
+    private func remove() {
+        guard let record else { return }
+        ApplePlaybackStore().removeFromContinueWatching(mediaID: record.id)
+        AppleXtreamLibraryStore.shared.refreshProgress()
     }
+
 }
 
 struct AppleXtreamCategoryView: View {
@@ -74,6 +105,7 @@ struct AppleXtreamCategoryView: View {
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
     let openSettings: () -> Void
+    @AppStorage("openstream.library.sort") private var sort = AppleLibrarySort.added
     @State private var limit = AppleXtreamLibraryPolicy.pageSize
     @ScaledMetric(relativeTo: .body) private var columnWidth = 150.0
 
@@ -86,14 +118,19 @@ struct AppleXtreamCategoryView: View {
         return [GridItem(.adaptive(minimum: minimum, maximum: max(220, minimum)))]
         #endif
     }
+    private var displayedItems: [AppleCatalogItem] {
+        let references = sort == .added ? Array(shelf.references.prefix(limit)) : shelf.references
+        return Array(AppleLibraryCatalogSort.sorted(references.compactMap {
+            AppleXtreamLibraryStore.shared.catalog($0)
+        }, by: sort).prefix(limit))
+    }
+
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 20) {
-                ForEach(Array(shelf.references.prefix(limit)), id: \.self) { reference in
-                    if let item = AppleXtreamLibraryStore.shared.catalog(reference) {
+                ForEach(displayedItems) { item in
                         AppleXtreamTitleLink(item: item, sourceStore: sourceStore, mediaIndex: mediaIndex,
                             settings: settings, openSettings: openSettings)
-                    }
                 }
             }.padding()
             if limit < shelf.references.count {

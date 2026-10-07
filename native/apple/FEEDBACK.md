@@ -4499,3 +4499,9 @@ oStream shows download bytes and channel/programme counts while importing Live T
 Settings › Restrictions now has a four-digit device-only PIN, locked groups and channels, optional Settings locking, and an option to hide locked channels. Live playback, channel switching, Multiview, channel links, catch-up and Start Over share the PIN check. A correct PIN unlocks the session until backgrounding. Forgot PIN asks for confirmation and clears the PIN and locked lists.
 
 Synthetic fixture checks covered both keypads, wrong-PIN rejection, locked-channel links, import cancellation, and iPhone settings/background/guide hiding. The full suite passed: 2,841 tests in 361 suites. Simulator and unsigned device Release builds, SDK floors and the final no-add-ons scan passed; screenshots are in ~/Developer/openstream-build/verification/pin-import/. Test sources and restrictions were removed, both simulators and the local server stopped. No commits or uploads.
+
+
+## 2026-10-06 — Library and Discover use the same presentation
+oStream’s Library now uses Discover’s platform-specific hero, shelves and Continue Watching cards. Shelf headings open the full list, including provider categories. Library keeps its own titles and order. Sort is saved and available everywhere; Discover now supports pull-to-refresh on iPhone and iPad. Phone and Mac keep Discover’s ⋯ menus; the other platforms keep its context menus.
+
+All five requested builds passed on Dev-Mini, along with 2,852 tests in 363 suites, SDK floors and the no-add-ons Release check. iPhone and Apple TV comparisons are in ~/Developer/openstream-build/verification/library-like-discover/. They show local rails and Library’s hero/resume cards. The unsigned app could not import the fixture add-on because Keychain access requires an entitlement, so Discover’s populated hero still needs a visual comparison. Original simulator data was restored and temporary fixture folders removed. No commits or uploads.

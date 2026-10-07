@@ -238,7 +238,13 @@ final class AppleLocalLibraryStore {
         return value
     }
     var continueWatching: [AppleLibrarySeries] {
-        groups.filter { progress[$0.id] != nil }.sorted { progress[$0.id]!.updatedAt > progress[$1.id]!.updatedAt }
+        let store = ApplePlaybackStore()
+        return groups.filter { group in
+            progress[group.id] != nil && group.items.contains { file in
+                store.progress(for: playbackID(file))?.resumePosition != nil
+                    && !store.isRemovedFromContinueWatching(mediaID: playbackID(file))
+            }
+        }.sorted { progress[$0.id]!.updatedAt > progress[$1.id]!.updatedAt }
     }
     func refreshProgress() {
         let store = ApplePlaybackStore()
@@ -508,37 +514,55 @@ struct AppleLocalTitleShelf: View {
     let tabToolbar: AppleTabToolbarContext?
     var showsProgress = false
     var accessory: AnyView? = nil
+    var previewLimit: Int? = nil
+    var opensFullList = true
     @State private var library = AppleLocalLibraryStore.shared
+    @FocusState private var focusedItemID: String?
+
     var body: some View {
-        AppleMediaShelf(title: title, accessory: accessory) {
-            ForEach(groups) { group in
+        AppleHomeShelf(title: title, accessory: accessory, headingIdentifier: "library.shelf.\(title)", opensFullList: opensFullList) {
+            ForEach(Array(groups.prefix(previewLimit ?? groups.count))) { group in
+                tile(group).focused($focusedItemID, equals: group.id)
+            }
+        } destination: {
+            List(groups) { group in
                 NavigationLink {
-                    AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings,
-                                               openSettings: openSettings, tabToolbar: tabToolbar)
-                        .environment(\.appleDiscoverRows, nil)
+                    AppleLocalTitleDestination(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex,
+                        settings: settings, openSettings: openSettings, tabToolbar: tabToolbar)
                 } label: {
-                    // The bar goes on the artwork, as on Discover's Continue
-                    // Watching. On Apple TV a linear ProgressView in a card
-                    // label drew as a dot under the poster (N41 survey); on an
-                    // iPad in landscape one under the title and year sat just
-                    // below the screen edge (N60 walk), where portrait still
-                    // had room for it. On the artwork it is in view with the
-                    // poster, and a progress card drops its year line.
-                    AppleCatalogCard(item: library.catalogItem(for: group), progress: progressFraction(group))
-                }.appleCatalogCardButtonStyle().accessibilityIdentifier("library.title.\(group.parsed.title)")
-                .task(id: group.id) { await library.resolve(group, sourceStore: sourceStore, settings: settings) }
+                    let item = library.catalogItem(for: group)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name).font(.headline)
+                        if let year = item.releaseInfo { Text(year).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+                .navigationTitle(title)
+                .scrollIndicators(.never)
+                .task(id: groups.map(\.id)) { library.refreshProgress() }
+        }
+        .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
+        #if os(tvOS)
+        .defaultFocus($focusedItemID, groups.first?.id)
+        .task(id: focusedItemID) {
+            guard let group = groups.first(where: { $0.id == focusedItemID }) else { return }
+            try? await Task.sleep(for: AppleMetadataPrefetcher.focusDwell)
+            guard !Task.isCancelled else { return }
+            await library.resolve(group, sourceStore: sourceStore, settings: settings)
+            let item = library.catalogItem(for: group)
+            if let target = AppleMetadataPrefetcher.detailTarget(type: item.type, mediaID: item.mediaID) {
+                await AppleMetadataPrefetcher.warmDetail(target, sources: sourceStore.sources,
+                    preferredSourceID: group.items.first?.sourceID, configuration: settings.tmdbConfiguration)
             }
         }
-        // The shelf brings its own artwork lookup, so a Library shelf and
-        // Discover's Your Library row resolve a missing poster the same way
-        // wherever they are drawn.
-        .environment(\.appleTMDBConfiguration, settings.tmdbConfiguration)
+        #endif
     }
 
-    private func progressFraction(_ group: AppleLibrarySeries) -> Double? {
-        guard showsProgress, let value = library.progress[group.id] else { return nil }
-        return AppleWatchProgress.fraction(position: value.position, duration: value.duration)
+    private func tile(_ group: AppleLibrarySeries) -> some View {
+        AppleLocalLibraryTile(group: group, sourceStore: sourceStore, mediaIndex: mediaIndex,
+            settings: settings, openSettings: openSettings, tabToolbar: tabToolbar, showsProgress: showsProgress)
     }
+
 }
 
 struct AppleLocalTitleDestination: View {
