@@ -17,6 +17,15 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
       failover exists only on Apple TV, not iPhone/iPad/Mac; multiview reopens all four streams on every
       grid↔full-screen trip. Order: 1 → 4 → 2 → 5 → 3 → 6 → 8 → 9 → 7 → 10 (numbers in the review).
+      DONE a9e2594: 1 (guide fetched ≤ every 6 h, 304-aware), 4 (failover + one quick reopen on all platforms),
+      2 (200k-programme guide 25 s → 2 s). Next: 5 → 3 → 6 → 8 → 9 → 7 → 10.
+
+- [ ] **(2026-10-06) Your IPTV on DevPlus — app bug fixed (3614aaa), provider too slow tonight.** Opening a channel
+      started it twice (the saved lineup auto-started your last channel, then the link restarted it 4 s later), so
+      nothing ever played. Fixed and verified on DevPlus: one start, one connection. But CBS and FOX (East and West)
+      all arrived at ~40% of real time (≈3 s of video per 6.5 s) at 23:40, so none reached a picture. **Your check:**
+      does the same channel play right now in another player (VLC/TiviMate) on the same Wi-Fi? If yes, it's on us
+      (look at connection count / user agent); if no, it's the provider. The Mac mini can't reach the panel at all.
 
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
