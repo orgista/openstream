@@ -35,6 +35,10 @@ struct AppleIPTVGuideRobustnessTests {
         await store.refreshVisible(channelIDs: ["a"], now: now)
         let file = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
         let original = try Data(contentsOf: file)
+        let saved = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: original)
+        #expect(saved.eTag == "v1")
+        #expect(saved.lastModified == "Mon, 05 Oct 2026 12:00:00 GMT")
+        #expect(saved.fetchedAt == now)
         await store.refreshVisible(channelIDs: ["b"], now: now.addingTimeInterval(3599 * 6))
         #expect(FreshGuideProtocol.requests.withLock { $0.count } == 1)
         #expect(store.guide(for: ["b"]).allProgrammes.first?.title == "Original")
@@ -50,11 +54,46 @@ struct AppleIPTVGuideRobustnessTests {
         let requests = FreshGuideProtocol.requests.withLock { $0 }
         #expect(requests[1].value(forHTTPHeaderField: "If-None-Match") == "v1")
         #expect(requests[1].value(forHTTPHeaderField: "If-Modified-Since") == "Mon, 05 Oct 2026 12:00:00 GMT")
+        let changed = try Data(contentsOf: file)
+        await store.refreshVisible(channelIDs: ["a"], force: true, now: now.addingTimeInterval(8 * 3600))
+        #expect(try Data(contentsOf: file) == changed) // identical 200 also avoids parse/write
         // A changed configuration must fetch even while the old file was fresh.
         store.configure(xmltvURL: URL(string: "https://fixture.example/other.xml")!)
         await store.refreshVisible(channelIDs: ["a"], now: now.addingTimeInterval(7 * 3600))
-        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 4)
+        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 5)
         #expect(FreshGuideProtocol.requests.withLock { $0.last?.value(forHTTPHeaderField: "If-None-Match") } == nil)
+    }
+
+    @Test func fixedXMLTVDatesMatchTheFormerFormatters() throws {
+        let samples = [
+            "20301005090000", "20301005090000 +0000", "20301005090000 +0530",
+            "20301005090000 -0330", "20000229000000 +1400", "19691231235959 -1200",
+            "20240229000000", "21000301000000", " 20301005090000 +0200 ",
+            "19700101000000 +0000", "19000228000000 +0000", "19000229000000 +0000",
+            "20301005090000 +1245", "20301231235959 -1200",
+            "20300230090000", "20301301090000", "bad"
+        ]
+        for offset in [-20.0, -5, -5.501, -0.008333333333333333, 0.001, 0.008333333333333333, 5.5, 5.501, 20, .infinity] {
+            let withOffset = DateFormatter()
+            withOffset.dateFormat = "yyyyMMddHHmmss Z"
+            withOffset.locale = Locale(identifier: "en_US_POSIX")
+            withOffset.isLenient = false
+            let withoutOffset = DateFormatter()
+            withoutOffset.dateFormat = "yyyyMMddHHmmss"
+            withoutOffset.locale = Locale(identifier: "en_US_POSIX")
+            withoutOffset.timeZone = TimeZone(secondsFromGMT: Int((offset.isFinite ? min(14, max(-12, offset)) : 0) * 3600))
+            withoutOffset.isLenient = false
+            for sample in samples {
+                let trimmed = sample.trimmingCharacters(in: .whitespacesAndNewlines)
+                let expected = withOffset.date(from: trimmed) ?? withoutOffset.date(from: trimmed)
+                #expect(AppleIPTVGuideXMLTVParser.parseDate(sample, defaultOffsetHours: offset) == expected)
+            }
+        }
+        let xml = Data("<tv><programme channel=\"a\" start=\"20301005090000 +0000\" stop=\"20301005100000 +0000\"><title>Stable</title></programme></tv>".utf8)
+        let first = try #require(AppleIPTVGuideXMLTVParser().parse(data: xml).first)
+        let second = try #require(AppleIPTVGuideXMLTVParser().parse(data: xml).first)
+        #expect(first.id == "a|\(Int64(first.start.timeIntervalSince1970))")
+        #expect(first.id == second.id)
     }
 
     @Test func cacheExpiresByProgrammeEndAndKeepsFutureData() async throws {

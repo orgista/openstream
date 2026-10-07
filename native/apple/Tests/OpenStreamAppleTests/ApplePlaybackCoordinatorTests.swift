@@ -56,6 +56,23 @@ import Testing
         coordinator.stop()
     }
 
+    @Test func liveOpenReopensOnceBeforeTryingTheAlternate() async {
+        let engine = FakePlaybackEngine()
+        let first = ApplePlaybackRequest(url: URL(string: "https://fixture.example/dead.m3u8")!, isLive: true,
+            mediaID: "dead", sourceKind: .iptv)
+        let backup = ApplePlaybackRequest(url: URL(string: "https://fixture.example/backup.m3u8")!, isLive: true,
+            mediaID: "backup", sourceKind: .iptv)
+        engine.loadHandler = { request in
+            if request.mediaID == "dead" { throw ApplePlaybackFailure(kind: .network, message: "Fixture offline") }
+            engine.phase = .playing
+        }
+        let coordinator = ApplePlaybackCoordinator(engine: engine)
+        await coordinator.begin(first, fallbackCandidates: [backup])
+        #expect(engine.loadedRequests.map(\.mediaID) == ["dead", "dead", "backup"])
+        #expect(coordinator.phase == .playing)
+        coordinator.stop()
+    }
+
     @Test func authenticationFailureKeepsItsActionableReasonWithAlternatives() async {
         let engine = FakePlaybackEngine()
         engine.failOnLoad = .init(kind: .authentication, message: "The source rejected authentication (HTTP 403).")

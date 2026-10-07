@@ -4,6 +4,15 @@ import Testing
 
 @Suite("AppleIPTVGuideStore Tests")
 struct AppleIPTVGuideStoreTests {
+    @Test func unconditionalLoadRejects304WithoutARetainedGuide() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [UnexpectedNotModifiedGuideProtocol.self]
+        let loader = AppleIPTVGuideLoader(session: URLSession(configuration: config))
+        await #expect(throws: URLError.self) {
+            _ = try await loader.load(xmltvURL: URL(string: "https://fixture.example/unconditional.xml")!)
+        }
+    }
+
     @Test func playlistRetainsGuideURLAndProviderChannelID() throws {
         let data = Data("""
         #EXTM3U x-tvg-url="guide.xml"
@@ -41,8 +50,10 @@ struct AppleIPTVGuideStoreTests {
         let session = URLSession(configuration: config)
         let loader = AppleIPTVGuideLoader(session: session)
         
-        let store = await AppleIPTVGuideStore(loader: loader)
-        await store.configure(xmltvURL: URL(string: "https://example.com/guide.xml"))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = await AppleIPTVGuideStore(loader: loader, diskCache: AppleIPTVGuideDiskCache(directory: directory))
+        await store.configure(xmltvURL: URL(string: "https://fixture.example/guide.xml"))
         
         var requestCount = 0
         let xmlData = """
@@ -90,6 +101,17 @@ private final class QualifiedGuideURLProtocol: URLProtocol {
         """
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class UnexpectedNotModifiedGuideProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 304,
+            httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

@@ -1,6 +1,67 @@
 import Foundation
 
 final class AppleIPTVGuideXMLTVParser: NSObject, XMLParserDelegate, Sendable {
+    static func parseDate(_ value: String, defaultOffsetHours: Double = 0) -> Date? {
+        parseDate(value, defaultOffsetSeconds: defaultOffsetSeconds(hours: defaultOffsetHours))
+    }
+
+    fileprivate static func defaultOffsetSeconds(hours: Double) -> Int {
+        let clamped = hours.isFinite ? min(14, max(-12, hours)) : 0
+        let seconds = Int(clamped * 3600)
+        // The former formatter uses the fixed zone's identifier, which rounds
+        // sub-minute offsets to the nearest minute, with ties away from zero.
+        return ((abs(seconds) + 30) / 60 * 60) * (seconds < 0 ? -1 : 1)
+    }
+
+    /// XMLTV's fixed digit layout, using Gregorian civil-day arithmetic.
+    /// No Calendar or formatter allocation on the programme hot path.
+    fileprivate static func parseDate(_ value: String, defaultOffsetSeconds: Int) -> Date? {
+        let bytes = Array(value.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
+        guard bytes.count >= 14 else { return nil }
+        func digits(_ start: Int, _ count: Int) -> Int? {
+            guard start + count <= bytes.count else { return nil }
+            var result = 0
+            for index in start..<(start + count) {
+                guard bytes[index] >= 48, bytes[index] <= 57 else { return nil }
+                result = result * 10 + Int(bytes[index] - 48)
+            }
+            return result
+        }
+        guard let year = digits(0, 4), year > 0,
+              let month = digits(4, 2), (1...12).contains(month),
+              let day = digits(6, 2), day > 0,
+              let hour = digits(8, 2), hour < 24,
+              let minute = digits(10, 2), minute < 60,
+              let second = digits(12, 2), second < 60 else { return nil }
+        let leap = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
+        let monthDays: Int
+        switch month {
+        case 2: monthDays = leap ? 29 : 28
+        case 4, 6, 9, 11: monthDays = 30
+        default: monthDays = 31
+        }
+        guard day <= monthDays else { return nil }
+        var offset = defaultOffsetSeconds
+        if bytes.count > 14 {
+            var index = 14
+            while index < bytes.count, bytes[index] == 32 || bytes[index] == 9 { index += 1 }
+            guard index > 14, bytes.count == index + 5,
+                  bytes[index] == 43 || bytes[index] == 45,
+                  let offsetHour = digits(index + 1, 2), offsetHour < 24,
+                  let offsetMinute = digits(index + 3, 2), offsetMinute < 60 else { return nil }
+            offset = (offsetHour * 3600 + offsetMinute * 60) * (bytes[index] == 45 ? -1 : 1)
+        }
+        // March-based 400-year eras: 719468 days from civil origin to 1970-01-01.
+        let adjustedYear = year - (month <= 2 ? 1 : 0)
+        let era = adjustedYear / 400
+        let yearOfEra = adjustedYear - era * 400
+        let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        let days = era * 146097 + dayOfEra - 719468
+        let epoch = days * 86400 + hour * 3600 + minute * 60 + second - offset
+        return Date(timeIntervalSince1970: TimeInterval(epoch))
+    }
+
     func parse(data: Data, defaultOffsetHours: Double = 0) -> [AppleIPTVProgramme] {
         guide(data: data, defaultOffsetHours: defaultOffsetHours).allProgrammes
     }
@@ -50,38 +111,15 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
     private var currentDesc: String = ""
     private var currentCategory: String = ""
     
-    private let dateFormatterWithOffset: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMddHHmmss Z"
-        df.locale = Locale(identifier: "en_US_POSIX")
-        return df
-    }()
-    
-    private let dateFormatterNoOffset: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMddHHmmss"
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone(secondsFromGMT: 0)
-        return df
-    }()
-    
+    private let defaultOffsetSeconds: Int
+
     init(defaultOffsetHours: Double) {
+        defaultOffsetSeconds = AppleIPTVGuideXMLTVParser.defaultOffsetSeconds(hours: defaultOffsetHours)
         super.init()
-        let hours = defaultOffsetHours.isFinite ? min(14, max(-12, defaultOffsetHours)) : 0
-        dateFormatterNoOffset.timeZone = TimeZone(secondsFromGMT: Int(hours * 3600))
-        dateFormatterNoOffset.isLenient = false
-        dateFormatterWithOffset.isLenient = false
     }
 
-    private func parseDate(_ string: String) -> Date? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let d = dateFormatterWithOffset.date(from: trimmed) {
-            return d
-        }
-        if let d = dateFormatterNoOffset.date(from: trimmed) {
-            return d
-        }
-        return nil
+    private func parseDate(_ value: String) -> Date? {
+        AppleIPTVGuideXMLTVParser.parseDate(value, defaultOffsetSeconds: defaultOffsetSeconds)
     }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
@@ -137,7 +175,7 @@ private final class ParserDelegate: NSObject, XMLParserDelegate {
             guard let start = currentStart, let end = currentEnd, !currentChannel.isEmpty, end > start, !currentTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, programmes.count < AppleIPTVGuideDiskCache.maximumProgrammes else { return }
             
             let prog = AppleIPTVProgramme(
-                id: UUID().uuidString,
+                id: "\(currentChannel)|\(Int64(start.timeIntervalSince1970))",
                 channelID: currentChannel,
                 title: currentTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 subtitle: currentSubtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : currentSubtitle.trimmingCharacters(in: .whitespacesAndNewlines),

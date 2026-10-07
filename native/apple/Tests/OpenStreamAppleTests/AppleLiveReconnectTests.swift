@@ -36,8 +36,19 @@ struct AppleLiveReconnectPolicyTests {
             == .giveUp(.windowExpired))
     }
 
-    @Test func aChannelThatNeverPlayedIsNotReconnected() {
-        #expect(policy.decide(kind: .network, attemptsSoFar: 0, elapsed: .zero, hasPlayed: false)
+    @Test(arguments: [ApplePlaybackFailure.Kind.network, .timedOut, .player])
+    func aChannelThatNeverPlayedGetsOnlyOneQuickReopen(kind: ApplePlaybackFailure.Kind) {
+        #expect(policy.decide(kind: kind, attemptsSoFar: 0, elapsed: .zero, hasPlayed: false)
+            == .reconnect(attempt: 1, delay: .seconds(1)))
+        #expect(policy.decide(kind: kind, attemptsSoFar: 1, elapsed: .seconds(1), hasPlayed: false)
+            == .giveUp(.neverPlayed))
+        #expect(policy.decide(kind: kind, attemptsSoFar: 0, elapsed: .seconds(15), hasPlayed: false)
+            == .giveUp(.windowExpired))
+    }
+
+    @Test(arguments: [ApplePlaybackFailure.Kind.authentication, .unsupportedMedia, .engineUnavailable, .cancelled, .sourceEnded, .unavailable])
+    func otherOpeningFailuresSkipReopen(kind: ApplePlaybackFailure.Kind) {
+        #expect(policy.decide(kind: kind, attemptsSoFar: 0, elapsed: .zero, hasPlayed: false)
             == .giveUp(.neverPlayed))
     }
 
@@ -257,7 +268,7 @@ struct AppleLiveReconnectCoordinatorTests {
         coordinator.stop()
     }
 
-    @Test func aChannelThatNeverPlayedIsNotReconnected() async {
+    @Test func aChannelThatNeverPlayedReopensOnlyOnce() async {
         let engine = FakePlaybackEngine()
         engine.failOnLoad = .init(kind: .network, message: "refused")
         let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
@@ -267,7 +278,7 @@ struct AppleLiveReconnectCoordinatorTests {
             if case .failed = coordinator.phase { return true }
             return false
         }
-        #expect(engine.loadedRequests.count == 1)
+        #expect(engine.loadedRequests.count == 2)
         coordinator.stop()
     }
 

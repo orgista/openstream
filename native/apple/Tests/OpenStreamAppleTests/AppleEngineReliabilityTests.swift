@@ -111,8 +111,8 @@ struct AppleEngineReliabilityTests {
         coordinator.stop()
     }
 
-    @Test("Live channels and fake engines by default do not retry")
-    func liveDoesNotRetry() async {
+    @Test("Live opens retry once without stacking the engine retry")
+    func liveRetriesOnlyOnce() async {
         let engine = FakePlaybackEngine()
         engine.failOnLoad = ApplePlaybackFailure(kind: .network, message: "down")
         let coordinator = ApplePlaybackCoordinator(engine: engine)
@@ -124,7 +124,7 @@ struct AppleEngineReliabilityTests {
         live.sourceKind = .iptv
         await coordinator.begin(live)
         await waitUntil { if case .failed = coordinator.phase { true } else { false } }
-        #expect(engine.loadedRequests.count == 1)
+        #expect(engine.loadedRequests.count == 2)
         coordinator.stop()
     }
 }

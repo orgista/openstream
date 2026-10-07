@@ -339,6 +339,7 @@ struct AppleLiveTVView: View {
                 startFirstChannelIfNeeded()
             }
         }
+        .refreshable { await refreshGuide(Set(channelSnapshot.channelIDs), force: true) }
         .task(id: reloadIdentity) { await reload() }
         .task(id: "\(channelsRevision)|\(settings.guideTimeOffsets.sorted { $0.key < $1.key })|\(settings.guideChannelAssignments.sorted { $0.key < $1.key })") {
             await refreshGuide(Set(channelSnapshot.channelIDs))
@@ -484,7 +485,11 @@ struct AppleLiveTVView: View {
         return {
             guard let channel = selectedChannel else { return }
             playbackCoordinator.stop()
-            fullWindowPlayer = AppleStremioPlayerPresentation(request: channel.playbackRequest(), settings: settings)
+            let request = playbackRequest(for: channel)
+            let alternates = AppleLiveChannelAlternates.playbackCandidates(
+                for: channel, request: request, in: channels,
+                hasRecentlyFailed: { ApplePlaybackFailureHistory.shared.contains($0) })
+            fullWindowPlayer = AppleStremioPlayerPresentation(request: request, fallbackCandidates: alternates, settings: settings)
         }
         #else
         return nil
@@ -699,6 +704,10 @@ struct AppleLiveTVView: View {
     }
 
     private func refreshGuide(_ visibleIDs: Set<String>) async {
+        await refreshGuide(visibleIDs, force: false)
+    }
+
+    private func refreshGuide(_ visibleIDs: Set<String>, force: Bool) async {
         guard !visibleIDs.isEmpty else { return }
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         guideStore.channelDisplayNames = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0.name) })
@@ -722,7 +731,7 @@ struct AppleLiveTVView: View {
                     }), timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
             }
         }
-        await guideStore.refreshVisible(channelIDs: visibleIDs)
+        await guideStore.refreshVisible(channelIDs: visibleIDs, force: force)
     }
 
     private func rebuildChannelGroups() async {
@@ -1470,7 +1479,10 @@ struct AppleLiveInlinePlayer: View {
             suspendedRequestID = nil
             suspendedPosition = nil
             suspendedWasPlaying = nil
-            await coordinator.begin(playbackRequest)
+            let alternates = AppleLiveChannelAlternates.playbackCandidates(
+                for: liveChannel, request: playbackRequest, in: otherListLineup,
+                hasRecentlyFailed: { ApplePlaybackFailureHistory.shared.contains($0) })
+            await coordinator.begin(playbackRequest, fallbackCandidates: alternates)
         }
         .onDisappear {
             lifetime.inlineDisappeared(host: host, coordinator: coordinator)

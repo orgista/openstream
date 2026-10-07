@@ -21,8 +21,8 @@ public struct AppleLiveReconnectPolicy: Equatable, Sendable {
     }
 
     public enum GiveUpReason: Equatable, Sendable {
-        /// The channel never showed a frame: that is a dead channel, which
-        /// the alternates and the timeout already handle.
+        /// The channel never showed a frame and its one quick reopen has
+        /// been used (or cannot help); move on to alternates.
         case neverPlayed
         /// Retrying cannot fix it (credentials, format, no engine, a switch).
         case notRecoverable
@@ -82,7 +82,14 @@ public struct AppleLiveReconnectPolicy: Equatable, Sendable {
         elapsed: Duration,
         hasPlayed: Bool
     ) -> Decision {
-        guard hasPlayed else { return .giveUp(.neverPlayed) }
+        if !hasPlayed {
+            guard [.network, .timedOut, .player].contains(kind), attemptsSoFar == 0, maxAttempts > 0 else {
+                return .giveUp(.neverPlayed)
+            }
+            let delay: Duration = .seconds(1)
+            guard elapsed + delay <= window else { return .giveUp(.windowExpired) }
+            return .reconnect(attempt: 1, delay: delay)
+        }
         guard Self.isRecoverable(kind) else { return .giveUp(.notRecoverable) }
         guard attemptsSoFar < maxAttempts else { return .giveUp(.attemptsExhausted) }
         let delay = delay(beforeAttempt: attemptsSoFar + 1)

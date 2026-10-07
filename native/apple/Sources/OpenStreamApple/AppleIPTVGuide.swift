@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct AppleIPTVProgramme: Identifiable, Sendable, Equatable, Codable {
     public let id: String
@@ -107,13 +108,45 @@ public actor AppleIPTVGuideLoader {
         client = AppleBoundedHTTPClient(configuration: configuration)
     }
 
+    public struct XMLTVResponse: Sendable {
+        public let guide: AppleIPTVGuide?
+        public let eTag: String?
+        public let lastModified: String?
+        public let contentDigest: String?
+    }
+
     public func load(xmltvURL: URL?, defaultOffsetHours: Double = 0) async throws -> AppleIPTVGuide {
-        guard let url = xmltvURL else { return AppleIPTVGuide(programmes: []) }
+        guard let xmltvURL else { return AppleIPTVGuide(programmes: []) }
+        guard let guide = try await loadXMLTV(url: xmltvURL, defaultOffsetHours: defaultOffsetHours).guide else {
+            throw URLError(.badServerResponse)
+        }
+        return guide
+    }
+
+    public func loadXMLTV(url: URL, defaultOffsetHours: Double = 0, eTag: String? = nil,
+                          lastModified: String? = nil, contentDigest: String? = nil) async throws -> XMLTVResponse {
+        guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host?.isEmpty == false else { throw AppleIPTVError.invalidEndpoint }
         return try await AppleImportStore.shared.run(title: "Programme Guide", unit: "programmes") { progress in
-            let data = try await self.fetch(url) { bytes, total in
-                progress(.init(items: 0, bytes: bytes, totalBytes: total > 0 ? Int(total) : 0, phase: .downloading))
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.requestTimeout)
+            request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+            request.setValue(eTag, forHTTPHeaderField: "If-None-Match")
+            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+            let (data, response) = try await self.client.load(request, maximumBytes: Self.maximumGuideBytes,
+                redirectPolicy: Self.redirectPolicy, behavior: .rejectOverflow) { bytes, total in
+                    progress(.init(items: 0, bytes: bytes, totalBytes: total > 0 ? Int(total) : 0, phase: .downloading))
+                }
+            guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            try Task.checkCancellation()
+            let tag = response.value(forHTTPHeaderField: "ETag")
+            let modified = response.value(forHTTPHeaderField: "Last-Modified")
+            if response.statusCode == 304 {
+                return XMLTVResponse(guide: nil, eTag: tag ?? eTag, lastModified: modified ?? lastModified, contentDigest: contentDigest)
             }
-            return try await Self.parseXMLTV(data, defaultOffsetHours: defaultOffsetHours, progress: progress)
+            guard 200..<300 ~= response.statusCode else { throw AppleIPTVError.requestFailed(response.statusCode) }
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let guide = digest == contentDigest ? nil : try await Self.parseXMLTV(data, defaultOffsetHours: defaultOffsetHours, progress: progress)
+            return XMLTVResponse(guide: guide, eTag: tag, lastModified: modified, contentDigest: digest)
         }
     }
 
