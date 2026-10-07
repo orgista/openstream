@@ -93,21 +93,16 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         Thread.sleep(forTimeInterval: 6)
         attach("b-live-after-swipe-next")
 
-        // The swipe also counts as a tap on the video, and a tap with the
-        // controls hidden opens the channel list (seen on DevPlus). With the
-        // list up the controls are hidden from accessibility, so close it —
-        // by its button, else by picking the channel already playing — and
-        // the controls stay on screen.
+        // A swipe must change the channel and nothing else. The video area is
+        // the transport's "show channels" Button, which used to fire on the
+        // same touch and open the channel list (DevPlus, 2026-10-06); the
+        // swipe now takes priority over that tap.
         let pickerClose = app.descendants(matching: .any).matching(identifier: "live.picker.close").firstMatch
         let last = app.descendants(matching: .any).matching(identifier: "live.player.lastChannel").firstMatch
-        if pickerClose.exists {
-            XCTContext.runActivity(named: "channel list open after the swipe") { _ in }
+        if pickerClose.waitForExistence(timeout: 1.5) {
+            attach("b-list-opened-by-swipe")
+            check(false, "b-swipe-opened-list", "the channel swipe also opened the Channels list")
             pickerClose.tap()
-            if !pickerClose.waitForNonExistence(timeout: 3) {
-                attach("b-list-still-open-after-close")
-                XCTContext.runActivity(named: "channel list stayed open after Close channels") { _ in }
-                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Smoke Apple TS")).firstMatch.tap()
-            }
         }
         if !last.waitForExistence(timeout: 2) {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

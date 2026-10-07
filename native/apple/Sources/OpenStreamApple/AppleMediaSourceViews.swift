@@ -1607,6 +1607,32 @@ private struct AppleLiveFullScreenControls: View {
     let onClose: () -> Void
     let channelPicker: AppleLiveChannelPickerState
     @State private var hideChromeSignal = false
+    /// A channel swipe is under way: the video-area tap must not open the list.
+    @State private var swipeInProgress = false
+    /// When the channel last changed, from any gesture or control. On iPhone
+    /// the swipe is a UIKit recogniser on the video container, so it never
+    /// reaches the SwiftUI drag above; the switch itself is the one signal
+    /// every path shares.
+    @State private var lastChannelSwitch: ContinuousClock.Instant?
+    @State private var pickerShowTask: Task<Void, Never>?
+
+    /// Shows the channel list unless a channel switch lands around the same
+    /// touch: the video-area Button fires on the lift of a swipe too
+    /// (DevPlus, 2026-10-06), so the show waits a beat and yields to a zap.
+    private func requestChannelPicker() {
+        pickerShowTask?.cancel()
+        appleTrace("live picker requested swipe=\(swipeInProgress)")
+        pickerShowTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            guard !swipeInProgress else { appleTrace("live picker dropped: swipe"); return }
+            if let lastChannelSwitch, ContinuousClock.now - lastChannelSwitch < .milliseconds(800) {
+                appleTrace("live picker dropped: channel switch"); return
+            }
+            appleTrace("live picker shown")
+            channelPicker.show()
+        }
+    }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var previousChannel: AppleIPTVChannel? {
@@ -1709,13 +1735,13 @@ private struct AppleLiveFullScreenControls: View {
             let transport = AppleTransportOverlay(
                 coordinator: coordinator,
                 request: request,
-                onShowChannels: channels.isEmpty ? nil : { channelPicker.show() },
+                onShowChannels: channels.isEmpty ? nil : { requestChannelPicker() },
                 onLastChannel: lastChannelAction,
                 onStartOver: request.isLive ? onStartOver : nil,
                 isObscured: transportIsObscured,
                 onBackgroundTap: { wasHidden in
                     if wasHidden {
-                        if !channels.isEmpty { channelPicker.show() }
+                        if !channels.isEmpty { requestChannelPicker() }
                     } else if channelPicker.isPresented {
                         channelPicker.dismiss()
                     }
@@ -1752,13 +1778,38 @@ private struct AppleLiveFullScreenControls: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : Animation.default, value: channelPicker.isPresented)
+        .onChange(of: request.mediaID) { _, new in
+            appleTrace("live controls request changed → \(new)")
+            lastChannelSwitch = .now
+            pickerShowTask?.cancel()
+            pickerShowTask = nil
+        }
         .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
         .modifier(ApplePINPresenter())
         #if os(iOS)
-        .simultaneousGesture(DragGesture(minimumDistance: 60).onEnded { gesture in
-            if let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
-                vertical: gesture.translation.height) { zap(direction) }
-        })
+        // The transport's full-screen "show channels" Button fires on any
+        // touch that lifts inside it — gesture priority does not stop it — so
+        // a channel swipe also opened the Channels list (DevPlus, 2026-10-06).
+        // `swipeInProgress` is raised while the finger moves (before it
+        // lifts) and the tap paths below ignore the touch while it is up.
+        .simultaneousGesture(DragGesture(minimumDistance: 60)
+            .onChanged { gesture in
+                if !swipeInProgress,
+                   AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
+                                                vertical: gesture.translation.height) != nil {
+                    swipeInProgress = true
+                    appleTrace("live swipe recognised (SwiftUI)")
+                }
+            }
+            .onEnded { gesture in
+                if let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
+                    vertical: gesture.translation.height) { zap(direction) }
+                // The Button's action runs on the same lift, in either order.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    swipeInProgress = false
+                }
+            }, including: channelPicker.isPresented ? .subviews : .all)
         .accessibilityAction(named: "Next Channel") { zap(.next) }
         .accessibilityAction(named: "Previous Channel") { zap(.previous) }
         #endif
