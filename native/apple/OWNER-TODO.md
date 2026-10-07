@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
+      ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
+      re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
+      failover exists only on Apple TV, not iPhone/iPad/Mac; multiview reopens all four streams on every
+      grid↔full-screen trip. Order: 1 → 4 → 2 → 5 → 3 → 6 → 8 → 9 → 7 → 10 (numbers in the review).
+
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
       sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
