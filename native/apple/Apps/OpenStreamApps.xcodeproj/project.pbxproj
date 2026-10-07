@@ -1795,7 +1795,9 @@
 		A5C00000000000000000002A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
                 APPLICATION_EXTENSION_API_ONLY = YES;
                 CODE_SIGN_ENTITLEMENTS = OpenStreamShare/OpenStreamShare.entitlements;
-                CODE_SIGN_STYLE = Automatic;
+                CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				PROVISIONING_PROFILE_SPECIFIER = "OpenStream App Store share 2026-10-06b";
                 DEVELOPMENT_TEAM = 2VQ74PD5YG;
                 CURRENT_PROJECT_VERSION = 1;
                 GENERATE_INFOPLIST_FILE = NO;

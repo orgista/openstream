@@ -104,6 +104,16 @@ public enum AppleInteractionTrace {
         record(.screen, "trace started")
     }
 
+    /// Debug builds always echo the trace to stdout. A release build does so only when a cabled Mac launches it with
+    /// `-OpenStreamTraceConsole YES` (`devicectl device process launch --console`), so device runs can be read live.
+    static let printsToConsole: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return UserDefaults.standard.bool(forKey: "OpenStreamTraceConsole")
+        #endif
+    }()
+
     public static func record(_ kind: Kind, _ detail: @autoclosure () -> String) {
         guard isEnabled else { return }
         let text = detail()
@@ -113,10 +123,10 @@ public enum AppleInteractionTrace {
         entries.append(line)
         if entries.count > limit { entries.removeFirst(entries.count - limit) }
         lock.unlock()
-        #if DEBUG
-        print("[OpenStream] trace \(line)")
-        fflush(stdout)
-        #endif
+        if printsToConsole {
+            print("[OpenStream] trace \(line)")
+            fflush(stdout)
+        }
         append(line)
     }
 
