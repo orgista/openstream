@@ -7,15 +7,15 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>com.orgista.openstream</key>
-		<string>OpenStream AdHoc DevPlus app</string>
+		<string>OpenStream AdHoc Team app</string>
 		<key>com.orgista.openstream.messages</key>
-		<string>OpenStream AdHoc DevPlus messages</string>
+		<string>OpenStream AdHoc Team messages</string>
 		<key>com.orgista.openstream.watchkitapp</key>
-		<string>OpenStream AdHoc DevPlus watchkitapp</string>
+		<string>OpenStream AdHoc Team watchkitapp</string>
 		<key>com.orgista.openstream.widgets</key>
-		<string>OpenStream AdHoc DevPlus widgets</string>
+		<string>OpenStream AdHoc Team widgets</string>
 		<key>com.orgista.openstream.share</key>
-		<string>OpenStream AdHoc DevPlus share b</string>
+		<string>OpenStream AdHoc Team share</string>
 	</dict>
 	<key>signingStyle</key>
 	<string>manual</string>
