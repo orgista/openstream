@@ -7,8 +7,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
-- [ ] **(2026-10-06) Owner decisions:** don't ship 16 yet; **no DVR/recording** (dropped); Apple TV gets paired with
-      the mini over Wi-Fi on 2026-10-07; go ahead with the Mythos Live review fixes; make an OpenStream backup of the
+- [ ] **(2026-10-06) Owner decisions:** don't ship 16 yet; **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
+      iPhone (cable once → Trust) get paired with the Mac mini on 2026-10-07 — then install the waiting ad hoc build
+      (`scripts/mini.sh 'zsh scripts/release/devplus-install.sh 16 00008130-000610103443001C'`); go ahead with the Mythos Live review fixes; make an OpenStream backup of the
       owner's own sources to import for content verification on DevPlus.
 
 - [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in

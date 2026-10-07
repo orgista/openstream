@@ -74,9 +74,9 @@ struct AppleIPTVGuideStoreTests {
         #expect(progs.count == 1)
         #expect(requestCount == 1)
         
-        // Let's also test a new channel ID triggers fetch
+        // A new channel is served from the already parsed XMLTV file
         await store.refreshVisible(channelIDs: ["ch2"])
-        #expect(requestCount == 2)
+        #expect(requestCount == 1)
     }
 }
 

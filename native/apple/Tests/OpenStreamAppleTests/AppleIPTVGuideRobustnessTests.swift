@@ -21,6 +21,42 @@ struct AppleIPTVGuideRobustnessTests {
         #expect(local.start.timeIntervalSince(utc.start) == 5 * 3600)
     }
 
+    @MainActor @Test func xmltvFileFreshnessConditionalAndChangedResponses() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = AppleIPTVGuideDiskCache(directory: directory)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FreshGuideProtocol.self]
+        FreshGuideProtocol.requests.withLock { $0 = [] }
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: config)), diskCache: disk)
+        let url = URL(string: "https://fixture.example/fresh.xml")!
+        let now = Date()
+        store.configure(xmltvURL: url)
+        await store.refreshVisible(channelIDs: ["a"], now: now)
+        let file = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+        let original = try Data(contentsOf: file)
+        await store.refreshVisible(channelIDs: ["b"], now: now.addingTimeInterval(3599 * 6))
+        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 1)
+        #expect(store.guide(for: ["b"]).allProgrammes.first?.title == "Original")
+        await store.refreshVisible(channelIDs: ["a"], now: now.addingTimeInterval(6 * 3600))
+        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 2)
+        #expect(try Data(contentsOf: file) == original) // 304 never rewrites the snapshot
+        #expect(store.guide(for: ["a"]).allProgrammes.first?.title == "Original")
+        await store.refreshVisible(channelIDs: ["a"], now: now.addingTimeInterval(7 * 3600))
+        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 2)
+        await store.refreshVisible(channelIDs: ["a"], force: true, now: now.addingTimeInterval(7 * 3600))
+        #expect(store.guide(for: ["a"]).allProgrammes.first?.title == "Changed")
+        #expect(try Data(contentsOf: file) != original)
+        let requests = FreshGuideProtocol.requests.withLock { $0 }
+        #expect(requests[1].value(forHTTPHeaderField: "If-None-Match") == "v1")
+        #expect(requests[1].value(forHTTPHeaderField: "If-Modified-Since") == "Mon, 05 Oct 2026 12:00:00 GMT")
+        // A changed configuration must fetch even while the old file was fresh.
+        store.configure(xmltvURL: URL(string: "https://fixture.example/other.xml")!)
+        await store.refreshVisible(channelIDs: ["a"], now: now.addingTimeInterval(7 * 3600))
+        #expect(FreshGuideProtocol.requests.withLock { $0.count } == 4)
+        #expect(FreshGuideProtocol.requests.withLock { $0.last?.value(forHTTPHeaderField: "If-None-Match") } == nil)
+    }
+
     @Test func cacheExpiresByProgrammeEndAndKeepsFutureData() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -74,6 +110,25 @@ private final class RobustGuideProtocol: URLProtocol {
         }.joined()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(("<tv>" + entries + "</tv>").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class FreshGuideProtocol: URLProtocol {
+    static let requests = Mutex<[URLRequest]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let count = Self.requests.withLock { $0.append(request); return $0.count }
+        let status = count == 2 ? 304 : 200
+        let title = count < 3 ? "Original" : "Changed"
+        let entries = ["a", "b"].map {
+            "<programme channel=\"\($0)\" start=\"20301005090000 +0000\" stop=\"20301005100000 +0000\"><title>\(title)</title></programme>"
+        }.joined()
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+            headerFields: ["ETag": count < 3 ? "v1" : "v2", "Last-Modified": "Mon, 05 Oct 2026 12:00:00 GMT"])!, cacheStoragePolicy: .notAllowed)
+        if status != 304 { client?.urlProtocol(self, didLoad: Data(("<tv>" + entries + "</tv>").utf8)) }
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
