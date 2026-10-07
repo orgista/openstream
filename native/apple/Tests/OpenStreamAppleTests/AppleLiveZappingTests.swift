@@ -134,4 +134,24 @@ import Testing
         #expect(AppleMultiviewPolicy.companionID(currentID: "a", heldID: nil, orderedIDs: ["a"]) == nil)
     }
 
+    @Test func aRequestedChannelIsHandledOnceTheSavedLineupKnowsIt() {
+        #expect(AppleLiveZappingPolicy.handlesRequest(isLoading: true, channelIsKnown: true))
+        #expect(!AppleLiveZappingPolicy.handlesRequest(isLoading: true, channelIsKnown: false))
+        #expect(AppleLiveZappingPolicy.handlesRequest(isLoading: false, channelIsKnown: false))
+    }
+
+    @Test func askingForTheChannelAlreadyStartingKeepsItsAttempt() {
+        for phase: ApplePlaybackPhase in [.resolving, .loading, .waiting(nil), .playing, .paused] {
+            #expect(AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: "cbs", selectedID: "cbs",
+                isCatchUp: false, phase: phase))
+        }
+        for phase: ApplePlaybackPhase in [.idle, .ended, .failed(ApplePlaybackFailure(kind: .timedOut, message: "t"))] {
+            #expect(!AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: "cbs", selectedID: "cbs",
+                isCatchUp: false, phase: phase))
+        }
+        #expect(!AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: "fox", selectedID: "cbs",
+            isCatchUp: false, phase: .loading))
+        #expect(!AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: "cbs", selectedID: "cbs",
+            isCatchUp: true, phase: .playing))
+    }
 }

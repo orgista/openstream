@@ -849,7 +849,9 @@ struct AppleLiveTVView: View {
     }
 
     private func consumeLiveChannelRequest() {
-        guard !isLoading, !channels.isEmpty, let id = AppleLiveSystemChannels.shared.requestedChannelID else { return }
+        guard !channels.isEmpty, let id = AppleLiveSystemChannels.shared.requestedChannelID,
+              AppleLiveZappingPolicy.handlesRequest(isLoading: isLoading, channelIsKnown: channelIndex[id] != nil)
+        else { return }
         AppleLiveSystemChannels.shared.requestedChannelID = nil
         if let channel = channelIndex[id] {
             #if os(tvOS)
@@ -874,6 +876,22 @@ struct AppleLiveTVView: View {
     }
 
     private func play(_ channel: AppleIPTVChannel) {
+        // The strip or a resume may already be starting this very channel
+        // (a link or Siri asks for the last-watched one): keep that attempt.
+        #if os(tvOS)
+        let playerShown = tvPlayer != nil
+        #else
+        let playerShown = true
+        #endif
+        if playerShown, AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: channel.id,
+            selectedID: selectedChannel?.id, isCatchUp: catchUp != nil, phase: playbackCoordinator.phase) {
+            appleTrace("live play \(channel.name): already \(playbackCoordinator.phase.isBusy ? "starting" : "playing"), kept")
+            sharePlay.selected(channel)
+            #if !os(tvOS)
+            fullScreenRevision &+= 1
+            #endif
+            return
+        }
         startChannel(channel, shareSelection: true)
     }
 

@@ -48,4 +48,24 @@ enum AppleLiveZappingPolicy {
         }
         return target == currentID ? nil : target
     }
+
+    /// A channel asked for from outside the guide (a link, Siri, a widget)
+    /// is handled as soon as the saved lineup knows it, not after the
+    /// network refresh. Waiting let the strip start the last channel first
+    /// and the request then restarted it (DevPlus, 2026-10-06).
+    static func handlesRequest(isLoading: Bool, channelIsKnown: Bool) -> Bool {
+        channelIsKnown || !isLoading
+    }
+
+    /// Asking again for the live channel that is already starting or playing
+    /// brings its player forward instead of reopening the stream. Reopening
+    /// cut a slow Xtream channel off 4 s into its start, so it never played.
+    static func keepsCurrentAttempt(requestedID: String, selectedID: String?, isCatchUp: Bool,
+                                    phase: ApplePlaybackPhase) -> Bool {
+        guard requestedID == selectedID, !isCatchUp else { return false }
+        switch phase {
+        case .resolving, .loading, .waiting, .playing, .paused: return true
+        case .idle, .ended, .failed: return false
+        }
+    }
 }
