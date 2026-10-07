@@ -21,6 +21,7 @@
 		7A1000000000000000000006 /* AppleiOSSystemIntegrationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000005 /* AppleiOSSystemIntegrationUITests.swift */; };
 		7A1000000000000000000011 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000010 /* OpenStreamUITestCase.swift */; };
 		7A1000000000000000000013 /* AppleiOSStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */; };
+		7A1000000000000000000021 /* AppleDeviceSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000020 /* AppleDeviceSmokeUITests.swift */; };
 		7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000014 /* OpenStreamUITestCase.swift */; };
 		7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */; };
 		7A1000000000000000000019 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000018 /* OpenStreamUITestCase.swift */; };
@@ -207,6 +208,7 @@
 		7A1000000000000000000005 /* AppleiOSSystemIntegrationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleiOSSystemIntegrationUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000010 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 		7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleiOSStubSmokeUITests.swift; sourceTree = "<group>"; };
+		7A1000000000000000000020 /* AppleDeviceSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleDeviceSmokeUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000014 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 		7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVStubSmokeUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000018 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
@@ -382,6 +384,7 @@
 			children = (
 				AB1000000000000000000002 /* AppleiOSUITests.swift */,
 				7A1000000000000000000012 /* AppleiOSStubSmokeUITests.swift */,
+				7A1000000000000000000020 /* AppleDeviceSmokeUITests.swift */,
 				7A1000000000000000000010 /* OpenStreamUITestCase.swift */,
 				59D22BCCC6AE343179BCBE05 /* AppleMessagesExtensionUITests.swift */,
 				7A1000000000000000000003 /* AppleiOSLiveActivityUITests.swift */,
@@ -993,6 +996,7 @@
 			files = (
 				AB1000000000000000000001 /* AppleiOSUITests.swift in Sources */,
 				7A1000000000000000000013 /* AppleiOSStubSmokeUITests.swift in Sources */,
+				7A1000000000000000000021 /* AppleDeviceSmokeUITests.swift in Sources */,
 				7A1000000000000000000011 /* OpenStreamUITestCase.swift in Sources */,
 				51A32276ED29BE9EE33C74AE /* AppleMessagesExtensionUITests.swift in Sources */,
 				7A1000000000000000000004 /* AppleiOSLiveActivityUITests.swift in Sources */,
