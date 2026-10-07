@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **(2026-10-06) Owner decisions:** don't ship 16 yet; **no DVR/recording** (dropped); Apple TV gets paired with
+      the mini over Wi-Fi on 2026-10-07; go ahead with the Mythos Live review fixes; make an OpenStream backup of the
+      owner's own sources to import for content verification on DevPlus.
+
 - [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
       ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
       re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
@@ -18,7 +22,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
       (8ed357d); Start Over, live buffer, Top Shelf/Siri channels (4abfaac); provider movies & series (189dd18); parental
       PIN + import progress (8c29e10). Research + gap report: ~/Developer/openstream-build/specs/live-tv/gap-report-2026-10-05.md.
-      Still open: recording/DVR (your call — scheduled recording needs an always-on server), PiP on Apple TV.
+      DVR dropped by the owner 2026-10-06; Apple TV PiP built (7165a8e).
 
 - [ ] **(2026-10-04) App Store submission, what's left.** App Store Connect is filled for all four platforms: name
       **oStream**, subtitle, description, keywords, promo text, support/privacy/marketing URLs, copyright "2026 Raster
