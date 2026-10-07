@@ -3,6 +3,15 @@
 You were handed a task by the main session (Fable) or by the owner. Do that task, nothing else,
 and report in the format at the bottom. Where this file and your task disagree, ask; do not guess.
 
+## 0. Where builds run (owner rule 2026-10-05 — overrides anything below)
+Builds, `swift test`, xcodebuild, simulators and device runs happen on the Mac mini **Dev-Mini**, never on the
+Mac Studio (it has no Xcode). Edit here; run every heavy command through `scripts/mini.sh '<command>'` — it syncs this
+tree to dev-mini:~/Developer/openstream-build/src/native/apple and runs the command there under the shared build lock.
+The gate below becomes: `scripts/mini.sh 'swift test --scratch-path ~/Developer/openstream-build/spm 2>&1 | tail -30'`.
+xcodebuild DerivedData on the mini: `~/Developer/openstream-build/dd-<platform>`. Test device: iPhone 16e DevPlus
+(UDID 00008140-000809A82E89801C) on the mini — prefer it over creating simulators. Read
+/Volumes/Files/Projects/AGENTS.md "Apple builds and tests run on the Mac mini" and its concurrency gate.
+
 ## 1. The three commands (verbatim — no substitutions)
 ```
 # GATE — run BEFORE and AFTER every change. NEVER plain `swift test` (default .build lands on the

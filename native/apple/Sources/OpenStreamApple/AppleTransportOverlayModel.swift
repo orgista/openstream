@@ -483,8 +483,9 @@ public final class AppleTransportOverlayModel {
     public var showsAirPlay: Bool { route == .avPlayer }
 
     /// Picture-in-picture button is shown on `.avPlayer` routes on iOS
-    /// (toggles PiP through the AVKit controller). tvOS has no PiP;
-    /// `.surface` hides it. The T7e overlay no longer renders it.
+    /// (toggles PiP through the AVKit controller). tvOS offers PiP from the
+    /// stock player only (`AppleTVPictureInPicturePolicy`), never from this
+    /// overlay; `.surface` hides it. The T7e overlay no longer renders it.
     public var showsPictureInPicture: Bool {
         #if os(iOS)
         return route == .avPlayer

@@ -28,7 +28,7 @@ cleanup() { rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null || true; }
 trap cleanup EXIT
 wait_for_builds() {
     while pgrep -x xcodebuild >/dev/null || pgrep -x swift-build >/dev/null || pgrep -x swift-test >/dev/null; do sleep 10; done
-    "$build_root/bin/disk-guard.sh" 10
+    [[ -x "$build_root/bin/disk-guard.sh" ]] && "$build_root/bin/disk-guard.sh" 10
 }
 # Build the exported local snapshot, avoiding stale SMB reads entirely.
 "$root/scripts/release/public-export.sh" "$checkout"

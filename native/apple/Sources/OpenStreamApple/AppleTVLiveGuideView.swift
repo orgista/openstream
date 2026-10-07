@@ -145,7 +145,8 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
     let onShowHealth: (AppleIPTVChannel) -> Void
-    let onMultiview: (AppleIPTVChannel) -> Void
+    /// nil hides "Watch in Multiview" (while Picture in Picture is up).
+    let onMultiview: ((AppleIPTVChannel) -> Void)?
 
     @FocusState private var focus: AppleTVGuideFocus?
     /// Days the guide may scroll back into, from the lineup's catch-up
@@ -191,7 +192,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
         health: [String: AppleChannelHealthResult] = [:],
         healthRevision: Int = 0,
         onShowHealth: @escaping (AppleIPTVChannel) -> Void = { _ in },
-        onMultiview: @escaping (AppleIPTVChannel) -> Void = { _ in },
+        onMultiview: ((AppleIPTVChannel) -> Void)? = { _ in },
         onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in }
     ) {
         self.metrics = metrics
@@ -645,6 +646,7 @@ struct AppleTVLiveGuideScreen<Search: View>: View {
             healthRevision: healthRevision,
             onShowHealth: onShowHealth,
             onMultiview: onMultiview,
+            offersMultiview: onMultiview != nil,
             onRailMoveLeft: { focusCategories(from: "rail") }
         )
         .equatable()
@@ -680,7 +682,9 @@ private struct AppleTVGuideGrid: View, Equatable {
     let health: [String: AppleChannelHealthResult]
     let healthRevision: Int
     let onShowHealth: (AppleIPTVChannel) -> Void
-    let onMultiview: (AppleIPTVChannel) -> Void
+    let onMultiview: ((AppleIPTVChannel) -> Void)?
+    /// `onMultiview != nil`, for the comparison.
+    let offersMultiview: Bool
     let onRailMoveLeft: () -> Void
 
     // `View` infers `@MainActor` for the whole type; the comparison reads only
@@ -693,6 +697,7 @@ private struct AppleTVGuideGrid: View, Equatable {
             && lhs.favoriteIDs == rhs.favoriteIDs
             && lhs.metrics == rhs.metrics
             && lhs.healthRevision == rhs.healthRevision
+            && lhs.offersMultiview == rhs.offersMultiview
     }
 
     /// Right from the rail lands on the programme on now (else the next one),
@@ -724,7 +729,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelect: { onSelect(row.channel) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
                                 onShowHealth: { onShowHealth(row.channel) },
-                                onMultiview: { onMultiview(row.channel) },
+                                onMultiview: onMultiview.map { action in { action(row.channel) } },
                                 onMoveLeft: onRailMoveLeft,
                                 onMoveRight: { focusEntryCell(of: row.id) }
                             )
@@ -746,7 +751,7 @@ private struct AppleTVGuideGrid: View, Equatable {
                                 onSelectCell: { onSelectProgramme(row.channel, $0.programme) },
                                 onToggleFavorite: { onToggleFavorite(row.id) },
                                 onShowHealth: { onShowHealth(row.channel) },
-                                onMultiview: { onMultiview(row.channel) }
+                                onMultiview: onMultiview.map { action in { action(row.channel) } }
                             )
                             .frame(width: metrics.timelineWidth)
                             .focusSection()
@@ -1539,6 +1544,9 @@ struct AppleTVLivePlayerScreen: View {
     @State private var captionsNoticeTask: Task<Void, Never>?
     /// The captions the OpenStream engine leaves to the app on this route.
     @State private var stockSubtitles = AppleStockPlayerSubtitles()
+    /// This cover was rebuilt around the player in the Picture in Picture
+    /// window: the stream keeps playing, so the first load is skipped.
+    @State private var resumesFromPictureInPicture: Bool
     @Binding var footer: AppleTVLiveFooterState
 
     let channel: AppleIPTVChannel
@@ -1565,6 +1573,8 @@ struct AppleTVLivePlayerScreen: View {
     let onLastChannel: (() -> Void)?
     let onMultiview: ((AppleIPTVChannel?) -> Void)?
     let onBack: (() -> Void)?
+    /// The Live tab's own player; not a multiview tile or a fixture.
+    let allowsPictureInPicture: Bool
 
     init(channel: AppleIPTVChannel, coordinator: ApplePlaybackCoordinator, footerChannels: [AppleIPTVChannel],
          footer: Binding<AppleTVLiveFooterState>, alternateLineup: [AppleIPTVChannel] = [],
@@ -1578,6 +1588,7 @@ struct AppleTVLivePlayerScreen: View {
          onLastChannel: (() -> Void)? = nil,
          onMultiview: ((AppleIPTVChannel?) -> Void)? = nil,
          onBack: (() -> Void)? = nil,
+         allowsPictureInPicture: Bool = false,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
         self.channel = channel
         self.programme = programme
@@ -1595,9 +1606,12 @@ struct AppleTVLivePlayerScreen: View {
         self.onLastChannel = onLastChannel
         self.onMultiview = onMultiview
         self.onBack = onBack
-        let audioSession = AppleAudioSessionCoordinator()
+        self.allowsPictureInPicture = allowsPictureInPicture
+        let parked = allowsPictureInPicture ? AppleTVPictureInPicture.shared.parked(for: coordinator) : nil
+        let audioSession = parked?.audioSession ?? AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
-        _host = State(initialValue: ApplePlayerHost(coordinator: coordinator, audioSession: audioSession))
+        _host = State(initialValue: parked?.host ?? ApplePlayerHost(coordinator: coordinator, audioSession: audioSession))
+        _resumesFromPictureInPicture = State(initialValue: parked != nil)
     }
 
     private var request: ApplePlaybackRequest {
@@ -1799,7 +1813,16 @@ struct AppleTVLivePlayerScreen: View {
             #endif
         }
         .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")|\(playbackRevision)|\(onBack != nil && scenePhase == .background)") {
+            if resumesFromPictureInPicture {
+                // Back from the window: the same stream on the same host.
+                resumesFromPictureInPicture = false
+                hasPlayed = true
+                host.activate()
+                host.configureLivePlaybackControls()
+                return
+            }
             hasPlayed = false
+            if allowsPictureInPicture { AppleTVPictureInPicture.shared.endForNewPlayback(keeping: host) }
             coordinator.stop()
             if onBack != nil && scenePhase == .background { host.teardown(); return }
             // Drop the controller's reference to the channel that just
@@ -1843,6 +1866,7 @@ struct AppleTVLivePlayerScreen: View {
         }
         .onAppear {
             if footer.isVisible { focusFooter() } else { focus = .surface }
+            registerPictureInPicture()
         }
         #if DEBUG
         // Whether a given channel is dead changes hour to hour, so the failure
@@ -1864,6 +1888,9 @@ struct AppleTVLivePlayerScreen: View {
             // The cover's item binding is cleared by SwiftUI when the cover
             // is dismissed; nothing here must clear it, or a channel switch
             // that rebuilds this screen would close the player.
+            // In the Picture in Picture window it plays on.
+            if AppleTVPictureInPicture.shared.holds(host) { return }
+            AppleTVPictureInPicture.shared.unregister(host)
             host.teardown()
             coordinator.stop()
         }
@@ -1910,6 +1937,12 @@ struct AppleTVLivePlayerScreen: View {
     /// button leaves the hierarchy and the cards are the only focus targets.
     private var stockPlayerWithFooter: some View {
         ZStack {
+            if allowsPictureInPicture {
+                // Where the window opens from and lands; under the controller.
+                AppleTVPictureInPictureLayer(view: host.pictureInPictureLayerView)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+            }
             AppleTVLivePlayerControllerRepresentable(viewController: host.viewController)
                 .ignoresSafeArea()
 
@@ -2061,7 +2094,47 @@ struct AppleTVLivePlayerScreen: View {
     private var playbackOptions: AppleLivePlaybackOptions {
         AppleLivePlaybackOptions(onSleepTimer: openSleepTimer,
             onMultiview: onMultiview.map { action in { action(nil) } }, onCaptions: toggleCaptions,
-            onStartOver: programme == nil ? onStartOver : nil, onBackToLive: watchLiveAction)
+            onStartOver: programme == nil ? onStartOver : nil, onBackToLive: watchLiveAction,
+            onPictureInPicture: pictureInPictureAction)
+    }
+
+    /// "Picture in Picture" in the options, where the window can show this
+    /// stream (`AppleTVPictureInPicturePolicy.offersMenuEntry`).
+    private var pictureInPictureAction: (() -> Void)? {
+        guard allowsPictureInPicture, AppleTVPictureInPicturePolicy.offersMenuEntry(
+            route: coordinator.route,
+            isSupported: AVPictureInPictureController.isPictureInPictureSupported(),
+            isPictureInPictureActive: AppleTVPictureInPicture.shared.isActive) else { return nil }
+        return { startPictureInPicture() }
+    }
+
+    private func startPictureInPicture() {
+        #if DEBUG
+        AppleInteractionTrace.record(.press, "live picture in picture \(channel.name)")
+        #endif
+        footer.reset()
+        Task { @MainActor in
+            // Let the options menu close first, as the sleep timer does.
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            _ = await host.startPictureInPicture()
+        }
+    }
+
+    /// How this player leaves for the window and comes back from it.
+    private func registerPictureInPicture() {
+        guard allowsPictureInPicture else { return }
+        let pictureInPicture = AppleTVPictureInPicture.shared
+        let host = host
+        let coordinator = coordinator
+        pictureInPicture.register(AppleTVPictureInPicture.Owner(
+            host: host, audioSession: audioSession, coordinator: coordinator, content: .live,
+            leave: { closePlayer() },
+            restore: {},
+            end: {
+                host.teardown()
+                coordinator.stop()
+            }))
+        pictureInPicture.playerAppeared(host)
     }
 
     private func openSleepTimer() {

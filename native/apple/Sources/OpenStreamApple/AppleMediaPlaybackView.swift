@@ -130,6 +130,12 @@ struct AppleMediaPlayerView: View {
     /// player's own alert, never handed to the title page.
     @State private var hasPlayed = false
     @State private var handedOffFailure = false
+    #if os(tvOS)
+    /// This cover was rebuilt around the player in the Picture in Picture
+    /// window: the stream keeps playing, so the first load is skipped.
+    @State private var resumesFromPictureInPicture: Bool
+    private let presentation: AppleStremioPlayerPresentation
+    #endif
 
     private let request: ApplePlaybackRequest
     private let fallbackCandidates: [ApplePlaybackRequest]
@@ -149,10 +155,22 @@ struct AppleMediaPlayerView: View {
         request = presentation.request
         fallbackCandidates = presentation.fallbackCandidates
         securityScopedURL = presentation.securityScopedURL
+        #if os(tvOS)
+        self.presentation = presentation
+        let parked = AppleTVPictureInPicture.shared.parked(for: presentation.coordinator)
+        _resumesFromPictureInPicture = State(initialValue: parked != nil)
+        let audioSession = parked?.audioSession ?? AppleAudioSessionCoordinator()
+        #else
         let audioSession = AppleAudioSessionCoordinator()
+        #endif
         _audioSession = State(initialValue: audioSession)
         _coordinator = State(initialValue: presentation.coordinator)
-        #if !os(visionOS)
+        #if os(tvOS)
+        _host = State(initialValue: parked?.host ?? ApplePlayerHost(
+            coordinator: presentation.coordinator,
+            audioSession: audioSession
+        ))
+        #elseif !os(visionOS)
         _host = State(initialValue: ApplePlayerHost(
             coordinator: presentation.coordinator,
             audioSession: audioSession
@@ -403,11 +421,30 @@ struct AppleMediaPlayerView: View {
                 return nil
             }
             securityAccess = securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
+            #if os(tvOS)
+            if resumesFromPictureInPicture {
+                // Back from the window: the same stream on the same host.
+                resumesFromPictureInPicture = false
+                hasRouted = true
+                hasPlayed = true
+                return
+            }
+            AppleTVPictureInPicture.shared.endForNewPlayback(keeping: host)
+            #endif
             try? await audioSession.prepareForPlayback()
             guard !Task.isCancelled else { return }
             await coordinator.begin(request, fallbackCandidates: fallbackCandidates)
         }
+        #if os(tvOS)
+        .onAppear { registerPictureInPicture() }
+        #endif
         .onDisappear {
+            #if os(tvOS)
+            // In the Picture in Picture window it plays on; the window's end
+            // saves the position (`registerPictureInPicture`).
+            if AppleTVPictureInPicture.shared.holds(host) { return }
+            AppleTVPictureInPicture.shared.unregister(host)
+            #endif
             qualitySwitch?.cancel()
             coordinator.nextAutomaticSource = nil
             coordinator.onSourceFailure = nil
@@ -494,6 +531,10 @@ struct AppleMediaPlayerView: View {
     /// and the detail page can offer the resume point. The AVPlayer route's
     /// progress coordinator already saves when it stops observing.
     private func saveProgressOnClose() {
+        Self.saveProgressOnClose(coordinator: coordinator, request: request)
+    }
+
+    private static func saveProgressOnClose(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest) {
         guard coordinator.route == .surface, !request.isLive else { return }
         let position = coordinator.engine.position
         let duration = coordinator.engine.duration ?? 0
@@ -510,6 +551,27 @@ struct AppleMediaPlayerView: View {
     private func closeFromRemote() {
         saveProgressOnClose()
         closePlayer()
+    }
+
+    /// How this player leaves for the Picture in Picture window (AVKit's own
+    /// transport-bar button) and comes back: the root presents the same
+    /// presentation again, around the same host.
+    private func registerPictureInPicture() {
+        let pictureInPicture = AppleTVPictureInPicture.shared
+        let presentation = presentation
+        let host = host
+        let coordinator = coordinator
+        let request = request
+        pictureInPicture.register(AppleTVPictureInPicture.Owner(
+            host: host, audioSession: audioSession, coordinator: coordinator, content: .onDemand,
+            leave: { closePlayer() },
+            restore: { pictureInPicture.restoringPresentation = presentation },
+            end: {
+                Self.saveProgressOnClose(coordinator: coordinator, request: request)
+                host.teardown()
+                coordinator.stop()
+            }))
+        pictureInPicture.playerAppeared(host)
     }
     #endif
 

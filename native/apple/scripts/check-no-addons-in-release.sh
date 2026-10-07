@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 build_root="$HOME/Developer/openstream-build"
 log_file="/tmp/openstream-no-addons-release-build.log"
 strings_file="/tmp/openstream-no-addons-release-strings.txt"
-"$build_root/bin/disk-guard.sh" 10
+[[ -x "$build_root/bin/disk-guard.sh" ]] && "$build_root/bin/disk-guard.sh" 10
 while pgrep -x xcodebuild >/dev/null || pgrep -x swift-build >/dev/null || pgrep -x swift-test >/dev/null; do
     sleep 10
 done

@@ -70,6 +70,7 @@ struct AppleLiveTVView: View {
     #if os(tvOS)
     @State private var tvMultiviewChannels: [AppleIPTVChannel] = []
     @State private var tvPlayer: AppleTVLivePlayerPresentation?
+    @State private var pictureInPicture = AppleTVPictureInPicture.shared
     @State private var tvFocusRestore = 0
     /// Owned here, not by the player screen: switching to a channel that
     /// needs the other engine rebuilds the screen, and the footer must stay
@@ -357,6 +358,15 @@ struct AppleLiveTVView: View {
         .task(id: "\(AppleLiveSystemChannels.shared.requestedChannelID ?? "")|\(channelsRevision)|\(isLoading)") {
             consumeLiveChannelRequest()
         }
+        #if os(tvOS)
+        // The window's full-screen button: the player comes back around the
+        // channel in the window (the root has already switched to this tab).
+        .task(id: "\(pictureInPicture.liveRestoreRequest)|\(isActive)") {
+            guard isActive, pictureInPicture.takeLiveRestore() else { return }
+            tvMultiviewChannels = []
+            if tvPlayer == nil { tvPlayer = AppleTVLivePlayerPresentation() }
+        }
+        #endif
 
         .task(id: projectionIdentity) {
             await rebuildChannelGroups()
@@ -774,6 +784,13 @@ struct AppleLiveTVView: View {
 
     private func resumeLastChannelIfNeeded() {
         guard isActive, resumePending, !recallChannelIDs.isEmpty else { return }
+        #if os(tvOS)
+        guard AppleTVPictureInPicturePolicy.resumesLastChannelOnArrival(
+            isPictureInPictureActive: pictureInPicture.isActive) else {
+            resumePending = false
+            return
+        }
+        #endif
         guard startWithLastChannel, !sharePlay.isActive,
               AppleProgrammeReminderStore.shared.requestedChannelID == nil else {
             resumePending = false
@@ -945,6 +962,13 @@ struct AppleLiveTVView: View {
     private func startChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool = true,
                               programme: AppleIPTVProgramme? = nil) {
         parentalPlayTask?.cancel()
+        #if os(tvOS)
+        // Before anything stops the shared coordinator under the window.
+        if present, AppleTVPictureInPicturePolicy.channelChoice(
+            isPictureInPictureActive: pictureInPicture.isActive) == .closeWindowAndPlayFullScreen {
+            pictureInPicture.endForNewPlayback()
+        }
+        #endif
         let restrictions = AppleRestrictionStore.shared
         guard restrictions.needsUnlock(channelID: channel.id, group: channel.group) else {
             startAuthorizedChannel(channel, shareSelection: shareSelection, present: present, programme: programme)
@@ -1034,7 +1058,8 @@ struct AppleLiveTVView: View {
             favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
             nowPlaying: selectedChannel ?? lastWatchedChannel ?? channels.first,
             hasActiveSearch: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            previewsEnabled: settings.autoPlayTrailer,
+            previewsEnabled: AppleTVPictureInPicturePolicy.previewsEnabled(
+                preference: settings.autoPlayTrailer, isPictureInPictureActive: pictureInPicture.isActive),
             isPlayerOpen: tvPlayer != nil,
             focusRestoreToken: tvFocusRestore,
             focusRestoreChannelID: selectedChannel?.id ?? lastWatchedChannelID,
@@ -1045,7 +1070,8 @@ struct AppleLiveTVView: View {
             health: channelHealth,
             healthRevision: channelHealthRevision,
             onShowHealth: { healthDetailChannel = $0 },
-            onMultiview: { beginMultiview(held: $0) },
+            onMultiview: AppleTVPictureInPicturePolicy.offersMultiview(
+                isPictureInPictureActive: pictureInPicture.isActive) ? { beginMultiview(held: $0) } : nil,
             onSelectProgramme: playProgramme
         )
         // The tab root draws no page title on a television; the tab bar names it.
@@ -1073,6 +1099,7 @@ struct AppleLiveTVView: View {
                     onStartOver: startOverAction,
                     onLastChannel: lastChannelAction,
                     onMultiview: { beginMultiview(held: $0) },
+                    allowsPictureInPicture: true,
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .modifier(ApplePINPresenter())
@@ -1104,6 +1131,7 @@ struct AppleLiveTVView: View {
     }
 
     private func beginMultiview(held: AppleIPTVChannel?) {
+        guard AppleTVPictureInPicturePolicy.offersMultiview(isPictureInPictureActive: pictureInPicture.isActive) else { return }
         let current = selectedChannel ?? lastWatchedChannel ?? channelSnapshot.channels.first
         guard let current else { return }
         guard let otherID = AppleMultiviewPolicy.companionID(currentID: current.id,

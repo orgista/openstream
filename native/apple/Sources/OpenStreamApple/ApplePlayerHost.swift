@@ -36,6 +36,13 @@ public final class ApplePlayerHost {
     private let pictureInPicture = ApplePictureInPictureWatcher()
     private var externalPictureActive = false
     #endif
+    #if os(tvOS)
+    /// Picture in Picture: the stock controller's own window on demand, and
+    /// the live player's from `pictureInPictureLayerView` (`AppleTVPictureInPicture`).
+    private let pictureInPictureDelegate = AppleTVPictureInPictureDelegate()
+    let pictureInPictureLayerView = AppleTVPictureInPictureLayerView()
+    private var pictureInPictureController: AVPictureInPictureController?
+    #endif
     private var boundPlayer: AVPlayer?
     private var bindTimer: Timer?
     private var resumeAfterInterruption = false
@@ -87,6 +94,8 @@ public final class ApplePlayerHost {
         #endif
         #if !os(tvOS)
         controller.delegate = pictureInPicture
+        #else
+        controller.delegate = pictureInPictureDelegate
         #endif
         #if os(tvOS)
         controller.appliesPreferredDisplayCriteriaAutomatically = AppleDisplayCriteriaPolicy.automaticAVKitMatching(engine: coordinator.engine.kind)
@@ -101,6 +110,8 @@ public final class ApplePlayerHost {
 
         #if !os(tvOS)
         pictureInPicture.onChange = { [weak self] _ in self?.refreshPictureWhereabouts() }
+        #else
+        pictureInPictureDelegate.host = self
         #endif
         activate()
     }
@@ -201,6 +212,9 @@ public final class ApplePlayerHost {
         #else
         _viewController.player = nil
         #endif
+        #if os(tvOS)
+        pictureInPictureDidStop()
+        #endif
         #if os(iOS) || os(macOS)
         if mirrorsSubtitleSelection { subtitleSelection.bind(to: nil) }
         mirrorsSubtitleSelection = false
@@ -291,6 +305,49 @@ public final class ApplePlayerHost {
     }
     #endif
 
+    #if os(tvOS)
+    /// Opens the window from the live player's layer
+    /// (`AppleTVPictureInPictureLayerView`, mounted under the stock
+    /// controller). `false` when this stream or device cannot.
+    func startPictureInPicture() async -> Bool {
+        guard AppleTVPictureInPicturePolicy.allowsPictureInPicture(route: coordinator.route),
+              AVPictureInPictureController.isPictureInPictureSupported(),
+              let player = coordinator.engine.avPlayer else { return false }
+        let layer = pictureInPictureLayerView.playerLayer
+        layer.player = player
+        let controller = pictureInPictureController
+            ?? AVPictureInPictureController(contentSource: .init(playerLayer: layer))
+        controller.delegate = pictureInPictureDelegate
+        pictureInPictureController = controller
+        // Possible once the layer has a frame ready to hand over.
+        for _ in 0..<30 where !controller.isPictureInPicturePossible {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { break }
+        }
+        guard controller.isPictureInPicturePossible, !Task.isCancelled else {
+            appleTrace("picture in picture: not possible on this stream")
+            pictureInPictureDidStop()
+            return false
+        }
+        controller.startPictureInPicture()
+        return true
+    }
+
+    /// Closes a window opened from the live player's layer. A window from
+    /// the stock controller closes when `teardown` takes its player away.
+    func stopPictureInPicture() {
+        pictureInPictureController?.stopPictureInPicture()
+    }
+
+    /// The window is gone: the layer under the controller lets go of the
+    /// player so the picture is not composited twice.
+    func pictureInPictureDidStop() {
+        guard pictureInPictureController?.isPictureInPictureActive != true else { return }
+        pictureInPictureController = nil
+        pictureInPictureLayerView.playerLayer.player = nil
+    }
+    #endif
+
     /// Rebinds the AVKit controller to `engine.avPlayer` when it changes.
     private func refreshBinding() {
         #if canImport(WatchConnectivity) && os(iOS)
@@ -308,6 +365,16 @@ public final class ApplePlayerHost {
         let player = coordinator.engine.avPlayer
         #if os(tvOS)
         _viewController.appliesPreferredDisplayCriteriaAutomatically = AppleDisplayCriteriaPolicy.automaticAVKitMatching(engine: coordinator.engine.kind)
+        // AVKit's window button only where the window can show the picture.
+        let allowsPictureInPicture = AppleTVPictureInPicturePolicy.allowsPictureInPicture(route: coordinator.route)
+        if _viewController.allowsPictureInPicturePlayback != allowsPictureInPicture {
+            _viewController.allowsPictureInPicturePlayback = allowsPictureInPicture
+        }
+        // A live reconnect can replace the AVPlayer while the window is up.
+        let pictureInPictureLayer = pictureInPictureLayerView.playerLayer
+        if pictureInPictureLayer.player != nil, let player, pictureInPictureLayer.player !== player {
+            pictureInPictureLayer.player = player
+        }
         #endif
         if let channel = coordinator.sharePlayChannel {
             AppleSharePlaySessionStore.shared.refreshPlayback(coordinator, channel: channel)

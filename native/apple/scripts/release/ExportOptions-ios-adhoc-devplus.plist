@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>release-testing</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.orgista.openstream</key>
+		<string>OpenStream AdHoc DevPlus app</string>
+		<key>com.orgista.openstream.messages</key>
+		<string>OpenStream AdHoc DevPlus messages</string>
+		<key>com.orgista.openstream.watchkitapp</key>
+		<string>OpenStream AdHoc DevPlus watchkitapp</string>
+		<key>com.orgista.openstream.widgets</key>
+		<string>OpenStream AdHoc DevPlus widgets</string>
+		<key>com.orgista.openstream.share</key>
+		<string>OpenStream AdHoc DevPlus share</string>
+	</dict>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>iPhone Distribution</string>
+	<key>teamID</key>
+	<string>2VQ74PD5YG</string>
+	<key>compileBitcode</key>
+	<false/>
+</dict>
+</plist>

@@ -132,6 +132,8 @@ public struct OpenStreamRootView: View {
     @State private var mountedTabs: Set<OpenStreamTab> = []
     @State private var tabMountGeneration: [OpenStreamTab: Int] = [:]
     @State private var tabMountWatchdog: Task<Void, Never>?
+    /// The player in the Picture in Picture window, for its way back.
+    @State private var pictureInPicture = AppleTVPictureInPicture.shared
     #endif
     #if os(iOS)
     @State private var rootViewportSize: CGSize = .zero
@@ -382,6 +384,16 @@ public struct OpenStreamRootView: View {
             navigationPaths[.live] = NavigationPath()
             selectedTab = .live
         }
+        #if os(tvOS)
+        // The window's full-screen button. An on-demand player comes back over
+        // whichever tab is on screen; a live one in the Live tab, which opens
+        // it once it is the tab on screen (`AppleLiveTVView`).
+        .modifier(AppleMediaPlayerPresentationModifier(presentation: $pictureInPicture.restoringPresentation))
+        .onChange(of: pictureInPicture.liveRestoreRequest) {
+            navigationPaths[.live] = NavigationPath()
+            selectedTab = .live
+        }
+        #endif
         .appleTraceSelection("tab", value: selectedTab)
         .modifier(AppleConfigurationSync(
             controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex
