@@ -6,6 +6,16 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **Live doesn't work with the owner's config (2026-10-08, build 16)** — being tested on DevPlus with the
+      owner's imported backup alongside the trailer bug.
+- [ ] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
+      different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
+- [ ] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
+      (broken, fix in progress) and has no import. QR "send setup to Apple TV" moves first in the QR work.
+- [x] **Remove notices around the app (2026-10-08)** — About no longer says "a subsidiary of Raster Inc.";
+      the TMDB/JustWatch/no-content (i) buttons are gone from Welcome, Sources, the TMDB key page and the
+      watch-provider line. The credits stay once in About › Data Sources (TMDB requires it even with your own
+      key) and on the empty No Sources screen (App Review).
 - [ ] **Set up a new device by scanning a QR code (owner 2026-10-08):** a new device (Android/Google TV,
       Apple TV, iPad…) shows a QR code; scanning it with a phone that already has OpenStream sends the
       whole setup over the home network. Should work Apple→Apple and Apple→Android. Design in progress.
