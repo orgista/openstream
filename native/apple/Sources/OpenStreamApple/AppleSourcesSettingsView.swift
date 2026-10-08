@@ -127,6 +127,14 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
                 .appleTVReadableFocus()
+                Button {
+                    AppleSetupTransferCenter.shared.presentReceiver()
+                } label: {
+                    AppleTVNavigationLabel(AppleSetupTransferDevice.receiveTitle, systemImage: "qrcode")
+                }
+                .foregroundStyle(.primary)
+                .appleTVReadableFocus()
+                .accessibilityIdentifier("sources.setupFromPhone")
             }
 
             // Not "Sources" again: the pane is already titled Sources, so the
@@ -1967,8 +1975,9 @@ private struct AppleWebManagementBrowserRows: View {
     }
 }
 
-private struct AppleWebManagementQRCode: View {
+struct AppleWebManagementQRCode: View {
     let url: URL
+    var accessibilityText = "Web Management QR code"
 
     var body: some View {
         if let image = Self.image(for: url) {
@@ -1982,7 +1991,7 @@ private struct AppleWebManagementQRCode: View {
             }
             .frame(maxWidth: 280, maxHeight: 280)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Web Management QR code")
+            .accessibilityLabel(accessibilityText)
         }
     }
 

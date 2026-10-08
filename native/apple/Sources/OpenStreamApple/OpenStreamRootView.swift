@@ -407,6 +407,7 @@ public struct OpenStreamRootView: View {
         .modifier(AppleConfigurationSync(
             controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex
         ))
+        .modifier(AppleSetupTransferHost(router: router, controller: backupController))
         #if os(iOS)
         .onGeometryChange(for: CGSize.self) { [isPad = UIDevice.current.userInterfaceIdiom == .pad] proxy in
             isPad ? proxy.size : .zero

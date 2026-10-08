@@ -400,6 +400,29 @@ write; if a file you need is already modified by the other agent, say so and sto
   skill). Uploads: `asc builds upload` / `asc publish testflight` — ONLY after the owner says
   "ship"/"push (n)". Build 11 is still blocked on signing (Xcode account session or manual profile
   pinning) and the App Group tick for the widgets/watchkitapp bundle ids.
+- **Setup transfer over the LAN ("Set Up from iPhone", 2026-10-08)** — the wire format any platform
+  (Android TV next) must match. Code: `AppleSetupTransfer.swift` (link, crypto, session rules),
+  `AppleSetupTransferServer.swift` (receiver + sender), tests `AppleSetupTransferTests.swift`.
+  1. Receiver shows a QR: `openstream://send-setup?h=<ip:port>&s=<session>&k=<key>&c=<code>`.
+     `h` = private/link-local IPv4, ULA/link-local IPv6 in brackets, or a `.local` name; port ≥ 1024
+     (Apple uses 8091 upward). `s` = 16 random bytes, `k` = receiver's ephemeral X25519 public key
+     (32 bytes), both base64url without padding. `c` = 8 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`.
+     Unknown or repeated query keys are refused (`v=1` is optional).
+  2. `GET http://<h>/setup/<s>` → `{"v":1,"name":"<device name>"}` (404 wrong session, 410 used/expired,
+     429 locked).
+  3. Sender: ephemeral X25519 key; `shared = X25519(sender, k)`; `key = HKDF-SHA256(shared,
+     salt="openstream-setup-v1", info="openstream-setup-v1|<s>|<c>|<senderKey b64url>|<k b64url>", 32)`;
+     `sealed = AES-256-GCM(key, nonce 12 random, aad="openstream-setup-v1|<s>")` as nonce‖ciphertext‖tag.
+  4. `POST http://<h>/setup/<s>`, header `X-Setup-Code: <c>`, no `Origin`, `Host` = `<h>`, body
+     `{"v":1,"senderKey":"<b64url>","sealed":"<b64url>"}` ≤ 4 MB. 200 `{"v":1,"ok":true}`; 403 wrong
+     code, 400 unreadable, 410, 413, 429. Five failed tries lock the session; ten minutes; one success
+     closes the listener. Clients must be on the LAN (10/8, 172.16/12, 192.168/16, loopback, fc00::/7).
+  5. Plaintext = `{"v":1,"sender":"<name>","snapshot":{…},"secrets":{…}}`: `snapshot` is
+     `AppleConfigurationSnapshot` JSON and `secrets` is `AppleConfigurationSecrets` JSON — the same
+     pair a full backup seals (Foundation's JSONEncoder: dates as seconds since 2001-01-01, `Data` as
+     base64, `[UUID: X]` dictionaries as flat `[key, value, key, value]` arrays). The receiver asks
+     "Import setup from <sender>?" and applies it like Import Configuration (sources merge by id,
+     settings replace).
 
 ## 5. Owner rules — do not relitigate, do not ask again
 - **SHIPPING (owner, 2026-09-17, after I pushed 12 unasked): nothing goes to TestFlight without an

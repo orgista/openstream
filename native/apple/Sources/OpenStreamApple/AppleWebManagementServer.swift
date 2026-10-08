@@ -886,7 +886,7 @@ private final class AppleBonjourPublishMonitor: NSObject, NetServiceDelegate {
     }
 }
 
-private final class AppleWebManagementListenerStartupGate: Sendable {
+final class AppleWebManagementListenerStartupGate: Sendable {
     private let continuation: Mutex<CheckedContinuation<Void, any Error>?>
 
     init(continuation: CheckedContinuation<Void, any Error>) {
@@ -917,7 +917,7 @@ private final class AppleWebManagementListenerStartupGate: Sendable {
     }
 }
 
-private enum AppleWebManagementNetwork {
+enum AppleWebManagementNetwork {
     private struct Candidate {
         let address: String
         let interface: String
@@ -996,15 +996,21 @@ struct AppleWebManagementHTTPRequest: Sendable {
     let rawBody: Data
 }
 
-private enum AppleWebManagementHTTPReader {
+enum AppleWebManagementHTTPReader {
     private static let headerTerminator = Data([13, 10, 13, 10])
     private static let maxRequestLineBytes = 2_048
     private static let maxHeaderLineBytes = 4_096
     private static let maxHeaderCount = 40
     private static let maxHeaderBytes = 16_384
-    private static let maxBodyBytes = 8_192
+    static let maxBodyBytes = 8_192
 
-    static func read(from connection: NWConnection) async throws -> AppleWebManagementHTTPRequest {
+    /// `maxBodyBytes`/`acceptsBody`: the setup receiver (`AppleSetupReceiveServer`)
+    /// reads larger POST bodies on its own paths; the portal keeps 8 KB on `/`.
+    static func read(
+        from connection: NWConnection,
+        maxBodyBytes bodyLimit: Int = maxBodyBytes,
+        acceptsBody: @Sendable (String) -> Bool = { $0 == "/" || $0 == "/openstream" }
+    ) async throws -> AppleWebManagementHTTPRequest {
         var buffer = Data()
         var streamIsComplete = false
 
@@ -1015,7 +1021,7 @@ private enum AppleWebManagementHTTPReader {
                 let partial = try parseHead(Data(headerData))
                 let bodyOffset = terminator.upperBound
 
-                guard partial.method == "POST", partial.path == "/" || partial.path == "/openstream" else {
+                guard partial.method == "POST", acceptsBody(partial.path) else {
                     return partial.withBody(Data())
                 }
                 guard partial.headers["transfer-encoding"] == nil else {
@@ -1023,7 +1029,7 @@ private enum AppleWebManagementHTTPReader {
                 }
                 guard let lengthValue = partial.headers["content-length"],
                       let contentLength = Int(lengthValue),
-                      (1 ... maxBodyBytes).contains(contentLength) else {
+                      (1 ... bodyLimit).contains(contentLength) else {
                     throw AppleWebManagementHTTPReadError.tooLarge
                 }
 
@@ -1032,7 +1038,7 @@ private enum AppleWebManagementHTTPReader {
                     let bodyData = buffer[bodyOffset ..< bodyOffset + contentLength]
                     return partial.withBody(Data(bodyData))
                 }
-                guard buffer.count <= bodyOffset + maxBodyBytes else {
+                guard buffer.count <= bodyOffset + bodyLimit else {
                     throw AppleWebManagementHTTPReadError.tooLarge
                 }
             } else if buffer.count > maxHeaderBytes {
@@ -1147,7 +1153,7 @@ private enum AppleWebManagementHTTPReader {
     }
 }
 
-private struct AppleWebManagementHTTPResponse: Sendable {
+struct AppleWebManagementHTTPResponse: Sendable {
     let code: Int
     let status: String
     let body: String

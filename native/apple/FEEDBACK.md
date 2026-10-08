@@ -4539,6 +4539,9 @@ when the engine's load has returned. DevPlus, ad hoc Release 16.2 + owner config
 and `testCLivePlaysAndZaps` (now asserts the player says Playing) pass; before, Live was 0/5 played.
 `swift test`: 2914 tests in 371 suites passed.
 
+## 2026-10-08 — Set up the Apple TV from your iPhone with a QR code
+The Apple TV (and iPad, Mac, Vision Pro) now has **Set Up from iPhone** in Settings > Sources. It shows a QR code; scan it with the iPhone's Camera, tap Send, and press Import on the TV. Everything a full backup carries comes over (Live/IPTV, add-ons, media servers, network shares, sign-ins and settings), over your home network with no iCloud involved. The setup is locked to the code on the TV screen, so nothing else on the network can read it; the code works once, for 10 minutes, and stops after five wrong tries. On the iPhone, Backup & Sync has "Send Setup to Another Device" as a reminder to use the Camera. Checked on the Mac mini: package tests pass, the iOS and tvOS apps build, and an Apple TV simulator imported two test sources sent from an iPhone simulator (screenshots in verification-artifacts/qr-setup-2026-10-08/). Not yet: the button on the Apple TV's empty No Sources screen, and Android TV receiving.
+
 ## 2026-10-08 — Playback sweep: 100 add-on titles on the owner's config
 DevPlus, Debug build with add-ons, owner's imported config (one stream add-on: Torrentio TB). 100 Cinemeta titles,
 seeded by era and type (`verification-artifacts/playback-sweep-2026-10-08/`): 86 first frames, 9 TorBox-uncached

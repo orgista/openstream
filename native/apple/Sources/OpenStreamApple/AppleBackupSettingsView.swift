@@ -25,6 +25,7 @@ struct AppleBackupSettingsView: View {
     @State private var exporting = false
     @State private var importing = false
     @State private var syncAvailability = AppleICloudSyncAvailability.available
+    @State private var showsSendSetup = false
     @FocusState private var passphraseFocused: Bool
 
     var body: some View {
@@ -81,10 +82,23 @@ struct AppleBackupSettingsView: View {
                     }
                 }
             }
+            #if os(iOS)
+            // Set Up from iPhone: the other device shows a code; the Camera
+            // app opens it here (`AppleSetupSendView`).
+            Section {
+                Button("Send Setup to Another Device") { showsSendSetup = true }
+                    .accessibilityIdentifier("backup.sendSetup")
+            }
+            #endif
             if let result = controller.result {
                 Section { Text(result) }
             }
             Section { AppleResetEntry() }
+        }
+        .alert("Open the Camera", isPresented: $showsSendSetup) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Point it at the code on the other device.")
         }
         .appleSettingsPage(AppleSettingsRootEntry.backup.title)
         .scrollIndicators(.hidden)
@@ -200,6 +214,8 @@ struct AppleDiscoverRestoreEmptyState: View {
                     title: title, systemImage: OpenStreamTab.home.systemImage,
                     actionTitle: "Open Settings", action: openSettings,
                     secondaryActionTitle: "Import Backup", secondaryAction: importBackup,
+                    tertiaryActionTitle: AppleSetupTransferDevice.receiveTitle,
+                    tertiaryAction: { AppleSetupTransferCenter.shared.presentReceiver() },
                     footnote: footnote)
             }
         }

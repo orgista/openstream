@@ -126,18 +126,52 @@ final class AppleConfigurationController {
     func export(passphrase: String) async throws -> Data {
         isBusy = true
         defer { isBusy = false }
-        let snapshot = try capture()
-        var secrets = try sources.configurationSecrets()
-        secrets.settingsCredentials = try settings.configurationCredentials()
-        secrets.privateSettings = try settings.configurationValues().filter {
-            AppleSettingsStore.configurationURLKeys.contains($0.key)
-        }
-        let payload = AppleBackupEnvelope.Payload(snapshot: snapshot, secrets: secrets)
+        let payload = try fullPayload()
+        let snapshot = payload.snapshot
         let data = passphrase.isEmpty
             ? try AppleBackupEnvelope.seal(payload, key: backupKeys.exportKey())
             : try await AppleBackupEnvelope.sealData(payload, passphrase: passphrase)
         appleTrace("backup export: \(snapshot.sources.count) sources, secrets=included")
         return data
+    }
+
+    /// Everything a full backup carries, sign-ins included.
+    private func fullPayload() throws -> AppleBackupEnvelope.Payload {
+        var secrets = try sources.configurationSecrets()
+        secrets.settingsCredentials = try settings.configurationCredentials()
+        secrets.privateSettings = try settings.configurationValues().filter {
+            AppleSettingsStore.configurationURLKeys.contains($0.key)
+        }
+        return AppleBackupEnvelope.Payload(snapshot: try capture(), secrets: secrets)
+    }
+
+    /// Set Up from iPhone, sending side: the same content as a full backup.
+    func setupTransferPayload(sender: String) throws -> AppleSetupTransferPayload {
+        let payload = try fullPayload()
+        appleTrace("setup send: prepared \(payload.snapshot.sources.count) sources")
+        return AppleSetupTransferPayload(sender: sender, snapshot: payload.snapshot, secrets: payload.secrets)
+    }
+
+    /// Set Up from iPhone, receiving side: applied exactly like a backup
+    /// import. Returns how many sources came over.
+    @discardableResult
+    func importSetupTransfer(_ payload: AppleSetupTransferPayload) async throws -> Int {
+        isBusy = true
+        defer { isBusy = false }
+        try await apply(payload.snapshot, secrets: payload.secrets)
+        try finishImport(payload.snapshot, trace: "setup import")
+        result = "Setup imported"
+        return payload.snapshot.sources.count
+    }
+
+    private func finishImport(_ snapshot: AppleConfigurationSnapshot, trace: String) throws {
+        let ids = Set(snapshot.sources.map(\.id))
+        let waiting = sources.sources.filter { ids.contains($0.id) && $0.needsSignIn }.count
+        appleTrace("\(trace): \(ids.count - waiting) restored, \(waiting) need sign-in")
+        // A deliberate file restore is a new local edit, regardless of the file's date.
+        defaults.set(Date.now, forKey: Self.savedAtKey)
+        lastContent = try contentFingerprint()
+        if syncEnabled { scheduleWrite() }
     }
 
     /// What the import sheet can show before Import: the snapshot when the
@@ -174,13 +208,7 @@ final class AppleConfigurationController {
             decoded = try await AppleConfigurationFile.importData(data, passphrase: passphrase)
         }
         try await apply(decoded.snapshot, secrets: decoded.secrets)
-        let ids = Set(decoded.snapshot.sources.map(\.id))
-        let waiting = sources.sources.filter { ids.contains($0.id) && $0.needsSignIn }.count
-        appleTrace("backup import: \(ids.count - waiting) restored, \(waiting) need sign-in")
-        // A deliberate file restore is a new local edit, regardless of the file's date.
-        defaults.set(Date.now, forKey: Self.savedAtKey)
-        lastContent = try contentFingerprint()
-        if syncEnabled { scheduleWrite() }
+        try finishImport(decoded.snapshot, trace: "backup import")
         result = "Configuration imported"
     }
 

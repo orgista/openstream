@@ -25,13 +25,23 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       Table: verification-artifacts/playback-sweep-2026-10-08/SWEEP.md.
 - [ ] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
       (broken, fix in progress) and has no import. QR "send setup to Apple TV" moves first in the QR work.
+      **Import done in code (2026-10-08), waiting for your test:** the Apple TV can now take the whole setup
+      (Live/IPTV, add-ons, media servers, network shares, sign-ins, settings) straight from your iPhone over the
+      home network, no iCloud needed. See the QR line below for how to try it.
 - [x] **Remove notices around the app (2026-10-08)** — About no longer says "a subsidiary of Raster Inc.";
       the TMDB/JustWatch/no-content (i) buttons are gone from Welcome, Sources, the TMDB key page and the
       watch-provider line. The credits stay once in About › Data Sources (TMDB requires it even with your own
       key) and on the empty No Sources screen (App Review).
 - [ ] **Set up a new device by scanning a QR code (owner 2026-10-08):** a new device (Android/Google TV,
       Apple TV, iPad…) shows a QR code; scanning it with a phone that already has OpenStream sends the
-      whole setup over the home network. Should work Apple→Apple and Apple→Android. Design in progress.
+      whole setup over the home network. Should work Apple→Apple and Apple→Android. **Apple→Apple built
+      (2026-10-08), waiting for your test.** How to try it: on the Apple TV open Settings > Sources >
+      **Set Up from iPhone**. A QR code appears. Point the iPhone's Camera at it and tap "Open in oStream", then
+      **Send**. The TV asks "Import setup from <your iPhone>?" — press **Import**. Both need to be on the same
+      Wi-Fi; the code works once and for 10 minutes. On iPad/Mac the same row is in Settings > Sources, and on
+      an empty iPad/iPhone it is also a button on No Sources. Still to do: the button on the Apple TV's empty
+      No Sources screen (that file was being edited by the trailer work), and the Android TV side (the format
+      is written down in HANDOFF-NEXT-SESSION.md).
 - [ ] **iCloud sync still looks broken (owner 2026-10-08):** owner doesn't think it works and doesn't know how
       to test it. Fixed in code, waiting for your test: a phone set up before sync was on by default never sent
       anything to iCloud, so the other devices found nothing. Now it sends at launch, when the app comes back,

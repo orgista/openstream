@@ -78,14 +78,28 @@ public final class AppleAppRouter {
     public private(set) var route: AppleAppRoute?
     public private(set) var searchQuery = ""
     public private(set) var revision = 0
+    /// A scanned Set Up from iPhone code (`openstream://send-setup?…`): the
+    /// root asks "Send your setup to …?" (`AppleSetupTransferHost`).
+    public private(set) var setupSendLink: AppleSetupTransferLink?
 
     public init() {}
 
     public func open(_ url: URL) {
+        if url.scheme?.lowercased() == "openstream", url.host?.lowercased() == "send-setup" {
+            guard let link = AppleSetupTransferLink(url: url) else {
+                appleTraceFailure("setup send link refused")
+                return
+            }
+            appleTrace("setup send link opened")
+            setupSendLink = link
+            return
+        }
         guard let value = AppleAppRoute(url: url) else { return }
         if case .sharedLink = value { AppleSharedLinkHandoff.clear(matching: url) }
         open(value)
     }
+
+    public func clearSetupSendLink() { setupSendLink = nil }
 
     public func consumePendingSharedLink() {
         guard let url = AppleSharedLinkHandoff.take() else { return }
