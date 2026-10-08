@@ -1350,7 +1350,20 @@ struct AppleDiscoverView: View {
             )
         } else {
             #if os(tvOS)
-            openSettingsEmptyState(state)
+            if state == .noSources {
+                // Apple TV can't import a file: its setup comes from iCloud or from an iPhone over the LAN.
+                AppleSourceEmptyState(
+                    title: state.title,
+                    systemImage: OpenStreamTab.home.systemImage,
+                    actionTitle: AppleSetupTransferDevice.receiveTitle,
+                    action: { AppleSetupTransferCenter.shared.presentReceiver() },
+                    secondaryActionTitle: "Open Settings",
+                    secondaryAction: openSettings,
+                    footnote: state.footnote
+                )
+            } else {
+                openSettingsEmptyState(state)
+            }
             #else
             // No Sources with Backup & Sync at hand: restore or import first.
             if state == .noSources, let backupController {

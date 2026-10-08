@@ -951,8 +951,18 @@ private struct AppleFirstRunGuidanceView: View {
             // The same gap the billboard uses, which is wide enough that a
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {
+                // Apple TV can't import a file; most owners set it up from their iPhone.
+                Button(AppleSetupTransferDevice.receiveTitle) {
+                    dismiss()
+                    // The receiver is a root-level presentation: let this one close first.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(450))
+                        AppleSetupTransferCenter.shared.presentReceiver()
+                    }
+                }
+                .buttonStyle(.brandPrimary)
                 Button("Connect Media Server", action: openSettings)
-                    .buttonStyle(.brandPrimary)
+                    .buttonStyle(.brandSecondary)
                 Button("Not Now") { dismiss() }
                     .buttonStyle(.brandSecondary)
             }
