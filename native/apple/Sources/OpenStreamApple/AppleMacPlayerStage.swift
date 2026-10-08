@@ -9,18 +9,17 @@ import AppKit
 /// Play, title page Play, an episode, a local file, a media server, Add Files —
 /// goes through `AppleStremioPlayerPresentationModifier`, which asks this.
 enum AppleMediaPlayerPresentationStyle: Equatable {
-    /// The player takes over the window it was opened from (macOS).
+    /// The player takes over the window it was opened from (macOS,
+    /// visionOS). On Vision Pro it used to open a second "Player" window;
+    /// the owner wants it inside the app, the way other apps play
+    /// (2026-10-07). See `AppleVisionPlayerStage`.
     case windowStage
-    /// Its own window (visionOS).
-    case visionWindow
     /// A full-screen cover (iOS, iPadOS, tvOS).
     case fullScreenCover
 
     static var current: Self {
-        #if os(macOS)
+        #if os(macOS) || os(visionOS)
         .windowStage
-        #elseif os(visionOS)
-        .visionWindow
         #else
         .fullScreenCover
         #endif

@@ -59,7 +59,7 @@ struct AppleLiveTVView: View {
     @State private var channelHealthRevision = 0
     @State private var snapshotRevision = 0
     @State private var healthDetailChannel: AppleIPTVChannel?
-    #if os(macOS)
+    #if os(macOS) || os(visionOS)
     /// The channel in the window's full player, while it is up.
     @State private var fullWindowPlayer: AppleStremioPlayerPresentation?
     #endif
@@ -141,7 +141,7 @@ struct AppleLiveTVView: View {
                         .padding(12)
                         .accessibilityIdentifier("live.connecting")
                     }
-                    if let selectedChannel {
+                    if let selectedChannel, !fullWindowHoldsChannel {
                         ZStack(alignment: .topTrailing) {
                             AppleLiveInlinePlayer(
                                 request: playbackRequest(for: selectedChannel),
@@ -392,7 +392,7 @@ struct AppleLiveTVView: View {
                 .presentationDetents([.medium, .large])
                 #endif
         }
-        #if os(macOS)
+        #if os(macOS) || os(visionOS)
         .modifier(AppleStremioPlayerPresentationModifier(presentation: $fullWindowPlayer))
         .onChange(of: fullWindowPlayer == nil) { _, closed in
             // Back from the full player: the pinned player picks the channel
@@ -477,11 +477,16 @@ struct AppleLiveTVView: View {
             sourceNames: Dictionary(sourceStore.sources.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }))
     }
 
-    /// macOS: hands the channel to the window's full player and stops the
-    /// pinned one, so one stream plays at a time. Nil elsewhere: iOS and
-    /// visionOS present their own full-screen container.
+    /// macOS and visionOS: hands the channel to the window's full player and
+    /// stops the pinned one, so one stream plays at a time. Nil elsewhere:
+    /// iOS presents its own full-screen container. On Vision Pro a SharePlay
+    /// session keeps that container too, because the window's player is
+    /// not bound to the session.
     private var fullWindowAction: (() -> Void)? {
-        #if os(macOS)
+        #if os(visionOS)
+        guard !sharePlay.isActive else { return nil }
+        #endif
+        #if os(macOS) || os(visionOS)
         return {
             guard let channel = selectedChannel else { return }
             playbackCoordinator.stop()
@@ -493,6 +498,17 @@ struct AppleLiveTVView: View {
         }
         #else
         return nil
+        #endif
+    }
+
+    /// Vision Pro: the pinned player leaves while the window's player shows
+    /// the channel, so it cannot start the same stream underneath; it comes
+    /// back, and picks the channel up again, when that player closes.
+    private var fullWindowHoldsChannel: Bool {
+        #if os(visionOS)
+        fullWindowPlayer != nil
+        #else
+        false
         #endif
     }
 
@@ -887,7 +903,9 @@ struct AppleLiveTVView: View {
             selectedID: selectedChannel?.id, isCatchUp: catchUp != nil, phase: playbackCoordinator.phase) {
             appleTrace("live play \(channel.name): already \(playbackCoordinator.phase.isBusy ? "starting" : "playing"), kept")
             sharePlay.selected(channel)
-            #if !os(tvOS)
+            #if os(visionOS)
+            if let fullWindowAction { fullWindowAction() } else { fullScreenRevision &+= 1 }
+            #elseif !os(tvOS)
             fullScreenRevision &+= 1
             #endif
             return
@@ -1048,8 +1066,15 @@ struct AppleLiveTVView: View {
         #endif
         playbackCoordinator.sharePlayChannel = try? AppleSharePlayChannel(channel: channel)
         playbackRevision &+= 1
+        #if os(visionOS)
+        selectedChannel = channel
+        // The window's player, not AVKit's full-screen modal (which XCTest
+        // cannot even leave on the simulator).
+        if present { if let fullWindowAction { fullWindowAction() } else { fullScreenRevision &+= 1 } }
+        #else
         if present { fullScreenRevision &+= 1 }
         selectedChannel = channel
+        #endif
         #if os(tvOS)
         if present, tvPlayer == nil {
             // A fresh player starts with the footer hidden: Menu shows it.
@@ -1323,8 +1348,9 @@ struct AppleLiveInlinePlayer: View {
     let onSwitchChannel: ((AppleIPTVChannel) -> Void)?
     let onLastChannel: (() -> Void)?
     let onStartOver: (() -> Void)?
-    /// macOS: the channel goes to the window's full player
-    /// (`AppleMacPlayerStage`), the same one every other title plays in.
+    /// macOS and visionOS: the channel goes to the window's full player
+    /// (`AppleMacPlayerStage`, `AppleVisionPlayerStage`), the same one every
+    /// other title plays in.
     let onRequestFullWindow: (() -> Void)?
     #if os(macOS)
     @State private var fullWindowButtonVisible = true
@@ -1408,7 +1434,8 @@ struct AppleLiveInlinePlayer: View {
                 onFullScreenChanged: {
                     lifetime.isFullScreen = $0
                     isFullScreen = $0
-                }
+                },
+                onRequestFullWindow: onRequestFullWindow
             )
             #endif
             if coordinator.phase.isBusy {
@@ -1601,16 +1628,22 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
     let onLastChannel: (() -> Void)?
     let onStartOver: (() -> Void)?
     let onFullScreenChanged: (Bool) -> Void
+    /// visionOS: the full-screen button opens the window's player instead
+    /// of AVKit's modal. Nil on iOS.
+    var onRequestFullWindow: (() -> Void)? = nil
 
     func makeUIViewController(context: Context) -> AppleLivePlayerContainerViewController {
-        AppleLivePlayerContainerViewController(playerViewController: viewController,
+        let vc = AppleLivePlayerContainerViewController(playerViewController: viewController,
             coordinator: coordinator, request: request, liveMenu: liveMenu,
             channels: channels, guide: guide, currentChannelID: currentChannelID,
             onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
             onFullScreenChanged: onFullScreenChanged)
+        vc.onRequestFullWindow = onRequestFullWindow
+        return vc
     }
 
     func updateUIViewController(_ vc: AppleLivePlayerContainerViewController, context: Context) {
+        vc.onRequestFullWindow = onRequestFullWindow
         vc.update(request: request, liveMenu: liveMenu, channels: channels,
                   guide: guide, currentChannelID: currentChannelID,
                   onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver, fullScreenRevision: fullScreenRevision)
@@ -1868,6 +1901,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private var watchLiveButton: UIButton!
     private var lastChannelButton: UIButton!
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
+    /// Set on visionOS: full screen is the window's player stage.
+    var onRequestFullWindow: (() -> Void)?
     private var channels: [AppleIPTVChannel]
     private var guide: AppleIPTVGuide
     private var currentChannelID: String?
@@ -2220,6 +2255,11 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     }
 
     @objc private func requestFullScreen() {
+        if let onRequestFullWindow, presentedFullscreen == nil {
+            presentedRevision = fullScreenRevision
+            onRequestFullWindow()
+            return
+        }
         guard presentedFullscreen == nil, presentedViewController == nil,
               playerViewController.presentingViewController == nil else { return }
         presentedRevision = fullScreenRevision

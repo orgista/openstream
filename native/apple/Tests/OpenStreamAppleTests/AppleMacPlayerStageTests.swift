@@ -14,13 +14,13 @@ struct AppleMacPlayerStageTests {
     // MARK: Presentation
 
     @Test func theMacPresentsInTheWindowAndNotASheet() {
-        #if os(macOS)
+        #if os(macOS) || os(visionOS)
         #expect(AppleStremioPlayerPresentationStyle.current == .windowStage)
         #endif
     }
 
     /// Every page that opens a player hands it to the one modifier, and only
-    /// the stage (Mac), the cover (iOS, tvOS) and the vision window build the
+    /// the stages (Mac, Vision Pro) and the cover (iOS, tvOS) build the
     /// player view — so no entry point can grow a presentation of its own.
     ///
     /// `nonisolated`: it reads every source file, which on the SMB share can
@@ -36,7 +36,7 @@ struct AppleMacPlayerStageTests {
             if text.contains("AppleStremioPlayerView(presentation:") { builders.insert(file) }
             if text.contains("AppleStremioPlayerPresentationModifier(presentation:") { presenters.insert(file) }
         }
-        #expect(builders == ["AppleDiscoverView.swift", "AppleMacPlayerStage.swift", "AppleVisionPlaybackWindow.swift"])
+        #expect(builders == ["AppleDiscoverView.swift", "AppleMacPlayerStage.swift", "AppleVisionPlayerStage.swift"])
         // Title pages (Discover, Library, media servers), Add Files, Live.
         #expect(presenters.isSuperset(of: ["AppleDiscoverView.swift", "AppleSourcesSettingsView.swift",
                                            "AppleMediaSourceViews.swift"]))
@@ -47,6 +47,14 @@ struct AppleMacPlayerStageTests {
         #expect(macBranch.contains("AppleMacPlayerStagePresenter"))
         #expect(macBranch.contains("content.sheet(") == false)
         #expect(macBranch.contains("minWidth") == false)
+        // Vision Pro: in the app's window too, never a second "Player" window.
+        #expect(macBranch.contains("AppleVisionPlayerStagePresenter"))
+        #expect(macBranch.contains("openWindow") == false)
+        let scenes = try files.filter {
+            try String(contentsOf: Self.sources.appendingPathComponent($0), encoding: .utf8)
+                .contains("WindowGroup(\"Player\"")
+        }
+        #expect(scenes.isEmpty)
     }
 
     // MARK: Frame

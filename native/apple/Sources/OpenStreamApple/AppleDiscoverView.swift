@@ -8229,7 +8229,9 @@ struct AppleMediaPlayerPresentationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(visionOS)
-        content.modifier(AppleVisionPlayerPresentationModifier(presentation: $presentation))
+        // Inside the app's one window, like the Mac, and not a second
+        // "Player" window (owner, 2026-10-07). See `AppleVisionPlayerStage`.
+        content.modifier(AppleVisionPlayerStagePresenter(presentation: $presentation))
         #elseif os(macOS)
         // The player takes over the window it was opened from — edge to
         // edge, over the toolbar and the tab bar — rather than a sheet. The

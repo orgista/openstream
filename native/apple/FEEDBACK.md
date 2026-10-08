@@ -4505,3 +4505,11 @@ Synthetic fixture checks covered both keypads, wrong-PIN rejection, locked-chann
 oStream’s Library now uses Discover’s platform-specific hero, shelves and Continue Watching cards. Shelf headings open the full list, including provider categories. Library keeps its own titles and order. Sort is saved and available everywhere; Discover now supports pull-to-refresh on iPhone and iPad. Phone and Mac keep Discover’s ⋯ menus; the other platforms keep its context menus.
 
 All five requested builds passed on Dev-Mini, along with 2,852 tests in 363 suites, SDK floors and the no-add-ons Release check. iPhone and Apple TV comparisons are in ~/Developer/openstream-build/verification/library-like-discover/. They show local rails and Library’s hero/resume cards. The unsigned app could not import the fixture add-on because Keychain access requires an entitlement, so Discover’s populated hero still needs a visual comparison. Original simulator data was restored and temporary fixture folders removed. No commits or uploads.
+
+
+## 2026-10-08 — Vision Pro: the player plays inside the app
+The player no longer opens a second "Player" window. It fills the oStream window you were using; the window keeps its width, takes the shape of the video and resizes evenly from the window bar, and goes back to its size when you close the player, with the page you came from still there. The tabs step aside while it plays. Live channels opened full window use the same player.
+
+The audio that kept playing after you closed the window is fixed: the player now stops and remembers your place when the window goes away. The simulator cannot close a window from a test, so please check that one on the headset.
+
+Checked on the Vision Pro simulator on the Mac mini: four automated tests pass (player inside the window, 16:9 while playing, size restored, clip ending, a failed stream, a relaunch with one window). Screenshots: verification-artifacts/audit-2026-10-07/vision-e2e/. Not committed yet.

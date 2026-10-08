@@ -539,11 +539,9 @@ final class AppStoreScreenshotUITests: XCTestCase {
         XCTAssertFalse(app.alerts.firstMatch.exists, "Live playback presented an error alert")
         #if os(visionOS)
         capture("05-live")
-        // XR Simulator exposes this modal with a zero world transform: XCTest
-        // cannot tap its exit. Relaunch to finish Settings and source cleanup.
-        app.terminate()
-        app.launch()
-        playing = false
+        // The channel plays in the window's player stage, not AVKit's modal
+        // (which XCTest could not leave): its close button returns to Live.
+        try playerControl("player.close")
         #endif
         #if os(tvOS)
         for _ in 0..<3 where !channel.isHittable {

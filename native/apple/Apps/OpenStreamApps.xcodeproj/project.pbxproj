@@ -37,6 +37,7 @@
 		A9DFB0A2C2BF8A24229BB45D /* AppleMacScreenshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C369990DBB3867E958FE11 /* AppleMacScreenshotUITests.swift */; };
 		AB1000000000000000000001 /* AppleiOSUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000002 /* AppleiOSUITests.swift */; };
 		ACE25E4B2EFB78058040C93F /* AppleTVFocusUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791687CEE8616CBB3C5CCAE0 /* AppleTVFocusUITests.swift */; };
+		7A1000000000000000000041 /* AppleVisionPlayerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000040 /* AppleVisionPlayerUITests.swift */; };
 		B273701D1EE329791A414789 /* AppStoreScreenshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C5AD7DD647D200BEBD523C /* AppStoreScreenshotUITests.swift */; };
 		BB800056C96FC3E8BF129BB9 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 515F2F6124AE9E61D64D3E10 /* Foundation.framework */; };
 		D00000000000000000000001 /* OpenStreamApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* OpenStreamApps.swift */; };
@@ -197,6 +198,7 @@
 
 /* Begin PBXFileReference section */
 		1EF3BF2AFB564D81B0674276 /* OpenStreamMessagesViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenStreamMessagesViewController.swift; sourceTree = "<group>"; };
+		7A1000000000000000000040 /* AppleVisionPlayerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleVisionPlayerUITests.swift; sourceTree = "<group>"; };
 		42C5AD7DD647D200BEBD523C /* AppStoreScreenshotUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppStoreScreenshotUITests.swift; sourceTree = "<group>"; };
 		515F2F6124AE9E61D64D3E10 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		57A9EDE0EB4D1AE2F7607070 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/AppleTVOS.platform/Developer/SDKs/AppleTVOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -381,6 +383,15 @@
 			name = "OS X";
 			sourceTree = "<group>";
 		};
+		7A1000000000000000000042 /* OpenStreamVisionUITests */ = {
+			isa = PBXGroup;
+			children = (
+				7A1000000000000000000040 /* AppleVisionPlayerUITests.swift */,
+			);
+			name = OpenStreamVisionUITests;
+			path = OpenStreamVisionUITests;
+			sourceTree = "<group>";
+		};
 		AB1000000000000000000004 /* OpenStreamiOSUITests */ = {
 			isa = PBXGroup;
 			children = (
@@ -416,6 +427,7 @@
 				AB1000000000000000000004 /* OpenStreamiOSUITests */,
 				FD8A9365B9AA8122A63E53D9 /* OpenStreamMessages */,
 				E22FD65A20FB6E45B39E2321 /* OpenStreamMacUITests */,
+				7A1000000000000000000042 /* OpenStreamVisionUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -968,6 +980,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B273701D1EE329791A414789 /* AppStoreScreenshotUITests.swift in Sources */,
+				7A1000000000000000000041 /* AppleVisionPlayerUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

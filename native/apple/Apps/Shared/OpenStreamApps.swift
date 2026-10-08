@@ -79,10 +79,6 @@ struct OpenStreamPlatformApp: App {
         .defaultSize(width: 1280, height: 860)
         .commands { AppleMacMenuCommands() }
         #endif
-
-        #if os(visionOS)
-        AppleVisionPlaybackScene()
-        #endif
     }
 
     @ViewBuilder

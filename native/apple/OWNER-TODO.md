@@ -7,6 +7,27 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Vision Pro: player lives inside the app window, resizable** (asked 2026-10-07; today it opens a separate
+      "Player" window). Fable audit for direction → implement → overnight visionOS e2e on Dev-Mini. Also a Mythos
+      security check and a project audit — reports in `verification-artifacts/audit-2026-10-07/`.
+      **Status 2026-10-08:** built, uncommitted. The player now opens inside the oStream window; the window keeps its
+      width, turns 16:9 (or the film's shape) and resizes uniformly while playing, and returns to its size on close.
+      visionOS e2e on Dev-Mini: 4 passed, 1 skipped (below). Waiting for commit and a check on the real Vision Pro.
+- [ ] **Vision Pro: audio kept playing after the app window was closed** (reported 2026-10-07, previous TestFlight
+      build). Fixed, uncommitted: the player now stops (and saves the resume point) when the window leaves the
+      foreground. The simulator cannot close a window or background the app from a test, so this needs a device check.
+- [ ] **Vision Pro: audio keeps playing after the app is closed** (owner, 2026-10-07, previous build). Being fixed with the
+      in-window player: the player stops (and saves your place) when the window closes; e2e test added.
+- [ ] **Vision Pro environments** (owner, 2026-10-07). Apple's own environments (Mount Hood, Moon, etc.) can't be bundled,
+      but the full-window player docks into them when you pick one with the Digital Crown — verify on the device. Next:
+      our own "theater" environment (an immersive space with a docking spot for the screen), after the player work.
+- [ ] **Vision Pro traces:** device isn't paired with Dev-Mini. Owner: Settings → Share Diagnostics → AirDrop to the Mac.
+- [ ] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. Queued after the Vision Pro work:
+      (1) HIGH: Xtream guide (EPG) URL with the password is saved in plain preferences — keep it in the Keychain only;
+      (2) the web-portal diagnostics download and some trace lines can include stream URLs with credentials — redact;
+      (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
+      `verification-artifacts/audit-2026-10-07/mythos-security.md`.
+
 - [ ] **(2026-10-06) Owner decisions:** don't ship 16 yet; **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
       iPhone (cable once → Trust) get paired with the Mac mini on 2026-10-07 — then install the waiting ad hoc build
       (`scripts/mini.sh 'zsh scripts/release/devplus-install.sh 16 00008130-000610103443001C'`); go ahead with the Mythos Live review fixes; make an OpenStream backup of the

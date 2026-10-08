@@ -86,6 +86,13 @@ public final class ApplePlayerHost {
         // (`allowsVideoFrameAnalysis = false` below).
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
+        #if os(visionOS)
+        if #available(visionOS 26.0, *) {
+            // In the app's window, and AVKit's own expanded view; no
+            // immersive button until the owner decides on one (2026-10-07).
+            controller.experienceController.allowedExperiences = .only([.embedded, .expanded])
+        }
+        #endif
         #if os(iOS)
         // Disable Live Text / "Show Text" frame analysis (`allowsVideoFrameAnalysis`
         // is unavailable on tvOS, which has no Live Text feature to disable).

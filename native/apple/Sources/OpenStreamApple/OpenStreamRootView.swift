@@ -154,6 +154,10 @@ public struct OpenStreamRootView: View {
     /// This window's player, drawn over everything while something plays.
     @State private var macPlayerStage = AppleMacPlayerStage()
     #endif
+    #if os(visionOS)
+    /// This window's player, drawn over everything while something plays.
+    @State private var visionPlayerStage = AppleVisionPlayerStage()
+    #endif
     @State private var intentHandoff = AppleAppIntentHandoff.shared
     @State private var sharePlay = AppleSharePlaySessionStore.shared
     @AppStorage("openstream.firstRunGuidanceSeen") private var firstRunGuidanceSeen = false
@@ -219,6 +223,8 @@ public struct OpenStreamRootView: View {
                     set: { navigationPaths[tab] = $0 }
                 )) {
                     content(for: tab)
+                        // The tab ornament leaves while the player has the window.
+                        .toolbar(visionPlayerStage.isPresenting ? .hidden : .automatic, for: .tabBar)
                 }
                 .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
@@ -372,6 +378,9 @@ public struct OpenStreamRootView: View {
         #if os(macOS)
         .appleMacPlayerStage(macPlayerStage)
         #endif
+        #if os(visionOS)
+        .appleVisionPlayerStage(visionPlayerStage)
+        #endif
         .modifier(ApplePINPresenter())
         .onChange(of: restrictionScenePhase) { _, phase in
             if phase == .background { AppleRestrictionStore.shared.background() }
@@ -404,7 +413,15 @@ public struct OpenStreamRootView: View {
         } action: { rootViewportSize = $0 }
         #endif
         #if os(visionOS)
-        .frame(minWidth: 760, minHeight: 540)
+        // While the player has the window its minimum is the film's floor,
+        // or this minimum (which `.contentMinSize` turns into the window's)
+        // would win over the aspect-locked one (`AppleVisionPlayerStage`).
+        .frame(minWidth: visionPlayerStage.isPresenting
+                   ? AppleVisionPlayerWindowPolicy.playerContentMinimum.width
+                   : AppleVisionPlayerWindowPolicy.browseMinimum.width,
+               minHeight: visionPlayerStage.isPresenting
+                   ? AppleVisionPlayerWindowPolicy.playerContentMinimum.height
+                   : AppleVisionPlayerWindowPolicy.browseMinimum.height)
         .environment(\.defaultMinListRowHeight, 60)
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .defaultHoverEffect(.highlight)

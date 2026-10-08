@@ -79,7 +79,9 @@ struct AppleMediaPlayerPresentation: Identifiable {
 struct AppleMediaPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     #if os(visionOS)
-    @Environment(\.dismissWindow) private var dismissWindow
+    /// The window's player stage; nil only in a window that has none.
+    @Environment(AppleVisionPlayerStage.self) private var visionStage: AppleVisionPlayerStage?
+    @Environment(\.scenePhase) private var scenePhase
     #endif
     #if os(macOS)
     /// The window's player stage; nil only in a window that has none.
@@ -342,6 +344,24 @@ struct AppleMediaPlayerView: View {
             nativeMenuVisible = false
         }
         #endif
+        #if os(visionOS)
+        // AVKit's controls inside a window have no way out (the separate
+        // Player window had its own close); it hides with the More button.
+        // The transport overlay draws its own on the engine route.
+        .overlay(alignment: .topLeading) {
+            if coordinator.route == .avPlayer && nativeMenuVisible {
+                AppleMacPlayerCloseButton(action: closePlayer)
+                    .transition(.opacity)
+            }
+        }
+        // The window takes the film's shape once the engine knows it.
+        .onChange(of: coordinator.engine.videoSize, initial: true) { _, size in
+            visionStage?.fitVideo(size, for: presentationID)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if AppleVisionPlayerWindowPolicy.stopsPlayback(on: phase) { stopForBackground() }
+        }
+        #endif
         .overlay(alignment: .top) {
             if showsFallbackNotice {
                 Text("Trying another source").foregroundStyle(.white).shadow(color: .black, radius: 2).padding()
@@ -507,7 +527,9 @@ struct AppleMediaPlayerView: View {
 
     private func closePlayer() {
         #if os(visionOS)
-        dismissWindow(id: AppleVisionPlaybackWindow.sceneID)
+        // Never `dismissWindow()` here: the player is in the app's only
+        // window, and that would close the app.
+        if let visionStage { visionStage.dismiss(id: presentationID) } else { dismiss() }
         #elseif os(macOS)
         if let macStage { macStage.dismiss(id: presentationID) } else { dismiss() }
         #else
@@ -524,27 +546,6 @@ struct AppleMediaPlayerView: View {
             isBusy: coordinator.phase.isBusy,
             hasRouted: hasRouted
         )
-    }
-
-    /// Menu closes the player. The software route only writes progress every
-    /// few seconds, so the final position is saved before the engine stops
-    /// and the detail page can offer the resume point. The AVPlayer route's
-    /// progress coordinator already saves when it stops observing.
-    private func saveProgressOnClose() {
-        Self.saveProgressOnClose(coordinator: coordinator, request: request)
-    }
-
-    private static func saveProgressOnClose(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest) {
-        guard coordinator.route == .surface, !request.isLive else { return }
-        let position = coordinator.engine.position
-        let duration = coordinator.engine.duration ?? 0
-        guard position.isFinite, position > 0, duration.isFinite, duration > 0 else { return }
-        if let writer = coordinator.progressWriter {
-            writer(position, duration)
-        } else {
-            ApplePlaybackStore().save(mediaID: request.mediaID, position: position, duration: duration,
-                partID: request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID))
-        }
     }
 
     /// Menu on the Siri Remote: save where the owner was, then leave.
@@ -573,6 +574,43 @@ struct AppleMediaPlayerView: View {
             }))
         pictureInPicture.playerAppeared(host)
     }
+    #endif
+
+    #if os(tvOS) || os(visionOS)
+    /// Menu closes the player. The software route only writes progress every
+    /// few seconds, so the final position is saved before the engine stops
+    /// and the detail page can offer the resume point. The AVPlayer route's
+    /// progress coordinator already saves when it stops observing.
+    private func saveProgressOnClose() {
+        Self.saveProgressOnClose(coordinator: coordinator, request: request)
+    }
+
+    private static func saveProgressOnClose(coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest) {
+        guard coordinator.route == .surface, !request.isLive else { return }
+        let position = coordinator.engine.position
+        let duration = coordinator.engine.duration ?? 0
+        guard position.isFinite, position > 0, duration.isFinite, duration > 0 else { return }
+        if let writer = coordinator.progressWriter {
+            writer(position, duration)
+        } else {
+            ApplePlaybackStore().save(mediaID: request.mediaID, position: position, duration: duration,
+                partID: request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID))
+        }
+    }
+
+    #if os(visionOS)
+    /// The window left the foreground (closed, the app quit, or the wearer
+    /// went home): the picture is gone, so the sound goes too. Owner report:
+    /// audio kept playing after the window was closed. No Picture in Picture
+    /// exception: it plays on only on tvOS here.
+    private func stopForBackground() {
+        appleTrace("vision stage background → stop")
+        saveProgressOnClose()
+        visionHost?.teardown()
+        coordinator.stop()
+        closePlayer()
+    }
+    #endif
     #endif
 
     #if os(iOS) || os(visionOS)
@@ -827,9 +865,10 @@ struct AppleMediaPlayerView: View {
     }
 }
 
-#if os(macOS)
-/// The Mac player's way out on the AVKit route, whose floating controls have
-/// none: the transport overlay's close button, below the traffic lights.
+#if os(macOS) || os(visionOS)
+/// The Mac and Vision Pro player's way out on the AVKit route, whose controls
+/// have none: the transport overlay's close button (below the traffic lights
+/// on the Mac).
 private struct AppleMacPlayerCloseButton: View {
     let action: () -> Void
 
@@ -850,7 +889,9 @@ private struct AppleMacPlayerCloseButton: View {
         .accessibilityIdentifier("player.close")
     }
 }
-#else
+#endif
+
+#if !os(macOS)
 private struct AppleMediaPlayerControllerRepresentable: UIViewControllerRepresentable {
     let viewController: AVPlayerViewController
 
