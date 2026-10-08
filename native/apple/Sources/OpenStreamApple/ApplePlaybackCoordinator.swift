@@ -284,6 +284,8 @@ public final class ApplePlaybackCoordinator {
     private var timeoutTask: Task<Void, Never>?
     private var liveRetryTask: Task<Void, Never>?
     private var liveRetryAttempted = false
+    /// The live start deadline was already extended once for this attempt.
+    private var liveStartExtended = false
 
     // MARK: - Live reconnect (`AppleLiveReconnectPolicy`)
 
@@ -585,6 +587,7 @@ public final class ApplePlaybackCoordinator {
         attemptCountedFailure = false
         AppleInteractionTrace.count { $0.recordAttempt(isLive: request.isLive) }
         liveRetryAttempted = false
+        liveStartExtended = false
         lastProgressWrite = nil
         remoteProgressStarted = false
         lastKnownPosition = 0
@@ -700,6 +703,8 @@ public final class ApplePlaybackCoordinator {
         stopMonitoring()
         cancelTimeout()
         let failure = ApplePlaybackFailure.classify(error)
+        // Before the player: no stream was found or none could be prepared.
+        appleTraceFailure("playback \(failure.kind) before the player: \(failure.message)")
         cancelObservation()
         setPhase(.failed(failure))
         return failure
@@ -1103,16 +1108,27 @@ public final class ApplePlaybackCoordinator {
     /// what "live freezes when flipping channels" was (owner 2026-09-14).
     private var liveTimeoutDuration: Duration { .seconds(10) }
 
-    private func startTimeout() {
+    private func startTimeout(after duration: Duration? = nil) {
         timeoutTask?.cancel()
         let isLive = lastRequest?.isLive ?? false
-        let duration = isLive ? liveTimeoutDuration : timeoutDuration
+        let duration = duration ?? (isLive ? liveTimeoutDuration : timeoutDuration)
         let attempt = generation
         timeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled, let self, self.generation == attempt else { return }
             switch self.phase {
             case .idle, .resolving, .loading, .waiting:
+                // The engine has opened the channel (its load returned: the
+                // provider is sending media and the picture is being built),
+                // so this is a slow start, not a dead channel.
+                if let more = ApplePlaybackStartPolicy.liveStartExtension(
+                    isLive: isLive, sourceOpened: self.loadTask == nil, alreadyExtended: self.liveStartExtended
+                ) {
+                    self.liveStartExtended = true
+                    appleTrace("live start slow: the channel is open but has no picture after \(duration); waiting \(more) more")
+                    self.startTimeout(after: more)
+                    return
+                }
                 self.loadTask?.cancel()
                 self.engine.stop()
                 #if DEBUG

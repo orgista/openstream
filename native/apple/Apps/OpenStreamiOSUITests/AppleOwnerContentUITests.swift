@@ -116,18 +116,25 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         let player = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Live player for")).firstMatch
         guard check(player.waitForExistence(timeout: 30), "c-no-player", "no live player after tapping a channel") else { return }
-        Thread.sleep(forTimeInterval: 10)
+        // Past the 10 s live deadline and its one extension for a channel
+        // that is open but slow to its first segment (build 16: the owner's
+        // channels started at ~11-16 s and were all cut at 10 s, which read as
+        // a pass here until the player said whether it was playing).
         let first = player.label
+        let playing = NSPredicate(format: "value == %@", "Playing")
+        let started = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: player)], timeout: 30) == .completed
         attach("c-live-playing")
+        check(started, "c-not-playing", "the live channel did not start within 30 s (\(player.value as? String ?? "-"))")
         check(!playbackFailed(), "c-playback-failed", "live playback failed: \(alertText())")
 
         player.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92))
             .press(forDuration: 0.05, thenDragTo: player.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != %@", first), object: player)
         let zapped = XCTWaiter.wait(for: [changed], timeout: 15) == .completed
-        Thread.sleep(forTimeInterval: 10)
+        let zappedPlaying = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: player)], timeout: 30) == .completed
         attach("c-live-after-zap")
         check(zapped, "c-no-zap", "a swipe up did not change the channel")
+        check(zappedPlaying, "c-zap-not-playing", "the next channel did not start within 30 s")
         check(!playbackFailed(), "c-zap-failed", "live playback failed after the zap: \(alertText())")
         closePlayer()
     }
@@ -154,6 +161,68 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         let trailer = app.buttons["detail.trailer.mute"].firstMatch.waitForExistence(timeout: 30)
         attach("d-title-trailer")
         check(trailer, "d-no-trailer", "the title page showed no trailer within 30 s")
+    }
+
+    /// The title page's trailer stays on screen once it has appeared, and a
+    /// second Trailers card switches the hero to that trailer and keeps it
+    /// playing (build 16 on the owner's iPhone: the trailer flashed for a
+    /// split second and went back to the art; a card press often played
+    /// nothing). `detail.trailer.toggle` is an element only while the video is
+    /// on screen; its value says whether it is still playing.
+    func testFTitleTrailerKeepsPlaying() {
+        // `OPENSTREAM_TRAILER_LAUNCH_ARGS`: extra launch arguments, e.g. a Debug
+        // build's `-OpenStreamDebugDetailsDelay 6` (slow-network metadata).
+        launch(environment["OPENSTREAM_TRAILER_LAUNCH_ARGS"]?.split(separator: " ").map(String.init) ?? [])
+        tab("Discover")
+        let details = app.buttons["home.featured.details"].firstMatch
+        guard check(details.waitForExistence(timeout: 90), "f-no-hero", "Discover shows no hero") else { return }
+        Thread.sleep(forTimeInterval: 2)
+        details.tap()
+        let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
+        guard check(page.waitForExistence(timeout: 30), "f-no-title-page", "no title page from Discover") else { return }
+        let toggle = app.buttons["detail.trailer.toggle"].firstMatch
+        guard check(trailerIsPlaying(toggle, within: 45), "f-no-trailer", "the title page's trailer never came on screen")
+        else { return }
+        attach("f-trailer-on")
+        Thread.sleep(forTimeInterval: 10)
+        attach("f-trailer-10s")
+        check(toggle.exists && toggle.value as? String == "Playing", "f-trailer-gone",
+              "the trailer did not stay on screen for 10 s (value \(toggle.exists ? String(describing: toggle.value) : "gone"))")
+
+        // The Trailers shelf, below the fold.
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
+                                                     "detail.trailer.", "Play Trailer"))
+        scrollIntoView(cards.element(boundBy: 0))
+        let count = cards.count
+        print("OWNER-CONTENT trailer cards=\(count)")
+        guard count >= 2 else {
+            print("OWNER-CONTENT this title has \(count) trailer card(s); the shelf switch was not checked")
+            return
+        }
+        // The second card: the one next to the hero's own trailer. (A third
+        // sits off the side of the shelf, where XCUITest reads a stale frame
+        // for the lazily built card once the press has scrolled the page.)
+        for index in 1..<2 {
+            let card = cards.element(boundBy: index)
+            scrollIntoView(card)
+            let key = card.identifier
+            let label = card.label
+            print("OWNER-CONTENT pressing \(key)")
+            card.tap()
+            // The press scrolls back up to the hero; the old trailer goes and
+            // the pressed one comes on.
+            // (The swap itself takes ~1.5 s behind the art, too quick for
+            // XCUITest to see reliably; the device trace records it.)
+            guard check(trailerIsPlaying(toggle, within: 30), "f-card\(index)-no-trailer",
+                        "pressing \(label) played nothing") else { return }
+            attach("f-card\(index)-on")
+            Thread.sleep(forTimeInterval: 10)
+            attach("f-card\(index)-10s")
+            check(toggle.exists && toggle.value as? String == "Playing", "f-card\(index)-gone",
+                  "the trailer from \(label) did not keep playing for 10 s")
+            check(app.buttons[key].firstMatch.exists, "f-card\(index)-dropped",
+                  "\(label)'s card left the shelf, as a failed key does")
+        }
     }
 
     /// Search finds a known title.
@@ -237,9 +306,34 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         if quality.waitForExistence(timeout: 4), quality.isHittable { quality.tap() }
     }
 
+    /// Swipes the page up until `element`'s row is on screen (at most 8
+    /// swipes); a card off to the side of its shelf is the shelf's to scroll.
+    private func scrollIntoView(_ element: XCUIElement) {
+        for _ in 0..<8 where !(element.exists && onScreen(element, vertically: true)) { app.swipeUp() }
+    }
+
+    /// On screen by its frame: `isHittable` fails outright on a lazily built
+    /// card that is off screen.
+    private func onScreen(_ element: XCUIElement, vertically: Bool = false) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame, window = app.windows.firstMatch.frame
+        guard !frame.isEmpty else { return false }
+        return vertically ? (window.minY...window.maxY).contains(frame.midY)
+            : window.contains(CGPoint(x: frame.midX, y: frame.midY))
+    }
+
+    /// Whether the hero's trailer is on screen and playing within `timeout`.
+    private func trailerIsPlaying(_ toggle: XCUIElement, within timeout: TimeInterval) -> Bool {
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value == %@", "Playing"),
+                                                object: toggle)
+        return XCTWaiter.wait(for: [playing], timeout: timeout) == .completed
+    }
+
     private func playbackFailed() -> Bool {
         let alert = app.alerts.firstMatch
-        return alert.exists && alert.label.localizedCaseInsensitiveContains("fail")
+        if alert.exists && alert.label.localizedCaseInsensitiveContains("fail") { return true }
+        // A live channel that timed out says so on the player, not in an alert.
+        return app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "not responding")).firstMatch.exists
     }
 
     private func alertText() -> String {

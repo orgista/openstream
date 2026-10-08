@@ -240,6 +240,11 @@ public struct AppleMediaPlaybackResolver: Sendable {
                     try await client.streams(source: source, type: item.type, mediaID: item.mediaID)
                 }
                 let http = selection.httpCandidates.filter { !$0.isPendingPreparation }
+                // Per add-on, so "did not return an Apple-compatible stream"
+                // can be read off the trace: which add-on answered with what.
+                appleTrace("streams from \(source.name) for \(item.name): ready=\(http.count) "
+                    + "pending=\(selection.httpCandidates.count - http.count) unsupported=\(selection.unsupported.count)"
+                    + (selection.unsupported.isEmpty ? "" : " (\(Set(selection.unsupported.map { Self.traceLabel($0.reason) }).sorted().joined(separator: ",")))"))
                 if http.isEmpty, selection.httpCandidates.contains(where: \.isPendingPreparation) {
                     providerFailure = .init(kind: .unavailable, message: "The provider is still preparing this title. No ready stream was returned.")
                 }
@@ -275,6 +280,18 @@ public struct AppleMediaPlaybackResolver: Sendable {
         }
         if let providerFailure { throw AppleStremioPlaybackResolutionError.providerFailure(providerFailure) }
         throw bestError
+    }
+
+    /// The kind of stream that could not play, without its locator (an
+    /// external link can carry a token).
+    static func traceLabel(_ reason: AppleStremioUnsupportedReason) -> String {
+        switch reason {
+        case .youtube: "youtube"
+        case .externalLink: "external-link"
+        case .invalidHTTPURL: "bad-url"
+        case .invalidLocator: "bad-locator"
+        case .missingLocator: "no-url (torrent only)"
+        }
     }
 
     private static func withTimeout<Value: Sendable>(

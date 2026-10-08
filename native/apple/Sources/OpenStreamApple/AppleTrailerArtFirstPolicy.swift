@@ -16,6 +16,26 @@ public enum AppleTrailerArtFirstPolicy {
         "\(itemID):\(enabled):\(art == .loaded):\(keys.joined(separator: ","))"
     }
 
+    /// The trailer the title page's hero shows. Once one has started it is
+    /// held by its key, not by its place in the list: the list is the
+    /// enriched details' trailers followed by the add-on's, and it changes
+    /// under a playing trailer as the details land (a few to dozens of keys,
+    /// prepended) or are cleared for a reload. Held by index, the key at that
+    /// place changed and the playing trailer was torn down for another one
+    /// mid-play — on screen for a moment, then back to the art.
+    static func heroTrailerKey(pinned: String?, gaveUp: Bool, candidates: [String]) -> String? {
+        if gaveUp { return nil }
+        return pinned ?? candidates.first
+    }
+
+    /// Where the search for the next playable trailer starts once `key` has
+    /// failed: just after it in the current list, or at the top when the
+    /// list no longer carries it.
+    static func nextCandidateStart(after key: String?, in candidates: [String]) -> Int {
+        guard let key, let index = candidates.firstIndex(of: key) else { return 0 }
+        return index + 1
+    }
+
     static func acceptsMessage(messageKey: String?, currentKey: String?) -> Bool {
         guard let messageKey, let currentKey else { return false }
         return messageKey == currentKey

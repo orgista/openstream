@@ -4525,3 +4525,17 @@ Checked: 2878 package tests pass, iOS, tvOS, visionOS and macOS builds succeed o
 
 ## 2026-10-08 — iCloud sync: the phone now sends, and you can see it
 A phone that was set up before iCloud sync was turned on by default never sent its setup to iCloud, so the iPad and Apple TV found nothing. It now sends at launch, when the app comes back, and when you tap the new Sync Now button in Backup & Sync, but only if iCloud has nothing or an older copy. The Apple TV, an empty device and a reset device never send. Under the iCloud switch you now see when this device last sent and last received, how many sources it has and how many are still waiting for passwords from iCloud Keychain (on the Apple TV: Settings > Sources > iCloud Sync). Waiting sources look for their passwords again whenever the app comes back. Checked: 2890 package tests pass and the tvOS build succeeds on the Mac mini; a real two-device test needs your devices.
+
+## 2026-10-08 — Build 16 trailers and Live on the owner's setup (DevPlus, imported backup)
+
+Trailers: not reproduced on DevPlus (iOS 27); owner's phone is iPhone16,2 on iOS 18.7.8 (TestFlight feedback).
+Fixed the races that fit the symptom: the hero now holds its trailer by key (`AppleTrailerArtFirstPolicy.heroTrailerKey`),
+not by index into a list that grows when the TMDB details land (3→76 keys seen in the trace); the error-recovery
+task no longer overrides a pressed card; the press unmutes only with the switch; the 60 s cap ignores a reported
+duration under 10 s. New traces: every return to the art says why (`title trailer paused: …`, `paused by the
+player`, candidates changed), and iframe states carry the duration. Live: the 10 s live deadline cut channels
+whose stream was already open (first picture at 12-16 s); `ApplePlaybackStartPolicy` grants one 15 s extension
+when the engine's load has returned. DevPlus, ad hoc Release 16.2 + owner config: `testFTitleTrailerKeepsPlaying`
+and `testCLivePlaysAndZaps` (now asserts the player says Playing) pass; before, Live was 0/5 played.
+`swift test`: 2914 tests in 371 suites passed.
+

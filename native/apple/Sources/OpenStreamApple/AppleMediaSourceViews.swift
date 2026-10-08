@@ -185,6 +185,11 @@ struct AppleLiveTVView: View {
                         .livePinnedPlayerLayout()
                         #endif
                         .accessibilityLabel("Live player for \(selectedChannel.name)")
+                        // Whether the picture is up, for VoiceOver and the
+                        // owner-content Live check (a channel that never
+                        // started read the same as one playing).
+                        .accessibilityValue(playbackCoordinator.phase == .playing ? "Playing"
+                            : (playbackCoordinator.phase.isBusy ? "Loading" : ""))
                     } else {
                         lastWatchedCard
                     }

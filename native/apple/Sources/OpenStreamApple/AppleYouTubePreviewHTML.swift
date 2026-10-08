@@ -106,6 +106,11 @@ enum AppleYouTubePreviewHTML {
         // Ends early enough for the 0.6 s crossfade back to the art to finish
         // over live frames, before YouTube can paint its end screen.
         var previewHideLeadSeconds = 0.8;
+        // A duration shorter than this is not the trailer's: the player can
+        // report a provisional length (a pre-roll, the first buffered range)
+        // as it starts, and capping at it ended the trailer the moment it
+        // was revealed. The 60 s cap and YouTube's own ENDED still apply.
+        var minimumTrustedDuration = 10;
         var api = document.createElement('script');
         api.src = 'https://www.youtube.com/iframe_api';
         document.head.appendChild(api);
@@ -117,7 +122,8 @@ enum AppleYouTubePreviewHTML {
               : (player && typeof player.isMuted === 'function' ? player.isMuted() : desiredMuted);
             var mediaTime = player && typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
             var quality = player && typeof player.getPlaybackQuality === 'function' ? player.getPlaybackQuality() : '';
-            var payload = {videoKey: \(videoKeyJSON), state: state, muted: Boolean(muted), mediaTime: mediaTime, quality: quality};
+            var duration = player && typeof player.getDuration === 'function' ? player.getDuration() : 0;
+            var payload = {videoKey: \(videoKeyJSON), state: state, muted: Boolean(muted), mediaTime: mediaTime, quality: quality, duration: duration};
             if (typeof errorCode === 'number') payload.errorCode = errorCode;
             window.webkit.messageHandlers.trailerState.postMessage(payload);
           } catch (_) {}
@@ -245,7 +251,7 @@ enum AppleYouTubePreviewHTML {
           previewCapTimer = setInterval(function() {
             if (!desiredPlaying || previewEnding || !player || !playerReady || typeof player.getCurrentTime !== 'function') return;
             var duration = typeof player.getDuration === 'function' ? player.getDuration() : 0;
-            var cap = duration > 0 ? Math.min(duration, previewCapSeconds) : previewCapSeconds;
+            var cap = duration >= minimumTrustedDuration ? Math.min(duration, previewCapSeconds) : previewCapSeconds;
             if (player.getCurrentTime() >= cap - previewHideLeadSeconds) finishPreview();
           }, 250);
           // Keep the cap independent of YouTube's current-time reporting. The

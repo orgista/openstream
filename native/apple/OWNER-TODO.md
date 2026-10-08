@@ -8,6 +8,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 ## Open
 - [ ] **Live doesn't work with the owner's config (2026-10-08, build 16)** — being tested on DevPlus with the
       owner's imported backup alongside the trailer bug.
+      **Fixed, waiting for your phone (2026-10-08):** your provider's channels take 12-16 s to show the first
+      picture (the stream opens in ~3-4 s, the first segment arrives a few seconds later), and the app gave
+      every channel only 10 s before calling it dead, then retried and fell back the same way: 0 of 5 played.
+      A channel that is open and sending now gets 15 s more (dead channels still fail at 10 s). On the mini's
+      iPhone with your setup: CBS and FOX both play (first picture ~14 s). Still slow to start; making it
+      faster is engine work for later.
 - [ ] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
       different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
 - [ ] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
@@ -35,6 +41,17 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       The pre-ship check on the mini's iPhone 16e passed (1.65 s, demo data), so it reproduces with the
       owner's sources/phone only. Plan: owner cables the phone to Dev-Mini once (trust + Developer Mode),
       then e2e over the cable or Wi-Fi with traces.
+      **Fixed in code, waiting for your phone (2026-10-08):** with your imported setup on the mini's iPhone
+      (iOS 27) the trailer did not flash, so the exact cause on your iPhone 15 Pro Max (iOS 18.7) is not
+      proven. Three things that could do it are fixed: (1) the page picked its trailer by its place in the list,
+      and the list changes while a trailer plays (TMDB's trailers arrive and are put first), so a different
+      video could replace the playing one mid-play; it now keeps the trailer it started. (2) The one-minute
+      cap could use a too-short length the player reports as it starts and end the trailer right after it
+      appeared; short lengths are now ignored. (3) A tapped trailer could be overridden by the page still
+      looking for a replacement for an earlier one, and the press unmuted the old trailer for a moment; both
+      fixed. Every way a trailer goes back to the art now writes its reason to the trace. Verified on the
+      mini's iPhone with your setup (ad hoc Release 16.2): trailer still playing after 10 s, Trailer 2 tapped,
+      switched and kept playing. If it still flashes on yours: Settings > Share Diagnostics right after.
 
 - [ ] **Vision Pro: player lives inside the app window, resizable** (asked 2026-10-07; today it opens a separate
       "Player" window). Fable audit for direction → implement → overnight visionOS e2e on Dev-Mini. Also a Mythos

@@ -1176,6 +1176,20 @@ struct AppleDiscoverView: View {
         // series, so a sweep can photograph both kinds of title page.
         // `OpenStreamDetailTitle` picks a title by name, so before and after
         // shots can photograph the same page.
+        // `OpenStreamDebugPlayID tt… -OpenStreamDebugPlayType movie|series`:
+        // any title by its IMDb id, opened as a Discover add-on title is, so
+        // a playback sweep can reach titles no Discover row lists.
+        if let playID = UserDefaults.standard.string(forKey: "OpenStreamDebugPlayID"),
+           ApplePlayGatingPolicy.canonicalMediaID(playID) != nil,
+           let section = visibleSections.first,
+           let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
+            let item = AppleCatalogItem(
+                mediaID: playID,
+                type: UserDefaults.standard.string(forKey: "OpenStreamDebugPlayType") ?? "movie",
+                name: UserDefaults.standard.string(forKey: "OpenStreamDebugPlayName") ?? playID
+            )
+            return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source)
+        }
         let type = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "detail-movie" ? "movie" : "series"
         let wanted = UserDefaults.standard.string(forKey: "OpenStreamDetailTitle") ?? ""
         let sections = visibleSections.filter { $0.catalog.type == type }
@@ -2967,10 +2981,10 @@ struct AppleCatalogItemDetailView: View {
             try? await Task.sleep(for: .seconds(2))
             // A pressed Play Trailer got there first.
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
-            guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: heroTrailer.candidateIndex) else { return }
+            guard let playableKey = await resolvePlayableTrailerKey(startingAt: 0) else { return }
             // …or while its first candidate was being probed.
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
-            heroTrailer.candidateIndex = playableIndex
+            heroTrailer.pinnedKey = playableKey
             heroTrailer.muted = true
             guard prepareTrailerAudio() else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
@@ -2990,6 +3004,10 @@ struct AppleCatalogItemDetailView: View {
             handleTrailerState("error", muted: heroTrailer.muted, errorCode: nil)
         }
         .onChange(of: settings.autoMuteTrailer) { _, muted in heroTrailer.muted = muted }
+        .onChange(of: trailerCandidates) { old, new in
+            guard heroTrailer.hasStarted else { return }
+            appleTrace("title trailer candidates changed \(old.count)→\(new.count) while started; key=\(trailerKey ?? "none")")
+        }
         // A pressed trailer that never comes on screen stops saying it is
         // loading after the same wait the Discover hero gives it.
         .task(id: heroTrailer.pressedKey) {
@@ -3034,7 +3052,8 @@ struct AppleCatalogItemDetailView: View {
             titleWordmark.graceExpired = true
         }
         .task(id: item.id) {
-            heroTrailer.candidateIndex = 0
+            heroTrailer.pinnedKey = nil
+            heroTrailer.gaveUp = false
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
             heroTrailer.muted = settings.autoMuteTrailer
@@ -3083,10 +3102,10 @@ struct AppleCatalogItemDetailView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase != .active else { return }
-            pauseTrailerPreview()
+            pauseTrailerPreview(reason: "scene \(phase)")
         }
         .onDisappear {
-            pauseTrailerPreview()
+            pauseTrailerPreview(reason: "page gone")
             if AppleMediaServerItemReference.parse(item.mediaID) == nil {
                 seasonDownloads.cancel()
                 if downloadCoordinator.state.ownsDownload { downloadCoordinator.cancel() }
@@ -4269,8 +4288,9 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var trailerKey: String? {
-        guard heroTrailer.candidateIndex < trailerCandidates.count else { return nil }
-        return trailerCandidates[heroTrailer.candidateIndex]
+        AppleTrailerArtFirstPolicy.heroTrailerKey(
+            pinned: heroTrailer.pinnedKey, gaveUp: heroTrailer.gaveUp, candidates: trailerCandidates
+        )
     }
 
     private var trailerCandidates: [String] {
@@ -4418,6 +4438,7 @@ struct AppleCatalogItemDetailView: View {
         let shouldPlay = !heroTrailer.isActive
         if shouldPlay, !prepareTrailerAudio() { return }
         if !shouldPlay { heroTrailer.pressedKey = nil }
+        if shouldPlay, heroTrailer.pinnedKey == nil { heroTrailer.pinnedKey = trailerKey }
         heroTrailer.hasStarted = true
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             heroTrailer.isActive = shouldPlay
@@ -4438,8 +4459,9 @@ struct AppleCatalogItemDetailView: View {
         heroTrailer.replayGeneration &+= 1
     }
 
-    private func pauseTrailerPreview() {
+    private func pauseTrailerPreview(reason: String) {
         guard heroTrailer.isActive else { return }
+        appleTrace("title trailer paused: \(reason) (\(item.name))")
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
@@ -4450,7 +4472,7 @@ struct AppleCatalogItemDetailView: View {
         #if os(iOS) || os(macOS)
         // Rotation can briefly report a stale frame. Stop only after the
         // hero has actually scrolled above the viewport.
-        if frame != .zero, frame.maxY <= 0, heroTrailer.isActive { pauseTrailerPreview() }
+        if frame != .zero, frame.maxY <= 0, heroTrailer.isActive { pauseTrailerPreview(reason: "hero scrolled off, maxY=\(Int(frame.maxY))") }
         // At the top the hero runs up under the toolbar, by the top inset.
         let atTop = frame.minY >= -pageGeometry.safeAreaInsets.top - 1
         if frame != .zero, atTop != heroTrailer.heroAtTop {
@@ -4474,39 +4496,46 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func handleTrailerState(_ state: String, muted: Bool, errorCode: Int?) {
-        print("[OpenStream] trailer title=\(item.name) candidate=\(heroTrailer.candidateIndex) state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
+        print("[OpenStream] trailer title=\(item.name) key=\(trailerKey ?? "none") state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
         if state == AppleTrailerArtFirstPolicy.webContentTerminatedState {
             // No next candidate: the web view itself died, not the video.
             heroTrailer.failedKeys.formUnion(trailerCandidates)
-            heroTrailer.candidateIndex = trailerCandidates.count
+            heroTrailer.gaveUp = true
             showTrailerArtworkOnly()
             logTrailerFailure("the trailer's web content process stopped")
             return
         }
         if state == "error" || state == "autoplay-blocked" {
-            if let key = trailerKey { heroTrailer.failedKeys.insert(key) }
+            let failedKey = trailerKey
+            if let failedKey { heroTrailer.failedKeys.insert(failedKey) }
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
-            let nextIndex = heroTrailer.candidateIndex + 1
             let candidates = trailerCandidates
+            let nextIndex = AppleTrailerArtFirstPolicy.nextCandidateStart(after: failedKey, in: candidates)
             let code = errorCode.map(String.init) ?? "none"
-            let failed = heroTrailer.candidateIndex + 1
             if nextIndex < candidates.count {
                 Task { @MainActor in
-                    guard let playableIndex = await resolvePlayableTrailerCandidateIndex(startingAt: nextIndex) else {
-                        appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): no playable key left, giving up")
-                        heroTrailer.candidateIndex = candidates.count
+                    let next = await resolvePlayableTrailerKey(startingAt: nextIndex)
+                    // A Trailers card pressed while this looked for the next
+                    // key has already chosen what plays; leave it be.
+                    guard heroTrailer.pinnedKey == failedKey || heroTrailer.pinnedKey == nil else {
+                        appleTrace("title trailer error=\(code) key=\(failedKey ?? "none"): another trailer was chosen meanwhile")
+                        return
+                    }
+                    guard let next else {
+                        appleTrace("title trailer error=\(code) key=\(failedKey ?? "none"): no playable key left, giving up")
+                        heroTrailer.gaveUp = true
                         showTrailerArtworkOnly()
                         logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
                         return
                     }
-                    appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): trying key \(playableIndex + 1)")
-                    heroTrailer.candidateIndex = playableIndex
+                    appleTrace("title trailer error=\(code) key=\(failedKey ?? "none"): trying key=\(next)")
+                    heroTrailer.pinnedKey = next
                     heroTrailer.isActive = true
                 }
             } else {
-                appleTrace("title trailer error=\(code) key \(failed)/\(candidates.count): giving up")
-                heroTrailer.candidateIndex = candidates.count
+                appleTrace("title trailer error=\(code) key=\(failedKey ?? "none") (\(candidates.count) candidates): giving up")
+                heroTrailer.gaveUp = true
                 showTrailerArtworkOnly()
                 logTrailerFailure("video provider could not play this trailer (error \(errorCode.map(String.init) ?? "unknown"))")
             }
@@ -4519,6 +4548,7 @@ struct AppleCatalogItemDetailView: View {
         } else if state == "concealed" {
             heroTrailer.isPlaying = false
         } else if state == "paused" {
+            appleTrace("title trailer paused by the player: back to the art (\(item.name), active=\(heroTrailer.isActive))")
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
         } else if AppleTrailerArtFirstPolicy.leavesForTheArt(forPlayerState: state) {
@@ -4543,7 +4573,9 @@ struct AppleCatalogItemDetailView: View {
         heroTrailer.interactionGlyph = nil
     }
 
-    private func resolvePlayableTrailerCandidateIndex(startingAt index: Int) async -> Int? {
+    /// The first key from `index` on that is neither a known failure nor a
+    /// portrait clip, as a key: the list can change while frames are probed.
+    private func resolvePlayableTrailerKey(startingAt index: Int) async -> String? {
         let keys = trailerCandidates
         var searchIndex = index
         while let candidateIndex = AppleTrailerPreviewPolicy.firstPlayableCandidate(
@@ -4562,7 +4594,7 @@ struct AppleCatalogItemDetailView: View {
                 searchIndex = candidateIndex + 1
                 continue
             }
-            return candidateIndex
+            return key
         }
         return nil
     }
@@ -4595,7 +4627,7 @@ struct AppleCatalogItemDetailView: View {
 
     private func logTrailerFailure(_ reason: String) {
         appleTrace("title trailer unavailable: \(item.name) reason=\(reason)")
-        print("[OpenStream] trailer unavailable title=\(item.name) candidate=\(heroTrailer.candidateIndex) reason=\(reason)")
+        print("[OpenStream] trailer unavailable title=\(item.name) key=\(trailerKey ?? "none") reason=\(reason)")
     }
 
     private func showTrailerInteractionGlyph(_ glyph: String) {
@@ -4846,7 +4878,7 @@ struct AppleCatalogItemDetailView: View {
         case .playTrailer?:
             AppleDetailActionButton(title: "Play Trailer", glyph: .systemImage("play.fill"),
                                     kind: .play, width: actionButtonWidth) {
-                playTrailerInHero(at: heroTrailer.candidateIndex)
+                if let key = trailerKey { playTrailerInHero(key: key) }
             }
             .accessibilityIdentifier("detail.play")
         default:
@@ -6385,14 +6417,21 @@ struct AppleCatalogItemDetailView: View {
                 }
             }
             group.addTask {
-                .details(try? await resolver.resolve(
+                let details = try? await resolver.resolve(
                     sources: sources,
                     preferredSourceID: preferredSourceID,
                     type: type,
                     mediaID: mediaID,
                     configuration: configuration,
                     fallbackName: itemName
-                ))
+                )
+                #if DEBUG
+                // `-OpenStreamDebugDetailsDelay <s>`: the enriched details (and
+                // their trailers) land that late, as on a slow phone network.
+                let delay = UserDefaults.standard.double(forKey: "OpenStreamDebugDetailsDelay")
+                if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+                #endif
+                return .details(details)
             }
         }
         await withTaskGroup(of: AppleDetailPrepareOutcome.self) { group in
@@ -6957,6 +6996,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             let errorCode = payload["errorCode"] as? Int
             let mediaTime = payload["mediaTime"] as? Double ?? 0
             let quality = payload["quality"] as? String ?? ""
+            let duration = payload["duration"] as? Double ?? 0
             #if DEBUG && os(iOS)
             if state == "chromeProbe" {
                 let items = payload["items"] as? [String] ?? []
@@ -6970,7 +7010,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 appleTrace("trailer ignored state from previous candidate")
                 return
             }
-            appleTrace("trailer iframe state=\(state) time=\(mediaTime) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
+            appleTrace("trailer iframe state=\(state) time=\(mediaTime) duration=\(duration) muted=\(muted) quality=\(quality) error=\(errorCode.map(String.init) ?? "none")")
             #if DEBUG && os(iOS)
             if state == "playing" { container?.probe?.begin() }
             #endif
@@ -7604,7 +7644,11 @@ private struct AppleTitlePageTrailerState {
     /// muted-only rule so `muted` can actually go false
     /// (`ApplePlaybackSessionPolicy`, `AppleYouTubePreviewHTML`).
     var allowsSound = false
-    var candidateIndex = 0
+    /// The trailer playing or loading, held by key (`heroTrailerKey`); nil
+    /// until one starts, when the hero offers the list's first.
+    var pinnedKey: String?
+    /// Every candidate failed: no trailer until the page is opened again.
+    var gaveUp = false
     var portraitKeys: Set<String> = []
     var failedKeys: Set<String> = []
     var landscapeKeys: Set<String> = []
@@ -8685,7 +8729,7 @@ extension AppleCatalogItemDetailView {
     /// Play (or resume), or the trailer when nothing here can play.
     fileprivate func performTitlePagePrimaryAction() {
         if titlePagePrimaryButtonState?.isTrailer == true {
-            playTrailerInHero(at: heroTrailer.candidateIndex)
+            if let key = trailerKey { playTrailerInHero(key: key) }
         } else if isDiscTitle {
             startDisc(.menu)
         } else {
@@ -9027,7 +9071,7 @@ extension AppleCatalogItemDetailView {
                             width: phoneCardWidth,
                             isLoading: trailerCardIsLoading(key)
                         ) {
-                            if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
+                            playTrailerInHero(key: key)
                         }
                     }
                 }
@@ -9047,19 +9091,14 @@ extension AppleCatalogItemDetailView {
         )
     }
 
-    /// Plays trailer `index` in the hero, scrolling back up to it first.
-    private func playTrailerInHero(at index: Int) {
+    /// Plays trailer `key` in the hero, scrolling back up to it first.
+    private func playTrailerInHero(key: String) {
         #if os(iOS) || os(visionOS) || os(macOS)
-        guard trailerCandidates.indices.contains(index) else { return }
+        guard trailerCandidates.contains(key) || key == trailerKey else { return }
         let scrolls = !heroTrailer.heroAtTop
-        appleTrace("title trailer press \(item.name) index=\(index) scrolls=\(scrolls) top=\(Int(pageGeometry.safeAreaInsets.top))")
+        appleTrace("title trailer press \(item.name) key=\(key) scrolls=\(scrolls) top=\(Int(pageGeometry.safeAreaInsets.top))")
         // The card says it is loading at once; the art stays in the hero.
-        let key = trailerCandidates[index]
         heroTrailer.pressedKey = key
-        // An explicit press starts with sound — autoplay never does.
-        heroTrailer.muted = false
-        heroTrailer.allowsSound = true
-        appleTrace("trailer unmuted (explicit press)")
         if scrolls {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
                 detailScrollPosition.scrollTo(edge: .top)
@@ -9071,16 +9110,23 @@ extension AppleCatalogItemDetailView {
             // already at the top starts its trailer's load straight away.
             if scrolls {
                 try? await Task.sleep(for: .milliseconds(reduceMotion ? 50 : 450))
-                // A later press won while this one waited for the scroll
-                // (review of 28f7fb7).
-                guard heroTrailer.pressedKey == key else { return }
             }
-            if index == heroTrailer.candidateIndex, heroTrailer.hasStarted {
+            // A later press won while this one waited (review of 28f7fb7).
+            guard heroTrailer.pressedKey == key else { return }
+            // An explicit press starts with sound — autoplay never does. Set
+            // with the switch, not before it: set at the press, it unmuted the
+            // trailer being replaced for the moment before the new one loaded.
+            heroTrailer.muted = false
+            heroTrailer.allowsSound = true
+            appleTrace("trailer unmuted (explicit press)")
+            if key == trailerKey, heroTrailer.hasStarted {
                 restartTrailer()
                 return
             }
             guard prepareTrailerAudio(pressed: true) else { return }
-            heroTrailer.candidateIndex = index
+            heroTrailer.pinnedKey = key
+            heroTrailer.gaveUp = false
+            heroTrailer.failedKeys.remove(key)
             // One transaction: a web view first made paused loads its page
             // with autoplay off and waits on a second message to start.
             withAnimation(reduceMotion ? nil : .easeInOut(duration: AppleDetailMetrics.trailerCrossfadeDuration)) {
@@ -9367,9 +9413,8 @@ extension AppleCatalogItemDetailView {
             guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPlayTrailer"),
                   titlePageTrailerKeys.first != nil else { return }
             try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled, let key = titlePageTrailerKeys.first,
-                  let index = trailerCandidates.firstIndex(of: key) else { return }
-            playTrailerInHero(at: index)
+            guard !Task.isCancelled, let key = titlePageTrailerKeys.first else { return }
+            playTrailerInHero(key: key)
         }
         #endif
     }
@@ -9651,7 +9696,7 @@ extension AppleCatalogItemDetailView {
                     width: width,
                     isLoading: trailerCardIsLoading(key)
                 ) {
-                    if let index = trailerCandidates.firstIndex(of: key) { playTrailerInHero(at: index) }
+                    playTrailerInHero(key: key)
                 }
             }
         }
