@@ -1,5 +1,55 @@
 # Deliveries
 
+## OpenStream build 16 TestFlight delivery — October 8, 2026 (iOS, tvOS, visionOS, macOS)
+
+Owner: "lets ship the next build to TestFlight" (ASC max was 15 on every platform → ship 16). Source `main`
+`f08a908907da90c2b0e32e51c0bf45ec13cdf562`, `git archive` into Dev-Mini `~/Developer/openstream-build/wt-b16`
+(local disk). Gate on the mini: `swift build` OK, **2878 tests / 366 suites passed**. All four archives used
+`CURRENT_PROJECT_VERSION=16` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
+Uploaded with `asc publish testflight … --group Internal --test-notes … --locale en-US --wait` (no `--submit`).
+The TraceEnabled group no longer exists in ASC (only Internal + Reddit), so Internal is the only group.
+
+| Platform | Build ID | Live status |
+|---|---|---|
+| iOS 16 | 6f17e9f1-64e0-4fd9-a87c-10f6de1bbdd9 | VALID / internal IN_BETA_TESTING / external not submitted |
+| tvOS 16 | d5786b92-e9c5-45c4-b972-43c0dc9b2383 | VALID / internal IN_BETA_TESTING / external not submitted |
+| visionOS 16 | 71d021dd-2abe-4bd5-991e-3668f10a5c84 | VALID / internal IN_BETA_TESTING / external not submitted |
+| macOS 16 | c6d43ec9-9c4b-4eb3-a9a1-171284a8f61a | VALID / internal IN_BETA_TESTING / external not submitted |
+
+- [x] 1 Authorization/numbers: owner said ship next; ASC readback 15 was the max on IOS/TV_OS/VISION_OS/MAC_OS.
+- [x] 2 Source: main HEAD recorded; local-disk tree on the mini; zero-byte Swift check empty; gate 2878/366.
+- [x] 3 Signing: embedded targets app, Widgets, Watch, Messages, **Share (new)**, Top Shelf, Mac app — each has a Release
+      profile pin and an ExportOptions line; all ACTIVE in `asc profiles list`. `OpenStream Mac App Store 2026-09-20`
+      was missing on the mini and was downloaded from ASC and installed (existing profile; nothing created or changed).
+- [x] 4 `check-no-addons-in-release.sh` PASS (App Store config); no placeholder hits; no `TODO(ship)`; nothing in
+      OWNER-TODO marks a release blocker; clean installs (Release + add-ons) start with no sources: iPhone and Vision Pro
+      sims show the "Welcome to oStream" first-run card, tvOS harness asserted "No Sources".
+- [x] 5 Tracing default unchanged (no `OpenStreamTraceDefault` in Info.plist → TestFlight receipt traces); Internal only.
+- [x] 6 Every bundle CFBundleVersion 16 (app, Messages, Share, Widgets, Watch, Top Shelf); exported IPAs/app
+      `codesign --verify --deep --strict` OK, team 2VQ74PD5YG, get-task-allow false; pkg signed by 3rd Party Mac
+      Developer Installer: Raster Inc; `sdk-floor-check` passes on all four archives; add-on markers present in all four.
+- [x] 6 Release launch per platform: iOS / visionOS sims (clean install → first-run), tvOS sim (harness), macOS
+      (Release + add-ons, ran 30 s, Discover appeared).
+- [x] 6 Smoke: Apple TV sim `AppStoreScreenshotUITests.testAppStorePass` (Release + add-ons) passed: No Sources,
+      demo Jellyfin sign-in, Discover, title, play, **Resume**, Live M3U channel, Settings, credits. iPhone 16e DevPlus
+      (ad hoc Release + add-ons, build 16): owner-content Library title played (first frame, resumed from a saved
+      17.8 s position, progress saved 17 → 35 s); Discover hero trailer started; title-page trailer revealed.
+      `testDDiscoverRowsAndTrailer` itself failed with an XCUITest "timed out evaluating UI query" on the
+      title page while the trace showed the trailer playing.
+- [x] 6 Real-iPhone trailer: Mayday shared link on DevPlus — trailer view inserted 5.39 s, `trailer cover fading out`
+      + `native reveal: live viewport (device)` at 7.04 s (1.65 s), then playing.
+- [ ] Not exercised: the title-page trailer on Apple TV (no Apple TV paired with the mini, and the demo server's
+      movies carry no trailers). The iPhone path, where build 15's bug was, passed on hardware.
+- [x] 7 Uploads VALID on all four (readback above); What to Test notes set per platform and read back (en-US).
+- [ ] 8 GitHub release not prepared: `github-release.sh` needs a git checkout on `main`, gitleaks and four more
+      archives on a machine with Xcode. Next step: run it on the mini from a git clone, under the same "ship 16".
+
+Build-only change for the archive: tvOS/visionOS used gitignored local copies of the AppStore schemes with the
+UITests entry set to `buildForArchiving = NO`. The shared schemes archive the UI-test bundles, which need
+development profiles the mini lacks. iOS exports run with `/usr/bin` first on PATH, because Homebrew rsync 3.5.1
+breaks Xcode's IPA packaging ("Copy failed"). Artifacts: `/Volumes/DevExt/openstream-b16/`
+(`OpenStream-<platform>-b16.xcarchive`, `export-<platform>-b16`).
+
 ## OpenStream build 14 TestFlight delivery — September 28, 2026 (iOS, tvOS, visionOS, macOS)
 
 Owner said "ship 14" for all platforms with tracing. Source a6298a7, built in local worktree

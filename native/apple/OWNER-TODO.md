@@ -29,7 +29,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
       `verification-artifacts/audit-2026-10-07/mythos-security.md`.
 
-- [ ] **(2026-10-06) Owner decisions:** don't ship 16 yet; **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
+- [ ] **(2026-10-06) Owner decisions:** ~~don't ship 16 yet~~ **shipped 16 on 2026-10-08** (TestFlight Internal, all four
+      platforms, f08a908; see DELIVERIES.md); **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
       iPhone (cable once → Trust) get paired with the Mac mini on 2026-10-07 — then install the waiting ad hoc build
       (`scripts/mini.sh 'zsh scripts/release/devplus-install.sh 16 00008130-000610103443001C'`); go ahead with the Mythos Live review fixes; make an OpenStream backup of the
       owner's own sources to import for content verification on DevPlus.
