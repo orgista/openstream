@@ -15,6 +15,19 @@ final class AppleReloadGate {
     }
 
     func end() { isRunning = false }
+
+    /// Waits out a reload already running, so one asked for meanwhile (a
+    /// playlist added or edited, Try Again) runs after it instead of being
+    /// dropped. Dropping it left Live on "No Live Channels" after a source
+    /// was added during the launch reload (sim, 2026-10-08). False when the
+    /// waiting task was cancelled.
+    func waitUntilIdle() async -> Bool {
+        while isRunning {
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return false }
+        }
+        return true
+    }
 }
 
 @MainActor
@@ -101,13 +114,17 @@ struct AppleLiveTVView: View {
         Group {
             if isLoading, channels.isEmpty {
                 ProgressView()
-            } else if channels.isEmpty, let errorMessage {
-                // A panel that timed out may answer next time: Retry first,
-                // the settings that fix a wrong address under it.
+            } else if channels.isEmpty, errorMessage != nil {
+                // A panel that timed out may answer next time: Try Again
+                // first, the settings that fix a wrong address under it. The
+                // same page as Discover's "Couldn't Load Your Catalogs": the
+                // system's error text ("Home IPTV: Could not connect to the
+                // server.") used to be the headline (owner 2026-10-08: "looks
+                // off and weird"); it stays in the trace.
                 AppleSourceEmptyState(
-                    title: errorMessage,
+                    title: "Couldn't Load Your Channels",
                     systemImage: OpenStreamTab.live.systemImage,
-                    actionTitle: "Retry",
+                    actionTitle: "Try Again",
                     action: { Task { await reload() } },
                     secondaryActionTitle: "Open Settings",
                     secondaryAction: openSettings
@@ -231,18 +248,19 @@ struct AppleLiveTVView: View {
                     // Not an explainer: the count is the whole message, and the
                     // way to narrow it is the package picker the viewer already
                     // has. Silent truncation was the thing to avoid.
-                    // A playlist that failed while the others loaded: its
-                    // error in place, with Retry, not a blocked tab.
-                    ForEach(sourceFailures) { failure in
+                    // A playlist that failed while the others loaded and has
+                    // nothing on screen in its place: one quiet line naming
+                    // it, with Try Again. One whose saved channels are showing
+                    // says nothing (owner 2026-10-08: a warning row with the
+                    // system's error text over a working lineup "looks off").
+                    ForEach(sourceFailures.filter { !$0.showsSavedChannels }) { failure in
                         HStack(spacing: AppleDesignTokens.spacingMedium) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .accessibilityHidden(true)
-                            Text(failure.text)
-                                .lineLimit(2)
+                            Text("Couldn't load \(failure.sourceName)")
+                                .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("Retry") { Task { await reload() } }
-                                .buttonStyle(.bordered)
-                                .accessibilityLabel("Retry \(failure.sourceName)")
+                            Button("Try Again") { Task { await reload() } }
+                                .foregroundStyle(AppleDesignTokens.textPrimary)
+                                .accessibilityLabel("Try \(failure.sourceName) Again")
                         }
                         .font(AppleDesignTokens.fontCaption)
                         .foregroundStyle(AppleDesignTokens.textSecondary)
@@ -544,7 +562,7 @@ struct AppleLiveTVView: View {
     }
 
     private func reload() async {
-        guard reloadGate.begin() else { return }
+        guard await reloadGate.waitUntilIdle(), reloadGate.begin() else { return }
         defer { reloadGate.end() }
         completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []
         lineupIndex = AppleChannelLineupIndex(completeGuide)
@@ -646,6 +664,9 @@ struct AppleLiveTVView: View {
         #endif
         sourceFailures = load.failures
         errorMessage = load.failures.first?.text
+        for failure in load.failures {
+            appleTrace("live playlist failed: \(failure.sourceName) saved=\(failure.showsSavedChannels) \(failure.message)")
+        }
         startFirstChannelIfNeeded()
     }
 
@@ -678,8 +699,14 @@ struct AppleLiveTVView: View {
                 // headlessly, and channel switching is where the player
                 // misbehaves, so this is the only way to capture that path.
                 let hops = UserDefaults.standard.integer(forKey: "OpenStreamLiveAutoSwitchCount")
-                if hops > 0 { scheduleDebugChannelHops(count: hops, from: channel) }
+                if hops > 0 { scheduleDebugChannelHops(count: hops, from: channel, in: channels) }
             }
+            #elseif DEBUG
+            // The same hops in the inline player, through the guide's own
+            // order, so a provider's start-up times can be measured
+            // headlessly on a phone simulator (trace: "first frame").
+            let hops = UserDefaults.standard.integer(forKey: "OpenStreamLiveAutoSwitchCount")
+            if hops > 0 { scheduleDebugChannelHops(count: hops, from: channel, in: channelSnapshot.channels, present: false) }
             #endif
         }
         #if DEBUG
@@ -698,11 +725,11 @@ struct AppleLiveTVView: View {
         #endif
     }
 
-    #if os(tvOS) && DEBUG
+    #if DEBUG
     /// Simulator only: walk to the next channels every few seconds so the
     /// switch path can be captured. Never reachable without the default set.
-    private func scheduleDebugChannelHops(count: Int, from channel: AppleIPTVChannel) {
-        let list = channels
+    private func scheduleDebugChannelHops(count: Int, from channel: AppleIPTVChannel,
+                                          in list: [AppleIPTVChannel], present: Bool = true) {
         guard let start = list.firstIndex(where: { $0.id == channel.id }), list.count > 1 else { return }
         let gap = UserDefaults.standard.object(forKey: "OpenStreamLiveAutoSwitchSeconds") as? Double ?? 8
         Task { @MainActor in
@@ -710,7 +737,8 @@ struct AppleLiveTVView: View {
                 try? await Task.sleep(for: .seconds(max(0.2, gap)))
                 let next = list[(start + hop) % list.count]
                 print("[OpenStream] debug channel hop \(hop) -> \(next.name)")
-                startChannel(next, shareSelection: false)
+                appleTrace("debug channel hop \(hop) -> \(next.name)")
+                startChannel(next, shareSelection: false, present: present)
             }
         }
     }
@@ -1464,6 +1492,10 @@ struct AppleLiveInlinePlayer: View {
                     .accessibilityIdentifier("live.reconnecting")
                 }
             }
+            if !isFullScreen, case .failed(let failure) = coordinator.phase,
+               AppleLiveFailurePresentation.isVisible(failure) {
+                failureCard(failure)
+            }
         }
         .background(.black)
         .modifier(AppleLiveWatchTracking(channelID: liveChannel?.id, coordinator: coordinator,
@@ -1537,20 +1569,77 @@ struct AppleLiveInlinePlayer: View {
         .onDisappear {
             lifetime.inlineDisappeared(host: host, coordinator: coordinator)
         }
-        .alert("Playback Failed", isPresented: failureBinding) {
+        // Full screen only: the inline picture says it in place
+        // (`failureCard`), so the guide under it stays usable.
+        .alert(failureTitle, isPresented: failureBinding) {
             if let other = otherListChannel, let onSwitchChannel {
                 Button(AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID])) {
                     appleTrace("live other-list chosen: \(AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID]))")
                     onSwitchChannel(other)
                 }
             }
-            Button("Retry") { Task { await coordinator.retry() } }
+            Button("Try Again") { Task { await coordinator.retry() } }
             Button("Close", role: .cancel) { coordinator.stop() }
         } message: {
-            if case .failed(let failure) = coordinator.phase {
-                Text(request.isLive ? failure.liveChannelMessage : failure.userMessage)
+            if let failureDetail { Text(failureDetail) }
+        }
+    }
+
+    /// A channel that will not play, said inside the picture: one line naming
+    /// the channel, one naming who did not answer, Try Again — the Apple TV
+    /// player's wording (`AppleLiveFailurePresentation`). It replaces a
+    /// "Playback Failed" alert that opened by itself over the whole Live tab
+    /// whenever the resumed channel could not be reached, with a paragraph of
+    /// advice in it (owner 2026-10-08: "looks off and weird").
+    private func failureCard(_ failure: ApplePlaybackFailure) -> some View {
+        VStack(spacing: 12) {
+            Text(request.isLive
+                 ? AppleLiveFailurePresentation.message(for: failure, channelName: liveChannel?.name)
+                 : "Playback Failed")
+                .font(AppleDesignTokens.fontHeadline)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            if let failureDetail {
+                Text(failureDetail)
+                    .font(AppleDesignTokens.fontCaption)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            HStack(spacing: 12) {
+                if let other = otherListChannel, let onSwitchChannel {
+                    let title = AppleLiveOtherListMatch.offerTitle(sourceName: sourceNames[other.sourceID])
+                    Button(title) {
+                        appleTrace("live other-list chosen: \(title)")
+                        onSwitchChannel(other)
+                    }
+                    .buttonStyle(.brandSecondary)
+                    .accessibilityIdentifier("live.failure.otherList")
+                }
+                Button("Try Again") { Task { await coordinator.retry() } }
+                    .buttonStyle(.brandPrimary)
+                    .accessibilityIdentifier("live.failure.retry")
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("live.failure")
+    }
+
+    private var failureTitle: String {
+        guard case .failed(let failure) = coordinator.phase else { return "" }
+        guard request.isLive else { return "Playback Failed" }
+        return AppleLiveFailurePresentation.message(for: failure, channelName: liveChannel?.name)
+    }
+
+    /// The quieter line: the host that did not answer, or nothing.
+    private var failureDetail: String? {
+        guard case .failed(let failure) = coordinator.phase else { return nil }
+        guard request.isLive else { return failure.userMessage }
+        return AppleLiveFailurePresentation.detail(for: failure, endpoint: request.url.host())
     }
 
     private var requestIdentity: String {
@@ -1570,10 +1659,10 @@ struct AppleLiveInlinePlayer: View {
     private var failureBinding: Binding<Bool> {
         Binding(
             get: {
-                if case .failed(let failure) = coordinator.phase { return failure.kind != .cancelled }
+                if isFullScreen, case .failed(let failure) = coordinator.phase { return failure.kind != .cancelled }
                 return false
             },
-            set: { if !$0 { coordinator.reset() } }
+            set: { if !$0, isFullScreen { coordinator.reset() } }
         )
     }
 

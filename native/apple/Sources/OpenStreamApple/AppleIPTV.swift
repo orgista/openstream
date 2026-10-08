@@ -496,10 +496,15 @@ public struct AppleIPTVClient: Sendable {
     /// under what the bytes could ever deliver.
     public static let maximumChannels = 25_000
 
-    /// The Xtream login probe is a few hundred bytes from a live panel, so it
-    /// fails fast: a dead panel held the Live tab ~21 s on the 20 s timeout
-    /// the channel downloads keep (Apple TV regression 2026-10-01).
-    static let accountProbeTimeout: TimeInterval = 7
+    /// The Xtream login probe is a few hundred bytes, but a busy panel can
+    /// take a while to answer it. It was 7 s to fail a dead panel fast (Apple
+    /// TV regression 2026-10-01); the owner's panel then missed it on an
+    /// iPhone simulator (2026-10-08 trace: "Could not reach the IPTV panel:
+    /// The request timed out" at 7.6 s), which failed the whole lineup and,
+    /// with nothing saved yet, left Live empty. A dead panel no longer holds
+    /// the tab (playlists load in parallel over the saved lineup), so the
+    /// probe waits as long as the channel downloads do.
+    static let accountProbeTimeout: TimeInterval = 20
 
     private let loader: Loader
     private let usesLiveLoader: Bool

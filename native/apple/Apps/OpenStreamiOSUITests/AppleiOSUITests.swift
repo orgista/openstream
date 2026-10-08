@@ -1145,14 +1145,16 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let blocked = app.buttons["Play UITest Blocked Channel"].firstMatch
         XCTAssertTrue(blocked.waitForExistence(timeout: 30))
         blocked.tap()
-        let failure = app.alerts.matching(NSPredicate(format: "label == %@ OR label == %@", "Channel Unavailable", "Playback Failed")).firstMatch
+        // Said inside the picture, not in an alert over the tab.
+        let failure = app.descendants(matching: .any).matching(identifier: "live.failure").firstMatch
         XCTAssertTrue(failure.waitForExistence(timeout: 35))
         let message = failure.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
-        XCTAssertTrue(message.contains("403") || message.contains("Try again or choose another channel"))
+        XCTAssertTrue(message.contains("UITest Blocked Channel"), message)
+        XCTAssertTrue(failure.buttons["Try Again"].exists)
         XCTAssertFalse(message.contains("custom source probe"))
         XCTAssertFalse(message.contains("username"))
+        XCTAssertFalse(app.alerts.firstMatch.exists, "a live failure opened an alert")
         attach("live-channel-denied")
-        failure.buttons["Close"].tap()
         search.tap()
         let clearSearch = search.buttons.firstMatch
         XCTAssertTrue(clearSearch.waitForExistence(timeout: 5))
@@ -1162,8 +1164,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(working.waitForExistence(timeout: 30))
         working.tap()
         Thread.sleep(forTimeInterval: 12)
-        XCTAssertFalse(app.alerts["Channel Unavailable"].exists)
-        XCTAssertFalse(app.alerts["Playback Failed"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "live.failure").firstMatch.exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
         XCTAssertFalse(app.keyboards.firstMatch.exists, "Choosing a channel should dismiss the search keyboard")
         attach("live-channel-recovered")
     }

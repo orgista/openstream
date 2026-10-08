@@ -10,6 +10,10 @@ public struct AppleLiveSourceLoad: Sendable {
         public let id: UUID
         public let sourceName: String
         public let message: String
+        /// The playlist's saved channels are still on screen. Its refresh
+        /// failing is then not worth a word: the lineup works, and a channel
+        /// that cannot be reached says so itself when it is played.
+        public var showsSavedChannels = false
 
         public var text: String { "\(sourceName): \(message)" }
     }
@@ -46,7 +50,10 @@ public struct AppleLiveSourceLoad: Sendable {
     /// Playlists that failed, in source order.
     public var failures: [Failure] {
         order.compactMap { id in
-            failureMessages[id].map { Failure(id: id, sourceName: names[id] ?? "Playlist", message: $0) }
+            failureMessages[id].map {
+                Failure(id: id, sourceName: names[id] ?? "Playlist", message: $0,
+                        showsSavedChannels: loaded[id] == nil && !(cached[id] ?? []).isEmpty)
+            }
         }
     }
 

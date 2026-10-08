@@ -4551,3 +4551,15 @@ stream source" (`AppleMediaPlaybackResolver.nothingFound`); per-add-on stream co
 Rocky spent two of their three tries on the same TorBox error-clip file before playing; deduping identical files in
 the fallback list is a candidate follow-up. `swift test`: 2916 tests in 371 suites passed.
 
+
+## 2026-10-08 — Live: the "can't reach Live" dialog, and why Live could stay empty
+The dialog you saw was a system alert ("Playback Failed", a paragraph of advice, Close/Retry) that opened by itself
+over the whole Live tab whenever the channel Live resumes could not start, with a warning row (the phone's own error
+text) behind it. Now: the message sits inside the picture, one line naming the channel, one quiet line naming the
+server, and Try Again; the channel list stays usable. A refresh that fails while your saved channels show says
+nothing. With no channels at all the page reads "Couldn't Load Your Channels" with Try Again and Open Settings, like
+Discover. Two causes of an empty Live were fixed: the panel login check gave up after 7 s (your panel missed it on
+the iPhone simulator; now 20 s), and a channel-list refresh asked for during another one was dropped (seen after a
+setup was added). Not yet proven on your provider: its panel did not answer this network at all between 17:10 and
+18:10, so the simulator could not try channels. Before/after screenshots: verification-artifacts/live-2026-10-08/.
+`swift test`: 2919 tests in 371 suites passed; tvOS and iOS apps build.

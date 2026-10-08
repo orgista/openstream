@@ -47,4 +47,15 @@ struct AppleLiveSourceLoadTests {
         load.succeeded(dead.id, channels: [channel("First", source: dead)])
         #expect(load.channels.map(\.name) == ["First", "Second"])
     }
+
+    /// Owner 2026-10-08: a refresh that failed under a working saved lineup
+    /// put a warning row over it. Only a playlist with nothing on screen is
+    /// worth a word.
+    @Test func aFailureUnderSavedChannelsIsMarkedSoTheTabStaysQuiet() {
+        var load = AppleLiveSourceLoad(sources: [dead, healthy], cached: [dead.id: [channel("Old", source: dead)]])
+        load.failed(dead.id, message: "Could not connect to the server.")
+        load.failed(healthy.id, message: "The request timed out.")
+        #expect(load.failures.map(\.showsSavedChannels) == [true, false])
+        #expect(load.channels.map(\.name) == ["Old"])
+    }
 }

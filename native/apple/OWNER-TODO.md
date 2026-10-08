@@ -14,6 +14,20 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       A channel that is open and sending now gets 15 s more (dead channels still fail at 10 s). On the mini's
       iPhone with your setup: CBS and FOX both play (first picture ~14 s). Still slow to start; making it
       faster is engine work for later.
+      **More fixed (2026-10-08 evening):** (1) your panel's login check gave up after 7 s; on the mini's iPhone
+      simulator it missed that and the whole channel list failed, which on a phone with no saved list leaves Live
+      empty. It now waits 20 s, like the channel download. (2) A list refresh asked for while another was running was
+      dropped, so Live could sit on "No Live Channels" after adding or importing a setup until the app restarted;
+      it now runs right after. (3) The new "can't reach Live" screens are redone (below). Not proven with your
+      provider yet: from 17:10 to 18:10 its panel did not answer this network at all (also 20 s), so no channel could
+      be tried on the simulator; worth a look on your phone after the next build.
+- [ ] **"New dialog in Live when it can't reach Live looks off and weird" (2026-10-08, build 16)** — it was an alert
+      ("Playback Failed" + advice paragraph + Close/Retry) that popped up over the whole Live tab whenever the resumed
+      channel could not start, plus a warning row with the system's error text over a working list.
+      **Fixed, waiting for your phone:** the message now sits inside the picture ("CBS is not broadcasting right now",
+      the server's name on one quiet line, Try Again); the guide under it stays usable. A list that can't refresh
+      while its saved channels show says nothing. With no channels at all: "Couldn't Load Your Channels", Try Again,
+      Open Settings (same as Discover). Screenshots: verification-artifacts/live-2026-10-08/.
 - [ ] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
       different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
       **Swept 2026-10-08:** 100 titles (20 per era, pre-1970 to 2020s, movies and episodes) with your config on

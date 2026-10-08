@@ -332,12 +332,14 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
     private func playbackFailed() -> Bool {
         let alert = app.alerts.firstMatch
         if alert.exists && alert.label.localizedCaseInsensitiveContains("fail") { return true }
-        // A live channel that timed out says so on the player, not in an alert.
-        return app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "not responding")).firstMatch.exists
+        // A live channel that will not play says so inside the picture.
+        return app.descendants(matching: .any).matching(identifier: "live.failure").firstMatch.exists
     }
 
     private func alertText() -> String {
-        app.alerts.firstMatch.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " / ")
+        let card = app.descendants(matching: .any).matching(identifier: "live.failure").firstMatch
+        let source = card.exists ? card : app.alerts.firstMatch
+        return source.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " / ")
     }
 
     private func closePlayer() {

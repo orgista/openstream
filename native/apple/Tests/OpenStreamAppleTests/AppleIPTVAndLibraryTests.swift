@@ -1308,5 +1308,7 @@ func channelHTTPFailuresDoNotMasqueradeAsAccountRejection(status: Int) async thr
         try await client.channels(source: source, credentials: .init(username: "viewer", password: "secret"))
     }
     #expect(timeouts.withLock { $0 } == [AppleIPTVClient.accountProbeTimeout])
-    #expect(AppleIPTVClient.accountProbeTimeout <= 8)
+    // As long as the channel download, no longer: a slow panel's login
+    // missed 7 s on the owner's provider (2026-10-08).
+    #expect(AppleIPTVClient.accountProbeTimeout >= 15 && AppleIPTVClient.accountProbeTimeout <= 20)
 }
