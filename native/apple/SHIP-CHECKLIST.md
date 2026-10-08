@@ -47,7 +47,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 ## 5. Tracing and groups
 - [ ] Traced build: tracing is on by default for TestFlight installs (AppleInteractionTrace.swift
       falls back to `AppleBuildChannel.isTestFlight`). Confirm it hasn't changed.
-- [ ] Groups: traced builds → `Internal,TraceEnabled`; the non-trace build → Reddit (only when the owner says so).
+- [ ] Groups: `Internal,Reddit` (owner 2026-10-08: TraceEnabled was merged into Reddit, which now gets traced builds).
 
 ## 6. Archive and verify (one build at a time, `disk-guard.sh` first)
 - [ ] `CURRENT_PROJECT_VERSION=N` in the app and **every** embedded bundle (read each Info.plist).
@@ -60,7 +60,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Trailers on a REAL iPhone (not only a simulator): the video must appear over the art within ~2 s. Simulators render video into WKWebView snapshots and devices don't, so build 15's hidden-trailer bug only showed on hardware.
 
 ## 7. Upload and record
-- [ ] `asc publish testflight --app 6807530757 --ipa <ipa> --platform IOS|TV_OS|VISION_OS --group "Internal,TraceEnabled" --submit --confirm`
+- [ ] `asc publish testflight --app 6807530757 --ipa <ipa> --platform IOS|TV_OS|VISION_OS --group "Internal,Reddit" --submit --confirm`
       Mac: `--pkg <pkg> --version 1.0 --build-number N --platform MAC_OS` with the same group flags.
 - [ ] Read back VALID for each platform; write the build IDs, sha, gate counts and any new profiles to `DELIVERIES.md`.
 

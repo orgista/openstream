@@ -655,8 +655,8 @@ build number, all platforms on the same N. Nothing else authorizes an upload or 
 - Build number comes from the command line: `CURRENT_PROJECT_VERSION=<N>`. Version is 1.0.
 - Tracing default is stamped in `Apps/Shared/Info.plist` key `OpenStreamTraceDefault` (true = traced
   build for Internal + TraceEnabled; absent/false = non‑trace build for Reddit).
-- Groups: Internal `ca5595ab-…` (receives every build automatically), TraceEnabled `64f18c4b-…`,
-  Reddit `7360237c-…`. External groups need beta review: `--submit --confirm`.
+- Groups: Internal `ca5595ab-…` (receives every build automatically) and Reddit `7360237c-…`. TraceEnabled
+  was merged into Reddit (owner 2026-10-08); every build goes to `Internal,Reddit`. External groups need beta review: `--submit --confirm`.
 - `asc` is logged in (profile "OpenStream"). Never print key ids, issuer ids or the .p8.
 - One `xcodebuild` at a time. Archives take 5–12 min; run them detached with a done‑marker and poll.
 - The share lies: before archiving, `find Sources Tests Apps -name "*.swift" -size 0` must be empty and

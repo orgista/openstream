@@ -7,14 +7,16 @@ Owner: "lets ship the next build to TestFlight" (ASC max was 15 on every platfor
 (local disk). Gate on the mini: `swift build` OK, **2878 tests / 366 suites passed**. All four archives used
 `CURRENT_PROJECT_VERSION=16` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
 Uploaded with `asc publish testflight … --group Internal --test-notes … --locale en-US --wait` (no `--submit`).
-The TraceEnabled group no longer exists in ASC (only Internal + Reddit), so Internal is the only group.
+The TraceEnabled group no longer exists in ASC (only Internal + Reddit). Owner then said Reddit now has tracing
+(TraceEnabled merged into it), so all four builds were added to Reddit with `asc builds add-groups --build-id <id>
+--group 7360237c-… --submit --confirm` the same day (beta app review submitted).
 
 | Platform | Build ID | Live status |
 |---|---|---|
-| iOS 16 | 6f17e9f1-64e0-4fd9-a87c-10f6de1bbdd9 | VALID / internal IN_BETA_TESTING / external not submitted |
-| tvOS 16 | d5786b92-e9c5-45c4-b972-43c0dc9b2383 | VALID / internal IN_BETA_TESTING / external not submitted |
-| visionOS 16 | 71d021dd-2abe-4bd5-991e-3668f10a5c84 | VALID / internal IN_BETA_TESTING / external not submitted |
-| macOS 16 | c6d43ec9-9c4b-4eb3-a9a1-171284a8f61a | VALID / internal IN_BETA_TESTING / external not submitted |
+| iOS 16 | 6f17e9f1-64e0-4fd9-a87c-10f6de1bbdd9 | VALID / internal IN_BETA_TESTING / Reddit submitted for beta review |
+| tvOS 16 | d5786b92-e9c5-45c4-b972-43c0dc9b2383 | VALID / internal IN_BETA_TESTING / Reddit submitted for beta review |
+| visionOS 16 | 71d021dd-2abe-4bd5-991e-3668f10a5c84 | VALID / internal IN_BETA_TESTING / Reddit submitted for beta review |
+| macOS 16 | c6d43ec9-9c4b-4eb3-a9a1-171284a8f61a | VALID / internal IN_BETA_TESTING / Reddit submitted for beta review |
 
 - [x] 1 Authorization/numbers: owner said ship next; ASC readback 15 was the max on IOS/TV_OS/VISION_OS/MAC_OS.
 - [x] 2 Source: main HEAD recorded; local-disk tree on the mini; zero-byte Swift check empty; gate 2878/366.
