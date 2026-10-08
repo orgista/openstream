@@ -4522,3 +4522,6 @@ Checked on the Vision Pro simulator on the Mac mini: four automated tests pass (
 - Tapping an oStream bubble in Messages only opens oStream links.
 - App Transport Security settings are unchanged; that one is your call.
 Checked: 2878 package tests pass, iOS, tvOS, visionOS and macOS builds succeed on the Mac mini. Not committed yet.
+
+## 2026-10-08 — iCloud sync: the phone now sends, and you can see it
+A phone that was set up before iCloud sync was turned on by default never sent its setup to iCloud, so the iPad and Apple TV found nothing. It now sends at launch, when the app comes back, and when you tap the new Sync Now button in Backup & Sync, but only if iCloud has nothing or an older copy. The Apple TV, an empty device and a reset device never send. Under the iCloud switch you now see when this device last sent and last received, how many sources it has and how many are still waiting for passwords from iCloud Keychain (on the Apple TV: Settings > Sources > iCloud Sync). Waiting sources look for their passwords again whenever the app comes back. Checked: 2890 package tests pass and the tvOS build succeeds on the Mac mini; a real two-device test needs your devices.

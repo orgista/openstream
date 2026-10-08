@@ -39,6 +39,16 @@ struct AppleBackupSettingsView: View {
                 .tint(.green)
                 .disabled(!syncAvailability.allowsChange(from: syncEnabled))
                 .accessibilityIdentifier("backup.sync")
+                if syncEnabled {
+                    AppleConfigurationSyncStatusLines(status: controller.status)
+                    Button {
+                        Task { await controller.syncNow() }
+                    } label: {
+                        AppleWorkingButtonLabel(title: "Sync Now", workingTitle: "Syncing…", isWorking: controller.isSyncing)
+                    }
+                    .disabled(controller.isSyncing || controller.isBusy)
+                    .accessibilityIdentifier("backup.sync.now")
+                }
             }
             Section {
                 SecureField("Passphrase for another Apple Account", text: $passphrase)

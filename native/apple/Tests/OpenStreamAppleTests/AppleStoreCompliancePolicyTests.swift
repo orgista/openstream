@@ -36,7 +36,6 @@ struct AppleStoreCompliancePolicyTests {
             "OpenStream/Playlists", "OpenStream/ChannelHealth",
         ]
         let credits: Set<String> = [
-            "OpenStream by Orgista, a subsidiary of Raster Inc.",
             "Playback engine, release 6.66.0, linked as dynamic frameworks. OpenStream's fork with its changes: ",
         ]
         var offenders: [String] = []

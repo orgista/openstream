@@ -237,6 +237,123 @@ struct AppleConfigurationSyncTests {
         #expect(signedIn.isEnabled)
     }
 
+    // MARK: - Sending without a local edit (launch, becoming active, Sync Now)
+
+    private func snapshot(savedAt: Date, sources: [AppleSource]) -> AppleConfigurationSnapshot {
+        AppleConfigurationSnapshot(savedAt: savedAt, sources: sources)
+    }
+
+    private func publishes(
+        mode: AppleConfigurationSyncMode = .viewerChoice, syncEnabled: Bool = true, restoreHeld: Bool = false,
+        local: AppleConfigurationSnapshot, localSavedAt: Date?, cloud: AppleConfigurationSnapshot?
+    ) -> Bool {
+        AppleConfigurationSyncPolicy.publishesWithoutEdit(
+            mode: mode, syncEnabled: syncEnabled, restoreHeld: restoreHeld,
+            local: local, localSavedAt: localSavedAt, cloud: cloud)
+    }
+
+    /// The phone set up before sync was on by default: iCloud holds nothing,
+    /// so it sends at launch without waiting for an edit.
+    @Test func aConfiguredPhoneSendsWhenICloudHoldsNothing() {
+        let local = snapshot(savedAt: epoch, sources: [source()])
+        #expect(publishes(local: local, localSavedAt: epoch, cloud: nil))
+        #expect(publishes(local: local, localSavedAt: nil, cloud: nil))
+    }
+
+    @Test func theAppleTVNeverSendsAtLaunch() {
+        let local = snapshot(savedAt: epoch, sources: [source()])
+        #expect(!publishes(mode: .automaticReadOnly, local: local, localSavedAt: epoch, cloud: nil))
+    }
+
+    @Test func anEmptyDeviceNeverSendsAtLaunch() {
+        let empty = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [])
+        let cloud = snapshot(savedAt: epoch, sources: [source(name: "From the iPhone")])
+        #expect(!publishes(local: empty, localSavedAt: epoch.addingTimeInterval(60), cloud: cloud))
+        #expect(!publishes(local: empty, localSavedAt: nil, cloud: nil))
+    }
+
+    @Test func aResetDeviceNeverSendsAtLaunch() {
+        let local = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [source()])
+        let cloud = snapshot(savedAt: epoch, sources: [source(name: "From the iPhone")])
+        #expect(!publishes(restoreHeld: true, local: local, localSavedAt: epoch.addingTimeInterval(60), cloud: cloud))
+        #expect(!publishes(restoreHeld: true, local: local, localSavedAt: epoch, cloud: nil))
+    }
+
+    @Test func syncOffNeverSends() {
+        let local = snapshot(savedAt: epoch, sources: [source()])
+        #expect(!publishes(syncEnabled: false, local: local, localSavedAt: epoch, cloud: nil))
+    }
+
+    /// Only the save time differs: iCloud already has this configuration.
+    @Test func theSameConfigurationIsNotSentAgain() {
+        let shared = source()
+        let local = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [shared])
+        let cloud = snapshot(savedAt: epoch, sources: [shared])
+        #expect(!publishes(local: local, localSavedAt: epoch.addingTimeInterval(60), cloud: cloud))
+    }
+
+    @Test func aNewerLocalConfigurationReplacesAnOlderOne() {
+        let local = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [source(name: "Phone")])
+        let cloud = snapshot(savedAt: epoch, sources: [source(name: "Older")])
+        #expect(publishes(local: local, localSavedAt: epoch.addingTimeInterval(60), cloud: cloud))
+    }
+
+    /// iCloud's copy is newer (the read applies it) or this device never
+    /// stamped an edit: leave iCloud alone.
+    @Test func anOlderOrUnstampedLocalConfigurationIsNotSent() {
+        let local = snapshot(savedAt: epoch, sources: [source(name: "Phone")])
+        let cloud = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [source(name: "Newer")])
+        #expect(!publishes(local: local, localSavedAt: epoch, cloud: cloud))
+        #expect(!publishes(local: local, localSavedAt: nil, cloud: cloud))
+    }
+
+    @Test func anICloudCopyWithNoSourcesIsFilled() {
+        let local = snapshot(savedAt: epoch, sources: [source()])
+        let cloud = snapshot(savedAt: epoch.addingTimeInterval(60), sources: [])
+        #expect(publishes(local: local, localSavedAt: nil, cloud: cloud))
+    }
+
+    // MARK: - Sync status
+
+    @Test func statusRecordsSendsAndReceivesAndClearsTheError() {
+        let failed = AppleConfigurationSyncStatus().recordingError("Could not read the iCloud configuration")
+        #expect(failed.detailLine == "Could not read the iCloud configuration")
+        let sent = failed.recordingSent(at: epoch, sourceCount: 8)
+        #expect(sent.lastSentAt == epoch)
+        #expect(sent.lastError == nil)
+        let received = sent.recordingError("Quota").recordingReceived(at: epoch.addingTimeInterval(60), sourceCount: 7)
+        #expect(received.lastReceivedAt == epoch.addingTimeInterval(60))
+        #expect(received.lastSentAt == epoch)
+        #expect(received.sourceCount == 7)
+        #expect(received.lastError == nil)
+    }
+
+    @Test func statusLinesReadPlainly() {
+        let time: (Date) -> String = { $0 == self.epoch ? "2:14 PM" : "2:15 PM" }
+        #expect(AppleConfigurationSyncStatus().activityLine(time: time) == "Not synced yet")
+        let status = AppleConfigurationSyncStatus()
+            .recordingSent(at: epoch, sourceCount: 8)
+            .recordingReceived(at: epoch.addingTimeInterval(60), sourceCount: 8)
+        #expect(status.activityLine(time: time) == "Last sent 2:14 PM · Last received 2:15 PM")
+        #expect(status.detailLine == "8 sources")
+        #expect(status.recordingSources(8, waitingForKeychain: 2).detailLine
+                == "8 sources · 2 waiting for passwords from iCloud Keychain")
+        #expect(status.recordingSources(1, waitingForKeychain: 0).detailLine == "1 source")
+    }
+
+    /// Kept on this device only: never a configuration key, so never in a
+    /// backup or the iCloud snapshot.
+    @MainActor @Test func statusIsStoredLocallyAndNeverSynced() throws {
+        let name = "configuration-sync-status.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(AppleConfigurationSyncStatus.load(from: defaults) == AppleConfigurationSyncStatus())
+        let status = AppleConfigurationSyncStatus(lastSentAt: epoch, sourceCount: 3, waitingForKeychain: 1)
+        status.save(to: defaults)
+        #expect(AppleConfigurationSyncStatus.load(from: defaults) == status)
+        #expect(!AppleSettingsStore.configurationKeys.contains(AppleConfigurationSyncStatus.defaultsKey))
+    }
+
     // MARK: - The injectable store
 
     /// The controller talks to a protocol, so a fake can stand in for iCloud.

@@ -892,23 +892,9 @@ private struct AppleMetadataSettingsView: View {
                 SecureField("API key or read token", text: $settings.tmdbAPIKey)
                     .disabled(!settings.metadataEnabled)
                     .appleFormSubmit(.tmdb, chain: Self.chain, focus: $focusedField)
-                #if os(tvOS)
-                // TMDB's notice sits behind an (i); a tvOS section header
-                // cannot take focus, so it is a row here.
-                AppleAttributionInfoRow()
-                #endif
             } header: {
-                #if os(tvOS)
+                // TMDB's credit lives once, in About (owner 2026-10-08: no notices around the app).
                 Text("TMDB")
-                #else
-                // TMDB's required notice is behind the (i) beside the header
-                // (owner: "just make them (i)").
-                HStack {
-                    Text("TMDB")
-                    Spacer()
-                    AppleAttributionInfoButton()
-                }
-                #endif
             }
 
             Section("OMDb") {
@@ -1352,8 +1338,6 @@ private struct AppleAboutView: View {
         Form {
             Section {
                 LabeledContent("App", value: "oStream")
-                Text("OpenStream by Orgista, a subsidiary of Raster Inc.")
-                    .foregroundStyle(.secondary)
                 LabeledContent("Version", value: version)
                 LabeledContent("Build", value: build)
             }

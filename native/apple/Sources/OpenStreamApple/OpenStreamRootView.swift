@@ -915,14 +915,9 @@ private struct AppleFirstRunGuidanceView: View {
             Spacer(minLength: 0)
             OpenStreamThreeBarMark()
                 .frame(width: 64, height: 46)
-            // The no-content statement is behind the (i) beside the title
-            // (owner: "just make them (i)").
-            HStack(spacing: AppleDesignTokens.spacingSmall) {
-                Text("Welcome to oStream")
-                    .font(.largeTitle.bold())
-                    .multilineTextAlignment(.center)
-                AppleAttributionInfoButton()
-            }
+            Text("Welcome to oStream")
+                .font(.largeTitle.bold())
+                .multilineTextAlignment(.center)
             Spacer(minLength: 0)
             Button("Connect Media Server", action: openSettings)
                 .buttonStyle(.brandPrimary)
@@ -949,14 +944,9 @@ private struct AppleFirstRunGuidanceView: View {
         VStack(spacing: AppleDesignTokens.spacingExtraLarge) {
             OpenStreamThreeBarMark()
                 .frame(width: 132, height: 96)
-            // The no-content statement is behind the (i) beside the title: a
-            // focusable glyph the remote reaches from the pills below.
-            HStack(spacing: AppleDesignTokens.spacingMedium) {
-                Text("Welcome to oStream")
-                    .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
-                    .accessibilityAddTraits(.isHeader)
-                AppleAttributionInfoButton()
-            }
+            Text("Welcome to oStream")
+                .font(.system(size: AppleTVChromeMetrics.pageHeaderFontSize, weight: .bold))
+                .accessibilityAddTraits(.isHeader)
             // The same gap the billboard uses, which is wide enough that a
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {

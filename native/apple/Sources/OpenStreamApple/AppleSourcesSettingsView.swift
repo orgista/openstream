@@ -81,6 +81,11 @@ struct AppleSourcesSettingsView: View {
     #if DEBUG
     @State private var debugDetailSourceID: AppleSource.ID?
     #endif
+    #if os(tvOS)
+    /// Apple TV has no Backup & Sync page, so what iCloud sync last did is
+    /// shown here instead (`AppleConfigurationSyncStatus`).
+    @AppStorage(AppleConfigurationSyncStatus.defaultsKey) private var syncStatusData: Data?
+    #endif
 
     let sourceStore: AppleSourceStore
     let settings: AppleSettingsStore
@@ -122,13 +127,6 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
                 .appleTVReadableFocus()
-                #if os(tvOS)
-                // The no-content statement lives behind an (i). Apple TV has
-                // no navigation bar to hold it beside the title, so it is the
-                // last row here (owner: "just make them (i)").
-                AppleAttributionInfoRow()
-                    .appleTVReadableFocus()
-                #endif
             }
 
             // Not "Sources" again: the pane is already titled Sources, so the
@@ -161,17 +159,18 @@ struct AppleSourcesSettingsView: View {
                     .textCase(.uppercase)
                     #endif
             }
+            #if os(tvOS)
+            Section {
+                AppleConfigurationSyncStatusLines(status: syncStatusData
+                    .flatMap { try? JSONDecoder().decode(AppleConfigurationSyncStatus.self, from: $0) }
+                    ?? AppleConfigurationSyncStatus())
+                    .focusable()
+            } header: {
+                Text("iCloud Sync").textCase(.uppercase)
+            }
+            #endif
         }
         .appleSettingsPane("Sources", embedded: embeddedInSplit)
-        #if !os(tvOS)
-        // The (i) beside the pane title: the no-content statement that used
-        // to be the first section's footer (owner: "just make them (i)").
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                AppleAttributionInfoButton()
-            }
-        }
-        #endif
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .navigationDestination(for: AppleSourceRoute.self) { route in
             switch route {

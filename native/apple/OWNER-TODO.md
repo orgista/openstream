@@ -20,7 +20,16 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       Apple TV, iPad…) shows a QR code; scanning it with a phone that already has OpenStream sends the
       whole setup over the home network. Should work Apple→Apple and Apple→Android. Design in progress.
 - [ ] **iCloud sync still looks broken (owner 2026-10-08):** owner doesn't think it works and doesn't know how
-      to test it. Investigating the sync path; plan a visible sync status in Settings so it's testable.
+      to test it. Fixed in code, waiting for your test: a phone set up before sync was on by default never sent
+      anything to iCloud, so the other devices found nothing. Now it sends at launch, when the app comes back,
+      and on the new **Sync Now** button whenever iCloud has nothing or an older copy (never from the Apple TV,
+      an empty device or a reset one). Backup & Sync now shows "Last sent / Last received" and how many sources
+      are still waiting for passwords from iCloud Keychain; the Apple TV shows the same under Settings > Sources
+      > iCloud Sync. Waiting sources also look for their passwords again each time the app comes back.
+      **How to test:** on the iPhone open Settings > Backup & Sync and tap Sync Now ("Last sent" updates). Then
+      open oStream on the iPad or Apple TV: "Last received" should show a fresh time and the sources should not
+      be waiting for passwords. Needs a build with this change; real two-device iCloud can't be tested on the
+      simulators.
 - [ ] **Build 16 trailers still broken on the owner's iPhone (2026-10-08):** the trailer flashes for a split
       second then disappears; tapping a different trailer in the Trailers shelf doesn't reliably play it.
       The pre-ship check on the mini's iPhone 16e passed (1.65 s, demo data), so it reproduces with the

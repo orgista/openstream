@@ -84,6 +84,38 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         mode != .automaticReadOnly
     }
 
+    /// Should this device send its configuration to iCloud without a local
+    /// edit (launch, becoming active, Sync Now)? A phone set up before sync
+    /// was on by default, and not changed since, otherwise never sends
+    /// anything and every other device reads "nothing stored".
+    ///
+    /// Run after the read, so a newer iCloud copy has already been applied.
+    /// Never from the Apple TV, with sync off, after Reset OpenStream, or from
+    /// a device with no sources: an empty or reset device must not replace
+    /// a configuration other devices still use. Otherwise: send when iCloud
+    /// holds nothing, or holds something different that is empty or older
+    /// than this device's last edit. `cloud` is nil when iCloud holds nothing.
+    public static func publishesWithoutEdit(
+        mode: AppleConfigurationSyncMode = current, syncEnabled: Bool, restoreHeld: Bool,
+        local: AppleConfigurationSnapshot, localSavedAt: Date?, cloud: AppleConfigurationSnapshot?
+    ) -> Bool {
+        guard publishesChanges(mode: mode), syncEnabled, !restoreHeld, !local.sources.isEmpty else { return false }
+        guard let cloud else { return true }
+        guard contentDiffers(local, cloud) else { return false }
+        if cloud.sources.isEmpty { return true }
+        guard let localSavedAt else { return false }
+        return localSavedAt > cloud.savedAt
+    }
+
+    /// Do two snapshots carry different configurations, ignoring when each
+    /// was saved? Compared as iCloud would store them.
+    static func contentDiffers(_ lhs: AppleConfigurationSnapshot, _ rhs: AppleConfigurationSnapshot) -> Bool {
+        var lhs = lhs, rhs = rhs
+        lhs.savedAt = .distantPast
+        rhs.savedAt = .distantPast
+        return (try? lhs.cloudData()) != (try? rhs.cloudData())
+    }
+
     /// May the viewer be offered the switch at all? Drives nothing on its own —
     /// the Backup screen is already `#if !os(tvOS)` — but keeps the answer in
     /// one place rather than in a platform check next to each caller.
@@ -145,5 +177,96 @@ public enum AppleCloudConfigurationRead: Equatable, Sendable {
         let isNewer = snapshot.savedAt > (localSavedAt ?? .distantPast)
         guard isNewer || (localIsEmpty && !snapshot.sources.isEmpty) else { return .notNewer }
         return .apply(snapshot)
+    }
+}
+
+/// What iCloud sync last did on this device, for the lines under the Backup &
+/// Sync switch (and the Apple TV's Sources pane). Kept in this device's
+/// defaults under `defaultsKey`, which is not a configuration key, so it is
+/// never part of a backup or the iCloud snapshot; Reset OpenStream clears it
+/// with the rest of the domain.
+public struct AppleConfigurationSyncStatus: Codable, Equatable, Sendable {
+    public static let defaultsKey = "openstream.backup.syncStatus.v1"
+
+    /// When this device last sent its configuration to iCloud.
+    public var lastSentAt: Date?
+    /// When this device last found iCloud's configuration and applied it, or
+    /// found it already applied here.
+    public var lastReceivedAt: Date?
+    /// Sources on this device when the status was last brought up to date.
+    public var sourceCount = 0
+    /// Sources still waiting for their sign-in from iCloud Keychain.
+    public var waitingForKeychain = 0
+    /// The last thing that went wrong, until the next send or receive works.
+    public var lastError: String?
+
+    public init(lastSentAt: Date? = nil, lastReceivedAt: Date? = nil, sourceCount: Int = 0,
+                waitingForKeychain: Int = 0, lastError: String? = nil) {
+        self.lastSentAt = lastSentAt
+        self.lastReceivedAt = lastReceivedAt
+        self.sourceCount = sourceCount
+        self.waitingForKeychain = waitingForKeychain
+        self.lastError = lastError
+    }
+
+    public func recordingSent(at date: Date, sourceCount: Int) -> Self {
+        var copy = self
+        copy.lastSentAt = date
+        copy.sourceCount = sourceCount
+        copy.lastError = nil
+        return copy
+    }
+
+    public func recordingReceived(at date: Date, sourceCount: Int) -> Self {
+        var copy = self
+        copy.lastReceivedAt = date
+        copy.sourceCount = sourceCount
+        copy.lastError = nil
+        return copy
+    }
+
+    public func recordingSources(_ count: Int, waitingForKeychain waiting: Int) -> Self {
+        var copy = self
+        copy.sourceCount = count
+        copy.waitingForKeychain = waiting
+        return copy
+    }
+
+    public func recordingError(_ message: String) -> Self {
+        var copy = self
+        copy.lastError = message
+        return copy
+    }
+
+    /// "Last sent 2:14 PM · Last received 2:15 PM", or "Not synced yet".
+    public func activityLine(time: (Date) -> String) -> String {
+        let parts = [lastSentAt.map { "Last sent \(time($0))" }, lastReceivedAt.map { "Last received \(time($0))" }]
+            .compactMap { $0 }
+        return parts.isEmpty ? "Not synced yet" : parts.joined(separator: " · ")
+    }
+
+    /// The error if there is one, otherwise "8 sources · 2 waiting for
+    /// passwords from iCloud Keychain".
+    public var detailLine: String {
+        if let lastError { return lastError }
+        let sources = sourceCount == 1 ? "1 source" : "\(sourceCount) sources"
+        guard waitingForKeychain > 0 else { return sources }
+        return "\(sources) · \(waitingForKeychain) waiting for passwords from iCloud Keychain"
+    }
+
+    /// Today's times as a time, anything older with its date.
+    public static func time(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        calendar.isDate(date, inSameDayAs: now)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    public static func load(from defaults: UserDefaults = .standard) -> Self {
+        defaults.data(forKey: defaultsKey).flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? Self()
+    }
+
+    public func save(to defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.defaultsKey)
     }
 }

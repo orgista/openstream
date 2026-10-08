@@ -16,14 +16,8 @@ struct AppleWatchProviderRow: View {
 
     var body: some View {
         if !providers.isEmpty {
-            // JustWatch supplies TMDB's availability data and asks for a
-            // credit wherever it is shown; it sits behind the (i) beside the
-            // line (owner: "just make them (i)"), which on Apple TV is the
-            // one focusable thing on this row.
-            HStack(spacing: logoSpacing) {
-                providerLine
-                AppleAttributionInfoButton()
-            }
+            // JustWatch's credit lives once, in About (owner 2026-10-08).
+            providerLine
         }
     }
 
