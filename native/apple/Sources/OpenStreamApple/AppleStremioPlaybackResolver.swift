@@ -232,6 +232,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
         let started = ContinuousClock.now
         var bestError: AppleStremioPlaybackResolutionError = .noStreams
         var providerFailure: ApplePlaybackFailure?
+        var someSourceAnswered = false
         for source in candidates {
             try Task.checkCancellation()
             if !collected.isEmpty, started.duration(to: .now) + sourceTimeout >= resolutionTimeout { break }
@@ -240,6 +241,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
                     try await client.streams(source: source, type: item.type, mediaID: item.mediaID)
                 }
                 let http = selection.httpCandidates.filter { !$0.isPendingPreparation }
+                someSourceAnswered = true
                 // Per add-on, so "did not return an Apple-compatible stream"
                 // can be read off the trace: which add-on answered with what.
                 appleTrace("streams from \(source.name) for \(item.name): ready=\(http.count) "
@@ -279,8 +281,18 @@ public struct AppleMediaPlaybackResolver: Sendable {
             return ranked
         }
         if let providerFailure { throw AppleStremioPlaybackResolutionError.providerFailure(providerFailure) }
+        if bestError == .noStreams, someSourceAnswered {
+            // The stream add-ons answered with nothing for this title. Not
+            // "this catalog provides details only, add a stream source": the
+            // viewer has one, and it was asked (playback sweep 2026-10-08).
+            throw AppleStremioPlaybackResolutionError.providerFailure(Self.nothingFound)
+        }
         throw bestError
     }
+
+    static let nothingFound = ApplePlaybackFailure(
+        kind: .unavailable, message: "No stream was found for this title. Your stream sources returned nothing for it."
+    )
 
     /// The kind of stream that could not play, without its locator (an
     /// external link can carry a token).

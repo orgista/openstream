@@ -16,6 +16,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       faster is engine work for later.
 - [ ] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
       different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
+      **Swept 2026-10-08:** 100 titles (20 per era, pre-1970 to 2020s, movies and episodes) with your config on
+      the mini's iPhone: 86 played (median 2.8 s to the picture). The "compatible source" message came up 0 times:
+      it only appears when an add-on sends nothing but torrent-only/YouTube/web links, and your Torrentio TB sent
+      real links every time. What failed: 9 not cached on TorBox yet, 4 where Torrentio had nothing at all (the app
+      wrongly told you to "add a stream source"; fixed, it now says nothing was found), 1 TorBox error video.
+      If you see the message again, note the title: it points at a different add-on or your TorBox account state.
+      Table: verification-artifacts/playback-sweep-2026-10-08/SWEEP.md.
 - [ ] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
       (broken, fix in progress) and has no import. QR "send setup to Apple TV" moves first in the QR work.
 - [x] **Remove notices around the app (2026-10-08)** — About no longer says "a subsidiary of Raster Inc.";

@@ -4539,3 +4539,12 @@ when the engine's load has returned. DevPlus, ad hoc Release 16.2 + owner config
 and `testCLivePlaysAndZaps` (now asserts the player says Playing) pass; before, Live was 0/5 played.
 `swift test`: 2914 tests in 371 suites passed.
 
+## 2026-10-08 — Playback sweep: 100 add-on titles on the owner's config
+DevPlus, Debug build with add-ons, owner's imported config (one stream add-on: Torrentio TB). 100 Cinemeta titles,
+seeded by era and type (`verification-artifacts/playback-sweep-2026-10-08/`): 86 first frames, 9 TorBox-uncached
+(pending only), 4 add-on returned no streams, 1 TorBox error clip. "Did not return an Apple-compatible stream": 0.
+Fixed: an add-on that answers with no streams no longer reads "This catalog provides details only. Add an enabled
+stream source" (`AppleMediaPlaybackResolver.nothingFound`); per-add-on stream counts are traced. The Exorcist and
+Rocky spent two of their three tries on the same TorBox error-clip file before playing; deduping identical files in
+the fallback list is a candidate follow-up. `swift test`: 2916 tests in 371 suites passed.
+

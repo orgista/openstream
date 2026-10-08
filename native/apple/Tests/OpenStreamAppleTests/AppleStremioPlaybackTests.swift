@@ -1029,3 +1029,31 @@ private actor PlaybackConcurrencyRecorder {
         item: .init(mediaID: "tt123", type: "movie", name: "Film"))
     #expect(candidates.map(\.sourceURL.lastPathComponent) == ["ready.mkv"])
 }
+
+/// Playback sweep 2026-10-08: a stream add-on that answers with no streams
+/// for a title was reported as "This catalog provides details only. Add an
+/// enabled stream source" — to a viewer who has one and whose add-on was
+/// asked. It now says nothing was found.
+@Test func rankedStreamsSayNothingWasFoundWhenEveryStreamSourceAnsweredEmpty() async throws {
+    let client = AppleStremioPlaybackClient { request in
+        (Data(#"{"streams":[]}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    let resolver = AppleStremioPlaybackResolver(client: client)
+    do {
+        _ = try await resolver.rankedCandidates(sources: [stremioSource()], item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
+        Issue.record("Expected nothing found")
+    } catch let error as AppleStremioPlaybackResolutionError {
+        #expect(error == .providerFailure(AppleStremioPlaybackResolver.nothingFound))
+        #expect(ApplePlaybackFailure.classify(error).message.contains("No stream was found"))
+    }
+}
+
+@Test func rankedStreamsStillAskForAStreamSourceWhenThereIsNone() async throws {
+    let resolver = AppleStremioPlaybackResolver(client: AppleStremioPlaybackClient { request in
+        (Data(#"{"streams":[]}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    })
+    await #expect(throws: AppleStremioPlaybackResolutionError.noStreams) {
+        _ = try await resolver.rankedCandidates(sources: [stremioSource(resources: ["catalog"])],
+            item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
+    }
+}
