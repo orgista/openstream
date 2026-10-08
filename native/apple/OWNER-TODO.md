@@ -6,6 +6,11 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **Set up a new device by scanning a QR code (owner 2026-10-08):** a new device (Android/Google TV,
+      Apple TV, iPad…) shows a QR code; scanning it with a phone that already has OpenStream sends the
+      whole setup over the home network. Should work Apple→Apple and Apple→Android. Design in progress.
+- [ ] **iCloud sync still looks broken (owner 2026-10-08):** owner doesn't think it works and doesn't know how
+      to test it. Investigating the sync path; plan a visible sync status in Settings so it's testable.
 - [ ] **Build 16 trailers still broken on the owner's iPhone (2026-10-08):** the trailer flashes for a split
       second then disappears; tapping a different trailer in the Trailers shelf doesn't reliably play it.
       The pre-ship check on the mini's iPhone 16e passed (1.65 s, demo data), so it reproduces with the
