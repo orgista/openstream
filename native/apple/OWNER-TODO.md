@@ -20,7 +20,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       dropped, so Live could sit on "No Live Channels" after adding or importing a setup until the app restarted;
       it now runs right after. (3) The new "can't reach Live" screens are redone (below). Not proven with your
       provider yet: from 17:10 to 18:10 its panel did not answer this network at all (also 20 s), so no channel could
-      be tried on the simulator; worth a look on your phone after the next build.
+      be tried on the simulator; worth a look on your phone after the next build. **~18:50 probe:** the address still
+      resolves (same answer from home DNS, 1.1.1.1 and 8.8.8.8; hosted on CDN77 NYC), but every port times out from the
+      Studio, Dev-Mini and ServerPlus (no refusal, no ping; packets die at the host's edge). DevPlus logged in fine
+      this morning from the same network, so this looks like the provider blocking our home IP after today's test
+      logins (or the panel being down). YOU: open Live on your phone with Wi-Fi OFF. Works on cellular = home IP is
+      blocked (usually lifts within a day; else ask the provider); fails there too = the provider is down. Test
+      agents told to stop logging in.
 - [ ] **"New dialog in Live when it can't reach Live looks off and weird" (2026-10-08, build 16)** — it was an alert
       ("Playback Failed" + advice paragraph + Close/Retry) that popped up over the whole Live tab whenever the resumed
       channel could not start, plus a warning row with the system's error text over a working list.
