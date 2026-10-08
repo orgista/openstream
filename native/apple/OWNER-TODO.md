@@ -6,6 +6,11 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **Build 16 trailers still broken on the owner's iPhone (2026-10-08):** the trailer flashes for a split
+      second then disappears; tapping a different trailer in the Trailers shelf doesn't reliably play it.
+      The pre-ship check on the mini's iPhone 16e passed (1.65 s, demo data), so it reproduces with the
+      owner's sources/phone only. Plan: owner cables the phone to Dev-Mini once (trust + Developer Mode),
+      then e2e over the cable or Wi-Fi with traces.
 
 - [ ] **Vision Pro: player lives inside the app window, resizable** (asked 2026-10-07; today it opens a separate
       "Player" window). Fable audit for direction → implement → overnight visionOS e2e on Dev-Mini. Also a Mythos
