@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 
 /// Parses a downloaded subtitle file (SubRip or WebVTT) into the same cue type
@@ -195,8 +196,46 @@ public enum AppleSubtitleTextParser {
         if flags & 0x02 != 0 { offset += 2 } // FHCRC
         guard offset < data.endIndex - 8 else { return data }
         let deflated = Data(data[offset ..< (data.endIndex - 8)])
-        guard let inflated = try? (deflated as NSData).decompressed(using: .zlib),
-              inflated.length <= maximumInflatedBytes else { return data }
-        return inflated as Data
+        guard let inflated = inflate(deflated, limit: maximumInflatedBytes) else { return data }
+        return inflated
+    }
+
+    /// Raw DEFLATE, streamed in chunks so a tiny zip bomb stops at `limit`
+    /// instead of inflating to gigabytes first. Nil when the payload is
+    /// corrupt or would exceed the limit.
+    static func inflate(_ deflated: Data, limit: Int) -> Data? {
+        let chunkSize = 64 * 1024
+        let destination = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkSize)
+        defer { destination.deallocate() }
+        let stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
+        defer { stream.deallocate() }
+        guard compression_stream_init(stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+            return nil
+        }
+        defer { compression_stream_destroy(stream) }
+        var output = Data()
+        return deflated.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Data? in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return nil }
+            stream.pointee.src_ptr = base
+            stream.pointee.src_size = raw.count
+            while true {
+                stream.pointee.dst_ptr = destination
+                stream.pointee.dst_size = chunkSize
+                let pending = stream.pointee.src_size
+                let status = compression_stream_process(stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                let produced = chunkSize - stream.pointee.dst_size
+                guard output.count + produced <= limit else { return nil }
+                output.append(destination, count: produced)
+                switch status {
+                case COMPRESSION_STATUS_OK:
+                    // No output and no input consumed: stuck on a truncated stream.
+                    if produced == 0, stream.pointee.src_size == pending { return nil }
+                case COMPRESSION_STATUS_END:
+                    return output
+                default:
+                    return nil
+                }
+            }
+        }
     }
 }

@@ -22,7 +22,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       but the full-window player docks into them when you pick one with the Digital Crown — verify on the device. Next:
       our own "theater" environment (an immersive space with a docking spot for the screen), after the player work.
 - [ ] **Vision Pro traces:** device isn't paired with Dev-Mini. Owner: Settings → Share Diagnostics → AirDrop to the Mac.
-- [ ] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. Queued after the Vision Pro work:
+- [ ] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. 1–3 + subtitle bomb + Messages links FIXED
+      2026-10-08 (tokens in cache files: protected + kept out of backups, not yet removed). ATS (4) waits on your OK:
       (1) HIGH: Xtream guide (EPG) URL with the password is saved in plain preferences — keep it in the Keychain only;
       (2) the web-portal diagnostics download and some trace lines can include stream URLs with credentials — redact;
       (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:

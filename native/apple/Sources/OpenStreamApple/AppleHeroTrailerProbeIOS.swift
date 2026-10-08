@@ -53,7 +53,7 @@ final class AppleHeroTrailerProbeIOS {
         }
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
-                appleTrace("debug orientation failed: \(error.localizedDescription)")
+                appleTrace("debug orientation failed: \(AppleDiagnosticRedactor.describe(error))")
             }
         }
     }

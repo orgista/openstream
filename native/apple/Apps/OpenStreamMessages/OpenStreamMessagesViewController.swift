@@ -52,7 +52,8 @@ final class OpenStreamMessagesViewController: MSMessagesAppViewController {
     /// the title.
     override func didSelect(_ message: MSMessage, conversation: MSConversation) {
         super.didSelect(message, conversation: conversation)
-        guard let url = message.url else { return }
+        // Only this app's own routes; a bubble cannot send the recipient anywhere else.
+        guard let url = message.url, AppleAppRoute(url: url) != nil else { return }
         extensionContext?.open(url, completionHandler: nil)
     }
 

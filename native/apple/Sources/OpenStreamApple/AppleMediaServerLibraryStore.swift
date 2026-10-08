@@ -448,7 +448,12 @@ public final class AppleMediaServerLibraryStore {
     private func persist() {
         let state = PersistedState(shelves: shelves, continueWatching: continueWatching, lastLoadedAt: lastLoadedAt)
         if let data = try? JSONEncoder().encode(state) {
-            try? data.write(to: cacheURL(), options: .atomic)
+            // Poster and stream URLs here carry X-Plex-Token / api_key.
+            var url = cacheURL()
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
         }
     }
     
@@ -547,7 +552,7 @@ public final class AppleMediaServerLibraryStore {
                     }
                 }
             } catch {
-                appleTrace("Remote progress failed: \(error)")
+                appleTrace("Remote progress failed: \(AppleDiagnosticRedactor.describe(error))")
             }
         }
     }

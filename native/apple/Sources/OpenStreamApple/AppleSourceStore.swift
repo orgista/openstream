@@ -57,11 +57,26 @@ enum AppleDiagnosticRedactor {
     private static let credentialPattern = try! NSRegularExpression(
         pattern: #"(?i)\b(password|passwd|pwd|username|user|token|cookie|authorization)\b\s*[\"']?\s*[:=]\s*[\"']?[^,\s;&}\]]+"#
     )
+    /// Xtream stream paths without a scheme: `host/live/<user>/<pass>/1.ts`.
+    private static let xtreamPathPattern = try! NSRegularExpression(
+        pattern: #"(?i)/(live|movie|series)/[^/\s\"'<>]+/[^/\s\"'<>]+/"#
+    )
+    private static let bearerPattern = try! NSRegularExpression(
+        pattern: #"(?i)\bBearer\s+[^\s,;\"'}\]]+"#
+    )
 
     static func redact(_ value: String) -> String {
         var redacted = replace(urlPattern, in: value, with: "[REDACTED URL]")
+        redacted = replace(xtreamPathPattern, in: redacted, with: "/$1/[REDACTED]/[REDACTED]/")
+        redacted = replace(bearerPattern, in: redacted, with: "Bearer [REDACTED]")
         redacted = replace(bodyPattern, in: redacted, with: "$1=[REDACTED]")
         return replace(credentialPattern, in: redacted, with: "$1=[REDACTED]")
+    }
+
+    /// An error for a trace line: its localized text, redacted. `\(error)`
+    /// would carry `NSErrorFailingURLStringKey`, i.e. the stream URL.
+    static func describe(_ error: any Error) -> String {
+        redact(error.localizedDescription)
     }
 
     private static func replace(
@@ -982,6 +997,7 @@ public final class AppleSourceStore {
         }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
+        hydrateGuideAddresses()
         migrateLegacyIPTVCredentials()
         relocateManagedImports()
         #if OPENSTREAM_ADDONS
@@ -1025,6 +1041,7 @@ public final class AppleSourceStore {
         }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
+        hydrateGuideAddresses()
         migrateLegacyIPTVCredentials()
         relocateManagedImports()
         #if OPENSTREAM_ADDONS
@@ -1374,6 +1391,7 @@ public final class AppleSourceStore {
                 username: cleanUsername,
                 password: cleanPassword
             )
+            if cleanEPGURL == nil { try? keychain.remove(Self.guideReference(existing.id)) }
             sources[index] = try securedTransportSource(AppleSource(
                 id: existing.id,
                 kind: .liveTV,
@@ -2095,6 +2113,30 @@ public final class AppleSourceStore {
         if migrated { persist() }
     }
 
+    /// The guide (EPG) address can carry the provider password in its query,
+    /// so it lives in the Keychain under `guide.<id>`, never in the defaults
+    /// blob. Older blobs that still hold it are rewritten without it.
+    private func hydrateGuideAddresses() {
+        var storedInBlob = false
+        for index in sources.indices where Self.protectsTransportURL(sources[index]) {
+            if sources[index].epgURL != nil {
+                storedInBlob = true
+                continue
+            }
+            do {
+                sources[index].epgURL = try keychain.string(for: Self.guideReference(sources[index].id))
+                    .flatMap(URL.init(string:))
+            } catch {
+                credentialError = error.localizedDescription
+            }
+        }
+        if storedInBlob { persist() }
+    }
+
+    static func guideReference(_ id: UUID) -> String {
+        "guide.\(id.uuidString.lowercased())"
+    }
+
     private func retryPendingCredentialCleanup() {
         guard !pendingCredentialCleanupReferences.isEmpty else { return }
         let activeReferences = Set(sources.flatMap { source in
@@ -2146,10 +2188,21 @@ public final class AppleSourceStore {
             appleTraceFailure("sources not saved: a protected source has no transport reference")
             return
         }
+        for source in sources where Self.protectsTransportURL(source) {
+            guard let guide = source.epgURL?.absoluteString else { continue }
+            let reference = Self.guideReference(source.id)
+            do {
+                if try keychain.string(for: reference) != guide { try keychain.set(guide, for: reference) }
+            } catch {
+                appleTraceFailure("sources not saved: a guide address could not be stored in the Keychain")
+                return
+            }
+        }
         let persistedSources = sources.map { source -> AppleSource in
             guard Self.protectsTransportURL(source) else { return source }
             var sanitized = source
             sanitized.url = Self.sanitizedTransportURL(source)
+            sanitized.epgURL = nil
             return sanitized
         }
         var members: [Any] = persistedSources.compactMap { source in

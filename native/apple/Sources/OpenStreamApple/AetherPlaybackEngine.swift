@@ -402,7 +402,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                         try await self.aether.reloadAtCurrentPosition { $0.prepareNativeSubtitles = declaring }
                     } catch {
                         succeeded = false
-                        appleTrace("caption handoff: reload failed: \(error)")
+                        appleTrace("caption handoff: reload failed: \(AppleDiagnosticRedactor.describe(error))")
                     }
                     guard generation == self.loadGeneration else { return }
                     self.performCaptionHandoff(self.captionHandoff.reloadFinished(succeeded: succeeded))

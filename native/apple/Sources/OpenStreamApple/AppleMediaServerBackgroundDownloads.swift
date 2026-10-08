@@ -146,7 +146,12 @@ public final class AppleMediaServerBackgroundDownloads: NSObject {
     private func save() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(Array(jobs.values)) {
-            try? data.write(to: directory.appendingPathComponent("jobs.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            // Job URLs carry the server token (api_key / X-Plex-Token); keep them out of device backups.
+            var url = directory.appendingPathComponent("jobs.json")
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
         }
     }
     private func remove(_ id: UUID) {

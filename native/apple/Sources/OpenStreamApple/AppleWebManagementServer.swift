@@ -501,7 +501,9 @@ public final class AppleWebManagementServer {
                 traceWeb("diagnostics refused: not paired")
                 return (.plain(401, "Session Ended", "Session ended — scan the code again"), false)
             }
-            let log = (try? String(contentsOf: AppleInteractionTrace.fileURL ?? URL(fileURLWithPath: "/dev/null"), encoding: .utf8)) ?? ""
+            // Same redaction as Share Diagnostics: the page is cleartext HTTP on the LAN.
+            let log = AppleDiagnosticsReport.redact(
+                (try? String(contentsOf: AppleInteractionTrace.fileURL ?? URL(fileURLWithPath: "/dev/null"), encoding: .utf8)) ?? "")
             traceWeb("diagnostics served (\(log.utf8.count) bytes)")
             return (.plain(200, "OK", log.isEmpty ? "No trace recorded yet." : log, cookies: browserToken.map(pairingCookies) ?? []), false)
         }

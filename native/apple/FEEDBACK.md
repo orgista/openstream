@@ -4513,3 +4513,12 @@ The player no longer opens a second "Player" window. It fills the oStream window
 The audio that kept playing after you closed the window is fixed: the player now stops and remembers your place when the window goes away. The simulator cannot close a window from a test, so please check that one on the headset.
 
 Checked on the Vision Pro simulator on the Mac mini: four automated tests pass (player inside the window, 16:9 while playing, size restored, clip ending, a failed stream, a relaunch with one window). Screenshots: verification-artifacts/audit-2026-10-07/vision-e2e/. Not committed yet.
+
+## 2026-10-08 — Security fixes from the 2026-10-07 audit
+- The TV guide address of an Xtream provider (it can hold your password) is no longer saved in the app's settings file. It is kept in the Keychain only, and settings saved by older builds are cleaned up the first time the app opens. Backups still bring the guide address back.
+- Diagnostics read from the Web Management page now hide passwords, tokens and stream addresses, the same way Share Diagnostics does. Error lines in the log no longer include the failing stream address.
+- Plex, Jellyfin and Emby cache files are locked until the device is first unlocked and are left out of device backups. They still hold server tokens inside; moving those out is a bigger change for later.
+- A tiny compressed subtitle file can no longer blow up into gigabytes and crash the app; unpacking stops at 32 MB.
+- Tapping an oStream bubble in Messages only opens oStream links.
+- App Transport Security settings are unchanged; that one is your call.
+Checked: 2878 package tests pass, iOS, tvOS, visionOS and macOS builds succeed on the Mac mini. Not committed yet.
