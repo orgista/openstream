@@ -6,6 +6,33 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **App Store submission 2026-10-09 (owner 2026-10-08: "apple store submission will be tomorrow").**
+      **Checked tonight:**
+      - App Store Connect "validate":
+        - iPhone/iPad passes with 0 errors.
+        - Apple TV and Vision Pro have no build attached.
+        - Mac has no build and no screenshots.
+      - The support page (orgista.com/support) and the privacy page (which covers oStream) are live.
+      - Every bundle has a privacy manifest.
+      - The local-network prompt no longer says "add-ons".
+      - The private-repo user-agent is gone.
+      - Build 16 passed Beta App Review (Reddit).
+      - The public Jellyfin demo login now fails (HTTP 400), so the review notes rely on the Apple sample M3U only.
+
+      **Tonight (agent, once the UX tour frees the build lock):** a release-candidate run of the App Store
+      flavour (add-ons compiled out) from main:
+      - check-no-addons, sdk-floor, the strings audit.
+      - A clean Release install on each of iPhone, iPad, Apple TV, Vision Pro and Mac. Each must show No Sources;
+        then the review-notes M3U plays.
+      - Every Open item for those platforms fixed, or listed as a known issue.
+      - Duo layout changes stay out of main until after submission.
+
+      **YOU:**
+      - (1) ASC → App Privacy → "Data Not Collected" → Publish. The API can't confirm it.
+      - (2) Say **"ship 17"**. That builds the TestFlight build plus the separate no-add-on App Store archive for
+        all four platforms, attaches them, and swaps out old build 10 on iPhone.
+      - (3) Mac screenshots need `sudo /usr/sbin/DevToolsSecurity -enable` on Dev-Mini (Screen Sharing).
+      - (4) Pick manual release.
 - [ ] **Live doesn't work with the owner's config (2026-10-08, build 16)** — being tested on DevPlus with the
       owner's imported backup alongside the trailer bug.
       **Fixed, waiting for your phone (2026-10-08):** your provider's channels take 12-16 s to show the first
