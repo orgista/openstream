@@ -6,6 +6,17 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **iPhone Duo support (2026-10-08)** — the foldable iPhone (iOS 27.1) ships 10-23. Done: audit of everything
+      that assumes one screen size (verification-artifacts/duo-2026-10-08/AUDIT.md) and fixes written as patches,
+      held back so tomorrow's App Store build is untouched: the app stays portrait-only on the big inner screen
+      (fix: it rotates there like on iPad), the Live channel restarts when the window changes shape on iPad and
+      would on the Duo (fix: it keeps playing), and the big screen gets the phone's hero, Live layout, channel list
+      and Settings instead of the iPad's (fix: they follow the screen size, not the device type). The patches pass
+      all 2926 tests; the iPad-simulator resize run (rotate on Home, a title page, a playing video, Live) is written
+      but did not run tonight (build machine busy with release prep). Left: apply the patches after the release,
+      run that test on the iPad simulator, then check on the Duo simulator (real screen sizes, half-folded poses, 4K
+      quality on the inner screen). **Blocked on you:** download Xcode 27.1 beta (needs your Apple developer
+      sign-in) onto the Mac mini.
 - [ ] **App Store submission 2026-10-09 (owner 2026-10-08: "apple store submission will be tomorrow").**
       **Checked tonight:**
       - App Store Connect "validate":

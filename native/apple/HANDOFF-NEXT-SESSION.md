@@ -655,8 +655,10 @@ delete?; hero synopsis contrast (fails 4.5:1 on bright art — **most urgent par
 download %; landscape button in the player; M3U EPG in the guide; settings backup/restore
 payload; iMessage "watch this" share extension (needs a third profile); visionOS every-screen
 dead-button tally (it builds now); Channel Manager redesign — recommendation in FEEDBACK.md
-(selected-only list, add via Search (+)); **iPhone DUO** — needs Xcode 27.1 beta, not released;
-this Mac has 26.3, no DUO device type, no iOS 27 runtime. Tooling-blocked, not us.
+(selected-only list, add via Search (+)); **iPhone Duo** (2026-10-08) — audit + four held-back patches in
+`verification-artifacts/duo-2026-10-08/` (AUDIT.md, `patches/01-04`; apply in order after the App Store
+release). Dev-Mini has Xcode 27.0 only: no Duo device type, no iOS 27.1 SDK. Blocker: the owner installs
+Xcode 27.1 beta (27A9269) on the mini; then run `testDuoReadinessSurvivesLiveResizing` on the Duo sim.
 
 **Test count**: 1007 / 101. If yours is lower, you lost tests — find out why before continuing.
 
