@@ -2210,6 +2210,134 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         attach("live-layout-stable")
     }
 
+    /// Live redesign captures (2026-10-09), in the Mythos wireframes' states:
+    /// default, scrolled, inline controls, full-screen controls, a channel
+    /// that fails in the frame. PNGs go to `OPENSTREAM_UX_CAPTURE_DIR` with
+    /// `OPENSTREAM_UX_CAPTURE_PREFIX`. Skipped unless `OPENSTREAM_UX_CAPTURE=1`.
+    func testLiveRedesignIsPhotographed() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_UX_CAPTURE"] == "1" else { throw XCTSkip("captures only with OPENSTREAM_UX_CAPTURE=1") }
+        continueAfterFailure = true
+        let prefix = env["OPENSTREAM_UX_CAPTURE_PREFIX"] ?? "live"
+        let dir = env["OPENSTREAM_UX_CAPTURE_DIR"].map { URL(fileURLWithPath: $0) }
+        func shot(_ name: String) {
+            let png = XCUIScreen.main.screenshot().pngRepresentation
+            if let dir {
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try? png.write(to: dir.appendingPathComponent("\(prefix)-\(name).png"))
+            }
+            print("LIVECAPTURE \(name)")
+            attach("\(prefix)-\(name)")
+        }
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
+        app.launchArguments += (env["OPENSTREAM_UX_CAPTURE_ARGS"] ?? "").split(separator: " ").map(String.init)
+        launch(screen: "live")
+        let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row")
+        Thread.sleep(forTimeInterval: 10)
+        shot("default")
+
+        let window = app.windows.firstMatch
+        let low = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+        let high = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        low.press(forDuration: 0.05, thenDragTo: high)
+        low.press(forDuration: 0.05, thenDragTo: high)
+        Thread.sleep(forTimeInterval: 1.5)
+        shot("scrolled")
+        high.press(forDuration: 0.05, thenDragTo: low)
+        high.press(forDuration: 0.05, thenDragTo: low)
+        high.press(forDuration: 0.05, thenDragTo: low)
+        Thread.sleep(forTimeInterval: 1)
+
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        if player.exists {
+            player.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+            Thread.sleep(forTimeInterval: 0.6)
+            shot("inline-controls")
+        }
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        if !(fullScreen.exists && fullScreen.isHittable), player.exists {
+            player.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+        }
+        print("LIVECAPTURE fullscreen button exists=\(fullScreen.exists) frame=\(fullScreen.exists ? fullScreen.frame : .zero)")
+        if fullScreen.waitForExistence(timeout: 5) {
+            fullScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            Thread.sleep(forTimeInterval: 6)
+            shot("fullscreen-hidden")
+            let close = app.buttons["player.close"].firstMatch
+            if !(close.exists && close.isHittable) {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                Thread.sleep(forTimeInterval: 0.8)
+            }
+            shot("fullscreen-controls")
+            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "player.live").count, 1,
+                           "LIVE appears once, as the scrubber's label")
+            XCTAssertFalse(app.buttons["Last Channel"].exists && app.buttons["Last Channel"].isHittable,
+                           "Last Channel lives in More, not on the screen")
+            if close.exists, close.isHittable { close.tap() }
+            Thread.sleep(forTimeInterval: 2)
+        }
+
+        let failing = app.buttons.matching(NSPredicate(format: "label == %@", "Play Offline Sports")).firstMatch
+        if failing.exists {
+            for _ in 0..<4 where !failing.isHittable { low.press(forDuration: 0.05, thenDragTo: high) }
+            if failing.isHittable {
+                failing.tap()
+                _ = app.descendants(matching: .any).matching(identifier: "live.failure").firstMatch.waitForExistence(timeout: 30)
+                Thread.sleep(forTimeInterval: 1)
+                shot("error-frame")
+            }
+        }
+    }
+
+    /// Device check (DevPlus): a Live channel in full screen on the AVPlayer
+    /// route goes to Picture in Picture when the viewer goes home. The
+    /// screenshot after Home shows the window; the app trace says
+    /// "picture in picture: didStart". Skipped unless `OPENSTREAM_PIP_CHECK=1`.
+    func testLiveFullScreenGoesToPictureInPictureOnHome() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_PIP_CHECK"] == "1" else { throw XCTSkip("device check only with OPENSTREAM_PIP_CHECK=1") }
+        continueAfterFailure = true
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "live")
+        let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row")
+        Thread.sleep(forTimeInterval: 8)
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        player.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(fullScreen.waitForExistence(timeout: 5))
+        fullScreen.tap()
+        Thread.sleep(forTimeInterval: 8)
+        attach("pip-before-home")
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 5)
+        attach("pip-after-home")
+        print("PIPCHECK app state after home: \(app.state.rawValue)")
+        Thread.sleep(forTimeInterval: 5)
+        attach("pip-after-10s")
+        app.activate()
+        Thread.sleep(forTimeInterval: 4)
+        attach("pip-after-return")
+    }
+
+    /// The system player for reference: Safari's full-screen HLS player with
+    /// its controls up (the page is opened first with `simctl openurl`).
+    func testSystemPlayerReferenceIsPhotographed() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_UX_CAPTURE"] == "1" else { throw XCTSkip("captures only with OPENSTREAM_UX_CAPTURE=1") }
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        safari.activate()
+        Thread.sleep(forTimeInterval: 4)
+        safari.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        Thread.sleep(forTimeInterval: 0.7)
+        let png = XCUIScreen.main.screenshot().pngRepresentation
+        if let dir = env["OPENSTREAM_UX_CAPTURE_DIR"] {
+            try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("system-player-controls.png"))
+        }
+        attach("system-player-controls")
+    }
+
     func testLiveTappedStatesArePhotographed() {
         // Two queries cannot both land inside a three-second auto-hide, and the
         // second one used to fail on a chrome that had already gone.

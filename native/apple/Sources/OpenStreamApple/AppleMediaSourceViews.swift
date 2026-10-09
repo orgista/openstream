@@ -1913,12 +1913,14 @@ struct AppleLiveInlinePlayer: View {
         AppleLiveLogoMark(url: channel.logoURL, height: 20, maxWidth: 80,
                           fallbackText: channel.name, alignment: .leading)
             .shadow(color: .black.opacity(0.4), radius: 2)
-            .padding(12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
+            // The element is the logo's own size: a full-frame element hid the
+            // player's buttons from VoiceOver and XCTest hit points.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(channel.name), now playing")
             .accessibilityIdentifier("live.channelBadge")
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
     }
 
     private var failureTitle: String {
