@@ -44,6 +44,9 @@ public struct AppleTMDBDetails: Equatable, Sendable {
     /// TMDB actually found something *better*, and swapping one
     /// title-in-the-picture backdrop for another is not better.
     public let textlessBackdropURL: URL?
+    /// The poster with no title burned into it (`iso_639_1 == null`), for the
+    /// iPhone's portrait hero (`AppleHeroPortraitArt`). Nil when TMDB has none.
+    public let textlessPosterURL: URL?
     public let logoURL: URL?
     public let trailerYouTubeKeys: [String]
     /// Cast and crew with their roles and portraits, when the source has them
@@ -82,7 +85,8 @@ public struct AppleTMDBDetails: Equatable, Sendable {
         castMembers: [AppleCreditPerson] = [],
         countries: [String] = [],
         originalLanguage: String? = nil,
-        spokenLanguages: [String] = []
+        spokenLanguages: [String] = [],
+        textlessPosterURL: URL? = nil
     ) {
         self.mediaID = mediaID
         self.mediaType = mediaType
@@ -102,6 +106,7 @@ public struct AppleTMDBDetails: Equatable, Sendable {
         self.posterURL = posterURL
         self.backdropURL = backdropURL
         self.textlessBackdropURL = textlessBackdropURL
+        self.textlessPosterURL = textlessPosterURL
         self.logoURL = logoURL
         self.trailerYouTubeKeys = ([trailerYouTubeKey].compactMap { $0 } + trailerYouTubeKeys)
             .compactMap(AppleTrailerPreviewPolicy.validYouTubeKey)
@@ -568,7 +573,9 @@ public struct AppleTMDBClient: Sendable {
             castMembers: actors + creators + directors,
             countries: countries,
             originalLanguage: AppleTitlePagePolicy.languageName(value.originalLanguage),
-            spokenLanguages: spoken
+            spokenLanguages: spoken,
+            textlessPosterURL: imageURL(path: AppleTextlessBackdropPolicy.textlessPoster(
+                (value.images?.posters ?? []).map(\.artworkImage)), width: "w780")
         )
     }
 
@@ -695,13 +702,15 @@ public struct AppleTMDBClient: Sendable {
     private struct Images: Decodable, Sendable {
         let logos: [ImageEntry]
         let backdrops: [ImageEntry]
+        let posters: [ImageEntry]
 
-        enum CodingKeys: String, CodingKey { case logos, backdrops }
+        enum CodingKeys: String, CodingKey { case logos, backdrops, posters }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             logos = (try? container.decode([ImageEntry].self, forKey: .logos)) ?? []
             backdrops = (try? container.decode([ImageEntry].self, forKey: .backdrops)) ?? []
+            posters = (try? container.decode([ImageEntry].self, forKey: .posters)) ?? []
         }
     }
 
@@ -929,7 +938,8 @@ public struct AppleMetadataResolver: Sendable {
                                                                from: lhs.castMembers + rhs.castMembers),
             countries: lhs.countries.isEmpty ? rhs.countries : lhs.countries,
             originalLanguage: nonEmpty(lhs.originalLanguage) ?? nonEmpty(rhs.originalLanguage),
-            spokenLanguages: lhs.spokenLanguages.isEmpty ? rhs.spokenLanguages : lhs.spokenLanguages
+            spokenLanguages: lhs.spokenLanguages.isEmpty ? rhs.spokenLanguages : lhs.spokenLanguages,
+            textlessPosterURL: lhs.textlessPosterURL ?? rhs.textlessPosterURL
         )
     }
 

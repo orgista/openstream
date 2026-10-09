@@ -108,7 +108,10 @@ struct AppleHomeBillboard<Actions: View>: View {
         #if os(tvOS)
         .none
         #else
-        AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
+        // The iPhone's portrait hero is static: its trailer plays on the
+        // title page, so the hero's button never says Play Trailer.
+        phone != nil && !AppleHeroPortraitArt.phoneHeroPlaysTrailers ? .none
+        : AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
                                                  patienceElapsed: trailerLookupPatienceElapsed)
         #endif
     }
@@ -231,7 +234,13 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var loadedStill: AppleHeroLoadedStill?
     @State private var artMeasurement: AppleHeroArtMeasurement?
 
-    private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
+    /// The iPhone portrait hero's settled art (`AppleHomePhonePortraitStage`).
+    @State private var portraitDecision: AppleHeroPortraitDecision?
+
+    private var stillURL: URL? {
+        if phone != nil { return portraitDecision?.art.imageURL }
+        return item.backgroundURL ?? item.posterURL
+    }
 
     /// The measured still for this page's art, or nil until it has been.
     private var artLuminance: AppleHeroLuminanceMap? {
@@ -333,8 +342,12 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder
     private var featuredBody: some View {
         if let phone {
-            AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
-                               wordmark: wordmark, wordmarkLookupPending: wordmarkLookupPending,
+            AppleHomePhoneHero(item: item,
+                               artHeight: AppleHomePhoneHeroLayout.portraitArtHeight(width: viewportSize.width,
+                                                                                     limit: phone.artHeight),
+                               copyFadeLine: phone.copyFadeLine,
+                               wordmark: wordmark ?? portraitDecision?.logo, wordmarkLookupPending: wordmarkLookupPending,
+                               showsTitle: portraitDecision.map(\.art.showsTitle),
                                stage: stage, artLuminance: artLuminance,
                                onOpenDetails: onOpenDetails) { actionButtons }
         } else {
@@ -352,7 +365,21 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     private var stage: AnyView {
-        AnyView(
+        if phone != nil, !AppleHeroPortraitArt.phoneHeroPlaysTrailers {
+            return AnyView(
+                AppleHomePhonePortraitStage(item: item) { decision, image in
+                    portraitDecision = decision
+                    stillImage = image
+                    if let image, let url = decision.art.imageURL {
+                        loadedStill = AppleHeroLoadedStill(url: url, image: image)
+                        recordStill(.loaded)
+                    } else {
+                        recordStill(.failed)
+                    }
+                }
+            )
+        }
+        return AnyView(
             ZStack {
                 // The still sits outside the per-title identity below. It
                 // was inside it, so every page change remounted it empty

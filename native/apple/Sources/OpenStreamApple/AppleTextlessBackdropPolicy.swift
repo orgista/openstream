@@ -83,6 +83,12 @@ public enum AppleTextlessBackdropPolicy {
         return nil
     }
 
+    /// The textless (`iso_639_1 == null`) poster with the highest
+    /// `vote_average`, for the iPhone's portrait hero; nil when there is none.
+    public static func textlessPoster(_ posters: [AppleArtworkImage]) -> String? {
+        bestTextless(posters)
+    }
+
     /// Highest `vote_average` wins. A tie keeps TMDB's own order, which is
     /// already ranked, so the answer never depends on sort stability.
     private static func bestTextless(_ backdrops: [AppleArtworkImage]) -> String? {

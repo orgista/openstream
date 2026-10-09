@@ -10,7 +10,9 @@ struct AppleHomePhoneHeroPreload: View {
 
     var body: some View {
         ZStack {
-            AppleCatalogArtwork(url: item.backgroundURL ?? item.posterURL)
+            // Settles the next page's art (and remembers it) before it
+            // slides in, so it arrives drawn, already cropped.
+            AppleHomePhonePortraitStage(item: item)
                 .frame(width: max(width, 1), height: artHeight)
             // The page draws its wordmark whatever the art (`AppleHeroTitlePolicy`).
             if let url = wordmark {

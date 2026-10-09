@@ -24,7 +24,12 @@ struct AppleHomePhoneHero<Actions: View>: View {
     let wordmark: URL?
     /// The wordmark lookup is still running (`AppleHeroTitleLockup`).
     var wordmarkLookupPending: Bool? = nil
-    /// The still and the inline trailer, from `AppleHomeBillboard`.
+    /// Whether the wordmark or name is drawn (`AppleHeroPortraitArt.showsTitle`):
+    /// false over a poster that already carries the title, nil while the art
+    /// is still being chosen (the title's place is held, unseen, so it
+    /// appears with its art rather than before it).
+    var showsTitle: Bool? = true
+    /// The portrait art (static on the iPhone), from `AppleHomeBillboard`.
     let stage: AnyView
     /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
     var artLuminance: AppleHeroLuminanceMap? = nil
@@ -54,7 +59,17 @@ struct AppleHomePhoneHero<Actions: View>: View {
             // paging (iOS 18.6 regression 2026-10-01). A tap fails once the
             // finger travels.
             VStack(spacing: 10) {
-                title
+                if showsTitle != false {
+                    title
+                        .opacity(showsTitle == nil ? 0 : 1)
+                        .animation(.easeOut(duration: 0.25), value: showsTitle)
+                } else {
+                    // The art says the name; VoiceOver still hears it.
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityLabel(item.name)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 AppleHomePhoneHeroMetadata(item: item)
             }
             .appleHeroCopyShadow(scrim.copyShadow)

@@ -21,13 +21,16 @@ actor AppleHeroArtworkUpgrade {
     struct Artwork: Codable, Equatable, Sendable {
         let backdropURL: URL?
         let logoURL: URL?
+        /// TMDB's textless (`null`-language) poster: the iPhone portrait
+        /// hero's first choice (`AppleHeroPortraitArt`).
+        var posterURL: URL? = nil
     }
 
     /// This is our own conclusion, not a provider payload, so it is namespaced
     /// away from the add-on responses that share the cache directory. The
     /// version suffix retires every stored answer if the choice rule changes.
     private static let cacheSource = "openstream://hero-artwork"
-    private static let cacheType = "textless-v1"
+    private static let cacheType = "portrait-v1"
 
     private let client: AppleTMDBClient
     private let cache: AppleMetadataDiskCache
@@ -51,6 +54,42 @@ actor AppleHeroArtworkUpgrade {
         return root
     }
 
+    /// `artwork`, but answering nil once `deadline` has passed: the iPhone
+    /// hero picks its art before it draws and will not wait longer than
+    /// this for TMDB. The lookup carries on, so its answer is cached for
+    /// the next visit.
+    func artwork(
+        imdbID: String,
+        kind: AppleMediaKind,
+        configuration: AppleTMDBConfiguration,
+        deadline: Duration
+    ) async -> Artwork? {
+        let lookup = Task { await self.artwork(imdbID: imdbID, kind: kind, configuration: configuration) }
+        // A race, not a task group: a group would wait for the lookup it
+        // lost to before returning, which is the wait this exists to cap.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Artwork?, Never>) in
+            let once = ResumeOnce(continuation)
+            Task { once.resume(await lookup.value) }
+            Task {
+                try? await Task.sleep(for: deadline)
+                once.resume(nil)
+            }
+        }
+    }
+
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Artwork?, Never>?
+        init(_ continuation: CheckedContinuation<Artwork?, Never>) { self.continuation = continuation }
+        func resume(_ value: Artwork?) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+    }
+
     func artwork(
         imdbID: String,
         kind: AppleMediaKind,
@@ -70,7 +109,8 @@ actor AppleHeroArtworkUpgrade {
             // `textlessBackdropURL`, not `backdropURL`: replacing one
             // title-in-the-picture backdrop with another buys the viewer a
             // reload of the hero and nothing else.
-            let value = Artwork(backdropURL: details?.textlessBackdropURL, logoURL: details?.logoURL)
+            let value = Artwork(backdropURL: details?.textlessBackdropURL, logoURL: details?.logoURL,
+                                posterURL: details?.textlessPosterURL)
             // A failed lookup is still worth remembering for a day: the cost
             // of asking again on every visit is paid by the viewer.
             if let payload = try? JSONEncoder().encode(value) {
