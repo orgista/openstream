@@ -44,6 +44,8 @@ struct AppleLiveTVView: View {
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
     @State private var query = ""
     @State private var selectedCategory = "All"
+    /// Pay-per-view channels in the lineup, for the Events tab.
+    @State private var eventChannelCount = 0
     @State private var selectedChannel: AppleIPTVChannel?
     @State private var playbackRevision = 0
     @State private var fullScreenRevision = 0
@@ -823,9 +825,10 @@ struct AppleLiveTVView: View {
         let entries = completeGuide
         let favorites = settings.favoriteChannelIDs
         let category = selectedCategory
-        let snapshot = await Task.detached(priority: .userInitiated) {
-            AppleLiveChannelSnapshot.build(groups: updated, package: package, custom: custom,
-                entries: entries, favoriteIDs: favorites, category: category)
+        let (snapshot, events) = await Task.detached(priority: .userInitiated) {
+            (AppleLiveChannelSnapshot.build(groups: updated, package: package, custom: custom,
+                entries: entries, favoriteIDs: favorites, category: category),
+             AppleLiveCategoryOrder.eventChannels(visible))
         }.value
         guard !Task.isCancelled else { return }
         #if DEBUG
@@ -836,11 +839,19 @@ struct AppleLiveTVView: View {
         recallChannelIDs = Set(visible.map(\.id))
         // Both guides use this number/favorite projection; zaps and the
         // strip must follow it rather than the pre-sort playlist order.
-        let ordered = AppleGuideChannelProjection.rows(channels: snapshot.channels, entries: entries,
+        var ordered = AppleGuideChannelProjection.rows(channels: snapshot.channels, entries: entries,
             favoriteIDs: favorites, favoritesOnly: false, sortByNumber: true,
             favoriteOrder: category == "Favorites" ? settings.favoriteLiveChannelOrder : []).map(\.channel)
+        var hiddenCount = snapshot.hiddenCount
+        // Events (iPhone and iPad): the lineup's pay-per-view channels, shown
+        // whether or not "Show pay-per-view" is on (owner item 11).
+        eventChannelCount = events.count
+        if category == AppleLiveCategoryOrder.events {
+            ordered = Array(events.prefix(AppleLiveChannelSnapshot.maximumDisplayedChannels))
+            hiddenCount = max(0, events.count - ordered.count)
+        }
         channelSnapshot = AppleLiveChannelSnapshot(channels: ordered, channelIDs: ordered.map(\.id),
-            categories: snapshot.categories, hiddenCount: snapshot.hiddenCount)
+            categories: snapshot.categories, hiddenCount: hiddenCount)
         resumeLastChannelIfNeeded()
         startFirstChannelIfNeeded()
         snapshotRevision &+= 1
@@ -1306,6 +1317,11 @@ struct AppleLiveTVView: View {
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { viewportSize = $0 }
+        .onChange(of: liveCategoryTabs) { _, tabs in
+            // The last favourite removed or the events gone: back to All.
+            let resolved = AppleLiveCategoryOrder.resolved(selectedCategory, in: tabs)
+            if resolved != selectedCategory { selectedCategory = resolved }
+        }
     }
 
     private var liveStagePlayerColumn: some View {
@@ -1355,28 +1371,10 @@ struct AppleLiveTVView: View {
 
     private var liveStageGuideColumn: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: AppleDesignTokens.spacingLarge) {
-                        ForEach(channelSnapshot.categories, id: \.self) { category in
-                            Button { selectedCategory = category } label: {
-                                Text(category)
-                                    .font(AppleDesignTokens.fontSubheadline)
-                                    .foregroundStyle(selectedCategory == category ? AppleDesignTokens.textPrimary : AppleDesignTokens.textSecondary)
-                                    .padding(.vertical, 10)
-                                    .frame(minWidth: 44, minHeight: 44)
-                                    .contentShape(.rect)
-                            }
-                            .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
-                        }
-                    }
-                    .padding(.horizontal, AppleDesignTokens.spacingMedium)
-                }
-                .scrollIndicators(.never)
-                liveSearchButton
-            }
-            .frame(height: 44)
-            .accessibilityIdentifier("live.categories")
+            AppleLiveCategoryBar(tabs: liveCategoryTabs, selection: Binding(
+                get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
+                set: { selectedCategory = $0 }
+            ), onSearch: { showsSearch = true })
             AppleIPTVGuideGridView(
                 channels: channelSnapshot.channels,
                 guide: guideStore.guide(for: playbackGuideChannelIDs),
@@ -1394,18 +1392,9 @@ struct AppleLiveTVView: View {
         }
     }
 
-    private var liveSearchButton: some View {
-        Button { showsSearch = true } label: {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .padding(.trailing, 8)
-        .accessibilityLabel("Search Channels")
-        .accessibilityIdentifier("live.search")
+    private var liveCategoryTabs: [String] {
+        AppleLiveCategoryOrder.tabs(groups: channelSnapshot.categories,
+            hasFavorites: !settings.favoriteChannelIDs.isEmpty, eventCount: eventChannelCount)
     }
     #endif
 
