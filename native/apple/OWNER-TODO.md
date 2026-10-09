@@ -8,6 +8,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 ## Open
 - [ ] **Apple TV "Set Up from iPhone" fails: "Couldn't import this setup." (owner 2026-10-09, build 17, real Apple TV +
       real iPhone).** Scanned the QR with the iPhone; the TV showed that error with Show New Code / Close. Investigating.
+      **Same TV, Library:** a warning row reads "ServerPlus: You don't have permission to save the file 'OpenStream' in
+      the folder 'Application Support'." Likely root cause of both: real tvOS can't write Application Support (only
+      Caches/tmp), while the tvOS sim allows it. Also, raw error text must not show in the UI.
 - [ ] **UX overhaul before the App Store (owner 2026-10-09, build 17, iPhone iOS 18.7 portrait). Test on the iOS 18.6 sim
       with the owner's config.** Owner: "no ton of bugs, it's UX"; the back end is good (Live plays fast, the guide loads fast).
       **Cast & crew:**
