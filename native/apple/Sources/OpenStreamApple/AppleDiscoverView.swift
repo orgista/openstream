@@ -2641,6 +2641,7 @@ struct AppleCatalogItemDetailView: View {
     // dynamic property of a view, and the page had sixty.
     @State private var heroTrailer = AppleTitlePageTrailerState()
     @State private var heroStill = AppleTitlePageHeroStill()
+    @State private var slotArt = AppleTitlePageSlotArtState()
     /// Hero art URLs that failed to load on this page; the next candidate is
     /// tried (`AppleTitlePagePolicy.heroArtworkURL`).
     @State private var failedHeroArtworkURLs: Set<URL> = []
@@ -3046,11 +3047,14 @@ struct AppleCatalogItemDetailView: View {
             guard !Task.isCancelled else { return }
             heroTrailer.pressedKey = nil
         }
-        .task(id: "title-logo:" + titleLogoCandidates.map(\.absoluteString).joined(separator: "|")) {
+        .task(id: titleLogoTaskID) {
             titleWordmark.loadResult = nil
             let candidates = titleLogoCandidates
             guard !candidates.isEmpty else {
-                titleWordmark.state = .unavailable
+                // Until the page's details have answered, no wordmark yet is
+                // not "no wordmark": the title's place is held, so a text
+                // title never draws and then gives way to the logo.
+                titleWordmark.state = titleMetadataAnswered ? .unavailable : .loading
                 return
             }
             titleWordmark.state = .loading
@@ -3072,6 +3076,10 @@ struct AppleCatalogItemDetailView: View {
             }
             if !Task.isCancelled { titleWordmark.state = .unavailable }
         }
+        // The iPhone header's art is chosen once the details answer or a
+        // deadline passes (`AppleTitlePageSlotArt`). Kept off this chain,
+        // which is already at the type checker's limit on visionOS.
+        .background { slotArtWatcher }
         // Keyed by the item only: a wordmark URL that arrives late must not
         // hide a text title that is already on screen; the text stays until
         // the wordmark has actually loaded.
@@ -3417,11 +3425,11 @@ struct AppleCatalogItemDetailView: View {
     /// `controlTopInset` moves its mute/replay control to the top right, for
     /// the iPhone title page whose copy covers the bottom of the art.
     @ViewBuilder
-    private func trailerPreview(controlTopInset: CGFloat? = nil) -> some View {
+    private func trailerPreview(controlTopInset: CGFloat? = nil, exactSlot: Bool = false) -> some View {
         if trailerPreviewIsShown, let embedURL = trailerEmbedURL {
             AppleYouTubeAutoPreview(
                 url: embedURL,
-                artworkURL: heroArtworkURL,
+                artworkURL: exactSlot ? phoneSlotArt?.url : heroArtworkURL,
                 artworkImage: heroStill.image,
                 isLandscape: viewportSize.width > viewportSize.height,
                 isPlaying: $heroTrailer.isActive,
@@ -3441,7 +3449,8 @@ struct AppleCatalogItemDetailView: View {
                 controlTopInset: controlTopInset,
                 // Final crop before the art fades, as the hero's (N46b): the
                 // page revealed first and grew 1.35→1.80× in view (N50).
-                settlesPictureBeforeReveal: true
+                settlesPictureBeforeReveal: !exactSlot,
+                exactSlot: exactSlot
             )
                 .id(embedURL.lastPathComponent)
                 .frame(maxWidth: .infinity)
@@ -4243,6 +4252,72 @@ struct AppleCatalogItemDetailView: View {
             onFailure: heroArtworkFailed,
             keepsImageWhileReloading: true
         )
+    }
+
+    private var slotArtWatcher: some View {
+        Color.clear
+            .task(id: item.id) {
+                if slotArt.itemID != item.id { slotArt = AppleTitlePageSlotArtState(itemID: item.id) }
+                lockSlotArtIfReady()
+                try? await Task.sleep(for: AppleTitlePageSlotArt.deadline)
+                guard !Task.isCancelled else { return }
+                slotArt.deadlinePassed = true
+                lockSlotArtIfReady()
+            }
+            .onChange(of: pageMetadata.details) { _, _ in lockSlotArtIfReady() }
+            .accessibilityHidden(true)
+    }
+
+    /// Reruns the wordmark lookup when its candidates change or the page's
+    /// details first answer. Built here: inline, the page's modifier chain
+    /// went past the type checker's limit on visionOS.
+    private var titleLogoTaskID: String {
+        let candidates = titleLogoCandidates.map(\.absoluteString).joined(separator: "|")
+        return "title-logo:\(titleMetadataAnswered):\(candidates)"
+    }
+
+    /// The page's details have answered, or the slot-art deadline passed.
+    private var titleMetadataAnswered: Bool {
+        AppleTitlePageSlotArt.isReady(detailsAnswered: pageMetadata.details != nil,
+                                      deadlinePassed: slotArt.itemID == item.id && slotArt.deadlinePassed)
+    }
+
+    /// The iPhone header's art, once chosen; nil while the page is still
+    /// finding out (black, then the final art).
+    private var phoneSlotArt: AppleTitlePageSlotArt? {
+        slotArt.itemID == item.id ? slotArt.chosen : nil
+    }
+
+    /// Chooses the iPhone header's art once, when the page knows enough.
+    /// Only a failed load moves it on to the next candidate.
+    private func lockSlotArtIfReady() {
+        guard slotArt.itemID == item.id, slotArt.chosen == nil, titleMetadataAnswered else { return }
+        slotArt.chosen = phoneSlotArtCandidate
+        if let chosen = slotArt.chosen {
+            appleTrace("title slot art \(chosen.isPosterCard ? "poster card" : "backdrop") (\(item.name))")
+        } else {
+            appleTrace("title slot art: none (\(item.name))")
+            if usesPhoneTitlePage { heroStill.art = heroStill.art.settling(with: .failed) }
+        }
+    }
+
+    private var phoneSlotArtCandidate: AppleTitlePageSlotArt? {
+        AppleTitlePageSlotArt.choose(
+            backdrops: [pageMetadata.details?.textlessBackdropURL, pageMetadata.details?.backdropURL,
+                        item.backgroundURL, pageMetadata.fallbackArtwork?.backgroundURL],
+            posters: [pageMetadata.details?.posterURL, item.posterURL, pageMetadata.fallbackArtwork?.posterURL],
+            failed: slotArt.failed)
+    }
+
+    private func phoneSlotArtFailed() {
+        guard let chosen = phoneSlotArt else { return }
+        slotArt.failed.insert(chosen.url)
+        slotArt.chosen = phoneSlotArtCandidate
+        appleTrace("title slot art failed, \(slotArt.chosen == nil ? "none left" : "trying the next") (\(item.name))")
+        if slotArt.chosen == nil {
+            heroStill.image = nil
+            heroStill.art = heroStill.art.settling(with: .failed)
+        }
     }
 
     /// The art that failed is skipped for the next candidate; only when none
@@ -6883,6 +6958,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     /// the trailer's crop is final (`AppleTrailerPictureSettle`), and it is
     /// never re-measured once seen. Unset, it reveals and then re-measures.
     var settlesPictureBeforeReveal = false
+    /// The caller's frame is itself 16:9 (the iPhone title page's header):
+    /// the player fills it exactly, with no crop zoom and no picture
+    /// measuring, so the trailer is never zoomed after it appears (the
+    /// Taskmaster zoom ~1 s in) and never cut off.
+    var exactSlot = false
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var loadedURL: URL?
@@ -6939,6 +7019,17 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private func reveal(muted: Bool) {
             guard playbackIntent, let webView, let container else { return }
             let generation = revealGeneration
+            if container.exactSlot {
+                // A 16:9 player in a 16:9 slot: nothing to measure or crop.
+                container.pictureWindow = 0...1
+                container.hasMeasuredPicture = true
+                container.layoutIfNeeded()
+                webView.alpha = 1
+                container.setPreviewVisible(true)
+                appleTrace("trailer native reveal: exact 16:9 slot")
+                onStateChange?("revealed", muted, nil)
+                return
+            }
             if container.settlesPictureBeforeReveal, AppleTrailerPictureSettle.snapshotsShowVideo {
                 settlePicture(generation: generation, gate: AppleTrailerPictureSettle(), muted: muted)
                 return
@@ -7173,6 +7264,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
         var settlesPictureBeforeReveal = false
+        var exactSlot = false { didSet { if oldValue != exactSlot { setNeedsLayout() } } }
         #if DEBUG && os(iOS)
         var probe: AppleHeroTrailerProbeIOS?
         #endif
@@ -7275,11 +7367,18 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             muteButton.backgroundColor = .clear
             muteButton.hoverStyle = .init(effect: .highlight)
             #else
-            muteButton.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-            muteButton.setPreferredSymbolConfiguration(
-                UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold), forImageIn: .normal)
+            muteButton.backgroundColor = .clear
+            muteButton.layer.shadowColor = UIColor.black.cgColor
+            muteButton.layer.shadowOpacity = 0.4
+            muteButton.layer.shadowRadius = 3
+            muteButton.layer.shadowOffset = .zero
             #endif
+            #if os(visionOS)
             muteButton.clipsToBounds = true
+            #else
+            // The shadow draws outside the glyph's bounds.
+            muteButton.clipsToBounds = false
+            #endif
             muteButton.accessibilityIdentifier = "detail.trailer.mute"
             muteButton.addTarget(self, action: #selector(mutePreview), for: .primaryActionTriggered)
             addSubview(muteButton)
@@ -7290,8 +7389,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            let viewport = AppleTrailerPreviewLayout.playerFrame(in: bounds.size, isLandscape: isLandscape)
-            let picture = AppleTrailerPreviewLayout.playerFrame(
+            let viewport = exactSlot ? AppleTrailerPreviewLayout.slotFrame(in: bounds.size)
+                : AppleTrailerPreviewLayout.playerFrame(in: bounds.size, isLandscape: isLandscape)
+            let picture = exactSlot ? viewport : AppleTrailerPreviewLayout.playerFrame(
                 in: bounds.size, isLandscape: isLandscape, pictureWindow: pictureWindow
             )
             // Keep the WebKit viewport stable while applying the cover crop.
@@ -7322,27 +7422,41 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             }
             artworkCover.frame = cover.bounds
             touchShield.frame = bounds
-            #if os(visionOS)
-            let controlSide: CGFloat = 60
-            #else
-            let controlSide: CGFloat = 32
-            #endif
-            muteButton.layer.cornerRadius = controlSide / 2
             // Placed in the part that is on screen: the hero's 16:9 view
             // overhangs its art frame, and a control at its own corner was
             // clipped off the screen.
             let visible = cover.frame.intersection(bounds)
+            #if os(visionOS)
+            let controlSide: CGFloat = 60
+            muteButton.layer.cornerRadius = controlSide / 2
             muteButton.frame = CGRect(
                 x: visible.maxX - 12 - controlSide,
                 y: controlTopInset.map { visible.minY + $0 } ?? (visible.maxY - 12 - controlSide),
                 width: controlSide, height: controlSide
             )
+            #else
+            // Paused: one play.fill centred on the picture. Playing: the sound
+            // glyph in its corner. Both bare glyphs with a shadow, no ring
+            // (Mythos §2.2, spec §4.3), each a 44 pt target or larger.
+            let frame = AppleTrailerPreviewLayout.controlFrame(in: visible, paused: showsReplay,
+                                                               topInset: controlTopInset)
+            muteButton.frame = frame
+            muteButton.layer.cornerRadius = 0
+            #endif
             bringSubviewToFront(muteButton)
         }
 
         func updateControls(isPlaying: Bool, isMuted: Bool, showsReplay: Bool) {
             self.isPlaying = isPlaying
+            if self.showsReplay != showsReplay { setNeedsLayout() }
             self.showsReplay = showsReplay
+            #if !os(visionOS)
+            muteButton.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(pointSize: showsReplay ? AppleTrailerPreviewLayout.pausedGlyphSize
+                                                                   : AppleTrailerPreviewLayout.soundGlyphSize,
+                                            weight: showsReplay ? .regular : .semibold),
+                forImageIn: .normal)
+            #endif
             updatePlaybackValue()
             touchShield.accessibilityLabel = isPlaying ? "Pause trailer preview" : "Play trailer preview"
             // One glyph in one quiet circle: paused shows play.fill, not a
@@ -7354,7 +7468,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 for: .normal
             )
             muteButton.accessibilityLabel = showsReplay
-                ? "Replay trailer"
+                ? "Play trailer"
                 : (isMuted ? "Turn trailer sound on" : "Mute trailer")
             muteButton.accessibilityIdentifier = showsReplay ? "detail.trailer.replay" : "detail.trailer.mute"
             muteButton.accessibilityValue = showsReplay ? nil : (isMuted ? "Muted" : "Sound on")
@@ -7475,6 +7589,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         container.controlTopInset = controlTopInset
         container.coverSize = coverSize
         container.settlesPictureBeforeReveal = settlesPictureBeforeReveal
+        container.exactSlot = exactSlot
         #if DEBUG && os(iOS)
         if settlesPictureBeforeReveal, let probe = AppleHeroTrailerProbeIOS.fromDefaults() {
             probe.container = container
@@ -7509,6 +7624,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.isLandscape = isLandscape
         view.controlTopInset = controlTopInset
         view.coverSize = coverSize
+        view.exactSlot = exactSlot
         view.updateArtwork(artworkURL)
         view.updateStill(artworkImage)
         view.updateControls(
@@ -7592,6 +7708,33 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 #endif
 
 enum AppleTrailerPreviewLayout {
+    /// The paused state's one `play.fill` and the sound glyph (Mythos §2.2).
+    static let pausedGlyphSize: CGFloat = 44
+    static let soundGlyphSize: CGFloat = 20
+    /// The smallest touch target either control gets.
+    static let minimumControlSide: CGFloat = 44
+    static let pausedControlSide: CGFloat = 64
+    static let controlInset: CGFloat = 4
+
+    /// A 16:9 slot's player: exactly the slot, no crop zoom.
+    static func slotFrame(in size: CGSize) -> CGRect {
+        CGRect(origin: .zero, size: size)
+    }
+
+    /// Where the trailer's one control sits in the `visible` part of its
+    /// view: paused, centred; playing, in the bottom-right corner, or
+    /// `topInset` below the top when the caller's copy covers the bottom.
+    static func controlFrame(in visible: CGRect, paused: Bool, topInset: CGFloat?) -> CGRect {
+        if paused {
+            let side = pausedControlSide
+            return CGRect(x: visible.midX - side / 2, y: visible.midY - side / 2, width: side, height: side)
+        }
+        let side = minimumControlSide
+        return CGRect(x: visible.maxX - controlInset - side,
+                      y: topInset.map { visible.minY + $0 } ?? (visible.maxY - controlInset - side),
+                      width: side, height: side)
+    }
+
     // A 4:3 hero needs only the minimal cover scale for a 16:9 source. The
     // negative offset puts the visible source window below YouTube's title
     // strip and above its lower branding row.
@@ -7768,6 +7911,15 @@ private struct AppleTitlePageHeroStill {
     /// The hero still's load; the trailer waits on it (art-first).
     var art = AppleTrailerArtFirstPolicy.Art.loading
     var image: CGImage?
+}
+
+/// The iPhone title page's 16:9 header art, held once chosen
+/// (`AppleTitlePageSlotArt`).
+private struct AppleTitlePageSlotArtState {
+    var itemID: String?
+    var chosen: AppleTitlePageSlotArt?
+    var deadlinePassed = false
+    var failed: Set<URL> = []
 }
 
 private struct AppleTitlePageWordmarkState {
@@ -8537,40 +8689,36 @@ extension AppleCatalogItemDetailView {
 
     // MARK: Hero
 
-    /// From the top edge of the screen: 70 % of it, as the Apple TV app's
-    /// title page, never less than the home hero's floor.
-    private var phoneHeroArtHeight: CGFloat {
-        max(AppleHomePhoneHeroLayout.minimumArtHeight, viewportSize.height * 0.70)
+    /// The 16:9 header (Mythos §5): the trailer plays in it exactly, so it
+    /// is never cropped, zoomed or off centre, and the title block sits
+    /// under it on black.
+    private var phoneSlotHeight: CGFloat {
+        AppleTitlePageSlotArt.slotHeight(width: viewportSize.width)
     }
 
     private var phoneHero: some View {
-        VStack(spacing: 12) {
-            phoneTitleLockup
-            phoneMetadataLine
-            phoneActionRow
-                .padding(.top, 4)
-        }
-        // Past accessibility 2 the header ran under the back and search
-        // buttons, Play was clipped and the round buttons hit the screen
-        // edges (iPhone 27 v2 re-run, AX-XXXL). The episode text below the
-        // hero still follows the full size.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-        .padding(.horizontal, Self.phoneInset)
-        .padding(.bottom, 14)
-        // Clear of the status bar and the navigation buttons at the
-        // accessibility sizes; the hero grows downwards instead.
-        .padding(.top, dynamicTypeSize.isAccessibilitySize ? pageGeometry.safeAreaInsets.top + 56 : 0)
-        .frame(maxWidth: .infinity)
-        // The copy is laid out in the flow, anchored to the bottom of the art:
-        // at the accessibility sizes it grows the hero downwards rather than
-        // clipping the buttons, and the fade is solid black by then.
-        .frame(minHeight: phoneHeroArtHeight, alignment: .bottom)
-        .background(alignment: .top) {
+        VStack(spacing: 0) {
             phoneHeroStage
                 .frame(maxWidth: .infinity)
-                .frame(height: phoneHeroArtHeight)
+                .frame(height: phoneSlotHeight)
                 .clipped()
+            VStack(spacing: 12) {
+                phoneTitleLockup
+                phoneMetadataLine
+                phoneActionRow
+                    .padding(.top, 4)
+            }
+            // Past accessibility 2 Play was clipped and the round buttons
+            // hit the screen edges (iPhone 27 v2 re-run, AX-XXXL). The
+            // episode text below the hero still follows the full size.
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .padding(.horizontal, Self.phoneInset)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity)
         }
+        // Under the status bar, black; the slot starts below it.
+        .padding(.top, pageGeometry.safeAreaInsets.top)
         .background(.black)
         // Where the hero sits in the page, read without a GeometryReader
         // in the tree or a preference climbing it on every scroll frame.
@@ -8579,30 +8727,59 @@ extension AppleCatalogItemDetailView {
         } action: { frame in
             detailHeroFrameChanged(frame)
         }
-        // With the navigation bar hidden, the art runs up under the status bar.
+        // With the navigation bar hidden, the page runs up under the status bar.
         .padding(.top, -pageGeometry.safeAreaInsets.top)
         .accessibilityElement(children: .contain)
     }
 
-    /// The still, the inline trailer over it once started (art until its
-    /// first frame, 3ea0ef0), and the one approved billboard fade.
+    /// The still and, once started, the trailer over it (art until its
+    /// first frames, then a crossfade). No fade over the video.
     private var phoneHeroStage: some View {
         ZStack {
-            heroArtwork
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+            phoneSlotArtwork
                 .accessibilityHidden(true)
             heroTrailerStartButton
             #if os(iOS) || os(visionOS)
-            // Top-trailing, under Search: the bottom of this art is under the
-            // title, the buttons and the fade, which hid a bottom control.
-            trailerPreview(controlTopInset: pageGeometry.safeAreaInsets.top + 10)
+            // The slot is all video: the sound control sits bottom-right,
+            // clear of the back and search buttons over its top.
+            trailerPreview(exactSlot: true)
             #endif
         }
-        .overlay {
-            AppleHomePhoneHeroFade()
-                .allowsHitTesting(false)
+    }
+
+    /// The header's still, chosen once (`AppleTitlePageSlotArt`); black
+    /// until then, so the first art drawn is the final one.
+    @ViewBuilder
+    private var phoneSlotArtwork: some View {
+        ZStack {
+            Color.black
+            if let art = phoneSlotArt {
+                switch art {
+                case .backdrop(let url):
+                    AppleRemoteImage(url: url, placeholderSystemImage: "", onLoad: phoneSlotArtLoaded,
+                                     onFailure: phoneSlotArtFailed, loadingFill: .black, fillAlignment: .center)
+                case .posterCard(let url):
+                    AppleRemoteImage(url: url, placeholderSystemImage: "", loadingFill: .black, fillAlignment: .center)
+                        .blur(radius: 30)
+                        .overlay(Color.black.opacity(0.35))
+                    // Sized to a 2:3 poster: a fitted image in
+                    // `AppleRemoteImage` is pinned to its leading edge.
+                    AppleRemoteImage(url: url, contentMode: .fit, placeholderSystemImage: "", onLoad: phoneSlotArtLoaded,
+                                     onFailure: phoneSlotArtFailed, loadingFill: .clear)
+                        .frame(width: max(0, phoneSlotHeight - 24) * 2 / 3, height: max(0, phoneSlotHeight - 24))
+                        .clipShape(.rect(cornerRadius: 8))
+                }
+            }
         }
+        .id(phoneSlotArt?.url)
+        .transition(.opacity)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phoneSlotArt)
+    }
+
+    private func phoneSlotArtLoaded(_ image: CGImage) {
+        heroStill.image = image
+        heroStill.art = heroStill.art.settling(with: .loaded)
+        fillTimeline.mark(.artwork)
     }
 
     /// The wordmark once it has drawn, otherwise the name in black-weight

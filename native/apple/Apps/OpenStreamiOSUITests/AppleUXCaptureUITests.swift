@@ -220,6 +220,34 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         shot("pressed-trailer")
     }
 
+    /// The portrait hero (owner items 6 and 19): each page of Discover's or
+    /// Library's carousel, swiped through one by one. The tab comes from
+    /// `OPENSTREAM_UX_CAPTURE_TAB` (Discover by default), the number of pages
+    /// from `OPENSTREAM_UX_CAPTURE_PAGES` (8 by default).
+    func testB7HeroPages() {
+        let tab = environment["OPENSTREAM_UX_CAPTURE_TAB"].flatMap { $0.isEmpty ? nil : $0 } ?? "Discover"
+        let pages = environment["OPENSTREAM_UX_CAPTURE_PAGES"].flatMap(Int.init) ?? 8
+        launch([])
+        if tab != "Discover" {
+            let button = app.tabBars.buttons[tab].firstMatch
+            if button.waitForExistence(timeout: 20) { button.tap() } else { print("UXCAPTURE HERO no \(tab) tab") }
+        }
+        let details = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+        print("UXCAPTURE HERO \(tab) shown=\(details.waitForExistence(timeout: 60))")
+        Thread.sleep(forTimeInterval: 8)
+        let slug = tab.lowercased()
+        shot("\(slug)-hero-01")
+        let window = app.windows.firstMatch
+        for page in 2...max(pages, 2) {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)),
+                       withVelocity: .fast, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 3)
+            print("UXCAPTURE HERO \(tab) page \(page): \(details.exists ? details.label : "?")")
+            shot(String(format: "%@-hero-%02d", slug, page))
+        }
+    }
+
     // MARK: - Helpers
 
     private func launch(_ extra: [String]) {
