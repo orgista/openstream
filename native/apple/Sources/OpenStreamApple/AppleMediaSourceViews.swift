@@ -78,6 +78,7 @@ struct AppleLiveTVView: View {
     #endif
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
     #endif
     #if os(tvOS)
@@ -139,6 +140,8 @@ struct AppleLiveTVView: View {
             } else {
                 #if os(tvOS)
                 tvGuide
+                #elseif os(iOS)
+                liveStage
                 #else
                 #if os(iOS)
                 let isPad = UIDevice.current.userInterfaceIdiom == .pad
@@ -339,7 +342,10 @@ struct AppleLiveTVView: View {
             )
         })
         #if os(iOS)
-        .toolbar(UIDevice.current.userInterfaceIdiom == .pad && verticalSizeClass == .compact ? .hidden : .visible, for: .navigationBar)
+        // No "Live" title and no bar above the video: the tab bar names the
+        // tab and search is a glyph in the category row (owner item 9).
+        .toolbar(.hidden, for: .navigationBar)
+        .modifier(AppleLiveTabBarBackground())
         #endif
         .environment(\.liveChannelSettings, settings)
         .task(id: settings.playbackEngine) {
@@ -1272,6 +1278,136 @@ struct AppleLiveTVView: View {
             showsSharedChannelChoices = true
         }
     }
+
+    #if os(iOS)
+    /// iPhone and iPad Live (owner items 7–10): the video edge to edge under
+    /// the status bar, the category row fixed under it, the channel list the
+    /// only thing that scrolls. One `AnyLayout` stacks the two columns on a
+    /// phone and sets them side by side on a wide iPad window; the same child
+    /// views keep their identity across the switch, so the channel never
+    /// reloads on rotation or resize.
+    private var liveStage: some View {
+        let sideBySide = AppleLiveStagePolicy.sideBySide(
+            isRegularWidth: horizontalSizeClass == .regular, size: viewportSize)
+        let layout = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
+            : AnyLayout(VStackLayout(spacing: 0))
+        return layout {
+            liveStagePlayerColumn
+                .frame(width: sideBySide ? AppleLiveStagePolicy.playerWidth(total: viewportSize.width) : nil)
+                .frame(maxHeight: sideBySide ? .infinity : nil, alignment: .top)
+            liveStageGuideColumn
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(.white.opacity(0.1)).frame(width: 1)
+                        .opacity(sideBySide ? 1 : 0)
+                }
+        }
+        .background(Color.black)
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { viewportSize = $0 }
+    }
+
+    private var liveStagePlayerColumn: some View {
+        VStack(spacing: 0) {
+            Group {
+                if let selectedChannel {
+                    stageInlinePlayer(selectedChannel)
+                        .accessibilityLabel("Live player for \(selectedChannel.name)")
+                        .accessibilityValue(playbackCoordinator.phase == .playing ? "Playing"
+                            : (playbackCoordinator.phase.isBusy ? "Loading" : ""))
+                } else {
+                    AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL)
+                }
+            }
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .accessibilityIdentifier("live.stage.player")
+            AppleLiveProgrammeLine(programme: selectedChannel.flatMap {
+                guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
+            })
+        }
+    }
+
+    private func stageInlinePlayer(_ channel: AppleIPTVChannel) -> some View {
+        AppleLiveInlinePlayer(
+            request: playbackRequest(for: channel),
+            coordinator: playbackCoordinator,
+            playbackRevision: playbackRevision,
+            fullScreenRevision: fullScreenRevision,
+            logoURL: channel.logoURL,
+            sharedChannel: try? AppleSharePlayChannel(channel: channel),
+            sharePlay: sharePlay,
+            liveChannel: channel,
+            channels: channelSnapshot.channels,
+            otherListLineup: channels,
+            sourceNames: liveSourceNames,
+            guide: guideStore.guide(for: playbackGuideChannelIDs),
+            onSwitchChannel: { startChannel($0, shareSelection: true, present: false) },
+            onLastChannel: lastChannelAction,
+            onStartOver: startOverAction,
+            onRequestFullWindow: nil,
+            isConnecting: pendingProbe != nil
+        )
+        .id(ObjectIdentifier(playbackCoordinator))
+    }
+
+    private var liveStageGuideColumn: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: AppleDesignTokens.spacingLarge) {
+                        ForEach(channelSnapshot.categories, id: \.self) { category in
+                            Button { selectedCategory = category } label: {
+                                Text(category)
+                                    .font(AppleDesignTokens.fontSubheadline)
+                                    .foregroundStyle(selectedCategory == category ? AppleDesignTokens.textPrimary : AppleDesignTokens.textSecondary)
+                                    .padding(.vertical, 10)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .contentShape(.rect)
+                            }
+                            .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, AppleDesignTokens.spacingMedium)
+                }
+                .scrollIndicators(.never)
+                liveSearchButton
+            }
+            .frame(height: 44)
+            .accessibilityIdentifier("live.categories")
+            AppleIPTVGuideGridView(
+                channels: channelSnapshot.channels,
+                guide: guideStore.guide(for: playbackGuideChannelIDs),
+                guideRevision: guideStore.revision,
+                entries: completeGuide,
+                favoriteIDs: settings.favoriteChannelIDs,
+                favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
+                onSelect: play,
+                onToggleFavorite: toggleFavorite,
+                onVisibleChannels: refreshGuide,
+                health: channelHealth,
+                onShowHealth: { healthDetailChannel = $0 },
+                onSelectProgramme: playProgramme
+            )
+        }
+    }
+
+    private var liveSearchButton: some View {
+        Button { showsSearch = true } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 8)
+        .accessibilityLabel("Search Channels")
+        .accessibilityIdentifier("live.search")
+    }
+    #endif
 
     @ViewBuilder
     private var lastWatchedCard: some View {

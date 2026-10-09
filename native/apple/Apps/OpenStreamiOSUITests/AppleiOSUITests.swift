@@ -2185,6 +2185,31 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
     }
 
+    /// Owner item 8 (2026-10-09): the player and the category row never move
+    /// while the channel list scrolls, and no "Connecting to…" line appears.
+    func testLiveLayoutIsStable() {
+        launch(screen: "live")
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        let categories = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 60), "no Live player frame")
+        XCTAssertTrue(categories.waitForExistence(timeout: 10), "no category row")
+        Thread.sleep(forTimeInterval: 3)
+        let playerFrame = player.frame
+        let categoryFrame = categories.frame
+        XCTAssertEqual(playerFrame.width / max(1, playerFrame.height), 16.0 / 9.0, accuracy: 0.02)
+        let window = app.windows.firstMatch
+        let low = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+        let high = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        low.press(forDuration: 0.05, thenDragTo: high)
+        low.press(forDuration: 0.05, thenDragTo: high)
+        high.press(forDuration: 0.05, thenDragTo: low)
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(player.frame, playerFrame, "the player moved while the list scrolled")
+        XCTAssertEqual(categories.frame, categoryFrame, "the category row moved while the list scrolled")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "live.connecting").firstMatch.exists)
+        attach("live-layout-stable")
+    }
+
     func testLiveTappedStatesArePhotographed() {
         // Two queries cannot both land inside a three-second auto-hide, and the
         // second one used to fail on a chrome that had already gone.
