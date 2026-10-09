@@ -69,7 +69,7 @@ struct AppleLiveSystemChrome: View {
             VStack(spacing: 0) {
                 topRow
                 Spacer(minLength: 0)
-                if !model.showsWaitingIndicator { centreTransport }
+                if !model.showsWaitingIndicator, !isFailed { centreTransport }
                 Spacer(minLength: 0)
                 bottomBlock
             }
@@ -262,6 +262,11 @@ struct AppleLiveSystemChrome: View {
             .appleTransportGlyphLegibility()
             .frame(width: 44, height: 44)
             .contentShape(.rect)
+    }
+
+    private var isFailed: Bool {
+        if case .failed = coordinator.phase { return true }
+        return false
     }
 
     private var isPlaying: Bool {

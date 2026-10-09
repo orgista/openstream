@@ -44,6 +44,8 @@ struct AppleLiveTVView: View {
     @State private var errorMessage: String?
     /// Playlists that failed while others loaded; shown inline with Retry.
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
+    /// Why each failed playlist failed, for the one-line failure states.
+    @State private var sourceCauses: [UUID: AppleLiveFailureCause] = [:]
     @State private var query = ""
     @State private var selectedCategory = "All"
     /// Pay-per-view channels in the lineup, for the Events tab.
@@ -123,6 +125,10 @@ struct AppleLiveTVView: View {
                 Color.clear
             } else if isLoading, channels.isEmpty {
                 ProgressView()
+            } else if channels.isEmpty, errorMessage != nil, let cause = tabFailureCause {
+                AppleLiveFailureCard(cause: cause, size: .tab) { perform(cause.action) }
+            } else if channels.isEmpty, !hasLiveSources, isIOS {
+                AppleLiveFailureCard(cause: .noSources, size: .tab) { perform(.addSource) }
             } else if channels.isEmpty, errorMessage != nil {
                 // A panel that timed out may answer next time: Try Again
                 // first, the settings that fix a wrong address under it. The
@@ -503,6 +509,36 @@ struct AppleLiveTVView: View {
         // fullScreenCover and dismissed the player silently (2026-09-03).
     }
 
+    /// iPhone and iPad: the whole-tab failure, from the first playlist that
+    /// failed (one symbol, one title naming it, one button).
+    private var tabFailureCause: AppleLiveFailureCause? {
+        #if os(iOS)
+        guard let failure = sourceFailures.first else { return nil }
+        return sourceCauses[failure.id] ?? .loadFailed(source: failure.sourceName)
+        #else
+        return nil
+        #endif
+    }
+
+    private var isIOS: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    private var hasLiveSources: Bool {
+        sourceStore.sources.contains { $0.kind == .liveTV && $0.isEnabled }
+    }
+
+    private func perform(_ action: AppleLiveFailureCause.Action) {
+        switch action {
+        case .tryAgain: Task { await reload() }
+        case .openSettings, .addSource, .nextChannel: openSettings()
+        }
+    }
+
     /// Each list's name by id, for "Watch on <list>".
     private var playbackGuideChannelIDs: [String] {
         let ids = channelSnapshot.channelIDs
@@ -634,6 +670,7 @@ struct AppleLiveTVView: View {
                 let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
                 sourceStore.recordValidationFailure(id: source.id, summary: message)
                 load.failed(source.id, message: message)
+                sourceCauses[source.id] = .source(error, sourceName: source.name)
             }
         }
         let cancelled = await withTaskGroup(of: (AppleSource, Result<[AppleIPTVChannel], any Error>).self) { group in
@@ -651,6 +688,7 @@ struct AppleLiveTVView: View {
                 switch result {
                 case .success(let sourceChannels):
                     load.succeeded(source.id, channels: sourceChannels)
+                    sourceCauses[source.id] = nil
                     await AppleIPTVChannelCache.shared.store(sourceChannels, for: source.id)
                     sourceStore.recordValidationSuccess(
                         id: source.id,
@@ -673,6 +711,7 @@ struct AppleLiveTVView: View {
                     let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
                     sourceStore.recordValidationFailure(id: source.id, summary: message)
                     load.failed(source.id, message: message)
+                    sourceCauses[source.id] = .source(error, sourceName: source.name)
                 }
                 channelIndex = AppleIPTVChannelIndex(load.channels)
                 settings.updateAutomaticLiveChannelPackage(channels: load.channels)
@@ -1039,7 +1078,14 @@ struct AppleLiveTVView: View {
             pendingProbe = nil
             failedProbe = request
             appleTrace("live preflight failed: \(String(describing: type(of: error)))")
+            #if os(iOS)
+            // Five words naming the channel; the error text (and any host
+            // in it) stays in the trace.
+            appleTrace("live preflight error: \(error.localizedDescription)")
+            probeFailureMessage = AppleLiveFailureCause.notBroadcasting(channel: request.channel.name).title
+            #else
             probeFailureMessage = error.localizedDescription
+            #endif
         }
     }
 
@@ -1380,7 +1426,8 @@ struct AppleLiveTVView: View {
             onLastChannel: lastChannelAction,
             onStartOver: startOverAction,
             onRequestFullWindow: nil,
-            isConnecting: pendingProbe != nil
+            isConnecting: pendingProbe != nil,
+            onOpenSettings: openSettings
         )
         .id(ObjectIdentifier(playbackCoordinator))
     }
@@ -1416,7 +1463,8 @@ struct AppleLiveTVView: View {
 
     private var liveSourceProblems: [AppleLiveOnNowList.SourceProblem] {
         sourceFailures.filter { !$0.showsSavedChannels }.map {
-            AppleLiveOnNowList.SourceProblem(id: $0.id, title: "Couldn’t load \($0.sourceName)")
+            AppleLiveOnNowList.SourceProblem(id: $0.id,
+                title: sourceCauses[$0.id]?.title ?? AppleLiveFailureCause.loadFailed(source: $0.sourceName).title)
         }
     }
 
@@ -1561,15 +1609,18 @@ struct AppleLiveInlinePlayer: View {
     /// The Live tab is checking a channel's stream before it starts: the
     /// frame shows the spinner, not a "Connecting to…" line.
     let isConnecting: Bool
+    /// Login failures send the viewer to Settings.
+    let onOpenSettings: (() -> Void)?
     #if os(macOS)
     @State private var fullWindowButtonVisible = true
     @State private var pointerActivity = 0
     private let macCommands = AppleMacCommandCenter.shared
     #endif
 
-    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], otherListLineup: [AppleIPTVChannel] = [], sourceNames: [UUID: String] = [:], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil, isConnecting: Bool = false) {
+    init(request: ApplePlaybackRequest, coordinator: ApplePlaybackCoordinator, playbackRevision: Int, fullScreenRevision: Int = 0, logoURL: URL?, sharedChannel: AppleSharePlayChannel?, sharePlay: AppleSharePlaySessionStore = .shared, liveChannel: AppleIPTVChannel? = nil, channels: [AppleIPTVChannel] = [], otherListLineup: [AppleIPTVChannel] = [], sourceNames: [UUID: String] = [:], guide: AppleIPTVGuide = AppleIPTVGuide(programmes: []), onSwitchChannel: ((AppleIPTVChannel) -> Void)? = nil, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil, onRequestFullWindow: (() -> Void)? = nil, isConnecting: Bool = false, onOpenSettings: (() -> Void)? = nil) {
         self.onRequestFullWindow = onRequestFullWindow
         self.isConnecting = isConnecting
+        self.onOpenSettings = onOpenSettings
         self.request = request
         self.coordinator = coordinator
         self.playbackRevision = playbackRevision
@@ -1646,7 +1697,8 @@ struct AppleLiveInlinePlayer: View {
                     isFullScreen = $0
                 },
                 onRequestFullWindow: onRequestFullWindow,
-                isBusy: coordinator.phase.isBusy || isConnecting
+                isBusy: coordinator.phase.isBusy || isConnecting,
+                failureContext: AppleLiveFailureContext(sourceNames: sourceNames, onOpenSettings: onOpenSettings)
             )
             #endif
             if coordinator.phase.isBusy || isConnecting {
@@ -1781,7 +1833,42 @@ struct AppleLiveInlinePlayer: View {
     /// "Playback Failed" alert that opened by itself over the whole Live tab
     /// whenever the resumed channel could not be reached, with a paragraph of
     /// advice in it (owner 2026-10-08: "looks off and weird").
+    @ViewBuilder
     private func failureCard(_ failure: ApplePlaybackFailure) -> some View {
+        #if os(iOS)
+        if request.isLive, let cause = AppleLiveFailureCause.playback(failure, channelName: liveChannel?.name,
+            sourceName: liveChannel.flatMap { sourceNames[$0.sourceID] }) {
+            AppleLiveFailureCard(cause: cause) { performFailureAction(cause.action) }
+                .background(.black)
+        } else {
+            legacyFailureCard(failure)
+        }
+        #else
+        legacyFailureCard(failure)
+        #endif
+    }
+
+    #if os(iOS)
+    private func performFailureAction(_ action: AppleLiveFailureCause.Action) {
+        switch action {
+        case .nextChannel:
+            if let liveChannel, let onSwitchChannel,
+               let id = AppleLiveZappingPolicy.target(currentID: liveChannel.id,
+                   orderedIDs: channels.map(\.id), direction: .next),
+               let next = channels.first(where: { $0.id == id }) {
+                onSwitchChannel(next)
+            } else {
+                Task { await coordinator.retry() }
+            }
+        case .openSettings, .addSource:
+            if let onOpenSettings { onOpenSettings() } else { Task { await coordinator.retry() } }
+        case .tryAgain:
+            Task { await coordinator.retry() }
+        }
+    }
+    #endif
+
+    private func legacyFailureCard(_ failure: ApplePlaybackFailure) -> some View {
         VStack(spacing: 12) {
             Text(request.isLive
                  ? AppleLiveFailurePresentation.message(for: failure, channelName: liveChannel?.name)
@@ -1864,6 +1951,10 @@ struct AppleLiveInlinePlayer: View {
     private var failureBinding: Binding<Bool> {
         Binding(
             get: {
+                #if os(iOS)
+                // iPhone and iPad Live say it in the full-screen card instead.
+                if request.isLive { return false }
+                #endif
                 if isFullScreen, case .failed(let failure) = coordinator.phase { return failure.kind != .cancelled }
                 return false
             },
@@ -1931,6 +2022,7 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
     /// of AVKit's modal. Nil on iOS.
     var onRequestFullWindow: (() -> Void)? = nil
     var isBusy = false
+    var failureContext = AppleLiveFailureContext()
 
     func makeUIViewController(context: Context) -> AppleLivePlayerContainerViewController {
         let vc = AppleLivePlayerContainerViewController(playerViewController: viewController,
@@ -1939,11 +2031,13 @@ private struct AppleLivePlayerControllerRepresentable: UIViewControllerRepresent
             onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
             onFullScreenChanged: onFullScreenChanged)
         vc.onRequestFullWindow = onRequestFullWindow
+        vc.failureContext = failureContext
         return vc
     }
 
     func updateUIViewController(_ vc: AppleLivePlayerContainerViewController, context: Context) {
         vc.onRequestFullWindow = onRequestFullWindow
+        vc.failureContext = failureContext
         vc.update(request: request, liveMenu: liveMenu, channels: channels,
                   guide: guide, currentChannelID: currentChannelID,
                   onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver, fullScreenRevision: fullScreenRevision)
@@ -1970,6 +2064,7 @@ private struct AppleLiveFullScreenControls: View {
     let onStartOver: (() -> Void)?
     let onClose: () -> Void
     let channelPicker: AppleLiveChannelPickerState
+    var failureContext = AppleLiveFailureContext()
     @State private var hideChromeSignal = false
     /// A channel swipe is under way: the video-area tap must not open the list.
     @State private var swipeInProgress = false
@@ -2091,6 +2186,27 @@ private struct AppleLiveFullScreenControls: View {
         #endif
     }
 
+    #if os(iOS)
+    private var fullScreenFailureCause: AppleLiveFailureCause? {
+        guard request.isLive, case .failed(let failure) = coordinator.phase else { return nil }
+        let channel = channels.first { $0.id == currentChannelID }
+        return AppleLiveFailureCause.playback(failure, channelName: channel?.name,
+            sourceName: channel.flatMap { failureContext.sourceNames[$0.sourceID] })
+    }
+
+    private func performFailureAction(_ action: AppleLiveFailureCause.Action) {
+        switch action {
+        case .nextChannel: zap(.next)
+        case .openSettings, .addSource:
+            if let open = failureContext.onOpenSettings {
+                onClose()
+                open()
+            } else { Task { await coordinator.retry() } }
+        case .tryAgain: Task { await coordinator.retry() }
+        }
+    }
+    #endif
+
     /// "ESPN · NFL Live" above the scrubber.
     private var nowPlaying: AppleLiveNowPlaying? {
         guard request.isLive, let currentChannelID,
@@ -2130,6 +2246,9 @@ private struct AppleLiveFullScreenControls: View {
                 onChannelStep: request.isLive && !channels.isEmpty ? { zap($0) } : nil,
                 nowPlaying: nowPlaying
             )
+            #if os(iOS)
+            if fullScreenFailureCause != nil { Color.black.ignoresSafeArea() }
+            #endif
             // Hidden from accessibility as well as from touch, on every
             // platform. `allowsHitTesting(false)` alone leaves the transport's
             // full-screen "Show playback controls" surface in the tree, and it
@@ -2139,6 +2258,15 @@ private struct AppleLiveFullScreenControls: View {
             transport
                 .allowsHitTesting(!channelPicker.isPresented)
                 .accessibilityHidden(channelPicker.isPresented)
+            #if os(iOS)
+            // The same card as the frame's, over black; close and the
+            // chevrons stay reachable around it.
+            if let cause = fullScreenFailureCause, !channelPicker.isPresented {
+                AppleLiveFailureCard(cause: cause) { performFailureAction(cause.action) }
+                    .frame(maxWidth: 320)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            #endif
             if channelPicker.isPresented {
                 Color.clear
                     .contentShape(.rect)
@@ -2220,6 +2348,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
     /// Set on visionOS: full screen is the window's player stage.
     var onRequestFullWindow: (() -> Void)?
+    var failureContext = AppleLiveFailureContext()
     private var channels: [AppleIPTVChannel]
     private var guide: AppleIPTVGuide
     private var currentChannelID: String?
@@ -2509,6 +2638,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 34)), for: .normal)
             playPauseButton.accessibilityLabel = playing ? "Pause" : "Play"
         }
+        presentedFullscreen?.failureContext = failureContext
         presentedFullscreen?.update(request: request, liveMenu: liveMenu,
                                     channels: channels, guide: guide, currentChannelID: currentChannelID,
                                     onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver)
@@ -2564,7 +2694,8 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
             channels: channels,
             guide: guide,
             currentChannelID: currentChannelID,
-            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver
+            onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
+            failureContext: failureContext
         )
         presentedFullscreen = fullscreen
         // Retain the guide's view hierarchy and its loading task while AVKit
@@ -2580,12 +2711,15 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
     private weak var inlineContainer: AppleLivePlayerContainerViewController?
     private let controlsHost: UIHostingController<AppleLiveFullScreenControls>
     private let channelPicker = AppleLiveChannelPickerState()
+    var failureContext: AppleLiveFailureContext
 
     init(playerViewController: AVPlayerViewController, inlineContainer: AppleLivePlayerContainerViewController,
          coordinator: ApplePlaybackCoordinator, request: ApplePlaybackRequest,
          liveMenu: AppleTransportOverlay.SharePlayMenu?, channels: [AppleIPTVChannel],
          guide: AppleIPTVGuide, currentChannelID: String?,
-         onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil) {
+         onSwitchChannel: ((AppleIPTVChannel) -> Void)?, onLastChannel: (() -> Void)? = nil, onStartOver: (() -> Void)? = nil,
+         failureContext: AppleLiveFailureContext = AppleLiveFailureContext()) {
+        self.failureContext = failureContext
         self.playerViewController = playerViewController
         self.inlineContainer = inlineContainer
         self.coordinator = coordinator
@@ -2593,7 +2727,7 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
             coordinator: coordinator, request: request, sharePlayMenu: liveMenu,
             channels: channels, guide: guide, currentChannelID: currentChannelID,
             onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver, onClose: {},
-            channelPicker: channelPicker))
+            channelPicker: channelPicker, failureContext: failureContext))
         super.init(nibName: nil, bundle: nil)
         update(request: request, liveMenu: liveMenu, channels: channels,
                guide: guide, currentChannelID: currentChannelID, onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver)
@@ -2610,7 +2744,7 @@ private final class AppleLiveFullscreenPlayerViewController: UIViewController {
             channels: channels, guide: guide, currentChannelID: currentChannelID,
             onSwitchChannel: onSwitchChannel, onLastChannel: onLastChannel, onStartOver: onStartOver,
             onClose: { [weak self] in self?.dismiss(animated: true) },
-            channelPicker: channelPicker)
+            channelPicker: channelPicker, failureContext: failureContext)
     }
 
     override func viewDidLoad() {
