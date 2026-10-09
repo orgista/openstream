@@ -9,13 +9,16 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **UX overhaul before the App Store (owner 2026-10-09, build 17, iPhone iOS 18.7 portrait). Test on the iOS 18.6 sim
       with the owner's config.** Owner: "no ton of bugs, it's UX"; the back end is good (Live plays fast, the guide loads fast).
       **Cast & crew:**
-      - [ ] (1) Not every face sits in its circle; some are cut off. Use face-aware crop.
+      - [x] (1) Not every face sits in its circle; some are cut off. Use face-aware crop. **Fixed a8c0855** (Vision face
+            crop, iOS 18.6 sim before/after in verification-artifacts/ux-ios18-2026-10-09).
       **Trailers:**
-      - [ ] (2) Trailers have NO audio.
-      - [ ] (3) No mute/unmute control.
-      - [ ] (4) Glitchy start: it flashes as the trailer begins (e.g. "Ticketmaster" from the Disney+ shows row; Spider-Man
+      - [x] (2) Trailers have NO audio. **Fixed a8c0855:** autoplay starts muted; the sound control or Play Trailer
+            turns sound on (checked in the app trace on the iOS 18.6 sim).
+      - [x] (3) No mute/unmute control. **Fixed a8c0855** (small speaker control, top right under Search).
+      - [x] (4) **Fixed a8c0855** (art holds until real frames, 0.4 s crossfade, no art jump; frames in after/). Glitchy start: it flashes as the trailer begins (e.g. "Ticketmaster" from the Disney+ shows row; Spider-Man
             Brand New Day). Needs a graceful crossfade from art into video. Capture frame-by-frame.
-      - [ ] (5) Paused state shows a play triangle inside a circle inside a circle; that's bad UI.
+      - [x] (5) Paused state shows a play triangle inside a circle inside a circle; that's bad UI. **Fixed a8c0855**
+            (one play.fill).
       **Heroes (Discover + Library, iOS portrait):**
       - [ ] (6) The hero is cut off and not centred, playing or paused. Art is out of place / too zoomed in; the crop is
             broken. Research how Plex, Jellyfin and the big streaming apps do portrait heroes (face/subject-aware framing,
@@ -36,13 +39,16 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       - [ ] (15) The back button and the enlarge icon look odd; use SF Symbols / Apple-standard controls.
       Good: mute works, the sleep timer is fine (check "end of program"), captions work.
       **Settings:**
-      - [ ] (16) Remove "Export Working M3U" (greyed out, pointless); it belongs in the full backup if anywhere.
-      - [ ] (17) Can't find where to scan a QR code to set up or sync. Make Set Up from iPhone / Send Setup easy to find.
+      - [x] (16) Remove "Export Working M3U" (greyed out, pointless); it belongs in the full backup if anywhere.
+            **Fixed a8c0855.**
+      - [x] (17) Can't find where to scan a QR code to set up or sync. Make Set Up from iPhone / Send Setup easy to find.
+            **Fixed a8c0855** (both rows under Backup & Sync at the top of Settings).
       **Library:**
-      - [ ] (18) "Your provider's movies and series are unavailable": say WHICH provider.
+      - [x] (18) "Your provider's movies and series are unavailable": say WHICH provider. **Fixed a8c0855.**
       - [ ] (19) The Library hero has the same crop problems as (6).
       **Live error:**
-      - [ ] (20) "Your live TV account has reached its stream limit" is shown, but the owner thinks it's our network
+      - [x] (20) **Fixed a8c0855** (an unreachable or blocking panel now says "Can't reach <provider>."; the stream limit
+            only when the panel reports it). "Your live TV account has reached its stream limit" is shown, but the owner thinks it's our network
             block. The message must match the real cause (an IP block / unreachable panel is not a stream limit).
       **Process (owner):**
       - Research the streaming apps (Paramount+ Live, DirecTV, Plex, Jellyfin, YouTube TV).
