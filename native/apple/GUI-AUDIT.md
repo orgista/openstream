@@ -2365,3 +2365,14 @@ brought back on screen after the walk had scrolled past their row.
 - [x] Window leaving the foreground stops the player and saves resume (owner: audio played on after closing the window). `stopsPlayback(on:)` policy tested.
 - [x] Gates: 2,872 tests / 365 suites; visionOS, macOS, iOS, tvOS Debug builds; every edited file recompiled in each. E2E-visionOS (`AppleVisionPlayerUITests`, sim 46B2DEDC): 4 passed (in-window + 16:9 + restore + tab ornament; clip end; failure alert; relaunch = one window), 1 skipped (Home keeps the app foreground on the simulator; needs device). Trace: `vision stage present 1100x619`, `vision stage dismiss 1100x760`.
 - [!] Not run: next-episode handoff and Live inline e2e (no stubbed series/IPTV fixture wired into the visionOS test yet); AppStore-visionOS screenshot pass (needs the private demo config). Screenshots: `verification-artifacts/audit-2026-10-07/vision-e2e/`.
+
+
+## 2026-10-08 — UX tour, iPhone + iPad, owner config (`AppleUXTourUITests`, OPENSTREAM_UX_TOUR=1)
+- [x] Env-gated XCUITest walks every tab, every Settings page (two levels deep), a movie and a series page, the player and Search. It taps every safe button once per kind, backs out, logs the result and screenshots each screen. iPhone 18 Pro Max sim and iPad Pro 11" sim, iOS 27: 338 taps, 115 screen visits, **0 crashes**. Live was not testable: the provider is blocking our IP. Findings, logs and redacted screenshots: `verification-artifacts/ux-tour-2026-10-08/FINDINGS.md`.
+- [F] Search on a title page opened from Search did nothing; it now drops back and opens a fresh Search (`AppleDiscoverView.openSearchFromPushedPage`).
+- [F] The iPhone season list was forced below its control and ran into the tab bar; the system now picks the side (`AppleTitlePageSeasonPicker.listEdge`).
+- [F] Add Network Share had two "Advanced" rows; there is now one group with Port + Domain (`AppleNetworkShareSetupViews`).
+- [F] "Sync Now" sat 8 pt right of its rows; `AppleWorkingButtonLabel(alignment:)` puts form-row labels on the leading edge (Backup, Storage).
+- [F] The Radarr/Sonarr prompts were fainter than other forms'; they now use the secondary-label prompt.
+- [F] The iOS Settings forms showed a scroll bar; `AppleSettingsContentModifier` now hides it.
+- [!] Open, with proposals in FINDINGS: posters with no long-press menu on Discover; "See all" is a text list; Top 10 cards with no backdrop; iPad content scrolls under the tab strip; no PiP/AirPlay button in the player; duplicate search results and missing-art gaps; three different button styles on add-source forms; saved SecureFields drawn blank on iOS 27; unlabelled hero page dots. Live notes (L1–L6) are left for the Live agent.

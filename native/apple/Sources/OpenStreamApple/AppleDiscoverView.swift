@@ -1319,7 +1319,22 @@ struct AppleDiscoverView: View {
     /// Discover's Search and Refresh, for the pages pushed from here.
     private var tabToolbarContext: AppleTabToolbarContext {
         AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing || catalogStore.isLoading },
-                               onSearch: { showsSearch = true }, onRefresh: refresh)
+                               onSearch: openSearchFromPushedPage, onRefresh: refresh)
+    }
+
+    /// Search from a pushed page. A title page opened from a search result
+    /// sits above Search, where `showsSearch` is already true and setting it
+    /// again did nothing (UX tour 2026-10-08: a dead magnifier). That stack
+    /// drops back to Discover without animation and a fresh Search is pushed.
+    private func openSearchFromPushedPage() {
+        guard showsSearch else { showsSearch = true; return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) { showsSearch = false }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            showsSearch = true
+        }
     }
 
     private var catalogIsStillLoading: Bool {

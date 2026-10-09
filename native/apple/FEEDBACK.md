@@ -4563,3 +4563,6 @@ the iPhone simulator; now 20 s), and a channel-list refresh asked for during ano
 setup was added). Not yet proven on your provider: its panel did not answer this network at all between 17:10 and
 18:10, so the simulator could not try channels. Before/after screenshots: verification-artifacts/live-2026-10-08/.
 `swift test`: 2919 tests in 371 suites passed; tvOS and iOS apps build.
+
+## 2026-10-08 — Full tour of the iPhone and iPad app with your setup
+A test now taps through the whole app on its own, on the iPhone and the iPad: every tab, every Settings page, a movie, a series, the player and Search. It pressed 338 buttons and nothing crashed. I fixed six things: the magnifier on a title page you opened from Search did nothing; the season list opened into the tab bar and hid the current season; Add Network Share had two "Advanced" rows; "Sync Now" sat out of line with the rows above it; Radarr/Sonarr hints were fainter than the other forms'; and Settings showed a scroll bar. A few things need your call; they are in the to-do list. Live could not be tested because your provider is blocking our home IP right now. Details and screenshots: verification-artifacts/ux-tour-2026-10-08/FINDINGS.md.

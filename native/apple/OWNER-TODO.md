@@ -503,6 +503,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Waiting on an owner decision
 
+- [ ] **UX tour 2026-10-08: four calls for you** (details in verification-artifacts/ux-tour-2026-10-08/FINDINGS.md):
+      (1) the iPhone/iPad player has no Picture in Picture or AirPlay button; PiP only starts when you leave
+      the app. Add both to the top bar like the Apple TV app? (2) Discover and Search each have a Refresh button;
+      Apple TV dropped it. Remove it on iPhone/iPad/Mac too? (3) There is no Share button on a title page. Add one?
+      (4) Long-pressing a Discover poster opens it, while Library/Continue Watching posters show a menu, and a
+      shelf's "See all" is a plain text list. Give every poster the menu and make "See all" a poster grid?
 - [ ] **YouTube attribution.** The trailer frame CSS (N49) hides YouTube's title, channel and link;
       the fast iPhone/iPad trailer start (a130f96) relies on it. YouTube's API terms may require
       showing it. Keep it, or go back to the fixed wait on iPhone/iPad?

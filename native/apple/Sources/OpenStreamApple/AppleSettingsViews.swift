@@ -1002,9 +1002,20 @@ private struct AppleArrConnectionSection: View {
         .onChange(of: qualityProfileID) { _, _ in state = .idle }
     }
 
+    /// The prompt colour the other add-source forms use: the default
+    /// placeholder was fainter here, and the empty API key row read as blank
+    /// (UX tour 2026-10-08).
+    private static func prompt(_ title: String) -> Text {
+        #if os(iOS)
+        Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
+        #else
+        Text(title).foregroundStyle(.secondary)
+        #endif
+    }
+
     @ViewBuilder
     private var fields: some View {
-        TextField("Server URL", text: $baseURL)
+        TextField("Server URL", text: $baseURL, prompt: Self.prompt("Server URL"))
             .autocorrectionDisabled()
             #if os(iOS) || os(visionOS)
             .keyboardType(.URL)
@@ -1012,13 +1023,13 @@ private struct AppleArrConnectionSection: View {
             #endif
             .tint(.primary)
             .appleFormSubmit(.baseURL, chain: Self.chain, focus: $focusedField)
-        SecureField("API key", text: $apiKey)
+        SecureField("API key", text: $apiKey, prompt: Self.prompt("API key"))
             .textContentType(.password)
             .appleFormSubmit(.apiKey, chain: Self.chain, focus: $focusedField)
-        TextField("Root folder path", text: $rootFolderPath)
+        TextField("Root folder path", text: $rootFolderPath, prompt: Self.prompt("Root folder path"))
             .autocorrectionDisabled()
             .appleFormSubmit(.rootFolder, chain: Self.chain, focus: $focusedField)
-        TextField("Quality profile ID", text: $qualityProfileID)
+        TextField("Quality profile ID", text: $qualityProfileID, prompt: Self.prompt("Quality profile ID"))
             #if os(iOS)
             .keyboardType(.numberPad)
             #endif
@@ -1391,9 +1402,13 @@ struct AppleWorkingButtonLabel: View {
     let title: LocalizedStringKey
     let workingTitle: LocalizedStringKey
     let isWorking: Bool
+    /// `.leading` for a Form row. Centred in the width of "◌ Syncing…", a
+    /// row's "Sync Now" sat ~8 pt right of the rows above it (UX tour
+    /// 2026-10-08); pill buttons keep the centre.
+    var alignment: Alignment = .center
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: alignment) {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.mini).accessibilityHidden(true)
                 Text(workingTitle)

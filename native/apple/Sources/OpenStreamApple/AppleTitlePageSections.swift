@@ -268,8 +268,7 @@ struct AppleTitlePageSeasonPicker: View {
             #endif
             // The iPhone title page only; Apple TV has its own season menu.
             #if !os(tvOS)
-            // Below the control on both: an iPhone names the arrow's edge, a
-            // Mac the side of the control the list opens on.
+            // On the Mac below the control; on iPhone/iPad wherever there is room.
             .popover(isPresented: $isPresented, arrowEdge: Self.listEdge) {
                 seasonList
                     .presentationCompactAdaptation(.popover)
@@ -298,9 +297,12 @@ struct AppleTitlePageSeasonPicker: View {
     }
 
     #if os(macOS)
-    private static let listEdge: Edge = .bottom
+    private static let listEdge: Edge? = .bottom
     #else
-    private static let listEdge: Edge = .top
+    /// The system's choice: the control sits low under the hero on first
+    /// view, and a list forced below it ran into the tab bar with two rows
+    /// showing and the current season scrolled out (UX tour 2026-10-08).
+    private static let listEdge: Edge? = nil
     #endif
 
     private var seasonList: some View {

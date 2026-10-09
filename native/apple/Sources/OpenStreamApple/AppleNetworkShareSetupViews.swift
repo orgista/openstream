@@ -342,6 +342,12 @@ private struct AppleNetworkShareConnectForm: View {
             Section {
                 if let server = setup.fixedServer {
                     LabeledContent(server.name, value: server.endpointLabel)
+                    if setup.account == .registered {
+                        DisclosureGroup("Advanced", isExpanded: $showingAdvanced) {
+                            domainField
+                                .focused($focus, equals: .domain)
+                        }
+                    }
                 } else {
                     addressField
                         .focused($focus, equals: .address)
@@ -349,12 +355,18 @@ private struct AppleNetworkShareConnectForm: View {
                         #if os(macOS)
                         .labelsHidden()
                         #endif
+                    // One Advanced group: a second one under Connect As (for
+                    // the domain) read as a duplicate control (UX tour 2026-10-08).
                     DisclosureGroup("Advanced", isExpanded: $showingAdvanced) {
                         LabeledContent("Port") {
                             portField
                                 .focused($focus, equals: .port)
                                 .multilineTextAlignment(.trailing)
                                 .labelsHidden()
+                        }
+                        if setup.account == .registered {
+                            domainField
+                                .focused($focus, equals: .domain)
                         }
                     }
                 }
@@ -378,10 +390,6 @@ private struct AppleNetworkShareConnectForm: View {
                         .onSubmit(connect)
                     passwordField
                         .onSubmit(connect)
-                    DisclosureGroup("Advanced") {
-                        domainField
-                            .focused($focus, equals: .domain)
-                    }
                 }
             } header: {
                 Text("Connect As")

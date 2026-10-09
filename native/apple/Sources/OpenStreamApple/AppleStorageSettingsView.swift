@@ -183,7 +183,8 @@ struct AppleStorageSettingsView: View {
             AppleWorkingButtonLabel(
                 title: LocalizedStringKey(title),
                 workingTitle: LocalizedStringKey(action.workingLabel),
-                isWorking: workingAction == action
+                isWorking: workingAction == action,
+                alignment: .leading
             )
             .accessibilityLabel(workingAction == action ? action.inProgressLabel : title)
         }

@@ -142,6 +142,8 @@ public struct AppleSettingsContentModifier: ViewModifier {
         // a phone column, and a phone does not need it.
         content
             .listStyle(.insetGrouped)
+            // The Settings root drew the system scroll bar (UX tour 2026-10-08).
+            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         #elseif os(tvOS)
         // 560 pt is a phone column. Centred on a 1920 pt television it left the
         // page title stranded at the safe inset while the rows floated in the

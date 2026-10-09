@@ -45,7 +45,7 @@ struct AppleBackupSettingsView: View {
                     Button {
                         Task { await controller.syncNow() }
                     } label: {
-                        AppleWorkingButtonLabel(title: "Sync Now", workingTitle: "Syncing…", isWorking: controller.isSyncing)
+                        AppleWorkingButtonLabel(title: "Sync Now", workingTitle: "Syncing…", isWorking: controller.isSyncing, alignment: .leading)
                     }
                     .disabled(controller.isSyncing || controller.isBusy)
                     .accessibilityIdentifier("backup.sync.now")
@@ -137,14 +137,14 @@ struct AppleBackupSettingsView: View {
                 } catch { controller.setResult("Could not export configuration") }
             }
         } label: {
-            AppleWorkingButtonLabel(title: "Export Configuration…", workingTitle: "Exporting…", isWorking: controller.isBusy && !importing)
+            AppleWorkingButtonLabel(title: "Export Configuration…", workingTitle: "Exporting…", isWorking: controller.isBusy && !importing, alignment: .leading)
         }
         .accessibilityIdentifier("backup.export")
     }
 
     private var importButton: some View {
         Button { importing = true } label: {
-            AppleWorkingButtonLabel(title: "Import Configuration…", workingTitle: "Importing…", isWorking: controller.isBusy && importing)
+            AppleWorkingButtonLabel(title: "Import Configuration…", workingTitle: "Importing…", isWorking: controller.isBusy && importing, alignment: .leading)
         }
         .accessibilityIdentifier("backup.import")
     }
