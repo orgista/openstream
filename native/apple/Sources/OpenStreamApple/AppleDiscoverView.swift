@@ -2996,7 +2996,9 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
             heroTrailer.hasStarted = false
-            heroTrailer.muted = settings.autoMuteTrailer
+            // Autoplay is muted (the page clamps it anyway); the sound
+            // control or Play Trailer turns sound on.
+            heroTrailer.muted = true
             heroTrailer.allowsSound = false
         }
         // Art-first: the autoplaying trailer is not even looked for until the
@@ -3084,7 +3086,7 @@ struct AppleCatalogItemDetailView: View {
             heroTrailer.gaveUp = false
             heroTrailer.isActive = false
             heroTrailer.isPlaying = false
-            heroTrailer.muted = settings.autoMuteTrailer
+            heroTrailer.muted = true
             heroTrailer.allowsSound = false
             titleWordmark.loadResult = nil
             titleWordmark.graceExpired = false
@@ -3434,7 +3436,7 @@ struct AppleCatalogItemDetailView: View {
                     handleTrailerState(state, muted: muted, errorCode: errorCode)
                 },
                 onTap: toggleTrailerPlayback,
-                onMute: { heroTrailer.muted.toggle() },
+                onMute: toggleTrailerSound,
                 onReplay: restartTrailer,
                 controlTopInset: controlTopInset,
                 // Final crop before the art fades, as the hero's (N46b): the
@@ -4476,6 +4478,15 @@ struct AppleCatalogItemDetailView: View {
             showTrailerInteractionGlyph(shouldPlay ? "play.circle.fill" : "pause.circle.fill")
         }
         #endif
+    }
+
+    /// The sound control over a playing trailer (owner items 2 and 3).
+    private func toggleTrailerSound() {
+        let next = AppleTrailerSoundBridge.tapped(isMuted: heroTrailer.muted, allowsSound: heroTrailer.allowsSound)
+        if !next.isMuted, !prepareTrailerAudio(pressed: true) { return }
+        heroTrailer.allowsSound = next.allowsSound
+        heroTrailer.muted = next.isMuted
+        appleTrace("trailer sound \(next.isMuted ? "off" : "on") (sound control)")
     }
 
     private func restartTrailer() {
@@ -6830,6 +6841,15 @@ final class AppleTrailerTouchShield: UIButton {
     }
 }
 
+/// The trailer's one small control (sound, or play when paused): drawn
+/// small and quiet in the corner, touched through a 44 pt target.
+final class AppleTrailerControlButton: UIButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let grow = max(0, (44 - bounds.width) / 2)
+        return bounds.insetBy(dx: -grow, dy: -grow).contains(point)
+    }
+}
+
 struct AppleYouTubeAutoPreview: UIViewRepresentable {
     let url: URL
     let artworkURL: URL?
@@ -6876,6 +6896,12 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private weak var container: PlayerContainer?
         private var playbackIntent = true
         private var revealGeneration = 0
+        /// The YouTube frame's `<video>` has presented real frames since the
+        /// last start (`AppleYouTubePreviewHTML.playerChromeScript`). The art
+        /// holds until then, so the crossfade never runs over a black or
+        /// still-buffering player (owner item 4: "flashes as it begins").
+        private var framesPresented = false
+        private var pendingRevealMuted: Bool?
 
         func attach(to container: PlayerContainer) {
             self.container = container
@@ -6890,6 +6916,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func prepareForPlayback() {
             playbackIntent = true
             revealGeneration += 1
+            framesPresented = false
+            pendingRevealMuted = nil
             container?.setPreviewVisible(false, animated: false)
             webView?.layer.removeAllAnimations()
             webView?.alpha = 1
@@ -6900,6 +6928,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func hidePreview(animated: Bool = false, completion: (() -> Void)? = nil) {
             playbackIntent = false
             revealGeneration += 1
+            framesPresented = false
+            pendingRevealMuted = nil
             lastPlaying = false
             container?.setPreviewVisible(false, animated: animated, completion: completion)
             webView?.layer.removeAllAnimations()
@@ -7042,8 +7072,33 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             #if DEBUG && os(iOS)
             if state == "playing" { container?.probe?.begin() }
             #endif
+            if state == AppleTrailerFirstFrameGate.framesState {
+                framesPresented = true
+                if let pending = pendingRevealMuted, playbackIntent {
+                    pendingRevealMuted = nil
+                    appleTrace("trailer first frames presented: revealing")
+                    reveal(muted: pending)
+                }
+                return
+            }
             if state == "revealed" {
                 guard playbackIntent else { return }
+                guard framesPresented else {
+                    // The page saw PLAYING, but no frame has been drawn yet:
+                    // hold the art, and reveal anyway after the cap rather
+                    // than never (a WebKit without frame callbacks).
+                    pendingRevealMuted = muted
+                    let generation = revealGeneration
+                    appleTrace("trailer waiting for first frames")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + AppleTrailerFirstFrameGate.cap) { [weak self] in
+                        guard let self, self.revealGeneration == generation, self.playbackIntent,
+                              let pending = self.pendingRevealMuted else { return }
+                        self.pendingRevealMuted = nil
+                        appleTrace("trailer first frames not reported: revealing at the cap")
+                        self.reveal(muted: pending)
+                    }
+                    return
+                }
                 reveal(muted: muted)
                 return
             } else if state == "ended" {
@@ -7107,7 +7162,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private let artworkCover: UIView & UIContentView
         private var artworkURL: URL?
         let touchShield = AppleTrailerTouchShield(type: .custom)
-        let muteButton = UIButton(type: .system)
+        let muteButton = AppleTrailerControlButton(type: .system)
         var onTap: (() -> Void)?
         var onMute: (() -> Void)?
         var onPause: (() -> Void)?
@@ -7220,7 +7275,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             muteButton.backgroundColor = .clear
             muteButton.hoverStyle = .init(effect: .highlight)
             #else
-            muteButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            muteButton.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+            muteButton.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold), forImageIn: .normal)
             #endif
             muteButton.clipsToBounds = true
             muteButton.accessibilityIdentifier = "detail.trailer.mute"
@@ -7252,18 +7309,32 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             } else {
                 cover.frame = bounds
             }
-            artworkStill.frame = cover.bounds
+            // Pinned top-leading, as the SwiftUI still under it is
+            // (`AppleRemoteImage` fills from its top-leading corner). Centred,
+            // a wide backdrop showed another part of the picture for the
+            // moments before the URL artwork above it drew: the art jumped
+            // and flashed as the trailer view went in (owner item 4).
+            if let size = artworkStill.image?.size, size.width > 0, size.height > 0 {
+                let fill = AppleTrailerPreviewLayout.aspectFillFrame(of: size, in: cover.bounds.size)
+                artworkStill.frame = CGRect(origin: .zero, size: fill.size)
+            } else {
+                artworkStill.frame = cover.bounds
+            }
             artworkCover.frame = cover.bounds
             touchShield.frame = bounds
             #if os(visionOS)
             let controlSide: CGFloat = 60
             #else
-            let controlSide: CGFloat = 44
+            let controlSide: CGFloat = 32
             #endif
             muteButton.layer.cornerRadius = controlSide / 2
+            // Placed in the part that is on screen: the hero's 16:9 view
+            // overhangs its art frame, and a control at its own corner was
+            // clipped off the screen.
+            let visible = cover.frame.intersection(bounds)
             muteButton.frame = CGRect(
-                x: bounds.maxX - 12 - controlSide,
-                y: controlTopInset ?? (bounds.maxY - 12 - controlSide),
+                x: visible.maxX - 12 - controlSide,
+                y: controlTopInset.map { visible.minY + $0 } ?? (visible.maxY - 12 - controlSide),
                 width: controlSide, height: controlSide
             )
             bringSubviewToFront(muteButton)
@@ -7274,9 +7345,11 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             self.showsReplay = showsReplay
             updatePlaybackValue()
             touchShield.accessibilityLabel = isPlaying ? "Pause trailer preview" : "Play trailer preview"
+            // One glyph in one quiet circle: paused shows play.fill, not a
+            // play.circle inside the button's own circle (owner item 5).
             muteButton.setImage(
                 UIImage(systemName: showsReplay
-                    ? "play.circle"
+                    ? "play.fill"
                     : (isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")),
                 for: .normal
             )
@@ -7298,6 +7371,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func updateStill(_ image: CGImage?) {
             guard artworkStill.image?.cgImage !== image else { return }
             artworkStill.image = image.map { UIImage(cgImage: $0) }
+            setNeedsLayout()
         }
 
         /// Reveal cross-fades the cover away over the live frames. Hiding
@@ -7336,10 +7410,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             let loading = !hasPlayedPreview || (isPlaying && !previewVisible)
             touchShield.isAccessibilityElement = !loading
             touchShield.accessibilityValue = isPlaying ? "Playing" : "Paused"
-            // Web previews stay silent to avoid WebKit's automatic Now Playing
-            // session. Keep replay available without offering an inert unmute.
-            muteButton.isHidden = !hasPlayedPreview || (!showsReplay
-                && (ApplePlaybackSessionPolicy.trailer.requiresMutedWebPlayback || loading))
+            // Autoplay starts muted; once the video is up the sound control
+            // shows, and turning sound on lifts the page's muted-only rule
+            // (owner 2026-10-09: no sound and no way to unmute).
+            muteButton.isHidden = !hasPlayedPreview || (!showsReplay && loading)
         }
 
         #if DEBUG && os(iOS)
@@ -8520,6 +8594,8 @@ extension AppleCatalogItemDetailView {
                 .accessibilityHidden(true)
             heroTrailerStartButton
             #if os(iOS) || os(visionOS)
+            // Top-trailing, under Search: the bottom of this art is under the
+            // title, the buttons and the fade, which hid a bottom control.
             trailerPreview(controlTopInset: pageGeometry.safeAreaInsets.top + 10)
             #endif
         }

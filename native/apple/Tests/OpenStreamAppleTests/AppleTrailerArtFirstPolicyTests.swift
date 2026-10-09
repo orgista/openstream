@@ -87,7 +87,7 @@ import Testing
     }
 
     @Test func theCrossfadeIsSixTenthsOfASecondAndInstantWithReduceMotion() {
-        #expect(Policy.crossfadeDuration(reduceMotion: false) == 0.6)
+        #expect(Policy.crossfadeDuration(reduceMotion: false) == 0.4)
         #expect(Policy.crossfadeDuration(reduceMotion: true) == 0)
     }
 

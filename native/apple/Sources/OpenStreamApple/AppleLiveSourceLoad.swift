@@ -15,7 +15,8 @@ public struct AppleLiveSourceLoad: Sendable {
         /// that cannot be reached says so itself when it is played.
         public var showsSavedChannels = false
 
-        public var text: String { "\(sourceName): \(message)" }
+        /// The message, led by the playlist's name unless it already names it.
+        public var text: String { message.contains(sourceName) ? message : "\(sourceName): \(message)" }
     }
 
     private let order: [UUID]

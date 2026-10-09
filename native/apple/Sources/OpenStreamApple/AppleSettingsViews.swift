@@ -64,6 +64,9 @@ struct AppleSettingsView: View {
     /// as the right column's stack. Nil pushes everything on one stack.
     var splitPath: Binding<NavigationPath>? = nil
     @State private var splitSelection: AppleSettingsRoute = .sources
+    #if os(iOS)
+    @State private var showsSendSetup = false
+    #endif
 
     var body: some View {
         settingsContent.modifier(AppleSettingsPINLock())
@@ -176,6 +179,9 @@ struct AppleSettingsView: View {
                         }
                         .appleTVReadableFocus()
                     }
+                    if entries.contains(.backup) {
+                        setupTransferRows
+                    }
                 }
             }
 
@@ -250,6 +256,36 @@ struct AppleSettingsView: View {
             }
         }
         .appleSettingsContent()
+        #if os(iOS)
+        .alert("Open the Camera", isPresented: $showsSendSetup) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Point it at the code on the other device.")
+        }
+        #endif
+    }
+
+    /// Set Up from iPhone, both ends, beside Backup & Sync (owner 2026-10-09:
+    /// "can't find where to scan a QR code"); before this they were only
+    /// under Sources and at the bottom of Backup & Sync.
+    @ViewBuilder
+    private var setupTransferRows: some View {
+        Button {
+            AppleSetupTransferCenter.shared.presentReceiver()
+        } label: {
+            AppleTVNavigationLabel(AppleSetupTransferDevice.receiveTitle, systemImage: "qrcode")
+        }
+        .foregroundStyle(.primary)
+        .accessibilityIdentifier("settings.setupFromPhone")
+        #if os(iOS)
+        Button {
+            showsSendSetup = true
+        } label: {
+            AppleTVNavigationLabel("Send Setup to Another Device", systemImage: "iphone.and.arrow.forward")
+        }
+        .foregroundStyle(.primary)
+        .accessibilityIdentifier("settings.sendSetup")
+        #endif
     }
     #endif
 }

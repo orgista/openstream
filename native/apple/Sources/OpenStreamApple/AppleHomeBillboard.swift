@@ -391,6 +391,8 @@ struct AppleHomeBillboard<Actions: View>: View {
                                      art: stillArt,
                                      artworkImage: phone != nil || mac != nil ? stillImage : nil,
                                      muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset },
+                                     // Under the top bar: the bottom of the art is under the copy.
+                                     controlTopInset: phone.map { $0.copyFadeLine + 8 },
                                      onTrailerOnScreen: { trailerIsOnScreen = $0 })
                     .id(item.id)
                 #endif
@@ -460,6 +462,8 @@ private struct AppleHomeHeroPreview: View {
     /// The Mac hero's round mute button sits this far from the top of the
     /// art (below the toolbar); nil on every other hero.
     var muteTopInset: CGFloat? = nil
+    /// The iPhone/iPad sound/play control's distance from the art's top.
+    var controlTopInset: CGFloat? = nil
     /// The video came on screen over the art (true) or left it (false).
     var onTrailerOnScreen: (Bool) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
@@ -478,6 +482,9 @@ private struct AppleHomeHeroPreview: View {
     /// The art frame the still fills, which the 16:9 web view overhangs.
     @State private var artFrameSize: CGSize?
     @State private var isMuted = true
+    /// The viewer turned the sound on with the trailer's control: the
+    /// muted-only rule is lifted and the next hero starts with sound.
+    @State private var soundUnlocked = false
     @State private var replayGeneration = 0
     #if os(iOS) || os(visionOS)
     @State private var systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
@@ -532,13 +539,14 @@ private struct AppleHomeHeroPreview: View {
                     url: embedURL, artworkURL: item.backgroundURL ?? item.posterURL,
                     artworkImage: artworkImage,
                     isLandscape: true, isPlaying: $isPlaying, isMuted: $isMuted,
-                    allowsSound: trailerRequest != nil,
+                    allowsSound: trailerRequest != nil || soundUnlocked,
                     replayGeneration: $replayGeneration, showsReplay: !isPlaying,
                     coverSize: artFrameSize,
                     onStateChange: handleState,
                     onTap: { isPlaying.toggle() },
-                    onMute: { isMuted.toggle() },
+                    onMute: toggleSound,
                     onReplay: { replayGeneration &+= 1; isPlaying = true },
+                    controlTopInset: controlTopInset,
                     settlesPictureBeforeReveal: settlesTrailerPicture
                 )
                 // Cover the art frame instead of fitting inside it. The embed
@@ -656,7 +664,9 @@ private struct AppleHomeHeroPreview: View {
         trailerKeys = keys
         trailerKeyIndex = 0
         trailerQuality = nil
-        isMuted = trailerRequest == nil && settings.autoMuteTrailer
+        // Autoplay starts muted (owner 2026-10-09) unless the viewer has
+        // already turned the sound on; the control over the video unmutes.
+        isMuted = trailerRequest == nil && !soundUnlocked
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: trailerRequest != nil) else { return }
         if trailerRequest != nil { appleTrace("trailer unmuted (explicit press)") }
         appleTrace("hero trailer start \(item.name)")
@@ -664,6 +674,17 @@ private struct AppleHomeHeroPreview: View {
         isPlaying = true
         #endif
     }
+
+    #if os(iOS) || os(visionOS)
+    private func toggleSound() {
+        let next = AppleTrailerSoundBridge.tapped(isMuted: isMuted, allowsSound: trailerRequest != nil || soundUnlocked)
+        if !next.isMuted, !ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true) { return }
+        // Sound on carries to the next hero this visit; muting again ends it.
+        soundUnlocked = !next.isMuted
+        isMuted = next.isMuted
+        appleTrace("hero trailer sound \(next.isMuted ? "off" : "on") (sound control)")
+    }
+    #endif
 
     private func stop() {
         trailerKeys = []

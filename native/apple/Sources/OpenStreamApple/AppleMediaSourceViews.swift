@@ -614,8 +614,9 @@ struct AppleLiveTVView: View {
             do {
                 requests.append((source, try sourceStore.iptvCredentials(for: source)))
             } catch {
-                sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
-                load.failed(source.id, message: error.localizedDescription)
+                let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
+                sourceStore.recordValidationFailure(id: source.id, summary: message)
+                load.failed(source.id, message: message)
             }
         }
         let cancelled = await withTaskGroup(of: (AppleSource, Result<[AppleIPTVChannel], any Error>).self) { group in
@@ -649,8 +650,12 @@ struct AppleLiveTVView: View {
                         group.cancelAll()
                         return true
                     }
-                    sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
-                    load.failed(source.id, message: error.localizedDescription)
+                    // Names the provider, and calls a panel that did not
+                    // answer unreachable rather than a stream limit (owner
+                    // item 20, 2026-10-09).
+                    let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
+                    sourceStore.recordValidationFailure(id: source.id, summary: message)
+                    load.failed(source.id, message: message)
                 }
                 channelIndex = AppleIPTVChannelIndex(load.channels)
                 settings.updateAutomaticLiveChannelPackage(channels: load.channels)

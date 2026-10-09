@@ -126,7 +126,9 @@ public enum AppleTrailerArtFirstPolicy {
         !(videoIsOnScreen && pressedTrailerPlaying)
     }
 
-    public static let crossfadeDuration: Double = 0.6
+    /// 0.4 s (owner 2026-10-09: a graceful ~0.4 s fade from the art into the
+    /// first real frames; it was 0.6 s).
+    public static let crossfadeDuration: Double = 0.4
 
     /// The art ↔ video crossfade; an instant swap with Reduce Motion.
     public static func crossfadeDuration(reduceMotion: Bool) -> Double {

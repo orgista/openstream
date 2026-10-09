@@ -599,8 +599,9 @@ struct AppleTitlePageCreditPortrait: View {
                 Text(person.initials)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.6))
-                if person.portraitURL != nil {
-                    AppleRemoteImage(url: person.portraitURL, placeholderSystemImage: "", loadingFill: .clear)
+                if let portraitURL = person.portraitURL {
+                    // Cropped around the face (owner 2026-10-09).
+                    AppleCreditPortraitImage(url: portraitURL)
                 }
             }
             .frame(width: side, height: side)

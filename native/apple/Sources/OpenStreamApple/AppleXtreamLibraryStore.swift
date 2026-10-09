@@ -90,13 +90,13 @@ final class AppleXtreamLibraryStore {
                                 shelves.append(shelf)
                                 revision += 1
                             } catch is CancellationError { throw CancellationError() }
-                            catch { failures[source.id] = AppleXtreamLibraryError.unavailable.localizedDescription }
+                            catch { failures[source.id] = AppleXtreamLibraryError.unavailableMessage(providerName: source.name) }
                         }
                     } catch is CancellationError { throw CancellationError() }
-                    catch { failures[source.id] = AppleXtreamLibraryError.unavailable.localizedDescription }
+                    catch { failures[source.id] = AppleXtreamLibraryError.unavailableMessage(providerName: source.name) }
                 }
             } catch is CancellationError { return }
-            catch { failures[source.id] = AppleXtreamLibraryError.unavailable.localizedDescription }
+            catch { failures[source.id] = AppleXtreamLibraryError.unavailableMessage(providerName: source.name) }
         }
         let retained = Set(shelves.flatMap(\.references))
         titles = titles.filter { retained.contains($0.key) }

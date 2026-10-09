@@ -24,6 +24,15 @@ public enum AppleXtreamLibraryError: Error, Equatable, LocalizedError, Sendable 
         case .tooLarge: "Your provider’s category is too large to load."
         }
     }
+
+    /// The Library's line for a provider whose movies and series did not
+    /// load, naming it (owner 2026-10-09: "say WHICH provider").
+    public static func unavailableMessage(providerName: String) -> String {
+        let name = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return unavailable.localizedDescription }
+        let possessive = name.hasSuffix("s") || name.hasSuffix("S") ? "\(name)’" : "\(name)’s"
+        return "\(possessive) movies and series are unavailable."
+    }
 }
 
 public enum AppleXtreamLibraryPolicy {

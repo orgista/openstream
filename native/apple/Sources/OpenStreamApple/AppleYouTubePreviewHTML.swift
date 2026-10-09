@@ -19,6 +19,14 @@ enum AppleTrailerSoundBridge {
         "window.setTrailerAllowsSound(\(allowsSound ? "true" : "false"), \(isMuted ? "true" : "false"));"
     }
 
+    /// A tap on the trailer's sound control. Turning sound on is an explicit
+    /// request, like Play Trailer, so it also lifts the autoplay's muted-only
+    /// rule (owner 2026-10-09: autoplay starts muted, but the viewer must be
+    /// able to unmute); muting again leaves the rule lifted for this trailer.
+    static func tapped(isMuted: Bool, allowsSound: Bool) -> (isMuted: Bool, allowsSound: Bool) {
+        isMuted ? (false, true) : (true, allowsSound)
+    }
+
     static func accessibilityLabel(isMuted: Bool) -> String {
         isMuted ? "Turn trailer sound on" : "Mute trailer"
     }
@@ -103,7 +111,7 @@ enum AppleYouTubePreviewHTML {
         var previewCapDeadlineTimer = null;
         var previewEnding = false;
         var previewCapSeconds = 60; // owner 2026-09-24: give each hero page about a minute of trailer
-        // Ends early enough for the 0.6 s crossfade back to the art to finish
+        // Ends early enough for the 0.4 s crossfade back to the art to finish
         // over live frames, before YouTube can paint its end screen.
         var previewHideLeadSeconds = 0.8;
         // A duration shorter than this is not the trailer's: the player can
@@ -444,12 +452,16 @@ enum AppleYouTubePreviewHTML {
     /// pause glyph over the playing trailer (N49 #17); the Apple TV app draws
     /// nothing over a playing preview. Pausing stays with the native shield
     /// over the web view, which never passes a touch to YouTube.
+    ///
+    /// It also reports when YouTube's `<video>` has really drawn frames
+    /// (`AppleTrailerFirstFrameGate`): the host keeps the art up until then.
     static let playerChromeScript = """
     (function() {
       if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
       var style = document.createElement('style');
       style.textContent = '\(playerChromeHidingCSS)';
       (document.head || document.documentElement).appendChild(style);
+    \(AppleTrailerFirstFrameGate.frameScript)
     })();
     """
 
@@ -494,5 +506,53 @@ enum AppleYouTubePreviewHTML {
             .replacingOccurrences(of: "'", with: "&#39;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+}
+
+/// The art stays over a starting trailer until YouTube's `<video>` has
+/// presented `minimumFrames` frames with advancing media time, reported by
+/// `requestVideoFrameCallback` inside YouTube's own frame (owner item 4,
+/// 2026-10-09: the trailer "flashes as it begins"). PLAYING and advancing
+/// `currentTime` alone came before the first decoded frame was on screen on
+/// a device, where the video is a hardware layer. Each new `playing` event
+/// (a resume, a replay) arms it again. `cap` reveals anyway for a WebKit
+/// that never calls back.
+enum AppleTrailerFirstFrameGate {
+    static let framesState = "frames"
+    static let minimumFrames = 3
+    static let cap: TimeInterval = 2.5
+
+    static var frameScript: String {
+        """
+          (function() {
+            var key = location.pathname.split('/').pop();
+            function arm(video) {
+              if (!video || typeof video.requestVideoFrameCallback !== 'function') return;
+              var seen = 0, last = -1, sent = false;
+              function onFrame(now, meta) {
+                var time = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : video.currentTime;
+                if (time !== last) { seen += 1; last = time; }
+                if (seen >= \(minimumFrames)) {
+                  if (!sent) {
+                    sent = true;
+                    try { window.webkit.messageHandlers.trailerState.postMessage({videoKey: key, state: '\(framesState)'}); } catch (_) {}
+                  }
+                  return;
+                }
+                video.requestVideoFrameCallback(onFrame);
+              }
+              video.addEventListener('playing', function() {
+                seen = 0; last = -1; sent = false;
+                video.requestVideoFrameCallback(onFrame);
+              });
+              video.requestVideoFrameCallback(onFrame);
+            }
+            var hooked = null;
+            setInterval(function() {
+              var video = document.querySelector('video');
+              if (video && video !== hooked) { hooked = video; arm(video); }
+            }, 100);
+          })();
+        """
     }
 }

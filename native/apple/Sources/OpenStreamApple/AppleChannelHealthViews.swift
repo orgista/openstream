@@ -112,14 +112,16 @@ struct AppleChannelHealthDetailView: View {
     #endif
 }
 
-/// Settings → Live TV: the summary line, the sweep, and the export.
+/// Settings → Live TV: the summary line and the sweep. The Export Working
+/// M3U row is gone (owner 2026-10-09: greyed out and pointless here); the
+/// working playlist is still served at `/working.m3u` on the Web Management
+/// portal (`AppleWorkingM3UExportRoute`).
 struct AppleChannelHealthSettingsRows: View {
     let store: AppleChannelHealthStore
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
     #if os(tvOS)
     let webManagement: any AppleWebManagementServing
-    @State private var session: AppleWebManagementSession?
     #endif
 
     var body: some View {
@@ -130,7 +132,6 @@ struct AppleChannelHealthSettingsRows: View {
             summaryLine
             AppleFormActionBar {
                 sweepButton
-                exportRow
             }
         }
         if let progress = store.progress {
@@ -142,7 +143,6 @@ struct AppleChannelHealthSettingsRows: View {
             progressBar(progress)
         }
         sweepButton
-        exportRow
         #endif
     }
 
@@ -187,48 +187,6 @@ struct AppleChannelHealthSettingsRows: View {
         }
         return store.summary(now: now)
     }
-
-    #if os(tvOS)
-    /// No share sheet on Apple TV: the file comes from the Web Management
-    /// portal, behind the same pairing as its other pages.
-    @ViewBuilder
-    private var exportRow: some View {
-        Group {
-            if let session {
-                LabeledContent("Export Working M3U") {
-                    Text(AppleWorkingM3UExportRoute.address(for: session))
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
-            } else {
-                Button("Export Working M3U") {
-                    Task { @MainActor in
-                        session = try? await webManagement.start(sourceStore: sourceStore)
-                    }
-                }
-            }
-        }
-        .accessibilityIdentifier("settings.health.export")
-        .task {
-            for await updated in webManagement.sessionUpdates() {
-                guard !Task.isCancelled else { return }
-                session = updated
-            }
-        }
-    }
-    #else
-    private var exportRow: some View {
-        ShareLink(
-            item: AppleWorkingM3UFile(lineup: store.lineup, health: store.results),
-            preview: SharePreview("Working Channels")
-        ) {
-            Text("Export Working M3U")
-        }
-        .disabled(store.workingCount == 0)
-        .accessibilityIdentifier("settings.health.export")
-    }
-    #endif
 }
 
 #if !os(tvOS)
