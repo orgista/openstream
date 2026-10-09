@@ -20,9 +20,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       - [x] (5) Paused state shows a play triangle inside a circle inside a circle; that's bad UI. **Fixed a8c0855**
             (one play.fill).
       **Heroes (Discover + Library, iOS portrait):**
-      - [ ] (6) The hero is cut off and not centred, playing or paused. Art is out of place / too zoomed in; the crop is
+      - [x] (6) The hero is cut off and not centred, playing or paused. Art is out of place / too zoomed in; the crop is
             broken. Research how Plex, Jellyfin and the big streaming apps do portrait heroes (face/subject-aware framing,
-            portrait or textless art).
+            portrait or textless art). **Fixed b354bd1 + 12b2c91:** textless poster art at 1.25 × width, chosen before it
+            draws, no trailer in the iPhone hero; trailers play in a 16:9 header on the title page (no zoom, one paused
+            play glyph). Shots: verification-artifacts/hero-redesign-2026-10-09/after.
       **Live (needs a full redesign; owner likes Paramount+ Live best, DirecTV somewhat):**
       - [ ] (7) The player is a cut-off box. While playing there's nothing showing which channel you're on, in the
             player or the guide.
@@ -45,7 +47,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
             **Fixed a8c0855** (both rows under Backup & Sync at the top of Settings).
       **Library:**
       - [x] (18) "Your provider's movies and series are unavailable": say WHICH provider. **Fixed a8c0855.**
-      - [ ] (19) The Library hero has the same crop problems as (6).
+      - [x] (19) The Library hero has the same crop problems as (6). **Fixed b354bd1** (same hero as 6).
       **Live error:**
       - [x] (20) **Fixed a8c0855** (an unreachable or blocking panel now says "Can't reach <provider>."; the stream limit
             only when the panel reports it). "Your live TV account has reached its stream limit" is shown, but the owner thinks it's our network
