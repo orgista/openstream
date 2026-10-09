@@ -1372,6 +1372,13 @@ private struct AppleAddLiveTVSourceView: View {
                 Section {
                     Button("Choose File…") { isChoosingFile = true }
                         .accessibilityIdentifier("sources.live.chooseFile")
+                    // The system Paste control reads the clipboard without
+                    // the "Allow Paste" prompt: a playlist copied as text,
+                    // or a playlist address for the URL field.
+                    PasteButton(payloadType: String.self) { strings in
+                        acceptPastedPlaylist(strings.joined(separator: "\n"))
+                    }
+                    .accessibilityIdentifier("sources.live.paste")
                     if let playlistFileName {
                         LabeledContent("File", value: playlistFileName)
                         Button("Remove File", role: .destructive) {
@@ -1433,6 +1440,23 @@ private struct AppleAddLiveTVSourceView: View {
             guard let connectionAction, actionLedger.consume(connectionAction.requestID) else { return }
             await perform(connectionAction)
         }
+    }
+
+    /// A pasted single address goes into the URL field; pasted playlist text
+    /// is imported on Save, like a chosen file.
+    private func acceptPastedPlaylist(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.contains(where: \.isNewline), (try? AppleIPTVEndpointPolicy.normalize(trimmed)) != nil {
+            endpoint = trimmed
+            return
+        }
+        guard trimmed.contains("://") else {
+            isError = true
+            message = "The clipboard has no playlist."
+            return
+        }
+        pastedPlaylist = trimmed
+        playlistFileName = "Pasted Playlist"
     }
 
     private var connectionButtons: some View {

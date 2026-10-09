@@ -43,7 +43,7 @@ while IFS= read -r -d '' candidate; do
         LC_ALL=C strings -a "$candidate" >> "$strings_file"
     fi
 done < <(find "$app" -type f -print0)
-if LC_ALL=C grep -Eiq 'manifest[.]json|addonCollection|stremio|YouTube links need the YouTube add-on' "$strings_file"; then
+if LC_ALL=C grep -Eiq 'manifest[.]json|addonCollection|stremio|YouTube links need the YouTube add-on|torrent|debrid|magnet:|infohash|premiumize|torbox' "$strings_file"; then
     echo 'FAIL: Add-on marker remains in Release binary; inspect the strings file locally.'
     exit 1
 fi

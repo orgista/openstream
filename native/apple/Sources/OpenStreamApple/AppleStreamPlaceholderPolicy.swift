@@ -9,12 +9,18 @@ import Foundation
 public enum AppleStreamPlaceholderPolicy {
     /// Words add-ons put in the name or description of an error clip, and in
     /// the file names of the clips themselves.
+    /// Only add-ons send these clips, so the App Store flavour (add-ons
+    /// compiled out) ships no list and keeps the runtime check below.
+    #if OPENSTREAM_ADDONS
     static let markers: [String] = [
         "failed to split torrent", "only rar is available", "only rar available",
         "download failed", "not cached", "debrid failed", "failed to download",
         "failed_rar", "download_failed", "failed_access", "failed_unexpected",
         "failed_opening", "limits_exceeded", "failed_infringement",
     ]
+    #else
+    static let markers: [String] = []
+    #endif
 
     /// Whether this text names an error clip rather than the title.
     public static func isPlaceholder(text: String) -> Bool {

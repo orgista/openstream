@@ -1,6 +1,11 @@
 import XCTest
 import CoreGraphics
 import ImageIO
+#if os(macOS)
+import AppKit
+#elseif !os(tvOS)
+import UIKit
+#endif
 
 /// Runs only with the demo launch environment supplied by the local test runner.
 /// No demo address or credential is stored in the project or test plan.
@@ -589,6 +594,157 @@ final class AppStoreScreenshotUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", "AetherEngine")).firstMatch.waitForExistence(timeout: 15))
         capture("proof-third-party-notices")
         back()
+    }
+
+    // MARK: Release-candidate pass (what App Review sees)
+
+    /// A clean install of the App Store flavour, driven the way the review
+    /// notes tell a reviewer: first launch, the no-content line, Add Live TV
+    /// with Apple's public sample playlist (pasted, or typed as an address on
+    /// Apple TV), a channel playing, then every top-level Settings page, each
+    /// scanned for add-on wording. Runs only with `OPENSTREAM_RC=1` (pass
+    /// `TEST_RUNNER_OPENSTREAM_RC=1`); Apple TV also needs
+    /// `OPENSTREAM_RC_M3U_URL`, a URL serving the same playlist. Leaves the
+    /// playlist behind: the runner deletes the app afterwards.
+    func testReviewerReleaseCandidate() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OPENSTREAM_RC"] == "1" else { throw XCTSkip("The release-candidate pass runs only with OPENSTREAM_RC=1") }
+        continueAfterFailure = true
+        captureURL = env["OPENSTREAM_DEMO_CAPTURE_URL"].flatMap(URL.init(string:))
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES",
+                               "-openstream.backup.icloud.enabled.v1", "NO"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 45))
+        Thread.sleep(forTimeInterval: 4)
+        rcCapture("01-first-launch")
+        if button("Not Now").waitForExistence(timeout: 8) { try activate(button("Not Now")) }
+        XCTAssertTrue(app.staticTexts["No Sources"].waitForExistence(timeout: 30), "First launch is not empty")
+        rcCapture("02-no-sources")
+        try activate(element("emptyState.footnote"))
+        let noContent = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "doesn't provide any content")).firstMatch
+        XCTAssertTrue(noContent.waitForExistence(timeout: 15), "No Sources has no no-content line behind its (i)")
+        rcCapture("03-no-content-line")
+        try activate(button("Done"))
+
+        try sources()
+        rcCapture("04-sources")
+        let addLive = app.buttons.matching(NSPredicate(format:
+            "label == %@ AND NOT (identifier BEGINSWITH %@)", "Live TV", "settings.section.")).firstMatch
+        try activate(addLive)
+        #if os(tvOS)
+        try activate(element("sources.live.type.m3u"))
+        try fill("sources.live.name", "Apple Samples")
+        let address = try XCTUnwrap(env["OPENSTREAM_RC_M3U_URL"], "Apple TV needs OPENSTREAM_RC_M3U_URL")
+        try fill("sources.live.endpoint", address)
+        #else
+        try activate(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch)
+        try activate(button("M3U Playlist"))
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Self.reviewPlaylist, forType: .string)
+        #else
+        UIPasteboard.general.string = Self.reviewPlaylist
+        #endif
+        let paste = element("sources.live.paste")
+        #if os(iOS)
+        for _ in 0..<3 where !paste.isHittable { uiSurface.swipeUp() }
+        #endif
+        try activate(paste)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "Pasted Playlist")).firstMatch.waitForExistence(timeout: 10),
+            "Paste did not take the playlist")
+        #endif
+        rcCapture("05-add-live-tv")
+        try activate(element("sources.live.save"))
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element("sources.live.save"))
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 60), .completed, "Add Live TV did not save")
+        rcCapture("06-sources-with-playlist")
+
+        try tab("Live")
+        Thread.sleep(forTimeInterval: 8)
+        rcCapture("07-live")
+        let channel = app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH 'guide.play.' AND label CONTAINS[c] 'Apple Sample (fMP4)'")).firstMatch
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "The sample playlist shows no channel")
+        try activate(channel)
+        Thread.sleep(forTimeInterval: 20)
+        XCTAssertFalse(element("live.failure").exists, "The sample channel failed")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "Live playback presented an alert")
+        rcCapture("08-live-playing")
+        #if os(tvOS) || os(iOS)
+        // Apple's sample is a bright test card in the middle of the screen.
+        try verifyPicture(in: CGRect(x: 0.3, y: 0.42, width: 0.4, height: 0.12))
+        #endif
+
+        #if os(tvOS)
+        // A relaunch resumes the last channel full screen; Menu leaves it.
+        for _ in 0..<3 where !channel.isHittable { XCUIRemote.shared.press(.menu); Thread.sleep(forTimeInterval: 1) }
+        #else
+        // Settings from a fresh launch: the player covers the tab bar.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 45))
+        Thread.sleep(forTimeInterval: 3)
+        #endif
+        try tab("Settings")
+        #if os(tvOS)
+        for section in ["sources", "channels", "restrictions", "liveTV", "discover", "services",
+                        "playback", "privacy", "storage", "about"] {
+            try activate(element("settings.section." + section))
+            Thread.sleep(forTimeInterval: 2)
+            rcCapture("10-settings-" + section)
+        }
+        #else
+        for _ in 0..<3 where !button("Sources").exists { back() }
+        rcCapture("10-settings")
+        var visited: Set<String> = []
+        let list = app.collectionViews.firstMatch
+        for _ in 0..<18 {
+            let rows = list.buttons.allElementsBoundByIndex
+                .filter { $0.isHittable && !$0.label.isEmpty }
+                .map(\.label)
+                .filter { !visited.contains($0) && !Self.rcSkippedRows.contains($0) && !Self.tabTitles.contains($0) }
+                .filter { label in !["Reset", "Erase", "Delete", "Sign Out", "Sync Now"].contains { label.contains($0) } }
+            guard let label = rows.first else {
+                list.swipeUp()
+                continue
+            }
+            visited.insert(label)
+            try activate(button(label))
+            Thread.sleep(forTimeInterval: 2)
+            rcCapture("10-settings-" + label.filter { $0.isLetter || $0.isNumber })
+            back()
+            Thread.sleep(forTimeInterval: 1)
+        }
+        #endif
+    }
+
+    private static let tabTitles: Set<String> = ["Search", "Discover", "Library", "Live", "Settings"]
+    /// Rows that act instead of opening a page.
+    private static let rcSkippedRows: Set<String> = ["Back", "Done", "Close", "Sync Now", "Erase This Device", "Reset"]
+    private static let reviewPlaylist = """
+        #EXTM3U
+        #EXTINF:-1 group-title="Samples",Apple Sample (HLS)
+        https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8
+        #EXTINF:-1 group-title="Samples",Apple Sample (fMP4)
+        https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
+        #EXTINF:-1 group-title="Samples",Apple Sample (HEVC)
+        https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/master.m3u8
+        #EXTINF:-1 group-title="Samples",Apple Sample (Dolby Vision)
+        https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8
+        #EXTINF:-1 group-title="Open Movies",Big Buck Bunny (Blender Foundation, CC BY)
+        https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+        """
+
+    /// A screenshot plus a scan of everything on screen for add-on wording.
+    private func rcCapture(_ name: String) {
+        capture(name)
+        let text = app.debugDescription.lowercased()
+        for word in ["stremio", "add-on", "addon", "torrent", "magnet", "debrid", "infohash", "premiumize", "torbox"]
+            where text.contains(word) {
+            XCTFail("\(name) shows \"\(word)\"")
+        }
     }
 
     private func removeDemoDownloads() throws {

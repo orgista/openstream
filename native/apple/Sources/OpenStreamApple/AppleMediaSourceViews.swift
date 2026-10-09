@@ -227,6 +227,12 @@ struct AppleLiveTVView: View {
                                         .frame(minWidth: 44, minHeight: 44)
                                         .contentShape(.rect)
                                 }
+                                #if os(visionOS)
+                                // visionOS's default style puts the label on a
+                                // white platter, which hid the white text.
+                                .buttonStyle(.plain)
+                                .hoverEffect(.highlight)
+                                #endif
                                 .overlay(alignment: .bottom) {
                                     Capsule().fill(AppleDesignTokens.brandAccent)
                                         .frame(height: 2)
