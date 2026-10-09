@@ -38,6 +38,15 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       - Every Open item for those platforms fixed, or listed as a known issue.
       - Duo layout changes stay out of main until after submission.
 
+      **Release-candidate run done (2026-10-08 night, e855f12):** iPhone, iPad, Apple TV and Vision Pro pass on clean
+      installs (No Sources, the no-content line, sample playlist plays, Settings pages, no add-on words). Mac builds and
+      launches; its screens were not checked. Fixed: the review notes said "paste the playlist" but there was no Paste
+      (added); debrid/torrent words were left in the App Store binary (removed); Vision Pro Live category buttons were blank
+      (fixed). Gate 2919/371. Report, known issues and the **new review notes to paste into ASC**:
+      verification-artifacts/rc-2026-10-09/RC-REPORT.md. **YOU, besides (1)-(4):** paste the new review notes; host
+      the playlist at orgista.com/openstream/review.m3u for Apple TV (or drop that line); decide whether "Radarr &
+      Sonarr" stays visible in the App Store build. Build 17 = e855f12 or later.
+
       **YOU:**
       - (1) ASC → App Privacy → "Data Not Collected" → Publish. The API can't confirm it.
       - (2) Say **"ship 17"**. That builds the TestFlight build plus the separate no-add-on App Store archive for
