@@ -150,7 +150,7 @@ public actor AppleMediaIndexRepository {
     private let blockedVersion: Int?
 
     public init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultURL()
+        self.fileURL = fileURL ?? Self.defaultFileURL
         guard FileManager.default.fileExists(atPath: self.fileURL.path) else {
             recordsByID = [:]
             searchTextByID = [:]
@@ -376,10 +376,8 @@ public actor AppleMediaIndexRepository {
         #endif
     }
 
-    private static func defaultURL() -> URL {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return root.appending(path: "OpenStream", directoryHint: .isDirectory)
+    static var defaultFileURL: URL {
+        AppleStorageLocation.applicationSupport.appending(path: "OpenStream", directoryHint: .isDirectory)
             .appending(path: "media-index-v1.json")
     }
 }

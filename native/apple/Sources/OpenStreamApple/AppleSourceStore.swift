@@ -975,7 +975,7 @@ public final class AppleSourceStore {
         self.manifestClient = manifestClient
         self.logoBackfillDelay = logoBackfillDelay
         #endif
-        managedImportsDirectory = (documentsDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
+        managedImportsDirectory = (documentsDirectory ?? AppleStorageLocation.documents)
             .appendingPathComponent("Imports", isDirectory: true).standardizedFileURL
         credentialError = nil
         preservedUnknownSourcePayloads = []
@@ -1019,7 +1019,7 @@ public final class AppleSourceStore {
         self.manifestClient = manifestClient
         self.logoBackfillDelay = logoBackfillDelay
         #endif
-        managedImportsDirectory = (documentsDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
+        managedImportsDirectory = (documentsDirectory ?? AppleStorageLocation.documents)
             .appendingPathComponent("Imports", isDirectory: true).standardizedFileURL
         credentialError = nil
         preservedUnknownSourcePayloads = []
@@ -1975,60 +1975,90 @@ public final class AppleSourceStore {
         return result
     }
 
-    func restoreConfigurationSources(_ incoming: [AppleSource], secrets: AppleConfigurationSecrets?, merge: Bool = true) throws {
+    /// Restores `incoming` over (or, without `merge`, instead of) this
+    /// device's sources. A source whose sign-in or address this device's
+    /// keychain will not keep is not fatal: it keeps this device's copy when
+    /// there is one, else arrives signed out for the viewer to sign in again.
+    /// Returns how many sources that happened to.
+    @discardableResult
+    func restoreConfigurationSources(_ incoming: [AppleSource], secrets: AppleConfigurationSecrets?, merge: Bool = true) throws -> Int {
         var merged = merge ? sources : []
+        var signedOut = 0
         for portable in incoming {
-            var restored = AppleConfigurationSnapshot.portableSource(portable)
-            let existing = sources.first { $0.id == restored.id }
-            if let existing, existing.kind == restored.kind,
-               AppleConfigurationSnapshot.publicAddress(existing.url) == restored.url
-                || AppleConfigurationSnapshot.portableSource(existing).url == restored.url {
-                restored.bookmarkData = existing.bookmarkData
-                restored.credentialReference = existing.credentialReference
-                restored.transportReference = existing.transportReference
-                restored.url = existing.url
-                restored.epgURL = existing.epgURL
-                restored.needsSignIn = existing.needsSignIn
-            }
-            if let address = secrets?.sourceAddresses[restored.id] {
-                restored.url = address
-                restored.epgURL = secrets?.guideAddresses[restored.id]
-                restored.needsSignIn = false
-            }
-            if let value = secrets?.sourceCredentials[restored.id] {
-                let reference = restored.id.uuidString.lowercased()
-                try keychain.set(value, for: reference)
-                restored.credentialReference = reference
-            } else if AppleConfigurationSyncPolicy.isEnabled(storedPreference: AppleConfigurationSyncPolicy.storedPreference()), restored.kind != .library {
-                // Stable accounts reconnect independently arriving iCloud Keychain items.
-                let reference = restored.id.uuidString.lowercased()
-                if try keychain.string(for: reference) != nil { restored.credentialReference = reference }
-                let transport = "transport.\(reference)"
-                if let address = try keychain.string(for: transport), let url = URL(string: address) {
-                    restored.url = url
-                    restored.transportReference = transport
-                    restored.epgURL = try keychain.string(for: "guide.\(reference)").flatMap(URL.init(string:))
-                    restored.needsSignIn = false
-                    if existing?.needsSignIn == true { restored.isEnabled = true }
+            let restored: AppleSource
+            let existing = sources.first { $0.id == portable.id }
+            do {
+                restored = try restoredConfigurationSource(portable, existing: existing, secrets: secrets)
+            } catch {
+                signedOut += 1
+                appleTraceFailure("source restore: \(portable.kind.rawValue) kept signed out: \(appleErrorLabel(error))")
+                if let existing {
+                    restored = existing
+                } else {
+                    var fallback = AppleConfigurationSnapshot.portableSource(portable)
+                    fallback.credentialReference = nil
+                    fallback.transportReference = nil
+                    fallback.needsSignIn = true
+                    fallback.isEnabled = false
+                    restored = fallback
                 }
-            }
-            if restored.kind == .library || AppleLocalPlaylistStore.isLocal(restored.url) {
-                restored.needsSignIn = existing == nil || existing?.needsSignIn == true
-            }
-            if (restored.kind == .mediaServer || restored.kind == .nas || restored.iptvType == .xtream), restored.credentialReference == nil {
-                restored.needsSignIn = true
-            }
-            if restored.needsSignIn { restored.isEnabled = false }
-            else { restored = try securedTransportSource(restored) }
-            if let existing, existing.url != restored.url || existing.isEnabled != restored.isEnabled
-                || existing.credentialReference != restored.credentialReference {
-                restored.configurationRevision = nextConfigurationRevision(max(existing.configurationRevision, restored.configurationRevision))
             }
             if let index = merged.firstIndex(where: { $0.id == restored.id }) { merged[index] = restored }
             else { merged.append(restored) }
         }
         sources = merged
         persist()
+        return signedOut
+    }
+
+    private func restoredConfigurationSource(_ portable: AppleSource, existing: AppleSource?,
+                                             secrets: AppleConfigurationSecrets?) throws -> AppleSource {
+        var restored = AppleConfigurationSnapshot.portableSource(portable)
+        if let existing, existing.kind == restored.kind,
+           AppleConfigurationSnapshot.publicAddress(existing.url) == restored.url
+            || AppleConfigurationSnapshot.portableSource(existing).url == restored.url {
+            restored.bookmarkData = existing.bookmarkData
+            restored.credentialReference = existing.credentialReference
+            restored.transportReference = existing.transportReference
+            restored.url = existing.url
+            restored.epgURL = existing.epgURL
+            restored.needsSignIn = existing.needsSignIn
+        }
+        if let address = secrets?.sourceAddresses[restored.id] {
+            restored.url = address
+            restored.epgURL = secrets?.guideAddresses[restored.id]
+            restored.needsSignIn = false
+        }
+        if let value = secrets?.sourceCredentials[restored.id] {
+            let reference = restored.id.uuidString.lowercased()
+            try keychain.set(value, for: reference)
+            restored.credentialReference = reference
+        } else if AppleConfigurationSyncPolicy.isEnabled(storedPreference: AppleConfigurationSyncPolicy.storedPreference()), restored.kind != .library {
+            // Stable accounts reconnect independently arriving iCloud Keychain items.
+            let reference = restored.id.uuidString.lowercased()
+            if try keychain.string(for: reference) != nil { restored.credentialReference = reference }
+            let transport = "transport.\(reference)"
+            if let address = try keychain.string(for: transport), let url = URL(string: address) {
+                restored.url = url
+                restored.transportReference = transport
+                restored.epgURL = try keychain.string(for: "guide.\(reference)").flatMap(URL.init(string:))
+                restored.needsSignIn = false
+                if existing?.needsSignIn == true { restored.isEnabled = true }
+            }
+        }
+        if restored.kind == .library || AppleLocalPlaylistStore.isLocal(restored.url) {
+            restored.needsSignIn = existing == nil || existing?.needsSignIn == true
+        }
+        if (restored.kind == .mediaServer || restored.kind == .nas || restored.iptvType == .xtream), restored.credentialReference == nil {
+            restored.needsSignIn = true
+        }
+        if restored.needsSignIn { restored.isEnabled = false }
+        else { restored = try securedTransportSource(restored) }
+        if let existing, existing.url != restored.url || existing.isEnabled != restored.isEnabled
+            || existing.credentialReference != restored.credentialReference {
+            restored.configurationRevision = nextConfigurationRevision(max(existing.configurationRevision, restored.configurationRevision))
+        }
+        return restored
     }
 
     func reconnectConfigurationFolder(id: UUID, url: URL, bookmark: Data?) {

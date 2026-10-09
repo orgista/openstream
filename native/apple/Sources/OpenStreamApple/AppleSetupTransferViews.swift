@@ -103,6 +103,7 @@ final class AppleSetupTransferCenter {
 
     func importReceived(into controller: AppleConfigurationController?) async {
         guard let payload = received, let controller else {
+            appleTraceFailure("setup receive: import failed, \(received == nil ? "nothing received" : "still starting")")
             receiveStep = .failed("Couldn’t import this setup.")
             return
         }
@@ -112,7 +113,7 @@ final class AppleSetupTransferCenter {
             let count = try await controller.importSetupTransfer(payload)
             receiveStep = .imported(count)
         } catch {
-            appleTraceFailure("setup receive: import failed")
+            appleTraceFailure("setup receive: import failed: \(appleErrorLabel(error))")
             receiveStep = .failed("Couldn’t import this setup.")
         }
         received = nil

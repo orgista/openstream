@@ -402,7 +402,7 @@ final class AppleConfigurationController {
     }
 
     private func apply(_ snapshot: AppleConfigurationSnapshot, secrets: AppleConfigurationSecrets?, mergeSources: Bool = true) async throws {
-        try snapshot.validate()
+        try traced("validate") { try snapshot.validate() }
         var values = snapshot.settings
         if let secrets {
             for (key, value) in secrets.privateSettings where AppleSettingsStore.configurationURLKeys.contains(key) {
@@ -412,25 +412,52 @@ final class AppleConfigurationController {
             values.merge(try settings.synchronizedConfigurationURLs()) { _, incoming in incoming }
         }
         // Validate settings before any store is changed.
-        for (key, value) in values where AppleSettingsStore.configurationKeys.contains(key) {
-            _ = try AppleSettingsStore.configurationValue(value)
+        try traced("settings check") {
+            for (key, value) in values where AppleSettingsStore.configurationKeys.contains(key) {
+                _ = try AppleSettingsStore.configurationValue(value)
+            }
         }
         applying = true
         defer { applying = false }
-        try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
-        try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: mergeSources)
+        // Sources and settings are the setup; a failure there stops the import
+        // before anything else changes. What follows is kept on a best-effort
+        // basis: a part this device cannot keep is skipped and traced, so the
+        // rest still arrives (build 17's Apple TV lost the whole setup to its
+        // unwritable Application Support).
+        try traced("sources") {
+            let signedOut = try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
+            if signedOut > 0 { appleTraceFailure("configuration apply: \(signedOut) sources kept signed out") }
+        }
+        try traced("other sources") {
+            try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: mergeSources)
+        }
         #if OPENSTREAM_ADDONS
         sources.refreshRestoredManifests(ids: snapshot.sources.map(\.id))
         #endif
-        try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
-        if let secrets { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
+        try traced("settings") {
+            try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
+        }
+        if let secrets {
+            do { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
+            catch { appleTraceFailure("configuration apply: skipped settings sign-ins: \(appleErrorLabel(error))") }
+        }
         ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
         ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(
             snapshot.watchedHistory, tombstones: snapshot.watchedTombstones)
         ApplePlaybackStore(defaults: defaults).restoreConfigurationContinueWatchingRemovals(
             snapshot.continueWatchingRemovals)
         AppleTitleRatingStore(defaults: defaults).restoreConfigurationRatings(snapshot.ratings)
-        try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist)
+        do { try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist) }
+        catch { appleTraceFailure("configuration apply: skipped the watchlist: \(appleErrorLabel(error))") }
+    }
+
+    /// Runs one required step of `apply`, tracing which step failed and how.
+    private func traced(_ step: String, _ body: () throws -> Void) throws {
+        do { try body() }
+        catch {
+            appleTraceFailure("configuration apply: \(step) failed: \(appleErrorLabel(error))")
+            throw error
+        }
     }
 
     /// Reset OpenStream leaves this device out of iCloud, both ways, until

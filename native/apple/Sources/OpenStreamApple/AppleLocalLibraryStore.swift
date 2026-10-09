@@ -340,9 +340,12 @@ final class AppleLocalLibraryStore {
                 try await mediaIndex.replace(instanceID: source.id, with: AppleMediaIngestion.libraryRecords(source: source, items: items))
             } catch is CancellationError { return }
             catch {
-                appleTraceFailure("library index write \"\(source.name)\" failed: \(error.localizedDescription)")
-                errors.append("\(source.name): \(error.localizedDescription)")
-                sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
+                // This device's own storage, not the source: the shelves are
+                // already drawn from `groups`, and the next scan writes the
+                // index again. Nothing for the viewer to read or fix (build
+                // 17 showed Apple TV's raw "You don't have permission to save
+                // the file …" under the NAS), so it goes to the trace only.
+                appleTraceFailure("library index write failed: \(appleErrorLabel(error))")
             }
         }
         appleTrace("library index written")

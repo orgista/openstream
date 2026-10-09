@@ -84,8 +84,7 @@ public actor AppleChannelHealthHistory {
     private let limit: Int
 
     public init(directory: URL? = nil, limit: Int = 5) {
-        self.directory = directory ?? (FileManager.default.urls(for: .applicationSupportDirectory,
-            in: .userDomainMask).first ?? FileManager.default.temporaryDirectory)
+        self.directory = directory ?? AppleStorageLocation.applicationSupport
             .appending(path: "OpenStream/ChannelHealth")
         self.limit = max(1, limit)
     }

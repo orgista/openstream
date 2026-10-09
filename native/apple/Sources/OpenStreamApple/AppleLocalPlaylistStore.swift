@@ -34,9 +34,7 @@ public struct AppleLocalPlaylistStore: Sendable {
     }
 
     public static let shared: AppleLocalPlaylistStore = {
-        let base = (try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
-            ?? FileManager.default.temporaryDirectory
+        let base = AppleStorageLocation.applicationSupport
         #if os(tvOS)
         let mirror: String? = standardMirror
         #else

@@ -160,10 +160,8 @@ public actor AppleOfflineMediaStore {
         self.fileManager = fileManager
         self.downloader = downloader
         self.hlsDownloader = hlsDownloader ?? AppleOfflineMediaStore.liveHLSDownloader
-        let applicationSupport = rootDirectory ?? fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!.appending(path: "OpenStream/Offline", directoryHint: .isDirectory)
+        let applicationSupport = rootDirectory ?? AppleStorageLocation.directory(.applicationSupport, fileManager: fileManager)
+            .appending(path: "OpenStream/Offline", directoryHint: .isDirectory)
         self.rootDirectory = applicationSupport
         self.manifestURL = applicationSupport.appendingPathComponent("manifest").appendingPathExtension("json")
 

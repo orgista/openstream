@@ -35,8 +35,7 @@ actor AppleStorageMaintenance {
         self.cacheDirectory = cacheDirectory
             ?? caches.appending(path: "OpenStream", directoryHint: .isDirectory)
 
-        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.temporaryDirectory
+        let applicationSupport = AppleStorageLocation.directory(.applicationSupport, fileManager: fileManager)
         self.metadataDirectory = metadataDirectory
             ?? applicationSupport.appending(path: "OpenStream/Metadata", directoryHint: .isDirectory)
     }

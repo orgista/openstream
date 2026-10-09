@@ -221,6 +221,118 @@ struct AppleSetupTransferImportTests {
     }
 }
 
+/// The owner's real setup, shaped with fake values: six add-ons, an IPTV
+/// provider and an SMB NAS; Radarr, Sonarr, TMDB and gateway settings; Live
+/// favourites; progress, history, ratings and a watchlist. Build 17's Apple TV
+/// refused it with "Couldn't import this setup." because the Apple TV cannot
+/// write to Application Support, where the media index (and the watchlist the
+/// import restores into it) lived.
+@Suite("Set Up from iPhone: an owner-sized setup", .serialized)
+@MainActor
+struct AppleSetupTransferOwnerSetupTests {
+    @Test func importsOnADeviceThatCannotWriteApplicationSupport() async throws {
+        let phone = try SetupTransferTestDevice()
+        defer { phone.tearDown() }
+        try await Self.fillLikeTheOwner(phone)
+        let received = try Self.send(phone)
+
+        // An Application Support the device may not write to, as on Apple TV.
+        let locked = FileManager.default.temporaryDirectory.appending(path: "setup-locked-\(UUID())")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: locked)
+        }
+        let tv = try SetupTransferTestDevice(indexURL: locked.appending(path: "OpenStream/media-index-v1.json"))
+        defer { tv.tearDown() }
+
+        let count = try await tv.controller.importSetupTransfer(received)
+        #expect(count == phone.sources.sources.count)
+        #expect(Set(tv.sources.sources.map(\.id)) == Set(phone.sources.sources.map(\.id)))
+        #expect(tv.sources.sources.allSatisfy { !$0.needsSignIn })
+        #expect(tv.settings.tmdbAPIKey == "fixture-tmdb")
+        #expect(tv.settings.radarrAPIKey == "fixture-radarr")
+        #expect(tv.settings.radarrURL == "https://fixture.example/radarr")
+        #expect(tv.settings.gatewayURL == "https://fixture.example/gateway")
+        #expect(tv.settings.favoriteChannelIDs == ["fixture-channel-1", "fixture-channel-2"])
+        #expect(ApplePlaybackStore(defaults: tv.defaults).progress(for: "tt0000001")?.position == 600)
+        #expect(AppleTitleRatingStore(defaults: tv.defaults).rating(for: "tt0000002") == .up)
+        #expect(tv.controller.result == "Setup imported")
+    }
+
+    @Test func aSourceWhoseSignInCannotBeSavedArrivesSignedOut() async throws {
+        let phone = try SetupTransferTestDevice()
+        defer { phone.tearDown() }
+        try await Self.fillLikeTheOwner(phone)
+        let received = try Self.send(phone)
+        let nas = try #require(phone.sources.sources.first { $0.kind == .nas })
+
+        let keychain = SetupTransferRefusingCredentials()
+        keychain.refused = [nas.id.uuidString.lowercased()]
+        let tv = try SetupTransferTestDevice(sourceKeychain: keychain)
+        defer { tv.tearDown() }
+
+        let count = try await tv.controller.importSetupTransfer(received)
+        #expect(count == phone.sources.sources.count)
+        #expect(Set(tv.sources.sources.map(\.id)) == Set(phone.sources.sources.map(\.id)))
+        let arrived = try #require(tv.sources.sources.first { $0.id == nas.id })
+        #expect(arrived.needsSignIn)
+        #expect(tv.sources.sources.filter { $0.id != nas.id }.allSatisfy { !$0.needsSignIn })
+    }
+
+    @Test func theSameSetupImportsOnAnotherIPhone() async throws {
+        let phone = try SetupTransferTestDevice()
+        defer { phone.tearDown() }
+        try await Self.fillLikeTheOwner(phone)
+        let received = try Self.send(phone)
+        let other = try SetupTransferTestDevice()
+        defer { other.tearDown() }
+        #expect(try await other.controller.importSetupTransfer(received) == phone.sources.sources.count)
+        #expect(other.index.records.filter(\.isFavorite).count == 1)
+        #expect(other.sources.sources.allSatisfy { !$0.needsSignIn })
+    }
+
+    private static func send(_ phone: SetupTransferTestDevice) throws -> AppleSetupTransferPayload {
+        let now = Date()
+        var session = AppleSetupReceiveSession(now: now)
+        let link = session.link(host: "192.168.1.20", port: 8091)
+        let body = try AppleSetupTransferCrypto.sealPayload(
+            phone.controller.setupTransferPayload(sender: "Fixture iPhone"), for: link)
+        return try session.accept(sessionID: link.sessionID, code: link.code, body: body, now: now).get()
+    }
+
+    private static func fillLikeTheOwner(_ phone: SetupTransferTestDevice) async throws {
+        #if OPENSTREAM_ADDONS
+        for number in 1 ... 6 {
+            _ = try phone.sources.addStremio(
+                manifestURL: try #require(URL(string: "https://fixture.example/addon-\(number)/manifest.json")),
+                name: "Add-on \(number)")
+        }
+        #endif
+        _ = try phone.sources.addIPTV(name: "Provider", type: .xtream, endpoint: "https://fixture.example",
+                                      username: "fixture-user", password: "fixture-password")
+        _ = try phone.sources.addNetworkShare(name: "NAS", host: "192.0.2.10", share: "Media",
+                                              username: "fixture-user", password: "fixture-password")
+        phone.settings.radarrURL = "https://fixture.example/radarr"
+        phone.settings.radarrAPIKey = "fixture-radarr"
+        phone.settings.sonarrURL = "https://fixture.example/sonarr"
+        phone.settings.sonarrAPIKey = "fixture-sonarr"
+        phone.settings.tmdbAPIKey = "fixture-tmdb"
+        phone.settings.gatewayURL = "https://fixture.example/gateway"
+        phone.settings.gatewayEnabled = true
+        phone.settings.favoriteChannelIDs = ["fixture-channel-1", "fixture-channel-2"]
+        let playback = ApplePlaybackStore(defaults: phone.defaults)
+        playback.save(mediaID: "tt0000001", position: 600, duration: 6_000)
+        playback.markWatched(mediaID: "tt0000002")
+        AppleTitleRatingStore(defaults: phone.defaults).set(.up, for: "tt0000002")
+        let record = AppleMediaRecord(canonicalID: "tt0000003", kind: .movie, title: "Fixture Movie",
+            availability: [.init(instanceID: UUID(), capability: .resolvable, itemReference: "movie|tt0000003")])
+        try await phone.index.upsert(record)
+        try await phone.index.setFavorite(true, recordID: record.id)
+    }
+}
+
 private extension Result {
     var isSuccess: Bool { if case .success = self { true } else { false } }
 }
@@ -230,17 +342,22 @@ private struct SetupTransferTestDevice {
     let suite: String
     let defaults: UserDefaults
     let sources: AppleSourceStore
+    let settings: AppleSettingsStore
+    let index: AppleMediaIndexStore
     let controller: AppleConfigurationController
     let indexURL: URL
 
-    init() throws {
+    /// `indexURL`: where the media index lives, e.g. under a folder this
+    /// device may not write to (an Apple TV's Application Support).
+    init(indexURL: URL? = nil, sourceKeychain: any AppleCredentialStoring = SetupTransferTestCredentials()) throws {
         suite = "setup-transfer-device.\(UUID())"
         defaults = try #require(UserDefaults(suiteName: suite))
-        indexURL = FileManager.default.temporaryDirectory.appending(path: "setup-transfer-index-\(UUID()).json")
-        sources = AppleSourceStore(defaults: defaults, keychain: SetupTransferTestCredentials(),
+        self.indexURL = indexURL
+            ?? FileManager.default.temporaryDirectory.appending(path: "setup-transfer-index-\(UUID()).json")
+        sources = AppleSourceStore(defaults: defaults, keychain: sourceKeychain,
                                    logoBackfillDelay: .seconds(3_600))
-        let settings = AppleSettingsStore(defaults: defaults, keychain: SetupTransferTestCredentials())
-        let index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: indexURL))
+        settings = AppleSettingsStore(defaults: defaults, keychain: SetupTransferTestCredentials())
+        index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: self.indexURL))
         controller = AppleConfigurationController(sources: sources, settings: settings, mediaIndex: index,
                                                   defaults: defaults, cloud: FakeCloudStore(),
                                                   backupKeys: SetupTransferNoKeys())
@@ -256,6 +373,19 @@ private final class SetupTransferTestCredentials: AppleCredentialStoring {
     private var values: [String: String] = [:]
     func string(for account: String) throws -> String? { values[account] }
     func set(_ value: String, for account: String) throws { values[account] = value }
+    func remove(_ account: String) throws { values.removeValue(forKey: account) }
+}
+
+/// A keychain that refuses to save one account, the way a real device's
+/// keychain can refuse an item.
+private final class SetupTransferRefusingCredentials: AppleCredentialStoring {
+    private var values: [String: String] = [:]
+    var refused: Set<String> = []
+    func string(for account: String) throws -> String? { values[account] }
+    func set(_ value: String, for account: String) throws {
+        if refused.contains(account) { throw AppleKeychainStoreError.unexpectedStatus(-25_308) }
+        values[account] = value
+    }
     func remove(_ account: String) throws { values.removeValue(forKey: account) }
 }
 

@@ -31,7 +31,7 @@ public final class AppleMediaServerBackgroundDownloads: NSObject {
     private var processing = 0
     private var eventsFinished = false
     private let store = AppleOfflineMediaStore()
-    private let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    private let directory = AppleStorageLocation.applicationSupport
         .appendingPathComponent("OpenStream/BackgroundDownloads", isDirectory: true)
 
     private lazy var session: URLSession = {
