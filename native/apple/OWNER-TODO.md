@@ -6,6 +6,8 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **Picture in Picture for Live (owner 2026-10-09, build 17):** "if I swipe away it stops playing". Swiping home
+      while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Being built.
 - [ ] **iPhone Duo support (2026-10-08)** — the foldable iPhone (iOS 27.1) ships 10-23. Done: audit of everything
       that assumes one screen size (verification-artifacts/duo-2026-10-08/AUDIT.md) and fixes written as patches,
       held back so tomorrow's App Store build is untouched: the app stays portrait-only on the big inner screen
