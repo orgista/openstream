@@ -39,6 +39,8 @@ struct AppleLiveTVView: View {
     @State private var channelsRevision = 0
     @State private var recallChannelIDs: Set<String> = []
     @State private var isLoading = false
+    /// The first lineup load has answered (channels, an error or nothing).
+    @State private var hasResolvedFirstLoad = false
     @State private var errorMessage: String?
     /// Playlists that failed while others loaded; shown inline with Retry.
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
@@ -115,7 +117,11 @@ struct AppleLiveTVView: View {
         @Bindable var settings = settings
 
         Group {
-            if isLoading, channels.isEmpty {
+            if !hasResolvedFirstLoad, channels.isEmpty {
+                // Nothing until the first load answers: "No Live Channels"
+                // used to flash before the lineup drew.
+                Color.clear
+            } else if isLoading, channels.isEmpty {
                 ProgressView()
             } else if channels.isEmpty, errorMessage != nil {
                 // A panel that timed out may answer next time: Try Again
@@ -328,6 +334,9 @@ struct AppleLiveTVView: View {
             }
         }
 .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision, showsSearch: $showsSearch) {
+            #if os(iOS)
+            liveOnNowList(channels: channelSnapshot.channels, showsSourceProblems: false)
+            #else
             AppleIPTVGuideGridView(
                 channels: channelSnapshot.channels,
                 guide: guideStore.guide(for: playbackGuideChannelIDs),
@@ -342,6 +351,7 @@ struct AppleLiveTVView: View {
                 onShowHealth: { healthDetailChannel = $0 },
                 onSelectProgramme: playProgramme
             )
+            #endif
         })
         #if os(iOS)
         // No "Live" title and no bar above the video: the tab bar names the
@@ -573,7 +583,10 @@ struct AppleLiveTVView: View {
 
     private func reload() async {
         guard await reloadGate.waitUntilIdle(), reloadGate.begin() else { return }
-        defer { reloadGate.end() }
+        defer {
+            reloadGate.end()
+            if !Task.isCancelled { hasResolvedFirstLoad = true }
+        }
         completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []
         lineupIndex = AppleChannelLineupIndex(completeGuide)
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
@@ -665,7 +678,10 @@ struct AppleLiveTVView: View {
                 settings.updateAutomaticLiveChannelPackage(channels: load.channels)
                 channelsRevision &+= 1
                 sourceFailures = load.failures
-                if !load.channels.isEmpty { isLoading = false }
+                if !load.channels.isEmpty {
+                    isLoading = false
+                    hasResolvedFirstLoad = true
+                }
                 startFirstChannelIfNeeded()
             }
             return false
@@ -1375,21 +1391,46 @@ struct AppleLiveTVView: View {
                 get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
                 set: { selectedCategory = $0 }
             ), onSearch: { showsSearch = true })
-            AppleIPTVGuideGridView(
-                channels: channelSnapshot.channels,
-                guide: guideStore.guide(for: playbackGuideChannelIDs),
-                guideRevision: guideStore.revision,
-                entries: completeGuide,
-                favoriteIDs: settings.favoriteChannelIDs,
-                favoriteOrder: selectedCategory == "Favorites" ? settings.favoriteLiveChannelOrder : [],
-                onSelect: play,
-                onToggleFavorite: toggleFavorite,
-                onVisibleChannels: refreshGuide,
-                health: channelHealth,
-                onShowHealth: { healthDetailChannel = $0 },
-                onSelectProgramme: playProgramme
-            )
+            liveOnNowList(channels: channelSnapshot.channels)
         }
+    }
+
+    private func liveOnNowList(channels list: [AppleIPTVChannel], showsSourceProblems: Bool = true) -> some View {
+        AppleLiveOnNowList(
+            channels: list,
+            guide: guideStore.guide(for: playbackGuideChannelIDs),
+            guideRevision: guideStore.revision,
+            currentChannelID: pendingProbe?.channel.id ?? selectedChannel?.id,
+            favoriteIDs: settings.favoriteChannelIDs,
+            hiddenCount: showsSourceProblems ? channelSnapshot.hiddenCount : 0,
+            showsEmptyText: snapshotRevision > 0,
+            sourceProblems: showsSourceProblems ? liveSourceProblems : [],
+            onSelect: playFromList,
+            onToggleFavorite: toggleFavorite,
+            onHide: { settings.hiddenLiveChannelIDs.insert($0.id) },
+            onShowInfo: { healthDetailChannel = $0 },
+            onRetrySources: { Task { await reload() } },
+            onVisibleChannels: refreshGuide
+        )
+    }
+
+    private var liveSourceProblems: [AppleLiveOnNowList.SourceProblem] {
+        sourceFailures.filter { !$0.showsSavedChannels }.map {
+            AppleLiveOnNowList.SourceProblem(id: $0.id, title: "Couldn’t load \($0.sourceName)")
+        }
+    }
+
+    /// A row plays in the frame above the list, like Paramount+; the row
+    /// already playing goes full screen. The WATCHING pill moves at once,
+    /// before the stream starts.
+    private func playFromList(_ channel: AppleIPTVChannel) {
+        if channel.id == selectedChannel?.id, catchUp == nil, pendingProbe == nil {
+            AppleInteractionTrace.record(.press, "live row full screen \(channel.name)")
+            fullScreenRevision &+= 1
+            return
+        }
+        AppleInteractionTrace.record(.press, "live row \(channel.name)")
+        startChannel(channel, shareSelection: true, present: false)
     }
 
     private var liveCategoryTabs: [String] {
