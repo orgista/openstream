@@ -244,7 +244,14 @@ public final class AppleTransportOverlayModel {
     /// button's frame and its neighbour's inside that window — the second query
     /// lands after the timer — so the crawler and the live photo tests launch
     /// with `-OpenStreamHoldPlayerChrome YES` and the timer stands down.
-    private let hideDelay: Duration = AppleTransportOverlayModel.chromeIsHeldOpen ? .seconds(600) : .seconds(3)
+    /// iPhone and iPad Live hold it four seconds, as the system player does.
+    private var hideDelay: Duration {
+        if Self.chromeIsHeldOpen { return .seconds(600) }
+        #if os(iOS)
+        if isLive { return .seconds(AppleLiveSystemChromePolicy.autoHideSeconds) }
+        #endif
+        return .seconds(3)
+    }
 
     static let chromeIsHeldOpen: Bool = {
         #if DEBUG

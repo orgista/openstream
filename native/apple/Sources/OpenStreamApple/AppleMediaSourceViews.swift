@@ -1783,6 +1783,7 @@ private struct AppleLiveFullScreenControls: View {
     /// every path shares.
     @State private var lastChannelSwitch: ContinuousClock.Instant?
     @State private var pickerShowTask: Task<Void, Never>?
+    @State private var controlsHeight: CGFloat = 0
 
     /// Shows the channel list unless a channel switch lands around the same
     /// touch: the video-area Button fires on the lift of a swipe too
@@ -1894,6 +1895,15 @@ private struct AppleLiveFullScreenControls: View {
         #endif
     }
 
+    /// "ESPN · NFL Live" above the scrubber.
+    private var nowPlaying: AppleLiveNowPlaying? {
+        guard request.isLive, let currentChannelID,
+              let channel = channels.first(where: { $0.id == currentChannelID }) else { return nil }
+        let title = guide.nowAndNext(channelID: channel.id).now?.title
+        return AppleLiveNowPlaying(logoURL: channel.logoURL,
+            text: [channel.name, title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+    }
+
     var body: some View {
         ZStack(alignment: .leading) {
             if coordinator.route == .surface {
@@ -1907,12 +1917,10 @@ private struct AppleLiveFullScreenControls: View {
                 onLastChannel: lastChannelAction,
                 onStartOver: request.isLive ? onStartOver : nil,
                 isObscured: transportIsObscured,
-                onBackgroundTap: { wasHidden in
-                    if wasHidden {
-                        if !channels.isEmpty { requestChannelPicker() }
-                    } else if channelPicker.isPresented {
-                        channelPicker.dismiss()
-                    }
+                // A tap shows or hides the chrome, as in the system player; the
+                // channel list opens from its own glyph (owner items 12–15).
+                onBackgroundTap: { _ in
+                    if channelPicker.isPresented { channelPicker.dismiss() }
                 },
                 onControlsVisibilityChanged: { isVisible in
                     if !isVisible && channelPicker.isPresented {
@@ -1922,7 +1930,9 @@ private struct AppleLiveFullScreenControls: View {
                 hideChromeSignal: hideChromeSignal,
                 onClose: onClose,
                 sharePlayMenu: sharePlayMenu,
-                onWatchLive: watchLiveAction
+                onWatchLive: watchLiveAction,
+                onChannelStep: request.isLive && !channels.isEmpty ? { zap($0) } : nil,
+                nowPlaying: nowPlaying
             )
             // Hidden from accessibility as well as from touch, on every
             // platform. `allowsHitTesting(false)` alone leaves the transport's
@@ -1960,8 +1970,13 @@ private struct AppleLiveFullScreenControls: View {
         // a channel swipe also opened the Channels list (DevPlus, 2026-10-06).
         // `swipeInProgress` is raised while the finger moves (before it
         // lifts) and the tap paths below ignore the touch while it is up.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
         .simultaneousGesture(DragGesture(minimumDistance: 60)
             .onChanged { gesture in
+                // Only the middle 60 % of the height zaps: the home-indicator
+                // swipe and the scrubber live outside it.
+                guard AppleLiveSystemChromePolicy.acceptsZapSwipe(startY: gesture.startLocation.y,
+                                                                  height: controlsHeight) else { return }
                 if !swipeInProgress,
                    AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
                                                 vertical: gesture.translation.height) != nil {
@@ -1970,7 +1985,8 @@ private struct AppleLiveFullScreenControls: View {
                 }
             }
             .onEnded { gesture in
-                if let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
+                if AppleLiveSystemChromePolicy.acceptsZapSwipe(startY: gesture.startLocation.y, height: controlsHeight),
+                   let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
                     vertical: gesture.translation.height) { zap(direction) }
                 // The Button's action runs on the same lift, in either order.
                 Task { @MainActor in

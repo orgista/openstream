@@ -56,6 +56,12 @@ struct AppleTransportOverlay: View {
     /// control returns to the live channel.
     let onStartOver: (() -> Void)?
     let onWatchLive: (() -> Void)?
+    /// iPhone/iPad Live: the chevrons' channel up/down.
+    let onChannelStep: ((AppleLiveZappingPolicy.Direction) -> Void)?
+    /// iPhone/iPad Live: the channel and programme above the scrubber.
+    let nowPlaying: AppleLiveNowPlaying?
+    /// iPhone/iPad Live: `pip.enter`, only while Picture in Picture can start.
+    let onPictureInPicture: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     @State private var model: AppleTransportOverlayModel
@@ -107,10 +113,16 @@ struct AppleTransportOverlay: View {
         onClose: (() -> Void)? = nil,
         sharePlayMenu: SharePlayMenu? = nil,
         nextEpisode: AppleNextEpisodeContext? = nil,
-        onWatchLive: (() -> Void)? = nil
+        onWatchLive: (() -> Void)? = nil,
+        onChannelStep: ((AppleLiveZappingPolicy.Direction) -> Void)? = nil,
+        nowPlaying: AppleLiveNowPlaying? = nil,
+        onPictureInPicture: (() -> Void)? = nil
     ) {
         self.onStartOver = onStartOver
         self.onWatchLive = onWatchLive
+        self.onChannelStep = onChannelStep
+        self.nowPlaying = nowPlaying
+        self.onPictureInPicture = onPictureInPicture
         self.coordinator = coordinator
         self.request = request
         self.otherSources = otherSources
@@ -245,7 +257,17 @@ struct AppleTransportOverlay: View {
             // size, still hittable, and `allowsHitTesting(false)` silently
             // swallowed the tap — so the picker never opened and the tap never
             // reached the reveal surface underneath either (2026-09-18).
-            if model.controlsVisible, !isObscured { transportChrome.transition(.opacity) }
+            if model.controlsVisible, !isObscured {
+                #if os(iOS)
+                if usesLiveSystemChrome {
+                    liveSystemChrome.transition(.opacity)
+                } else {
+                    transportChrome.transition(.opacity)
+                }
+                #else
+                transportChrome.transition(.opacity)
+                #endif
+            }
             #endif
 
             // Inside the chrome's fade: the transport auto-hides
@@ -535,6 +557,50 @@ struct AppleTransportOverlay: View {
 
         }
     }
+
+    #if os(iOS)
+    /// iPhone and iPad Live take the system player's layout
+    /// (`AppleLiveSystemChrome`); VOD, tvOS and visionOS keep this one.
+    private var usesLiveSystemChrome: Bool { request.isLive }
+
+    private var liveSystemChrome: some View {
+        ZStack {
+            // One flat 35 % dim while the chrome is up, as the system player
+            // draws it; a tap on it (not on a control) hides the chrome.
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .contentShape(.rect)
+                .onTapGesture { model.hideControls() }
+                .accessibilityHidden(true)
+            AppleLiveSystemChrome(
+                model: model,
+                coordinator: coordinator,
+                request: request,
+                isMuted: isMuted,
+                onToggleMute: coordinator.engine.avPlayer == nil ? nil : {
+                    guard let player = coordinator.engine.avPlayer else { return }
+                    player.isMuted.toggle()
+                    isMuted = player.isMuted
+                    model.bumpActivity()
+                },
+                nowPlaying: nowPlaying,
+                onClose: {
+                    if let onClose { onClose() } else {
+                        coordinator.stop()
+                        dismiss()
+                    }
+                },
+                onPictureInPicture: onPictureInPicture,
+                onLastChannel: onLastChannel,
+                onStartOver: onStartOver,
+                onShowChannels: onShowChannels,
+                onChannelStep: onChannelStep,
+                sharePlayMenu: sharePlayMenu
+            )
+        }
+        .simultaneousGesture(TapGesture().onEnded { if model.controlsVisible { model.bumpActivity() } })
+    }
+    #endif
 
     private var liveTopControls: Bool {
         #if os(iOS) || os(visionOS)
