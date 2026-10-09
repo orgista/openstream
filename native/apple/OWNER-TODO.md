@@ -6,6 +6,49 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **UX overhaul before the App Store (owner 2026-10-09, build 17, iPhone iOS 18.7 portrait). Test on the iOS 18.6 sim
+      with the owner's config.** Owner: "no ton of bugs, it's UX"; the back end is good (Live plays fast, the guide loads fast).
+      **Cast & crew:**
+      - [ ] (1) Not every face sits in its circle; some are cut off. Use face-aware crop.
+      **Trailers:**
+      - [ ] (2) Trailers have NO audio.
+      - [ ] (3) No mute/unmute control.
+      - [ ] (4) Glitchy start: it flashes as the trailer begins (e.g. "Ticketmaster" from the Disney+ shows row; Spider-Man
+            Brand New Day). Needs a graceful crossfade from art into video. Capture frame-by-frame.
+      - [ ] (5) Paused state shows a play triangle inside a circle inside a circle; that's bad UI.
+      **Heroes (Discover + Library, iOS portrait):**
+      - [ ] (6) The hero is cut off and not centred, playing or paused. Art is out of place / too zoomed in; the crop is
+            broken. Research how Plex, Jellyfin and the big streaming apps do portrait heroes (face/subject-aware framing,
+            portrait or textless art).
+      **Live (needs a full redesign; owner likes Paramount+ Live best, DirecTV somewhat):**
+      - [ ] (7) The player is a cut-off box. While playing there's nothing showing which channel you're on, in the
+            player or the guide.
+      - [ ] (8) Remove or rework the All / Favorites / News / Sports / Entertainment bar. It also floats and jumps on
+            scroll.
+      - [ ] (9) The "Live" title + search wastes space. Make the video bigger; Live can live elsewhere.
+      - [ ] (10) The translucent tab bar over the guide: hide it while browsing the guide and bring it back on scroll,
+            or similar.
+      - [ ] (11) How do I get to pay-per-view?
+      **Fullscreen Live player:**
+      - [ ] (12) The X top-left looks tacky.
+      - [ ] (13) The "Channels" / "Last Channel" buttons look tacky.
+      - [ ] (14) The progress bar is big, loud and cheap-looking; it should be subtle and clean. Going LIVE works.
+      - [ ] (15) The back button and the enlarge icon look odd; use SF Symbols / Apple-standard controls.
+      Good: mute works, the sleep timer is fine (check "end of program"), captions work.
+      **Settings:**
+      - [ ] (16) Remove "Export Working M3U" (greyed out, pointless); it belongs in the full backup if anywhere.
+      - [ ] (17) Can't find where to scan a QR code to set up or sync. Make Set Up from iPhone / Send Setup easy to find.
+      **Library:**
+      - [ ] (18) "Your provider's movies and series are unavailable": say WHICH provider.
+      - [ ] (19) The Library hero has the same crop problems as (6).
+      **Live error:**
+      - [ ] (20) "Your live TV account has reached its stream limit" is shown, but the owner thinks it's our network
+            block. The message must match the real cause (an IP block / unreachable panel is not a stream limit).
+      **Process (owner):**
+      - Research the streaming apps (Paramount+ Live, DirecTV, Plex, Jellyfin, YouTube TV).
+      - Run designs past the skills (impeccable, ui-ux-pro-max), then Fable; if Fable's design isn't better, try Mythos,
+        else the best design tool or skill available.
+      - Live needs many research agents.
 - [ ] **Picture in Picture for Live (owner 2026-10-09, build 17):** "if I swipe away it stops playing". Swiping home
       while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Being built.
 - [ ] **iPhone Duo support (2026-10-08)** — the foldable iPhone (iOS 27.1) ships 10-23. Done: audit of everything
