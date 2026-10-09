@@ -37,19 +37,26 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
             draws, no trailer in the iPhone hero; trailers play in a 16:9 header on the title page (no zoom, one paused
             play glyph). Shots: verification-artifacts/hero-redesign-2026-10-09/after.
       **Live (needs a full redesign; owner likes Paramount+ Live best, DirecTV somewhat):**
-      - [ ] (7) The player is a cut-off box. While playing there's nothing showing which channel you're on, in the
-            player or the guide.
-      - [ ] (8) Remove or rework the All / Favorites / News / Sports / Entertainment bar. It also floats and jumps on
-            scroll.
-      - [ ] (9) The "Live" title + search wastes space. Make the video bigger; Live can live elsewhere.
-      - [ ] (10) The translucent tab bar over the guide: hide it while browsing the guide and bring it back on scroll,
-            or similar.
-      - [ ] (11) How do I get to pay-per-view?
+      - [x] (7) The player is a cut-off box. While playing there's nothing showing which channel you're on, in the
+            player or the guide. **Fixed 6fafa72, c3a1dcb, c1faea9:** video edge to edge under the status bar, channel
+            logo over it, programme line under it, WATCHING pill on the list row. Shots: verification-artifacts/live-redesign-2026-10-09/after.
+      - [x] (8) Remove or rework the All / Favorites / News / Sports / Entertainment bar. It also floats and jumps on
+            scroll. **Fixed 77d88b3, c1faea9:** fixed underlined tabs under the video, only the channel list scrolls
+            (UI test testLiveLayoutIsStable passes on the iOS 18.6 sim).
+      - [x] (9) The "Live" title + search wastes space. Make the video bigger; Live can live elsewhere. **Fixed 6fafa72**
+            (no title bar; search is a glyph at the end of the tab row, 77d88b3).
+      - [x] (10) The translucent tab bar over the guide: hide it while browsing the guide and bring it back on scroll,
+            or similar. **Fixed 6fafa72** (your default: always visible, standard opaque background on iOS 18; iOS 26
+            keeps its own glass).
+      - [x] (11) How do I get to pay-per-view? **Fixed 77d88b3:** an Events tab lists the pay-per-view channels.
       **Fullscreen Live player:**
-      - [ ] (12) The X top-left looks tacky.
-      - [ ] (13) The "Channels" / "Last Channel" buttons look tacky.
-      - [ ] (14) The progress bar is big, loud and cheap-looking; it should be subtle and clean. Going LIVE works.
-      - [ ] (15) The back button and the enlarge icon look odd; use SF Symbols / Apple-standard controls.
+      - [x] (12) The X top-left looks tacky. **Fixed 80dd79c** (bare xmark, system player layout).
+      - [x] (13) The "Channels" / "Last Channel" buttons look tacky. **Fixed 80dd79c, c3a1dcb:** list glyph; Last
+            Channel is the first row of the ⋯ menu (plus the swipe).
+      - [x] (14) The progress bar is big, loud and cheap-looking; it should be subtle and clean. Going LIVE works.
+            **Fixed 80dd79c** (3 pt bar, LIVE as its left label).
+      - [x] (15) The back button and the enlarge icon look odd; use SF Symbols / Apple-standard controls. **Fixed
+            80dd79c, c3a1dcb** (mute, AirPlay, full screen together top-right inline).
       Good: mute works, the sleep timer is fine (check "end of program"), captions work.
       **Settings:**
       - [x] (16) Remove "Export Working M3U" (greyed out, pointless); it belongs in the full backup if anywhere.
@@ -69,7 +76,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
         else the best design tool or skill available.
       - Live needs many research agents.
 - [ ] **Picture in Picture for Live (owner 2026-10-09, build 17):** "if I swipe away it stops playing". Swiping home
-      while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Being built.
+      while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Not in slice 1: the DevPlus
+      check did not pass on the first try (the phone was locked, so the test saw a black screen); moved to slice 2.
 - [ ] **iPhone Duo support (2026-10-08)** — the foldable iPhone (iOS 27.1) ships 10-23. Done: audit of everything
       that assumes one screen size (verification-artifacts/duo-2026-10-08/AUDIT.md) and fixes written as patches,
       held back so tomorrow's App Store build is untouched: the app stays portrait-only on the big inner screen

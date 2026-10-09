@@ -2231,6 +2231,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
         app.launchArguments += (env["OPENSTREAM_UX_CAPTURE_ARGS"] ?? "").split(separator: " ").map(String.init)
+        if env["OPENSTREAM_UX_CAPTURE_LANDSCAPE"] == "1" { XCUIDevice.shared.orientation = .landscapeLeft }
         launch(screen: "live")
         let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
         XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row")
