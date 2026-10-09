@@ -51,6 +51,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       - (1) ASC → App Privacy → "Data Not Collected" → Publish. The API can't confirm it.
       - (2) Say **"ship 17"**. That builds the TestFlight build plus the separate no-add-on App Store archive for
         all four platforms, attaches them, and swaps out old build 10 on iPhone.
+        **TestFlight half done 2026-10-09:** build 17 (08f57a5, add-ons on) is on TestFlight for all four
+        platforms, Internal + Reddit (DELIVERIES.md). The no-add-on App Store archive is NOT built or attached:
+        that needs your separate OK.
       - (3) Mac screenshots need `sudo /usr/sbin/DevToolsSecurity -enable` on Dev-Mini (Screen Sharing).
       - (4) Pick manual release.
 - [ ] **Live doesn't work with the owner's config (2026-10-08, build 16)** — being tested on DevPlus with the

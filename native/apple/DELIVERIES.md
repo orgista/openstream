@@ -1,5 +1,62 @@
 # Deliveries
 
+## OpenStream build 17 TestFlight delivery — October 9, 2026 (iOS, tvOS, visionOS, macOS)
+
+Owner: "lets push the next build to test flight" (ASC max was 16 on IOS/TV_OS/VISION_OS/MAC_OS → ship 17).
+Source `main` `08f57a5c6ed92e884d68f581c8496f87c0c3214b` (includes the RC fixes e855f12), `git archive` into
+Dev-Mini `~/Developer/openstream-build/wt-b17` (local disk). TestFlight flavour: all four archives used
+`CURRENT_PROJECT_VERSION=17` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
+Uploaded with `asc publish testflight … --group "Internal,Reddit" --submit --confirm --test-notes … --locale en-US --wait`.
+No App Store (no-add-on) archive was built; no App Store version, review notes or submission were touched.
+
+| Platform | Build ID | Live status (read back 2026-10-09) |
+|---|---|---|
+| iOS 17 | ede9eff4-015f-4e49-8d29-84c199c7aab5 | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| tvOS 17 | 0f2c66b4-ad43-4d1b-be1c-fb802357b514 | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| visionOS 17 | 5e8421a2-65ef-4232-bffe-55b487831f30 | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| macOS 17 | 48af9f39-1f5b-4b43-ad1a-baf21eb353ac | VALID / internal IN_BETA_TESTING / external (Reddit) WAITING_FOR_BETA_REVIEW |
+
+- [x] 1 Authorization/numbers: owner said push the next build; ASC readback 16 was the max on all four platforms.
+- [x] 2 Source: main HEAD recorded; local-disk tree on the mini; zero-byte Swift check empty; `swift build` OK; gate
+      **2919 tests / 371 suites passed**. The first `swift test` run failed 2 fixture suites (AppleCatalogFixtureTests,
+      AppleManifestFixtureTests) with "network stub: no fixture": `AppleNetworkStubTests` activates the process-wide
+      stub while those suites run in parallel (test-isolation race, DEBUG/test-only code). The full re-run passed clean.
+- [x] 3 Signing: app, Widgets, Watch, Messages, Share, Top Shelf, Mac app each have a Release profile pin and an
+      ExportOptions line; all 8 profiles ACTIVE in `asc profiles list` and installed on the mini. Nothing created or changed.
+- [x] 4 `check-no-addons-in-release.sh` PASS (App Store config); no placeholder hits; no `TODO(ship)`; nothing in
+      OWNER-TODO marks a release blocker. Clean Release + add-ons installs on the iPhone 17, Apple TV 4K and Vision Pro
+      sims open on the "Welcome to oStream" first-run screen (no sources; Apple TV shows Set Up from iPhone).
+- [x] 5 Tracing default unchanged (no `OpenStreamTraceDefault` in Info.plist → TestFlight receipt traces). Groups Internal + Reddit
+      read back on all four builds.
+- [x] 6 Every bundle CFBundleVersion 17 (app, Share, Messages, Widgets, Watch, Top Shelf, Mac); exported IPAs/app
+      `codesign --verify --deep --strict` OK, team 2VQ74PD5YG, get-task-allow false (Mac: absent); pkg signed by 3rd Party
+      Mac Developer Installer: Raster Inc; `sdk-floor-check` passes on all four archives; add-on markers present in all four.
+- [x] 6 Release launch per platform: iOS / tvOS / visionOS sims (clean install → Welcome); macOS (Release + add-ons, ad hoc)
+      ran over 60 s without exiting. The Mac window was not captured (no screen capture over SSH).
+- [x] 6 Smoke on iPhone 16e DevPlus with the same b17 archive exported ad hoc (owner's imported setup): owner-content
+      `testBLibraryPlaysAShareTitle` passed twice ("72 Hours" from the share: first frame, progress saved 35 → 52 s, next
+      launch resumed at about 49–52 s); `testFTitleTrailerKeepsPlaying` passed (title trailer stayed on 10 s, a second
+      Trailers card switched and kept playing 10 s; 3 cards).
+- [x] 6 Real-iPhone trailer: in the b17 sessions, `trailer view inserted` → `trailer cover fading out` + `native reveal: live
+      viewport (device)` took 1.6–1.9 s each time.
+- [ ] Not exercised: title play/resume and the title-page trailer on Apple TV. b16 ran `AppStoreScreenshotUITests.testAppStorePass`
+      against the LAN demo Jellyfin, but its credentials file isn't recorded anywhere I could find, and no Apple TV is paired
+      with the mini. The same playback engine and trailer path passed on the iPhone hardware above.
+- [x] 7 Uploads VALID on all four (readback above); What to Test notes set per platform and read back word for word (en-US).
+- [ ] 8 GitHub release not run (pending, under the same authorization; not part of this task).
+
+What to Test (iOS; other platforms drop the lines that don't apply to them. tvOS has no Paste but adds Set Up from iPhone
+on Welcome/No Sources; visionOS adds the Live category fix):
+> Fixed: trailers could vanish right after they started. / Fixed: Live gave up too soon on slow providers. It now waits
+> longer. / New: Live errors now show inside the picture. / New: Paste a playlist in Add Live TV. / New: a "no stream found"
+> message when an add-on finds nothing. / Fewer notices. / New: iCloud sync status and Sync Now in Settings > Backup & Sync.
+> / New: Set Up from iPhone. … / Fixed: the season picker, the Search button on title pages and Settings alignment.
+
+Build-only change for the archive: gitignored local `Ship17-<platform>` copies of the AppStore schemes with the UITests
+entry at `buildForArchiving = NO` (same as b16). Exports ran with `/usr/bin` first on PATH. Artifacts:
+`/Volumes/DevExt/openstream-b17/` (four `.xcarchive`s, `export-<platform>-b17`, `export-iOS-adhoc-b17`, `logs/`).
+The worktree and its DerivedData were removed from the mini.
+
 ## OpenStream build 16 TestFlight delivery — October 8, 2026 (iOS, tvOS, visionOS, macOS)
 
 Owner: "lets ship the next build to TestFlight" (ASC max was 15 on every platform → ship 16). Source `main`
