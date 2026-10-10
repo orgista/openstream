@@ -23,7 +23,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
@@ -65,7 +68,7 @@ fun OpenStreamButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.keyboardFocusRing(OpenStreamShapes.Control),
         enabled = enabled,
         shape = OpenStreamShapes.Control,
         colors = colors,
@@ -83,7 +86,7 @@ fun OpenStreamOutlinedButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.keyboardFocusRing(OpenStreamShapes.Control),
         enabled = enabled,
         shape = OpenStreamShapes.Control,
         content = content,
@@ -102,7 +105,7 @@ fun OpenStreamTextButton(
 ) {
     TextButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.keyboardFocusRing(OpenStreamShapes.Control),
         enabled = enabled,
         shape = OpenStreamShapes.Control,
         colors = colors,
@@ -122,6 +125,7 @@ fun ActionButton(
 ) {
     Surface(
         onClick = onClick,
+        modifier = Modifier.keyboardFocusRing(OpenStreamShapes.Control),
         enabled = enabled,
         shape = OpenStreamShapes.Control,
         color = when {
@@ -157,6 +161,7 @@ fun IconActionButton(
 ) {
     Surface(
         onClick = onClick,
+        modifier = Modifier.keyboardFocusRing(OpenStreamShapes.Control),
         shape = OpenStreamShapes.Control,
         color = if (selected) OpenStreamColors.Text else Color.Transparent,
         border = BorderStroke(1.dp, if (selected) OpenStreamColors.Text else OpenStreamColors.Border),
@@ -216,6 +221,9 @@ fun MediaCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    var menuAnchor by remember { mutableStateOf(DpOffset.Zero) }
+    var cardHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
     val interactionSource = remember { MutableInteractionSource() }
     // Mouse hover gets the same lift as remote/keyboard focus.
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -233,7 +241,13 @@ fun MediaCard(
             .scale(cardScale)
             .onFocusChanged { focused = it.isFocused || it.hasFocus }
             .pointerHoverIcon(PointerIcon.Hand)
-            .onSecondaryClick { menuOpen = true },
+            .onSizeChanged { cardHeightPx = it.height }
+            .onSecondaryClick { position ->
+                // DropdownMenu offsets are measured from the anchor's bottom-left;
+                // this opens the menu where the pointer clicked.
+                menuAnchor = with(density) { DpOffset(position.x.toDp(), (position.y - cardHeightPx).toDp()) }
+                menuOpen = true
+            },
         shape = RoundedCornerShape(12.dp),
         color = OpenStreamColors.Surface,
         border = BorderStroke(
@@ -282,7 +296,7 @@ fun MediaCard(
         }
     }
     // Right-click / secondary tap: desktop-style context menu.
-    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, offset = menuAnchor) {
         DropdownMenuItem(text = { Text("Open") }, onClick = { menuOpen = false; onOpen(item) })
         DropdownMenuItem(
             text = { Text("Copy title") },

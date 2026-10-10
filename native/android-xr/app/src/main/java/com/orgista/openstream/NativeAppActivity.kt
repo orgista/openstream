@@ -49,7 +49,12 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
     override val desktopWindowing: Boolean by lazy {
         packageManager.hasSystemFeature(PackageManager.FEATURE_PC)
     }
-    override val fullscreenWindow: Boolean get() = !isInMultiWindowMode
+    // Only a full screen OpenStream requested can be exited with
+    // requestFullscreenMode; a window the system opened full screen can't.
+    private var fullscreenRequested = false
+    override val fullscreenWindow: Boolean get() = fullscreenRequested && !isInMultiWindowMode
+    override val canToggleFullscreen: Boolean
+        get() = desktopWindowing && Build.VERSION.SDK_INT >= 35 && (isInMultiWindowMode || fullscreenWindow)
 
     private var playerKeyHandler: ((KeyEvent) -> Boolean)? = null
     private var appKeyHandler: ((KeyEvent) -> Boolean)? = null
@@ -139,7 +144,16 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
             }
             KeyEvent.ACTION_UP -> if (swallowedKeyUps.remove(event.keyCode)) return true
         }
-        return super.dispatchKeyEvent(event)
+        if (super.dispatchKeyEvent(event)) return true
+        // Desktop images don't map Esc to Back. An Esc nothing else used
+        // (text fields clear themselves first) closes the screen like Back.
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.action == KeyEvent.ACTION_UP &&
+            !event.isCanceled && event.hasNoModifiers()
+        ) {
+            onBackPressedDispatcher.onBackPressed()
+            return true
+        }
+        return false
     }
 
     // Meta+/ (Keyboard Shortcuts Helper) lists what OpenStream understands.
@@ -188,13 +202,21 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
     }
 
     override fun toggleFullscreenWindow() {
-        if (!desktopWindowing || Build.VERSION.SDK_INT < 35) return
-        val request = if (isInMultiWindowMode) {
-            Activity.FULLSCREEN_MODE_REQUEST_ENTER
+        if (!canToggleFullscreen || Build.VERSION.SDK_INT < 35) return
+        if (isInMultiWindowMode) {
+            requestFullscreenMode(Activity.FULLSCREEN_MODE_REQUEST_ENTER, null)
+            fullscreenRequested = true
         } else {
-            Activity.FULLSCREEN_MODE_REQUEST_EXIT
+            requestFullscreenMode(Activity.FULLSCREEN_MODE_REQUEST_EXIT, null)
+            fullscreenRequested = false
         }
-        requestFullscreenMode(request, null)
+        Logs.event("desktop full screen ${if (fullscreenRequested) "requested" else "left"}")
+    }
+
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        // Back in a freeform window (caption-bar button, Esc, …): our full screen is over.
+        if (isInMultiWindowMode) fullscreenRequested = false
     }
 
     private fun pictureInPictureParams(): PictureInPictureParams =

@@ -8,8 +8,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.border
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
@@ -99,6 +104,19 @@ fun Modifier.verticalScrollbar(state: LazyGridState): Modifier = scrollbar({ sta
 fun Modifier.verticalScrollbar(state: ScrollState): Modifier = scrollbar({ state.isScrollInProgress }) {
     val viewport = state.viewportSize.toFloat()
     ScrollMetrics(state.value.toFloat(), viewport + state.maxValue, viewport)
+}
+
+/**
+ * High-contrast keyboard focus ring for buttons; Material's 10% focus layer is
+ * nearly invisible on the dark canvas. TV keeps its existing focus styling.
+ */
+fun Modifier.keyboardFocusRing(shape: Shape): Modifier = composed {
+    val context = LocalContext.current
+    val television = remember(context) { context.isTelevision() }
+    if (television) return@composed this
+    var focused by remember { mutableStateOf(false) }
+    onFocusChanged { focused = it.isFocused }
+        .then(if (focused) Modifier.border(2.dp, OpenStreamColors.Text, shape) else Modifier)
 }
 
 fun Context.isTelevision(): Boolean =

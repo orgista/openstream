@@ -859,7 +859,9 @@ fun PlayerScreen(
     val windowHost = remember(context) { context.playbackWindowHost() }
     val inPictureInPicture = windowHost?.inPictureInPicture?.value == true
     // Window mode changes arrive as configuration changes (no restart).
-    val fullscreenWindow = remember(LocalConfiguration.current) { windowHost?.fullscreenWindow == true }
+    val windowConfiguration = LocalConfiguration.current
+    val fullscreenWindow = remember(windowConfiguration) { windowHost?.fullscreenWindow == true }
+    val canToggleFullscreen = remember(windowConfiguration) { windowHost?.canToggleFullscreen == true }
     var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
     DisposableEffect(player) {
         val session = runCatching {
@@ -878,7 +880,7 @@ fun PlayerScreen(
         windowHost?.setPlayerKeyHandler { event ->
             val fullKeyboard = event.device?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
             val modified = event.isCtrlPressed || event.isAltPressed || event.isMetaPressed
-            val fullscreen = windowHost.desktopWindowing && windowHost.fullscreenWindow
+            val fullscreen = windowHost.fullscreenWindow
             when (PlayerKeyboardPolicy.action(event.keyCode, fullKeyboard, modified, fullscreen)) {
                 PlayerKeyAction.TOGGLE_PLAY -> Util.handlePlayPauseButtonAction(player)
                 PlayerKeyAction.PLAY -> Util.handlePlayButtonAction(player)
@@ -900,7 +902,7 @@ fun PlayerScreen(
                     true
                 }
                 PlayerKeyAction.TOGGLE_FULLSCREEN, PlayerKeyAction.EXIT_FULLSCREEN -> {
-                    if (!windowHost.desktopWindowing) return@setPlayerKeyHandler false
+                    if (!windowHost.canToggleFullscreen) return@setPlayerKeyHandler false
                     windowHost.toggleFullscreenWindow()
                     true
                 }
@@ -1068,8 +1070,10 @@ fun PlayerScreen(
                     OpenStreamTextButton(onClick = { windowHost.enterPictureInPicture() }) {
                         Text("Mini player", color = Color.White)
                     }
-                    OpenStreamTextButton(onClick = { windowHost.toggleFullscreenWindow() }) {
-                        Text(if (fullscreenWindow) "Exit full screen" else "Full screen", color = Color.White)
+                    if (canToggleFullscreen) {
+                        OpenStreamTextButton(onClick = { windowHost.toggleFullscreenWindow() }) {
+                            Text(if (fullscreenWindow) "Exit full screen" else "Full screen", color = Color.White)
+                        }
                     }
                 }
             }

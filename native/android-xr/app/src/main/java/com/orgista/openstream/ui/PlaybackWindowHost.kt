@@ -16,8 +16,11 @@ interface PlaybackWindowHost {
     /** True on Googlebook/desktop windowing, where windows resize freely. */
     val desktopWindowing: Boolean
 
-    /** True while the window covers the display (not a freeform window). */
+    /** True while OpenStream itself has put its desktop window in full screen. */
     val fullscreenWindow: Boolean
+
+    /** A freeform window can go full screen, or OpenStream's own full screen can be left. */
+    val canToggleFullscreen: Boolean
 
     fun setPlayerKeyHandler(handler: ((KeyEvent) -> Boolean)?)
 
