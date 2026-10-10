@@ -2390,3 +2390,11 @@ brought back on screen after the walk had scrolled past their row.
 - [F] #56 Cross-origin HLS auth stripping, pairing-attempt limits and safe stored filenames. Regression tests; full gate 3018 / 384. Sharing/link behavior choices remain with the owner.
 - [x] #56 Public add-on remainder: 25 fresh app-client probes, zero crashes/timeouts; five iOS UI batches add manifests, scroll to catalog posters and open a title page (76.687 / 103.477 / 76.593 / 78.077 / 84.884 s). Catalog/title screenshots inspected. Cyberflix HTML and other provider failures recorded in OWNER-TODO. Caption grouping retains the owner's one-row-per-language rule; paging/compatibility regression tests pass.
 - [x] Final gate: 3018 tests / 384 suites (61.219 s); iOS/tvOS builds and 45/45 production/UI compile checks pass. Original simulator app data restored byte for byte; test-created source/guide Keychain entries removed, original values/attributes unchanged. Simulators shut down. Zero-byte and whitespace checks clean. Temporary result bundles/screenshots removed after recording these checks.
+
+
+## 2026-10-10 — Engine round 2
+
+- [x] Restored fork including .git from ServerPlus backup; dvd-menus 4e877598 and engine-lab c9c5cf3d verified published to the owner's fork. Mini fork gate 2640 tests / 356 suites; aetherctl builds.
+- [x] Public native-HLS baseline: three bipbop advanced fMP4 trials, remoteBypass on M4; first frame 529–860 ms, nine seeks 83–169 ms, no playback freezes/missing frames/buffering samples. /Volumes/DevExt/engine-lab/hls-round2/scoreboard.md; dark-frame seek continuity flags unresolved. A12 heat remains unverified.
+- [!] #34 Full corpus and before/after fixes pending tool-install approval. DevExt sentinel checked, lab symlink established, twelve downloaded fixtures (0.35 GB); four-case preliminary scoreboard excludes ffprobe oracle. MBAFF freezes 2573 ms; E-AC3 seeks do not land; VC-1 ends at 0.756 s with premature EOF; automatic AV1 uses M4 hardware. /Volumes/DevExt/engine-lab/runs/round2-before-tools/scoreboard.md.
+- [!] OpenStream baseline full gate fails before source changes: shared health-store assertion, plus two caption waits on retry. Explicit serial full gate passes 3018 tests / 384 suites (60.141 s). Existing upstream pin retained; exact fork integration change recorded in OWNER-TODO.md.

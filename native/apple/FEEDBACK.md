@@ -4574,3 +4574,12 @@ Saved cache copies no longer keep credential-bearing URLs, and background downlo
 The Swift gate passes 3,018 tests in 384 suites; iOS and tvOS builds pass. The engine lab needs the missing fork and fixtures from you. Native HLS latency and A12 Apple TV heat still need your provider sample and device. The two security UI choices and the conflicting commit rules are recorded in OWNER-TODO. No upload or commit was made.
 
 The public add-on remainder also passed five in-app batches covering 25 add-ons, with catalog posters and title pages checked. Cyberflix returned a web page instead of a manifest, and several other provider endpoints returned errors; those failures did not crash the app. The existing one-row-per-language captions rule is retained.
+
+
+## 2026-10-10 — Engine fork restored and published
+
+The fork was in the ServerPlus backup. It is restored on Dev-Mini, and both the DVD-menu and engine-lab branches are now published to your GitHub fork. Its 2,640 tests in 356 suites pass. The external-drive lab folder is ready and twelve public samples have been downloaded.
+
+Apple's public native-HLS sample reached its first frame in 529–860 ms across three runs. All nine seeks landed in 83–169 ms, with no playback freezes or buffering samples. The harness flags dark frames after seeks; that still needs checking against the sample itself. These are M4 Mac measurements; the A12 Apple TV heat check remains yours.
+
+The preliminary lab reproduced the interlaced freeze, missing truncated-file seek landings and early VC-1 end. AV1 uses hardware on the M4, so its software case still needs measuring. FFmpeg and MKVToolNix are absent on Dev-Mini; installation approval is pending before rebuilding all 98 cases and checking the media with ffprobe. No engine fixes or dependency changes are claimed. The exact change from upstream to the tested fork is recorded in OWNER-TODO. OpenStream's initial full tests failed before source changes; the explicitly serial full gate passes all 3,018 tests in 384 suites (60.141 s). No OpenStream commit or app upload was made.

@@ -240,8 +240,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       concurrent requests; 8 preserves HLS catch-up extensions; 9 uses the shared eight-match threshold. 10 extracts
       selection, request, preflight, resume and recall/zap state into AppleLiveSession; platform layout/focus stays in views.
       11 prevents health sweeps while any Live coordinator is active. Gate 3018 / 384 and local tvOS round-trip UI pass. Four-tile layout/fullscreen verification passes (14.289 s); trace confirms exactly one open per tile across both layout toggles and the round trip.
-      **Owner action:** provide a real native-HLS provider sample for latency tuning, and an A12 Apple TV for the four-tile
-      heat check. The available DevPlus PiP channel uses the engine's TS-to-HLS route, so it is not the native-HLS baseline.
+      **Native-HLS measurement 2026-10-10:** Apple's public bipbop advanced fMP4, native remoteBypass on Dev-Mini M4,
+      three 10 s trials: first frame 529/633/860 ms; nine seeks 83–169 ms; no playback freezes, missing frames or buffering
+      samples. Scoreboard: /Volumes/DevExt/engine-lab/hls-round2/scoreboard.md. Seek continuity fails 0/3 because the
+      harness flags dark frames; content-versus-player cause is not verified. This measures the engine on macOS,
+      not real Apple TV channel changes. No private provider sample is needed for this public baseline.
+      **Owner action:** check four-tile heat on an A12 Apple TV.
 
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
@@ -280,13 +284,26 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       a tab that never appears. Re-checked after the crash fix: Subtitle Delay, Frame Rate, title-page badges,
       Playback Unavailable all work. Dropped per you: catch-up player chrome, special disc title page.
       Small: "Playback Unavailable" for a title with no streams says "details only" — wording could be clearer.
-- [ ] **Engine lab DONE (fork branch engine-lab, 9 commits, NOT pushed):** 98 test files/servers (4.4 GB, off the repo)
+- [ ] **Engine lab round 2 IN PROGRESS (fork branches published 2026-10-10):** 98 test files/servers (4.4 GB, off the repo)
       scored automatically. Fixed 5 engine bugs: MKV seeks landing one group late, debrid servers that ignore Range
       (hung 45 s → works), HDR10 MKV with no colour tags never showing a picture, software-decoded seeks near the end
       killing playback, TS seeks never showing a frame. Seek speed passes 55→71 of 84, seek smoothness 63→70.
       Next round: AV1 stutter after seek, truncated files stalling 12 s, interlaced TV freezes, VC-1 ending early.
-      Push both fork branches: `cd ~/Developer/openstream-build/AetherEngine-fork && git push -u origin dvd-menus engine-lab`
-      **Owner action 2026-10-10:** restore the missing AetherEngine-fork checkout (absent on both Macs), then publish dvd-menus and engine-lab; provide the engine-lab fixtures so seek/AV1/VC-1/interlaced/truncated before-and-after checks can run.
+      **Agent evidence 2026-10-10 (#34):** restored the full read-only ServerPlus backup to Dev-Mini; published
+      dvd-menus 4e877598ab22a4cce00a54eb5ba081c1cb1ce1e1 and engine-lab c9c5cf3da1b476e8774335699b4e7ab3d4380ff5
+      to cyberbanksy/AetherEngine using a fresh Studio clone after Mini HTTPS auth failed. Fork gate: 2640 / 356 green.
+      DevExt sentinel checked; ~/Developer/openstream-build/engine-lab links to /Volumes/DevExt/engine-lab.
+      Twelve public fixtures rebuilt (0.35 GB); preliminary four-case scoreboard at
+      /Volumes/DevExt/engine-lab/runs/round2-before-tools/scoreboard.md (ffprobe unavailable): playback 3/4,
+      frames 3/4, seek latency 2/3, seek continuity 2/3. MBAFF freezes 2573 ms; truncated E-AC3 seeks never land;
+      VC-1 ends at 0.756 s versus declared 7.007 s and logs premature EOF. AV1 uses M4 hardware and passes;
+      force software for its original stutter case. Full 98-source baseline, fixes, traces and after scoreboard remain open.
+      OpenStream serial gate: 3018 / 384 green (60.141 s); default runs expose existing shared-state/caption races.
+      OpenStream currently pins upstream 6.66.0. Integration needed after the fixes: replace its Package.swift
+      AetherEngine entry with `.package(url: "https://github.com/cyberbanksy/AetherEngine", revision: "<tested engine-lab SHA>")`
+      and regenerate Package.resolved plus Apps/OpenStreamApps.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+      on Dev-Mini. The app consumes the local package; no AetherEngine xcodeproj reference needs changing.
+      **Owner action:** approve FFmpeg and MKVToolNix installation on Dev-Mini so the full corpus and oracle can run.
 - [ ] **DONE da014fb (2026-10-02):** IPTV catch-up from the guide (back up to 3 days, plays a past programme from its
       start, Watch Live returns; sim-checked on Apple TV — iPad build only); Discover rows neutral + Top 10 off;
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
@@ -324,12 +341,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       Engine forked (github.com/cyberbanksy/AetherEngine, public — LGPL-3.0 + App Store exception, so our engine
       changes are published; keep rebased on upstream). Phase 1 DONE (disc menu structure, button highlights, the
       DVD menu "brain", 70 tests, test disc) on branch dvd-menus in ~/Developer/openstream-build/AetherEngine-fork —
-      NOT pushed: pushing was blocked by permissions. Owner: run `cd ~/Developer/openstream-build/AetherEngine-fork &&
-      git push -u origin dvd-menus` or allow it. Phase 2 DONE (6 commits on dvd-menus): menus play on screen with
+      **Published 2026-10-10:** dvd-menus 4e877598 is now on cyberbanksy/AetherEngine; the push owner action is closed. Phase 2 DONE (6 commits on dvd-menus): menus play on screen with
       button highlights, remote/touch/pointer input, stills, setup menus, Play Disc (`.menu`) vs Skip to Movie;
       97 DVD tests incl. an end-to-end menu → title → back-to-menu test. Open: menus are silent, resume restarts
       the cell, tiny gap on looping menus, multi-angle, no real-disc/Apple TV test yet. Phase 3 (wire into the app)
-      needs the fork pushed so the app can depend on it.
+      needs the app dependency switched to the tested fork revision; the fork is now published.
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
