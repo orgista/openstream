@@ -155,27 +155,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       logins (or the panel being down). YOU: open Live on your phone with Wi-Fi OFF. Works on cellular = home IP is
       blocked (usually lifts within a day; else ask the provider); fails there too = the provider is down. Test
       agents told to stop logging in.
-- [ ] **"New dialog in Live when it can't reach Live looks off and weird" (2026-10-08, build 16)** — it was an alert
-      ("Playback Failed" + advice paragraph + Close/Retry) that popped up over the whole Live tab whenever the resumed
-      channel could not start, plus a warning row with the system's error text over a working list.
-      **Fixed, waiting for your phone:** the message now sits inside the picture ("CBS is not broadcasting right now",
-      the server's name on one quiet line, Try Again); the guide under it stays usable. A list that can't refresh
-      while its saved channels show says nothing. With no channels at all: "Couldn't Load Your Channels", Try Again,
-      Open Settings (same as Discover). Screenshots: verification-artifacts/live-2026-10-08/.
-- [ ] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
-      different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
-      **Swept 2026-10-08:** 100 titles (20 per era, pre-1970 to 2020s, movies and episodes) with your config on
-      the mini's iPhone: 86 played (median 2.8 s to the picture). The "compatible source" message came up 0 times:
-      it only appears when an add-on sends nothing but torrent-only/YouTube/web links, and your Torrentio TB sent
-      real links every time. What failed: 9 not cached on TorBox yet, 4 where Torrentio had nothing at all (the app
-      wrongly told you to "add a stream source"; fixed, it now says nothing was found), 1 TorBox error video.
-      If you see the message again, note the title: it points at a different add-on or your TorBox account state.
-      Table: verification-artifacts/playback-sweep-2026-10-08/SWEEP.md.
-- [ ] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
-      (broken, fix in progress) and has no import. QR "send setup to Apple TV" moves first in the QR work.
-      **Import done in code (2026-10-08), waiting for your test:** the Apple TV can now take the whole setup
-      (Live/IPTV, add-ons, media servers, network shares, sign-ins, settings) straight from your iPhone over the
-      home network, no iCloud needed. See the QR line below for how to try it.
 - [x] **Remove notices around the app (2026-10-08)** — About no longer says "a subsidiary of Raster Inc.";
       the TMDB/JustWatch/no-content (i) buttons are gone from Welcome, Sources, the TMDB key page and the
       watch-provider line. The credits stay once in About › Data Sources (TMDB requires it even with your own
@@ -218,17 +197,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       mini's iPhone with your setup (ad hoc Release 16.2): trailer still playing after 10 s, Trailer 2 tapped,
       switched and kept playing. If it still flashes on yours: Settings > Share Diagnostics right after.
 
-- [ ] **Vision Pro: player lives inside the app window, resizable** (asked 2026-10-07; today it opens a separate
-      "Player" window). Fable audit for direction → implement → overnight visionOS e2e on Dev-Mini. Also a Mythos
-      security check and a project audit — reports in `verification-artifacts/audit-2026-10-07/`.
-      **Status 2026-10-08:** built, uncommitted. The player now opens inside the oStream window; the window keeps its
-      width, turns 16:9 (or the film's shape) and resizes uniformly while playing, and returns to its size on close.
-      visionOS e2e on Dev-Mini: 4 passed, 1 skipped (below). Waiting for commit and a check on the real Vision Pro.
 - [ ] **Vision Pro: audio kept playing after the app window was closed** (reported 2026-10-07, previous TestFlight
       build). Fixed, uncommitted: the player now stops (and saves the resume point) when the window leaves the
       foreground. The simulator cannot close a window or background the app from a test, so this needs a device check.
-- [ ] **Vision Pro: audio keeps playing after the app is closed** (owner, 2026-10-07, previous build). Being fixed with the
-      in-window player: the player stops (and saves your place) when the window closes; e2e test added.
 - [ ] **Vision Pro environments** (owner, 2026-10-07). Apple's own environments (Mount Hood, Moon, etc.) can't be bundled,
       but the full-window player docks into them when you pick one with the Digital Crown — verify on the device. Next:
       our own "theater" environment (an immersive space with a docking spot for the screen), after the player work.
@@ -241,12 +212,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
       `verification-artifacts/audit-2026-10-07/mythos-security.md`.
 
-- [ ] **(2026-10-06) Owner decisions:** ~~don't ship 16 yet~~ **shipped 16 on 2026-10-08** (TestFlight Internal, all four
-      platforms, f08a908; see DELIVERIES.md); **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
-      iPhone (cable once → Trust) get paired with the Mac mini on 2026-10-07 — then install the waiting ad hoc build
-      (`scripts/mini.sh 'zsh scripts/release/devplus-install.sh 16 00008130-000610103443001C'`); go ahead with the Mythos Live review fixes; make an OpenStream backup of the
-      owner's own sources to import for content verification on DevPlus.
-
 - [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
       ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
       re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
@@ -255,13 +220,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       DONE a9e2594: 1 (guide fetched ≤ every 6 h, 304-aware), 4 (failover + one quick reopen on all platforms),
       2 (200k-programme guide 25 s → 2 s). Next: 5 → 3 → 6 → 8 → 9 → 7 → 10.
 
-- [ ] **(2026-10-06) Your IPTV on DevPlus — app bug fixed (3614aaa), provider too slow tonight.** Opening a channel
-      started it twice (the saved lineup auto-started your last channel, then the link restarted it 4 s later), so
-      nothing ever played. Fixed and verified on DevPlus: one start, one connection. But CBS and FOX (East and West)
-      all arrived at ~40% of real time (≈3 s of video per 6.5 s) at 23:40, so none reached a picture. **Your check:**
-      does the same channel play right now in another player (VLC/TiviMate) on the same Wi-Fi? If yes, it's on us
-      (look at connection count / user agent); if no, it's the provider. The Mac mini can't reach the panel at all.
-
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
       sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
@@ -269,27 +227,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       PIN + import progress (8c29e10). Research + gap report: ~/Developer/openstream-build/specs/live-tv/gap-report-2026-10-05.md.
       DVR dropped by the owner 2026-10-06; Apple TV PiP built (7165a8e).
 
-- [ ] **(2026-10-04) App Store submission, what's left.** App Store Connect is filled for all four platforms: name
-      **oStream**, subtitle, description, keywords, promo text, support/privacy/marketing URLs, copyright "2026 Raster
-      Inc", categories Entertainment + Photo & Video, content rights, age rating 16+, review notes with Apple's public
-      sample playlist (the public Jellyfin demo now needs a password, so it's no longer in the notes), and screenshots
-      for iPhone, iPad, Apple TV and Vision Pro. Validation: iPhone/iPad 0 errors. Left: **you** fill App Privacy → "Data
-      Not Collected" (website only); **"ship N"** builds the App Store (no add-ons) build and attaches it to all four
-      platforms — the iPhone listing currently has old build 10 attached, which must be swapped; Mac screenshots need
-      `sudo /usr/sbin/DevToolsSecurity -enable` first.
-- [ ] **(2026-10-04) Channel lineup back as "Complete Guide".** You asked to bring back the biggest US package preset
-      under another name. Codex is restoring it in all builds; it only organises your own IPTV playlist and defaults to
-      Everything when your playlist doesn't match it.
 - [x] **(2026-10-04) Short app names.** Under the icon: oStream (all platforms, Share, Messages, Watch, widgets);
       App Store name oStream. Inside the app it's still OpenStream. (368be0c)
 
-- [ ] **Apple TV regression on the overnight code (2026-10-01 morning):** fixes committed 2026-10-01 (gate 2519/303).
-      Done, checked on the sim: 3 dead IPTV panel (error + Retry by ~9 s, was ~21 s), 5 Clear Cache label, 6 search
-      exact title first (stale half-typed results re-ranked), Show Captions opens on the checked value, My Channels
-      spinner. Done, unit-tested only (needs a real-stream check on the Apple TV): 1 captions stay above the
-      scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
-      last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
-      nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
 - [ ] **Owner decisions 2026-10-01 (afternoon):**
       1. FINAL: "native player with our engine" — remove the Player choice; always the OpenStream engine shown in
          Apple's player (Infuse-style). Native stays as a hidden debug override only. DONE 4440c97 (sim-checked).
@@ -301,10 +241,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
          MP4-on-engine for tvOS.
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
-- [ ] **Build 15 feedback (owner, real iPhone, 2026-10-03):** (1) trailers still don't play (title page hero stays
-      dark; Masters of the Universe 2026) — build 15's pre-ship test covered playback/resume, not trailers;
-      (2) title page shows two refresh-looking buttons (global refresh + trailer replay). Fixing on Codex with
-      iOS 18.6 + iOS 27 sim proof; trailers added to the pre-ship test list.
 - [ ] **CarPlay (owner ask 2026-10-03) — not in build 15:** YOU request at developer.apple.com/contact/carplay/ for
       com.orgista.openstream: Video (`com.apple.developer.carplay-video`, iOS 27+) AND Audio (so it appears in every
       CarPlay car; video-only shows only in cars with parked video). After Apple grants it: CarPlay scene + icon,
@@ -312,39 +248,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       on non-video head units), test in CarPlay Simulator. Research: muse-results/34-carplay-video-parked.md.
 - [x] **Build 15 shipped 2026-10-03** to TestFlight Internal (iOS, tvOS, visionOS, macOS; add-ons kept), all VALID —
       see DELIVERIES.md.
-- [ ] **App Store push (owner 2026-10-02: assume the bridge works, get the app ready to publish, then move on to the
-      next app).** Running: Codex batch A (server discovery on your network, Quick Connect as the default on Apple TV,
-      Dolby Vision/HDR/SDR + audio line in player info, Release first-run leads with Media Server); work Claude
-      (App Store submission pack: description/keywords/review notes/legal demo/privacy label/screenshot list, and
-      an Apple app playbook for future apps at Code, Apps & Websites/Apps/APPLE-APP-PLAYBOOK.md). Next: downloads
-      from your media server; Release screenshots; then "ship" when you say so.
-- [ ] **Add-on route DECIDED 2026-10-02: Cloudflare bridge (Rill, github.com/mrtxiv/Rill, MIT).** Each user deploys
-      their own free bridge to their own Cloudflare account (Deploy button), pastes add-ons into its page, and
-      OpenStream signs in to it as a Jellyfin server — works anywhere, free, Orgista never touches it, App Store app
-      has no add-on code. Remux removed from ServerPlus (container, image, data). Add-on code kept in the repo
-      behind a build switch (Debug/sideload/Mac Developer-ID on; App Store/TestFlight compiled out). DEPLOYED
-      2026-10-02 to your Cloudflare account (wrangler, no GitHub needed): https://rill.xcxhcprtpj.workers.dev
-      (D1 "rill", queue "rill-jobs", free plan) + custom domain https://stream.ourzephyr.com (personal domain on purpose — keep streaming off orgista/Raster domains). Source: ~/Developer/openstream-build/bridge/rill; update =
-      `npm run build && npm run deploy` there. YOU: open the address now and create the Rill account (first
-      visitor claims it), add your add-ons, then test in OpenStream (Add Media Server › Jellyfin).
-      Private fork: github.com/cyberbanksy/stream-bridge (push needed: `cd ~/Developer/openstream-build/bridge/rill
-      && git push -u origin HEAD:main`). Security audit (specs/codex/rill-audit.out): NOT safe as-is — malicious
-      add-on artwork (SVG) could take over the settings page; config links embed your password + add-on keys in
-      reversible form; public routes can be abused; no login throttling; its build pulls upstream code at deploy.
-      HARDENED + DEPLOYED 2026-10-02 (fork branch `hardening` b43c981): builds/deploys only our code, no auto-update,
-      owner-only helper routes, raster-only images + size caps, outbound policy, same-origin settings, login
-      throttling, revocable sessions, AES-GCM-encrypted add-on keys (key in ~/Developer/openstream-build/signing/
-      rill/RILL_DATA_KEY — back it up), third-party features off. D1 backup taken first. Remaining: DNS-rebinding
-      SSRF gap (platform limit); root still sends a harmless invalid CORS combo. YOU: sign in again, change the Rill
-      password (old one was stored reversibly), then add your add-ons. Push: `cd ~/Developer/openstream-build/bridge/
-      rill && git push -u origin hardening`.
-- [ ] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
-      delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
-      HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
-      whole-library disc check on the main thread; HIGH: iPad Live guide cells draw over the channel column;
-      Playback Unavailable shows raw engine text; Watch Live overlaps the speaker icon on the inline player; full-
-      screen catch-up has no way back except the guide. Expected: Play Disc = main title until the engine fork is
-      pushed. Rotation not testable headless.
 - [ ] **Apple TV full pass 2026-10-02 (9c0be32):** most new features pass (reconnect, Watch on other list, catch-up,
       latest season, Start from Beginning, recent searches, disc badge, Play Disc/Skip to Movie, no tab replay).
       P0 FIXED 0e9a6d5: every on-demand play with artwork crashed (Now Playing artwork, from 40e9350) — verified.
@@ -365,10 +268,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
       iCloud restore no longer rewinds Resume; "Forced"-only subtitle tracks never auto-picked. Open: a deleted
       add-on can come back after iCloud sync; search tab position on tvOS (kept first per your 09-14 call).
-- [ ] **Live TV DONE d018726 (sim-checked with a local fake IPTV server):** a dropped channel reconnects by itself
-      ("Reconnecting…", 3 tries), then offers "Watch on <other list>" for the same channel; tvOS guide shows 7 channels
-      × 3 hours (was ~4.5 × 2.3) with now-airing progress, Left goes to categories. Not done: catch-up from the guide
-      (needs past listings + a play action + panel time zone) and live rewind on raw TS channels (engine buffer).
 - [ ] **Open-source / public repo (2026-10-01) — specs/oss-public-readiness.md:** history scan (410 commits): no signing
       keys, .env, API keys or IPTV logins anywhere. But: (1) your AIOMetadata config URL (its id is a login token) is
       in the code — being moved out now; RECREATE that config in AIOMetadata. (2) 2.3 GB of movie/TV rips sit in git
@@ -384,29 +283,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       badges (4K, Dolby Vision, HDR, Atmos, 7.1, Remux) on title pages only — the Quality picker stays plain per your
       09-24 rule. Engine retries a failed open once; engine logs in the trace; add-on paging actually works now.
       Known: Jellyfin/Plex disc items get no badge; VIDEO_TS/BDMV folders play as plain files (engine opens images only).
-- [ ] **App Store compliance audit (2026-10-01) — specs/app-store-compliance-audit.md:** Apple pulled every app built
-      around Stremio add-ons (Stremio Lite Jan 2026; Reelo, Omni, Fusion Aug 2026 — Reelo even after removing add-on
-      install). Survivors (Infuse, SenPlayer, VidHub, IPTVX, Swiftfin, Channels) = "player for your own content".
-      DONE a6765b2 (sim-checked): test add-ons seeded in DEBUG only (rotate the AIOMetadata keys anyway — they were
-      in earlier TestFlight builds); torrent client removed; TMDB/JustWatch credits + "we don't provide any content"
-      line; no "Stremio" in the UI (a test enforces it); About no longer links the private repo. Also caught: the
-      Release build didn't compile (fixed). Note: the TMDB logo is blue-green — their terms require it unaltered.
-      DONE 2026-10-01 (uncommitted, gates green): (3) rows keep the add-on's own catalog name (id→brand map
-      AppleCatalogServiceName deleted), Top 10 off by default; (4) lineup JSON moved to Tests/…/Fixtures/ChannelLineup
-      (Debug/test only, Release ships none → Premier Guide hidden, package defaults to Everything, playlist tvg-logo).
-      (1) add-ons + (2) downloads: owner wants to KEEP both (incl. downloading away from home) in a safe way, e.g.
-      add-ons configured online and synced. Researching: a server-side bridge (our own open-source "OpenStream
-      Bridge" or Remux) where add-ons are set up on a web page and the app just signs in to "your media server" —
-      downloads then come from your own server; plus a second build with native add-ons outside the App Store.
-      Research done (specs/addon-bridge-options.md): every removed app ran add-ons ON the device; no add-on app has
-      passed review since Aug 2026 (Vidi/All The Media haven't been re-reviewed). Recommended: App Store build = a
-      generic Jellyfin client (no add-on code) + an "OpenStream Bridge" = Remux (open source, runs on Unraid/NAS or
-      hosted) where add-ons are set up on its web page; add "download from your server" (~1 week); keep native
-      add-ons in a Mac Developer-ID build + sideload build. Orgista-hosted accounts = possible but we'd become the
-      aggregator (DMCA, user keys, bandwidth) — only as a deliberate business. DECIDE: go with the bridge plan?
-      Owner still has the live App Store listing text to check by hand.
-      Ideas picked by Claude (owner delegated), in order: engine lab with smooth seek as a gate; dead live stream →
-      restart, then same channel from another list; format badges; denser TV guide; IPTV catch-up + live pause.
 - [ ] **Ideas from Strand + iProTV (2026-10-01, pick what you want):** smooth seek (no black flash) as a gate test;
       App Store risk — Strand pulled Stremio add-ons to pass review (fallback: Remux, add-ons behind a Jellyfin API);
       IPTV catch-up/timeshift + live pause; denser TV guide (TiviMate-style, Left → sidebar); IPTV multiview 2–4;
@@ -444,51 +320,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       swipe pages the hero; "£" → "♪" in subtitles; General Hospital 1963 first; VoiceOver no longer reads icon
       names. Still: "A Different World" search lists the 2026 show above 1987.
       Minor: title page flashes between auto-advanced episodes; CW time left uses the stream's length (director's cut).
-- [ ] **iPad regression of today's fixes (2026-10-01):** 10/11 pass (Resume, latest season, next episode, captions,
-      IPTV error ~9 s, configure-first, Remove from CW, rotation, search, 0 crashes). Open:
-      1. FIXED (sim-checked on iPad): switching tabs back to a title page no longer starts playback by itself
-         (it replayed ~2 s later; series played a wrong episode and wiped Resume). Likely in builds since 09-25.
-      2. Question: after Remove from Continue Watching the title page still says Resume (progress kept). Intended?
-- [ ] **Apple TV check of 630db1d (2026-10-01):** pass: Goede Tijden opens on Season 37, stock player advances to the
-      next episode, widescreen captions clear the scrubber, SNL 1975 first, Clear Cache readable, 0 crashes.
-      Fixed in 5298e1c (unit-tested, not yet re-checked on the sim): Resume… shows however the title was opened;
-      tvOS "Configure this add-on first." is plain text; stock player shows the real title (not "2023"); with
-      Player = Native, MP4 sources come before MKV for the next episode; seeded sims no longer get the test catalogs
-      (AIOMetadata is seeded on purpose in Debug/TestFlight). Still open:
-      3. FIXED e8b60ec (sim-checked): stock player froze after a seek (AVPlayer stuck waiting with media buffered);
-         it now plays what's buffered after 4 s.
-      5. FIXED (sim-checked): Resume… now shows on Apple TV (the button was hard-coded "Play"); the player shows
-         2015, not "2023"; on the stock player MP4 sources go first and MKVs are skipped instead of ~100 black-
-         spinner retries. When every stream fails there is now a "Playback Unavailable" alert;
-         on Native it offers "Try OpenStream Player" for that one play (sim-checked). DECIDE above still stands:
-         switch automatically instead of asking?
-- [ ] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
-      chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
-      1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,
-         though they can't play catalog titles).
-      2. HIGH: debrid placeholder clips ("Debrid failed to split torrent… only rar") play as the episode and
-         auto-advance through the season; SNL then drops out of Continue Watching.
-      3. Live tab waits ~35 s on one unreachable IPTV panel before showing other playlists.
-      4. Still open: Hail Mary title page text instead of logo; title-page margins 40/16; Settings not split in
-         landscape; text fields with only placeholders (no labels).
-      UX: player icons vanish over bright video; subtitle cue drawn 3× over the Next Episode card; title name doesn't
-      scale at accessibility sizes; live stall shows a frozen frame + Play icon; duplicate Paramount+/Peacock tiers.
-- [ ] **iPhone 27 re-run (v2, 2026-10-01 dawn):** most fixes since 09-30 hold (chapters, Quality, Also available on,
-      watch-link spam gone, row names, metadata on after seed, Stranger Things #1, audio labels + checkmark, subtitle
-      More…, menus stay open, long series open fast, encrypted backup). Still broken / new:
-      1. P0: Next Episode countdown ends → player closes, the next episode never plays (2/2); Continue Watching
-         doesn't show the next episode.
-      2. SNL S1E1/E2 still play "Saturday Night Live U K … 2026" — demotion misses "U K".
-      3. Sidecar subtitles: Windows-1251 (Russian) mojibake; UTF-16 (Portuguese) shows nothing.
-      4. AX-XXXL Dynamic Type: hero/title header collide with the nav bar, Play clipped, scrubber squeezed.
-      5. Add Service row only tappable on its label; its top-10 list is still odd; Subtitle Languages first row under
-         the nav bar; truncated-file failure shows raw engine text; Live error ".." with no Retry; search results
-         still show "AIOMetadata  | ElfHosted"; Quality sheet has no Done.
-- [ ] **P0 iOS 18: app freezes when opening a title from Discover** (2026-10-01, iOS 18.6 sim, 3/3; hero or poster
-      tap; main thread 100% in the navigation push layout, app frame AppleCatalogItemDetailView.phoneHero).
-      Search → title works. Old iOS 18 crash: 0 crashes now.
-- [ ] Watch on Netflix opened tv.apple.com when the Netflix app/id was missing — a fallback must stay on the
-      labelled service (Netflix search), not jump to Apple TV.
 - [ ] iOS 18 UX: nav icons + large "Discover" title unreadable on bright hero art (no glass on iOS 18); Streaming
       Services "Add Service" only tappable on its label; full-screen player not modal for VoiceOver; a search
       deep link with a title page open lands under it.
@@ -499,25 +330,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       match); subtitle/audio menus keep the old checkmark after picking from More…/another track; Channel Manager
       error row draws an empty capsule; captions "off" still auto-selects English on some launches; a sparse-cue
       subtitle shows nothing after a mid-stream switch; UI test testFullSubtitleMenuSelectsSpanish needs updating.
-- [ ] **Full-test bugs (Apple TV tvOS 27, v2 plan, 2026-10-01 overnight):**
-      1. HIGH: focused toggle rows (Settings › Sources › add-on, catalog toggles) and the "Playback Failed" Retry
-         button show no label — white text on the white focus pill.
-      2. Opening Rate on a title page drops focus back to Play (B22 regression).
-      3. Subtitle menu has no "More…" — non-preferred languages (Spanish) unreachable.
-      4. Audio menu shows raw labels ("ENG (ac3) (eng)") and no checkmark on the playing track.
-      5. Search "stranger things": the 2013 movie ranks first, twice (Cinemeta + TMDB not merged); 2016 series 3rd.
-      6. Truncated file reports "format OpenStream cannot play" instead of an incomplete/network error.
-      7. Skip Intro appears but Down from the video never reaches it.
-      8. Channel Manager: Package page blank and My Channels spinner endless when the IPTV panel is down.
-      9. Local playlists/channel health stored in Application Support — check tvOS purge safety (Swiftfin's #1 issue).
-      UX: subtitle cue drawn on the scrubber line; tvOS form fields have no outline and an invisible placeholder;
-      Live search "Clear Search" is red; weak focus in the guide; Top 10 "Wonka's" tile blank.
-- [ ] **Streaming services must be useful, not just a label** (2026-09-30): when no add-on/source can play a title,
-      Play becomes "Watch on <service>" (menu if several of the viewer's services have it), and it must open the
-      TITLE in that app, not just the app. Plan: TMDB/JustWatch providers for availability; per-service title IDs
-      from Wikidata (Netflix/Disney+/Hulu/Prime/Max/Apple TV by IMDb id) → universal links; fallback = service
-      search for the title. tvOS deep links are limited (search/TV app fallback). Overnight: verify which links work.
-      **Owner decision 2026-09-30: use Wikidata** for the per-service title IDs.
 - [ ] **Test every public Stremio add-on (FMHY + r/StremioAddons + community catalogue)** (2026-09-30) — list, a
       headless harness using the app's own add-on code (manifest/catalog/meta/stream/subtitles), then in-app
       spot checks of flagged + top 20; harness kept for every release.
@@ -526,7 +338,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       without a name dropped (poster-only tiles in Stremio); meta requires an exact id match (Stravo mx→tt) and rejects
       redirects; 12-catalog cap hides catalogs; manifests with no resources accepted (unconfigured AIO Metadata);
       AppleAddonURLSecretPolicy flags 14 public add-ons as secret; 100-item shelves; one subtitle track per language.
-- [ ] **Crash reported: the stravio.site add-on crashes the app** (2026-09-30, tester report).
 - [ ] **Full-test bugs (iPad iOS 27, 2026-09-30):**
       1. HIGH: after Search → open result → Play, the player's controls/tap area are squeezed into the top 458 pt
          (keyboard height left over); rotating fixes it.
@@ -548,60 +359,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       dead end; number pad has no Done; subtitle menu check indent; raw add-on names in row headers
       ("AIOMetadata  | ElfHosted"); Top 10 row pops in above Airing Today; can't clear a rating; Subtitle Languages
       first row under the nav bar; no-backdrop title is a big black area.
-- [ ] **Reset: a total wipe of the app on this device** (2026-09-29) — everything incl. downloads; the last step is
-      holding the final button for 5 seconds. Owner: device-only; tell the viewer iCloud data must be deleted manually.
-- [ ] **Rework the Live GUI — "still not great", wants something better and fresh** (2026-09-29). Start with design
-      directions for the owner to pick from before building.
-- [ ] **Test fixture: auto-import the owner's sources into every simulator/app for testing** (2026-09-29) — one private
-      file on this Mac (never in the repo or OSArchive) + a Debug-only import-at-launch hook + a seed script.
-      `scripts/dev-sources.py` (interactive; can pull every add-on from the Stremio account) writes
-      ~/Developer/openstream-build/signing/dev-sources.json. Still to build: the app hook + scripts/seed-sim.sh.
-- [ ] **Import Backup leaves every source "Needs Sign-In"** (2026-09-29, iOS 18 sim). The file was exported without a
-      passphrase, which silently drops all credentials AND the addon URL paths, so even public addons (Cinemeta,
-      OpenSubtitles) arrive broken. Fix: public addons keep working without a passphrase; exporting makes the
-      passphrase choice explicit; Needs Sign-In rows are tappable to fix.
-      **Owner direction 2026-09-29:** the backup always contains everything (passwords included), encrypted so only
-      OpenStream on their own devices can read it (key in iCloud Keychain; passphrase only for another Apple Account),
-      and restores with no Needs Sign-In. Also: the Enabled toggle on imported sources can't be turned on — fix.
-- [ ] **Hero title logos (word art) not showing — plain text title instead** (2026-09-29, iOS 18 sim screenshot:
-      "JEOPARDY!" in bold text over the backdrop).
-- [ ] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
-      an explicit Play Trailer press unmutes.
-- [ ] **Streaming services: keep the quiet "Also available on …" line only (owner chose option a), but make it
-      easier to spot** — no Play replacement, no service rows.
-- [ ] **Subtitles menu still lists every language instead of defaulting to English (asked again)**
-      (2026-09-28, build 14). The earlier fix (FEEDBACK.md "A picked language was not the only option")
-      only filters strictly when a language was explicitly picked; with device defaults and no exact match it
-      still falls back to every track. English should be the default and the only entry.
-- [ ] **Streaming services setting: an "Add" menu instead of the long list, top 10 by popularity only**
-      (2026-09-28). Owner also asks what turning one on does — toggling Netflix on showed no visible difference.
-- [ ] **When a trailer ends it should go back to the movie art** (2026-09-28, owner) — today it stays on the
-      finished video.
-- [ ] **iPhone crash: UINavigationBar layout assertion** (TestFlight crashes on builds 10 and 12, iOS 18.7, 4 of 4
-      readable reports; one tester comment "Search"). Owner shared another crash on build 14 today — not yet
-      in App Store Connect; read it when it appears.
-      **Build 14 crash read 2026-09-29** (AMKnSe6teuQS5qAin8cixtU, iPhone 15 Pro Max iOS 18.7.8, "Just scrolling the
-      app"): same assertion, reached from a layout pass while scrolling Discover, with loadTop10 running. 305af48
-      (not in build 14) removes the Discover Refresh item flip; hardening the scroll-driven hero layout too.
-      **Root cause found 2026-09-30:** tapping the tab you're already on rebuilds that tab's navigation stack
-      (`.id` bump), which iOS 18 rejects — 24/24 crashes on the iOS 18 sim, build 14 AND main. 305af48 did not fix
-      it. Fix in progress: pop to root without rebuilding; deep links too.
-- [ ] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
-      sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
-      bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
-      backup/import easy to find from the empty state. **Fix committed 66e2d46** (sync on by default, fresh
-      device pulls, keychain retry, Restore/Import buttons on No Sources) — tick once installed (build 15).
-- [ ] **iOS trailers don't play** (2026-09-28, build 14). Failures are silent by design; asked the owner whether
-      Auto-Play Video Previews is on and whether Play Trailer on a title page fails too.
-- [ ] **iOS Live TV subtitles are out of sync — they appear too late** (2026-09-28, build 14; they show up now).
-      **Fix committed 1f3f9f0** (cues follow the on-screen frame, not the scrub clock) — tick once installed.
 - [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
-- [ ] **Remove a specific title from Continue Watching** (2026-09-28; clarified 2026-09-29: per title like Netflix,
-      not hiding the whole row). Progress is kept; it comes back if played again.
-- [ ] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
-      works but isn't friendly for long moves (about 25 rows). Make it drag-and-drop (or similar) on
-      every platform, keeping a non-drag way for Apple TV and accessibility.
-
 ## Waiting on an owner decision
 
 - [ ] **UX tour 2026-10-08: four calls for you** (details in verification-artifacts/ux-tour-2026-10-08/FINDINGS.md):
@@ -626,6 +384,290 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
 
 ## Done
+- [x] **"New dialog in Live when it can't reach Live looks off and weird" (2026-10-08, build 16)** — it was an alert
+      ("Playback Failed" + advice paragraph + Close/Retry) that popped up over the whole Live tab whenever the resumed
+      channel could not start, plus a warning row with the system's error text over a working list.
+      **Fixed, waiting for your phone:** the message now sits inside the picture ("CBS is not broadcasting right now",
+      the server's name on one quiet line, Try Again); the guide under it stays usable. A list that can't refresh
+      while its saved channels show says nothing. With no channels at all: "Couldn't Load Your Channels", Try Again,
+      Open Settings (same as Discover). Screenshots: verification-artifacts/live-2026-10-08/.
+      **Closed 2026-10-09 (done, verified against git):** d744332 replaces modal Live failure alerts with in-picture errors and suppresses refresh warnings over cached channels; 016b668 refines source-specific error copy.
+- [x] **"Did not return a compatible source" on iOS (2026-10-08)** — sweep 100 random movies + episodes from
+      different eras with the owner's config on DevPlus; table in verification-artifacts/playback-sweep-2026-10-08/.
+      **Swept 2026-10-08:** 100 titles (20 per era, pre-1970 to 2020s, movies and episodes) with your config on
+      the mini's iPhone: 86 played (median 2.8 s to the picture). The "compatible source" message came up 0 times:
+      it only appears when an add-on sends nothing but torrent-only/YouTube/web links, and your Torrentio TB sent
+      real links every time. What failed: 9 not cached on TorBox yet, 4 where Torrentio had nothing at all (the app
+      wrongly told you to "add a stream source"; fixed, it now says nothing was found), 1 TorBox error video.
+      If you see the message again, note the title: it points at a different add-on or your TorBox account state.
+      Table: verification-artifacts/playback-sweep-2026-10-08/SWEEP.md.
+      **Closed 2026-10-09 (done, verified against git):** 67bd3a9 completes the 100-title sweep and corrects empty stream-result messaging; verification-artifacts/playback-sweep-2026-10-08/SWEEP.md records outcomes.
+- [x] **Apple TV has no Live and no way to import (2026-10-08)** — Apple TV only gets its setup from iCloud
+      (broken, fix in progress) and has no import. QR "send setup to Apple TV" moves first in the QR work.
+      **Import done in code (2026-10-08), waiting for your test:** the Apple TV can now take the whole setup
+      (Live/IPTV, add-ons, media servers, network shares, sign-ins, settings) straight from your iPhone over the
+      home network, no iCloud needed. See the QR line below for how to try it.
+      **Closed 2026-10-09 (done, verified against git):** 81e7c57 adds Apple setup transfer, 24517d6 adds TV Welcome/No Sources entry points, and 782bac9 fixes real-TV import storage.
+- [x] **Vision Pro: player lives inside the app window, resizable** (asked 2026-10-07; today it opens a separate
+      "Player" window). Fable audit for direction → implement → overnight visionOS e2e on Dev-Mini. Also a Mythos
+      security check and a project audit — reports in `verification-artifacts/audit-2026-10-07/`.
+      **Status 2026-10-08:** built, uncommitted. The player now opens inside the oStream window; the window keeps its
+      width, turns 16:9 (or the film's shape) and resizes uniformly while playing, and returns to its size on close.
+      visionOS e2e on Dev-Mini: 4 passed, 1 skipped (below). Waiting for commit and a check on the real Vision Pro.
+      **Closed 2026-10-09 (done, verified against git):** f91da00 commits the in-window, aspect-constrained Vision player and UI/policy tests; the note saying uncommitted is obsolete, with real-headset confirmation still useful.
+- [x] **Vision Pro: audio keeps playing after the app is closed** (owner, 2026-10-07, previous build). Being fixed with the
+      in-window player: the player stops (and saves your place) when the window closes; e2e test added.
+      **Closed 2026-10-09 (stale, verified against git):** Duplicate of #15 (Vision Pro audio after window close); f91da00 supplies the shared fix, and #15 retains the device-verification action.
+- [x] **(2026-10-06) Owner decisions:** ~~don't ship 16 yet~~ **shipped 16 on 2026-10-08** (TestFlight Internal, all four
+      platforms, f08a908; see DELIVERIES.md); **no DVR/recording** (dropped); Apple TV (Wi-Fi) and the owner's
+      iPhone (cable once → Trust) get paired with the Mac mini on 2026-10-07 — then install the waiting ad hoc build
+      (`scripts/mini.sh 'zsh scripts/release/devplus-install.sh 16 00008130-000610103443001C'`); go ahead with the Mythos Live review fixes; make an OpenStream backup of the
+      owner's own sources to import for content verification on DevPlus.
+
+      **Closed 2026-10-09 (stale, verified against git):** The no-ship hold was lifted (36165c0/75434ba); #7, #13 and #23 retain device checks, #21 retains review work, and 6be1946 supplies the backup/test tooling.
+- [x] **(2026-10-06) Your IPTV on DevPlus — app bug fixed (3614aaa), provider too slow tonight.** Opening a channel
+      started it twice (the saved lineup auto-started your last channel, then the link restarted it 4 s later), so
+      nothing ever played. Fixed and verified on DevPlus: one start, one connection. But CBS and FOX (East and West)
+      all arrived at ~40% of real time (≈3 s of video per 6.5 s) at 23:40, so none reached a picture. **Your check:**
+      does the same channel play right now in another player (VLC/TiviMate) on the same Wi-Fi? If yes, it's on us
+      (look at connection count / user agent); if no, it's the provider. The Mac mini can't reach the panel at all.
+
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #7's later provider-access diagnosis and cellular/Wi-Fi test; double-start itself was fixed in 3614aaa.
+- [x] **(2026-10-04) App Store submission, what's left.** App Store Connect is filled for all four platforms: name
+      **oStream**, subtitle, description, keywords, promo text, support/privacy/marketing URLs, copyright "2026 Raster
+      Inc", categories Entertainment + Photo & Video, content rights, age rating 16+, review notes with Apple's public
+      sample playlist (the public Jellyfin demo now needs a password, so it's no longer in the notes), and screenshots
+      for iPhone, iPad, Apple TV and Vision Pro. Validation: iPhone/iPad 0 errors. Left: **you** fill App Privacy → "Data
+      Not Collected" (website only); **"ship N"** builds the App Store (no add-ons) build and attaches it to all four
+      platforms — the iPhone listing currently has old build 10 attached, which must be swapped; Mac screenshots need
+      `sudo /usr/sbin/DevToolsSecurity -enable` first.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #6's newer submission checklist and RC report; privacy publication, no-add-on archives and Mac screenshots remain there.
+- [x] **(2026-10-04) Channel lineup back as "Complete Guide".** You asked to bring back the biggest US package preset
+      under another name. Codex is restoring it in all builds; it only organises your own IPTV playlist and defaults to
+      Everything when your playlist doesn't match it.
+      **Closed 2026-10-09 (done, verified against git):** ae9ce31 restores Complete Guide in every build with a match threshold and Everything fallback; recorded checks are in GUI-AUDIT.md's 2026-10-04 entry.
+- [x] **Apple TV regression on the overnight code (2026-10-01 morning):** fixes committed 2026-10-01 (gate 2519/303).
+      Done, checked on the sim: 3 dead IPTV panel (error + Retry by ~9 s, was ~21 s), 5 Clear Cache label, 6 search
+      exact title first (stale half-typed results re-ranked), Show Captions opens on the checked value, My Channels
+      spinner. Done, unit-tested only (needs a real-stream check on the Apple TV): 1 captions stay above the
+      scrubber/Next card on widescreen, 2 stock player advances at the end (+ Apple's "Next Episode" button in the
+      last 20 s), Resume label. 4 long series: every episode loads (Goede Tijden 7,333, was 1,000) and a soap with
+      nothing watched opens on its latest season (unit-tested; check Goede Tijden on the Apple TV).
+      **Closed 2026-10-09 (done, verified against git):** 6b9e532 fixes the regression set; 5298e1c, 0006afa and 22125ac complete Resume/title/stock-player/search behavior, with subsequent checks recorded in #44/#47.
+- [x] **Build 15 feedback (owner, real iPhone, 2026-10-03):** (1) trailers still don't play (title page hero stays
+      dark; Masters of the Universe 2026) — build 15's pre-ship test covered playback/resume, not trailers;
+      (2) title page shows two refresh-looking buttons (global refresh + trailer replay). Fixing on Codex with
+      iOS 18.6 + iOS 27 sim proof; trailers added to the pre-ship test list.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #13's later owner-phone trailer failure and fixes; 6bbf9a2/43feec0 fix earlier candidate/reveal issues and remove duplicate Refresh.
+- [x] **App Store push (owner 2026-10-02: assume the bridge works, get the app ready to publish, then move on to the
+      next app).** Running: Codex batch A (server discovery on your network, Quick Connect as the default on Apple TV,
+      Dolby Vision/HDR/SDR + audio line in player info, Release first-run leads with Media Server); work Claude
+      (App Store submission pack: description/keywords/review notes/legal demo/privacy label/screenshot list, and
+      an Apple app playbook for future apps at Code, Apps & Websites/Apps/APPLE-APP-PLAYBOOK.md). Next: downloads
+      from your media server; Release screenshots; then "ship" when you say so.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #6's submission RC/action list and #31's bridge decision; d195bc3, c9d4a12 and 075d096 implement the former preparation batches.
+- [x] **Add-on route DECIDED 2026-10-02: Cloudflare bridge (Rill, github.com/mrtxiv/Rill, MIT).** Each user deploys
+      their own free bridge to their own Cloudflare account (Deploy button), pastes add-ons into its page, and
+      OpenStream signs in to it as a Jellyfin server — works anywhere, free, Orgista never touches it, App Store app
+      has no add-on code. Remux removed from ServerPlus (container, image, data). Add-on code kept in the repo
+      behind a build switch (Debug/sideload/Mac Developer-ID on; App Store/TestFlight compiled out). DEPLOYED
+      2026-10-02 to your Cloudflare account (wrangler, no GitHub needed): https://rill.xcxhcprtpj.workers.dev
+      (D1 "rill", queue "rill-jobs", free plan) + custom domain https://stream.ourzephyr.com (personal domain on purpose — keep streaming off orgista/Raster domains). Source: ~/Developer/openstream-build/bridge/rill; update =
+      `npm run build && npm run deploy` there. YOU: open the address now and create the Rill account (first
+      visitor claims it), add your add-ons, then test in OpenStream (Add Media Server › Jellyfin).
+      Private fork: github.com/cyberbanksy/stream-bridge (push needed: `cd ~/Developer/openstream-build/bridge/rill
+      && git push -u origin HEAD:main`). Security audit (specs/codex/rill-audit.out): NOT safe as-is — malicious
+      add-on artwork (SVG) could take over the settings page; config links embed your password + add-on keys in
+      reversible form; public routes can be abused; no login throttling; its build pulls upstream code at deploy.
+      HARDENED + DEPLOYED 2026-10-02 (fork branch `hardening` b43c981): builds/deploys only our code, no auto-update,
+      owner-only helper routes, raster-only images + size caps, outbound policy, same-origin settings, login
+      throttling, revocable sessions, AES-GCM-encrypted add-on keys (key in ~/Developer/openstream-build/signing/
+      rill/RILL_DATA_KEY — back it up), third-party features off. D1 backup taken first. Remaining: DNS-rebinding
+      SSRF gap (platform limit); root still sends a harmless invalid CORS combo. YOU: sign in again, change the Rill
+      password (old one was stored reversibly), then add your add-ons. Push: `cd ~/Developer/openstream-build/bridge/
+      rill && git push -u origin hardening`.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #1's hardened-bridge re-test and AGENTS.md's newer TestFlight add-ons rule; account/password actions still belong to the owner.
+- [x] **iPad full pass 2026-10-02 (0fcee5b):** most pass (no crash with artwork, badges, Start from Beginning, subtitle
+      delay, audio language, next episode, reconnect, catch-up, search, latest season, Remove from CW). To fix:
+      HIGH: player ignores taps for long stretches — the title page behind it keeps recomputing source badges + a
+      whole-library disc check on the main thread; HIGH: iPad Live guide cells draw over the channel column;
+      Playback Unavailable shows raw engine text; Watch Live overlaps the speaker icon on the inline player; full-
+      screen catch-up has no way back except the guide. Expected: Play Disc = main title until the engine fork is
+      pushed. Rotation not testable headless.
+      **Closed 2026-10-09 (done, verified against git):** e09772c fixes iPad responsiveness, guide overlap, raw playback errors, Watch Live placement and catch-up return; DVD menu integration is separately tracked in #42.
+- [x] **Live TV DONE d018726 (sim-checked with a local fake IPTV server):** a dropped channel reconnects by itself
+      ("Reconnecting…", 3 tries), then offers "Watch on <other list>" for the same channel; tvOS guide shows 7 channels
+      × 3 hours (was ~4.5 × 2.3) with now-airing progress, Left goes to categories. Not done: catch-up from the guide
+      (needs past listings + a play action + panel time zone) and live rewind on raw TS channels (engine buffer).
+      **Closed 2026-10-09 (done, verified against git):** d018726 supplies reconnect/failover and denser guide; da014fb adds catch-up and 4abfaac adds live buffer/Start Over, completing the remaining named features.
+- [x] **App Store compliance audit (2026-10-01) — specs/app-store-compliance-audit.md:** Apple pulled every app built
+      around Stremio add-ons (Stremio Lite Jan 2026; Reelo, Omni, Fusion Aug 2026 — Reelo even after removing add-on
+      install). Survivors (Infuse, SenPlayer, VidHub, IPTVX, Swiftfin, Channels) = "player for your own content".
+      DONE a6765b2 (sim-checked): test add-ons seeded in DEBUG only (rotate the AIOMetadata keys anyway — they were
+      in earlier TestFlight builds); torrent client removed; TMDB/JustWatch credits + "we don't provide any content"
+      line; no "Stremio" in the UI (a test enforces it); About no longer links the private repo. Also caught: the
+      Release build didn't compile (fixed). Note: the TMDB logo is blue-green — their terms require it unaltered.
+      DONE 2026-10-01 (uncommitted, gates green): (3) rows keep the add-on's own catalog name (id→brand map
+      AppleCatalogServiceName deleted), Top 10 off by default; (4) lineup JSON moved to Tests/…/Fixtures/ChannelLineup
+      (Debug/test only, Release ships none → Premier Guide hidden, package defaults to Everything, playlist tvg-logo).
+      (1) add-ons + (2) downloads: owner wants to KEEP both (incl. downloading away from home) in a safe way, e.g.
+      add-ons configured online and synced. Researching: a server-side bridge (our own open-source "OpenStream
+      Bridge" or Remux) where add-ons are set up on a web page and the app just signs in to "your media server" —
+      downloads then come from your own server; plus a second build with native add-ons outside the App Store.
+      Research done (specs/addon-bridge-options.md): every removed app ran add-ons ON the device; no add-on app has
+      passed review since Aug 2026 (Vidi/All The Media haven't been re-reviewed). Recommended: App Store build = a
+      generic Jellyfin client (no add-on code) + an "OpenStream Bridge" = Remux (open source, runs on Unraid/NAS or
+      hosted) where add-ons are set up on its web page; add "download from your server" (~1 week); keep native
+      add-ons in a Mac Developer-ID build + sideload build. Orgista-hosted accounts = possible but we'd become the
+      aggregator (DMCA, user keys, bandwidth) — only as a deliberate business. DECIDE: go with the bridge plan?
+      Owner still has the live App Store listing text to check by hand.
+      Ideas picked by Claude (owner delegated), in order: engine lab with smooth seek as a gate; dead live stream →
+      restart, then same channel from another list; format badges; denser TV guide; IPTV catch-up + live pause.
+      **Closed 2026-10-09 (stale, verified against git):** Bridge choice superseded by #31, App Store preparation by #6/#30, and bundled-lineup removal by #25; native add-ons are now excluded by 9b63e9d/e855f12.
+- [x] **iPad regression of today's fixes (2026-10-01):** 10/11 pass (Resume, latest season, next episode, captions,
+      IPTV error ~9 s, configure-first, Remove from CW, rotation, search, 0 crashes). Open:
+      1. FIXED (sim-checked on iPad): switching tabs back to a title page no longer starts playback by itself
+         (it replayed ~2 s later; series played a wrong episode and wiped Resume). Likely in builds since 09-25.
+      2. Question: after Remove from Continue Watching the title page still says Resume (progress kept). Intended?
+      **Closed 2026-10-09 (done, verified against git):** c723611/b4d4793 prevent reappearance replay; 4440c97 adds Start from Beginning and preserves Resume after CW removal, resolving the report's remaining behavior question.
+- [x] **Apple TV check of 630db1d (2026-10-01):** pass: Goede Tijden opens on Season 37, stock player advances to the
+      next episode, widescreen captions clear the scrubber, SNL 1975 first, Clear Cache readable, 0 crashes.
+      Fixed in 5298e1c (unit-tested, not yet re-checked on the sim): Resume… shows however the title was opened;
+      tvOS "Configure this add-on first." is plain text; stock player shows the real title (not "2023"); with
+      Player = Native, MP4 sources come before MKV for the next episode; seeded sims no longer get the test catalogs
+      (AIOMetadata is seeded on purpose in Debug/TestFlight). Still open:
+      3. FIXED e8b60ec (sim-checked): stock player froze after a seek (AVPlayer stuck waiting with media buffered);
+         it now plays what's buffered after 4 s.
+      5. FIXED (sim-checked): Resume… now shows on Apple TV (the button was hard-coded "Play"); the player shows
+         2015, not "2023"; on the stock player MP4 sources go first and MKVs are skipped instead of ~100 black-
+         spinner retries. When every stream fails there is now a "Playback Unavailable" alert;
+         on Native it offers "Try OpenStream Player" for that one play (sim-checked). DECIDE above still stands:
+         switch automatically instead of asking?
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #27's final engine-first/hidden-Native decision (4440c97); earlier defects were fixed by 5298e1c, 0006afa and e8b60ec.
+- [x] **iPad re-run (v2, 2026-10-01 morning):** 6 of the 9 iPad bugs from 09-30 fixed; next episode, SNL 1975,
+      chapters, subtitle More… + encodings, resume after kill, rotation all pass. New / still open:
+      1. HIGH: "Watch on <service>" never shows when an IPTV or SMB source exists (hasPlaybackRoute counts them,
+         though they can't play catalog titles).
+      2. HIGH: debrid placeholder clips ("Debrid failed to split torrent… only rar") play as the episode and
+         auto-advance through the season; SNL then drops out of Continue Watching.
+      3. Live tab waits ~35 s on one unreachable IPTV panel before showing other playlists.
+      4. Still open: Hail Mary title page text instead of logo; title-page margins 40/16; Settings not split in
+         landscape; text fields with only placeholders (no labels).
+      UX: player icons vanish over bright video; subtitle cue drawn 3× over the Next Episode card; title name doesn't
+      scale at accessibility sizes; live stall shows a frozen frame + Play icon; duplicate Paramount+/Peacock tiers.
+      **Closed 2026-10-09 (done, verified against git):** 32d1283 fixes route eligibility, placeholder clips, parallel Live load, title logos/margins/labels, split Settings and player/cue/service UX; ed39ad5 completes accessibility-size handling.
+- [x] **iPhone 27 re-run (v2, 2026-10-01 dawn):** most fixes since 09-30 hold (chapters, Quality, Also available on,
+      watch-link spam gone, row names, metadata on after seed, Stranger Things #1, audio labels + checkmark, subtitle
+      More…, menus stay open, long series open fast, encrypted backup). Still broken / new:
+      1. P0: Next Episode countdown ends → player closes, the next episode never plays (2/2); Continue Watching
+         doesn't show the next episode.
+      2. SNL S1E1/E2 still play "Saturday Night Live U K … 2026" — demotion misses "U K".
+      3. Sidecar subtitles: Windows-1251 (Russian) mojibake; UTF-16 (Portuguese) shows nothing.
+      4. AX-XXXL Dynamic Type: hero/title header collide with the nav bar, Play clipped, scrubber squeezed.
+      5. Add Service row only tappable on its label; its top-10 list is still odd; Subtitle Languages first row under
+         the nav bar; truncated-file failure shows raw engine text; Live error ".." with no Retry; search results
+         still show "AIOMetadata  | ElfHosted"; Quality sheet has no Done.
+      **Closed 2026-10-09 (done, verified against git):** ed39ad5 fixes next-episode handoff, SNL country/year matching, subtitle encodings, accessibility layouts and small UX; tests include AppleNextEpisodeHandoffTests and AppleIPhone27SmallFixesTests.
+- [x] **P0 iOS 18: app freezes when opening a title from Discover** (2026-10-01, iOS 18.6 sim, 3/3; hero or poster
+      tap; main thread 100% in the navigation push layout, app frame AppleCatalogItemDetailView.phoneHero).
+      Search → title works. Old iOS 18 crash: 0 crashes now.
+      **Closed 2026-10-09 (done, verified against git):** ec61260 moves episode content out of the changing lazy push layout; commit records 6/6 iOS 18 and 2/2 iOS 27 title-open checks.
+- [x] Watch on Netflix opened tv.apple.com when the Netflix app/id was missing — a fallback must stay on the
+      labelled service (Netflix search), not jump to Apple TV.
+      **Closed 2026-10-09 (done, verified against git):** ec61260 keeps fallback on the selected streaming service; only Apple TV falls back to its own site.
+- [x] **Full-test bugs (Apple TV tvOS 27, v2 plan, 2026-10-01 overnight):**
+      1. HIGH: focused toggle rows (Settings › Sources › add-on, catalog toggles) and the "Playback Failed" Retry
+         button show no label — white text on the white focus pill.
+      2. Opening Rate on a title page drops focus back to Play (B22 regression).
+      3. Subtitle menu has no "More…" — non-preferred languages (Spanish) unreachable.
+      4. Audio menu shows raw labels ("ENG (ac3) (eng)") and no checkmark on the playing track.
+      5. Search "stranger things": the 2013 movie ranks first, twice (Cinemeta + TMDB not merged); 2016 series 3rd.
+      6. Truncated file reports "format OpenStream cannot play" instead of an incomplete/network error.
+      7. Skip Intro appears but Down from the video never reaches it.
+      8. Channel Manager: Package page blank and My Channels spinner endless when the IPTV panel is down.
+      9. Local playlists/channel health stored in Application Support — check tvOS purge safety (Swiftfin's #1 issue).
+      UX: subtitle cue drawn on the scrubber line; tvOS form fields have no outline and an invisible placeholder;
+      Live search "Clear Search" is red; weak focus in the guide; Top 10 "Wonka's" tile blank.
+      **Closed 2026-10-09 (done, verified against git):** 4fd1ac5 fixes the full TV batch, a695c35 fixes choice pages/Top 10, 3b3494f proves intro focus, and 782bac9 completes actual-device storage protection.
+- [x] **Streaming services must be useful, not just a label** (2026-09-30): when no add-on/source can play a title,
+      Play becomes "Watch on <service>" (menu if several of the viewer's services have it), and it must open the
+      TITLE in that app, not just the app. Plan: TMDB/JustWatch providers for availability; per-service title IDs
+      from Wikidata (Netflix/Disney+/Hulu/Prime/Max/Apple TV by IMDb id) → universal links; fallback = service
+      search for the title. tvOS deep links are limited (search/TV app fallback). Overnight: verify which links work.
+      **Owner decision 2026-09-30: use Wikidata** for the per-service title IDs.
+      **Closed 2026-10-09 (done, verified against git):** 67210b7 implements provider actions and Wikidata title IDs; ec61260 fixes service fallback and 32d1283 fixes in-app route eligibility; installed-service app checks remain useful owner validation.
+- [x] **Crash reported: the stravio.site add-on crashes the app** (2026-09-30, tester report).
+      **Closed 2026-10-09 (done, verified against git):** fa19152 hardens Stravo hero rotation, duplicate headers and runtime overflow with fixture tests; fd858aa/630db1d complete tolerant metadata handling.
+- [x] **Reset: a total wipe of the app on this device** (2026-09-29) — everything incl. downloads; the last step is
+      holding the final button for 5 seconds. Owner: device-only; tell the viewer iCloud data must be deleted manually.
+      **Closed 2026-10-09 (done, verified against git):** b4a4977 implements full device reset and five-second hold (AppleResetView.swift:87); f907e54 returns to first run without exiting, preserving device-only semantics.
+- [x] **Rework the Live GUI — "still not great", wants something better and fresh** (2026-09-29). Start with design
+      directions for the owner to pick from before building.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #3's explicit 2026-10-09 Live overhaul and its implemented fixes (6fafa72, 77d88b3, c1faea9, 80dd79c).
+- [x] **Test fixture: auto-import the owner's sources into every simulator/app for testing** (2026-09-29) — one private
+      file on this Mac (never in the repo or OSArchive) + a Debug-only import-at-launch hook + a seed script.
+      `scripts/dev-sources.py` (interactive; can pull every add-on from the Stremio account) writes
+      ~/Developer/openstream-build/signing/dev-sources.json. Still to build: the app hook + scripts/seed-sim.sh.
+      **Closed 2026-10-09 (done, verified against git):** e28039c supplies private-source builder; f907e54 adds Debug launch import and scripts/seed-sim.sh; OpenStreamRootView.swift:440 wires the import hook.
+- [x] **Import Backup leaves every source "Needs Sign-In"** (2026-09-29, iOS 18 sim). The file was exported without a
+      passphrase, which silently drops all credentials AND the addon URL paths, so even public addons (Cinemeta,
+      OpenSubtitles) arrive broken. Fix: public addons keep working without a passphrase; exporting makes the
+      passphrase choice explicit; Needs Sign-In rows are tappable to fix.
+      **Owner direction 2026-09-29:** the backup always contains everything (passwords included), encrypted so only
+      OpenStream on their own devices can read it (key in iCloud Keychain; passphrase only for another Apple Account),
+      and restores with no Needs Sign-In. Also: the Enabled toggle on imported sources can't be turned on — fix.
+      **Closed 2026-10-09 (done, verified against git):** b4a4977 implements full encrypted backups with iCloud Keychain/passphrase support and restored-source sign-in/enabling; AppleBackupRestoreTests covers round trips.
+- [x] **Hero title logos (word art) not showing — plain text title instead** (2026-09-29, iOS 18 sim screenshot:
+      "JEOPARDY!" in bold text over the backdrop).
+      **Closed 2026-10-09 (done, verified against git):** 05b9000 retries/fetches missing hero wordmarks; 32d1283 supplies title-page logo fallback; b354bd1 settles portrait art before drawing.
+- [x] **Play Trailer tap turns sound on** (owner decision 2026-09-28: yes). Autoplaying hero trailers stay muted;
+      an explicit Play Trailer press unmutes.
+      **Closed 2026-10-09 (done, verified against git):** c445b33 unmutes explicit Play Trailer; a8c0855 retains muted autoplay with a sound control and verifies explicit sound intent.
+- [x] **Streaming services: keep the quiet "Also available on …" line only (owner chose option a), but make it
+      easier to spot** — no Play replacement, no service rows.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #55's 2026-09-30 owner decision to offer Watch on service with Wikidata title deep links (67210b7).
+- [x] **Subtitles menu still lists every language instead of defaulting to English (asked again)**
+      (2026-09-28, build 14). The earlier fix (FEEDBACK.md "A picked language was not the only option")
+      only filters strictly when a language was explicitly picked; with device defaults and no exact match it
+      still falls back to every track. English should be the default and the only entry.
+      **Closed 2026-10-09 (done, verified against git):** d0eda15 removes fallback-to-every-track and defaults to English; 4fd1ac5 retains preferred-language first-level choices with an explicit More menu.
+- [x] **Streaming services setting: an "Add" menu instead of the long list, top 10 by popularity only**
+      (2026-09-28). Owner also asks what turning one on does — toggling Netflix on showed no visible difference.
+      **Closed 2026-10-09 (done, verified against git):** b6fbea7 adds Add Service/top-10; ed39ad5 excludes stores/aggregators and improves ranking/taps, 32d1283 deduplicates tiers, and 67210b7 supplies visible Watch on behavior.
+- [x] **When a trailer ends it should go back to the movie art** (2026-09-28, owner) — today it stays on the
+      finished video.
+      **Closed 2026-10-09 (done, verified against git):** 021ec54 returns completed trailers to artwork; later 6647eb3 stabilizes end/cap behavior and traces return reasons.
+- [x] **iPhone crash: UINavigationBar layout assertion** (TestFlight crashes on builds 10 and 12, iOS 18.7, 4 of 4
+      readable reports; one tester comment "Search"). Owner shared another crash on build 14 today — not yet
+      in App Store Connect; read it when it appears.
+      **Build 14 crash read 2026-09-29** (AMKnSe6teuQS5qAin8cixtU, iPhone 15 Pro Max iOS 18.7.8, "Just scrolling the
+      app"): same assertion, reached from a layout pass while scrolling Discover, with loadTop10 running. 305af48
+      (not in build 14) removes the Discover Refresh item flip; hardening the scroll-driven hero layout too.
+      **Root cause found 2026-09-30:** tapping the tab you're already on rebuilds that tab's navigation stack
+      (`.id` bump), which iOS 18 rejects — 24/24 crashes on the iOS 18 sim, build 14 AND main. 305af48 did not fix
+      it. Fix in progress: pop to root without rebuilding; deep links too.
+      **Closed 2026-10-09 (done, verified against git):** be84a94 replaces tab-reselect/deep-link NavigationStack rebuilds with path updates, fixing the reproduced iOS 18 assertion; 305af48 alone was insufficient.
+- [x] **iCloud sync / backup on a new device (asked again)** (2026-09-28, iPad, build 14): a fresh iPad with no
+      sources gets nothing from iCloud, so there's no content, and there's no visible backup/import to
+      bring the setup over. Make iCloud sync switchable on and working on a fresh install, and make
+      backup/import easy to find from the empty state. **Fix committed 66e2d46** (sync on by default, fresh
+      device pulls, keychain retry, Restore/Import buttons on No Sources) — tick once installed (build 15).
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #12's newer real-device sync regression/test; 66e2d46 implemented this earlier fresh-device/default-on/Restore-Import work, and f20c0e0 adds missing publication.
+- [x] **iOS trailers don't play** (2026-09-28, build 14). Failures are silent by design; asked the owner whether
+      Auto-Play Video Previews is on and whether Play Trailer on a title page fails too.
+      **Closed 2026-10-09 (stale, verified against git):** Superseded by #28 and then #13's later real-phone trailer failures; 6bbf9a2/43feec0/6647eb3 implement successive fixes, with #13 retaining owner re-test.
+- [x] **iOS Live TV subtitles are out of sync — they appear too late** (2026-09-28, build 14; they show up now).
+      **Fix committed 1f3f9f0** (cues follow the on-screen frame, not the scrub clock) — tick once installed.
+      **Closed 2026-10-09 (done, verified against git):** 1f3f9f0 paces captions from presented source frames instead of the scrub clock, with cue/overlay regression tests; new-build owner listening remains useful validation.
+- [x] **Remove a specific title from Continue Watching** (2026-09-28; clarified 2026-09-29: per title like Netflix,
+      not hiding the whole row). Progress is kept; it comes back if played again.
+      **Closed 2026-10-09 (done, verified against git):** 77a0f5a adds per-title CW removal with progress retained and return-after-play policy; 4440c97 adds the complementary Start from Beginning choice.
+- [x] **Discover Rows reorder is hard to use** (2026-09-28, Mac screenshot): the list of ↑/↓ chevrons
+      works but isn't friendly for long moves (about 25 rows). Make it drag-and-drop (or similar) on
+      every platform, keeping a non-drag way for Apple TV and accessibility.
+
+
+      **Closed 2026-10-09 (done, verified against git):** 77a0f5a implements drag reorder plus TV pick-up/carry/put-down and accessible non-drag moves, replacing the earlier chevron-only experience.
 
 - [x] **Refresh spinner too big / poor UX** — the refresh arrow now stays the same size and turns
       while the tab reloads (iPhone, iPad, Mac, Vision Pro) — e4b8dee, installed 2026-09-26.
