@@ -54,7 +54,9 @@
 
         <!-- Googlebook / desktop windowing: freely resizable (window changes
              are handled in place via configChanges, no restart), no
-             orientation lock, picture-in-picture for playing video. -->
+             orientation lock, picture-in-picture for playing video, several
+             windows at once (taskbar "New window", Ctrl+N), and "Open with"
+             for local video and audio files. -->
         <activity
             android:name=".NativeAppActivity"
             android:colorMode="wideColorGamut"
@@ -69,6 +71,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <property
+                android:name="android.window.PROPERTY_SUPPORTS_MULTI_INSTANCE_SYSTEM_UI"
+                android:value="true" />
         </activity>
         <service
             android:name=".offline.OpenStreamDownloadService"

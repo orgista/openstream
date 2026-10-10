@@ -4,11 +4,16 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.PictureInPictureParams
 import android.app.UiModeManager
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.view.DragAndDropPermissions
+import android.view.DragEvent
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
@@ -19,9 +24,13 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
+import com.orgista.openstream.ui.LocalMedia
+import com.orgista.openstream.ui.LocalMediaDropZone
+import com.orgista.openstream.ui.LocalMediaPolicy
 import com.orgista.openstream.ui.OpenStreamApp
 import com.orgista.openstream.ui.OpenStreamLaunchGate
 import com.orgista.openstream.ui.OpenStreamTheme
@@ -42,6 +51,8 @@ import com.orgista.openstream.xr.XrRuntimeProbe
  * On Googlebook/desktop windowing the window is a normal resizable desktop
  * window: no orientation lock, system bars left alone, keyboard shortcuts,
  * full-screen toggle and picture-in-picture come from [PlaybackWindowHost].
+ * Each window is its own instance ("New window", Ctrl+N), and local video or
+ * audio plays when it is opened with OpenStream, picked (Ctrl+O) or dropped.
  */
 class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
     private val pictureInPictureState = mutableStateOf(false)
@@ -66,6 +77,14 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
         getSystemService(UiModeManager::class.java)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
+    private val localMediaState = mutableStateOf<LocalMedia?>(null)
+    override val pendingLocalMedia: State<LocalMedia?> get() = localMediaState
+    private var dropPermissions: DragAndDropPermissions? = null
+    private var escapeBackInFlight = false
+    private val localMediaPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { offerLocalMedia(it, "picked") }
+    }
+
     // TV keeps its existing behavior (Home stops playback); phones, tablets
     // and desktops shrink a playing video into picture-in-picture instead.
     private val pictureInPictureAllowed: Boolean by lazy {
@@ -81,13 +100,78 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
         @Suppress("DEPRECATION")
         run { window.navigationBarColor = android.graphics.Color.TRANSPARENT }
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+        if (savedInstanceState == null) handleViewIntent(intent)
         setContent {
             OpenStreamTheme {
-                OpenStreamLaunchGate {
-                    OpenStreamApp(onExit = { finish() })
+                LocalMediaDropZone(enabled = !television, onDrop = ::acceptDrop) {
+                    OpenStreamLaunchGate {
+                        // Back from Discover leaves the app; Esc never closes the window.
+                        OpenStreamApp(onExit = { if (!escapeBackInFlight) finish() })
+                    }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleViewIntent(intent)
+    }
+
+    // A file manager's "Open with OpenStream" for a video or audio file.
+    private fun handleViewIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        val type = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull()
+        if (!LocalMediaPolicy.accepts(uri.scheme, type)) return
+        offerLocalMedia(uri, "opened")
+    }
+
+    private fun acceptDrop(event: DragEvent): Boolean {
+        val clip = event.clipData ?: return false
+        val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri } ?: return false
+        // Cross-app drops need the drag's read grant; it lasts until the next drop.
+        dropPermissions?.release()
+        dropPermissions = requestDragAndDropPermissions(event)
+        offerLocalMedia(uri, "dropped")
+        return true
+    }
+
+    private fun offerLocalMedia(uri: Uri, origin: String) {
+        val name = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')
+        localMediaState.value = LocalMedia(uri.toString(), name?.takeIf { it.isNotBlank() } ?: "Local file")
+        // No file name or path in the log.
+        Logs.event("local media $origin")
+    }
+
+    override fun consumeLocalMedia() {
+        localMediaState.value = null
+    }
+
+    override fun pickLocalMedia() {
+        if (television) return
+        runCatching { localMediaPicker.launch(arrayOf("video/*", "audio/*")) }
+            .onFailure { Logs.warn("file picker unavailable: ${it.message}") }
+    }
+
+    override val canOpenNewWindow: Boolean get() = desktopWindowing
+
+    override fun openNewWindow() {
+        if (!canOpenNewWindow) return
+        runCatching {
+            startActivity(
+                Intent(this, NativeAppActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT,
+                ),
+            )
+        }.onSuccess { Logs.event("new window opened") }
+            .onFailure { Logs.warn("new window unavailable: ${it.message}") }
     }
 
     private fun applyDeviceOrientation() {
@@ -136,7 +220,8 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
-                val handled = playerKeyHandler?.invoke(event) == true || appKeyHandler?.invoke(event) == true
+                val handled = windowShortcut(event) || playerKeyHandler?.invoke(event) == true ||
+                    appKeyHandler?.invoke(event) == true
                 if (handled) {
                     swallowedKeyUps += event.keyCode
                     return true
@@ -150,10 +235,27 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
         if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.action == KeyEvent.ACTION_UP &&
             !event.isCanceled && event.hasNoModifiers()
         ) {
-            onBackPressedDispatcher.onBackPressed()
+            escapeBackInFlight = true
+            try {
+                onBackPressedDispatcher.onBackPressed()
+            } finally {
+                escapeBackInFlight = false
+            }
             return true
         }
         return false
+    }
+
+    // Ctrl+N new window, Ctrl+O open a file: work on every screen, player included.
+    private fun windowShortcut(event: KeyEvent): Boolean {
+        if (television || !event.isCtrlPressed || event.isAltPressed || event.isMetaPressed || event.isShiftPressed) {
+            return false
+        }
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_N -> canOpenNewWindow.also { if (it) openNewWindow() }
+            KeyEvent.KEYCODE_O -> true.also { pickLocalMedia() }
+            else -> false
+        }
     }
 
     // Meta+/ (Keyboard Shortcuts Helper) lists what OpenStream understands.
@@ -163,14 +265,16 @@ class NativeAppActivity : ComponentActivity(), PlaybackWindowHost {
         val ctrl = KeyEvent.META_CTRL_ON
         data += KeyboardShortcutGroup(
             "OpenStream",
-            listOf(
-                shortcut("Search", KeyEvent.KEYCODE_F, ctrl),
-                shortcut("Discover", KeyEvent.KEYCODE_1, ctrl),
-                shortcut("Library", KeyEvent.KEYCODE_2, ctrl),
-                shortcut("Live TV", KeyEvent.KEYCODE_3, ctrl),
-                shortcut("Settings", KeyEvent.KEYCODE_COMMA, ctrl),
-                shortcut("Back / close", KeyEvent.KEYCODE_ESCAPE),
-            ),
+            buildList {
+                add(shortcut("Search", KeyEvent.KEYCODE_F, ctrl))
+                add(shortcut("Discover", KeyEvent.KEYCODE_1, ctrl))
+                add(shortcut("Library", KeyEvent.KEYCODE_2, ctrl))
+                add(shortcut("Live TV", KeyEvent.KEYCODE_3, ctrl))
+                add(shortcut("Settings", KeyEvent.KEYCODE_COMMA, ctrl))
+                add(shortcut("Open a video or audio file", KeyEvent.KEYCODE_O, ctrl))
+                if (canOpenNewWindow) add(shortcut("New window", KeyEvent.KEYCODE_N, ctrl))
+                add(shortcut("Back / close", KeyEvent.KEYCODE_ESCAPE))
+            },
         )
         data += KeyboardShortcutGroup(
             "Player",

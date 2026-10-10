@@ -1012,6 +1012,19 @@ fun OpenStreamApp(onExit: () -> Unit) {
         onDispose { windowHost?.setAppKeyHandler(null) }
     }
 
+    // A local file opened with OpenStream, picked (Ctrl+O) or dropped on the window.
+    val localMedia = windowHost?.pendingLocalMedia?.value
+    LaunchedEffect(localMedia) {
+        val media = localMedia ?: return@LaunchedEffect
+        windowHost.consumeLocalMedia()
+        if (kidsMode) {
+            Logs.event("local file blocked by kids policy")
+            Toast.makeText(context, "Not available in Kids Mode", Toast.LENGTH_SHORT).show()
+        } else {
+            navigate(Screen.Player(LocalMediaPolicy.request(media)))
+        }
+    }
+
     val openItem: (MediaItem) -> Unit = { item ->
         val youtubeVideoId = YoutubeSourcePolicy.videoId(item)
         if (youtubeVideoId != null) {
@@ -1642,6 +1655,43 @@ private fun TopNav(
                                 onNavigate(screen)
                             },
                         )
+                    }
+                    if (windowHost != null && !television) {
+                        HorizontalDivider(color = OpenStreamColors.Border)
+                        DropdownMenuItem(
+                            text = { Text("Open file…", color = OpenStreamColors.Text) },
+                            leadingIcon = {
+                                Icon(
+                                    AppIcons.Folder,
+                                    contentDescription = null,
+                                    tint = OpenStreamColors.TextSoft,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                            trailingIcon = { Text("Ctrl+O", color = OpenStreamColors.Muted, fontSize = 12.sp) },
+                            onClick = {
+                                menuOpen = false
+                                windowHost.pickLocalMedia()
+                            },
+                        )
+                        if (windowHost.canOpenNewWindow) {
+                            DropdownMenuItem(
+                                text = { Text("New window", color = OpenStreamColors.Text) },
+                                leadingIcon = {
+                                    Icon(
+                                        AppIcons.Add,
+                                        contentDescription = null,
+                                        tint = OpenStreamColors.TextSoft,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                },
+                                trailingIcon = { Text("Ctrl+N", color = OpenStreamColors.Muted, fontSize = 12.sp) },
+                                onClick = {
+                                    menuOpen = false
+                                    windowHost.openNewWindow()
+                                },
+                            )
+                        }
                     }
                     if (hasLibraries) {
                         DropdownMenuItem(

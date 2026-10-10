@@ -32,7 +32,21 @@ interface PlaybackWindowHost {
     fun enterPictureInPicture(): Boolean
 
     fun toggleFullscreenWindow()
+
+    /** Desktop windowing can open OpenStream in a second, independent window. */
+    val canOpenNewWindow: Boolean
+
+    fun openNewWindow()
+
+    /** A local video/audio file to play: opened with OpenStream, picked, or dropped. */
+    val pendingLocalMedia: State<LocalMedia?>
+
+    fun consumeLocalMedia()
+
+    /** System file picker for local video and audio (Ctrl+O). */
+    fun pickLocalMedia()
 }
+
 
 fun Context.playbackWindowHost(): PlaybackWindowHost? {
     var current: Context? = this
