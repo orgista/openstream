@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Apple TV Top Shelf shows no content, only a blurry stretched logo (owner 2026-10-10).** Cause: publishing was
+      off by default (Settings › Privacy › Show in Apple services), and a setup import wrote that off value onto the TV,
+      so the extension had nothing and tvOS fell back to the static image. Fixed: on by default under a new v2 key (old
+      off values ignored); regression test, 3027 tests green; fresh tvOS sim install now writes the shelf file unprompted.
+      **YOU:** after the next build, open the app once on the TV, then hover it on the top row: Continue Watching / Top
+      Picks tiles should appear.
 - [ ] **Googlebook version of OpenStream + Google Play "Made for desktop" badge (owner 2026-10-09).** Build the
       large-screen/desktop variant (same Play app, mobile AAB), e2e on the Googlebook AVD on Dev-Mini (keyboard, mouse,
       resize, multi-window, playback), and meet every badge requirement. Spec: specs/googlebook-2026-10-09.md; work Claude

@@ -437,3 +437,17 @@ func devSeedTMDBKeyTurnsMetadataOn() {
     try store.restoreConfiguration(backup)
     #expect(store.liveChannelPackage == .completeGuide)
 }
+
+/// Owner 2026-10-10: the Apple TV shelf showed only the static image because
+/// publishing was off by default and a setup import copied that off value.
+@MainActor @Test func topShelfIsOnByDefaultAndIgnoresTheOldOffValue() {
+    let defaults = makeIsolatedDefaults()
+    defaults.set(false, forKey: "openstream.settings.privacy.topShelf.v1")
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    #expect(store.topShelfEnabled)
+    #expect(AppleSettingsStore.topShelfEnabled(in: defaults))
+
+    store.showInAppleServices = false
+    #expect(!AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).topShelfEnabled)
+    #expect(!AppleSettingsStore.topShelfEnabled(in: defaults))
+}

@@ -15,7 +15,7 @@ public struct OpenStreamChannelQuery: EntityStringQuery {
     public init() {}
 
     private func available() -> [OpenStreamChannelEntity] {
-        guard UserDefaults.standard.bool(forKey: "openstream.settings.privacy.topShelf.v1"),
+        guard AppleSettingsStore.topShelfEnabled(),
               let snapshot = AppleTopShelfSnapshotReader().read() else { return [] }
         var seen: Set<String> = []
         return (snapshot.favoriteChannels + snapshot.recentChannels).compactMap { item in

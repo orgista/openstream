@@ -542,6 +542,11 @@ public final class AppleSettingsStore {
         didSet { defaults.set(diagnosticLoggingEnabled, forKey: AppleInteractionTrace.preferenceKey) }
     }
 
+    /// Top Shelf, widgets and channel suggestions; the data stays on the device.
+    public nonisolated static func topShelfEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: DefaultsKey.topShelfEnabled) as? Bool ?? true
+    }
+
     public var showInAppleServices: Bool {
         get { systemSearchEnabled || topShelfEnabled }
         set {
@@ -703,7 +708,7 @@ public final class AppleSettingsStore {
         deleteAfterWatching = defaults.bool(forKey: DefaultsKey.deleteAfterWatching)
         systemSearchEnabled = defaults.bool(forKey: DefaultsKey.systemSearchEnabled)
         diagnosticLoggingEnabled = AppleInteractionTrace.isEnabled
-        topShelfEnabled = defaults.bool(forKey: DefaultsKey.topShelfEnabled)
+        topShelfEnabled = Self.topShelfEnabled(in: defaults)
         liveTVEnabled = defaults.object(forKey: DefaultsKey.liveTVEnabled) as? Bool ?? true
         discoverEnabled = defaults.object(forKey: DefaultsKey.discoverEnabled) as? Bool ?? true
         libraryEnabled = defaults.object(forKey: DefaultsKey.libraryEnabled) as? Bool ?? true
@@ -968,7 +973,10 @@ public final class AppleSettingsStore {
         static let autoMuteTrailer = "openstream.settings.trailer.autoMute.v1"
         static let deleteAfterWatching = "openstream.settings.downloads.deleteAfterWatching.v1"
         static let systemSearchEnabled = "openstream.settings.privacy.systemSearch.v1"
-        static let topShelfEnabled = "openstream.settings.privacy.topShelf.v1"
+        // v2 (owner 2026-10-10): on by default. v1 was off by default, and a
+        // setup import wrote that off value to every device, so the shelf
+        // showed only the static image; v1 values are ignored on purpose.
+        static let topShelfEnabled = "openstream.settings.privacy.topShelf.v2"
         static let liveTVEnabled = "openstream.settings.live.enabled.v1"
         static let discoverEnabled = "openstream.settings.discover.enabled.v1"
         static let libraryEnabled = "openstream.settings.library.enabled.v1"
