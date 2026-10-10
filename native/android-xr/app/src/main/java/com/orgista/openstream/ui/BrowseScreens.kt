@@ -26,6 +26,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -137,7 +146,8 @@ fun DiscoverScreen(
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    val discoverListState = rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().verticalScrollbar(discoverListState), state = discoverListState) {
         item(key = "featured") {
             Box(Modifier.fillMaxWidth().height(heroHeight).background(Color.Black)) {
                 CinematicArtwork(featured, Modifier.fillMaxSize())
@@ -310,10 +320,13 @@ fun LibraryScreen(
         heightDp = configuration.screenHeightDp.toFloat(),
     )
 
+    val libraryGridState = rememberLazyGridState()
     LazyVerticalGrid(
+        state = libraryGridState,
         modifier = Modifier
             .fillMaxSize()
             .background(OpenStreamColors.Canvas)
+            .verticalScrollbar(libraryGridState)
             .padding(horizontal = layout.horizontalPaddingDp.dp),
         columns = if (layout.gridColumns > 0) GridCells.Fixed(layout.gridColumns) else GridCells.Adaptive(minSize = 184.dp),
         horizontalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),
@@ -458,11 +471,40 @@ fun SearchScreen(
         heightDp = configuration.screenHeightDp.toFloat(),
     )
 
+    // Hardware keyboards (Googlebook, tablets with a keyboard) start typing
+    // straight away; Esc clears the query before it falls through to Back.
+    val searchFocus = remember { FocusRequester() }
+    val context = LocalContext.current
+    val hardwareKeyboard = configuration.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+        !context.isTelevision()
+    LaunchedEffect(hardwareKeyboard) {
+        if (hardwareKeyboard) runCatching { searchFocus.requestFocus() }
+    }
+    var escapeConsumed by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize().padding(horizontal = layout.horizontalPaddingDp.dp)) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+                .focusRequester(searchFocus)
+                .onPreviewKeyEvent { event ->
+                    if (event.key != Key.Escape) return@onPreviewKeyEvent false
+                    when {
+                        event.type == KeyEventType.KeyDown && query.isNotEmpty() -> {
+                            query = ""
+                            escapeConsumed = true
+                            true
+                        }
+                        event.type == KeyEventType.KeyUp && escapeConsumed -> {
+                            escapeConsumed = false
+                            true
+                        }
+                        else -> false
+                    }
+                },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             label = { Text("Search titles") },
@@ -503,7 +545,10 @@ fun SearchScreen(
                 fontSize = 13.sp,
             )
         }
+        val resultsGridState = rememberLazyGridState()
         LazyVerticalGrid(
+            state = resultsGridState,
+            modifier = Modifier.verticalScrollbar(resultsGridState),
             columns = if (layout.gridColumns > 0) GridCells.Fixed(layout.gridColumns) else GridCells.Adaptive(minSize = 184.dp),
             horizontalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),
             verticalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),

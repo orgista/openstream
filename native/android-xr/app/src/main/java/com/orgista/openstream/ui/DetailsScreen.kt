@@ -909,7 +909,10 @@ fun DetailsScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(OpenStreamColors.Canvas).verticalScroll(rememberScrollState())) {
+    val detailsScroll = rememberScrollState()
+    Column(
+        Modifier.fillMaxSize().background(OpenStreamColors.Canvas).verticalScrollbar(detailsScroll).verticalScroll(detailsScroll),
+    ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val heroHeight = ArtworkPresentationPolicy.stageHeightDp(
                 widthDp = maxWidth.value,

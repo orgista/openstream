@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -56,7 +60,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
+import androidx.media3.session.MediaSession
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -81,6 +88,8 @@ import com.orgista.openstream.player.PlaybackRouteRetryPolicy
 import com.orgista.openstream.player.PlaybackRoutePresentation
 import com.orgista.openstream.player.PlaybackTrackSignal
 import com.orgista.openstream.player.PlayerLoadingUiPolicy
+import com.orgista.openstream.player.PlayerKeyAction
+import com.orgista.openstream.player.PlayerKeyboardPolicy
 import com.orgista.openstream.player.LivePlayerGesturePolicy
 import com.orgista.openstream.player.LiveEdgeSeekDecision
 import com.orgista.openstream.player.LiveEdgeSeekPolicy
@@ -845,6 +854,74 @@ fun PlayerScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Desktop and picture-in-picture integration. The media session makes
+    // hardware media keys and the PiP window's play/pause control work.
+    val windowHost = remember(context) { context.playbackWindowHost() }
+    val inPictureInPicture = windowHost?.inPictureInPicture?.value == true
+    // Window mode changes arrive as configuration changes (no restart).
+    val fullscreenWindow = remember(LocalConfiguration.current) { windowHost?.fullscreenWindow == true }
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+    DisposableEffect(player) {
+        val session = runCatching {
+            MediaSession.Builder(context, player).setId("openstream-${System.identityHashCode(player)}").build()
+        }.onFailure { Logs.warn("media session unavailable: ${it.message}") }.getOrNull()
+        val windowListener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                windowHost?.updatePlayback(isPlaying, player.videoSize.width, player.videoSize.height)
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                windowHost?.updatePlayback(player.isPlaying, videoSize.width, videoSize.height)
+            }
+        }
+        player.addListener(windowListener)
+        windowHost?.setPlayerKeyHandler { event ->
+            val fullKeyboard = event.device?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
+            val modified = event.isCtrlPressed || event.isAltPressed || event.isMetaPressed
+            val fullscreen = windowHost.desktopWindowing && windowHost.fullscreenWindow
+            when (PlayerKeyboardPolicy.action(event.keyCode, fullKeyboard, modified, fullscreen)) {
+                PlayerKeyAction.TOGGLE_PLAY -> Util.handlePlayPauseButtonAction(player)
+                PlayerKeyAction.PLAY -> Util.handlePlayButtonAction(player)
+                PlayerKeyAction.PAUSE -> Util.handlePauseButtonAction(player)
+                PlayerKeyAction.SEEK_BACK, PlayerKeyAction.SEEK_FORWARD -> {
+                    if (!player.isCurrentMediaItemSeekable) return@setPlayerKeyHandler false
+                    val forward = event.keyCode in setOf(
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_L,
+                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                    )
+                    player.seekTo(PlayerKeyboardPolicy.seekTarget(player.currentPosition, player.duration, forward))
+                    playerViewRef?.showController()
+                    true
+                }
+                PlayerKeyAction.TOGGLE_MUTE -> {
+                    player.volume = if (player.volume > 0f) 0f else 1f
+                    Logs.event("player ${if (player.volume == 0f) "muted" else "unmuted"} (keyboard)")
+                    true
+                }
+                PlayerKeyAction.TOGGLE_FULLSCREEN, PlayerKeyAction.EXIT_FULLSCREEN -> {
+                    if (!windowHost.desktopWindowing) return@setPlayerKeyHandler false
+                    windowHost.toggleFullscreenWindow()
+                    true
+                }
+                PlayerKeyAction.PICTURE_IN_PICTURE -> windowHost.enterPictureInPicture()
+                PlayerKeyAction.NONE -> false
+            }
+        }
+        onDispose {
+            windowHost?.setPlayerKeyHandler(null)
+            windowHost?.updatePlayback(false, 0, 0)
+            player.removeListener(windowListener)
+            session?.release()
+        }
+    }
+    LaunchedEffect(inPictureInPicture) {
+        if (inPictureInPicture) {
+            playerViewRef?.hideController()
+            chromeVisible = false
+        }
+    }
+
     var swipeStartNearBottom by remember { mutableStateOf(false) }
     var upwardDrag by remember { mutableFloatStateOf(0f) }
     var exitTriggered by remember { mutableStateOf(false) }
@@ -910,9 +987,11 @@ fun PlayerScreen(
                     )
                     post { hideController() }
                     keepScreenOn = true
+                    playerViewRef = this
                 }
             },
             update = { playerView ->
+                playerView.useController = !inPictureInPicture
                 // AndroidView retains its PlayerView when a live-channel
                 // change recomposes this screen. Move that surface to the
                 // current ExoPlayer or audio can advance with no video output.
@@ -953,7 +1032,7 @@ fun PlayerScreen(
         )
         // Title, source, and back are part of the transient controller chrome:
         // touch or remote input reveals them; they never sit over the movie.
-        if (chromeVisible) {
+        if (chromeVisible && !inPictureInPicture) {
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -982,9 +1061,20 @@ fun PlayerScreen(
                         fontSize = 13.sp,
                     )
                 }
+                // Desktop windows get pointer-reachable window controls; the
+                // keyboard equivalents are F and P (see PlayerKeyboardPolicy).
+                if (windowHost?.desktopWindowing == true) {
+                    Spacer(Modifier.weight(1f))
+                    OpenStreamTextButton(onClick = { windowHost.enterPictureInPicture() }) {
+                        Text("Mini player", color = Color.White)
+                    }
+                    OpenStreamTextButton(onClick = { windowHost.toggleFullscreenWindow() }) {
+                        Text(if (fullscreenWindow) "Exit full screen" else "Full screen", color = Color.White)
+                    }
+                }
             }
         }
-        if (chromeVisible && request.isLive) {
+        if (chromeVisible && !inPictureInPicture && request.isLive) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 140.dp, bottom = 18.dp),
                 shape = RoundedCornerShape(8.dp),

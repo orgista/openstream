@@ -52,12 +52,17 @@
             android:name="android.window.PROPERTY_XR_BOUNDARY_TYPE_RECOMMENDED"
             android:value="XR_BOUNDARY_TYPE_LARGE" />
 
+        <!-- Googlebook / desktop windowing: freely resizable (window changes
+             are handled in place via configChanges, no restart), no
+             orientation lock, picture-in-picture for playing video. -->
         <activity
             android:name=".NativeAppActivity"
             android:colorMode="wideColorGamut"
-            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:screenOrientation="unspecified"
             android:windowSoftInputMode="adjustResize"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

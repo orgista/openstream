@@ -186,8 +186,10 @@ fun ConnectionsScreen(
     }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+      val connectionsListState = androidx.compose.foundation.lazy.rememberLazyListState()
       LazyColumn(
-        Modifier.fillMaxHeight().widthIn(max = 1080.dp).fillMaxWidth().padding(horizontal = 24.dp),
+        Modifier.fillMaxHeight().widthIn(max = 1080.dp).fillMaxWidth().verticalScrollbar(connectionsListState).padding(horizontal = 24.dp),
+        state = connectionsListState,
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 36.dp),
       ) {

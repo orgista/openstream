@@ -27,4 +27,12 @@ class DevicePresentationPolicyTest {
             DevicePresentationPolicy.orientation(smallestWidthDp = 900, immersiveRuntime = true),
         )
     }
+
+    @Test
+    fun `desktops and freeform windows never lock orientation`() {
+        assertEquals(
+            OrientationPreference.SYSTEM,
+            DevicePresentationPolicy.orientation(smallestWidthDp = 1080, immersiveRuntime = false, desktopWindowing = true),
+        )
+    }
 }

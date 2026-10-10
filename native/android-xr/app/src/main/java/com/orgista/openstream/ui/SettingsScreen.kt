@@ -179,11 +179,13 @@ fun SettingsScreen(
     }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+      val settingsScroll = rememberScrollState()
       Column(
         Modifier
             .widthIn(max = 1080.dp)
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScrollbar(settingsScroll)
+            .verticalScroll(settingsScroll)
             .padding(
                 top = 16.dp,
                 start = if (configuration.screenWidthDp >= 900) 48.dp else 24.dp,

@@ -131,6 +131,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
+    // Media session: hardware media keys and the picture-in-picture controls.
+    implementation("androidx.media3:media3-session:$media3Version")
 
     // FFmpeg software decoders for Media3 (the Jellyfin/Findroid approach):
     // decode codecs the hardware can't — TrueHD, DTS, E-AC3, FLAC, etc. — on

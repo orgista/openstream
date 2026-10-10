@@ -37,7 +37,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -977,6 +979,28 @@ fun OpenStreamApp(onExit: () -> Unit) {
                 onExit()
             }
         }
+    }
+
+    // Desktop keyboard shortcuts (listed in the Meta+/ helper by the activity).
+    val windowHost = remember(context) { context.playbackWindowHost() }
+    val currentNavigate by rememberUpdatedState(navigate)
+    val currentScreen by rememberUpdatedState(screen)
+    DisposableEffect(windowHost) {
+        windowHost?.setAppKeyHandler { event ->
+            if (!event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) return@setAppKeyHandler false
+            if (currentScreen is Screen.Player) return@setAppKeyHandler false
+            val target = when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_F -> Screen.Search
+                android.view.KeyEvent.KEYCODE_1 -> Screen.Discover
+                android.view.KeyEvent.KEYCODE_2 -> Screen.Library
+                android.view.KeyEvent.KEYCODE_3 -> Screen.Live
+                android.view.KeyEvent.KEYCODE_COMMA -> Screen.Settings
+                else -> null
+            } ?: return@setAppKeyHandler false
+            currentNavigate(target)
+            true
+        }
+        onDispose { windowHost?.setAppKeyHandler(null) }
     }
 
     val openItem: (MediaItem) -> Unit = { item ->

@@ -16,7 +16,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
@@ -207,22 +215,32 @@ fun MediaCard(
     onOpen: (MediaItem) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    // Mouse hover gets the same lift as remote/keyboard focus.
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val highlighted = focused || hovered
+    val clipboard = LocalClipboardManager.current
     val cardScale by animateFloatAsState(
-        targetValue = if (focused) 1.055f else 1f,
+        targetValue = if (highlighted) 1.055f else 1f,
         label = "title-card-scale",
     )
+    Box {
     Surface(
         onClick = { onOpen(item) },
         modifier = Modifier
             .width(width)
             .scale(cardScale)
-            .onFocusChanged { focused = it.isFocused || it.hasFocus },
+            .onFocusChanged { focused = it.isFocused || it.hasFocus }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .onSecondaryClick { menuOpen = true },
         shape = RoundedCornerShape(12.dp),
         color = OpenStreamColors.Surface,
         border = BorderStroke(
-            if (focused) 2.dp else 1.dp,
-            if (focused) OpenStreamColors.Text else Color(0x14E6F0F5),
+            if (highlighted) 2.dp else 1.dp,
+            if (highlighted) OpenStreamColors.Text else Color(0x14E6F0F5),
         ),
+        interactionSource = interactionSource,
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(if (useBackdrop) 16f / 9f else 2f / 3f)) {
             Poster(item, Modifier.fillMaxSize(), useBackdrop = useBackdrop)
@@ -262,6 +280,18 @@ fun MediaCard(
                 )
             }
         }
+    }
+    // Right-click / secondary tap: desktop-style context menu.
+    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenuItem(text = { Text("Open") }, onClick = { menuOpen = false; onOpen(item) })
+        DropdownMenuItem(
+            text = { Text("Copy title") },
+            onClick = {
+                menuOpen = false
+                clipboard.setText(AnnotatedString(if (item.year > 0) "${item.title} (${item.year})" else item.title))
+            },
+        )
+    }
     }
 }
 
