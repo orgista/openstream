@@ -16,7 +16,7 @@ case "$cmd" in
   start)
     ssh dev-mini 'test -f /Volumes/DevExt/.devext-ok' </dev/null
     ssh dev-mini "$ENV; nohup ~/Developer/bin/buildlock.sh \$B/emulator/emulator -avd $AVD -port 5580 -no-snapshot -no-boot-anim -no-audio -memory 4096 >/tmp/openstream-emu.log 2>&1 &" </dev/null
-    ssh dev-mini "$ENV; for i in \$(seq 1 180); do [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ] && echo booted && exit 0; sleep 5; done; tail -20 /tmp/openstream-emu.log; exit 1" </dev/null
+    ssh dev-mini "$ENV; for i in \$(seq 1 180); do [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ] && { $ADB shell 'settings put system screen_off_timeout 2147483647; svc power stayon true; locksettings set-disabled true; wm dismiss-keyguard' >/dev/null 2>/dev/null; echo booted; exit 0; }; sleep 5; done; tail -20 /tmp/openstream-emu.log; exit 1" </dev/null
     ;;
   stop) ssh dev-mini "$ENV; $ADB emu kill >/dev/null 2>&1 || true; sleep 5; pkill -f 'avd $AVD' || true" </dev/null ;;
   install) ssh dev-mini "$ENV; $ADB install -r -g ~/Developer/openstream-android/build-mobile/outputs/apk/debug/app-debug.apk" </dev/null ;;
