@@ -6,6 +6,12 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+- [ ] **Rill bridge was broken since the 10-02 hardening; fixed 2026-10-09 (Tismlist session, owner-approved).** Every
+      add-on fetch failed ("No manifest found at that address.") because Workers reject `redirect: 'error'`; now
+      `redirect: 'manual'` + regression test, deployed to stream.ourzephyr.com (D1 restore point taken first). Source:
+      branch `hardening-fix` (91588d0) in /mnt/user/backups/studio-openstream-build-2026-10-06/bridge/rill on ServerPlus;
+      public hardened copy github.com/cyberbanksy/rill-hardened. **YOU:** re-test adding add-ons in Rill, then playback in
+      OpenStream (Add Media Server › Jellyfin). The Reddit setup DM can now point to rill-hardened.
 - [ ] **Apple TV "Set Up from iPhone" fails: "Couldn't import this setup." (owner 2026-10-09, build 17, real Apple TV +
       real iPhone).** Scanned the QR with the iPhone; the TV showed that error with Show New Code / Close. Investigating.
       **Same TV, Library:** a warning row reads "ServerPlus: You don't have permission to save the file 'OpenStream' in
