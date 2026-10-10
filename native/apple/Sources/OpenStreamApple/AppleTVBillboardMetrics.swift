@@ -72,7 +72,7 @@ enum AppleTVBillboardMetrics {
     // Rows (`AppleMediaShelf` on tvOS). The horizontal safe area already
     // insets rows by 80, so cards start on the copy's column with no extra inset.
     static let rowHorizontalInset: CGFloat = 0
-    static let rowTitleFontSize: CGFloat = 31
+    static let rowTitleFontSize: CGFloat = 38
     static let rowTitleSpacing: CGFloat = 16
     static let cardGap: CGFloat = 24
     static let rowVerticalBleed: CGFloat = 20

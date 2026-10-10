@@ -4,7 +4,7 @@ import Testing
 
 /// `-OpenStreamStubNetwork <dir>`: every loader request is answered from
 /// `<dir>/<host>/<path>.json`; a miss fails loudly and never reaches the
-/// network. Serialized: the stub root is process-wide.
+/// network. Task-local roots keep parallel loader tests isolated.
 @Suite("Network stub", .serialized)
 struct AppleNetworkStubTests {
     private func makeRoot() throws -> URL {
@@ -39,34 +39,34 @@ struct AppleNetworkStubTests {
     @Test func loaderServesFixturesAndRejectsMisses() async throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        AppleNetworkStub.activate(root: root)
-        defer { AppleNetworkStub.deactivate() }
+        try await AppleNetworkStub.$testRoot.withValue(root) {
 
-        let request = URLRequest(url: URL(string: "https://fixture.example/catalog/movie/top.json")!)
-        let (data, response) = try await AppleBoundedHTTPDataLoader.load(request, maximumBytes: 1_000)
-        #expect(String(decoding: data, as: UTF8.self) == #"{"metas":[]}"#)
-        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            let request = URLRequest(url: URL(string: "https://fixture.example/catalog/movie/top.json")!)
+            let (data, response) = try await AppleBoundedHTTPDataLoader.load(request, maximumBytes: 1_000)
+            #expect(String(decoding: data, as: UTF8.self) == #"{"metas":[]}"#)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
 
-        let tmdb = try await AppleTMDBClient.liveLoader(
-            URLRequest(url: URL(string: "https://api.themoviedb.org/3/search/movie?query=x&api_key=k")!))
-        #expect(String(decoding: tmdb.0, as: UTF8.self) == #"{"results":[]}"#)
+            let tmdb = try await AppleTMDBClient.liveLoader(
+                URLRequest(url: URL(string: "https://api.themoviedb.org/3/search/movie?query=x&api_key=k")!))
+            #expect(String(decoding: tmdb.0, as: UTF8.self) == #"{"results":[]}"#)
 
-        let miss = URLRequest(url: URL(string: "https://fixture.example/catalog/movie/missing.json")!)
-        await #expect(throws: AppleNetworkStub.Error.unmatched("network stub: no fixture for fixture.example/catalog/movie/missing.json")) {
-            _ = try await AppleBoundedHTTPDataLoader.load(miss, maximumBytes: 1_000)
-        }
-        await #expect(throws: AppleBoundedHTTPError.responseTooLarge) {
-            _ = try await AppleBoundedHTTPDataLoader.load(request, maximumBytes: 4)
+            let miss = URLRequest(url: URL(string: "https://fixture.example/catalog/movie/missing.json")!)
+            await #expect(throws: AppleNetworkStub.Error.unmatched("network stub: no fixture for fixture.example/catalog/movie/missing.json")) {
+                _ = try await AppleBoundedHTTPDataLoader.load(miss, maximumBytes: 1_000)
+            }
+            await #expect(throws: AppleBoundedHTTPError.responseTooLarge) {
+                _ = try await AppleBoundedHTTPDataLoader.load(request, maximumBytes: 4)
+            }
         }
     }
 
     @Test func devSourcesBesideTheFixturesAreFoundOnlyWhenPresent() throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        AppleNetworkStub.activate(root: root)
-        defer { AppleNetworkStub.deactivate() }
-        #expect(AppleNetworkStub.devSourcesURL == nil)
-        try Data(#"{"version":1,"sources":[]}"#.utf8).write(to: root.appendingPathComponent("dev-sources.json"))
-        #expect(AppleNetworkStub.devSourcesURL?.lastPathComponent == "dev-sources.json")
+        try AppleNetworkStub.$testRoot.withValue(root) {
+            #expect(AppleNetworkStub.devSourcesURL == nil)
+            try Data(#"{"version":1,"sources":[]}"#.utf8).write(to: root.appendingPathComponent("dev-sources.json"))
+            #expect(AppleNetworkStub.devSourcesURL?.lastPathComponent == "dev-sources.json")
+        }
     }
 }

@@ -347,6 +347,9 @@ public struct OpenStreamRootView: View {
 
     public var body: some View {
         tabs
+        #if os(iOS)
+        .modifier(AppleSystemTabBarMinimization())
+        #endif
         #if os(tvOS)
         // One black ground for every tab, applied once here.
         //
@@ -408,6 +411,13 @@ public struct OpenStreamRootView: View {
             controller: $backupController, sources: sourceStore, settings: settingsStore, mediaIndex: mediaIndex
         ))
         .modifier(AppleSetupTransferHost(router: router, controller: backupController))
+        .confirmationDialog("Play Live TV", isPresented: Binding(
+            get: { router.pendingExternalLiveChannelID != nil },
+            set: { if !$0 { router.clearExternalLivePlayback() } }
+        ), titleVisibility: .visible, presenting: router.pendingExternalLiveChannelID) { id in
+            Button("Play", systemImage: "play.fill") { router.open(.live(channelID: id)) }
+            Button("Cancel", role: .cancel) { router.clearExternalLivePlayback() }
+        }
         #if os(iOS)
         .onGeometryChange(for: CGSize.self) { [isPad = UIDevice.current.userInterfaceIdiom == .pad] proxy in
             isPad ? proxy.size : .zero
@@ -614,7 +624,11 @@ public struct OpenStreamRootView: View {
         }
         .onChange(of: router.revision) {
             guard let route = router.route else { return }
-            Task { @MainActor in await apply(route) }
+            let revision = router.revision
+            Task { @MainActor in
+                guard router.revision == revision, router.route == route else { return }
+                await apply(route)
+            }
         }
         // Siri, Shortcuts and Spotlight arrive here and go through the same
         // router as a deep link, so Discover moves its own navigation state
@@ -624,7 +638,7 @@ public struct OpenStreamRootView: View {
             router.open(route)
         }
         .task {
-            if let route = intentHandoff.route { await apply(route) }
+            if let route = intentHandoff.route { router.open(route) }
             if let route = router.route { await apply(route) }
         }
         .task(id: sourceAvailabilityIdentity) {
@@ -799,7 +813,10 @@ public struct OpenStreamRootView: View {
         case .continueWatching:
             selectedTab = target
         case .live(let id):
-            guard visibleTabs.contains(.live) else { return }
+            guard visibleTabs.contains(.live), router.route == route,
+                  router.pendingExternalLiveChannelID == nil else { return }
+            // Entering Live can resume its previous channel, so defer the tab
+            // change as well as the requested channel until Play is confirmed.
             AppleLiveSystemChannels.shared.requestedChannelID = id
             selectedTab = .live
         }
@@ -1071,3 +1088,15 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
         )
     }
 }
+
+#if os(iOS)
+private struct AppleSystemTabBarMinimization: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26, *), UIDevice.current.userInterfaceIdiom == .phone {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
+        }
+    }
+}
+#endif

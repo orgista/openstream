@@ -47,12 +47,13 @@ import Testing
         #expect(track.id >= 1_000_000)
         let menu = AppleStockPlayerSubtitles()
         menu.select(track.id, on: player)
-        #expect(menu.menuEntries.first(where: { $0.title == "English" })?.isSelected == true)
         let cueDeadline = ContinuousClock.now.advanced(by: .seconds(2))
         while player.subtitleCues.isEmpty, ContinuousClock.now < cueDeadline {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(player.subtitleCues.first?.text == "HOLA DESDE ESPANA")
+        menu.refresh(from: player)
+        #expect(menu.menuEntries.first(where: { $0.title == "English" })?.isSelected == true)
         menu.select(nil, on: player)
         #expect(menu.menuEntries.first?.isSelected == true)
         #expect(player.subtitleCues.isEmpty)

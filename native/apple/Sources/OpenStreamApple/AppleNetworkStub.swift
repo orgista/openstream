@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+
 
 /// Where a stubbed request's answer lives on disk: `<root>/<host>/<path>`,
 /// with `.json` appended when the path does not already end in it. The query
@@ -37,9 +37,10 @@ public enum AppleNetworkStub {
         case unmatched(String)
     }
 
-    private static let override = Mutex<URL?>(nil)
+    /// Overrides belong to one test task and its children, never other suites.
+    @TaskLocal static var testRoot: URL?
 
-    /// The root from the launch argument, read once. Tests set `activate`.
+    /// The root from the launch argument, read once. Tests scope `testRoot`.
     private static let launchRoot: URL? = {
         #if DEBUG
         guard let path = UserDefaults.standard.string(forKey: AppleNetworkStubPolicy.launchKey),
@@ -50,14 +51,9 @@ public enum AppleNetworkStub {
         #endif
     }()
 
-    public static var root: URL? { override.withLock { $0 } ?? launchRoot }
+    public static var root: URL? { testRoot ?? launchRoot }
 
     public static var isActive: Bool { root != nil }
-
-    /// Unit tests: route the loader at `root`; `deactivate` restores the
-    /// launch-argument behaviour. Not for app code.
-    public static func activate(root: URL) { override.withLock { $0 = root } }
-    public static func deactivate() { override.withLock { $0 = nil } }
 
     /// `<root>/dev-sources.json` beside the fixtures: the sources a stubbed
     /// run should have, read in place and never deleted (it is a repo file).

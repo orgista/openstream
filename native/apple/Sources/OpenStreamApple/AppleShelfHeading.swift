@@ -16,7 +16,7 @@ struct AppleShelfHeading: View {
     }
     private var titleFont: Font {
         #if os(tvOS)
-        .title.bold()
+        .system(size: AppleTVBillboardMetrics.rowTitleFontSize, weight: .bold)
         #else
         rowStyle?.headerFont ?? .title.bold()
         #endif

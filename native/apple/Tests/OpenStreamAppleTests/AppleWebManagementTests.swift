@@ -877,6 +877,37 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     #expect(store.sources.isEmpty)
 }
 
+@MainActor
+@Test func workingPlaylistRequiresAnExplicitCredentialExportChoice() async throws {
+    let suite = "openstream-export-choice-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = AppleSourceStore(defaults: defaults)
+    let server = AppleWebManagementServer(configuration: .init(preferredPort: 0,
+        sessionDuration: 30, advertisesBonjour: false, advertisedHost: "127.0.0.1"))
+    let active = try await server.start(sourceStore: store)
+    defer { server.stop() }
+    let browser = URLSession(configuration: .ephemeral)
+    defer { browser.invalidateAndCancel() }
+    let export = active.friendlyURL.appendingPathComponent("working.m3u")
+    #expect(try await response(for: request(url: export), using: browser).statusCode == 401)
+    let cookie = try await pairBrowser(active, using: browser)
+    var unconfirmed = request(url: export)
+    unconfirmed.setValue(cookie, forHTTPHeaderField: "Cookie")
+    let (page, reply) = try await dataResponse(for: unconfirmed, using: browser)
+    #expect(reply.value(forHTTPHeaderField: "Content-Disposition") == nil)
+    #expect(String(decoding: page, as: UTF8.self).contains("Download Playlist With Provider Credentials"))
+    for choice in ["omit", "include"] {
+        var components = try #require(URLComponents(url: export, resolvingAgainstBaseURL: false))
+        components.queryItems = [URLQueryItem(name: "credentials", value: choice)]
+        var download = request(url: try #require(components.url))
+        download.setValue(cookie, forHTTPHeaderField: "Cookie")
+        let (_, response) = try await dataResponse(for: download, using: browser)
+        #expect(response.statusCode == 200)
+        #expect(response.value(forHTTPHeaderField: "Content-Disposition")?.hasPrefix("attachment;") == true)
+    }
+}
+
 private func multipartForm(_ values: [String: String], boundary: String) -> Data {
     var body = ""
     for (name, value) in values {

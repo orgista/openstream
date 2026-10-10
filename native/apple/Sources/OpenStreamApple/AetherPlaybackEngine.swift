@@ -609,13 +609,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         }
         // Establish ownership before clearSubtitle publishes its nil echo.
         activeExternalSubtitleID = id
+        activeSubtitleTrackID = nil
         aether.clearSubtitle()
         subtitleCues = []
         let track = externalSubtitleTracks[index]
         let load = externalSubtitleDataLoader
         externalSubtitleLoad = Task { [weak self] in
             let data = try? await load(track.url)
-            guard self != nil, !Task.isCancelled, let data else { return }
+            guard !Task.isCancelled else { return }
+            guard let data else {
+                if let self, self.activeExternalSubtitleID == id { self.activeExternalSubtitleID = nil }
+                return
+            }
             // Inflating and parsing a whole subtitle file on the main actor
             // froze the player; do it off the main actor and hop back only
             // to publish the cues.
@@ -624,6 +629,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             }.value
             guard let self, !Task.isCancelled, self.activeExternalSubtitleID == id else { return }
             self.subtitleCues = cues
+            self.activeSubtitleTrackID = cues.isEmpty ? nil : id
+            self.emit(.tracks)
         }
     }
 

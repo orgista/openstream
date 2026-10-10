@@ -1438,6 +1438,7 @@ struct AppleSearchView: View {
     @State private var sharedLinkLoading = false
     @State private var sharedLinkGeneration = 0
     @State private var sharedPlayer: AppleStremioPlayerPresentation?
+    @State private var pendingSharedPlayer: AppleStremioPlayerPresentation?
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasCopiedURL = false
@@ -1535,6 +1536,16 @@ struct AppleSearchView: View {
             if AppleSharedLinkResolver.link(in: query) == nil { recentSearches.record(query) }
         }
         .alert(sharedLinkError, isPresented: $showsSharedLinkError) { }
+        .confirmationDialog("Play YouTube Video", isPresented: Binding(
+            get: { pendingSharedPlayer != nil },
+            set: { if !$0 { pendingSharedPlayer = nil } }
+        ), titleVisibility: .visible, presenting: pendingSharedPlayer) { presentation in
+            Button("Play", systemImage: "play.fill") {
+                sharedPlayer = presentation
+                pendingSharedPlayer = nil
+            }
+            Button("Cancel", role: .cancel) { pendingSharedPlayer = nil }
+        }
         .modifier(AppleMediaPlayerPresentationModifier(presentation: $sharedPlayer))
         #if os(iOS)
         .safeAreaInset(edge: .bottom) {
@@ -1577,6 +1588,7 @@ struct AppleSearchView: View {
             if !router.searchQuery.isEmpty { query = router.searchQuery }
         }
         .onChange(of: router.revision) {
+            pendingSharedPlayer = nil
             if case .sharedLink = router.route {
                 routedResult = nil
                 sharedPlayer = nil
@@ -1606,6 +1618,8 @@ struct AppleSearchView: View {
             deliverMediaRoute(revision: revision)
         }
         .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
+            pendingSharedPlayer = nil
+            sharedLinkGeneration &+= 1
             let revision = router.revision
             if let link = AppleSharedLinkResolver.link(in: query) {
                 await openSharedLink(link, revision: revision)
@@ -1692,6 +1706,7 @@ struct AppleSearchView: View {
 
     private func openSharedLink(_ link: SharedLink, revision: Int) async {
         appleTrace("shared link parse \(link.provider)")
+        pendingSharedPlayer = nil
         sharedLinkGeneration &+= 1
         let generation = sharedLinkGeneration
         sharedLinkLoading = true
@@ -1707,7 +1722,7 @@ struct AppleSearchView: View {
                         let resolved = try await AppleMediaPlaybackResolver().resolve(source: source, item: item, gatewayConfig: gatewayConfig)
                         try Task.checkCancellation()
                         guard revision == router.revision, generation == sharedLinkGeneration else { return }
-                        sharedPlayer = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(
+                        pendingSharedPlayer = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(
                             url: resolved.preparedPlayback.url, headers: resolved.preparedPlayback.requestHeaders,
                             mediaID: item.mediaID, title: item.name, sourceKind: .catalog,
                             hints: .init(addonMediaID: item.mediaID, addonMediaType: item.type)), settings: settings)

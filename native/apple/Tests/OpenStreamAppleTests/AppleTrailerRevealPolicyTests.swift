@@ -59,14 +59,14 @@ struct AppleTrailerRevealPolicyTests {
         #endif
     }
 
-    /// The fast reveal on iPhone and iPad rests on this CSS: YouTube's
-    /// mobile embed draws its title strip and link in `.player-controls-top`.
-    @Test("Every trailer web view's frame script hides YouTube's player-controls-top (title strip and link)")
-    func frameScriptsHideTheTitleStrip() {
-        let selector = #"[class^="player-controls"]"#
-        #expect(AppleYouTubePreviewHTML.playerChromeScript.contains(selector))
-        #expect(AppleYouTubePreviewHTML.macPlayerFrameScript.contains(selector))
-        #expect(AppleYouTubePreviewHTML.playerChromeScript.contains("display:none!important"))
+    @Test("Trailer scripts preserve YouTube attribution")
+    func frameScriptsPreserveAttribution() {
+        for script in [AppleYouTubePreviewHTML.playerChromeScript, AppleYouTubePreviewHTML.macPlayerFrameScript] {
+            #expect(script.contains(#"[class^="player-controls"]"#) == false)
+            #expect(script.contains("player-controls-top") == false)
+            #expect(script.contains(".ytp-chrome-top") == false)
+            #expect(script.contains(".ytp-bezel"))
+        }
     }
 
     @Test("The page carries the same numbers as the Swift rule")
@@ -84,4 +84,13 @@ struct AppleTrailerRevealPolicyTests {
             #expect(!html.contains("3200 : 900"))
         }
     }
+    @Test("Known trailer offsets survive initial play and replay", arguments: ["12", "0", "-1", "nan"])
+    func suppliedOffsetIsHonored(_ value: String) throws {
+        let embed = try #require(URL(string: "https://www.youtube-nocookie.com/embed/trailer_456?start=\(value)"))
+        let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true)
+        let expected = value == "12" ? 12 : 0
+        #expect(html.contains("start: \(expected),"))
+        #expect(html.contains("player.seekTo(\(expected), true)"))
+    }
+
 }

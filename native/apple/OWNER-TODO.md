@@ -214,39 +214,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       but the full-window player docks into them when you pick one with the Digital Crown — verify on the device. Next:
       our own "theater" environment (an immersive space with a docking spot for the screen), after the player work.
 - [ ] **Vision Pro traces:** device isn't paired with Dev-Mini. Owner: Settings → Share Diagnostics → AirDrop to the Mac.
-- [ ] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. 1–3 + subtitle bomb + Messages links FIXED
-      2026-10-08 (tokens in cache files: protected + kept out of backups, not yet removed). ATS (4) WON'T DO (2026-10-08): IPTV playlists, guides, logos and
-      remote media servers are often plain http; narrowing would break them. Code already forces https for TMDB/Trakt/etc.
-      (1) HIGH: Xtream guide (EPG) URL with the password is saved in plain preferences — keep it in the Keychain only;
-      (2) the web-portal diagnostics download and some trace lines can include stream URLs with credentials — redact;
-      (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
-      `verification-artifacts/audit-2026-10-07/mythos-security.md`.
-      **Verified 2026-10-10:** credential-bearing cache copies are removed and resume data is sealed (finish-spec #19,
-      Done below). Cross-origin HLS children lose Cookie/Authorization, pairing attempts are capped per host, and
-      playlist/download filenames are constrained; regression tests and gate 3018 / 384 pass. ATS remains your WON'T DO.
-      **Owner action:** choose whether external play links should require Play and playlist sharing should show a
-      credential notice; those two behavior changes remain open pending your answer. A notice conflicts with your no-explainer UI rule, and the link change alters existing shared-play behavior. Technical fixes are uncommitted.
-
-- [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
-      ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
-      re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
-      failover exists only on Apple TV, not iPhone/iPad/Mac; multiview reopens all four streams on every
-      grid↔full-screen trip. Order: 1 → 4 → 2 → 5 → 3 → 6 → 8 → 9 → 7 → 10 (numbers in the review).
-      DONE a9e2594: 1 (guide fetched ≤ every 6 h, 304-aware), 4 (failover + one quick reopen on all platforms),
-      2 (200k-programme guide 25 s → 2 s). Remaining device measurements are listed below.
-      **Agent work 2026-10-10:** 5 retains tile players across fullscreen trips and caps tiles by cached provider limits;
-      3 prunes to -3/+7 days and writes atomic binary day shards (200k mixed-history fixture: median read 360 → 172 ms,
-      write 413 → 237 ms; Time Profiler cache samples 1490 → 757 ms). 6 fills the whole visible Xtream batch at four
-      concurrent requests; 8 preserves HLS catch-up extensions; 9 uses the shared eight-match threshold. 10 extracts
-      selection, request, preflight, resume and recall/zap state into AppleLiveSession; platform layout/focus stays in views.
-      11 prevents health sweeps while any Live coordinator is active. Gate 3018 / 384 and local tvOS round-trip UI pass. Four-tile layout/fullscreen verification passes (14.289 s); trace confirms exactly one open per tile across both layout toggles and the round trip.
-      **Native-HLS measurement 2026-10-10:** Apple's public bipbop advanced fMP4, native remoteBypass on Dev-Mini M4,
-      three 10 s trials: first frame 529/633/860 ms; nine seeks 83–169 ms; no playback freezes, missing frames or buffering
-      samples. Scoreboard: /Volumes/DevExt/engine-lab/hls-round2/scoreboard.md. Seek continuity fails 0/3 because the
-      harness flags dark frames; content-versus-player cause is not verified. This measures the engine on macOS,
-      not real Apple TV channel changes. No private provider sample is needed for this public baseline.
-      **Owner action:** check four-tile heat on an A12 Apple TV.
-
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
       sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
@@ -328,11 +295,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       "watch without tracking" / rewatch / shuffle; hand-off to Infuse/VLC keeping Trakt; per-Apple-TV-user
       profiles; Simkl + local watchlist; format badges (DV/HDR/Atmos); sports scores; iOS 27 external display
       (video on TV, controls on phone); first-run guide. Dead IPTV stream → offer the same channel from another list.
-- [ ] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
-      verify (specs/full-test-checklist-v3.md). Batch 1 DONE 40e9350: Subtitle Delay + Frame Rate fix (sim-checked),
-      Settings › Audio Language (sim-checked), Spotlight opens the title, add-on catalog paging, Now Playing series/
-      episode/artwork (not seen on a sim), honest "could not read this file" instead of "ended early". 20 more Muse
-      jobs queued on ServerPlus. Next: disc badge/spinner/Play Disc, format badges, engine open retry (running).
 - [ ] **ISO / disc images (owner 2026-10-01):** today ISOs play the main title only. DECIDED: Apple disc symbol in the
       poster corner (A2) + that symbol spinning while the disc opens (S1); "Play Disc" opens the real DVD menu first,
       "Skip to Movie" plays the main title (D2) — menus are part of the experience; Disc Menu button in the player (P1).
@@ -355,10 +317,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       swipe pages the hero; "£" → "♪" in subtitles; General Hospital 1963 first; VoiceOver no longer reads icon
       names. Still: "A Different World" search lists the 2026 show above 1987.
       Minor: title page flashes between auto-advanced episodes; CW time left uses the stream's length (director's cut).
-- [ ] iOS 18 UX: nav icons + large "Discover" title unreadable on bright hero art (no glass on iOS 18); Streaming
-      Services "Add Service" only tappable on its label; full-screen player not modal for VoiceOver; a search
-      deep link with a title page open lands under it.
-      Nav/title readability and fullscreen VoiceOver isolation are closed under finish-spec #52 in Done below.
 - [ ] **tvOS verification of 4fd1ac5 (2026-10-01 early):** toggles/Retry readable ✅, cue placement ✅, field outlines ✅,
       audio labels ✅. Still broken: **every Settings Picker on tvOS opens an empty page** (Package, Live view,
       Playback › Player; Menu there quits to Home) — pre-existing; Skip Intro still not reachable with Down; Top 10
@@ -397,22 +355,197 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       Apple TV dropped it. Remove it on iPhone/iPad/Mac too? (3) There is no Share button on a title page. Add one?
       (4) Long-pressing a Discover poster opens it, while Library/Continue Watching posters show a menu, and a
       shelf's "See all" is a plain text list. Give every poster the menu and make "See all" a poster grid?
-- [ ] **YouTube attribution.** The trailer frame CSS (N49) hides YouTube's title, channel and link;
-      the fast iPhone/iPad trailer start (a130f96) relies on it. YouTube's API terms may require
-      showing it. Keep it, or go back to the fixed wait on iPhone/iPad?
-- [ ] **Trailers with the title burned in.** Some trailers open on their own title card, so on the Mac
-      hero a faint second wordmark shows behind ours (N57). Keep those trailers, or skip them?
-- [ ] **Apple TV row headers** are 76 pt, about twice the Apple TV app's 38 pt. Shrink to match?
 - [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
-- [ ] **iPhone tab bar shrinking on scroll** — allow it (the system behaviour), or keep it fixed?
-- [ ] **Receipt check (N39 F1).** The app tells TestFlight builds apart (to turn tracing on) with
-      Apple's deprecated receipt URL, the last build warning. Its replacement is async and can put an
-      App Store sign-in prompt on the Mac. Keep the deprecated check (recommended), or switch?
 - [ ] **ServerPlus 3090:** passed a full overnight bench test on Windows (2026-09-27, 350 W, 0 errors), so it may
       be the DEG1/OCuLink path at 3090 power. The server runs a 2080 Ti for now (11 GB: the 27B local
       model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
 
 ## Done
+
+- [x] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. 1–3 + subtitle bomb + Messages links FIXED
+      2026-10-08 (tokens in cache files: protected + kept out of backups, not yet removed). ATS (4) WON'T DO (2026-10-08): IPTV playlists, guides, logos and
+      remote media servers are often plain http; narrowing would break them. Code already forces https for TMDB/Trakt/etc.
+      (1) HIGH: Xtream guide (EPG) URL with the password is saved in plain preferences — keep it in the Keychain only;
+      (2) the web-portal diagnostics download and some trace lines can include stream URLs with credentials — redact;
+      (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
+      `verification-artifacts/audit-2026-10-07/mythos-security.md`.
+      **Verified 2026-10-10:** credential-bearing cache copies are removed and resume data is sealed (finish-spec #19,
+      Done below). Cross-origin HLS children lose Cookie/Authorization, pairing attempts are capped per host, and
+      playlist/download filenames are constrained; regression tests and gate 3018 / 384 pass. ATS remains your WON'T DO.
+      **Round 3 closed 2026-10-10:** external URL media play opens the title; external Live and YouTube play
+      require Play before entering Live (which can auto-resume). Typed Siri/Shortcuts routes preserve intentional playback. Paired playlist export requires an
+      explicit redacted/full choice; redacted exports remove complete URLs and provider headers, including quote
+      edge cases. Independent review completed; routing/export regression tests, full gate 3026 / 384.
+      ATS remains the recorded WON'T DO; previous numbered fixes retained. Diff left for lead review.
+
+- [x] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
+      ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
+      re-downloaded and re-parsed every 15 min of viewing (first zap after 15 min pulls the whole file); dead-channel
+      failover exists only on Apple TV, not iPhone/iPad/Mac; multiview reopens all four streams on every
+      grid↔full-screen trip. Order: 1 → 4 → 2 → 5 → 3 → 6 → 8 → 9 → 7 → 10 (numbers in the review).
+      DONE a9e2594: 1 (guide fetched ≤ every 6 h, 304-aware), 4 (failover + one quick reopen on all platforms),
+      2 (200k-programme guide 25 s → 2 s). Remaining device measurements are listed below.
+      **Agent work 2026-10-10:** 5 retains tile players across fullscreen trips and caps tiles by cached provider limits;
+      3 prunes to -3/+7 days and writes atomic binary day shards (200k mixed-history fixture: median read 360 → 172 ms,
+      write 413 → 237 ms; Time Profiler cache samples 1490 → 757 ms). 6 fills the whole visible Xtream batch at four
+      concurrent requests; 8 preserves HLS catch-up extensions; 9 uses the shared eight-match threshold. 10 extracts
+      selection, request, preflight, resume and recall/zap state into AppleLiveSession; platform layout/focus stays in views.
+      11 prevents health sweeps while any Live coordinator is active. Gate 3018 / 384 and local tvOS round-trip UI pass. Four-tile layout/fullscreen verification passes (14.289 s); trace confirms exactly one open per tile across both layout toggles and the round trip.
+      **Native-HLS measurement 2026-10-10:** Apple's public bipbop advanced fMP4, native remoteBypass on Dev-Mini M4,
+      three 10 s trials: first frame 529/633/860 ms; nine seeks 83–169 ms; no playback freezes, missing frames or buffering
+      samples. Scoreboard: /Volumes/DevExt/engine-lab/hls-round2/scoreboard.md. Seek continuity fails 0/3 because the
+      harness flags dark frames; content-versus-player cause is not verified. This measures the engine on macOS,
+      not real Apple TV channel changes. No private provider sample is needed for this public baseline.
+      **Owner action:** check four-tile heat on an A12 Apple TV.
+      **Round 3 closed 2026-10-10:** all app findings resolved or measured above. Finding 7 has the public native-HLS
+      baseline; provider/device tuning is dropped from this round without a measured device defect. No guessed buffer
+      change. Full gate 3026 / 384; final tvOS compilation passes. A12 heat remains an owner-device action.
+
+- [x] **Muse research triage (2026-10-01):** 229 findings from 6 Muse jobs → 92 already handled, 30 gaps, 71 to
+      verify (specs/full-test-checklist-v3.md). Batch 1 DONE 40e9350: Subtitle Delay + Frame Rate fix (sim-checked),
+      Settings › Audio Language (sim-checked), Spotlight opens the title, add-on catalog paging, Now Playing series/
+      episode/artwork (not seen on a sim), honest "could not read this file" instead of "ended early". 20 more Muse
+      jobs queued on ServerPlus. Next: disc badge/spinner/Play Disc, format badges, engine open retry (running).
+      **Round 3 triage 2026-10-10:** all 30 GAP and 71 UNSURE entries rechecked against current Apple code.
+      Unit/source evidence below is not a claim of hardware verification. No older full-test reports, Duo,
+      CarPlay, Vision environments, owner accounts or package-checkout changes are included.
+      - M01-02 — Dropped: requires a representative network playback soak; no reproducible app defect or authorized private fixture supplied.
+      - M01-04 — Covered: corrupt index recovery is tested by AppleMediaIndexTests; migration/launch policies have regression suites (not a device soak).
+      - M01-05 — Dropped: two-hour Apple TV footprint/jetsam measurement needs the owner device.
+      - M01-06 — Covered: AppleProgressRestoreFreshnessTests proves per-title freshest progress wins, including a store open during restore.
+      - M01-12 — Covered: fixed both adapters: delayed, failed and cancelled external subtitles remain unselected; AppleExternalSubtitleTests.
+      - M01-16 — Covered: preferred audio selection and language normalization: AppleAudioLanguagePreferenceTests.
+      - M01-18 — Dropped: A/V drift requires a timed audiovisual fixture/device capture; no confirmed app code defect.
+      - M01-21 — Dropped: seek behavior belongs to the separate engine lab; round-2 corpus evidence retained, no speculative app patch.
+      - M01-23 — Covered: deleted sources cannot reappear on cloud merge: AppleBackupRestoreTests/newerCloudCannotResurrectDeletedSourceAndSyncNowPublishesDeletion.
+      - M01-26 — Covered: skip-based paging exists with AppleCatalogPagingTests.
+      - M01-28 — Dropped: custom torrent/streaming-server path is unwired and outside the current distribution.
+      - M01-31 — Covered: 10,000-title restore is tested by AppleProgressRestoreFreshnessTests/tenThousandTitlesRestoreInBoundedTime.
+      - M01-36 — Dropped: stremio URL scheme registration would edit prohibited Info.plist keys; paste/add-on flow remains supported.
+      - M01-37 — Dropped: first-frame behavior is engine/device validation; bounded startup failure/recovery already exists.
+      - M01-40 — Dropped: audible midstream switching needs device/media verification; current pending-pick and sparse-cue tests cover app policy.
+      - M02-01 — Dropped: 4K remux soak needs the owner Apple TV/network.
+      - M02-04 — Covered: subtitle delay and frame-rate resync are implemented in AppleSubtitleTiming; timing tests pass.
+      - M02-06 — Dropped: peak-time provider behavior cannot be reproduced with local mocks.
+      - M02-07 — Covered: title-only Forced is never auto-selected: AppleSubtitleTrackFilterTests/aTitleOnlyForcedTrackIsNeverAutoSelected.
+      - M02-10 — Dropped: 30/60/90-minute subtitle soak is runtime verification, not a demonstrated code change.
+      - M02-11 — Dropped: A/V drift under frame-rate matching requires device/audio measurement.
+      - M02-12 — Dropped: micro-stutter requires a device pacing trace and representative content.
+      - M02-13 — Dropped: provider scan/sync performance needs a large representative server/account.
+      - M02-14 — Dropped: HDMI negotiation/broken device state requires the owner television/device.
+      - M02-16 — Dropped: HomePod long-run audio requires owner hardware.
+      - M02-17 — Dropped: 10,000-poster navigation needs a before/after performance trace; no measured defect supplied.
+      - M02-18 — Covered: audio and subtitle selection use separate IDs and commands; AppleTrackSelectionPolicyTests (not an audible device check).
+      - M02-24 — Dropped: A8 Apple TV HD is excluded older hardware; codec fallback belongs to the engine.
+      - M02-25 — Covered: tvg-shift and manual guide offsets exist; AppleIPTVGuideMatchingTests and AppleIPTVCatchUpURLTests.
+      - M02-29 — Dropped: subjective audio-quality claim has no reproducible behavior or acceptance criterion.
+      - M02-30 — Covered: visible Xtream batches and refresh/retry behavior covered by AppleIPTVGuideStoreTests and AppleIPTVGuideRobustnessTests.
+      - M02-31 — Dropped: VPN/provider reachability is environmental; no confirmed app-side guide defect.
+      - M02-32 — Covered: guide gaps render bounded empty cells; AppleGuideRegressionTests.
+      - M02-33 — Covered: Xtream input and typed login errors covered by AppleIPTVAndLibraryTests and AppleIPTVFailureCauseTests.
+      - M02-34 — Dropped: provider-side VOD buffering needs the provider/account and network measurements.
+      - M03-03 — Dropped: 80 Mbps remux soak belongs to engine/device validation.
+      - M03-05 — Dropped: long-idle hang is not reproduced; requires a lifecycle/network soak.
+      - M03-06 — Dropped: SMB throughput requires representative server/network; protected SMB server is outside authorized edits.
+      - M03-07 — Dropped: 25 fps frame-drop measurement needs real Apple TV hardware; engine lab is the owning work.
+      - M03-08 — Covered: subtitle delay/frame-rate resampling already implemented and unit-tested.
+      - M03-09 — Covered: each engine selects one audio track; separate selection policy tests pass (no VLC mixer exists here).
+      - M03-10 — Dropped: font/tofu visual comparison requires representative styled/CJK/Hebrew content; no confirmed missing font.
+      - M03-11 — Dropped: Apple TV stutter requires a recorded performance trace.
+      - M03-14 — Dropped: thumbnail popup is system/engine rendering; no reproduced empty-preview defect.
+      - M03-16 — Covered: existing TV Settings/sidebar UI test passed in round 2; retained under finish-spec TV focus item.
+      - M03-19 — Dropped: Apple TV live audio stutter needs the owner device and same-stream comparison.
+      - M03-22 — Covered: per-channel manual guide assignment is wired through the shared Live guide refresh; AppleIPTVGuideMatchingTests.
+      - M03-23 — Covered: local playlist storage and purge boundaries have tests; no source-backed rename/delete defect found.
+      - M03-24 — Covered: subtitle sync controls exist in the player menus and AppleSubtitleDelayTests pass.
+      - M03-26 — Covered: transport hit targets use minimumActionSize or 44 pt minimum; transport/skip policies are tested.
+      - M03-28 — Dropped: kill/resume artwork validation is a UI runtime check; artwork/resume unit coverage already exists.
+      - M03-30 — Dropped: regression process recommendation is not an app code change.
+      - M03-33 — Covered: system TV tab bar retained; navigation/focus regression suites cover current behavior.
+      - M03-34 — Dropped: A/V desync requires a representative media/device recording.
+      - M03-35 — Dropped: 500 ms subtitle-toggle black-screen measurement is an engine/device check; sparse-cue switching has a regression.
+      - M03-36 — Covered: Live Home-to-PiP passed on DevPlus/iPad in round 2; lifecycle tests remain green (not a system-freeze soak).
+      - M04-03 — Covered: stock VOD player has no custom gesture layer; Live owns the remote by approved design.
+      - M04-06 — Covered: series/episode/artwork/live metadata implemented; AppleNowPlayingInfoTests.
+      - M04-10 — Dropped: new native transport tabs would redesign the approved engine-first player; existing captions/audio/chapter controls remain.
+      - M04-11 — Covered: AVMediaSelectionGroup and app language preference selection exist; AppleNativeSubtitleSelectionTests.
+      - M04-12 — Dropped: custom chapter skip is approved and remotely reachable; native contextual-action parity is superseded by engine-first player choice.
+      - M04-16 — Dropped: AVContentProposal redesign is superseded by existing episode handoff and native Next Episode contextual action.
+      - M04-24 — Dropped: SharePlay account/device pair is excluded; protected AppleSharePlay files are outside scope.
+      - M04-25 — Dropped: SharePlay PiP verification needs two owner accounts/devices.
+      - M04-28 — Covered: participant-local volume/captions are not overridden; current player session tests cover app isolation.
+      - M04-31 — Dropped: Live-first/tab-order proposal conflicts with approved Discover/Library/Live layout; no recordings tab exists.
+      - M04-32 — Covered: Spotlight title routing and recent searches implemented; AppleSpotlightRouteTests/AppleRecentSearchesTests; tab placement follows owner-approved toolbar/TV layout.
+      - M04-34 — Dropped: blanket ban on programmatic focus conflicts with approved TV skip/sidebar restoration behavior.
+      - M04-38 — Dropped: HLS trickplay track authoring belongs to the engine; app already requests scrub thumbnails.
+      - M04-39 — Dropped: spatial/3D media verification requires Vision hardware/content; environments are explicitly excluded.
+      - M04-40 — Dropped: HDR/aspect/audio-output visual verification requires physical display/media; no app defect established.
+      - M05-07 — Dropped: DV container metadata belongs to the pinned engine; package checkout edits are prohibited.
+      - M05-12 — Dropped: TrueHD/audio route verification needs AVR/AirPlay hardware; engine bridges are covered by the engine lab.
+      - M05-13 — Dropped: Atmos JOC playlist signaling is engine authoring plus AVR validation, outside app edits.
+      - M05-15 — Dropped: stereo AAC rendition authoring belongs to the engine; no package checkout edits authorized.
+      - M05-16 — Dropped: seek audio padding/drop is an engine implementation detail, not a demonstrated app bug.
+      - M05-18 — Dropped: negative CTTS muxer flag belongs to the engine and may conflict with its existing repair policy.
+      - M05-30 — Dropped: bitmap compositing format belongs to the engine; no app TIFF/HEIC/JPEG failure reproduced.
+      - M05-32 — Dropped: alleged 255-slot queue concerns another engine; OpenStream uses tested dynamic subtitle storage.
+      - M05-33 — Dropped: ASS raster pixel comparison belongs to the engine and needs a representative fixture.
+      - M05-34 — Dropped: subtitle delay is implemented; the separate sRGB-on-HDR claim needs engine/display measurement.
+      - M05-35 — Dropped: subtitle/frame-rate/HDR dropped-frame measurement needs a real Apple TV/display.
+      - M05-37 — Dropped: broadcast multivariant constraints do not justify re-authoring the local single-route engine playlist.
+      - M06-01 — Covered: platform-specific UI targets and E2E-iOS/tvOS/visionOS test plans exist; Mac retains its UI scheme.
+      - M06-02 — Covered: Debug launch-argument network stub exists; task-local test roots now prevent cross-suite interference.
+      - M06-04 — Covered: checked-in E2E test plans and UI schemes exist.
+      - M06-14 — Dropped: devicectl inventories physical devices; simulator inventory remains simctl, so one-inventory premise is false.
+      - M06-15 — Dropped: UDID/CoreDevice mapping is device-run infrastructure; current mini scripts already use explicit destination IDs.
+      - M06-16 — Dropped: physical install/launch/console flow already belongs to release/devplus scripts; no app change required.
+      - M06-17 — Dropped: real-device capture infrastructure requires a device session; current UI attachments supply screenshots.
+      - M06-18 — Dropped: build-once device fan-out is test infrastructure for owner devices, excluded from this app-fix round.
+      - M06-19 — Covered: Messages tests use predicates/waitForExistence; original fixed sleeps removed.
+      - M06-22 — Covered: iOS/tvOS/Mac UI base classes attach failure screenshots with keepAlways; relevant current targets inherit them.
+      - M06-23 — Covered: control-plane fixtures run through isolated bounded loader; AppleNetworkStubTests.
+      - M06-25 — Dropped: cross-device Messages test requires two owner devices/accounts.
+      - M06-26 — Covered: app uses KVS, not CloudKit; the alleged CloudKit Development/Production mismatch does not apply.
+      - M06-27 — Dropped: same-account assertion needs signed-in owner devices/accounts.
+      - M06-28 — Dropped: app uses KVS, not CloudKit push; two-real-device proof remains an owner action.
+      - M06-29 — Dropped: CloudKit-specific polling does not apply to KVS; same-account device checks are excluded.
+      - M06-31 — Dropped: airplane-mode sync conflict run needs two signed-in devices; merge/tombstone policies have unit tests.
+      - M06-33 — Dropped: CloudKit seed/import harness does not apply to KVS; real-account sync is excluded.
+      **Closed triage:** 101 individual dispositions (35 covered, 66 dropped). M01-12 fixed with delayed/failure/
+      retry/cancellation tests in both playback adapters. Full gate 3026 / 384; this closes triage, not device soaks.
+
+- [x] iOS 18 UX: nav icons + large "Discover" title unreadable on bright hero art (no glass on iOS 18); Streaming
+      Services "Add Service" only tappable on its label; full-screen player not modal for VoiceOver; a search
+      deep link with a title page open lands under it.
+      Nav/title readability and fullscreen VoiceOver isolation are closed under finish-spec #52 in Done below.
+      **Round 3 closed 2026-10-10:** a7b5fd2 nav/title and fullscreen presenter isolation reverified on the existing
+      iOS 18.6 simulator on the rebuilt app by testLegacyDiscoverNavigationAndPlayerAccessibilityIsolation (35.554 s); both attachments inspected.
+      Add Service hit area and search-route dismissal already fixed in the finish-spec; route policy tests pass.
+
+- [x] **YouTube attribution.** The trailer frame CSS (N49) hides YouTube's title, channel and link;
+      the fast iPhone/iPad trailer start (a130f96) relies on it. YouTube's API terms may require
+      showing it. Keep it, or go back to the fixed wait on iPhone/iPad?
+      **Round 3 closed 2026-10-10:** CSS preserves title/channel/link; obsolete showinfo/modestbranding flags removed.
+      Fast frame reveal retained; HTML/metadata/title-entry regressions pass.
+
+- [x] **Trailers with the title burned in.** Some trailers open on their own title card, so on the Mac
+      hero a faint second wordmark shows behind ours (N57). Keep those trailers, or skip them?
+      **Round 3 closed 2026-10-10:** valid source start offsets are carried into embed/API start and replay seek.
+      Missing/invalid offsets stay at zero; current metadata gives no chapter offsets, so no title-card guesses.
+      Known/negative/nonfinite offset tests pass.
+
+- [x] **Apple TV row headers** are 76 pt, about twice the Apple TV app's 38 pt. Shrink to match?
+      **Round 3 closed 2026-10-10:** AppleMediaShelf and AppleShelfHeading use shared explicit 38 pt bold metrics.
+      Final tvOS build recompiles both views and the metric.
+
+- [x] **iPhone tab bar shrinking on scroll** — allow it (the system behaviour), or keep it fixed?
+      **Round 3 closed 2026-10-10:** native onScrollDown minimization on iOS 26+ iPhone; system tab bar retained.
+      Older systems/iPad use their native default. Final iOS build passes.
+
+- [x] **Receipt check (N39 F1).** The app tells TestFlight builds apart (to turn tracing on) with
+      Apple's deprecated receipt URL, the last build warning. Its replacement is async and can put an
+      App Store sign-in prompt on the Mac. Keep the deprecated check (recommended), or switch?
+      **Round 3 closed 2026-10-10:** take the recommendation: retain AppleBuildChannel's deprecated receipt check.
+      No async StoreKit/sign-in prompt introduced; sandbox/release channel regression tests remain green.
 
 - [x] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
       Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials

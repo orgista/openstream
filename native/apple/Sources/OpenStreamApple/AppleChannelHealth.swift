@@ -125,18 +125,26 @@ public actor AppleChannelHealthHistory {
 }
 
 public enum AppleWorkingM3UExport {
-    public static func text(lineup: [AppleIPTVChannel], health: [String: AppleChannelHealthResult]) -> String {
+    public static func text(lineup: [AppleIPTVChannel], health: [String: AppleChannelHealthResult], includesCredentials: Bool = false) -> String {
         var lines = ["#EXTM3U"]
         for channel in lineup where health[AppleChannelHealthResult.storageID(channel.id)]?.bucket == .online {
-            if let original = channel.originalEXTINF { lines.append(original) }
+            if includesCredentials, let original = channel.originalEXTINF { lines.append(original) }
             else { lines.append("#EXTINF:-1,\(singleLine(channel.name))") }
             for (key, value) in channel.playbackHeaders.sorted(by: { $0.key < $1.key }) {
                 let option = key == "Referer" ? "http-referrer" : "http-\(key.lowercased())"
-                lines.append("#EXTVLCOPT:\(option)=\(singleLine(value))")
+                lines.append(includesCredentials ? "#EXTVLCOPT:\(option)=\(singleLine(value))" : "#EXTVLCOPT:[REDACTED]")
             }
-            lines.append(channel.streamURL.absoluteString)
+            lines.append(includesCredentials ? channel.streamURL.absoluteString : "[REDACTED URL]")
         }
-        return lines.joined(separator: "\n") + "\n"
+        let text = lines.joined(separator: "\n") + "\n"
+        // Credentials may occupy opaque paths and EXTINF attributes as well
+        // as recognizable queries. A redacted copy removes every URL and
+        // header value; only an explicit export choice produces a playable copy.
+        guard !includesCredentials else { return text }
+        return AppleDiagnosticsReport.redact(text).split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in
+                line.hasPrefix("#EXTVLCOPT:") ? "#EXTVLCOPT:[REDACTED]" : String(line)
+            }.joined(separator: "\n")
     }
 
     private static func singleLine(_ value: String) -> String {

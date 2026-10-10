@@ -240,7 +240,6 @@ public enum AppleTrailerPreviewPolicy {
             URLQueryItem(name: "enablejsapi", value: "1"),
             URLQueryItem(name: "rel", value: "0"),
             URLQueryItem(name: "fs", value: "0"),
-            URLQueryItem(name: "showinfo", value: "0"),
             URLQueryItem(name: "vq", value: quality),
             URLQueryItem(name: "origin", value: "https://openstream.app"),
         ]

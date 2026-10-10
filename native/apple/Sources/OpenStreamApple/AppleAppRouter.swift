@@ -78,6 +78,7 @@ public final class AppleAppRouter {
     public private(set) var route: AppleAppRoute?
     public private(set) var searchQuery = ""
     public private(set) var revision = 0
+    public private(set) var pendingExternalLiveChannelID: String?
     /// A scanned Set Up from iPhone code (`openstream://send-setup?…`): the
     /// root asks "Send your setup to …?" (`AppleSetupTransferHost`).
     public private(set) var setupSendLink: AppleSetupTransferLink?
@@ -96,7 +97,25 @@ public final class AppleAppRouter {
         }
         guard let value = AppleAppRoute(url: url) else { return }
         if case .sharedLink = value { AppleSharedLinkHandoff.clear(matching: url) }
-        open(value)
+        // A URL can come from any app or web page. Show the title so the
+        // viewer chooses Play; typed routes from Siri/Shortcuts retain intent.
+        if case .media(let id, .play) = value { open(.media(id: id, action: .display)) }
+        else {
+            open(value)
+            if case .live(let id) = value { pendingExternalLiveChannelID = id }
+        }
+    }
+
+    public func clearExternalLivePlayback() {
+        guard pendingExternalLiveChannelID != nil else { return }
+        pendingExternalLiveChannelID = nil
+        route = nil
+        revision &+= 1
+    }
+
+    public func confirmExternalLivePlayback() {
+        guard let id = pendingExternalLiveChannelID else { return }
+        open(.live(channelID: id))
     }
 
     public func clearSetupSendLink() { setupSendLink = nil }
@@ -110,6 +129,7 @@ public final class AppleAppRouter {
     /// A route that did not come from a URL: an App Intent (Siri, Shortcuts,
     /// Spotlight) handed over through `AppleAppIntentHandoff`.
     public func open(_ value: AppleAppRoute) {
+        pendingExternalLiveChannelID = nil
         route = value
         if case .search(let query) = value { searchQuery = query }
         if case .sharedLink = value { searchQuery = "" }

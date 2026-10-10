@@ -98,7 +98,7 @@ struct AppleMediaShelf<Content: View>: View {
 
     // tvOS retains its safe-area gutter and room for the focus lift.
     #if os(tvOS)
-    private var titleFont: Font { .title.bold() }
+    private var titleFont: Font { .system(size: AppleTVBillboardMetrics.rowTitleFontSize, weight: .bold) }
     private var titleSpacing: CGFloat { AppleTVBillboardMetrics.rowTitleSpacing }
     private var horizontalInset: CGFloat { AppleTVBillboardMetrics.rowHorizontalInset }
     private var cardGap: CGFloat { AppleTVBillboardMetrics.cardGap }

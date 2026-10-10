@@ -34,9 +34,9 @@ import Testing
         store.endLivePlayback(second)
         #expect(!store.hasLivePlayback)
         await first.begin(makeRequest(isLive: true, sourceKind: .iptv))
-        #expect(AppleChannelHealthStore.shared.hasLivePlayback)
+        #expect(AppleChannelHealthStore.shared.tracksLivePlayback(first))
         first.stop()
-        #expect(!AppleChannelHealthStore.shared.hasLivePlayback)
+        #expect(AppleChannelHealthStore.shared.tracksLivePlayback(first) == false)
     }
 
     @Test func supersededLoadFailureCannotReplaceNewPlayback() async throws {

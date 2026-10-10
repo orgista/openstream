@@ -4596,3 +4596,12 @@ Playback score falls 91/94 → 85/94 because six files now report an error durin
 The source fixes are committed and pushed to the owner's AetherEngine fork, tested revision `45d64e8a9b2ac422bcdb7f467f8327c214eab2ed`; detailed evidence is in documentation commit `a93c73dd`. OpenStream Package.swift and both resolved files pin the tested source revision. Fork gate: 2656 tests / 359 suites. OpenStream complete serial gate: 3018 / 384 (60.581 s); the default parallel run reproduces the pre-existing shared health-store race. The timestamp-wrap valid seek remains intact after restricting the raw EOF bound to unfolded Matroska. No OpenStream commit or upload was made.
 
 Owner only: check AV1/interlaced pixel output and native-HLS heat on the real A12 Apple TV after the lead merges this diff and installs a build. OWNER-TODO stays unticked until merge/install.
+
+
+## 2026-10-10 — Finish round 3
+
+Links from other apps now ask you to play Live TV or YouTube; movie links open their title page. Sharing a playlist asks whether to include provider credentials. The redacted choice removes full stream addresses and headers.
+
+External subtitles now show as selected only after valid captions arrive, and a failed download can be retried. TV shelf headings are 38 pt; the iPhone uses the system shrinking tab bar. YouTube attribution stays visible. Trailers only skip a title card when the source supplies a start offset. The recommended receipt check stays.
+
+The full tests pass: 3,026 tests in 384 suites. The iOS 18.6 navigation/accessibility check and final iOS/tvOS builds pass. All 101 Muse items have an individual disposition in OWNER-TODO (35 covered, 66 dropped). Device, account and soak checks are labelled separately; they are not claimed as tested. Googlebook stays open for shipping. No OpenStream commit or upload was made.

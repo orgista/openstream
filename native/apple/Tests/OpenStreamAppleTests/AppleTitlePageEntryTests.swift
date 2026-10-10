@@ -54,7 +54,7 @@ struct AppleTitlePageEntryTests {
     /// (the centre play/pause glyph, captions) as the Mac hero's.
     @Test func trailerChromeIsHiddenOnEveryHost() {
         for script in [AppleYouTubePreviewHTML.playerChromeScript, AppleYouTubePreviewHTML.macPlayerFrameScript] {
-            #expect(script.contains(#"[class^="player-controls"]"#))
+            #expect(script.contains(#"[class^="player-controls"]"#) == false)
             #expect(script.contains(".ytp-bezel"))
             #expect(script.contains("display:none!important"))
             #expect(script.contains("youtube(-nocookie)?"))

@@ -308,11 +308,11 @@ func addOnTracksUseEmbeddedLanguageNormalization(code: String, expected: String?
 
 @MainActor
 @Test(arguments: [AppleCaptionsPreference.always, .english, .deviceLanguage])
-func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreference) throws {
+func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreference) async throws {
     let native = NativePlaybackEngine()
     let aether = try AetherPlaybackEngine()
-    native.externalSubtitleDataLoader = { _ in Data() }
-    aether.externalSubtitleDataLoader = { _ in Data() }
+    native.externalSubtitleDataLoader = { _ in Data("1\n00:00:00,000 --> 00:01:00,000\nFixture cue\n".utf8) }
+    aether.externalSubtitleDataLoader = native.externalSubtitleDataLoader
     for engine: any ApplePlaybackEngine in [native, aether] {
         engine.applyCaptionPreferences(preference: preference, languages: ["eng"], languagesAreExplicit: true)
         engine.addExternalSubtitleTracks([
@@ -322,6 +322,8 @@ func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreferenc
                                        url: URL(fileURLWithPath: "/unused-en.srt")),
         ])
         let english = try #require(engine.subtitleTracks.first { $0.language == "en" })
+        let load = try #require(engine is NativePlaybackEngine ? native.externalSubtitleLoad : aether.pendingExternalSubtitleLoad)
+        await load.value
         #expect(engine.activeSubtitleTrackID == english.id)
         engine.selectSubtitleTrack(id: nil)
         engine.addExternalSubtitleTracks([
@@ -417,5 +419,89 @@ private func readSubtitleFixture(_ url: URL) async throws -> Data {
         engine.addExternalSubtitleTracks([track])
         #expect(try #require(engine.subtitleTracks.first).language == nil)
         engine.stop()
+    }
+}
+
+private actor SubtitleDownloadGate {
+    private var reader: CheckedContinuation<Data, any Error>?
+    private var observer: CheckedContinuation<Void, Never>?
+
+    func read() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            reader = continuation
+            observer?.resume()
+            observer = nil
+        }
+    }
+
+    func waitForRead() async {
+        if reader != nil { return }
+        await withCheckedContinuation { observer = $0 }
+    }
+
+    func finish(fails: Bool) {
+        if fails { reader?.resume(throwing: URLError(.cannotConnectToHost)) }
+        else { reader?.resume(returning: Data("1\n00:00:00,000 --> 00:01:00,000\nFixture cue\n".utf8)) }
+        reader = nil
+    }
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func externalSubtitleIsSelectedOnlyAfterASuccessfulDownload(fails: Bool) async throws {
+    for useNative in [false, true] {
+        let gate = SubtitleDownloadGate()
+        let aether = try AetherPlaybackEngine()
+        aether.captionsPreference = .off
+        let native = NativePlaybackEngine()
+        native.applyCaptionPreferences(preference: .off, languages: [], languagesAreExplicit: false)
+        aether.externalSubtitleDataLoader = { _ in try await gate.read() }
+        native.externalSubtitleDataLoader = { _ in try await gate.read() }
+        let engine: any ApplePlaybackEngine = useNative ? native : aether
+        defer { engine.stop() }
+        engine.addExternalSubtitleTracks([.init(id: "fixture", languageCode: "en", sourceName: "Fixture",
+            url: URL(string: "https://fixture.example/subtitle.srt")!)])
+        engine.selectSubtitleTrack(id: 1_000_000)
+        await gate.waitForRead()
+        #expect(engine.activeSubtitleTrackID == nil)
+        let load = try #require(useNative ? native.externalSubtitleLoad : aether.pendingExternalSubtitleLoad)
+        await gate.finish(fails: fails)
+        await load.value
+        #expect(engine.activeSubtitleTrackID == (fails ? nil : 1_000_000))
+        #expect(engine.subtitleCues.isEmpty == fails)
+        if fails {
+            native.externalSubtitleDataLoader = { _ in Data("1\n00:00:00,000 --> 00:01:00,000\nRetry cue\n".utf8) }
+            aether.externalSubtitleDataLoader = native.externalSubtitleDataLoader
+            engine.selectSubtitleTrack(id: 1_000_000)
+            let retry = try #require(useNative ? native.externalSubtitleLoad : aether.pendingExternalSubtitleLoad)
+            await retry.value
+            #expect(engine.activeSubtitleTrackID == 1_000_000)
+            #expect(engine.subtitleCues.first?.text == "Retry cue")
+        }
+    }
+}
+
+@MainActor
+@Test func cancellingAPendingSubtitleCannotSelectItAfterDownload() async throws {
+    for useNative in [false, true] {
+        let gate = SubtitleDownloadGate()
+        let aether = try AetherPlaybackEngine()
+        aether.captionsPreference = .off
+        let native = NativePlaybackEngine()
+        native.applyCaptionPreferences(preference: .off, languages: [], languagesAreExplicit: false)
+        aether.externalSubtitleDataLoader = { _ in try await gate.read() }
+        native.externalSubtitleDataLoader = { _ in try await gate.read() }
+        let engine: any ApplePlaybackEngine = useNative ? native : aether
+        defer { engine.stop() }
+        engine.addExternalSubtitleTracks([.init(id: "fixture", languageCode: "en", sourceName: "Fixture",
+            url: URL(string: "https://fixture.example/subtitle.srt")!)])
+        engine.selectSubtitleTrack(id: 1_000_000)
+        await gate.waitForRead()
+        let load = try #require(useNative ? native.externalSubtitleLoad : aether.pendingExternalSubtitleLoad)
+        engine.selectSubtitleTrack(id: nil)
+        await gate.finish(fails: false)
+        await load.value
+        #expect(engine.activeSubtitleTrackID == nil)
+        #expect(engine.subtitleCues.isEmpty)
     }
 }

@@ -31,6 +31,10 @@ public final class AppleChannelHealthStore {
     private var livePlayers: [ObjectIdentifier: LivePlayer] = [:]
     public var hasLivePlayback: Bool { livePlayers.values.contains { $0.coordinator != nil } }
 
+    func tracksLivePlayback(_ coordinator: ApplePlaybackCoordinator) -> Bool {
+        livePlayers[ObjectIdentifier(coordinator)]?.coordinator != nil
+    }
+
     func beginLivePlayback(_ coordinator: ApplePlaybackCoordinator) {
         livePlayers = livePlayers.filter { $0.value.coordinator != nil }
         livePlayers[ObjectIdentifier(coordinator)] = LivePlayer(coordinator: coordinator)
@@ -137,8 +141,8 @@ public final class AppleChannelHealthStore {
         lineup.filter { results[AppleChannelHealthResult.storageID($0.id)]?.bucket == .online }.count
     }
 
-    public func workingM3U() -> String {
-        AppleWorkingM3UExport.text(lineup: lineup, health: results)
+    public func workingM3U(includesCredentials: Bool = false) -> String {
+        AppleWorkingM3UExport.text(lineup: lineup, health: results, includesCredentials: includesCredentials)
     }
 
     /// Runs the phase-1 sweep with its defaults over the current lineup.

@@ -76,6 +76,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     private var externalSubtitleTracks: [AppleExternalSubtitleTrack] = []
     /// Internal read access lets tests await the actual load, without sleeps.
     private(set) var externalSubtitleLoad: Task<Void, Never>?
+    private var pendingExternalSubtitleID: Int?
     static let externalSubtitleTrackIDBase = 1_000_000
     public var externalSubtitleDataLoader: @Sendable (URL) async throws -> Data
         = AppleExternalSubtitleService.liveDataLoader
@@ -361,6 +362,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         subtitleSelectionOverridden = true
         externalSubtitleLoad?.cancel()
         externalSubtitleLoad = nil
+        pendingExternalSubtitleID = nil
         subtitleCues = []
         activeSubtitleTrackID = option.flatMap { selected in
             legibleOptions.first(where: { $0.value == selected })?.key
@@ -387,9 +389,10 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
 
     private func applySubtitleSelection(id: Int?) {
         // A repeat track-discovery callback must not restart the same download.
-        if let id, id >= Self.externalSubtitleTrackIDBase, id == activeSubtitleTrackID { return }
+        if let id, id >= Self.externalSubtitleTrackIDBase, (id == activeSubtitleTrackID || id == pendingExternalSubtitleID) { return }
         externalSubtitleLoad?.cancel()
         externalSubtitleLoad = nil
+        pendingExternalSubtitleID = nil
         activeSubtitleTrackID = nil
         subtitleCues = []
         if let item, let legibleGroup {
@@ -399,18 +402,24 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         if id >= Self.externalSubtitleTrackIDBase {
             let index = id - Self.externalSubtitleTrackIDBase
             guard externalSubtitleTracks.indices.contains(index) else { return }
-            activeSubtitleTrackID = id
+            pendingExternalSubtitleID = id
             let track = externalSubtitleTracks[index]
             let load = externalSubtitleDataLoader
             externalSubtitleLoad = Task { [weak self] in
                 let data = try? await load(track.url)
-                guard self != nil, !Task.isCancelled, let data else { return }
+                guard !Task.isCancelled else { return }
+                guard let data else {
+                    if let self, self.pendingExternalSubtitleID == id { self.pendingExternalSubtitleID = nil }
+                    return
+                }
                 // Match Aether's path: inflate/parse off the main actor.
                 let cues = await Task.detached(priority: .userInitiated) {
                     AppleSubtitleTextParser.cues(from: data, language: track.languageCode)
                 }.value
-                guard let self, !Task.isCancelled, self.activeSubtitleTrackID == id else { return }
+                guard let self, !Task.isCancelled, self.pendingExternalSubtitleID == id else { return }
+                self.pendingExternalSubtitleID = nil
                 self.subtitleCues = cues
+                self.activeSubtitleTrackID = cues.isEmpty ? nil : id
             }
         } else if let item, let legibleGroup, let option = legibleOptions[id] {
             item.select(option, in: legibleGroup)
@@ -736,6 +745,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
         captionObservation = nil
         externalSubtitleLoad?.cancel()
         externalSubtitleLoad = nil
+        pendingExternalSubtitleID = nil
         externalSubtitleTracks = []
         embeddedSubtitleTracks = []
         legibleGroup = nil

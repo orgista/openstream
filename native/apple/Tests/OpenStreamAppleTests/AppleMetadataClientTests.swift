@@ -120,7 +120,7 @@ import Testing
     #expect(html.contains("setTimeout(finishPreview, (previewCapSeconds - previewHideLeadSeconds) * 1000)"))
     #expect(html.contains("function clearPreviewCapTimers()"))
     #expect(html.contains("setTimeout(hidePlayer, 650)"))
-    #expect(html.contains("showinfo: 0"))
+    #expect(html.contains("showinfo: 0") == false)
     #expect(html.contains("fs: 0"))
     #expect(!html.contains("window.setTrailerMuted(!desiredMuted)"))
     #expect(!html.contains("&mute="))

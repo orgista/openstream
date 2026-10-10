@@ -36,4 +36,28 @@ struct AppleSpotlightRouteTests {
         let url = try #require(URL(string: "openstream://media/\(recordID)?action=display"))
         #expect(AppleAppRoute(url: url) == AppleAppRoute(spotlightIdentifier: recordID))
     }
+    @Test func externalPlayOpensTheTitleButTrustedIntentStillPlays() throws {
+        let router = AppleAppRouter()
+        router.open(try #require(URL(string: "openstream://media/\(recordID)?action=play")))
+        #expect(router.route == .media(id: recordID, action: .display))
+        router.open(.media(id: recordID, action: .play))
+        #expect(router.route == .media(id: recordID, action: .play))
+    }
+
+    @Test func externalLiveLinkWaitsForPlayAndTrustedLiveIntentDoesNot() throws {
+        let router = AppleAppRouter()
+        router.open(try #require(AppleAppRoute.liveURL(channelID: "fixture-channel")))
+        #expect(router.route == .live(channelID: "fixture-channel"))
+        #expect(router.pendingExternalLiveChannelID == "fixture-channel")
+        router.confirmExternalLivePlayback()
+        #expect(router.route == .live(channelID: "fixture-channel"))
+        #expect(router.pendingExternalLiveChannelID == nil)
+        router.open(try #require(AppleAppRoute.liveURL(channelID: "fixture-other")))
+        router.clearExternalLivePlayback()
+        #expect(router.route == nil)
+        #expect(router.pendingExternalLiveChannelID == nil)
+        router.open(.live(channelID: "trusted"))
+        #expect(router.pendingExternalLiveChannelID == nil)
+    }
+
 }

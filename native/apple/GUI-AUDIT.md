@@ -2399,3 +2399,13 @@ brought back on screen after the walk had scrolled past their row.
 - [x] #34 Whole corpus rebuilt on DevExt: all 98 entries, 4.37 GB downloaded/generated media, no skips. Baseline 20261010-031451-round2-full-baseline; final 20261010-041939-round2-full-final; both 98/98 results, 92/94 frames. Seek continuity 79/82 → 80/82. Six later-seek errors explain playback 91/94 → 85/94; steady-play windows remain healthy.
 - [F] #34 Fork fixes pushed, tested source 45d64e8a; evidence a93c73dd. Forced-software AV1 continuity 1/4 → 4/4; starvation 9/12 → 0/12; max frame latency 939.2 ms. Four truncated fixtures terminate absent-data seeks in 10–13 ms. VC-1 reaches actual decoded end 1.034 s versus 0.751 s. Six interlaced clips / 18 seeks have zero freezes before and after corrected measurement. Attached AV1 traces exercise real decode + three seeks; fork full serial gate 2656 / 359.
 - [F] #34 OpenStream now pins owner-fork 45d64e8a in Package.swift and both resolved files. App/package dependency resolution passes on Dev-Mini. Default full gate retains existing shared health-store race (3018 / 384, one issue); complete serial gate passes 3018 / 384 (60.581 s). Zero-byte and whitespace checks clean. A12 pixel output/heat and lead merge/install remain owner checks.
+
+
+## 2026-10-10 — Finish round 3
+
+- [F] Mythos security: URL playback consent, explicit playlist export choice, structurally redacted provider URLs/headers; independent review and regression gate 3026 / 384. ATS decision retained.
+- [x] Mythos Live: prior numbered fixes and native-HLS/multiview measurements retained; no unmeasured buffering patch. Physical A12 heat excluded.
+- [F] Muse M01-12: external subtitle remains unselected until valid cues load; fail/retry/cancel covered for both adapters. All 101 triage entries individually recorded (35 covered / 66 dropped).
+- [x] iOS 18.6: legacy navigation/bright hero and fullscreen accessibility UI test passes on the rebuilt app (35.554 s); both final result attachments inspected.
+- [F] System UI calls: 38 pt TV shelf titles, iPhone native tab minimization, preserved YouTube attribution and source-provided start offsets; deprecated receipt recommendation retained. iOS/tvOS compile proof recorded.
+- [x] Final full gate 3026 tests / 384 suites (8.856 s); iOS/tvOS each recompile all 15 changed sources, with the final Live guard recompiled again. Zero-byte Swift and whitespace checks clean. No commit/upload; Googlebook stays open for ship.

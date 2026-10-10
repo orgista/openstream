@@ -54,8 +54,13 @@ enum AppleYouTubePreviewHTML {
         let effectiveMuted = requiresMutedPlayback || startsMuted
         var components = URLComponents(url: embedURL, resolvingAgainstBaseURL: false)
         let existingItems = components?.queryItems ?? []
-        components?.queryItems = existingItems.filter { !["mute", "autoplay", "playsinline"].contains($0.name) }
-            + [URLQueryItem(name: "mute", value: effectiveMuted ? "1" : "0"),
+        // Honor only an offset supplied by the source. No guessed title-card
+        // duration: sources without chapter/offset information start at zero.
+        let suppliedStart = existingItems.first { $0.name == "start" }?.value.flatMap(Double.init) ?? 0
+        let start = suppliedStart.isFinite && suppliedStart >= 0 && suppliedStart <= 86_400 ? Int(suppliedStart) : 0
+        components?.queryItems = existingItems.filter { !["mute", "autoplay", "playsinline", "start"].contains($0.name) }
+            + [URLQueryItem(name: "start", value: String(start)),
+               URLQueryItem(name: "mute", value: effectiveMuted ? "1" : "0"),
                URLQueryItem(name: "autoplay", value: startsPlaying ? "1" : "0"),
                URLQueryItem(name: "playsinline", value: "1")]
         let videoKeyJSON = (try? JSONEncoder().encode(embedURL.lastPathComponent))
@@ -334,7 +339,7 @@ enum AppleYouTubePreviewHTML {
           if (!player || !playerReady) return true;
           clearPreviewCapTimers();
           previewEnding = false;
-          if (typeof player.seekTo === 'function') player.seekTo(0, true);
+          if (typeof player.seekTo === 'function') player.seekTo(\(start), true);
           startPlayback();
           return true;
         };
@@ -351,13 +356,12 @@ enum AppleYouTubePreviewHTML {
         function onYouTubeIframeAPIReady() {
           player = new YT.Player('player', {
             playerVars: {
+              start: \(start),
               autoplay: \(safeAutoplay),
               mute: \(effectiveMuted ? 1 : 0),
               playsinline: 1,
               controls: 0,
               disablekb: 1,
-              modestbranding: 1,
-              showinfo: 0,
               iv_load_policy: 3,
               enablejsapi: 1,
               rel: 0,
@@ -444,7 +448,7 @@ enum AppleYouTubePreviewHTML {
     /// YouTube's own chrome that `controls: 0` still draws: the play/pause
     /// glyph in the middle of the picture and the caption window.
     private static let playerChromeHidingCSS =
-        #"[class^="player-controls"],[class*=" player-controls"],.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
+        #".ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
 
     /// Injected into every frame of the title page's web view on iPhone and
     /// iPad, it acts only in YouTube's own player page, which the host page
