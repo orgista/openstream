@@ -333,6 +333,17 @@ fun LibraryScreen(
         verticalArrangement = Arrangement.spacedBy(layout.itemSpacingDp.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 34.dp),
     ) {
+        // The screen keeps its name, empty or not: a heading, no explainer text.
+        item(key = "library-heading", span = { GridItemSpan(maxLineSpan) }) {
+            Text(
+                "Library",
+                modifier = Modifier.semantics { heading() },
+                color = OpenStreamColors.Muted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+            )
+        }
         if (catalog.isNotEmpty()) {
             item(key = "library-filters", span = { GridItemSpan(maxLineSpan) }) {
                 LibraryFilters(
@@ -379,7 +390,6 @@ private fun EmptyLibraryState(
     ) {
         Text(
             title,
-            modifier = Modifier.semantics { heading() },
             color = OpenStreamColors.Text,
             fontSize = 24.sp,
             fontWeight = FontWeight.ExtraBold,
