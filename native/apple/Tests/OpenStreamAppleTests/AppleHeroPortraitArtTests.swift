@@ -6,6 +6,52 @@ import Testing
 /// Owner items 6 and 19 (2026-10-09): the iPhone's portrait hero picks its
 /// art in a fixed order, before it draws, and never shows the title twice.
 @Suite struct AppleHeroPortraitArtTests {
+    @Test func facesBeatSaliencyAndTheLargestFaceHasDoubleWeight() {
+        let point = AppleHeroFocalPoint.choose(faces: [
+            CGRect(x: 0, y: 0.6, width: 0.2, height: 0.2),
+            CGRect(x: 0.6, y: 0.2, width: 0.4, height: 0.4)
+        ], salientRegions: [CGRect(x: 0, y: 0, width: 0.1, height: 0.1)])
+        #expect(abs(point.x - 1.7 / 3) < 0.001)
+        #expect(abs(point.y - 0.5) < 0.001)
+        #expect(AppleHeroFocalPoint.choose(faces: [], salientRegions: []) == CGPoint(x: 0.5, y: 0.5))
+        let saliency = AppleHeroFocalPoint.choose(faces: [], salientRegions: [
+            CGRect(x: 0.1, y: 0.6, width: 0.2, height: 0.2)
+        ])
+        #expect(abs(saliency.x - 0.2) < 0.001 && abs(saliency.y - 0.3) < 0.001)
+    }
+
+    @Test func subjectCropPositionsTheSubjectAndClampsToImageEdges() {
+        let frame = CGSize(width: 400, height: 500)
+        for focal in [CGPoint(x: 0, y: 0), CGPoint(x: 0.8, y: 0.3), CGPoint(x: 1, y: 1)] {
+            let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 1280, height: 720),
+                in: frame, focal: focal, subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+            #expect(rect.minX <= 0 && rect.maxX >= frame.width - 0.001)
+            #expect(rect.minY <= 0 && rect.maxY >= frame.height - 0.001)
+        }
+        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 1280, height: 720),
+            in: frame, focal: CGPoint(x: 0.5, y: 0.4), subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+        #expect(abs(rect.midX - frame.width / 2) < 0.001)
+    }
+
+    @Test func focalPointIsLoadedFromTheHashedArtworkCacheBeforeDetection() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleArtworkDiskCache(directory: directory)
+        let url = URL(string: "https://fixture.example/artwork.jpg")!
+        await cache.store(try JSONEncoder().encode([0.2, 0.7]), for: url, variant: "focal-v1")
+        let context = try #require(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8,
+            bytesPerRow: 8, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try #require(context.makeImage())
+        let detector = AppleHeroFocalPoint(cache: cache)
+        #expect(try await detector.point(image: image, url: url) == CGPoint(x: 0.2, y: 0.7))
+        let uncachedURL = URL(string: "https://fixture.example/blank.jpg")!
+        let detected = try await detector.point(image: image, url: uncachedURL)
+        #expect(detected.x.isFinite && (0...1).contains(detected.x))
+        #expect(detected.y.isFinite && (0...1).contains(detected.y))
+        #expect(await cache.contains(url: uncachedURL, variant: "focal-v1"))
+        #expect(try await detector.point(image: image, url: uncachedURL) == detected)
+    }
+
     private let textlessPoster = URL(string: "https://fixture.example/poster-null.jpg")!
     private let poster = URL(string: "https://fixture.example/poster-en.jpg")!
     private let textlessBackdrop = URL(string: "https://fixture.example/backdrop-null.jpg")!

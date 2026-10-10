@@ -29,14 +29,14 @@ struct AppleAlignedTabTitle: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
         if isLive {
-            content
+            legacyNavigationBackground(content)
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
         } else {
             // `.inlineLarge` puts the large title in the toolbar row instead of a
             // second row beneath it, so "Discover" and "Live" sit right under the
             // status bar (owner, 2026-09-18: "Live is too low… Discover is too low").
-            content
+            legacyNavigationBackground(content)
                 .navigationTitle(title)
                 .toolbarTitleDisplayMode(.inlineLarge)
         }
@@ -48,6 +48,19 @@ struct AppleAlignedTabTitle: ViewModifier {
             .toolbarTitleDisplayMode(.inlineLarge)
         #endif
     }
+
+    #if os(iOS)
+    @ViewBuilder
+    private func legacyNavigationBackground(_ content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content
+        } else {
+            content
+                .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+        }
+    }
+    #endif
 }
 
 extension View {

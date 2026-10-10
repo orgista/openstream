@@ -4566,3 +4566,11 @@ setup was added). Not yet proven on your provider: its panel did not answer this
 
 ## 2026-10-08 — Full tour of the iPhone and iPad app with your setup
 A test now taps through the whole app on its own, on the iPhone and the iPad: every tab, every Settings page, a movie, a series, the player and Search. It pressed 338 buttons and nothing crashed. I fixed six things: the magnifier on a title page you opened from Search did nothing; the season list opened into the tab bar and hid the current season; Add Network Share had two "Advanced" rows; "Sync Now" sat out of line with the rows above it; Radarr/Sonarr hints were fainter than the other forms'; and Settings showed a scroll bar. A few things need your call; they are in the to-do list. Live could not be tested because your provider is blocking our home IP right now. Details and screenshots: verification-artifacts/ux-tour-2026-10-08/FINDINGS.md.
+
+## 2026-10-10 — Finish-spec fixes and checks
+
+Saved cache copies no longer keep credential-bearing URLs, and background download resume files are sealed to the device. Deleted sources stay deleted when cloud or backup data merges. The iOS 18 navigation and fullscreen accessibility checks pass. Live PiP keeps playing over Home on DevPlus and the iPad simulator. Apple TV multiview changes layout and returns from fullscreen without reopening its four streams; the season picker and Settings sidebar checks pass. Guide opens as a system sheet, and portrait backdrops choose their crop before appearing. The sparse subtitle switch already works in the pinned engine and now has a regression test.
+
+The Swift gate passes 3,018 tests in 384 suites; iOS and tvOS builds pass. The engine lab needs the missing fork and fixtures from you. Native HLS latency and A12 Apple TV heat still need your provider sample and device. The two security UI choices and the conflicting commit rules are recorded in OWNER-TODO. No upload or commit was made.
+
+The public add-on remainder also passed five in-app batches covering 25 add-ons, with catalog posters and title pages checked. Cyberflix returned a web page instead of a manifest, and several other provider endpoints returned errors; those failures did not crash the app. The existing one-row-per-language captions rule is retained.

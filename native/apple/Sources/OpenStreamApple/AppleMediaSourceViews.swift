@@ -50,17 +50,33 @@ struct AppleLiveTVView: View {
     @State private var selectedCategory = "All"
     /// Pay-per-view channels in the lineup, for the Events tab.
     @State private var eventChannelCount = 0
-    @State private var selectedChannel: AppleIPTVChannel?
-    @State private var playbackRevision = 0
-    @State private var fullScreenRevision = 0
+    @State private var liveSession = AppleLiveSession()
+    private var selectedChannel: AppleIPTVChannel? {
+        get { liveSession.channel }
+        nonmutating set { liveSession.channel = newValue }
+    }
+    private var playbackRevision: Int {
+        get { liveSession.playbackRevision }
+        nonmutating set { liveSession.playbackRevision = newValue }
+    }
+    private var fullScreenRevision: Int {
+        get { liveSession.fullScreenRevision }
+        nonmutating set { liveSession.fullScreenRevision = newValue }
+    }
     @State private var watchHistory = AppleLiveWatchHistoryStore.shared
     @AppStorage(AppleLiveWatchHistoryStore.resumeKey) private var startWithLastChannel = true
-    @State private var resumePending = false
+    private var resumePending: Bool {
+        get { liveSession.resumePending }
+        nonmutating set { liveSession.resumePending = newValue }
+    }
     private var lastWatchedChannelID: String { watchHistory.history.channelIDs.first ?? "" }
     @State private var guideStore = AppleIPTVGuideStore()
     @State private var completeGuide: [AppleChannelLineupEntry] = []
     @State private var lineupIndex = AppleChannelLineupIndex([])
-    @State private var playbackCoordinator = ApplePlaybackCoordinator()
+    private var playbackCoordinator: ApplePlaybackCoordinator {
+        get { liveSession.coordinator }
+        nonmutating set { liveSession.coordinator = newValue }
+    }
     @State private var configuredEngine: ApplePlaybackEngineKind?
     @FocusState private var focusedChannelID: String?
     @State private var reloadGate = AppleReloadGate()
@@ -86,9 +102,13 @@ struct AppleLiveTVView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
+    @State private var showsGuide = false
     #endif
     #if os(tvOS)
-    @State private var tvMultiviewChannels: [AppleIPTVChannel] = []
+    private var tvMultiviewChannels: [AppleIPTVChannel] {
+        get { liveSession.multiviewChannels }
+        nonmutating set { liveSession.multiviewChannels = newValue }
+    }
     @State private var tvPlayer: AppleTVLivePlayerPresentation?
     @State private var pictureInPicture = AppleTVPictureInPicture.shared
     @State private var tvFocusRestore = 0
@@ -938,7 +958,7 @@ struct AppleLiveTVView: View {
             return
         }
         let available = recallChannelIDs
-        guard let id = AppleLiveZappingPolicy.resumeTarget(enabled: startWithLastChannel, liveTabActive: isActive,
+        guard let id = liveSession.resumeTarget(enabled: startWithLastChannel, active: isActive,
             watchedIDs: watchHistory.history.channelIDs, availableIDs: available),
               let channel = channelIndex[id] else { return }
         resumePending = false
@@ -950,8 +970,9 @@ struct AppleLiveTVView: View {
     }
 
     private var previousWatchedChannel: AppleIPTVChannel? {
-        guard catchUp == nil, let selectedChannel,
-              let id = watchHistory.history.previous(currentID: selectedChannel.id, availableIDs: recallChannelIDs) else { return nil }
+        guard let selectedChannel,
+              let id = liveSession.previousID(currentID: selectedChannel.id, programme: catchUp,
+                  history: watchHistory.history, availableIDs: recallChannelIDs) else { return nil }
         return channelIndex[id]
     }
 
@@ -1036,56 +1057,45 @@ struct AppleLiveTVView: View {
 
     /// The programme out of the archive being played on `selectedChannel`;
     /// nil while the channel is live. Cleared by every live start.
-    @State private var catchUp: AppleIPTVProgramme?
+    private var catchUp: AppleIPTVProgramme? {
+        get { liveSession.programme }
+        nonmutating set { liveSession.programme = newValue }
+    }
 
     /// What the player is asked to play for `channel`: the archived
     /// programme when one was chosen, else the live stream.
     private func playbackRequest(for channel: AppleIPTVChannel) -> ApplePlaybackRequest {
-        if let catchUp, let request = AppleIPTVCatchUp.playbackRequest(for: channel, programme: catchUp) {
-            return request
-        }
-        return channel.playbackRequest()
+        liveSession.request(for: channel, programme: catchUp)
     }
 
-    @State private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] = [:]
-    private let liveStreamProbe = AppleIPTVStreamProbe()
-    private struct ChannelProbeRequest {
-        let id = UUID()
-        let channel: AppleIPTVChannel
-        let shareSelection: Bool
-        let present: Bool
-        var programme: AppleIPTVProgramme? = nil
+    private var liveProbedKinds: [String: AppleIPTVStreamProbeResult.MediaKind] {
+        liveSession.probedKinds
     }
-    @State private var pendingProbe: ChannelProbeRequest?
-    @State private var failedProbe: ChannelProbeRequest?
-    @State private var probeFailureMessage: String?
+    private typealias ChannelProbeRequest = AppleLiveSession.ProbeRequest
+    private var pendingProbe: ChannelProbeRequest? {
+        get { liveSession.pendingProbe }
+        nonmutating set { liveSession.pendingProbe = newValue }
+    }
+    private var failedProbe: ChannelProbeRequest? {
+        get { liveSession.failedProbe }
+        nonmutating set { liveSession.failedProbe = newValue }
+    }
+    private var probeFailureMessage: String? {
+        get { liveSession.probeFailureMessage }
+        nonmutating set { liveSession.probeFailureMessage = newValue }
+    }
 
     private func probePendingChannel() async {
-        guard let request = pendingProbe else { return }
-        do {
-            let result = try await liveStreamProbe.validate(channel: request.channel)
-            let kind = result.mediaKind
-            appleTrace("live preflight: HTTP \(result.statusCode), \(kind.rawValue)")
-            try Task.checkCancellation()
-            guard pendingProbe?.id == request.id else { return }
-            liveProbedKinds[request.channel.id] = kind
-            pendingProbe = nil
-            catchUp = request.programme
-            startChannelNow(request.channel.withProbedMediaKind(kind),
-                shareSelection: request.shareSelection, present: request.present)
-        } catch {
-            guard !Task.isCancelled, pendingProbe?.id == request.id else { return }
-            pendingProbe = nil
-            failedProbe = request
-            appleTrace("live preflight failed: \(String(describing: type(of: error)))")
+        switch await liveSession.resolvePendingProbe() {
+        case .ready(let request):
+            startChannelNow(request.channel, shareSelection: request.shareSelection, present: request.present)
+        case .failed(let request):
             #if os(iOS)
-            // Five words naming the channel; the error text (and any host
-            // in it) stays in the trace.
-            appleTrace("live preflight error: \(error.localizedDescription)")
             probeFailureMessage = AppleLiveFailureCause.notBroadcasting(channel: request.channel.name).title
             #else
-            probeFailureMessage = error.localizedDescription
+            _ = request
             #endif
+        case .superseded: break
         }
     }
 
@@ -1151,14 +1161,7 @@ struct AppleLiveTVView: View {
 
     private func startAuthorizedChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool,
                                        programme: AppleIPTVProgramme?) {
-        if shareSelection { resumePending = false }
-        // Synchronously cancel the old load/stream before probing or opening
-        // another one. The existing engine load retains its fast-join policy.
-        playbackCoordinator.stop()
-        pendingProbe = nil
-        probeFailureMessage = nil
-        failedProbe = nil
-        catchUp = programme
+        liveSession.beginSelection(programme: programme, shareSelection: shareSelection)
         guard channel.probedMediaKind == nil, AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
             startChannelNow(channel, shareSelection: shareSelection, present: present)
             return
@@ -1271,6 +1274,7 @@ struct AppleLiveTVView: View {
                     onLastChannel: lastChannelAction,
                     onMultiview: { beginMultiview(held: $0) },
                     allowsPictureInPicture: true,
+                    liveSession: liveSession,
                     onSwitch: { startChannel($0, shareSelection: true) }
                 )
                 .modifier(ApplePINPresenter())
@@ -1384,6 +1388,36 @@ struct AppleLiveTVView: View {
             let resolved = AppleLiveCategoryOrder.resolved(selectedCategory, in: tabs)
             if resolved != selectedCategory { selectedCategory = resolved }
         }
+        .sheet(isPresented: $showsGuide) { liveGuideSheet }
+    }
+
+    private var liveGuideSheet: some View {
+        NavigationStack {
+            AppleIPTVGuideGridView(channels: channelSnapshot.channels,
+                guide: guideStore.guide(for: playbackGuideChannelIDs), guideRevision: guideStore.revision,
+                entries: completeGuide, favoriteIDs: settings.favoriteChannelIDs,
+                onSelect: { channel in
+                    showsGuide = false
+                    if channel.id != selectedChannel?.id || catchUp != nil {
+                        startChannel(channel, shareSelection: true, present: false)
+                    }
+                }, onToggleFavorite: toggleFavorite, onVisibleChannels: refreshGuide,
+                health: channelHealth, onShowHealth: { healthDetailChannel = $0 },
+                onSelectProgramme: { channel, programme in
+                    showsGuide = false
+                    startChannel(channel, shareSelection: false, present: false, programme: programme)
+                })
+                .navigationTitle("Guide")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showsGuide = false }
+                            .accessibilityIdentifier("live.guide.done")
+                    }
+                }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     private var liveStagePlayerColumn: some View {
@@ -1437,7 +1471,7 @@ struct AppleLiveTVView: View {
             AppleLiveCategoryBar(tabs: liveCategoryTabs, selection: Binding(
                 get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
                 set: { selectedCategory = $0 }
-            ), onSearch: { showsSearch = true })
+            ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true })
             liveOnNowList(channels: channelSnapshot.channels)
         }
     }
@@ -1640,7 +1674,8 @@ struct AppleLiveInlinePlayer: View {
         _audioSession = State(initialValue: audioSession)
         _host = State(initialValue: ApplePlayerHost(
             coordinator: coordinator,
-            audioSession: audioSession
+            audioSession: audioSession,
+            activateImmediately: false
         ))
     }
 
@@ -1775,9 +1810,10 @@ struct AppleLiveInlinePlayer: View {
                 }
             }
             guard scenePhase != .background else {
-                lifetime.stop(host: host, coordinator: coordinator)
+                lifetime.enteredBackground(host: host, coordinator: coordinator)
                 return
             }
+            lifetime.enteredForeground()
             // SwiftUI can restart this task when a full-screen cover returns.
             // Only a new channel/retry or a real stop needs a new player item.
             guard lifetime.beginLoad(identity: "\(requestIdentity):\(playbackRevision)") else { return }

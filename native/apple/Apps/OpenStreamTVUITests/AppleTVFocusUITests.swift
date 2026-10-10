@@ -70,6 +70,52 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
 
     // MARK: - The guide
 
+    func testSeasonMenuStartsOnCurrentSeasonAndReturnsFocus() {
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
+        if let title = ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_FIXTURE_NAME"] {
+            app.launchArguments += ["-OpenStreamDetailTitle", title, "-openstream.settings.trailer.autoplay.v1", "NO"]
+        }
+        if let id = ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_FIXTURE_ID"] {
+            app.launchArguments += ["-OpenStreamDebugPlayID", id, "-OpenStreamDebugPlayType", "series", "-OpenStreamDebugStreamFixture", "YES"]
+        }
+        launch(screen: "detail")
+        XCTAssertTrue(wait(for: element("detail.play"), 40))
+        let season = element("detail.season")
+        XCTAssertTrue(season.waitForExistence(timeout: 40))
+        remote.press(.down)
+        let seasonFocus = season.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(season.hasFocus || seasonFocus.waitForExistence(timeout: 10))
+        let current = season.value as? String ?? season.label
+        remote.press(.select)
+        let openMenu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        openMenu.name = "season-menu-open"
+        openMenu.lifetime = .keepAlways
+        add(openMenu)
+        // The system popup does not expose its focused row to XCUITest.
+        // Selecting immediately must choose the already checked season;
+        // Specials receiving focus instead would change this value.
+        remote.press(.select)
+        XCTAssertTrue(season.hasFocus || seasonFocus.waitForExistence(timeout: 10))
+        XCTAssertEqual(season.value as? String ?? season.label, current,
+                       "Season menu did not start on its checked season")
+        remote.press(.select)
+        remote.press(.menu)
+        XCTAssertTrue(season.hasFocus || seasonFocus.waitForExistence(timeout: 10))
+    }
+
+    func testLeftFromBottomOfPlaybackPaneReachesSidebar() {
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES", "-OpenStreamSettingsPane", "playback"]
+        launch(screen: "settings")
+        XCTAssertTrue(element("settings.section.sources").waitForExistence(timeout: 30))
+        Thread.sleep(forTimeInterval: 1)
+        remote.press(.right)
+        for _ in 0..<18 { remote.press(.down) }
+        XCTAssertFalse(focusedElement.identifier.hasPrefix("settings.section."))
+        remote.press(.left)
+        XCTAssertTrue(focused(where: NSPredicate(format: "identifier BEGINSWITH %@", "settings.section."))
+            .waitForExistence(timeout: 10), "Left from the bottom row missed the sidebar")
+    }
+
     /// Repeatable guide-only navigation, with no selection or playback.
     func testLocalGuideFocusLatency() async throws {
         guard let fixture = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"],
@@ -1537,6 +1583,45 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
     }
     /// Local live fixture only: the runner supplies its playlist through the
     /// environment, so this test never needs an owner's provider credentials.
+    func testMultiviewLayoutAndFullscreenRetainFourStreams() throws {
+        guard let value = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"],
+              let url = URL(string: value), url.scheme == "http", url.host == "127.0.0.1" else {
+            throw XCTSkip("Requires the local multiview fixture")
+        }
+        let origin = url.deletingLastPathComponent()
+        app.launchArguments = ["-OpenStreamInlineLiveFixture", "-OpenStreamMuteAudio", "YES",
+            "-OpenStreamTrace", "YES", "-OpenStreamVisionPlaybackIsLive", "YES",
+            "-OpenStreamVisionPlaybackURL", origin.appendingPathComponent("channel1.m3u8").absoluteString,
+            "-OpenStreamMultiviewFixture", "YES", "-OpenStreamMultiviewCount", "4",
+            "-OpenStreamMultiviewTemplate", origin.absoluteString + "channel{channel}.m3u8"]
+        app.launch()
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'multiview.tile.'"))
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 20))
+        let ids = Set(tiles.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertEqual(ids.count, 4)
+        Thread.sleep(forTimeInterval: 5)
+        let layout = element("multiview.layout")
+        for _ in 0..<8 where !layout.hasFocus { remote.press(.down) }
+        XCTAssertTrue(layout.hasFocus)
+        remote.press(.select)
+        XCTAssertEqual(layout.label, "Grid")
+        XCTAssertEqual(Set(tiles.allElementsBoundByIndex.map(\.identifier)), ids)
+        remote.press(.select)
+        XCTAssertEqual(layout.label, "1 Big + Smalls")
+        remote.press(.up)
+        XCTAssertTrue(tiles.allElementsBoundByIndex.contains(where: \.hasFocus))
+        remote.press(.select)
+        XCTAssertTrue(element("live.player.surface").waitForExistence(timeout: 10))
+        remote.press(.menu)
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(Set(tiles.allElementsBoundByIndex.map(\.identifier)), ids)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "four-retained-multiview-streams"
+        shot.lifetime = .keepAlways
+        add(shot)
+        remote.press(.menu)
+    }
+
     func testLiveZappingRecallAndMultiviewRemoteMapping() throws {
         let value = ProcessInfo.processInfo.environment["OPENSTREAM_TEST_M3U"] ?? ""
         guard let url = URL(string: value), url.host == "127.0.0.1", url.scheme == "http" else {
@@ -1600,6 +1685,11 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         grid.name = "zapping-multiview-focus"
         grid.lifetime = .keepAlways
         add(grid)
+        remote.press(.select)
+        XCTAssertTrue(surface.waitForExistence(timeout: 10), "A tile did not enter fullscreen")
+        remote.press(.menu)
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 10), "Back did not restore the retained grid")
+        XCTAssertEqual(Set(tiles.allElementsBoundByIndex.map(\.identifier)), tileIDs)
         remote.press(.menu)
     }
 

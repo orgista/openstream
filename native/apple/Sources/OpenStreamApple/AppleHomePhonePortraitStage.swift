@@ -22,8 +22,9 @@ struct AppleHomePhonePortraitStage: View {
     struct Shown: Equatable {
         let decision: AppleHeroPortraitDecision
         let image: CGImage?
+        var focal: CGPoint = AppleHeroPortraitArt.focalPoint
         static func == (lhs: Shown, rhs: Shown) -> Bool {
-            lhs.decision == rhs.decision && lhs.image === rhs.image
+            lhs.decision == rhs.decision && lhs.image === rhs.image && lhs.focal == rhs.focal
         }
     }
 
@@ -32,7 +33,7 @@ struct AppleHomePhonePortraitStage: View {
             ZStack(alignment: .topLeading) {
                 Color.black
                 if let shown, let image = shown.image {
-                    art(shown.decision.art, image: image, size: proxy.size)
+                    art(shown.decision.art, image: image, size: proxy.size, focal: shown.focal)
                         .transition(.opacity)
                 }
             }
@@ -44,11 +45,14 @@ struct AppleHomePhonePortraitStage: View {
     }
 
     @ViewBuilder
-    private func art(_ art: AppleHeroPortraitArt, image: CGImage, size: CGSize) -> some View {
+    private func art(_ art: AppleHeroPortraitArt, image: CGImage, size: CGSize, focal: CGPoint) -> some View {
         let imageSize = CGSize(width: image.width, height: image.height)
         switch art {
-        case .keyArt, .backdrop:
+        case .keyArt:
             AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size)
+        case .backdrop:
+            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: focal,
+                                  subjectAnchor: CGPoint(x: 0.5, y: 0.4))
         case .posterCard:
             ZStack {
                 AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: CGPoint(x: 0.5, y: 0.5))
@@ -74,8 +78,9 @@ struct AppleHomePhonePortraitStage: View {
                 image = try? await AppleRemoteImageCache.shared.image(
                     url: url, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
             }
+            let focal = await focalPoint(for: remembered.art, image: image)
             guard !Task.isCancelled else { return }
-            show(Shown(decision: remembered, image: image), animated: false)
+            show(Shown(decision: remembered, image: image, focal: focal), animated: false)
             return
         }
         let tmdb = await tmdbArtwork()
@@ -95,10 +100,11 @@ struct AppleHomePhonePortraitStage: View {
             do {
                 let image = try await AppleRemoteImageCache.shared.image(
                     url: url, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
+                let focal = await focalPoint(for: art, image: image)
                 guard !Task.isCancelled else { return }
                 AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
                 AppleHeroPortraitArtTally.record(art, item: item.name)
-                show(Shown(decision: decision, image: image), animated: true)
+                show(Shown(decision: decision, image: image, focal: focal), animated: true)
                 return
             } catch is CancellationError {
                 return
@@ -115,6 +121,11 @@ struct AppleHomePhonePortraitStage: View {
         return await AppleHeroArtworkUpgrade.shared.artwork(
             imdbID: imdbID, kind: item.type == "series" ? .series : .movie,
             configuration: configuration, deadline: AppleHeroPortraitMemory.lookupDeadline)
+    }
+
+    private func focalPoint(for art: AppleHeroPortraitArt, image: CGImage?) async -> CGPoint {
+        guard case .backdrop(let url) = art, let image else { return AppleHeroPortraitArt.focalPoint }
+        return (try? await AppleHeroFocalPoint.shared.point(image: image, url: url)) ?? CGPoint(x: 0.5, y: 0.5)
     }
 
     private func show(_ value: Shown, animated: Bool) {
@@ -150,9 +161,10 @@ struct AppleHeroCroppedImage: View {
     let imageSize: CGSize
     let size: CGSize
     var focal: CGPoint = AppleHeroPortraitArt.focalPoint
+    var subjectAnchor: CGPoint? = nil
 
     var body: some View {
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal)
+        let rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal, subjectAnchor: subjectAnchor)
         Image(decorative: image, scale: 1)
             .resizable()
             .interpolation(.high)

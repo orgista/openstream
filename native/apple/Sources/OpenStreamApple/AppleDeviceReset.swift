@@ -29,7 +29,7 @@ public enum AppleDeviceReset {
     static let cloudRestoreHeldKey = "openstream.reset.cloudRestoreHeld.v1"
     /// Keychain services whose items this device may own. The backup key's
     /// service is deliberately not here.
-    static let localKeychainServices = ["com.orgista.openstream.settings", "com.orgista.openstream.instances"]
+    static let localKeychainServices = ["com.orgista.openstream.settings", "com.orgista.openstream.instances", AppleDownloadResumePersistence.service]
     /// Defaults that describe how this device's keychain is stored rather than
     /// what the viewer set up; losing the sync choice would re-run the
     /// keychain migration on the next launch.

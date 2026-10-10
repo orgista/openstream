@@ -10,7 +10,16 @@ struct AppleLiveCategoryBar: View {
     let tabs: [String]
     @Binding var selection: String
     let onSearch: () -> Void
+    let onGuide: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(tabs: [String], selection: Binding<String>, onSearch: @escaping () -> Void,
+         onGuide: (() -> Void)? = nil) {
+        self.tabs = tabs
+        _selection = selection
+        self.onSearch = onSearch
+        self.onGuide = onGuide
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -30,6 +39,18 @@ struct AppleLiveCategoryBar: View {
                         proxy.scrollTo(tab, anchor: .center)
                     }
                 }
+            }
+            if let onGuide {
+                Button(action: onGuide) {
+                    Image(systemName: "tablecells")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Guide")
+                .accessibilityIdentifier("live.guide")
             }
             Button(action: onSearch) {
                 Image(systemName: "magnifyingglass")

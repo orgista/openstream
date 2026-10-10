@@ -401,6 +401,7 @@ public final class ApplePlaybackCoordinator {
     }
 
     isolated deinit {
+        AppleChannelHealthStore.shared.endLivePlayback(self)
         externalSubtitleTask?.cancel()
         observationTask?.cancel()
         loadTask?.cancel()
@@ -578,6 +579,8 @@ public final class ApplePlaybackCoordinator {
         }
         loadTask?.cancel()
         lastRequest = request
+        if request.isLive { AppleChannelHealthStore.shared.beginLivePlayback(self) }
+        else { AppleChannelHealthStore.shared.endLivePlayback(self) }
         if subtitleTimingMediaID != request.mediaID {
             subtitleTimingMediaID = request.mediaID
             if !subtitleTiming.isIdentity { subtitleTiming = AppleSubtitleTiming() }
@@ -655,6 +658,7 @@ public final class ApplePlaybackCoordinator {
     }
 
     public func stop() {
+        AppleChannelHealthStore.shared.endLivePlayback(self)
         sleepTimer.cancel()
         sharedPlayback?.suspendForLocalTransition()
         generation &+= 1

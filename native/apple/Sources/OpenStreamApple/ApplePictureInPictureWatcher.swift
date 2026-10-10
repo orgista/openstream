@@ -21,15 +21,20 @@ final class ApplePictureInPictureWatcher: NSObject {
     enum Source: Hashable { case stockPlayer, other }
 
     private var active: Set<Source> = []
+    private var isStarting = false
     var isActive: Bool { !active.isEmpty }
+    var isStartingOrActive: Bool { isStarting || isActive }
     var onChange: (Bool) -> Void = { _ in }
 
     func set(_ isOn: Bool, source: Source = .stockPlayer, event: String) {
+        if source == .stockPlayer { isStarting = false }
         let wasActive = isActive
         if isOn { active.insert(source) } else { active.remove(source) }
         appleTrace("picture in picture: \(event) (\(source)) active=\(isActive)")
         if isActive != wasActive { onChange(isActive) }
     }
+
+    func willStart() { isStarting = true }
 }
 
 #if os(macOS)
@@ -48,6 +53,9 @@ extension ApplePictureInPictureWatcher: AVPlayerViewPictureInPictureDelegate {
 }
 #else
 extension ApplePictureInPictureWatcher: AVPlayerViewControllerDelegate {
+    nonisolated func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        Task { @MainActor in self.willStart() }
+    }
     nonisolated func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
         Task { @MainActor in self.set(true, event: "didStart") }
     }

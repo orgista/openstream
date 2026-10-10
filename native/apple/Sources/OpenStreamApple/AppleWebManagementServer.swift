@@ -103,6 +103,7 @@ public final class AppleWebManagementServer {
     public var onSessionChange: (@MainActor @Sendable (AppleWebManagementSession?) -> Void)?
     public var onBrowsersChange: (@MainActor @Sendable ([ConnectedBrowser]) -> Void)?
     private var browsers: [UUID: BrowserSession] = [:]
+    private var pairingAttempts: [String: (start: Date, count: Int)] = [:]
     private let now: @MainActor () -> Date
 
     public private(set) var session: AppleWebManagementSession?
@@ -342,11 +343,23 @@ public final class AppleWebManagementServer {
         return token
     }
 
-    private func pair(code: String?, headers: [String: String]) -> String? {
+    private func pair(code: String?, headers: [String: String], remoteHost: String) -> String? {
+        let stamp = now()
+        pairingAttempts = pairingAttempts.filter {
+            let age = stamp.timeIntervalSince($0.value.start)
+            return age >= 0 && age < 60
+        }
+        guard let code, !code.isEmpty,
+              pairingAttempts[remoteHost] != nil || pairingAttempts.count < 256 else { return nil }
+        var attempts = pairingAttempts[remoteHost] ?? (start: stamp, count: 0)
+        guard attempts.count < 10 else { return nil }
+        attempts.count += 1
+        pairingAttempts[remoteHost] = attempts
         guard let current = session, current.expiresAt > now(),
               AppleWebManagementProtocol.hasValidPairingCode(
                   form: ["pairingCode": code ?? ""], session: current
               ) else { return nil }
+        pairingAttempts[remoteHost] = nil
         let agent = headers["user-agent"] ?? ""
         let name = agent.contains("Edg/") ? "Edge" : agent.contains("Firefox/") ? "Firefox"
             : agent.contains("Chrome/") ? "Chrome" : agent.contains("Safari/") ? "Safari" : "Browser"
@@ -437,7 +450,7 @@ public final class AppleWebManagementServer {
                 traceWeb("dropped: session ended before the reply")
                 return
             }
-            let result = await response(for: request, session: activeSession)
+            let result = await response(for: request, session: activeSession, remoteHost: remoteHost)
             traceWeb("-> \(result.response.code) \(result.response.status)")
             await send(result.response, to: connection)
             if result.stopAfterSending, generation == acceptedGeneration {
@@ -463,7 +476,8 @@ public final class AppleWebManagementServer {
 
     private func response(
         for request: AppleWebManagementHTTPRequest,
-        session activeSession: AppleWebManagementSession
+        session activeSession: AppleWebManagementSession,
+        remoteHost: String
     ) async -> (response: AppleWebManagementHTTPResponse, stopAfterSending: Bool) {
         guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics"
                 || request.path == AppleWorkingM3UExportRoute.path else {
@@ -517,7 +531,7 @@ public final class AppleWebManagementServer {
             guard request.method == "GET" else {
                 return (.plain(405, "Method Not Allowed", "Use GET.", headers: ["Allow": "GET"]), false)
             }
-            guard let token = browserToken ?? pair(code: request.query["pair"], headers: request.headers) else {
+            guard let token = browserToken ?? pair(code: request.query["pair"], headers: request.headers, remoteHost: remoteHost) else {
                 traceWeb("working m3u refused: not paired")
                 return (.plain(401, "Session Ended", "Session ended — scan the code again"), false)
             }
@@ -532,7 +546,7 @@ public final class AppleWebManagementServer {
         switch request.method {
         case "GET":
             if let code = request.query["pair"] {
-                guard let token = pair(code: code, headers: request.headers) else {
+                guard let token = pair(code: code, headers: request.headers, remoteHost: remoteHost) else {
                     return (.html(403, "Pairing Required", page(session: activeSession, paired: false,
                         error: "The pairing code is missing or incorrect.")), false)
                 }
@@ -556,7 +570,7 @@ public final class AppleWebManagementServer {
                 contentType: request.headers["content-type"]
             )
             if form["action"] == "pair" {
-                guard let token = pair(code: form["pairingCode"] ?? request.query["pair"], headers: request.headers) else {
+                guard let token = pair(code: form["pairingCode"] ?? request.query["pair"], headers: request.headers, remoteHost: remoteHost) else {
                     return (.html(403, "Pairing Required", page(session: activeSession, paired: false,
                         error: "The pairing code is missing or incorrect.")), false)
                 }

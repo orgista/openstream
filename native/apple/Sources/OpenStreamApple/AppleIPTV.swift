@@ -618,6 +618,7 @@ public struct AppleIPTVClient: Sendable {
         credentials: AppleIPTVCredentials
     ) async throws -> [AppleIPTVChannel] {
         let account = try await verifyXtreamAccount(source: source, credentials: credentials)
+        await AppleIPTVAccountLimits.shared.record(account.info, sourceID: source.id)
         let preferredExtension = account.preferredExtension
 
         let categoryURL = try Self.xtreamAPIURL(

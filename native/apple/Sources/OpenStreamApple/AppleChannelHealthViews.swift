@@ -177,6 +177,7 @@ struct AppleChannelHealthSettingsRows: View {
                 .accessibilityIdentifier("settings.health.stop")
         } else {
             Button("Check Channels Now") { store.startSweep() }
+                .disabled(store.hasLivePlayback)
                 .accessibilityIdentifier("settings.health.check")
         }
     }

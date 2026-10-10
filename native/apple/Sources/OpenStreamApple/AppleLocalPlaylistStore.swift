@@ -63,7 +63,11 @@ public struct AppleLocalPlaylistStore: Sendable {
     }
 
     public func fileURL(for url: URL) -> URL {
-        directory.appending(path: url.lastPathComponent)
+        let name = url.lastPathComponent
+        let allowed = !name.isEmpty && name != "." && name != ".." && name.utf8.allSatisfy {
+            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0)
+        }
+        return directory.appending(path: allowed ? name : ApplePlaybackIdentity.digest(for: url.absoluteString) + ".m3u")
     }
 
     public func read(_ url: URL) throws -> Data {

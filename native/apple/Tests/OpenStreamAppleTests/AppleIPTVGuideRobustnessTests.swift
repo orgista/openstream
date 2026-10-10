@@ -5,6 +5,32 @@ import Testing
 
 @Suite("Guide robustness")
 struct AppleIPTVGuideRobustnessTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_CACHE_BENCHMARK"] == "1"),
+          .timeLimit(.minutes(1)))
+    func largeParsedGuideCacheRoundTripMeasurement() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleIPTVGuideDiskCache(directory: directory)
+        let now = Date()
+        let programmes = (0..<200_000).map { index in
+            let start = now.addingTimeInterval(Double(index % 31 - 15) * 86_400)
+            return AppleIPTVProgramme(id: "p\(index)", channelID: "c\(index % 1000)", title: "Programme \(index)",
+                subtitle: nil, description: "Synthetic guide programme for measurement", start: start,
+                end: start.addingTimeInterval(3600), category: "Fixture", isLive: false)
+        }
+        let clock = ContinuousClock()
+        let writeStart = clock.now
+        await cache.store(programmes, key: "benchmark", fetchedAt: now, isRawXMLTV: true)
+        print("GUIDE_CACHE_WRITE \(writeStart.duration(to: clock.now))")
+        for _ in 0..<3 {
+            let readStart = clock.now
+            let restored = await cache.snapshot(key: "benchmark", now: now)
+            print("GUIDE_CACHE_READ \(readStart.duration(to: clock.now)) records=\(restored.programmes.count)")
+            #expect(!restored.programmes.isEmpty && restored.programmes.count <= programmes.count)
+            #expect(restored.fetchedAt == now)
+        }
+    }
+
     @Test func missingOffsetUsesConfiguredZoneAndExplicitOffsetWins() throws {
         let xml = Data("""
         <tv>
@@ -30,10 +56,11 @@ struct AppleIPTVGuideRobustnessTests {
         FreshGuideProtocol.requests.withLock { $0 = [] }
         let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: config)), diskCache: disk)
         let url = URL(string: "https://fixture.example/fresh.xml")!
-        let now = Date()
+        let now = try #require(AppleIPTVGuideXMLTVParser.parseDate("20301005090000 +0000", defaultOffsetHours: 0))
         store.configure(xmltvURL: url)
         await store.refreshVisible(channelIDs: ["a"], now: now)
-        let file = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+        let file = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .first { !$0.lastPathComponent.contains(".day.") })
         let original = try Data(contentsOf: file)
         let saved = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: original)
         #expect(saved.eTag == "v1")
@@ -111,6 +138,38 @@ struct AppleIPTVGuideRobustnessTests {
         #expect(await cache.programmes(key: "other", now: now).isEmpty)
         #expect(await cache.programmes(key: "fixture", now: now.addingTimeInterval(60)).isEmpty)
     }
+
+    @Test func rawGuidePrunesShardsMigratesLegacyAndRejectsIncompleteGeneration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        func programme(_ day: Int) -> AppleIPTVProgramme {
+            let start = now.addingTimeInterval(Double(day) * 86_400)
+            return AppleIPTVProgramme(id: "p\(day)", channelID: "a", title: "Fixture", subtitle: nil, description: nil,
+                start: start, end: start.addingTimeInterval(3600), category: nil, isLive: false)
+        }
+        let manifest = directory.appendingPathComponent(ApplePlaybackIdentity.digest(for: "legacy") + ".json")
+        let legacy = AppleIPTVGuideDiskCache.Snapshot(programmes: [-4, -3, 0, 6, 7, 8].map(programme),
+            channelNames: ["a": "Fixture"], fetchedAt: now, eTag: "fixture-etag", isRawXMLTV: true)
+        try JSONEncoder().encode(legacy).write(to: manifest)
+        let cache = AppleIPTVGuideDiskCache(directory: directory)
+        let restored = await cache.snapshot(key: "legacy", now: now)
+        #expect(Set(restored.programmes.map(\.id)) == ["p-3", "p0", "p6"])
+        #expect(restored.eTag == "fixture-etag" && restored.channelNames == ["a": "Fixture"])
+        let saved = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: Data(contentsOf: manifest))
+        #expect(saved.programmes.isEmpty && saved.shardDays?.count == 3)
+        #expect(saved.shardGeneration != nil && saved.binaryShards == true)
+        #expect(await cache.snapshot(key: "legacy", now: now).programmes.count == 3)
+        await cache.store([programme(0)], key: "legacy", fetchedAt: now, isRawXMLTV: true)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let shard = try #require(files.first { $0.lastPathComponent.contains(".day.") })
+        #expect(files.count == 2) // Old generations are removed after publishing.
+        #expect(try Data(contentsOf: shard).starts(with: Data("bplist00".utf8)))
+        try FileManager.default.removeItem(at: shard)
+        #expect(await cache.snapshot(key: "legacy", now: now).isRawXMLTV == nil)
+        #expect(await cache.snapshot(key: "legacy", now: now).programmes.isEmpty)
+    }
     @MainActor @Test func xmltvRefreshPopulatesMoreThanFiftyChannelsAndRestoresWithoutNetwork() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -123,14 +182,15 @@ struct AppleIPTVGuideRobustnessTests {
         let url = URL(string: "https://fixture.example/guide.xml")!
         RobustGuideProtocol.requests.withLock { $0 = 0 }
         let first = AppleIPTVGuideStore(loader: loader, diskCache: disk)
+        let now = try #require(AppleIPTVGuideXMLTVParser.parseDate("20301005090000 +0000", defaultOffsetHours: 0))
         first.configure(xmltvURL: url, sourceID: source, channelMapping: mapping, timeShiftHours: 2)
-        await first.refreshVisible(channelIDs: [source.uuidString + ":0"])
+        await first.refreshVisible(channelIDs: [source.uuidString + ":0"], now: now)
         #expect(first.guide(for: mapping.keys).allProgrammes.count == 80)
         let original = AppleIPTVGuideXMLTVParser().parse(data: Data("<tv><programme channel=\"p0\" start=\"20301005090000 +0000\" stop=\"20301005100000 +0000\"><title>Programme 0</title></programme></tv>".utf8))
         #expect(first.guide(for: mapping.keys).allProgrammes.first?.start == original.first?.start.addingTimeInterval(7200))
         let relaunched = AppleIPTVGuideStore(loader: loader, diskCache: disk)
         relaunched.configure(xmltvURL: url, sourceID: source, channelMapping: mapping, timeShiftHours: 2)
-        await relaunched.refreshVisible(channelIDs: Set(mapping.keys))
+        await relaunched.refreshVisible(channelIDs: Set(mapping.keys), now: now)
         #expect(relaunched.guide(for: mapping.keys).allProgrammes.count == 80)
         #expect(RobustGuideProtocol.requests.withLock { $0 } == 1)
     }

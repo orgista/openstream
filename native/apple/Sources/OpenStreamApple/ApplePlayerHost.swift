@@ -49,13 +49,22 @@ public final class ApplePlayerHost {
 
     public var route: ApplePlaybackPresentationRoute { coordinator.route }
 
+    var keepsPlaybackForPictureInPicture: Bool {
+        #if !os(tvOS)
+        pictureInPicture.isStartingOrActive
+        #else
+        pictureInPictureController?.isPictureInPictureActive == true
+        #endif
+    }
+
     #if os(macOS)
     public var playerView: AVPlayerView { _playerView }
     #else
     public var viewController: AVPlayerViewController { _viewController }
     #endif
 
-    public init(coordinator: ApplePlaybackCoordinator, audioSession: AppleAudioSessionCoordinator) {
+    public init(coordinator: ApplePlaybackCoordinator, audioSession: AppleAudioSessionCoordinator,
+                activateImmediately: Bool = true) {
         self.coordinator = coordinator
         self.audioSession = audioSession
         // Taking AirPods out pauses rather than moving the audio to the device
@@ -120,7 +129,7 @@ public final class ApplePlayerHost {
         #else
         pictureInPictureDelegate.host = self
         #endif
-        activate()
+        if activateImmediately { activate() }
     }
 
     /// A Picture in Picture window started or stopped by something other
@@ -196,7 +205,7 @@ public final class ApplePlayerHost {
 
     /// Stops the engine, tears down the AVKit binding, and deactivates the
     /// shared audio session. Called from the player view's `onDisappear`.
-    public func teardown() {
+    public func teardown(deactivateAudioSession: Bool = true) {
         bindTimer?.invalidate()
         bindTimer = nil
         audioSession.onInterruption = nil
@@ -227,7 +236,7 @@ public final class ApplePlayerHost {
         mirrorsSubtitleSelection = false
         #endif
         boundPlayer = nil
-        audioSession.deactivate()
+        if deactivateAudioSession { audioSession.deactivate() }
     }
 
     /// Hands the system's transport controls to the engine.

@@ -69,6 +69,9 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     public let formatVersion: Int
     public var savedAt: Date
     public var sources: [AppleSource]
+    /// Removed identities stay removed when an offline device or old backup returns.
+    /// Adding the provider again creates a new UUID; edits never clear a deletion.
+    public var sourceTombstones: [UUID: Date]
     var preservedSourcePayloads: [ApplePreservedJSON] = []
     public var settings: [String: Data]
     public var playbackProgress: [String: ApplePlaybackProgress]
@@ -85,10 +88,10 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchedTombstones, watchlist, ratings
-        case continueWatchingRemovals
+        case continueWatchingRemovals, sourceTombstones
     }
 
-    public init(savedAt: Date = .now, sources: [AppleSource] = [], settings: [String: Data] = [:],
+    public init(savedAt: Date = .now, sources: [AppleSource] = [], sourceTombstones: [UUID: Date] = [:], settings: [String: Data] = [:],
                 playbackProgress: [String: ApplePlaybackProgress] = [:],
                 watchedHistory: [String: Date] = [:],
                 watchedTombstones: [String: Date] = [:],
@@ -96,7 +99,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
                 continueWatchingRemovals: [String: Date] = [:]) {
         formatVersion = 1
         self.savedAt = savedAt
-        self.sources = sources.map(Self.portableSource)
+        self.sourceTombstones = sourceTombstones
+        self.sources = sources.filter { sourceTombstones[$0.id] == nil }.map(Self.portableSource)
         self.settings = settings
         self.playbackProgress = playbackProgress
         let history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
@@ -116,6 +120,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         formatVersion = try container.decode(Int.self, forKey: .formatVersion)
         savedAt = try container.decode(Date.self, forKey: .savedAt)
+        sourceTombstones = try container.decodeIfPresent([UUID: Date].self, forKey: .sourceTombstones) ?? [:]
         sources = []
         for payload in try container.decode([ApplePreservedJSON].self, forKey: .sources) {
             let data = try JSONEncoder().encode(payload)
@@ -144,6 +149,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(formatVersion, forKey: .formatVersion)
         try container.encode(savedAt, forKey: .savedAt)
+        if !sourceTombstones.isEmpty { try container.encode(sourceTombstones, forKey: .sourceTombstones) }
         let sourcePayloads = try sources.map { source in
             try JSONDecoder().decode(ApplePreservedJSON.self, from: JSONEncoder().encode(source))
         }
@@ -173,8 +179,13 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             if let index = combined.firstIndex(where: { $0.id == source.id }) { combined[index] = source }
             else { combined.append(source) }
         }
-        result.sources = combined
+        result.sourceTombstones = sourceTombstones.merging(incoming.sourceTombstones) { max($0, $1) }
+        result.sources = combined.filter { result.sourceTombstones[$0.id] == nil }
         result.preservedSourcePayloads = Self.mergedPayloads(preservedSourcePayloads, incoming.preservedSourcePayloads)
+            .filter { payload in
+                guard let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return true }
+                return result.sourceTombstones[id] == nil
+            }
         // Resume position: the freshest of the two per title, so a snapshot
         // written before this device's last play never winds it back (V6).
         result.playbackProgress = playbackProgress.merging(incoming.playbackProgress) { mine, theirs in

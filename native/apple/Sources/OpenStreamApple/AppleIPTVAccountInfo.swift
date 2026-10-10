@@ -1,5 +1,16 @@
 import Foundation
 
+actor AppleIPTVAccountLimits {
+    static let shared = AppleIPTVAccountLimits()
+    private var limits: [UUID: Int] = [:]
+
+    func record(_ info: AppleIPTVAccountInfo, sourceID: UUID) {
+        limits[sourceID] = info.maxConnections.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    func snapshot() -> [UUID: Int] { limits }
+}
+
 public struct AppleIPTVAccountInfo: Equatable, Sendable {
     public let expiresAt: Date?
     public let maxConnections: Int?

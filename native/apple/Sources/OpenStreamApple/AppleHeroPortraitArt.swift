@@ -104,7 +104,8 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
     /// The image's aspect-fill rect in a frame of `frame`, placed so that
     /// `focal` (normalised in the image) sits as close to the same place in
     /// the frame as the image's edges allow. Never leaves a gap.
-    public static func fillRect(imageSize: CGSize, in frame: CGSize, focal: CGPoint = focalPoint) -> CGRect {
+    public static func fillRect(imageSize: CGSize, in frame: CGSize, focal: CGPoint = focalPoint,
+                                subjectAnchor: CGPoint? = nil) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0, frame.width > 0, frame.height > 0 else {
             return CGRect(origin: .zero, size: frame)
         }
@@ -112,8 +113,14 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
         let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let overflowX = size.width - frame.width
         let overflowY = size.height - frame.height
-        let x = -overflowX * min(max(focal.x, 0), 1)
-        let y = -overflowY * min(max(focal.y, 0), 1)
+        let x: CGFloat, y: CGFloat
+        if let subjectAnchor {
+            x = min(0, max(-overflowX, frame.width * subjectAnchor.x - size.width * focal.x))
+            y = min(0, max(-overflowY, frame.height * subjectAnchor.y - size.height * focal.y))
+        } else {
+            x = -overflowX * min(max(focal.x, 0), 1)
+            y = -overflowY * min(max(focal.y, 0), 1)
+        }
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 }

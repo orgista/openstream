@@ -206,6 +206,32 @@ func protectedBridgeTokenCapacityExpiresBeforeRenewal() async throws {
     #expect(received?.value(for: "Referer") == "http://panel.example/page")
 }
 
+@Test(arguments: [false, true])
+func protectedPlaybackChildrenForwardCredentialsOnlyToTheSessionOrigin(crossOrigin: Bool) async throws {
+    let origin = AppleLiveTVUpstreamFixture()
+    let edge = AppleLiveTVUpstreamFixture()
+    let originPort = try await origin.start()
+    let edgePort = try await edge.start()
+    let port = crossOrigin ? edgePort : originPort
+    let target = crossOrigin ? edge : origin
+    await target.addRoute("/segment.ts", body: Data([0x47]))
+    let body = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nhttp://127.0.0.1:\(port)/segment.ts\n#EXT-X-ENDLIST\n"
+    await origin.addRoute("/root.m3u8", headers: ["Content-Type": "application/vnd.apple.mpegurl"], body: Data(body.utf8))
+    let server = AppleProtectedHTTPPlaybackServer()
+    let playback = try await server.playbackURL(upstreamURL: URL(string: "http://127.0.0.1:\(originPort)/root.m3u8")!,
+        requestHeaders: ["Authorization": "Bearer fixture", "Cookie": "fixture=1",
+                         "User-Agent": "FixtureAgent", "Referer": "https://fixture.example/page"])
+    let (playlist, _) = try await URLSession.shared.data(from: playback)
+    let child = try #require(childResourceURLs(inPlaylist: playlist).first)
+    _ = try await URLSession.shared.data(from: child)
+    let received = try #require(await target.headers(receivedFor: "/segment.ts"))
+    #expect(received.value(for: "Authorization") == (crossOrigin ? nil : "Bearer fixture"))
+    #expect(received.value(for: "Cookie") == (crossOrigin ? nil : "fixture=1"))
+    #expect(received.value(for: "User-Agent") == "FixtureAgent")
+    #expect(received.value(for: "Referer") == "https://fixture.example/page")
+    await server.revoke(playbackURL: playback)
+}
+
 @Test func protectedPlaybackServerReturnsBadGatewayForEmptyUpstreamPlaylist() async throws {
     let origin = AppleLiveTVUpstreamFixture()
     let originPort = try await origin.start()

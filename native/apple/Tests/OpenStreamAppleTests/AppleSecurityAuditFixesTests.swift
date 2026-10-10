@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import OpenStreamApple
 
@@ -12,6 +13,64 @@ private final class AuditCredentialStore: AppleCredentialStoring {
 
 @MainActor
 @Suite struct AppleSecurityAuditFixesTests {
+    @Test func cachedMetadataDropsAuthenticatedURLsButKeepsPublicArtwork() throws {
+        let item = AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Fixture",
+            posterURL: URL(string: "https://fixture.example/image?X-Plex-Token=fixture-secret"),
+            backgroundURL: URL(string: "https://fixture.example/image?width=900"),
+            logoURL: URL(string: "https://fixture.example/image?api_key=fixture-secret"))
+        let data = try AppleCachedCredentialPolicy.metadata(JSONEncoder().encode(item))
+        let cached = try JSONDecoder().decode(AppleCatalogItem.self, from: data)
+        #expect(cached.posterURL == nil)
+        #expect(cached.logoURL == nil)
+        #expect(cached.backgroundURL == item.backgroundURL)
+        #expect(!String(decoding: data, as: UTF8.self).contains("fixture-secret"))
+        #expect(AppleCachedCredentialPolicy.artwork(URL(string: "https://fixture.example/live/user/pass/image")) == nil)
+    }
+
+    @Test func mediaIndexCacheDoesNotRetainServerTokensAndMigratesOldCopies() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("index.json")
+        let tokenURL = URL(string: "https://fixture.example/image?api_key=fixture-secret")!
+        let record = AppleMediaRecord(kind: .movie, title: "Fixture", artworkURL: tokenURL,
+            availability: [.init(instanceID: UUID(), capability: .resolvable, itemReference: "fixture")])
+        let repository = AppleMediaIndexRepository(fileURL: url)
+        try await repository.upsert(record)
+        #expect(!(try String(contentsOf: url, encoding: .utf8)).contains("fixture-secret"))
+        #expect(await repository.records().first?.artworkURL == tokenURL, "live artwork remains authenticated")
+        var legacy = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var records = try #require(legacy["records"] as? [[String: Any]])
+        records[0]["artworkURL"] = tokenURL.absoluteString
+        legacy["records"] = records
+        try JSONSerialization.data(withJSONObject: legacy).write(to: url)
+        let reloaded = AppleMediaIndexRepository(fileURL: url)
+        #expect(await reloaded.records().first?.artworkURL == nil)
+        #expect(!(try String(contentsOf: url, encoding: .utf8)).contains("fixture-secret"))
+    }
+
+    @Test func resumeDataIsSealedAndLegacyCopyIsReplaced() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("fixture.resume")
+        let payload = try PropertyListSerialization.data(fromPropertyList: [
+            "NSURLSessionResumeOriginalRequest": Data("https://fixture.example/video?api_key=fixture-secret".utf8),
+            "Authorization": "Bearer fixture-secret"], format: .binary, options: 0)
+        // A legacy URLSession plist must migrate without altering its opaque request bytes.
+        try payload.write(to: url)
+        let key = Data(repeating: 42, count: 32)
+        #expect(try AppleDownloadResumePersistence.read(url, key: key) == payload)
+        let stored = try Data(contentsOf: url)
+        #expect(stored != payload)
+        #expect(stored.range(of: Data("fixture-secret".utf8)) == nil)
+        #expect(try AppleDownloadResumePersistence.read(url, key: key) == payload)
+        #expect(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+        var damaged = stored
+        damaged[damaged.count - 1] ^= 1
+        try damaged.write(to: url)
+        #expect(throws: CryptoKitError.authenticationFailure) { try AppleDownloadResumePersistence.read(url, key: key) }
+    }
+
     private static let guide = "https://iptv.fixture.example/xmltv.php?username=fixture-user&password=fixture-password"
 
     private func makeDefaults() throws -> (UserDefaults, String) {
@@ -110,5 +169,25 @@ private final class AuditCredentialStore: AppleCredentialStoring {
         #expect(bomb.count < 1_000_000)
         #expect(AppleSubtitleTextParser.decompressedIfNeeded(bomb) == bomb)
         #expect(AppleSubtitleTextParser.inflate(Data([0x01, 0x02, 0x03]), limit: 1_000) == nil)
+    }
+
+    @Test func encodedPlaylistNamesCannotEscapeTheOwnedDirectory() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = AppleLocalPlaylistStore(directory: directory)
+        for text in ["openstream-playlist://local/..%2Foutside.m3u", "openstream-playlist://local/%2Ftmp%2Foutside.m3u",
+                     "openstream-playlist://local/..", "openstream-playlist://local/%E2%98%83.m3u"] {
+            let file = store.fileURL(for: try #require(URL(string: text)))
+            #expect(file.standardizedFileURL.deletingLastPathComponent().path == directory.standardizedFileURL.path)
+            #expect(!file.lastPathComponent.contains("/"))
+        }
+        #expect(store.fileURL(for: AppleLocalPlaylistStore.pastedURL).lastPathComponent == "pasted.m3u")
+    }
+
+    @Test func remoteMediaExtensionsCannotBecomePathComponents() {
+        #expect(AppleOfflineMediaStore.safeMediaExtension("M4V") == "m4v")
+        #expect(AppleOfflineMediaStore.safeMediaExtension("mkv") == "mkv")
+        for value in ["", "../mp4", "mp4/../../outside", "mp4%2Foutside", "☃", String(repeating: "a", count: 100)] {
+            #expect(AppleOfflineMediaStore.safeMediaExtension(value) == "media")
+        }
     }
 }

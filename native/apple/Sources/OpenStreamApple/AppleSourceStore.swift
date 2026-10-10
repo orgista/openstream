@@ -944,6 +944,7 @@ public struct AppleManifestClient: Sendable {
 @Observable
 public final class AppleSourceStore {
     public private(set) var sources: [AppleSource]
+    public private(set) var sourceTombstones: [UUID: Date]
     public private(set) var credentialError: String?
 
     private let defaults: UserDefaults
@@ -970,6 +971,8 @@ public final class AppleSourceStore {
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
+        sourceTombstones = defaults.data(forKey: storageKey + ".tombstones")
+            .flatMap { try? JSONDecoder().decode([UUID: Date].self, from: $0) } ?? [:]
         self.keychain = keychain
         #if OPENSTREAM_ADDONS
         self.manifestClient = manifestClient
@@ -995,6 +998,7 @@ public final class AppleSourceStore {
             sources = []
             protectsStoredBlobWhenEmpty = false
         }
+        if !sourceTombstones.isEmpty { mergeSourceTombstones([:]) }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
         hydrateGuideAddresses()
@@ -1014,6 +1018,8 @@ public final class AppleSourceStore {
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
+        sourceTombstones = defaults.data(forKey: storageKey + ".tombstones")
+            .flatMap { try? JSONDecoder().decode([UUID: Date].self, from: $0) } ?? [:]
         self.keychain = keychain
         #if OPENSTREAM_ADDONS
         self.manifestClient = manifestClient
@@ -1039,6 +1045,7 @@ public final class AppleSourceStore {
             sources = []
             protectsStoredBlobWhenEmpty = false
         }
+        if !sourceTombstones.isEmpty { mergeSourceTombstones([:]) }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
         hydrateGuideAddresses()
@@ -1629,6 +1636,7 @@ public final class AppleSourceStore {
         pendingCredentialCleanupReferences.append(contentsOf: references)
         pendingCredentialCleanupReferences = Array(Set(pendingCredentialCleanupReferences)).sorted()
         persistPendingCredentialCleanup()
+        sourceTombstones[id] = .now
         sources.removeAll { $0.id == id }
         persist()
         retryPendingCredentialCleanup()
@@ -1929,6 +1937,10 @@ public final class AppleSourceStore {
 
     func restorePreservedConfigurationSources(_ payloads: [ApplePreservedJSON], secrets: AppleConfigurationSecrets? = nil, merge: Bool) throws {
         let combined = AppleConfigurationSnapshot.mergedPayloads(merge ? preservedConfigurationSources : [], payloads)
+            .filter { payload in
+                guard let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return true }
+                return sourceTombstones[id] == nil
+            }
         let restored = try combined.map { payload -> ApplePreservedJSON in
             guard case .object(var fields) = payload, let id = payload.sourceID.flatMap(UUID.init(uuidString:)),
                   let secrets else { return payload }
@@ -1947,6 +1959,18 @@ public final class AppleSourceStore {
             return .object(fields)
         }
         preservedUnknownSourcePayloads = restored.compactMap { try? JSONEncoder().encode($0) }
+        persist()
+    }
+
+    func mergeSourceTombstones(_ incoming: [UUID: Date]) {
+        let combined = sourceTombstones.merging(incoming) { max($0, $1) }
+        for id in combined.keys where sources.contains(where: { $0.id == id }) { _ = remove(id: id) }
+        sourceTombstones = combined
+        preservedUnknownSourcePayloads.removeAll { data in
+            guard let payload = try? JSONDecoder().decode(ApplePreservedJSON.self, from: data),
+                  let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return false }
+            return combined[id] != nil
+        }
         persist()
     }
 
@@ -1984,7 +2008,7 @@ public final class AppleSourceStore {
     func restoreConfigurationSources(_ incoming: [AppleSource], secrets: AppleConfigurationSecrets?, merge: Bool = true) throws -> Int {
         var merged = merge ? sources : []
         var signedOut = 0
-        for portable in incoming {
+        for portable in incoming where sourceTombstones[portable.id] == nil {
             let restored: AppleSource
             let existing = sources.first { $0.id == portable.id }
             do {
@@ -2200,6 +2224,7 @@ public final class AppleSourceStore {
     }
 
     private func persist() {
+        if let data = try? JSONEncoder().encode(sourceTombstones) { defaults.set(data, forKey: storageKey + ".tombstones") }
         // Each of these refusals is correct — they protect a stored list from
         // being replaced by an empty or credential-leaking one — but they are
         // also indistinguishable from a successful save until the next launch

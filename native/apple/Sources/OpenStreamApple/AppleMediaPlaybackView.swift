@@ -183,6 +183,10 @@ struct AppleMediaPlayerView: View {
 
     var body: some View {
         playbackContent.modifier(ApplePINPresenter())
+            #if os(iOS)
+            .background(ApplePlayerAccessibilityModal().frame(width: 0, height: 0))
+            .accessibilityAddTraits(.isModal)
+            #endif
     }
 
     private var playbackContent: some View {

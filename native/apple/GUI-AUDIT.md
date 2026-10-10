@@ -2376,3 +2376,17 @@ brought back on screen after the walk had scrolled past their row.
 - [F] The Radarr/Sonarr prompts were fainter than other forms'; they now use the secondary-label prompt.
 - [F] The iOS Settings forms showed a scroll bar; `AppleSettingsContentModifier` now hides it.
 - [!] Open, with proposals in FINDINGS: posters with no long-press menu on Discover; "See all" is a text list; Top 10 cards with no backdrop; iPad content scrolls under the tab strip; no PiP/AirPlay button in the player; duplicate search results and missing-art gaps; three different button styles on add-source forms; saved SecureFields drawn blank on iOS 27; unlabelled hero page dots. Live notes (L1–L6) are left for the Live agent.
+
+## 2026-10-10 — Finish-spec checks
+
+- [F] #19 Cache copies remove credential-bearing URLs; resume data uses device-only sealed storage and migrates old files. Cache/resume regression tests; full gate 3018 / 384.
+- [F] #35 Deleted-source tombstones survive newer stale cloud and backup merges. Snapshot/controller regression tests; full gate 3018 / 384.
+- [F] #52 iOS 18 opaque system navigation reads over bright art; fullscreen accessibility hides the presenter and restores it after dismissal. Owner-config iOS 18.6 UI check passes (36.309 s); screenshot inspected.
+- [x] #53 Sparse-cue language switch backfills the active cue in the actual Aether fixture. Fixture suite 7 tests / 1 suite; no engine edit required.
+- [F] #21 Multiview round trip retains the grid's tile identities. Local two-channel tvOS UI check passes (38.798 s); four-tile layout/fullscreen UI passes (14.289 s), trace counts one open for each tile; guide-cache benchmark and Time Profiler comparison recorded in OWNER-TODO.
+- [F] #4 Live PiP keeps playing over Home on DevPlus for ten seconds. Device UI check passes (40.961 s); Home screenshot inspected; trace remains active through return. iPad in-memory fixture UI also passes (39.064 s), active through Home; original app data restored.
+- [F] #44 Left from the bottom of Playback settings returns to the sidebar. tvOS UI check passes (12.504 s); season-menu behavior check passes (10.769 s): immediate Select keeps the checked season, Menu restores focus, bright-art metadata screenshot inspected.
+- [F] #56 Guide uses a large system sheet and dismisses back to Live. iOS 18.6 UI check passes (9.675 s); focal-point crop/cache tests and iOS/tvOS builds pass.
+- [F] #56 Cross-origin HLS auth stripping, pairing-attempt limits and safe stored filenames. Regression tests; full gate 3018 / 384. Sharing/link behavior choices remain with the owner.
+- [x] #56 Public add-on remainder: 25 fresh app-client probes, zero crashes/timeouts; five iOS UI batches add manifests, scroll to catalog posters and open a title page (76.687 / 103.477 / 76.593 / 78.077 / 84.884 s). Catalog/title screenshots inspected. Cyberflix HTML and other provider failures recorded in OWNER-TODO. Caption grouping retains the owner's one-row-per-language rule; paging/compatibility regression tests pass.
+- [x] Final gate: 3018 tests / 384 suites (61.219 s); iOS/tvOS builds and 45/45 production/UI compile checks pass. Original simulator app data restored byte for byte; test-created source/guide Keychain entries removed, original values/attributes unchanged. Simulators shut down. Zero-byte and whitespace checks clean. Temporary result bundles/screenshots removed after recording these checks.

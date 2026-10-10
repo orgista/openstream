@@ -32,7 +32,7 @@ public struct AppleOfflineRecord: Identifiable, Codable, Equatable, Sendable {
         let cleanSubtitle = subtitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.title = cleanTitle.isEmpty ? nil : String(cleanTitle.prefix(200))
         self.subtitle = cleanSubtitle.isEmpty ? nil : String(cleanSubtitle.prefix(200))
-        self.artworkURL = artworkURL
+        self.artworkURL = AppleCachedCredentialPolicy.artwork(artworkURL)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -48,7 +48,7 @@ public struct AppleOfflineRecord: Identifiable, Codable, Equatable, Sendable {
         storedAt = try values.decode(Date.self, forKey: .storedAt)
         title = try values.decodeIfPresent(String.self, forKey: .title)
         subtitle = try values.decodeIfPresent(String.self, forKey: .subtitle)
-        artworkURL = try values.decodeIfPresent(URL.self, forKey: .artworkURL)
+        artworkURL = AppleCachedCredentialPolicy.artwork(try values.decodeIfPresent(URL.self, forKey: .artworkURL))
     }
 }
 
@@ -257,7 +257,7 @@ public actor AppleOfflineMediaStore {
         try fileManager.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
         let manifest = loadManifest()
         let existingRecord = manifest[mediaID]
-        let sourceExtension = sourceURL.pathExtension.isEmpty ? "media" : sourceURL.pathExtension.lowercased()
+        let sourceExtension = Self.safeMediaExtension(sourceURL.pathExtension)
         let destination = rootDirectory.appending(path: "\(stableIdentifier(mediaID)).\(sourceExtension)")
         let stagingURL = rootDirectory.appending(
             path: ".\(stableIdentifier(mediaID))-\(UUID().uuidString).partial"
@@ -353,6 +353,13 @@ public actor AppleOfflineMediaStore {
         return record
     }
 
+    nonisolated static func safeMediaExtension(_ value: String) -> String {
+        guard !value.isEmpty, value.utf8.count <= 12, value.utf8.allSatisfy({
+            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0)
+        }) else { return "media" }
+        return value.lowercased()
+    }
+
     public func remove(mediaID: String) throws {
         var manifest = loadManifest()
         if let record = manifest.removeValue(forKey: mediaID), fileManager.fileExists(atPath: record.localURL.path) {
@@ -401,7 +408,10 @@ public actor AppleOfflineMediaStore {
 
     private func loadManifest() -> [String: AppleOfflineRecord] {
         guard let data = try? Data(contentsOf: manifestURL) else { return [:] }
-        return (try? JSONDecoder().decode([String: AppleOfflineRecord].self, from: data)) ?? [:]
+        guard let manifest = try? JSONDecoder().decode([String: AppleOfflineRecord].self, from: data) else { return [:] }
+        // Migrate old token-bearing artwork without touching downloaded media.
+        if let clean = try? JSONEncoder().encode(manifest), clean != data { try? saveManifest(manifest) }
+        return manifest
     }
 
     private func saveManifest(_ manifest: [String: AppleOfflineRecord]) throws {

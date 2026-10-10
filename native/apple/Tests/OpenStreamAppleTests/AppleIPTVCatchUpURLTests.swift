@@ -57,6 +57,15 @@ struct AppleIPTVCatchUpURLTests {
 
     // MARK: Xtream time zones
 
+    @Test(arguments: [("m3u8", "m3u8"), ("ts", "ts"), ("", "ts"), ("mp4", "ts")])
+    func timeshiftRetainsSupportedLiveContainer(extensions: (String, String)) {
+        let suffix = extensions.0.isEmpty ? "" : "." + extensions.0
+        let channel = xtreamChannel(url: "https://fixture.example/live/user/pass/101" + suffix)
+        let result = AppleIPTVCatchUp.timeshiftURL(for: channel,
+            programme: programme(start: utc("2026-01-15T14:30:00Z"), minutes: 30))
+        #expect(result?.pathExtension == extensions.1)
+    }
+
     @Test("The start is written in the panel's zone, UTC when it reports none")
     func panelZoneIsApplied() {
         let start = utc("2026-01-15T14:30:00Z")
@@ -249,7 +258,7 @@ struct AppleIPTVCatchUpURLTests {
         let ts = m3uChannel(url: "http://f.example/news/mpegts", attributes: ["catchup": "flussonic-ts"])
         #expect(AppleIPTVCatchUp.catchUpURL(for: ts, programme: p, now: now)?.absoluteString == "http://f.example/news/timeshift_abs-1768487400.ts")
         let xc = m3uChannel(url: "http://x.example/live/user/pass/77.m3u8", attributes: ["catchup": "xc", "catchup-days": "1"])
-        #expect(AppleIPTVCatchUp.catchUpURL(for: xc, programme: p, now: now)?.absoluteString == "http://x.example/timeshift/user/pass/30/2026-01-15:14-30/77.ts")
+        #expect(AppleIPTVCatchUp.catchUpURL(for: xc, programme: p, now: now)?.absoluteString == "http://x.example/timeshift/user/pass/30/2026-01-15:14-30/77.m3u8")
         // xc on a URL that is not an Xtream live URL has nothing to build from.
         let xcBad = m3uChannel(url: "http://x.example/hls/77.m3u8", attributes: ["catchup": "xc"])
         #expect(!AppleIPTVCatchUp.supportsCatchUp(xcBad))

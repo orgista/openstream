@@ -4155,7 +4155,7 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSSeasonRow: some View {
         if seasonNumbers.count > 1 {
             Menu {
-                ForEach(seasonNumbers, id: \.self) { season in
+                ForEach(AppleTVDetailMetrics.seasonMenuOrder(seasonNumbers, selected: tvOSCurrentSeason), id: \.self) { season in
                     Button {
                         episodeList.selectedSeason = season
                     } label: {
@@ -4785,7 +4785,7 @@ struct AppleCatalogItemDetailView: View {
     /// simulator's light appearance otherwise painted it black on the art.
     private var titleMetadataColor: Color {
         #if os(tvOS)
-        .white.opacity(0.8)
+        .white
         #else
         colorScheme == .dark ? .white.opacity(0.60) : .black.opacity(0.60)
         #endif

@@ -11,6 +11,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       large-screen/desktop variant (same Play app, mobile AAB), e2e on the Googlebook AVD on Dev-Mini (keyboard, mouse,
       resize, multi-window, playback), and meet every badge requirement. Spec: specs/googlebook-2026-10-09.md; work Claude
       worker running 2026-10-09. Owner: any Play Console declaration it reports.
+      BUILT + e2e PASSED 2026-10-10 (e8a9bc7, 82fca93, 0331e3c, ae66124; 385 Android tests, 42 screenshots in
+      native/google-tv/verification-artifacts/googlebook-2026-10-09/REPORT.md): window resize during playback, PiP, keyboard
+      + media keys, Ctrl shortcuts, mouse hover/right-click/scrollbars. Google gives the label itself (no opt-in, criteria
+      unpublished); built to Tier 1 Desktop. Left: Down-arrow from the top bar, multi-instance, drag-drop. Reaches users with
+      the next AAB pair (TV vc3, mobile vc4) — needs your "ship".
+      ROUND 2 DONE 2026-10-10 (892a81c..c014552, 387 tests): Down-arrow, tooltips, several windows (Ctrl+N), open local
+      files + drag-drop, smoke test green. Owner: a hands-on check on a real Googlebook if you have one.
 - [ ] **Rill bridge was broken since the 10-02 hardening; fixed 2026-10-09 (Tismlist session, owner-approved).** Every
       add-on fetch failed ("No manifest found at that address.") because Workers reject `redirect: 'error'`; now
       `redirect: 'manual'` + regression test, deployed to stream.ourzephyr.com (D1 restore point taken first). Source:
@@ -86,9 +93,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       - Run designs past the skills (impeccable, ui-ux-pro-max), then Fable; if Fable's design isn't better, try Mythos,
         else the best design tool or skill available.
       - Live needs many research agents.
-- [ ] **Picture in Picture for Live (owner 2026-10-09, build 17):** "if I swipe away it stops playing". Swiping home
-      while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Not in slice 1: the DevPlus
-      check did not pass on the first try (the phone was locked, so the test saw a black screen); moved to slice 2.
+
 - [ ] **iPhone Duo support (2026-10-08)** — the foldable iPhone (iOS 27.1) ships 10-23. Done: audit of everything
       that assumes one screen size (verification-artifacts/duo-2026-10-08/AUDIT.md) and fixes written as patches,
       held back so tomorrow's App Store build is untouched: the app stays portrait-only on the big inner screen
@@ -216,6 +221,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (2) the web-portal diagnostics download and some trace lines can include stream URLs with credentials — redact;
       (3) Plex/Jellyfin tokens in cached URLs; (4) ATS wide open — narrow to media + local network. Report:
       `verification-artifacts/audit-2026-10-07/mythos-security.md`.
+      **Verified 2026-10-10:** credential-bearing cache copies are removed and resume data is sealed (finish-spec #19,
+      Done below). Cross-origin HLS children lose Cookie/Authorization, pairing attempts are capped per host, and
+      playlist/download filenames are constrained; regression tests and gate 3018 / 384 pass. ATS remains your WON'T DO.
+      **Owner action:** choose whether external play links should require Play and playlist sharing should show a
+      credential notice; those two behavior changes remain open pending your answer. A notice conflicts with your no-explainer UI rule, and the link change alters existing shared-play behavior. Technical fixes are uncommitted.
 
 - [ ] **(2026-10-06) Mythos Live TV review → Opus.** Findings with file:line and fixes in
       ~/Developer/openstream-build/specs/live-tv/mythos-live-review-2026-10-06.md. Top three: the XMLTV guide is
@@ -223,7 +233,15 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       failover exists only on Apple TV, not iPhone/iPad/Mac; multiview reopens all four streams on every
       grid↔full-screen trip. Order: 1 → 4 → 2 → 5 → 3 → 6 → 8 → 9 → 7 → 10 (numbers in the review).
       DONE a9e2594: 1 (guide fetched ≤ every 6 h, 304-aware), 4 (failover + one quick reopen on all platforms),
-      2 (200k-programme guide 25 s → 2 s). Next: 5 → 3 → 6 → 8 → 9 → 7 → 10.
+      2 (200k-programme guide 25 s → 2 s). Remaining device measurements are listed below.
+      **Agent work 2026-10-10:** 5 retains tile players across fullscreen trips and caps tiles by cached provider limits;
+      3 prunes to -3/+7 days and writes atomic binary day shards (200k mixed-history fixture: median read 360 → 172 ms,
+      write 413 → 237 ms; Time Profiler cache samples 1490 → 757 ms). 6 fills the whole visible Xtream batch at four
+      concurrent requests; 8 preserves HLS catch-up extensions; 9 uses the shared eight-match threshold. 10 extracts
+      selection, request, preflight, resume and recall/zap state into AppleLiveSession; platform layout/focus stays in views.
+      11 prevents health sweeps while any Live coordinator is active. Gate 3018 / 384 and local tvOS round-trip UI pass. Four-tile layout/fullscreen verification passes (14.289 s); trace confirms exactly one open per tile across both layout toggles and the round trip.
+      **Owner action:** provide a real native-HLS provider sample for latency tuning, and an A12 Apple TV for the four-tile
+      heat check. The available DevPlus PiP channel uses the engine's TS-to-HLS route, so it is not the native-HLS baseline.
 
 - [ ] **(2026-10-05) Live TV for Apple TV — built, needs your Apple TV (build 16).** Multiview (up to 4 channels,
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
@@ -268,6 +286,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       killing playback, TS seeks never showing a frame. Seek speed passes 55→71 of 84, seek smoothness 63→70.
       Next round: AV1 stutter after seek, truncated files stalling 12 s, interlaced TV freezes, VC-1 ending early.
       Push both fork branches: `cd ~/Developer/openstream-build/AetherEngine-fork && git push -u origin dvd-menus engine-lab`
+      **Owner action 2026-10-10:** restore the missing AetherEngine-fork checkout (absent on both Macs), then publish dvd-menus and engine-lab; provide the engine-lab fixtures so seek/AV1/VC-1/interlaced/truncated before-and-after checks can run.
 - [ ] **DONE da014fb (2026-10-02):** IPTV catch-up from the guide (back up to 3 days, plays a past programme from its
       start, Watch Live returns; sim-checked on Apple TV — iPad build only); Discover rows neutral + Top 10 off;
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
@@ -314,10 +333,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **Owner asks 2026-10-01 (evening):** use Muse's 2B tokens for research at scale (it's the Meta Model API /
       developer console, not meta.ai chat — needs an API key); on-device processing + ML + Apple silicon ideas;
       end-to-end tests for the iMessage app and iCloud sync on a real iPhone over USB (test Apple ID).
-- [ ] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
-      Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials
-      not the checked season; Settings › Playback bottom row, Left doesn't reach the sidebar; faint metadata line
-      over bright art (Goede Tijden).
+
 - [ ] **iOS 18.6 iPhone regression (b4d4793, 2026-10-01):** no hang (5 titles incl. General Hospital S64), Resume,
       next episode, no tab-switch replay, English-only captions, Live error ~9 s, configure-first, 0 crashes. Open:
       FIXED (sim-checked on iOS 18.6): hero Play Trailer over the preview gets sound; title-page art comes back
@@ -328,6 +344,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] iOS 18 UX: nav icons + large "Discover" title unreadable on bright hero art (no glass on iOS 18); Streaming
       Services "Add Service" only tappable on its label; full-screen player not modal for VoiceOver; a search
       deep link with a title page open lands under it.
+      Nav/title readability and fullscreen VoiceOver isolation are closed under finish-spec #52 in Done below.
 - [ ] **tvOS verification of 4fd1ac5 (2026-10-01 early):** toggles/Retry readable ✅, cue placement ✅, field outlines ✅,
       audio labels ✅. Still broken: **every Settings Picker on tvOS opens an empty page** (Package, Live view,
       Playback › Player; Menu there quits to Home) — pre-existing; Skip Intro still not reachable with Down; Top 10
@@ -335,14 +352,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       match); subtitle/audio menus keep the old checkmark after picking from More…/another track; Channel Manager
       error row draws an empty capsule; captions "off" still auto-selects English on some launches; a sparse-cue
       subtitle shows nothing after a mid-stream switch; UI test testFullSubtitleMenuSelectsSpanish needs updating.
-- [ ] **Test every public Stremio add-on (FMHY + r/StremioAddons + community catalogue)** (2026-09-30) — list, a
-      headless harness using the app's own add-on code (manifest/catalog/meta/stream/subtitles), then in-app
-      spot checks of flagged + top 20; harness kept for every release.
-      **First sweep 2026-09-30 (17d6a4e): 594 probed, 0 crashes.** App fixes found: only movie/series catalogs used
-      (78 add-ons show nothing: tv/anime/channel types); 2 MB catalog limit rejects TMDB's 12 MB shelf; catalog items
-      without a name dropped (poster-only tiles in Stremio); meta requires an exact id match (Stravo mx→tt) and rejects
-      redirects; 12-catalog cap hides catalogs; manifests with no resources accepted (unconfigured AIO Metadata);
-      AppleAddonURLSecretPolicy flags 14 public add-ons as secret; 100-item shelves; one subtitle track per language.
+      The sparse-cue switch is now verified against the actual engine fixture; finish-spec #53 is closed in Done below.
 - [ ] **Full-test bugs (iPad iOS 27, 2026-09-30):**
       1. HIGH: after Search → open result → Play, the player's controls/tap area are squeezed into the top 458 pt
          (keyboard height left over); rotating fixes it.
@@ -389,6 +399,59 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
 
 ## Done
+
+- [x] **Apple TV smoke of 22125ac (2026-10-01):** all pass (hero buttons, title art, Resume, no tab-switch replay,
+      Goede Tijden S37, search order, Settings readable, 0 crashes). Polish: season picker opens focused on Specials
+      not the checked season; Settings › Playback bottom row, Left doesn't reach the sidebar; faint metadata line
+      over bright art (Goede Tijden).
+      **Closed 2026-10-10 (done, verified):** Current season is first in the menu; Select immediately keeps it checked and Menu restores focus (tvOS UI 10.769 s). Left from the bottom of Playback returns to the sidebar (12.504 s). Metadata uses white with its existing shadow; bright-art screenshot inspected. Season-37 ordering regression and full gate 3018 / 384 pass; uncommitted.
+
+- [x] **Picture in Picture for Live (owner 2026-10-09, build 17):** "if I swipe away it stops playing". Swiping home
+      while a Live channel plays should continue it in PiP (iPhone/iPad), same as movies. Not in slice 1: the DevPlus
+      check did not pass on the first try (the phone was locked, so the test saw a black screen); moved to slice 2.
+      **Closed 2026-10-10 (done, verified):** The background lifecycle preserves a starting/active PiP session; ephemeral SwiftUI hosts no longer reset the engine's active PiP flag. DevPlus UI passes (40.961 s) with the window over Home at ten seconds and an active trace; iPad in-memory fixture UI passes (39.064 s), also active through Home. Original simulator data restored. Gate 3018 / 384; uncommitted.
+
+- [x] **Finish-spec #19 — credential-bearing cache copies and background resume data.**
+      **Closed 2026-10-10 (done, verified):** token-bearing artwork/stream URLs are removed from persisted library,
+      index, offline and download metadata; existing copies migrate on load. Resume data is AES-GCM sealed with a
+      device-only Keychain key, protected and excluded from backups; legacy resume files migrate or are discarded.
+      Cache/live-URL and sealed-resume regression tests pass; full gate 3018 tests / 384 suites. Changes are uncommitted
+      pending resolution of the spec's commit instruction versus AGENTS.md's explicit no-commit rule.
+- [x] **Finish-spec #35 — deleted-source tombstones.**
+      **Closed 2026-10-10 (done, verified):** source removals persist dated UUID tombstones; cloud/backup merges retain
+      the newest deletion and remove stale source payloads. Newer stale cloud snapshots cannot resurrect a deleted
+      source. Snapshot and actual controller/backup merge tests pass; full gate 3018 / 384; uncommitted.
+- [x] **Finish-spec #52 — iOS 18 navigation and full-screen VoiceOver isolation.**
+      **Closed 2026-10-10 (done, verified):** pre-iOS-26 navigation uses the opaque system background; full-screen
+      presentation hides the presenting accessibility hierarchy and restores it on dismissal. iOS 18.6 owner-config
+      UI check passes, including restoration; the Discover screenshot shows readable title/icons. Full gate 3018 / 384;
+      uncommitted. Other issues in the older iOS 18 UX row are outside this finish-spec item.
+- [x] **Finish-spec #53 — switching sparse subtitle cues mid-stream.**
+      **Closed 2026-10-10 (done, verified):** the actual Aether fixture switches English to French after seeking into
+      a sparse cue and immediately shows the new cue. The pinned engine already passes; regression coverage added.
+      Fixture-enabled subtitle suite 7 / 1; full gate 3018 / 384; test change uncommitted.
+- [x] **Test every public Stremio add-on (FMHY + r/StremioAddons + community catalogue)** (2026-09-30) — list, a
+      headless harness using the app's own add-on code (manifest/catalog/meta/stream/subtitles), then in-app
+      spot checks of flagged + top 20; harness kept for every release.
+      **First sweep 2026-09-30 (17d6a4e): 594 probed, 0 crashes.** App fixes found: only movie/series catalogs used
+      (78 add-ons show nothing: tv/anime/channel types); 2 MB catalog limit rejects TMDB's 12 MB shelf; catalog items
+      without a name dropped (poster-only tiles in Stremio); meta requires an exact id match (Stravo mx→tt) and rejects
+      redirects; 12-catalog cap hides catalogs; manifests with no resources accepted (unconfigured AIO Metadata);
+      AppleAddonURLSecretPolicy flags 14 public add-ons as secret; 100-item shelves; one subtitle track per language.
+      **Closed 2026-10-10 (done, verified):** The remainder checks cover 20 selected common add-ons plus all five public-URL
+      flags. Fresh app-client probes: 25 checked, zero crashes/timeouts; manifests 24 accepted, Cyberflix returned HTML.
+      Five iOS UI batches pass (76.687 / 103.477 / 76.593 / 78.077 / 84.884 s): add manifests, scroll to catalog posters,
+      open a title page. Catalog/title screenshots inspected; no claim of a measured popularity ranking. Existing
+      compatibility and 250-item paging regressions pass. One caption row per language follows the owner's 2026-09-24
+      rule and its merge/selection tests. Provider failures remain external: TMDB Alternatives 500, Collections 404,
+      Discover+ HTML, Community OpenSubtitles 404. No app crash; upstream failures are recorded rather than hidden.
+      Full gate 3018 / 384 (61.219 s); original simulator app data restored byte for byte and test-created Keychain entries removed, with original values/attributes unchanged. UI harness change uncommitted.
+
+- [x] **Finish-spec #56 — Live slice 2 Guide sheet and portrait focal crop.**
+      **Closed 2026-10-10 (done, verified):** Guide opens as a system large sheet and returns to Live; portrait backdrop
+      framing uses Vision face/saliency anchors with a bounded centre fallback and a disk cache. Key art keeps its own
+      framing. Guide UI check passes on iOS 18.6; crop/cache regression tests and iOS/tvOS builds pass; full gate 3018 / 384;
+      uncommitted.
 - [x] **"New dialog in Live when it can't reach Live looks off and weird" (2026-10-08, build 16)** — it was an alert
       ("Playback Failed" + advice paragraph + Close/Retry) that popped up over the whole Live tab whenever the resumed
       channel could not start, plus a warning row with the system's error text over a working list.

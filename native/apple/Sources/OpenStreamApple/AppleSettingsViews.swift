@@ -348,6 +348,7 @@ private struct AppleTVSettingsSplitView: View {
         HStack(alignment: .top, spacing: metrics.columnSpacing) {
             sidebar
                 .frame(width: metrics.sidebarWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
                 .focusSection()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

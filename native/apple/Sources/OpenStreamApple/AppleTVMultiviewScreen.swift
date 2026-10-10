@@ -99,8 +99,8 @@ struct AppleTVMultiviewScreen: View {
             focus = session.policy.channels.count < 4 ? "multiview.add" : "multiview.layout"
         }
         .task(id: "\(scenePhase == .active)|\(fullScreen)") {
-            guard scenePhase == .active && !fullScreen else {
-                if !fullScreen { session.suspend() }
+            guard scenePhase == .active else {
+                session.suspend()
                 return
             }
             await session.resume()
@@ -115,7 +115,7 @@ struct AppleTVMultiviewScreen: View {
                 if let channel = session.thermalChanged() { finish(channel) }
             }
         }
-        .onDisappear { session.suspend() }
+        .onDisappear { if !fullScreen { session.suspend() } }
         .sheet(isPresented: $pickerPresented, onDismiss: restoreFocus) {
             AppleTVMultiviewChannelPicker(channels: channels, guide: guide,
                 selectedIDs: Set(session.policy.channels), onSelect: picked)
@@ -124,7 +124,7 @@ struct AppleTVMultiviewScreen: View {
             if let tile = session.tiles.first(where: { $0.id == session.policy.fullScreenID }) {
                 AppleTVLivePlayerScreen(channel: tile.channel, coordinator: tile.coordinator,
                     footerChannels: channels, footer: $footer, guide: guide,
-                    onBack: { fullScreen = false }, onSwitch: switchFullScreen)
+                    onBack: { fullScreen = false }, retainsMultiviewStream: true, onSwitch: switchFullScreen)
                     .id(tile.id)
             }
         }

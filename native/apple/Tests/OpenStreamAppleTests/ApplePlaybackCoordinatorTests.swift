@@ -18,6 +18,27 @@ import Testing
 
     // MARK: - Phase mapping (policy table rows)
 
+    @Test func livePlaybackBlocksHealthProbesUntilEveryPlayerStops() async {
+        let store = AppleChannelHealthStore()
+        store.setLineup([AppleIPTVChannel(id: "fixture", sourceID: UUID(), name: "Fixture",
+            streamURL: URL(string: "https://fixture.example/live.m3u8")!)])
+        let first = ApplePlaybackCoordinator(engine: FakePlaybackEngine())
+        let second = ApplePlaybackCoordinator(engine: FakePlaybackEngine())
+        store.beginLivePlayback(first)
+        store.beginLivePlayback(second)
+        #expect(store.hasLivePlayback)
+        store.startSweep()
+        #expect(!store.isSweeping)
+        store.endLivePlayback(first)
+        #expect(store.hasLivePlayback)
+        store.endLivePlayback(second)
+        #expect(!store.hasLivePlayback)
+        await first.begin(makeRequest(isLive: true, sourceKind: .iptv))
+        #expect(AppleChannelHealthStore.shared.hasLivePlayback)
+        first.stop()
+        #expect(!AppleChannelHealthStore.shared.hasLivePlayback)
+    }
+
     @Test func supersededLoadFailureCannotReplaceNewPlayback() async throws {
         let engine = FakePlaybackEngine()
         var oldLoad: CheckedContinuation<Void, any Error>?

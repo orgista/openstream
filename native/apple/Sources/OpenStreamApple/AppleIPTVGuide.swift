@@ -161,7 +161,7 @@ public actor AppleIPTVGuideLoader {
     ///   can scroll back into; `get_short_epg` only lists what is coming.
     public func load(xtreamBase: URL, username: String, password: String, streamIDs: [Int],
                      archiveStreamIDs: Set<Int> = []) async throws -> AppleIPTVGuide {
-        let ids = Array(Set(streamIDs.filter { $0 > 0 })).sorted().prefix(50)
+        let ids = Array(Set(streamIDs.filter { $0 > 0 })).sorted().prefix(AppleIPTVClient.maximumChannels)
         return try await withThrowingTaskGroup(of: [AppleIPTVProgramme].self) { group in
             var iterator = ids.makeIterator()
             func enqueue(_ id: Int) {

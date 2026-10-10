@@ -76,14 +76,15 @@ struct AppleChannelLineupPresetsTests {
         #expect(try JSONEncoder().encode(package) == Data("\"completeGuide\"".utf8))
     }
 
-    @Test(arguments: [0, 1, 19, 20, 21])
-    func automaticPackageNeedsTwentyDistinctMatches(count: Int) throws {
+    @Test(arguments: [0, 1, 7, 8, 9, 19, 20, 21])
+    func automaticPackageUsesTheSnapshotConfidenceThreshold(count: Int) throws {
         let entries = Array(try AppleChannelLineupPresets.completeUS().prefix(count))
         let channels = entries.map {
             AppleIPTVChannel(id: String($0.number), sourceID: UUID(), name: $0.name, group: "All",
                              streamURL: URL(string: "https://fixture.example/channel.ts")!)
         }
-        #expect(AppleLiveChannelPackage.defaultPackage(for: channels) == (count >= 20 ? .completeGuide : .everything))
+        #expect(AppleLiveChannelPackage.defaultPackage(for: channels) ==
+                (count >= AppleLiveChannelSnapshot.minimumLineupMatches ? .completeGuide : .everything))
         #expect(AppleLiveChannelPackage.defaultPackage(for: Array(repeating: channels.first, count: 30).compactMap { $0 }) == .everything)
     }
 

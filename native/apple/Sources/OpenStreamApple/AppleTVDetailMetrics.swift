@@ -231,4 +231,9 @@ enum AppleTVDetailMetrics {
     static func usesTVDetailLayout(on platform: AppleUIPlatform) -> Bool {
         platform == .tvOS
     }
+
+    static func seasonMenuOrder(_ seasons: [Int], selected: Int?) -> [Int] {
+        guard let selected, seasons.contains(selected) else { return seasons }
+        return [selected] + seasons.filter { $0 != selected }
+    }
 }

@@ -4,6 +4,12 @@ import Foundation
 /// Pure multiview geometry and transitions. Channel order is insertion order,
 /// so thermal shedding always retires the oldest stream without audio.
 public enum AppleMultiviewPolicy {
+    static func providerLimitReached(sourceID: UUID, sources: [String: UUID], limits: [UUID: Int],
+                                     replacing: String? = nil) -> Bool {
+        guard let limit = limits[sourceID], limit > 0 else { return false }
+        return sources.filter { $0.key != replacing && $0.value == sourceID }.count >= limit
+    }
+
     static func companionID(currentID: String, heldID: String?, orderedIDs: [String]) -> String? {
         if let heldID, heldID != currentID { return heldID }
         return orderedIDs.first { $0 != currentID }
@@ -96,6 +102,11 @@ public enum AppleMultiviewPolicy {
         public var displayOrder: [String] {
             guard channels.count == 3 || layout == .bigAndSmalls, let bigID else { return channels }
             return [bigID] + channels.filter { $0 != bigID }
+        }
+
+        public var pausedChannelIDs: Set<String> {
+            guard let fullScreenID else { return [] }
+            return Set(channels.filter { $0 != fullScreenID })
         }
     }
 

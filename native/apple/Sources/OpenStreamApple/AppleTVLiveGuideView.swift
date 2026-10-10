@@ -1547,6 +1547,7 @@ struct AppleTVLivePlayerScreen: View {
     /// This cover was rebuilt around the player in the Picture in Picture
     /// window: the stream keeps playing, so the first load is skipped.
     @State private var resumesFromPictureInPicture: Bool
+    @State private var liveSession: AppleLiveSession
     @Binding var footer: AppleTVLiveFooterState
 
     let channel: AppleIPTVChannel
@@ -1575,6 +1576,7 @@ struct AppleTVLivePlayerScreen: View {
     let onBack: (() -> Void)?
     /// The Live tab's own player; not a multiview tile or a fixture.
     let allowsPictureInPicture: Bool
+    let retainsMultiviewStream: Bool
 
     init(channel: AppleIPTVChannel, coordinator: ApplePlaybackCoordinator, footerChannels: [AppleIPTVChannel],
          footer: Binding<AppleTVLiveFooterState>, alternateLineup: [AppleIPTVChannel] = [],
@@ -1589,6 +1591,8 @@ struct AppleTVLivePlayerScreen: View {
          onMultiview: ((AppleIPTVChannel?) -> Void)? = nil,
          onBack: (() -> Void)? = nil,
          allowsPictureInPicture: Bool = false,
+         retainsMultiviewStream: Bool = false,
+         liveSession: AppleLiveSession? = nil,
          onSwitch: @escaping (AppleIPTVChannel) -> Void) {
         self.channel = channel
         self.programme = programme
@@ -1607,6 +1611,8 @@ struct AppleTVLivePlayerScreen: View {
         self.onMultiview = onMultiview
         self.onBack = onBack
         self.allowsPictureInPicture = allowsPictureInPicture
+        self.retainsMultiviewStream = retainsMultiviewStream
+        _liveSession = State(initialValue: liveSession ?? AppleLiveSession(coordinator: coordinator))
         let parked = allowsPictureInPicture ? AppleTVPictureInPicture.shared.parked(for: coordinator) : nil
         let audioSession = parked?.audioSession ?? AppleAudioSessionCoordinator()
         _audioSession = State(initialValue: audioSession)
@@ -1615,10 +1621,7 @@ struct AppleTVLivePlayerScreen: View {
     }
 
     private var request: ApplePlaybackRequest {
-        if let programme, let request = AppleIPTVCatchUp.playbackRequest(for: channel, programme: programme) {
-            return request
-        }
-        return channel.playbackRequest()
+        liveSession.request(for: channel, programme: programme)
     }
 
     /// "Watch Live" for the overlay: only over an archived programme.
@@ -1813,6 +1816,19 @@ struct AppleTVLivePlayerScreen: View {
             #endif
         }
         .task(id: "\(channel.id)|\(channel.streamURL.absoluteString)|\(programme?.id ?? "")|\(playbackRevision)|\(onBack != nil && scenePhase == .background)") {
+            if retainsMultiviewStream {
+                if scenePhase == .background {
+                    coordinator.engine.pause()
+                    host.teardown()
+                    return
+                }
+                host.activate()
+                host.configureLivePlaybackControls()
+                coordinator.engine.play()
+                hasPlayed = coordinator.phase == .playing
+                host.rebind()
+                return
+            }
             if resumesFromPictureInPicture {
                 // Back from the window: the same stream on the same host.
                 resumesFromPictureInPicture = false
@@ -1891,8 +1907,8 @@ struct AppleTVLivePlayerScreen: View {
             // In the Picture in Picture window it plays on.
             if AppleTVPictureInPicture.shared.holds(host) { return }
             AppleTVPictureInPicture.shared.unregister(host)
-            host.teardown()
-            coordinator.stop()
+            host.teardown(deactivateAudioSession: !retainsMultiviewStream)
+            if !retainsMultiviewStream { coordinator.stop() }
         }
         // No alert: the failure is drawn over the picture. What a dead channel
         // needs is the next channel, so the strip opens itself and takes
@@ -2146,8 +2162,8 @@ struct AppleTVLivePlayerScreen: View {
     }
 
     private var previousChannel: AppleIPTVChannel? {
-        guard let id = watchHistory.history.previous(currentID: channel.id,
-            availableIDs: Set(footerChannels.map(\.id))) else { return nil }
+        guard let id = liveSession.previousID(currentID: channel.id, programme: programme,
+            history: watchHistory.history, availableIDs: Set(footerChannels.map(\.id))) else { return nil }
         return footerChannels.first { $0.id == id }
     }
 
@@ -2164,7 +2180,7 @@ struct AppleTVLivePlayerScreen: View {
 
     private func zap(_ direction: AppleLiveZappingPolicy.Direction) {
         guard programme == nil, !playbackMenu,
-              let id = AppleLiveZappingPolicy.target(currentID: channel.id,
+              let id = liveSession.zapTarget(currentID: channel.id, programme: programme,
                 orderedIDs: footerChannels.map(\.id), direction: direction),
               let target = footerChannels.first(where: { $0.id == id }) else { return }
         switchLiveChannel(target)

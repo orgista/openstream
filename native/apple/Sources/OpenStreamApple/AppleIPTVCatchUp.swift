@@ -228,8 +228,10 @@ public enum AppleIPTVCatchUp: Sendable {
         guard let year = parts.year, let month = parts.month, let day = parts.day,
               let hour = parts.hour, let minute = parts.minute else { return nil }
         let start = String(format: "%04d-%02d-%02d:%02d-%02d", year, month, day, hour, minute)
+        let liveExtension = channel.streamURL.pathExtension.lowercased()
+        let container = liveExtension == "m3u8" ? "m3u8" : "ts"
         var components = base.components
-        components.percentEncodedPath = "\(base.prefix)/timeshift/\(base.user)/\(base.password)/\(minutes)/\(start)/\(base.streamID).ts"
+        components.percentEncodedPath = "\(base.prefix)/timeshift/\(base.user)/\(base.password)/\(minutes)/\(start)/\(base.streamID).\(container)"
         return components.url
     }
 

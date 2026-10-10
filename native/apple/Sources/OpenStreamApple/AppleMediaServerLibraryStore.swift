@@ -447,7 +447,7 @@ public final class AppleMediaServerLibraryStore {
     
     private func persist() {
         let state = PersistedState(shelves: shelves, continueWatching: continueWatching, lastLoadedAt: lastLoadedAt)
-        if let data = try? JSONEncoder().encode(state) {
+        if let data = try? AppleCachedCredentialPolicy.metadata(JSONEncoder().encode(state)) {
             // Poster and stream URLs here carry X-Plex-Token / api_key.
             var url = cacheURL()
             try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -459,12 +459,14 @@ public final class AppleMediaServerLibraryStore {
     
     public func loadPersisted() {
         guard let data = try? Data(contentsOf: cacheURL()),
-              let state = try? JSONDecoder().decode(PersistedState.self, from: data) else {
+              let clean = try? AppleCachedCredentialPolicy.metadata(data),
+              let state = try? JSONDecoder().decode(PersistedState.self, from: clean) else {
             return
         }
         self.shelves = state.shelves
         self.continueWatching = state.continueWatching
         self.lastLoadedAt = state.lastLoadedAt
+        persist() // Strip tokens from older saved copies as soon as they are read.
     }
     
     public struct AppleMediaServerDetail: Equatable, Sendable {

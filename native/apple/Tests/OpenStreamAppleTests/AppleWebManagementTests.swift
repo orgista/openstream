@@ -481,6 +481,29 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
 }
 
 @MainActor
+@Test func webManagementBoundsFailedPairingAttemptsAndAllowsRetryAfterTheWindow() async throws {
+    let name = "openstream-web-pair-limit-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    var now = Date()
+    let server = AppleWebManagementServer(configuration: .init(preferredPort: 0, sessionDuration: 600,
+        advertisesBonjour: false, advertisedHost: "127.0.0.1"), now: { now })
+    let active = try await server.start(sourceStore: AppleSourceStore(defaults: defaults))
+    defer { server.stop() }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.httpShouldSetCookies = false
+    let browser = URLSession(configuration: configuration)
+    defer { browser.invalidateAndCancel() }
+    let wrong = active.friendlyURL.appending(queryItems: [.init(name: "pair", value: "INVALID")])
+    for _ in 0..<10 { #expect(try await response(for: request(url: wrong), using: browser).statusCode == 403) }
+    #expect(try await response(for: request(url: active.pairingURL), using: browser).statusCode == 403)
+    #expect(server.connectedBrowsers.isEmpty)
+    now = now.addingTimeInterval(61)
+    #expect(try await response(for: request(url: active.pairingURL), using: browser).statusCode == 200)
+    #expect(server.connectedBrowsers.count == 1)
+}
+
+@MainActor
 @Test func webManagementFallsBackWhenThePreferredPortIsOccupied() async throws {
     let (socketDescriptor, occupiedPort) = try occupiedLoopbackPort()
     defer { Darwin.close(socketDescriptor) }

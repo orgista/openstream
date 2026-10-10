@@ -258,7 +258,7 @@ public enum AppleLiveChannelPackage: String, Codable, CaseIterable, Identifiable
         let index = AppleChannelLineupIndex((try? AppleChannelLineupPresets.completeUS()) ?? [])
         let matched = Set(AppleChannelVisibilityPolicy.deduplicatedEastChannels(channels)
             .compactMap { index.match($0.name)?.number })
-        return matched.count >= 20 ? .completeGuide : .everything
+        return matched.count >= AppleLiveChannelSnapshot.minimumLineupMatches ? .completeGuide : .everything
     }
 
     public init?(storedValue: String) {

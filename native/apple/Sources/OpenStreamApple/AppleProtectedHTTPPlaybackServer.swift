@@ -230,10 +230,14 @@ public actor AppleProtectedHTTPPlaybackServer {
         // request can't make the same media sequence resolve to a different
         // absolute segment URL between two live playlist refreshes.
         let stickyTarget = Self.stickyURL(childID: childID, in: session)
+        // A playlist may name a different host directly, with no redirect
+        // delegate hop. Credentials belong to the session's root origin.
+        let resourceHeaders = Self.isSameOrigin(originURL, session.upstreamURL) ? session.requestHeaders
+            : session.requestHeaders.filter { !["authorization", "cookie"].contains($0.key.lowercased()) }
         var attempt = await attemptFetch(
             method: method,
             lines: lines,
-            requestHeaders: session.requestHeaders,
+            requestHeaders: resourceHeaders,
             targetURL: stickyTarget ?? originURL,
             originURL: originURL,
             connection: connection
@@ -246,7 +250,7 @@ public actor AppleProtectedHTTPPlaybackServer {
             attempt = await attemptFetch(
                 method: method,
                 lines: lines,
-                requestHeaders: session.requestHeaders,
+                requestHeaders: resourceHeaders,
                 targetURL: originURL,
                 originURL: originURL,
                 connection: connection

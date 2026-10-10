@@ -4,6 +4,18 @@ import Testing
 
 @Suite("AppleIPTVGuideStore Tests")
 struct AppleIPTVGuideStoreTests {
+    @MainActor @Test func oneRefreshPopulatesEveryVisibleChannelBeyondTheFirstFifty() async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [QualifiedGuideURLProtocol.self]
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: configuration)))
+        let source = UUID()
+        store.configure(xtreamBase: URL(string: "https://fixture.example")!, username: "fixture",
+                        password: "fixture", sourceID: source)
+        let ids = Set((1...300).map { "\(source.uuidString):\($0)" })
+        await store.refreshVisible(channelIDs: ids)
+        #expect(Set(store.guide(for: ids).allProgrammes.map(\.channelID)) == ids)
+    }
+
     @Test func unconditionalLoadRejects304WithoutARetainedGuide() async {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [UnexpectedNotModifiedGuideProtocol.self]

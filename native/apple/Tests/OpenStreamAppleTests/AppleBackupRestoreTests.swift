@@ -342,6 +342,25 @@ struct AppleDeviceResetTests {
     }
 }
 
+@MainActor
+@Test func newerCloudCannotResurrectDeletedSourceAndSyncNowPublishesDeletion() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let source = try device.sources.addIPTV(name: "Fixture", type: .m3u,
+        endpoint: "https://fixture.example/playlist.m3u")
+    let stale = AppleConfigurationSnapshot(savedAt: .now, sources: device.sources.sources)
+    #expect(device.sources.remove(id: source.id))
+    device.cloud.set(try stale.cloudData(), forKey: "openstream.configuration.v1")
+    await device.controller.start()
+    #expect(device.sources.sources.isEmpty)
+    await device.controller.syncNow()
+    let data = try #require(device.cloud.data(forKey: "openstream.configuration.v1"))
+    let synced = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
+    #expect(synced.sources.isEmpty)
+    #expect(synced.sourceTombstones[source.id] != nil)
+    #expect(synced.merging(stale).sources.isEmpty)
+}
+
 /// One device's stores on throwaway defaults, keychain and index file.
 @MainActor
 private struct BackupTestDevice {

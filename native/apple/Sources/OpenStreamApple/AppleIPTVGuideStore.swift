@@ -105,7 +105,7 @@ public final class AppleIPTVGuideStore {
     public func refreshVisible(channelIDs: Set<String>, force: Bool = false, now: Date = .now) async {
         for key in configurations.keys.sorted() {
             guard let configuration = configurations[key], !changedSources.contains(key), restoredKeys.insert(key).inserted else { continue }
-            let snapshot = await diskCache.snapshot(key: diskKey(key, configuration))
+            let snapshot = await diskCache.snapshot(key: diskKey(key, configuration), now: now)
             let saved = snapshot.programmes
             guard configurations[key] == configuration, !Task.isCancelled else { continue }
             if case .xmltv = configuration {
@@ -136,8 +136,7 @@ public final class AppleIPTVGuideStore {
         }
         for key in groups.keys.sorted() {
             guard !Task.isCancelled, let configuration = configurations[key] else { continue }
-            let limit: Int
-            if case .xmltv = configuration { limit = AppleIPTVClient.maximumChannels } else { limit = 50 }
+            let limit = AppleIPTVClient.maximumChannels
             var requested = Set(groups[key] ?? [])
             if case .xmltv(_, let mapping, _, _, _) = configuration {
                 requested.formUnion(caches.keys.filter { sourceKey($0) == key })

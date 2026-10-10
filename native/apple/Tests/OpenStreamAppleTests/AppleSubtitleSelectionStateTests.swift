@@ -1,7 +1,39 @@
+import Foundation
 import Testing
 @testable import OpenStreamApple
 
+private let sparseSubtitleFixture = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Fixtures/out/mp4-h264-aac-subtitles.mp4")
+
 @Suite struct AppleSubtitleSelectionStateTests {
+    @MainActor @Test(.timeLimit(.minutes(1)),
+                    .enabled(if: FileManager.default.fileExists(atPath: sparseSubtitleFixture.path)))
+    func switchingEmbeddedLanguageBackfillsAnAlreadyStartedSparseCue() async throws {
+        // This private generated fixture contains one cue per language, spanning 0–10 seconds.
+        let engine = try AetherPlaybackEngine()
+        engine.captionsPreference = .off
+        defer { engine.stop() }
+        try await engine.load(ApplePlaybackRequest(url: sparseSubtitleFixture, autoplay: false,
+                                                  mediaID: "sparse-subtitle-switch", sourceKind: .files))
+        for _ in 0..<150 where engine.subtitleTracks.count < 2 {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let english = try #require(engine.subtitleTracks.first { $0.language == "en" || $0.language == "eng" })
+        let french = try #require(engine.subtitleTracks.first { $0.language == "fr" || $0.language == "fra" })
+        await engine.seek(to: 6)
+        for track in [english, french] {
+            engine.selectSubtitleTrack(id: track.id)
+            let expected = track.id == english.id ? "English fixture cue" : "French fixture cue"
+            for _ in 0..<150 where !engine.subtitleCues.contains(where: { $0.text == expected }) {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(engine.activeSubtitleTrackID == track.id)
+            #expect(engine.subtitleCues.contains { $0.text == expected && $0.startTime <= 6 && $0.endTime > 6 })
+            #expect(!engine.subtitleCues.contains { $0.text != expected })
+        }
+    }
+
     @Test func startupAutoSelectionIsTheRenderedTrack() {
         #expect(AppleSubtitleSelectionState.renderedTrackID(
             engineTrackID: 7, appTrackID: nil, appOwnsRendering: false) == 7)

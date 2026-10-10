@@ -1,8 +1,57 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import OpenStreamApple
 
 @Suite struct AppleLiveZappingTests {
+    @MainActor @Test func sharedSessionPreservesCoordinatorAndArchiveAcrossSurfaceChanges() throws {
+        let coordinator = ApplePlaybackCoordinator(engine: FakePlaybackEngine())
+        let session = AppleLiveSession(coordinator: coordinator)
+        var channel = AppleIPTVChannel(id: "a", sourceID: UUID(), name: "Fixture",
+            streamURL: URL(string: "https://fixture.example/live/u/p/1.m3u8")!)
+        channel.catchUpDays = 3
+        let start = Date().addingTimeInterval(-1800)
+        let programme = AppleIPTVProgramme(id: "p", channelID: "a", title: "Earlier", subtitle: nil,
+            description: nil, start: start, end: start.addingTimeInterval(900), category: nil, isLive: false)
+        session.beginSelection(programme: programme, shareSelection: false)
+        session.channel = channel
+        session.fullScreenRevision += 1
+        session.multiviewChannels = [channel]
+        #expect(session.coordinator === coordinator)
+        #expect(!session.request(for: channel, programme: session.programme).isLive)
+        #expect(session.zapTarget(currentID: "a", programme: programme, orderedIDs: ["a", "b"], direction: .next) == nil)
+        session.beginSelection(programme: nil, shareSelection: true)
+        #expect(session.request(for: channel, programme: session.programme).isLive)
+        #expect(session.zapTarget(currentID: "a", programme: nil, orderedIDs: ["a", "b"], direction: .next) == "b")
+        session.resumePending = true
+        #expect(session.resumeTarget(enabled: true, active: false, watchedIDs: ["a"], availableIDs: ["a"]) == nil)
+        #expect(session.resumePending)
+        #expect(session.resumeTarget(enabled: true, active: true, watchedIDs: ["a"], availableIDs: ["a"]) == "a")
+        #expect(!session.resumePending)
+    }
+
+    @MainActor @Test func supersededLiveProbeCannotSelectOrCacheThePreviousChannel() async throws {
+        let pending = Mutex<CheckedContinuation<(Data, URLResponse), any Error>?>(nil)
+        let probe = AppleIPTVStreamProbe { _ in
+            try await withCheckedThrowingContinuation { continuation in pending.withLock { $0 = continuation } }
+        }
+        let session = AppleLiveSession(coordinator: ApplePlaybackCoordinator(engine: FakePlaybackEngine()), streamProbe: probe)
+        let channel = AppleIPTVChannel(id: "a", sourceID: UUID(), name: "Fixture",
+            streamURL: URL(string: "https://fixture.example/live")!)
+        session.pendingProbe = .init(channel: channel, shareSelection: false, present: false)
+        let old = Task { await session.resolvePendingProbe() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while pending.withLock({ $0 == nil }), ContinuousClock.now < deadline { await Task.yield() }
+        let continuation = try #require(pending.withLock { $0 })
+        let replacement = AppleLiveSession.ProbeRequest(channel: channel, shareSelection: true, present: true)
+        session.pendingProbe = replacement
+        continuation.resume(returning: (Data("#EXTM3U".utf8), HTTPURLResponse(url: channel.streamURL,
+            statusCode: 200, httpVersion: nil, headerFields: nil)!))
+        guard case .superseded = await old.value else { Issue.record("Superseded probe became current"); return }
+        #expect(session.pendingProbe?.id == replacement.id)
+        #expect(session.probedKinds.isEmpty && session.channel == nil)
+    }
+
     @Test func onlyPlayedTimeQualifiesAndHistoryIsBounded() throws {
         var history = AppleLiveWatchHistory()
         history.record("preview", watchedSeconds: 4.99)

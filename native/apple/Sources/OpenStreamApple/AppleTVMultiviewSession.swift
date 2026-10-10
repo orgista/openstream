@@ -13,6 +13,7 @@ final class AppleTVMultiviewSession {
     var captionsEnabled: Bool
     @ObservationIgnored private var channels: [String: AppleIPTVChannel]
     @ObservationIgnored private var active = false
+    @ObservationIgnored private var providerLimits: [UUID: Int] = [:]
     @ObservationIgnored private let audioSession = AppleAudioSessionCoordinator()
 
     init(channels: [AppleIPTVChannel]) {
@@ -28,6 +29,16 @@ final class AppleTVMultiviewSession {
     }
 
     func resume() async {
+        providerLimits = await AppleIPTVAccountLimits.shared.snapshot()
+        var retained: [String: UUID] = [:]
+        for id in policy.channels {
+            guard let channel = channels[id] else { continue }
+            if AppleMultiviewPolicy.providerLimitReached(sourceID: channel.sourceID,
+                                                         sources: retained, limits: providerLimits) {
+                _ = policy.remove(id)
+                notice = providerLimitMessage(channel.sourceID)
+            } else { retained[id] = channel.sourceID }
+        }
         try? await audioSession.prepareForPlayback()
         guard !Task.isCancelled else { return }
         active = true
@@ -52,18 +63,20 @@ final class AppleTVMultiviewSession {
     func select(_ id: String) {
         policy.select(id)
         applyRoles()
-        suspend()
+        applyFullscreenPauses()
     }
 
-    func returnToGrid() { _ = policy.back() }
+    func returnToGrid() { _ = policy.back(); applyFullscreenPauses() }
 
     func add(_ channel: AppleIPTVChannel) {
+        guard !providerLimitReached(channel) else { notice = providerLimitMessage(channel.sourceID); return }
         if let refusal = policy.add(channel.id, thermal: Self.thermal) { notice = refusal.message; return }
         channels[channel.id] = channel
         reconcile()
     }
 
     func replace(_ id: String, with channel: AppleIPTVChannel) {
+        guard !providerLimitReached(channel, replacing: id) else { notice = providerLimitMessage(channel.sourceID); return }
         guard policy.replace(id, with: channel.id) else { notice = AppleMultiviewPolicy.Refusal.duplicate.message; return }
         channels[channel.id] = channel
         reconcile()
@@ -76,6 +89,17 @@ final class AppleTVMultiviewSession {
     }
 
     func promote(_ id: String) { policy.promote(id); applyRoles() }
+
+    private func providerLimitReached(_ channel: AppleIPTVChannel, replacing: String? = nil) -> Bool {
+        AppleMultiviewPolicy.providerLimitReached(sourceID: channel.sourceID,
+            sources: Dictionary(uniqueKeysWithValues: policy.channels.compactMap { id in
+                channels[id].map { (id, $0.sourceID) }
+            }), limits: providerLimits, replacing: replacing)
+    }
+
+    private func providerLimitMessage(_ sourceID: UUID) -> String {
+        "This provider allows \(providerLimits[sourceID] ?? 1) simultaneous streams"
+    }
     func toggleLayout() {
         policy.layout = policy.layout == .grid ? .bigAndSmalls : .grid
         applyRoles()
@@ -98,6 +122,11 @@ final class AppleTVMultiviewSession {
         }
         applyRoles()
         if active { for tile in tiles { tile.start() } }
+        applyFullscreenPauses()
+    }
+
+    private func applyFullscreenPauses() {
+        for tile in tiles { tile.setFullscreenPaused(policy.pausedChannelIDs.contains(tile.id)) }
     }
 
     private func applyRoles() {

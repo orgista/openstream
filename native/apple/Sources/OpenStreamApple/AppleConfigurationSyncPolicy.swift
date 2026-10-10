@@ -99,9 +99,13 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         mode: AppleConfigurationSyncMode = current, syncEnabled: Bool, restoreHeld: Bool,
         local: AppleConfigurationSnapshot, localSavedAt: Date?, cloud: AppleConfigurationSnapshot?
     ) -> Bool {
-        guard publishesChanges(mode: mode), syncEnabled, !restoreHeld, !local.sources.isEmpty else { return false }
+        guard publishesChanges(mode: mode), syncEnabled, !restoreHeld, (!local.sources.isEmpty || !local.sourceTombstones.isEmpty) else { return false }
         guard let cloud else { return true }
         guard contentDiffers(local, cloud) else { return false }
+        // A newer snapshot from an offline device may still omit our deletions.
+        if local.sourceTombstones.contains(where: { id, date in
+            cloud.sourceTombstones[id].map { $0 < date } ?? true
+        }) { return true }
         if cloud.sources.isEmpty { return true }
         guard let localSavedAt else { return false }
         return localSavedAt > cloud.savedAt

@@ -10,6 +10,61 @@ struct AppleConfigurationSnapshotTests {
                     credentialReference: "local-keychain-reference")
     }
 
+    @Test func sourceDeletionsWinInEitherMergeDirectionAndSurviveRoundTrip() throws {
+        let removed = source()
+        let kept = source(name: "Kept")
+        let stale = AppleConfigurationSnapshot(sources: [removed, kept])
+        let deletion = AppleConfigurationSnapshot(sourceTombstones: [removed.id: Date(timeIntervalSince1970: 100)])
+        for merged in [stale.merging(deletion), deletion.merging(stale)] {
+            #expect(merged.sources.map(\.id) == [kept.id])
+            #expect(merged.sourceTombstones[removed.id] != nil)
+            let restored = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: merged.cloudData())
+            #expect(restored.sourceTombstones == merged.sourceTombstones)
+            #expect(restored.merging(stale).sources.map(\.id) == [kept.id])
+        }
+    }
+
+    @Test func tombstoneAlsoRemovesUnsupportedSourcePayload() {
+        let id = UUID()
+        var stale = AppleConfigurationSnapshot()
+        stale.preservedSourcePayloads = [.object(["id": .string(id.uuidString), "kind": .string("future")])]
+        let deleted = AppleConfigurationSnapshot(sourceTombstones: [id: .now])
+        #expect(stale.merging(deleted).preservedSourcePayloads.isEmpty)
+        #expect(deleted.merging(stale).preservedSourcePayloads.isEmpty)
+    }
+
+    @MainActor @Test func deletedSourceCannotReturnFromBackupOrAfterRelaunch() throws {
+        let name = "source-tombstones.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = AppleSourceStore(defaults: defaults)
+        let original = source()
+        try store.restoreConfigurationSources([original], secrets: nil)
+        #expect(store.remove(id: original.id))
+        #expect(store.sourceTombstones[original.id] != nil)
+        let reloaded = AppleSourceStore(defaults: defaults)
+        try reloaded.restoreConfigurationSources([original], secrets: nil, merge: false)
+        #expect(reloaded.sources.isEmpty)
+        let fresh = source(name: "Added again")
+        try reloaded.restoreConfigurationSources([fresh], secrets: nil)
+        #expect(reloaded.sources.map(\.id) == [fresh.id])
+    }
+
+    @MainActor @Test func remoteDeletionRemovesExistingSourceAndPersistsItsTombstone() throws {
+        let name = "remote-source-tombstones.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = AppleSourceStore(defaults: defaults)
+        let original = source()
+        try store.restoreConfigurationSources([original], secrets: nil)
+        store.mergeSourceTombstones([original.id: .now])
+        #expect(store.sources.isEmpty)
+        let reloaded = AppleSourceStore(defaults: defaults)
+        #expect(reloaded.sourceTombstones[original.id] != nil)
+        try reloaded.restoreConfigurationSources([original], secrets: nil)
+        #expect(reloaded.sources.isEmpty)
+    }
+
     @Test func roundTripAndVersion() throws {
         let snapshot = AppleConfigurationSnapshot(sources: [source()])
         let data = try AppleConfigurationFile.encode(snapshot: snapshot)

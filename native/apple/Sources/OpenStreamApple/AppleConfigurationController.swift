@@ -50,7 +50,7 @@ final class AppleConfigurationController {
         guard !started else { return }
         await mediaIndex.load()
         started = true
-        heldSources = !sources.sources.isEmpty
+        heldSources = !sources.sources.isEmpty || !sources.sourceTombstones.isEmpty
         lastContent = try? contentFingerprint()
         // A device that syncs without ever being asked still has to move its
         // existing credentials into the synchronizing keychain. They were
@@ -278,7 +278,8 @@ final class AppleConfigurationController {
             try await apply(snapshot, secrets: nil, mergeSources: false)
             defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
-            if !sources.sources.isEmpty { heldSources = true }
+            if sources.sourceTombstones != snapshot.sourceTombstones { scheduleWrite() }
+            if !sources.sources.isEmpty || !sources.sourceTombstones.isEmpty { heldSources = true }
             appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
             updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) }
             result = "Synced with iCloud"
@@ -386,7 +387,7 @@ final class AppleConfigurationController {
         }
         var snapshot = AppleConfigurationSnapshot(
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
-            sources: sources.sources, settings: values,
+            sources: sources.sources, sourceTombstones: sources.sourceTombstones, settings: values,
             playbackProgress: ApplePlaybackStore(defaults: defaults).configurationProgress(),
             watchedHistory: ApplePlaybackStore(defaults: defaults).configurationWatchedHistory(),
             watchedTombstones: ApplePlaybackStore(defaults: defaults).configurationWatchedTombstones(),
@@ -424,6 +425,7 @@ final class AppleConfigurationController {
         // basis: a part this device cannot keep is skipped and traced, so the
         // rest still arrives (build 17's Apple TV lost the whole setup to its
         // unwritable Application Support).
+        sources.mergeSourceTombstones(snapshot.sourceTombstones)
         try traced("sources") {
             let signedOut = try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
             if signedOut > 0 { appleTraceFailure("configuration apply: \(signedOut) sources kept signed out") }
@@ -491,7 +493,8 @@ final class AppleConfigurationController {
                 appleTrace("configuration sync: kept iCloud's sources, this device has none yet")
                 return false
             }
-            let data = try capture().cloudData()
+            let local = try capture()
+            let data = try (stored.map { $0.merging(local) } ?? local).cloudData()
             try sources.prepareConfigurationKeychain()
             try settings.prepareConfigurationKeychain()
             cloud.set(data, forKey: Self.cloudKey)

@@ -6,6 +6,28 @@ import Testing
 
 @Suite("Multiview policies")
 struct AppleMultiviewPolicyTests {
+    @Test func providerLimitCountsOnlyThatProvidersTilesAndExcludesAReplacement() {
+        let first = UUID(), second = UUID()
+        let sources = ["a": first, "b": first, "c": second]
+        #expect(AppleMultiviewPolicy.providerLimitReached(sourceID: first, sources: sources, limits: [first: 2]))
+        #expect(!AppleMultiviewPolicy.providerLimitReached(sourceID: first, sources: sources,
+                                                         limits: [first: 2], replacing: "a"))
+        #expect(!AppleMultiviewPolicy.providerLimitReached(sourceID: second, sources: sources, limits: [first: 2]))
+        #expect(!AppleMultiviewPolicy.providerLimitReached(sourceID: first, sources: sources, limits: [first: 0]))
+    }
+
+    @Test func fullscreenPausesCompanionsAndBackRetainsEveryChannel() {
+        var state = AppleMultiviewPolicy.Session(channels: ["a", "b", "c"])
+        #expect(state.pausedChannelIDs.isEmpty)
+        state.select("b")
+        #expect(state.pausedChannelIDs == ["a", "c"])
+        state.select("c")
+        #expect(state.pausedChannelIDs == ["a", "b"])
+        _ = state.back()
+        #expect(state.pausedChannelIDs.isEmpty)
+        #expect(state.channels == ["a", "b", "c"])
+    }
+
     @Test(arguments: [2, 3, 4])
     func layoutsAreInsideCanvasAndDoNotOverlap(count: Int) {
         #expect(AppleMultiviewPolicy.frames(count: count, layout: .grid, size: .zero).isEmpty)

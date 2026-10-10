@@ -63,6 +63,60 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         add(shot)
     }
 
+    func testLegacyDiscoverNavigationAndPlayerAccessibilityIsolation() {
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "discover")
+        XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 30))
+        Thread.sleep(forTimeInterval: 8)
+        attach("legacy-discover-navigation")
+        app.terminate()
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "add-files")
+        let directURL = app.buttons["Direct URL"].firstMatch
+        XCTAssertTrue(directURL.waitForExistence(timeout: 30))
+        directURL.tap()
+        let dialog = app.alerts["Direct URL"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10))
+        dialog.textFields.firstMatch.tap()
+        dialog.textFields.firstMatch.typeText("http://127.0.0.1:9/openstream-ui-test-unreachable.mkv")
+        dialog.buttons["Play"].tap()
+        let player = app.descendants(matching: .any).matching(identifier: "player.connecting").firstMatch
+        let failure = app.alerts["Playback Failed"].firstMatch
+        let presented = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            player.exists || failure.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [presented], timeout: 30), .completed)
+        let isolated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !self.app.tabBars.buttons["Discover"].exists && !self.app.buttons["Direct URL"].exists
+        }, object: nil)
+        attach("fullscreen-player-accessibility-isolation")
+        XCTAssertEqual(XCTWaiter.wait(for: [isolated], timeout: 10), .completed,
+                       "The presenting page must be absent from the fullscreen accessibility tree")
+        if failure.exists {
+            let close = failure.buttons["Close"]
+            if close.exists { close.tap() }
+        }
+        let closePlayer = app.buttons["player.close"].firstMatch
+        if closePlayer.waitForExistence(timeout: 3) { closePlayer.tap() }
+        XCTAssertTrue(directURL.waitForExistence(timeout: 10),
+                      "Dismissal must restore the presenting page's accessibility elements")
+    }
+
+    func testLiveGuideSheetOpensAndDismisses() {
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "live")
+        let guide = app.buttons["live.guide"].firstMatch
+        XCTAssertTrue(guide.waitForExistence(timeout: 60))
+        guide.tap()
+        let done = app.buttons["live.guide.done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Guide"].exists)
+        attach("live-guide-sheet")
+        done.tap()
+        XCTAssertTrue(guide.waitForExistence(timeout: 10))
+        XCTAssertFalse(done.exists)
+    }
+
     /// Captures every debug route without adding sources or modifying settings.
     func testEveryRouteIsPhotographed() {
         let routes = ["discover", "library", "live", "detail", "episodes", "play", "first-run",
@@ -633,6 +687,58 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// On its own so a run that died half-way can be cleaned up by name.
     func testZRemoveTheDownloadFixture() {
         removeDownloadFixture()
+    }
+
+    /// Public-manifest spot checks. The driver restores the simulator's app
+    /// data after each bounded batch; URLs are supplied outside the repo.
+    func testPublicAddonManifestsInApp() throws {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_ALLOW_MUTATING_UI_TESTS"] == "1",
+              let path = ProcessInfo.processInfo.environment["OPENSTREAM_PUBLIC_ADDON_BATCH"] else {
+            throw XCTSkip("Requires a public add-on batch and restored simulator data")
+        }
+        struct Entry: Decodable { let name: String; let manifest_url: String }
+        let entries = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        XCTAssertLessThanOrEqual(entries.count, 9)
+        var outcomes: [String] = []
+        for (index, entry) in entries.enumerated() {
+            app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+            app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-openstream.settings.trailer.autoplay.v1", "NO", "-openstream.backup.icloud.enabled.v1", "NO"]
+            launch(screen: "add-catalog")
+            let field = app.textFields["Manifest URL"].firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 20))
+            field.tap(); field.typeText(entry.manifest_url)
+            if app.keyboards.buttons["Return"].exists { app.keyboards.buttons["Return"].tap() }
+            let add = app.buttons["Add Catalog"].firstMatch
+            XCTAssertTrue(add.waitForExistence(timeout: 10)); add.tap()
+            let added = field.waitForNonExistence(timeout: 30)
+            outcomes.append("\(entry.name): \(added ? "added" : "provider rejected or unavailable")")
+            attach("public-addon-\(index)-\(added ? "added" : "unavailable")")
+            XCTAssertEqual(app.state, .runningForeground, "Public manifest crashed the app")
+            app.terminate()
+        }
+        app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-openstream.settings.trailer.autoplay.v1", "NO", "-openstream.backup.icloud.enabled.v1", "NO"]
+        launch(screen: "discover")
+        XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 30))
+        Thread.sleep(forTimeInterval: 8)
+        attach("public-addon-discover")
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home.media.'")).firstMatch
+        for _ in 0..<8 {
+            if isSafelyHittable(poster) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(poster.waitForExistence(timeout: 30), "The public batch did not publish any catalog posters")
+        XCTAssertTrue(isSafelyHittable(poster), "Catalog posters stayed outside the visible area")
+        attach("public-addon-catalog-posters")
+        poster.tap()
+        let detail = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'detail.screen.'")).firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 30))
+        attach("public-addon-title-page")
+        let report = XCTAttachment(string: outcomes.joined(separator: "\n"))
+        report.name = "public-addon-outcomes"
+        report.lifetime = .keepAlways
+        add(report)
+        for outcome in outcomes { print("PUBLICADDON \(outcome)") }
     }
 
     /// Adds a localhost add-on through Settings › Sources › Add Catalog.
@@ -2299,13 +2405,24 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let env = ProcessInfo.processInfo.environment
         guard env["OPENSTREAM_PIP_CHECK"] == "1" else { throw XCTSkip("device check only with OPENSTREAM_PIP_CHECK=1") }
         continueAfterFailure = true
+        let inlineFixture = env["OPENSTREAM_PIP_INLINE_FIXTURE_URL"].flatMap(URL.init(string:))
+        if let inlineFixture {
+            XCTAssertEqual(inlineFixture.host, "127.0.0.1")
+            XCTAssertEqual(inlineFixture.scheme, "http")
+            app.launchArguments += ["-OpenStreamInlineLiveFixture", "-OpenStreamVisionPlaybackIsLive", "YES",
+                                    "-OpenStreamVisionPlaybackURL", inlineFixture.absoluteString]
+        }
         app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
         launch(screen: "live")
         let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
-        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row")
+        if inlineFixture == nil { XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row") }
         Thread.sleep(forTimeInterval: 8)
         let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
-        player.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+        if inlineFixture != nil {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.23)).tap()
+        } else {
+            player.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+        }
         let fullScreen = app.buttons["player.fullscreen"].firstMatch
         XCTAssertTrue(fullScreen.waitForExistence(timeout: 5))
         fullScreen.tap()
@@ -2315,6 +2432,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         Thread.sleep(forTimeInterval: 5)
         attach("pip-after-home")
         print("PIPCHECK app state after home: \(app.state.rawValue)")
+        // AVKit can report a visible PiP app as foreground. A suspended app
+        // cannot keep the live window playing; the device trace and Home
+        // screenshots separately prove the window lasts through ten seconds.
+        XCTAssertTrue(app.state == .runningBackground || app.state == .runningForeground)
         Thread.sleep(forTimeInterval: 5)
         attach("pip-after-10s")
         app.activate()

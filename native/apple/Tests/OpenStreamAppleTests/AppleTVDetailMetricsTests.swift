@@ -5,6 +5,12 @@ import Testing
 @Suite("Apple TV title page and chrome metrics")
 @MainActor
 struct AppleTVDetailMetricsTests {
+    @Test func seasonMenuOpensOnTheCheckedSeasonInsteadOfSpecials() {
+        #expect(AppleTVDetailMetrics.seasonMenuOrder([0, 1, 2, 37], selected: 37) == [37, 0, 1, 2])
+        #expect(AppleTVDetailMetrics.seasonMenuOrder([0, 1, 2], selected: nil) == [0, 1, 2])
+        #expect(AppleTVDetailMetrics.seasonMenuOrder([0, 1, 2], selected: 9) == [0, 1, 2])
+    }
+
     @Test func heroFillsTheWholeScreen() {
         #expect(AppleTVDetailMetrics.screenSize == CGSize(width: 1920, height: 1080))
         #expect(AppleTVDetailMetrics.heroFrame == CGRect(x: 0, y: 0, width: 1920, height: 1080))

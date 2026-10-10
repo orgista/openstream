@@ -16,6 +16,7 @@ final class AppleTVMultiviewTile: Identifiable {
     @ObservationIgnored private var uncapped = false
     @ObservationIgnored private var captions = false
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var fullscreenPaused = false
 
     init(channel: AppleIPTVChannel) {
         self.channel = channel
@@ -45,6 +46,7 @@ final class AppleTVMultiviewTile: Identifiable {
     func start() {
         guard !started else { return }
         started = true
+        appleTrace("multiview tile start \(id)")
         routeFailure = nil
         openTask = Task { [weak self] in
             guard let self else { return }
@@ -86,6 +88,7 @@ final class AppleTVMultiviewTile: Identifiable {
                 }
             }
             self.applyRoles()
+            if self.fullscreenPaused { self.coordinator.engine.pause() }
             self.revision &+= 1
         }
     }
@@ -135,10 +138,19 @@ final class AppleTVMultiviewTile: Identifiable {
     }
 
     func stop() {
+        if started { appleTrace("multiview tile stop \(id)") }
         started = false
         openTask?.cancel(); openTask = nil
         eventTask?.cancel(); eventTask = nil
         coordinator.stop()
+    }
+
+    func setFullscreenPaused(_ paused: Bool) {
+        guard fullscreenPaused != paused else { return }
+        fullscreenPaused = paused
+        guard started else { return }
+        if paused { coordinator.engine.pause() }
+        else { coordinator.engine.play() }
     }
 
     deinit { openTask?.cancel(); eventTask?.cancel() }

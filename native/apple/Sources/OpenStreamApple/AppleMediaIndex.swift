@@ -161,13 +161,21 @@ public actor AppleMediaIndexRepository {
 
         do {
             let data = try Data(contentsOf: self.fileURL)
-            let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            let clean = try AppleCachedCredentialPolicy.metadata(data)
+            let envelope = try JSONDecoder().decode(Envelope.self, from: clean)
             guard envelope.version == 1 else {
                 recordsByID = [:]
                 searchTextByID = [:]
                 orderedRecordIDs = []
                 blockedVersion = envelope.version
                 return
+            }
+            if clean != data {
+                #if os(iOS) || os(tvOS) || os(visionOS)
+                try clean.write(to: self.fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+                #else
+                try clean.write(to: self.fileURL, options: .atomic)
+                #endif
             }
             let records = Dictionary(uniqueKeysWithValues: envelope.records.map { ($0.id, $0) })
             recordsByID = records
@@ -368,7 +376,7 @@ public actor AppleMediaIndexRepository {
         }
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(Envelope(version: 1, records: Array(values.values)))
+        let data = try AppleCachedCredentialPolicy.metadata(JSONEncoder().encode(Envelope(version: 1, records: Array(values.values))))
         #if os(iOS) || os(tvOS) || os(visionOS)
         try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
         #else

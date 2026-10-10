@@ -27,6 +27,19 @@ public final class AppleChannelHealthStore {
     public var isSweeping: Bool { progress != nil }
 
     @ObservationIgnored private var sweepTask: Task<Void, Never>?
+    private struct LivePlayer { weak var coordinator: ApplePlaybackCoordinator? }
+    private var livePlayers: [ObjectIdentifier: LivePlayer] = [:]
+    public var hasLivePlayback: Bool { livePlayers.values.contains { $0.coordinator != nil } }
+
+    func beginLivePlayback(_ coordinator: ApplePlaybackCoordinator) {
+        livePlayers = livePlayers.filter { $0.value.coordinator != nil }
+        livePlayers[ObjectIdentifier(coordinator)] = LivePlayer(coordinator: coordinator)
+        cancelSweep()
+    }
+
+    func endLivePlayback(_ coordinator: ApplePlaybackCoordinator) {
+        livePlayers[ObjectIdentifier(coordinator)] = nil
+    }
     @ObservationIgnored private var didLoad = false
     @ObservationIgnored private let history: AppleChannelHealthHistory
     /// A review-build fixture: never reads or writes history, never probes.
@@ -152,7 +165,7 @@ public final class AppleChannelHealthStore {
     }
 
     private func startSweep(channels: [AppleIPTVChannel]) {
-        guard sweepTask == nil, !channels.isEmpty, !isFixture else { return }
+        guard sweepTask == nil, !channels.isEmpty, !isFixture, !hasLivePlayback else { return }
         let history = history
         progress = Progress(completed: 0, total: channels.count)
         // Holds the store until the sweep ends or is cancelled.

@@ -131,7 +131,7 @@ public struct AppleIPTVGuideGridView: View {
                                 .overlay(alignment: .topLeading) {
                                     if context.date >= window.start && context.date < window.end {
                                         let offset = context.date.timeIntervalSince(window.start) / 1800
-                                        Rectangle().fill(AppleDesignTokens.brandAccent).frame(width: 2)
+                                        Rectangle().fill(AppleDesignTokens.brandAccent).frame(width: 1)
                                             .offset(x: railWidth + CGFloat(offset) * cellWidth)
                                             .padding(.top, 36)
                                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -370,7 +370,7 @@ private struct GuideChannelRail: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(isFavorite ? AppleDesignTokens.brandAccent : .secondary)
+            .foregroundStyle(.secondary)
             .accessibilityLabel("\(isFavorite ? "Remove" : "Add") \(row.channel.name) \(isFavorite ? "from" : "to") favorites")
             .accessibilityIdentifier("guide.favorite.\(row.id)")
         }
@@ -396,7 +396,7 @@ private struct GuideScheduleRow: View, Equatable {
             ForEach(row.spans) { cell in
                 Button(action: cell.isCatchUp ? { onSelectSpan(cell) } : onSelect) {
                     GuideProgrammeTitle(cell: cell, cellWidth: cellWidth, height: height, scrollState: scrollState)
-                    .background(cell.isNow ? AppleDesignTokens.brandAccent.opacity(0.14) : AppleDesignTokens.surface)
+                    .background(Color.white.opacity(cell.isNow ? 0.12 : 0.06))
                     .overlay(Rectangle().stroke(.white.opacity(0.08), lineWidth: 1))
                     .clipped()
                     .contentShape(Rectangle())
