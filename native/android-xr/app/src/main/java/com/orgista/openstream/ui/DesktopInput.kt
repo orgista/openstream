@@ -182,6 +182,9 @@ fun HoverTooltip(label: String, content: @Composable () -> Unit) {
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(label) } },
         state = state,
+        // Material's own hover/long-press trigger can race a fast pass over
+        // the button and leave a persistent tooltip stuck; this one owns it.
+        enableUserInput = false,
         modifier = Modifier.pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
