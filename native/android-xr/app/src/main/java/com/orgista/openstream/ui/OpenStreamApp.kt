@@ -48,7 +48,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -1156,6 +1165,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
         }
     }
 
+    val contentFocus = remember { FocusRequester() }
     Box(
         Modifier
             .fillMaxSize()
@@ -1168,7 +1178,8 @@ fun OpenStreamApp(onExit: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .padding(top = contentTopInset)
-                .clipToBounds(),
+                .clipToBounds()
+                .focusRequester(contentFocus),
         ) {
             when (screen) {
                 Screen.Discover -> DiscoverScreen(
@@ -1421,6 +1432,7 @@ fun OpenStreamApp(onExit: () -> Unit) {
             missingLibrarySources = missingLibrarySources.size,
             onNavigate = navigate,
             onRescan = { libraryRevision++ },
+            onFocusContent = { runCatching { contentFocus.requestFocus() } },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .onSizeChanged { topNavHeightPx = it.height }
@@ -1441,10 +1453,17 @@ private fun TopNav(
     missingLibrarySources: Int,
     onNavigate: (Screen) -> Unit,
     onRescan: () -> Unit,
+    onFocusContent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var brandFocused by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val television = remember(context) { context.isTelevision() }
+    val focusManager = LocalFocusManager.current
+    val windowHost = remember(context) { context.playbackWindowHost() }
+    // Plain field, not state: read right after moveFocus, inside the same event.
+    val topRowFocused = remember { booleanArrayOf(false) }
     val primaryTabs = primaryTopDestinations().map { destination ->
         when (destination) {
             TopDestination.DISCOVER -> Tab(Screen.Discover, "Discover")
@@ -1464,11 +1483,24 @@ private fun TopNav(
     val compact = TopNavLayoutPolicy.isCompact(configuration.screenWidthDp, configuration.screenHeightDp)
 
     Column(
-        modifier = modifier.fillMaxWidth(),
+        // Keyboard Down from the nav goes into the screen below. The nav floats
+        // over the content, so the geometric search can miss it (Down from the
+        // brand stayed put). TV remotes keep the existing D-pad behavior.
+        modifier = modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+            if (television || event.type != KeyEventType.KeyDown || event.key != Key.DirectionDown ||
+                !event.fromFullKeyboard()
+            ) {
+                return@onPreviewKeyEvent false
+            }
+            val moved = focusManager.moveFocus(FocusDirection.Down)
+            if (!moved || topRowFocused[0]) onFocusContent()
+            true
+        },
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { topRowFocused[0] = it.hasFocus }
                 .padding(
                     start = TopNavLayoutPolicy.brandStartPaddingDp(compact).dp,
                     end = if (compact) 8.dp else 26.dp,
