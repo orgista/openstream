@@ -6,6 +6,11 @@ goes on the line. A request that has been asked for before is marked **(asked ag
 never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this file is the list.
 
 ## Open
+
+- [ ] **Googlebook version of OpenStream + Google Play "Made for desktop" badge (owner 2026-10-09).** Build the
+      large-screen/desktop variant (same Play app, mobile AAB), e2e on the Googlebook AVD on Dev-Mini (keyboard, mouse,
+      resize, multi-window, playback), and meet every badge requirement. Spec: specs/googlebook-2026-10-09.md; work Claude
+      worker running 2026-10-09. Owner: any Play Console declaration it reports.
 - [ ] **Rill bridge was broken since the 10-02 hardening; fixed 2026-10-09 (Tismlist session, owner-approved).** Every
       add-on fetch failed ("No manifest found at that address.") because Workers reject `redirect: 'error'`; now
       `redirect: 'manual'` + regression test, deployed to stream.ourzephyr.com (D1 restore point taken first). Source:
@@ -268,7 +273,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
       iCloud restore no longer rewinds Resume; "Forced"-only subtitle tracks never auto-picked. Open: a deleted
       add-on can come back after iCloud sync; search tab position on tvOS (kept first per your 09-14 call).
-- [ ] **Open-source / public repo (2026-10-01) — specs/oss-public-readiness.md:** history scan (410 commits): no signing
+- [ ] **Open-source / public repo (2026-10-01) — owner 2026-10-09: do NOT rotate or recreate the AIOMetadata key, keep using it; key part closed. Remaining: publish orgista/openstream-apple (Apache-2.0, already decided).** — specs/oss-public-readiness.md:** history scan (410 commits): no signing
       keys, .env, API keys or IPTV logins anywhere. But: (1) your AIOMetadata config URL (its id is a login token) is
       in the code — being moved out now; RECREATE that config in AIOMetadata. (2) 2.3 GB of movie/TV rips sit in git
       history (Tests/Fixtures/private/) plus build folders, ServerPlus IPs in notes/screenshots, 21 commits under your
