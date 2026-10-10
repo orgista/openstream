@@ -143,8 +143,10 @@ fun LiveChannelManagerScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(AppIcons.Back, contentDescription = "Back", tint = OpenStreamColors.Text)
+            HoverTooltip("Back") {
+                IconButton(onClick = onBack) {
+                    Icon(AppIcons.Back, contentDescription = "Back", tint = OpenStreamColors.Text)
+                }
             }
             Column(Modifier.weight(1f)) {
                 Text(

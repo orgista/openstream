@@ -491,8 +491,10 @@ private fun LiveGuideTimelineHeader(
             Text("$channelCount", color = OpenStreamColors.Muted, fontSize = 11.sp)
             OpenStreamTextButton(onClick = onNow, enabled = !atNow) { Text("Now") }
         }
-        IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
-            Icon(AppIcons.Back, contentDescription = "Earlier", tint = OpenStreamColors.TextSoft)
+        HoverTooltip("Earlier") {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {
+                Icon(AppIcons.Back, contentDescription = "Earlier", tint = OpenStreamColors.TextSoft)
+            }
         }
         Row(Modifier.weight(1f).fillMaxHeight()) {
             repeat(4) { index ->
@@ -509,13 +511,15 @@ private fun LiveGuideTimelineHeader(
                 }
             }
         }
-        IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
-            Icon(
-                AppIcons.Back,
-                contentDescription = "Later",
-                tint = OpenStreamColors.TextSoft,
-                modifier = Modifier.graphicsLayer(rotationZ = 180f),
-            )
+        HoverTooltip("Later") {
+            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    AppIcons.Back,
+                    contentDescription = "Later",
+                    tint = OpenStreamColors.TextSoft,
+                    modifier = Modifier.graphicsLayer(rotationZ = 180f),
+                )
+            }
         }
     }
 }

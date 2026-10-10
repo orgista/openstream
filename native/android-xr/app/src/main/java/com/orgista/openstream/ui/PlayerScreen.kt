@@ -870,6 +870,8 @@ fun PlayerScreen(
         val windowListener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 windowHost?.updatePlayback(isPlaying, player.videoSize.width, player.videoSize.height)
+                // Play/pause swaps its label after this; refresh the hover tooltips.
+                playerViewRef?.let { view -> view.post { view.syncHoverTooltips() } }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -985,6 +987,7 @@ fun PlayerScreen(
                     setControllerVisibilityListener(
                         PlayerView.ControllerVisibilityListener { visibility ->
                             chromeVisible = visibility == View.VISIBLE
+                            if (visibility == View.VISIBLE) syncHoverTooltips()
                         },
                     )
                     post { hideController() }
@@ -1043,8 +1046,10 @@ fun PlayerScreen(
                     .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 22.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(AppIcons.Back, contentDescription = "Back", tint = Color.White)
+                HoverTooltip("Back") {
+                    IconButton(onClick = onBack) {
+                        Icon(AppIcons.Back, contentDescription = "Back", tint = Color.White)
+                    }
                 }
                 Column(Modifier.padding(start = 4.dp)) {
                     Text(

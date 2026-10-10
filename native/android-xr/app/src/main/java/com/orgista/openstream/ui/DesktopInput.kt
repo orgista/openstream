@@ -8,7 +8,29 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.mimeTypes
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import android.view.DragEvent
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,7 +49,12 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.key.KeyEvent as ComposeKeyEvent
 import androidx.compose.ui.unit.dp
+import android.view.InputDevice
+import android.view.View
+import android.view.ViewGroup
+import kotlinx.coroutines.delay
 
 /** Right-click (or two-finger trackpad click): calls [onClick] with the press position. */
 fun Modifier.onSecondaryClick(onClick: (Offset) -> Unit): Modifier = pointerInput(onClick) {
@@ -121,3 +148,113 @@ fun Modifier.keyboardFocusRing(shape: Shape): Modifier = composed {
 
 fun Context.isTelevision(): Boolean =
     getSystemService(UiModeManager::class.java)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+
+/** A key from a full alphabetic keyboard (desktop, laptop), not a TV remote or D-pad. */
+fun ComposeKeyEvent.fromFullKeyboard(): Boolean =
+    nativeKeyEvent.device?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
+
+/**
+ * Hover tooltip for icon-only buttons (desktop T-Hover_Parity): the label
+ * appears after the pointer rests on [content]. Touch long-press keeps
+ * Material's behavior; TV has no pointer, so it gets the bare content.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HoverTooltip(label: String, content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val television = remember(context) { context.isTelevision() }
+    if (television || label.isBlank()) {
+        content()
+        return
+    }
+    // Persistent: stays up while the pointer rests on the button, not 1.5 s.
+    val state = rememberTooltipState(isPersistent = true)
+    var hovered by remember { mutableStateOf(false) }
+    LaunchedEffect(hovered) {
+        if (hovered) {
+            delay(500)
+            state.show()
+        } else {
+            state.dismiss()
+        }
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = state,
+        modifier = Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    when (event.type) {
+                        PointerEventType.Enter -> hovered = true
+                        PointerEventType.Exit, PointerEventType.Press -> hovered = false
+                    }
+                }
+            }
+        },
+    ) {
+        content()
+    }
+}
+
+/**
+ * Android-view counterpart of [HoverTooltip] for Media3's controller: every
+ * labelled control shows its current description on hover. Call again when
+ * descriptions change (play/pause swaps its label).
+ */
+fun View.syncHoverTooltips() {
+    if (android.os.Build.VERSION.SDK_INT < 26 || context.isTelevision()) return
+    if (isClickable && !contentDescription.isNullOrBlank()) tooltipText = contentDescription
+    if (this is ViewGroup) for (index in 0 until childCount) getChildAt(index).syncHoverTooltips()
+}
+
+/**
+ * Drop a video or audio file from the Files app (or any app) anywhere on the
+ * window to play it (T-Drag_Drop_Support). TV has no drag source, so it gets
+ * the bare content.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun LocalMediaDropZone(enabled: Boolean, onDrop: (DragEvent) -> Boolean, content: @Composable () -> Unit) {
+    if (!enabled) {
+        content()
+        return
+    }
+    var over by remember { mutableStateOf(false) }
+    val currentOnDrop by rememberUpdatedState(onDrop)
+    val target = remember {
+        object : DragAndDropTarget {
+            override fun onEntered(event: DragAndDropEvent) { over = true }
+            override fun onExited(event: DragAndDropEvent) { over = false }
+            override fun onEnded(event: DragAndDropEvent) { over = false }
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                over = false
+                return currentOnDrop(event.toAndroidDragEvent())
+            }
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .dragAndDropTarget(
+                shouldStartDragAndDrop = { event ->
+                    event.mimeTypes().any { it.startsWith("video/") || it.startsWith("audio/") }
+                },
+                target = target,
+            ),
+    ) {
+        content()
+        if (over) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .border(3.dp, OpenStreamColors.Accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Drop to play", color = OpenStreamColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}

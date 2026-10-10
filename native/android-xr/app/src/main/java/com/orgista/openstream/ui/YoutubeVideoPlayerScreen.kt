@@ -65,8 +65,10 @@ fun YoutubeVideoPlayerScreen(
             shape = CircleShape,
             color = Color.Black.copy(alpha = 0.62f),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(AppIcons.Back, contentDescription = "Back from $title", tint = Color.White)
+            HoverTooltip("Back") {
+                IconButton(onClick = onBack) {
+                    Icon(AppIcons.Back, contentDescription = "Back from $title", tint = Color.White)
+                }
             }
         }
     }

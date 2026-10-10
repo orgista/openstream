@@ -1544,26 +1544,30 @@ private fun TopNav(
                 Text(deviceStatus.time, color = OpenStreamColors.TextSoft, fontSize = 13.sp, style = TextStyle(shadow = NavTextShadow))
                 Spacer(Modifier.width(12.dp))
             }
-            IconButton(onClick = { onNavigate(Screen.Search) }, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    AppIcons.Search,
-                    contentDescription = "Search",
-                    tint = if (current == Screen.Search) OpenStreamColors.Accent else OpenStreamColors.TextSoft,
-                    modifier = Modifier.size(19.dp),
-                )
+            HoverTooltip("Search") {
+                IconButton(onClick = { onNavigate(Screen.Search) }, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        AppIcons.Search,
+                        contentDescription = "Search",
+                        tint = if (current == Screen.Search) OpenStreamColors.Accent else OpenStreamColors.TextSoft,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
             }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
-                    Icon(
-                        AppIcons.More,
-                        contentDescription = "More options",
-                        tint = if (current == Screen.Connections || current == Screen.Settings) {
-                            OpenStreamColors.Accent
-                        } else {
-                            OpenStreamColors.TextSoft
-                        },
-                        modifier = Modifier.size(20.dp),
-                    )
+                HoverTooltip("More options") {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            AppIcons.More,
+                            contentDescription = "More options",
+                            tint = if (current == Screen.Connections || current == Screen.Settings) {
+                                OpenStreamColors.Accent
+                            } else {
+                                OpenStreamColors.TextSoft
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 DropdownMenu(
                     expanded = menuOpen,

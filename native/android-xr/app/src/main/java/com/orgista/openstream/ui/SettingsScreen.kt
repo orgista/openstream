@@ -1112,17 +1112,19 @@ internal fun Panel(
 
 @Composable
 private fun SettingsInfoButton(label: String, onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label },
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = Color.Transparent,
-            border = BorderStroke(1.dp, OpenStreamColors.Muted),
+    HoverTooltip("Information") {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.size(48.dp).semantics { contentDescription = label },
         ) {
-            androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
+            Surface(
+                shape = CircleShape,
+                color = Color.Transparent,
+                border = BorderStroke(1.dp, OpenStreamColors.Muted),
+            ) {
+                androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                    Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
+                }
             }
         }
     }

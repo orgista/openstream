@@ -79,26 +79,28 @@ fun IptvSettingsPanel(
                     )
                 }
                 AnimatedVisibility(visible = deletingSource) {
-                    IconButton(
-                        enabled = !working,
-                        onClick = {
-                            store.removeCustom()
-                            saved = null
-                            endpoint = ""
-                            username = ""
-                            password = ""
-                            deletingSource = false
-                            messageError = false
-                            message = "Removed from this device."
-                            onChanged()
-                        },
-                    ) {
-                        Icon(
-                            AppIcons.Close,
-                            contentDescription = "Delete Live TV source",
-                            tint = OpenStreamColors.Danger,
-                            modifier = Modifier.size(20.dp),
-                        )
+                    HoverTooltip("Delete source") {
+                        IconButton(
+                            enabled = !working,
+                            onClick = {
+                                store.removeCustom()
+                                saved = null
+                                endpoint = ""
+                                username = ""
+                                password = ""
+                                deletingSource = false
+                                messageError = false
+                                message = "Removed from this device."
+                                onChanged()
+                            },
+                        ) {
+                            Icon(
+                                AppIcons.Close,
+                                contentDescription = "Delete Live TV source",
+                                tint = OpenStreamColors.Danger,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                 }
             }

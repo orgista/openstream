@@ -391,16 +391,18 @@ fun ConnectionsScreen(
                     AnimatedVisibility(
                         visible = SourceManagementPolicy.showRemoveControl(SourceCollection.LIBRARIES, deletingCollection),
                     ) {
-                        IconButton(onClick = {
-                            onRemoveLibrary(folder.id)
-                            if (libraries.size == 1) deletingCollection = null
-                            revision++
-                        }) {
-                            Icon(
-                                AppIcons.Close,
-                                contentDescription = "Delete ${folder.connectionName} library",
-                                tint = OpenStreamColors.Danger,
-                            )
+                        HoverTooltip("Delete library") {
+                            IconButton(onClick = {
+                                onRemoveLibrary(folder.id)
+                                if (libraries.size == 1) deletingCollection = null
+                                revision++
+                            }) {
+                                Icon(
+                                    AppIcons.Close,
+                                    contentDescription = "Delete ${folder.connectionName} library",
+                                    tint = OpenStreamColors.Danger,
+                                )
+                            }
                         }
                     }
                 }
@@ -442,16 +444,18 @@ fun ConnectionsScreen(
                 AnimatedVisibility(
                     visible = SourceManagementPolicy.showRemoveControl(SourceCollection.NAS_SHARES, deletingCollection),
                 ) {
-                    IconButton(onClick = {
-                        store.removeNas(connection.id)
-                        if (nasConnections.size == 1) deletingCollection = null
-                        revision++
-                    }) {
-                        Icon(
-                            AppIcons.Close,
-                            contentDescription = "Delete NAS share ${connection.name}",
-                            tint = OpenStreamColors.Danger,
-                        )
+                    HoverTooltip("Delete share") {
+                        IconButton(onClick = {
+                            store.removeNas(connection.id)
+                            if (nasConnections.size == 1) deletingCollection = null
+                            revision++
+                        }) {
+                            Icon(
+                                AppIcons.Close,
+                                contentDescription = "Delete NAS share ${connection.name}",
+                                tint = OpenStreamColors.Danger,
+                            )
+                        }
                     }
                 }
             }
@@ -559,17 +563,19 @@ fun ConnectionsScreen(
                 AnimatedVisibility(
                     visible = SourceManagementPolicy.showRemoveControl(SourceCollection.YOUTUBE, deletingCollection),
                 ) {
-                    IconButton(onClick = {
-                        store.removeYoutubeChannel(channel.id)
-                        if (youtubeChannels.size == 1) deletingCollection = null
-                        revision++
-                        onAddonsChanged()
-                    }) {
-                        Icon(
-                            AppIcons.Close,
-                            contentDescription = "Delete YouTube channel ${channel.name}",
-                            tint = OpenStreamColors.Danger,
-                        )
+                    HoverTooltip("Delete channel") {
+                        IconButton(onClick = {
+                            store.removeYoutubeChannel(channel.id)
+                            if (youtubeChannels.size == 1) deletingCollection = null
+                            revision++
+                            onAddonsChanged()
+                        }) {
+                            Icon(
+                                AppIcons.Close,
+                                contentDescription = "Delete YouTube channel ${channel.name}",
+                                tint = OpenStreamColors.Danger,
+                            )
+                        }
                     }
                 }
             }
@@ -622,42 +628,44 @@ fun ConnectionsScreen(
                 }
                 val testing = testingAddonId == addon.id
                 val testResult = addonTestResults[addon.id]
-                IconButton(
-                    modifier = Modifier.semantics {
-                        contentDescription = AddonTestIndicatorPolicy.contentDescription(addon.name, testing, testResult)
-                    },
-                    enabled = testingAddonId == null,
-                    onClick = {
-                        testingAddonId = addon.id
-                        addonTestResults = addonTestResults - addon.id
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) { StremioClient.testAddon(addon) }
-                            addonTestResults = addonTestResults + (addon.id to result)
-                            testingAddonId = null
-                            Logs.event("add-on test ${if (result.working) "passed" else "failed"}: ${addon.name}")
+                HoverTooltip("Test add-on") {
+                    IconButton(
+                        modifier = Modifier.semantics {
+                            contentDescription = AddonTestIndicatorPolicy.contentDescription(addon.name, testing, testResult)
+                        },
+                        enabled = testingAddonId == null,
+                        onClick = {
+                            testingAddonId = addon.id
+                            addonTestResults = addonTestResults - addon.id
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) { StremioClient.testAddon(addon) }
+                                addonTestResults = addonTestResults + (addon.id to result)
+                                testingAddonId = null
+                                Logs.event("add-on test ${if (result.working) "passed" else "failed"}: ${addon.name}")
+                            }
+                        },
+                    ) {
+                        when (AddonTestIndicatorPolicy.state(testing, testResult)) {
+                            AddonTestIndicatorState.READY -> Icon(
+                                AppIcons.Refresh,
+                                contentDescription = null,
+                                tint = OpenStreamColors.TextSoft,
+                                modifier = Modifier.size(21.dp),
+                            )
+                            AddonTestIndicatorState.TESTING -> OpenStreamLoadingIndicator(role = LoadingIndicatorRole.INLINE)
+                            AddonTestIndicatorState.PASSED -> Icon(
+                                AppIcons.Check,
+                                contentDescription = null,
+                                tint = OpenStreamColors.Green,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            AddonTestIndicatorState.FAILED -> Icon(
+                                AppIcons.Close,
+                                contentDescription = null,
+                                tint = OpenStreamColors.Danger,
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
-                    },
-                ) {
-                    when (AddonTestIndicatorPolicy.state(testing, testResult)) {
-                        AddonTestIndicatorState.READY -> Icon(
-                            AppIcons.Refresh,
-                            contentDescription = null,
-                            tint = OpenStreamColors.TextSoft,
-                            modifier = Modifier.size(21.dp),
-                        )
-                        AddonTestIndicatorState.TESTING -> OpenStreamLoadingIndicator(role = LoadingIndicatorRole.INLINE)
-                        AddonTestIndicatorState.PASSED -> Icon(
-                            AppIcons.Check,
-                            contentDescription = null,
-                            tint = OpenStreamColors.Green,
-                            modifier = Modifier.size(22.dp),
-                        )
-                        AddonTestIndicatorState.FAILED -> Icon(
-                            AppIcons.Close,
-                            contentDescription = null,
-                            tint = OpenStreamColors.Danger,
-                            modifier = Modifier.size(22.dp),
-                        )
                     }
                 }
                 Switch(
@@ -675,17 +683,19 @@ fun ConnectionsScreen(
                 AnimatedVisibility(
                     visible = SourceManagementPolicy.showRemoveControl(SourceCollection.ADD_ONS, deletingCollection),
                 ) {
-                    IconButton(onClick = {
-                        store.removeStremio(addon.id)
-                        if (addons.size == 1) deletingCollection = null
-                        revision++
-                        onAddonsChanged()
-                    }) {
-                        Icon(
-                            AppIcons.Close,
-                            contentDescription = "Delete add-on ${addon.name}",
-                            tint = OpenStreamColors.Danger,
-                        )
+                    HoverTooltip("Delete add-on") {
+                        IconButton(onClick = {
+                            store.removeStremio(addon.id)
+                            if (addons.size == 1) deletingCollection = null
+                            revision++
+                            onAddonsChanged()
+                        }) {
+                            Icon(
+                                AppIcons.Close,
+                                contentDescription = "Delete add-on ${addon.name}",
+                                tint = OpenStreamColors.Danger,
+                            )
+                        }
                     }
                 }
             }
@@ -757,17 +767,19 @@ private fun SourceSectionHeading(
             color = OpenStreamColors.Text,
         )
         if (layout.showSectionInfo) {
-            IconButton(
-                onClick = { showInfo = true },
-                modifier = Modifier.size(48.dp).semantics { contentDescription = "$title information" },
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = androidx.compose.ui.graphics.Color.Transparent,
-                    border = BorderStroke(1.dp, OpenStreamColors.Muted),
+            HoverTooltip("Information") {
+                IconButton(
+                    onClick = { showInfo = true },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "$title information" },
                 ) {
-                    androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
+                    Surface(
+                        shape = CircleShape,
+                        color = androidx.compose.ui.graphics.Color.Transparent,
+                        border = BorderStroke(1.dp, OpenStreamColors.Muted),
+                    ) {
+                        androidx.compose.foundation.layout.Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                            Text("i", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OpenStreamColors.TextSoft)
+                        }
                     }
                 }
             }
@@ -1200,9 +1212,11 @@ private fun NasBrowser(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = {
-                if (path.isEmpty()) onBack() else path = path.substringBeforeLast('/', "")
-            }) { Icon(AppIcons.Back, contentDescription = "Back", tint = OpenStreamColors.Text) }
+            HoverTooltip("Back") {
+                IconButton(onClick = {
+                    if (path.isEmpty()) onBack() else path = path.substringBeforeLast('/', "")
+                }) { Icon(AppIcons.Back, contentDescription = "Back", tint = OpenStreamColors.Text) }
+            }
             Column(Modifier.weight(1f)) {
                 Text(connection.name, fontWeight = FontWeight.ExtraBold, fontSize = 19.sp, color = OpenStreamColors.Text)
                 Text("/${path}", fontSize = 13.sp, color = OpenStreamColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
