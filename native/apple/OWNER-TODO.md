@@ -284,26 +284,24 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       a tab that never appears. Re-checked after the crash fix: Subtitle Delay, Frame Rate, title-page badges,
       Playback Unavailable all work. Dropped per you: catch-up player chrome, special disc title page.
       Small: "Playback Unavailable" for a title with no streams says "details only" — wording could be clearer.
-- [ ] **Engine lab round 2 IN PROGRESS (fork branches published 2026-10-10):** 98 test files/servers (4.4 GB, off the repo)
-      scored automatically. Fixed 5 engine bugs: MKV seeks landing one group late, debrid servers that ignore Range
-      (hung 45 s → works), HDR10 MKV with no colour tags never showing a picture, software-decoded seeks near the end
-      killing playback, TS seeks never showing a frame. Seek speed passes 55→71 of 84, seek smoothness 63→70.
-      Next round: AV1 stutter after seek, truncated files stalling 12 s, interlaced TV freezes, VC-1 ending early.
-      **Agent evidence 2026-10-10 (#34):** restored the full read-only ServerPlus backup to Dev-Mini; published
-      dvd-menus 4e877598ab22a4cce00a54eb5ba081c1cb1ce1e1 and engine-lab c9c5cf3da1b476e8774335699b4e7ab3d4380ff5
-      to cyberbanksy/AetherEngine using a fresh Studio clone after Mini HTTPS auth failed. Fork gate: 2640 / 356 green.
-      DevExt sentinel checked; ~/Developer/openstream-build/engine-lab links to /Volumes/DevExt/engine-lab.
-      Twelve public fixtures rebuilt (0.35 GB); preliminary four-case scoreboard at
-      /Volumes/DevExt/engine-lab/runs/round2-before-tools/scoreboard.md (ffprobe unavailable): playback 3/4,
-      frames 3/4, seek latency 2/3, seek continuity 2/3. MBAFF freezes 2573 ms; truncated E-AC3 seeks never land;
-      VC-1 ends at 0.756 s versus declared 7.007 s and logs premature EOF. AV1 uses M4 hardware and passes;
-      force software for its original stutter case. Full 98-source baseline, fixes, traces and after scoreboard remain open.
-      OpenStream serial gate: 3018 / 384 green (60.141 s); default runs expose existing shared-state/caption races.
-      OpenStream currently pins upstream 6.66.0. Integration needed after the fixes: replace its Package.swift
-      AetherEngine entry with `.package(url: "https://github.com/cyberbanksy/AetherEngine", revision: "<tested engine-lab SHA>")`
-      and regenerate Package.resolved plus Apps/OpenStreamApps.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-      on Dev-Mini. The app consumes the local package; no AetherEngine xcodeproj reference needs changing.
-      **Owner action:** approve FFmpeg and MKVToolNix installation on Dev-Mini so the full corpus and oracle can run.
+- [ ] **Engine lab round 2 — steps 2–4 DONE 2026-10-10; awaiting lead merge/install.**
+      Fork branches are published: dvd-menus 4e877598; engine-lab source 45d64e8a9b2ac422bcdb7f467f8327c214eab2ed
+      plus evidence a93c73dd. All 98 corpus entries available, no skips; downloaded/generated media 4.37 GB on DevExt.
+      FFmpeg/MKVToolNix and downloads were lead-approved and completed. No tool-install action remains.
+      **#34 DONE:** forced-software AV1 seek continuity 1/4 → 4/4; nine starving seeks (131–700 ms) → none,
+      all twelve frame latencies below 1.5 s. Four truncated files end impossible seeks in 10–13 ms; valid generated-MKV
+      seek still lands. VC-1 final clock 0.751 → 1.034 s, matching FFmpeg's last decodable picture in the truncated sample.
+      Interlaced freezes were enqueue-time measurement errors: all six clips already show zero measured freezes in the
+      corrected baseline. EOF drain preserves their final buffered pictures; no unobserved display-freeze fix is claimed.
+      Whole-corpus baseline /Volumes/DevExt/engine-lab/runs/20261010-031451-round2-full-baseline; final 20261010-041939-round2-full-final.
+      Both 98/98 results; frame score 92/94 unchanged, seek continuity 79/82 → 80/82. Playback 91/94 → 85/94 is six
+      later-seek errors now reported explicitly; their six-second play windows remain healthy. Thresholds unchanged.
+      Attached AV1 before/after traces complete decoding and three seeks; CPU demand similar. Raw EOF bounds apply only
+      to unfolded Matroska; full-run timestamp-wrap valid seek preserved (82.5 ms). Fork gate 2656 / 359 green.
+      Package.swift and both resolved files now pin the tested owner-fork source revision. OpenStream full serial gate 3018 / 384 green (60.581 s);
+      default full gate reproduces the existing shared health-store race (3018 / 384, one issue), also present before edits.
+      **Owner only:** check software AV1/interlaced pixel output and native-HLS heat on the real A12 Apple TV after the
+      lead merges the OpenStream diff and installs a build. Checkbox stays open until merged and installed.
 - [ ] **DONE da014fb (2026-10-02):** IPTV catch-up from the guide (back up to 3 days, plays a past programme from its
       start, Watch Live returns; sim-checked on Apple TV — iPad build only); Discover rows neutral + Top 10 off;
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
