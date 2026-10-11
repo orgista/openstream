@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Polish to perfection from two references (owner 2026-10-11): "Apple TV is the main GUI I am trying to emulate
+      with heroes, and Netflix for icons [and] suggestion algorithm. Our design is in a good place but both those apps
+      can help us bring it to perfection."** REA run: Apple TV app hero/shelves vs our billboard; Netflix artwork/icons +
+      how suggestions are built vs AppleRecommendationRanker. Spec specs/rea-appletv-netflix-polish-2026-10-11.md;
+      reports design/reference-apps/2026-10-11-appletv-hero-gui.md + 2026-10-11-netflix-artwork-suggestions.md, each
+      ending in a ranked polish list for the owner to pick from.
 - [ ] **REA deep dives (owner 2026-10-11): Paramount+ live functions, Netflix GUI, Plex backend + features, Infuse engine +
       source setup for local sources.** One report each in design/reference-apps/, with what OpenStream should take.
       Plex = "longest in the game: what can we learn for how our app works" → extra step holds Plex's backend against
