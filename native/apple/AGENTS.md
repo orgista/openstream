@@ -90,6 +90,22 @@ overall feel = the Apple TV app** (transport layout, scrubber with times, info/c
 chapter and skip affordances, quiet chrome that hides together). On iPhone the app is portrait-only
 except the full-screen player, which follows the device orientation and also plays in portrait.
 
+### 4.2 How other apps do it: REA (owner, 2026-10-11)
+When the owner asks for an app function, check how the reference apps build it before designing ours. Every agent
+has the `rea` MCP ([morluto/rea](https://github.com/morluto/rea) 6.4.0, pinned) and the `reverse-engineer-anything`
+skill; the server runs on Dev-Mini (`ssh -T dev-mini ~/Developer/bin/rea-mcp.sh`; CLI:
+`ssh dev-mini '~/Developer/bin/rea-mcp.sh cli <command> …'`). Engines: Ghidra 12.1.4 (native), JADX headless 0.7.1
+(Android).
+- Targets on the mini, under `/Volumes/DevExt/dev/rea/targets/`: Apple TV app (`/System/Applications/TV.app`),
+  `Infuse.app` (8.5.6, from the Studio), `Plex.app` (desktop 1.115), `apk/com.netflix.ninja.apk` (Netflix, Android TV)
+  and `apk/paramount/com.cbs.ott.apk` (Paramount+, Android TV). APK signers were checked (Netflix, Inc. and CBS
+  Interactive, plus Google Play's stamp); re-check with `apksigner verify --print-certs` when replacing one.
+- Learn the behaviour (when, how long, which states, what the remote does), then write our own code. Never copy their
+  code, strings, art or assets; never bypass DRM, sign-in or encryption; never run or install the downloaded APKs;
+  never upload a target or REA output anywhere.
+- Findings go in `design/reference-apps/<date>-<feature>.md` (one page per feature: per-app behaviour, the evidence
+  location, and what OpenStream should do).
+
 ## 5. Architecture traps (each one cost an hour)
 - **Add-on distribution boundary:** `OPENSTREAM_ADDONS` is defined for Debug in the app project and
   SwiftPM module/tests. App Store Release builds leave it undefined (owner 2026-10-02: TestFlight

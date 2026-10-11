@@ -7,6 +7,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Use the GitHub "REA" tool to see how other apps build a feature (owner 2026-10-11).** Set it up for the project
+      so any "how should this function work" request can check reference apps; first run on Netflix, Apple TV app,
+      Paramount+, Plex and Infuse.
+      SET UP 2026-10-11: morluto/rea 6.4.0 as the `rea` MCP for every agent (runs on Dev-Mini; Ghidra + JADX), rule in
+      AGENTS.md §4.2. Targets ready: Apple TV app, Infuse 8.5.6, Plex desktop, Netflix + Paramount+ Android TV (signers
+      verified). First run (Codex, spec specs/rea-trial-2026-10-11.md): Skip Intro + Next Episode across all five →
+      design/reference-apps/2026-10-11-skip-intro-next-episode.md.
 - [ ] **Apple TV Top Shelf shows no content, only a blurry stretched logo (owner 2026-10-10).** Cause: publishing was
       off by default (Settings › Privacy › Show in Apple services), and a setup import wrote that off value onto the TV,
       so the extension had nothing and tvOS fell back to the static image. Fixed: on by default under a new v2 key (old
