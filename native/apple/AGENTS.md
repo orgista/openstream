@@ -97,12 +97,18 @@ skill; the server runs on Dev-Mini (`ssh -T dev-mini ~/Developer/bin/rea-mcp.sh`
 `ssh dev-mini '~/Developer/bin/rea-mcp.sh cli <command> …'`). Engines: Ghidra 12.1.4 (native), JADX headless 0.7.1
 (Android).
 - Targets on the mini, under `/Volumes/DevExt/dev/rea/targets/`: Apple TV app (`/System/Applications/TV.app`),
-  `Infuse.app` (8.5.6, from the Studio), `Plex.app` (desktop 1.115), `apk/com.netflix.ninja.apk` (Netflix, Android TV)
+  `Infuse.app` (8.5.6, from the Studio; `Infuse-arm64` slice for Ghidra), `Plex.app` (desktop 1.115), `apk/com.netflix.ninja.apk` (Netflix, Android TV)
   and `apk/paramount/com.cbs.ott.apk` (Paramount+, Android TV). APK signers were checked (Netflix, Inc. and CBS
   Interactive, plus Google Play's stamp); re-check with `apksigner verify --print-certs` when replacing one.
 - Learn the behaviour (when, how long, which states, what the remote does), then write our own code. Never copy their
   code, strings, art or assets; never bypass DRM, sign-in or encryption; never run or install the downloaded APKs;
   never upload a target or REA output anywhere.
+- Tips from the first run (2026-10-11): search strings first (e.g. Apple TV `com.apple.hls.skip`), then follow xrefs;
+  Ghidra rejects universal binaries — use `targets/Infuse-arm64` (made with `lipo -thin arm64`), and on Infuse narrow
+  string searches still hit the 600 s limit, so read its `Localizable.strings` and symbol names first; Plex's logic is
+  the bundled web client (`Plex.app/Contents/Resources/web-client`, `analyze_javascript_application`); Netflix keeps its
+  player logic in the 81 MB `libnetflix.so`, so the Java side says little; apktool and ripgrep are installed.
+  First report: `design/reference-apps/2026-10-11-skip-intro-next-episode.md`.
 - Findings go in `design/reference-apps/<date>-<feature>.md` (one page per feature: per-app behaviour, the evidence
   location, and what OpenStream should do).
 
