@@ -10,8 +10,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **REA deep dives (owner 2026-10-11): Paramount+ live functions, Netflix GUI, Plex backend + features, Infuse engine +
       source setup for local sources.** One report each in design/reference-apps/, with what OpenStream should take.
       Plex = "longest in the game: what can we learn for how our app works" → extra step holds Plex's backend against
-      our code (design/reference-apps/2026-10-11-plex-lessons-for-openstream.md). Running: Codex A (Paramount+, Netflix),
-      Codex B (Plex, Infuse); spec specs/rea-deep-dives-2026-10-11.md.
+      our code (design/reference-apps/2026-10-11-plex-lessons-for-openstream.md). Spec specs/rea-deep-dives-2026-10-11.md.
+      DONE 2026-10-11, five reports in design/reference-apps/ (paramount-live, netflix-gui, plex-backend,
+      infuse-engine-sources, plex-lessons-for-openstream: 12 ranked changes). Owner: pick which changes to build.
 - [ ] **Use the GitHub "REA" tool to see how other apps build a feature (owner 2026-10-11).** Set it up for the project
       so any "how should this function work" request can check reference apps; first run on Netflix, Apple TV app,
       Paramount+, Plex and Infuse.
