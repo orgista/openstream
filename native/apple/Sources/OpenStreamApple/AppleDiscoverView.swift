@@ -147,6 +147,8 @@ struct AppleDiscoverView: View {
         let records: [AppleMediaRecord]
         let lookup: AppleCatalogSearchLookup
         let progress: [String: ApplePlaybackProgress]
+        let activity: [String: ApplePlaybackProgress]
+        let availableEpisodes: [String: [AppleStremioEpisode]]
         let completed: [String: Date]
         let unwatched: [String: Date]
         let removed: [String: Date]
@@ -589,6 +591,7 @@ struct AppleDiscoverView: View {
         #endif
         let snapshot = RecommendationSnapshot(sections: catalogStore.sections, sources: sourceStore.sources,
             records: mediaIndex.records, lookup: catalogLookup, progress: store.configurationProgress(),
+            activity: store.activities(), availableEpisodes: await store.availableEpisodes(),
             completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
             removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
@@ -612,9 +615,25 @@ struct AppleDiscoverView: View {
         let saved: (AppleMediaRecord) -> ApplePlaybackProgress? = { record in
             ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.progress[$0] }
         }
-        let ordered = AppleContinueWatchingResolver.inProgress(snapshot.records, saved: saved) {
-            saved($0)?.updatedAt ?? $0.lastVerified
+        let activity: (AppleMediaRecord) -> ApplePlaybackProgress? = { record in
+            ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.activity[$0] } ?? saved(record)
         }
+        let ordered = AppleContinueWatchingResolver.inProgress(snapshot.records, saved: saved, activity: activity,
+            successorAvailable: { record in
+                guard let key = ApplePlaybackIdentity.storageKey(for: record.id) else { return false }
+                let episodes = snapshot.availableEpisodes[key] ?? []
+                let completed = Set(episodes.compactMap { episode -> String? in
+                    guard let key = ApplePlaybackIdentity.storageKey(for: episode.id),
+                          let watched = snapshot.completed[key], watched > (snapshot.unwatched[key] ?? .distantPast) else { return nil }
+                    return episode.id
+                })
+                return AppleCompletionPolicy.successor(after: activity(record)?.partID, episodes: episodes,
+                    completedIDs: completed, now: snapshot.now) != nil
+            }, removedAt: { record in
+                ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.removed[$0] }
+            }) {
+                activity($0)?.updatedAt ?? $0.lastVerified
+            }
         let entries = AppleContinueWatchingResolver.entries(ordered, in: [snapshot.lookup])
         if snapshot.lookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
         let local = Array(entries.compactMap { entry in
@@ -627,7 +646,7 @@ struct AppleDiscoverView: View {
         let heroContinueWatching = merged.filter { value in
             guard let key = ApplePlaybackIdentity.storageKey(for: value.record.id) else { return true }
             return !AppleContinueWatchingRemovalPolicy.isRemoved(removedAt: snapshot.removed[key],
-                lastPlayedAt: snapshot.progress[key]?.updatedAt)
+                lastPlayedAt: snapshot.activity[key]?.updatedAt ?? snapshot.progress[key]?.updatedAt)
         }
         var identities = AppleRecommendationInputs.IdentityMemo()
         let picks = try topPicks(snapshot, visibleSections: visibleSections, continueWatching: local, identities: &identities)
@@ -6569,7 +6588,7 @@ struct AppleCatalogItemDetailView: View {
         return title.isEmpty ? episodeNumber(episode) : "\(episodeNumber(episode)) · \(title)"
     }
 
-    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) {
+    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) async {
         let mediaID = pageMetadata.resolvedMediaID ?? item.mediaID
         episodeList.episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
@@ -6585,6 +6604,7 @@ struct AppleCatalogItemDetailView: View {
         episodeList.isLoading = false
         episodeList.loadFinished = true
         fillTimeline.mark(.episodes, detail: "\(episodeList.episodes.count)")
+        await playbackStore.recordEpisodes(episodeList.episodes, mediaID: progressRecordID)
     }
 
     private func prepareXtream(_ reference: AppleXtreamReference, generation: UUID) async {
@@ -6598,6 +6618,8 @@ struct AppleCatalogItemDetailView: View {
             pageMetadata.details = AppleTMDBDetails(title: title.name, imdbRating: title.rating, year: title.year,
                 overview: title.plot, posterURL: title.poster, backdropURL: title.backdrop)
             episodeList.episodes = AppleXtreamLibraryStore.shared.episodes(detail, sourceID: reference.sourceID)
+            await playbackStore.recordEpisodes(episodeList.episodes, mediaID: progressRecordID)
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
             episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
                 ?? upNextEpisode(in: episodeList.episodes)?.season
                 ?? AppleStremioEpisodePolicy.initialSeason(in: episodeList.episodes)
@@ -6671,6 +6693,8 @@ struct AppleCatalogItemDetailView: View {
                 self.pageMetadata.details = msLibrary.metadata(from: msDetail)
                 self.pageMetadata.resolvedMediaID = item.mediaID
                 self.episodeList.episodes = msLibrary.episodes(from: msDetail)
+                await playbackStore.recordEpisodes(episodeList.episodes, mediaID: progressRecordID)
+                guard !Task.isCancelled, preparationGeneration == generation else { return }
                 markMetadataArrived()
                 fillTimeline.mark(.episodes, detail: "\(self.episodeList.episodes.count)")
                 self.offlineState.serverDownloadsAllowed = (try? await msLibrary.downloadsAllowed(in: msDetail)) == true
@@ -6800,7 +6824,7 @@ struct AppleCatalogItemDetailView: View {
                     addLookups(to: &group, mediaID: mediaID)
                 case .episodes(let fetched):
                     guard let fetched else { continue }
-                    applyEpisodes(fetched)
+                    await applyEpisodes(fetched)
                     await refreshDownloadedEpisodeIDs()
                 case .preview(let preview):
                     pageMetadata.previewAssets = preview

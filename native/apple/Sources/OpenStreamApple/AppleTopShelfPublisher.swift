@@ -33,13 +33,27 @@ public final class AppleTopShelfPublisher {
     ) async {
         var watchedAt: [String: Date] = [:]
         var savedProgress: [String: ApplePlaybackProgress] = [:]
-        for record in records where (record.progress ?? 0) > 0 {
+        var activity: [String: ApplePlaybackProgress] = [:]
+        var successorAvailable = Set<String>()
+        var removals: [String: Date] = [:]
+        let episodesByKey = await playbackStore.availableEpisodes()
+        for record in records {
+            if let latest = playbackStore.lastActivity(for: record.id) { activity[record.id] = latest }
+            if playbackStore.isRemovedFromContinueWatching(mediaID: record.id) { removals[record.id] = .distantFuture }
+            if record.kind == .series, let key = ApplePlaybackIdentity.storageKey(for: record.id) {
+                let episodes = episodesByKey[key] ?? []
+                if AppleCompletionPolicy.successor(after: activity[record.id]?.partID, episodes: episodes,
+                    completedIDs: playbackStore.completedMediaIDs(among: episodes.map(\.id))) != nil {
+                    successorAvailable.insert(record.id)
+                }
+            }
             guard let saved = playbackStore.progress(for: record.id) else { continue }
             watchedAt[record.id] = saved.updatedAt
             savedProgress[record.id] = saved
         }
         let digest = Self.digest(records: records, sections: sections, sources: sources,
                                  savedProgress: savedProgress, enabled: enabled)
+            + "|activity:\(ApplePlaybackProgressFeed.shared.revision)|successors:\(successorAvailable.sorted())|removed:\(removals.keys.sorted())"
         let live = AppleLiveSystemChannels.shared
         let sourceIDs = Set(sources.filter { $0.kind == .liveTV && $0.isEnabled }.map(\.id))
         let favorites = AppleLiveSystemChannels.supported(live.favorites, sourceIDs: sourceIDs)
@@ -49,7 +63,8 @@ public final class AppleTopShelfPublisher {
         guard combinedDigest != lastDigest else { return }
         lastDigest = combinedDigest
         try? await writer.write(records: records, sections: sections, sources: sources,
-                                watchedAt: watchedAt, savedProgress: savedProgress,
+                                watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
+                                successorAvailable: successorAvailable, removedAt: removals,
                                 favoriteChannels: favorites, recentChannels: recents, enabled: enabled)
     }
 

@@ -144,9 +144,9 @@ struct AppleNextEpisodeHandoffTests {
         let finishedEpisode = ApplePlaybackProgress(position: 3_900, duration: 3_900, partID: "tt0072562:1:1")
         let midEpisode = ApplePlaybackProgress(position: 600, duration: 3_900, partID: "tt0072562:1:1")
 
-        #expect(AppleContinueWatchingResolver.isUpNext(record, saved: finishedEpisode))
+        #expect(AppleContinueWatchingResolver.isUpNext(record, saved: finishedEpisode, successorAvailable: true))
         #expect(!AppleContinueWatchingResolver.isUpNext(record, saved: midEpisode))
-        #expect(AppleContinueWatchingResolver.inProgress([record], saved: { _ in finishedEpisode }) { _ in .now }.count == 1)
+        #expect(AppleContinueWatchingResolver.inProgress([record], saved: { _ in finishedEpisode }, successorAvailable: { _ in true }) { _ in .now }.count == 1)
         // Without the saved episode it is a finished title, as before.
         #expect(AppleContinueWatchingResolver.inProgress([record]) { _ in .now }.isEmpty)
 

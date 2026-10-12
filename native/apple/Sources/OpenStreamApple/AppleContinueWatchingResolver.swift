@@ -62,17 +62,25 @@ enum AppleContinueWatchingResolver {
 
     /// Records the viewer is part-way into, most recently watched first.
     ///
-    /// A series whose saved position is a finished episode stays: its card
-    /// opens on the next one (`isUpNext`). It used to drop out the moment an
-    /// episode ended (C15, iPhone 27 v2 re-run).
+    /// Completed series activity stays only while an available successor exists.
+    /// Resume deletion does not delete that activity; exhausted series leave.
     static func inProgress(
         _ records: [AppleMediaRecord],
         saved: (AppleMediaRecord) -> ApplePlaybackProgress? = { _ in nil },
+        activity: (AppleMediaRecord) -> ApplePlaybackProgress? = { _ in nil },
+        successorAvailable: (AppleMediaRecord) -> Bool = { _ in false },
+        removedAt: (AppleMediaRecord) -> Date? = { _ in nil },
         watchedAt: (AppleMediaRecord) -> Date
     ) -> [AppleMediaRecord] {
         let unfinished = records.filter {
-            (($0.progress ?? 0) > 0 && ($0.progress ?? 1) < ApplePlaybackProgress.completionFraction)
-                || isUpNext($0, saved: saved($0))
+            let value = saved($0)
+            let latest = activity($0) ?? value
+            if latest != nil {
+                return AppleCompletionPolicy.includes(saved: value, activity: latest,
+                    successorAvailable: $0.kind == .series && successorAvailable($0), removedAt: removedAt($0))
+            }
+            return !AppleContinueWatchingRemovalPolicy.isRemoved(removedAt: removedAt($0), lastPlayedAt: nil)
+                && ($0.progress ?? 0) > 0 && ($0.progress ?? 1) < ApplePlaybackProgress.completionFraction
         }
         let dates = Dictionary(unfinished.map { ($0.id, watchedAt($0)) }, uniquingKeysWith: max)
         return unfinished.sorted { lhs, rhs in
@@ -82,12 +90,10 @@ enum AppleContinueWatchingResolver {
         }
     }
 
-    /// A series whose saved position is the end of one of its episodes: the
-    /// viewer finished an episode and the next is up.
-    static func isUpNext(_ record: AppleMediaRecord, saved: ApplePlaybackProgress?) -> Bool {
-        guard record.kind == .series, let saved, saved.isComplete,
-              let partID = saved.partID else { return false }
-        return AppleStremioSeriesInfo(mediaID: partID) != nil
+    static func isUpNext(_ record: AppleMediaRecord, saved: ApplePlaybackProgress?,
+                         successorAvailable: Bool = false) -> Bool {
+        record.kind == .series && AppleCompletionPolicy.includes(saved: nil, activity: saved,
+            successorAvailable: successorAvailable, removedAt: nil)
     }
 
     /// How far along a Continue Watching card's bar is, 0...1, or nil for
@@ -105,6 +111,7 @@ enum AppleContinueWatchingResolver {
         guard let saved else {
             return isSeries ? nil : recordProgress.map { min(max($0, 0), 1) }
         }
+        if saved.isComplete { return nil }
         if isSeries, saved.partID == nil || saved.resumePosition == nil { return nil }
         return AppleWatchProgress.fraction(position: saved.position, duration: saved.duration)
     }

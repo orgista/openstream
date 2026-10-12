@@ -1,8 +1,8 @@
 import Foundation
 
 public struct ApplePlaybackProgress: Codable, Equatable, Sendable {
-    public static let completionFraction = 0.95
-    public static let completionRemainingSeconds = 30.0
+    public static let completionFraction = AppleCompletionPolicy.fraction
+    public static let completionRemainingSeconds = AppleCompletionPolicy.remainingSeconds
 
     public let position: Double
     public let duration: Double
@@ -35,10 +35,7 @@ public struct ApplePlaybackProgress: Codable, Equatable, Sendable {
     }
 
     public var isComplete: Bool {
-        guard duration.isFinite, position.isFinite, duration > 0, position >= 0 else { return false }
-        let clampedPosition = min(position, duration)
-        return clampedPosition >= duration * Self.completionFraction
-            || duration - clampedPosition <= Self.completionRemainingSeconds
+        AppleCompletionPolicy.isComplete(position: position, duration: duration)
     }
 }
 
@@ -100,6 +97,55 @@ public final class ApplePlaybackStore {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    private let activityKey = "openstream.playback.activity.v1"
+    private let episodesKey = "openstream.playback.availableEpisodes.v1"
+
+    private var activityData: Data?
+    private var activityCache: [String: ApplePlaybackProgress]?
+
+    func activities() -> [String: ApplePlaybackProgress] {
+        let data = defaults.data(forKey: activityKey)
+        if let activityCache, data == activityData { return activityCache }
+        let values = data.flatMap { try? JSONDecoder().decode([String: ApplePlaybackProgress].self, from: $0) } ?? [:]
+        activityData = data
+        activityCache = values
+        return values
+    }
+
+    public func lastActivity(for mediaID: String) -> ApplePlaybackProgress? {
+        ApplePlaybackIdentity.storageKey(for: mediaID).flatMap { activities()[$0] } ?? progress(for: mediaID)
+    }
+
+    func availableEpisodes() async -> [String: [AppleStremioEpisode]] {
+        await Self.decodeEpisodes(defaults.data(forKey: episodesKey))
+    }
+
+    @concurrent nonisolated private static func decodeEpisodes(_ data: Data?) async -> [String: [AppleStremioEpisode]] {
+        data.flatMap { try? JSONDecoder().decode([String: [AppleStremioEpisode]].self, from: $0) } ?? [:]
+    }
+
+    @concurrent nonisolated private static func updatedEpisodes(_ data: Data?, episodes: [AppleStremioEpisode], key: String) async -> Data? {
+        var values = await decodeEpisodes(data)
+        values[key] = episodes.map { AppleStremioEpisode(id: $0.id, title: "", season: $0.season,
+            episode: $0.episode, releaseInfo: $0.releaseInfo) }
+        return try? JSONEncoder().encode(values)
+    }
+
+    func recordEpisodes(_ episodes: [AppleStremioEpisode], mediaID: String) async {
+        guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        // Retry if another title arrived while encoding off the main actor.
+        while !Task.isCancelled {
+            let previous = defaults.data(forKey: episodesKey)
+            let data = await Self.updatedEpisodes(previous, episodes: episodes, key: key)
+            guard previous == defaults.data(forKey: episodesKey) else { continue }
+            if data != previous {
+                defaults.set(data, forKey: episodesKey)
+                ApplePlaybackProgressFeed.shared.storeDidChange()
+            }
+            return
+        }
     }
 
     /// Saved entries for library adapters; avoids scanning every provider title on each save.
@@ -181,7 +227,7 @@ public final class ApplePlaybackStore {
     public func isRemovedFromContinueWatching(mediaID: String) -> Bool {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
         return AppleContinueWatchingRemovalPolicy.isRemoved(
-            removedAt: continueWatchingRemovals()[storageKey], lastPlayedAt: entries()[storageKey]?.updatedAt)
+            removedAt: continueWatchingRemovals()[storageKey], lastPlayedAt: activities()[storageKey]?.updatedAt ?? entries()[storageKey]?.updatedAt)
     }
 
     public func progress(for url: URL) -> ApplePlaybackProgress? {
@@ -218,6 +264,15 @@ public final class ApplePlaybackStore {
             return
         }
         let progress = ApplePlaybackProgress(position: min(position, duration), duration: duration, partID: partID)
+        var activity = activities()
+        activity[storageKey] = progress
+        if activity.count > Self.watchedHistoryLimit {
+            activity = Dictionary(uniqueKeysWithValues: activity.sorted { $0.value.updatedAt > $1.value.updatedAt }
+                .prefix(Self.watchedHistoryLimit).map { ($0.key, $0.value) })
+        }
+        activityCache = activity
+        activityData = try? JSONEncoder().encode(activity)
+        defaults.set(activityData, forKey: activityKey)
         if progress.isComplete {
             current.removeValue(forKey: storageKey)
             // A series keeps its entry under the show and names the episode
@@ -240,6 +295,11 @@ public final class ApplePlaybackStore {
     }
 
     private func clear(storageKey: String) {
+        var activity = activities()
+        activity.removeValue(forKey: storageKey)
+        activityCache = activity
+        activityData = try? JSONEncoder().encode(activity)
+        defaults.set(activityData, forKey: activityKey)
         var current = entries()
         current.removeValue(forKey: storageKey)
         persist(current)

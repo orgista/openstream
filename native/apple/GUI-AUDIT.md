@@ -2414,3 +2414,9 @@ brought back on screen after the walk had scrolled past their row.
 ## 2026-10-12 — Netflix suggestions 1–4
 
 - [x] Real normalized genres/year inputs; canonical unique recommendations/heroes with alternate routes; progress/completed history and per-show cap; neutral/capped ratings and related-title genre affinity. Seventeen regression tests; full Swift gate 3044 / 384. Lead review follow-up: body reads cached Top Picks/heroes; a cheap revision-keyed task captures Sendable inputs, then a structured @concurrent pass scans/ranks/canonicalizes with one identity memo. Cancellation/current-revision guards prevent stale publication. Rating set/remove/restore and same-count index edits invalidate the cache. tvOS build confirmed recompilation of AppleDiscoverView, AppleRecommendationRanker, AppleMediaIndex, AppleMediaServerLibraryStore and AppleTitleRatingStore. No rendered UI/device check claimed; no UI text, timing or rail changes.
+
+
+## 2026-10-12 — Plex lessons 1–2 (data policy)
+
+- [x] Safe source scans retain stale offline records and groups; deletion requires completeness; successful-scan dates persist. Lead-review correction: NAS Library uses the original network scanner and raw path/URL/ID conversion, with 100,000-entry / 20,000-folder bounds; browse scanner unchanged. Slash variants, 302 folders / 12,080 files, denied-child retention/stamp, failed-root, safety-bound and cancellation fixtures pass; full Swift gate 3082 / 385; iOS/tvOS Debug builds confirm AppleNetworkShare, AppleLocalLibraryStore and the restored AppleSMBLibraryScanner recompiled.
+- [x] Completion activity and available successors feed Discover/Library/Top Shelf through one policy. Completed bars suppressed and finished series excluded; save/index-sync, boundary, removal and successor fixtures pass. No rendered UI changes or device verification claimed.

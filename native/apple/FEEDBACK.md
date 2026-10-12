@@ -4614,3 +4614,12 @@ Suggestions now use the genres and release years already available for a title, 
 Suggestions and hero selection are now prepared off the render path when their catalog, viewing, rating and metadata inputs change.
 
 All 3,044 tests in 384 suites pass, including 17 new checks. The tvOS app builds and recompiles the changed files. The changes are left uncommitted for the lead to review.
+
+
+## 2026-10-12 — Safe scans and series continuation
+
+An incomplete or unreachable library scan keeps the files already listed and marks their source stale. Only a complete scan removes missing files, and incomplete attempts do not update the successful-scan date. After lead review, NAS Library scans again preserve the original file paths, URLs and saved-state identities. They support large seasonal libraries without the smaller browse limits or folder exclusions; the safety limits are 100,000 entries and 20,000 folders.
+
+Finishing an episode now keeps its viewing activity after the resume position is removed. Continue Watching offers a known available successor, hides completed progress bars, and drops a series when no successor remains. Provider watched flags stay authoritative.
+
+All 3,082 tests in 385 suites pass, including slash-variant identity checks, 302 folders with 12,080 files, denied-child retention, safety bounds and cancellation. iOS/tvOS Debug builds recompile the corrected scanner and store, plus the restored browse scanner. Existing macOS captions tests intermittently timed out during full runs; unchanged retries passed. No UI changes, commit or upload.

@@ -14,7 +14,7 @@ public struct AppleMediaEpisodeIdentity: Equatable, Sendable {
     public var id: String { "\(seriesID):\(season):\(episode)" }
 }
 
-public struct AppleMediaEpisode: Identifiable, Equatable, Sendable {
+public struct AppleMediaEpisode: Identifiable, Codable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let season: Int?
@@ -250,8 +250,8 @@ public enum AppleMediaEpisodePolicy {
         guard let last = candidates.lastIndex(where: { completedIDs.contains($0.id) }) else {
             return start
         }
-        return candidates[candidates.index(after: last)...].first { !completedIDs.contains($0.id) }
-            ?? start
+        return AppleCompletionPolicy.successor(after: candidates[last].id, episodes: candidates,
+            completedIDs: completedIDs) ?? start
     }
 
     /// The episode the title page selects in `season`: Up Next when it is in

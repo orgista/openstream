@@ -267,6 +267,9 @@ public actor AppleTopShelfSnapshotWriter {
         sources: [AppleSource]? = nil,
         watchedAt: [String: Date] = [:],
         savedProgress: [String: ApplePlaybackProgress]? = nil,
+        activity: [String: ApplePlaybackProgress] = [:],
+        successorAvailable: Set<String> = [],
+        removedAt: [String: Date] = [:],
         favoriteChannels: [AppleTopShelfSnapshot.Item] = [],
         recentChannels: [AppleTopShelfSnapshot.Item] = [],
         enabled: Bool
@@ -281,7 +284,10 @@ public actor AppleTopShelfSnapshotWriter {
 
         let eligible = records.filter { !$0.availability.isEmpty && !$0.isPrivate }
         let continued = AppleContinueWatchingResolver.inProgress(eligible,
-            saved: { savedProgress?[$0.id] }) { watchedAt[$0.id] ?? $0.lastVerified }
+            saved: { savedProgress?[$0.id] }, activity: { activity[$0.id] },
+            successorAvailable: { successorAvailable.contains($0.id) }, removedAt: { removedAt[$0.id] }) {
+                activity[$0.id]?.updatedAt ?? watchedAt[$0.id] ?? $0.lastVerified
+            }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
         let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)

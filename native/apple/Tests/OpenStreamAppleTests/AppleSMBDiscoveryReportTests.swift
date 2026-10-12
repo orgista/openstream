@@ -207,7 +207,9 @@ private struct NestedSMBClient: AppleNetworkShareClient {
         "Shows/Sample Show/Season 1": season,
     ]))
 
-    let items = try await scanner.scan(source: source, credentials: .init(username: "fixture", password: "fixture"))
+    let result = try await scanner.scan(source: source, credentials: .init(username: "fixture", password: "fixture"))
+    let items = result.items
+    #expect(result.status == .complete)
     #expect(items.count == 9)
     #expect(items.map(\.relativePath).contains("Shows/Sample Show/Season 1/Sample Show S01E03 (long).mkv"))
     #expect(items.map(\.relativePath).contains("Movies/Sample Movie Long (2024).mp4"))
@@ -239,4 +241,138 @@ private struct NestedSMBClient: AppleNetworkShareClient {
     #expect(AppleSMBError.authenticationFailed.errorDescription?.contains("username") == true)
     #expect(AppleSMBError.accessDenied.errorDescription?.contains("share") == true)
     #expect(AppleSMBError.serverUnreachable.errorDescription?.contains("unreachable") == true)
+}
+
+
+private actor NetworkLibraryFixtureClient: AppleNetworkShareClient {
+    let directories: [String: [AppleSMBDirectoryEntry]]
+    let cancelOnPath: String?
+    private(set) var requestedPaths: [String] = []
+
+    init(_ directories: [String: [AppleSMBDirectoryEntry]], cancelOnPath: String? = nil) {
+        self.directories = directories
+        self.cancelOnPath = cancelOnPath
+    }
+
+    func listShares(host: String, port: Int, credentials: AppleSMBCredentials) async throws -> [AppleSMBShare] { [] }
+    func read(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws -> Data { Data() }
+    func listDirectory(url: URL, credentials: AppleSMBCredentials, recursive: Bool) async throws -> [AppleSMBDirectoryEntry] {
+        #expect(recursive == false)
+        let path = try AppleSMBEndpointPolicy.parts(from: url).path
+        requestedPaths.append(path)
+        if path == cancelOnPath { withUnsafeCurrentTask { $0?.cancel() } }
+        guard let entries = directories[path] else { throw AppleSMBError.accessDenied }
+        return entries
+    }
+}
+
+private func networkLibraryEntry(_ path: String, directory: Bool = false) -> AppleSMBDirectoryEntry {
+    .init(name: directory ? "Season" : "episode.mkv", path: path, isDirectory: directory, sizeBytes: 1024)
+}
+
+private let networkLibrarySource = AppleSource(kind: .nas, name: "Fixture", url: URL(string: "smb://fixture.example/Media")!)
+private let networkLibraryCredentials = AppleSMBCredentials(username: "fixture", password: "fixture")
+
+@Test(arguments: ["Shows/Season 1/episode.mkv", "/Shows/Season 1/episode.mkv",
+                  "Shows/Season 1/episode.mkv/", "/Shows/Season 1/episode.mkv/"])
+func networkLibraryScanPreservesPreChangeIdentityBytes(_ path: String) async throws {
+    let entry = networkLibraryEntry(path)
+    let client = NetworkLibraryFixtureClient(["": [entry]])
+    let result = try await AppleSMBNetworkLibraryScanner(client: client).scan(
+        source: networkLibrarySource, credentials: networkLibraryCredentials)
+    // The pre-change adapter passed entry.path as-is to both makeURL and relativePath.
+    let expectedURL = try AppleSMBEndpointPolicy.makeURL(host: "fixture.example", port: 445, share: "Media", path: entry.path)
+    let expected = AppleLibraryItem(sourceID: networkLibrarySource.id, name: entry.name,
+        url: expectedURL, relativePath: entry.path, sizeBytes: entry.sizeBytes)
+    let item = try #require(result.items.first)
+    #expect(result.status == .complete)
+    #expect(item == expected)
+    #expect(item.id.utf8.elementsEqual(expected.id.utf8))
+    #expect(item.relativePath.utf8.elementsEqual(path.utf8))
+    #expect(item.url.absoluteString.utf8.elementsEqual(expectedURL.absoluteString.utf8))
+}
+
+@Test func networkLibraryCompletesLargeSeasonalSharesWithoutBrowseFilters() async throws {
+    var directories: [String: [AppleSMBDirectoryEntry]] = [:]
+    let folders = (0..<300).map { "Show/Season \($0)" } + ["downloads", ".archive"]
+    directories[""] = folders.map { networkLibraryEntry($0, directory: true) }
+    for folder in folders {
+        directories[folder] = (0..<40).map { networkLibraryEntry("\(folder)/episode-\($0).mkv") }
+    }
+    let client = NetworkLibraryFixtureClient(directories)
+    let result = try await AppleSMBNetworkLibraryScanner(client: client).scan(
+        source: networkLibrarySource, credentials: networkLibraryCredentials)
+    #expect(result.status == .complete)
+    #expect(result.items.count == 12_080)
+    #expect(await client.requestedPaths.count == 303)
+    #expect(result.items.contains { $0.relativePath == "downloads/episode-39.mkv" })
+    #expect(result.items.contains { $0.relativePath == ".archive/episode-39.mkv" })
+}
+
+@Test func networkLibraryDeniedChildIsPartialAndRetainsOldItemsAndStamp() async throws {
+    let old = AppleLibraryItem(sourceID: networkLibrarySource.id, name: "old.mkv",
+        url: URL(string: "smb://fixture.example/Media/denied/old.mkv")!, relativePath: "/denied/old.mkv", sizeBytes: 1024)
+    let client = NetworkLibraryFixtureClient([
+        "": [networkLibraryEntry("denied", directory: true), networkLibraryEntry("readable", directory: true)],
+        "readable": [networkLibraryEntry("readable/new.mkv")],
+    ])
+    let result = try await AppleSMBNetworkLibraryScanner(client: client).scan(
+        source: networkLibrarySource, credentials: networkLibraryCredentials)
+    #expect(result.status == .partial)
+    #expect(result.items.map(\.relativePath) == ["readable/new.mkv"])
+    #expect(Set(result.retaining([old]).map(\.id)) == Set([old.id] + result.items.map(\.id)))
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let repository = AppleMediaIndexRepository(fileURL: directory.appendingPathComponent("index.json"))
+    let previous = AppleMediaIngestion.libraryRecords(source: networkLibrarySource, items: [old])
+    try await repository.replace(instanceID: networkLibrarySource.id, with: previous)
+    let stamp = await repository.lastSuccessfulScan(for: networkLibrarySource.id)
+    try await repository.replace(instanceID: networkLibrarySource.id,
+        with: AppleMediaIngestion.libraryRecords(source: networkLibrarySource, items: result.items), scanStatus: result.status)
+    let records = await repository.records()
+    #expect(records.count == 2)
+    #expect(records.first { $0.id == previous[0].id }?.availability.first?.isStale == true)
+    #expect(await repository.lastSuccessfulScan(for: networkLibrarySource.id) == stamp)
+}
+
+@Test func networkLibraryUnavailableRootFailsWithoutFreshness() async throws {
+    let result = try await AppleSMBNetworkLibraryScanner(client: NetworkLibraryFixtureClient([:])).scan(
+        source: networkLibrarySource, credentials: networkLibraryCredentials)
+    #expect(result.status == .failed)
+    #expect(result.items.isEmpty)
+}
+
+@Test(arguments: [(2, 20), (100, 1)])
+func networkLibrarySafetyBoundsYieldPartial(_ limits: (Int, Int)) async throws {
+    let client = NetworkLibraryFixtureClient([
+        "": [networkLibraryEntry("a", directory: true), networkLibraryEntry("b", directory: true)],
+        "a": [networkLibraryEntry("a/one.mkv")],
+        "b": [networkLibraryEntry("b/two.mkv")],
+    ])
+    let result = try await AppleSMBNetworkLibraryScanner(client: client,
+        maximumEntries: limits.0, maximumFolders: limits.1).scan(
+        source: networkLibrarySource, credentials: networkLibraryCredentials)
+    #expect(result.status == .partial)
+}
+
+@Test func networkLibraryCancellationStopsBeforeRootAndAfterChildListing() async {
+    let beforeRoot = NetworkLibraryFixtureClient(["": []])
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await AppleSMBNetworkLibraryScanner(client: beforeRoot).scan(
+            source: networkLibrarySource, credentials: networkLibraryCredentials)
+    }
+    await #expect(throws: CancellationError.self) { try await cancelled.value }
+    #expect(await beforeRoot.requestedPaths.isEmpty)
+
+    let duringWalk = NetworkLibraryFixtureClient([
+        "": [networkLibraryEntry("a", directory: true), networkLibraryEntry("b", directory: true)],
+        "a": [networkLibraryEntry("a/one.mkv")], "b": [],
+    ], cancelOnPath: "a")
+    let interrupted = Task {
+        try await AppleSMBNetworkLibraryScanner(client: duringWalk).scan(
+            source: networkLibrarySource, credentials: networkLibraryCredentials)
+    }
+    await #expect(throws: CancellationError.self) { try await interrupted.value }
+    #expect(await duringWalk.requestedPaths == ["", "a"])
 }

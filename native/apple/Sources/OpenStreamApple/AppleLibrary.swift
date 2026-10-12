@@ -106,6 +106,16 @@ public actor AppleLibraryScanner {
     }
 
     public func scan(source: AppleSource) throws -> [AppleLibraryItem] {
+        try snapshot(source: source).items
+    }
+
+    public func scanResult(source: AppleSource) -> AppleLibraryScanResult {
+        do { return try snapshot(source: source) }
+        catch { return AppleLibraryScanResult(items: [], status: .failed) }
+    }
+
+    private func snapshot(source: AppleSource) throws -> AppleLibraryScanResult {
+        try Task.checkCancellation()
         let root = try AppleLibraryBookmark.resolve(source)
         let access = AppleSecurityScopedAccess(url: root)
         defer { withExtendedLifetime(access) {} }
@@ -113,19 +123,24 @@ public actor AppleLibraryScanner {
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw AppleLibrarySourceError.unavailable
         }
+        var incomplete = false
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .nameKey, .creationDateKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: { _, _ in incomplete = true; return true }
         ) else { throw AppleLibrarySourceError.permissionDenied }
 
         var items: [AppleLibraryItem] = []
         for case let url as URL in enumerator {
             try Task.checkCancellation()
-            guard items.count < maximumItems else { break }
-            guard Self.supportedExtensions.contains(url.pathExtension.lowercased()),
-                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .nameKey, .creationDateKey]),
-                  values.isRegularFile == true else { continue }
+            guard items.count < maximumItems else { incomplete = true; break }
+            guard Self.supportedExtensions.contains(url.pathExtension.lowercased()) else { continue }
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .nameKey, .creationDateKey]) else {
+                incomplete = true
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
             let rootPath = root.standardizedFileURL.path.hasSuffix("/")
                 ? root.standardizedFileURL.path
                 : root.standardizedFileURL.path + "/"
@@ -140,6 +155,7 @@ public actor AppleLibraryScanner {
                 addedAt: values.creationDate ?? .distantPast
             ))
         }
-        return items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+        return AppleLibraryScanResult(items: items.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending },
+            status: incomplete ? .partial : .complete)
     }
 }

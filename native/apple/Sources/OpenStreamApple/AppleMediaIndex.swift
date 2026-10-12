@@ -31,6 +31,7 @@ public struct AppleMediaAvailability: Codable, Equatable, Sendable {
     public let capability: AppleMediaPlaybackCapability
     /// Opaque lookup key only. It is never a URL, SMB path, or credential.
     public let itemReference: String
+    public var isStale: Bool?
     public let lastVerified: Date
 
     public init(
@@ -141,7 +142,12 @@ public actor AppleMediaIndexRepository {
     private struct Envelope: Codable {
         let version: Int
         let records: [AppleMediaRecord]
+        var successfulScans: [String: Date]? = nil
     }
+
+    private var successfulScans: [String: Date] = [:]
+
+    public func lastSuccessfulScan(for sourceID: AppleSource.ID) -> Date? { successfulScans[sourceID.uuidString] }
 
     private var recordsByID: [String: AppleMediaRecord]
     private var searchTextByID: [String: String]
@@ -177,6 +183,7 @@ public actor AppleMediaIndexRepository {
                 try clean.write(to: self.fileURL, options: .atomic)
                 #endif
             }
+            successfulScans = envelope.successfulScans ?? [:]
             let records = Dictionary(uniqueKeysWithValues: envelope.records.map { ($0.id, $0) })
             recordsByID = records
             searchTextByID = Self.makeSearchTextByID(records)
@@ -225,16 +232,22 @@ public actor AppleMediaIndexRepository {
 
     /// Replaces one instance's projection only after its adapter produced a
     /// complete bounded snapshot. Other instances and user state are kept.
-    public func replace(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord]) throws {
+    public func replace(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord], scanStatus: AppleLibraryScanStatus = .complete) throws {
         let previous = recordsByID
         var next = recordsByID
         for (id, record) in next {
             var updated = record
-            updated.availability.removeAll { $0.instanceID == instanceID }
+            if scanStatus == .complete {
+                updated.availability.removeAll { $0.instanceID == instanceID }
+            } else {
+                for index in updated.availability.indices where updated.availability[index].instanceID == instanceID {
+                    updated.availability[index].isStale = true
+                }
+            }
             if updated.availability.isEmpty { next.removeValue(forKey: id) }
             else { next[id] = updated }
         }
-        for record in incoming.prefix(10_000) {
+        for record in incoming {
             guard record.availability.contains(where: { $0.instanceID == instanceID }) else { continue }
             var refreshed = record
             if let old = previous[record.id] {
@@ -250,7 +263,9 @@ public actor AppleMediaIndexRepository {
                 next[record.id] = refreshed
             }
         }
-        try persist(next)
+        let oldScans = successfulScans
+        if scanStatus == .complete { successfulScans[instanceID.uuidString] = .now }
+        do { try persist(next) } catch { successfulScans = oldScans; throw error }
         recordsByID = next
         searchTextByID = Self.makeSearchTextByID(next)
         orderedRecordIDs = Self.makeOrderedRecordIDs(next)
@@ -376,7 +391,7 @@ public actor AppleMediaIndexRepository {
         }
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try AppleCachedCredentialPolicy.metadata(JSONEncoder().encode(Envelope(version: 1, records: Array(values.values))))
+        let data = try AppleCachedCredentialPolicy.metadata(JSONEncoder().encode(Envelope(version: 1, records: Array(values.values), successfulScans: successfulScans)))
         #if os(iOS) || os(tvOS) || os(visionOS)
         try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
         #else
@@ -646,8 +661,8 @@ public final class AppleMediaIndexStore {
         setRecords(await repository.records())
     }
 
-    public func replace(instanceID: AppleSource.ID, with values: [AppleMediaRecord]) async throws {
-        try await repository.replace(instanceID: instanceID, with: values)
+    public func replace(instanceID: AppleSource.ID, with values: [AppleMediaRecord], scanStatus: AppleLibraryScanStatus = .complete) async throws {
+        try await repository.replace(instanceID: instanceID, with: values, scanStatus: scanStatus)
         setRecords(await repository.records())
     }
 

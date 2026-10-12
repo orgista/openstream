@@ -503,7 +503,8 @@ public final class AppleMediaServerLibraryStore {
               let duration = item.runtimeSeconds,
               duration > 0 else { return nil }
         
-        if position >= 15.0 && position < duration * 0.95 {
+        if position >= 15.0, item.userData?.played != true,
+           !AppleCompletionPolicy.isComplete(position: position, duration: duration) {
             return position
         }
         return nil
@@ -539,7 +540,7 @@ public final class AppleMediaServerLibraryStore {
                     case .stopped: state = .stopped
                     }
                     try await self.plexClient.reportTimeline(session: ticket.session, item: pItem, state: state, positionSeconds: position)
-                    if event == .stopped && duration > 0 && position >= duration * 0.95 {
+                    if event == .stopped && AppleCompletionPolicy.isComplete(position: position, duration: duration) {
                         try await self.plexClient.markPlayed(session: ticket.session, ratingKey: ref.itemID)
                     }
                 } else {
@@ -564,7 +565,7 @@ public final class AppleMediaServerLibraryStore {
     /// once, so Continue Watching is right before the server answers.
     private func applyStop(reference ref: AppleMediaServerItemReference, mediaID: String, position: Double, duration: Double) {
         guard let item = index[ref] else { return }
-        let played = duration > 0 && position >= duration * 0.95
+        let played = AppleCompletionPolicy.isComplete(position: position, duration: duration)
         let old = item.userData
         let newUserData = AppleMediaServerItem.UserData(
             positionSeconds: played ? 0 : position,
@@ -616,10 +617,11 @@ public final class AppleMediaServerLibraryStore {
                 }
                 
                 var userData: AppleMediaServerItem.UserData?
-                if let viewOffset = plex.viewOffsetSeconds, let dur = plex.durationSeconds {
+                if plex.viewCount != nil || plex.viewOffsetSeconds != nil {
+                    let viewOffset = plex.viewOffsetSeconds ?? 0
                     userData = AppleMediaServerItem.UserData(
                         positionSeconds: viewOffset,
-                        played: (plex.viewCount ?? 0) > 0 || viewOffset >= dur * 0.95,
+                        played: (plex.viewCount ?? 0) > 0,
                         isFavorite: false,
                         playCount: plex.viewCount ?? 0
                     )
@@ -749,7 +751,8 @@ public final class AppleMediaServerLibraryStore {
             
             let position: Double?
             if resume, let offset = plexItem.viewOffsetSeconds, let dur = plexItem.durationSeconds {
-                position = (offset >= dur * 0.95) ? nil : offset
+                position = (plexItem.viewCount ?? 0) > 0 || AppleCompletionPolicy.isComplete(position: offset, duration: dur)
+                    ? nil : offset
             } else {
                 position = nil
             }

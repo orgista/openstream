@@ -22,6 +22,25 @@ final class AppleLocalLibraryStore {
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
     private var offlineIDs: [String: String] = [:]
+    private var episodesByGroup: [String: [AppleStremioEpisode]] = [:]
+
+    @concurrent nonisolated private static func episodeCandidates(groups: [AppleLibrarySeries], sources: [AppleSource],
+        offlineIDs: [String: String]) async -> [String: [AppleStremioEpisode]] {
+        let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        return Dictionary(uniqueKeysWithValues: groups.filter { $0.parsed.kind == .show }.map { group in
+            let episodes = group.items.enumerated().map { index, file in
+                let parsed = AppleLibraryTitleParser.parse(file)
+                let id = offlineIDs[file.id] ?? sourcesByID[file.sourceID].map {
+                    AppleMediaIngestion.libraryRecord(source: $0, item: file).id
+                } ?? file.id
+                return AppleStremioEpisode(id: id, title: "", season: parsed.season ?? 1,
+                    episode: parsed.episode ?? index + 1)
+            }
+            return (group.id, episodes)
+        })
+    }
+    private(set) var staleSourceIDs: Set<UUID> = []
+    private(set) var lastSuccessfulScanBySource: [UUID: Date] = [:]
     private(set) var lastScan: Date?
     
     struct AppleLibraryGroupSnapshot: Codable {
@@ -50,7 +69,10 @@ final class AppleLocalLibraryStore {
         errorMessage = nil
         progress = [:]
         offlineIDs = [:]
+        episodesByGroup = [:]
         lastScan = nil
+        staleSourceIDs = []
+        lastSuccessfulScanBySource = [:]
         contentDidChange()
     }
 
@@ -88,6 +110,7 @@ final class AppleLocalLibraryStore {
         
         self.sources = activeSources
         self.groups = realGroups
+        episodesByGroup = await Self.episodeCandidates(groups: realGroups, sources: activeSources, offlineIDs: [:])
         contentDidChange()
         appleTrace("library published from persisted index: \(publishedCount) titles")
         return true
@@ -239,12 +262,23 @@ final class AppleLocalLibraryStore {
     }
     var continueWatching: [AppleLibrarySeries] {
         let store = ApplePlaybackStore()
-        return groups.filter { group in
-            progress[group.id] != nil && group.items.contains { file in
-                store.progress(for: playbackID(file))?.resumePosition != nil
-                    && !store.isRemovedFromContinueWatching(mediaID: playbackID(file))
-            }
-        }.sorted { progress[$0.id]!.updatedAt > progress[$1.id]!.updatedAt }
+        let eligible = groups.compactMap { group -> (AppleLibrarySeries, Date)? in
+            let files = group.items
+            let latest = files.compactMap { file -> (AppleLibraryItem, ApplePlaybackProgress)? in
+                store.lastActivity(for: playbackID(file)).map { (file, $0) }
+            }.max { $0.1.updatedAt < $1.1.updatedAt }
+            guard let (file, activity) = latest else { return nil }
+            let successor: Bool
+            if group.parsed.kind == .show && activity.isComplete {
+                let episodes = episodesByGroup[group.id] ?? []
+                successor = AppleCompletionPolicy.successor(after: playbackID(file), episodes: episodes,
+                    completedIDs: store.completedMediaIDs(among: episodes.map(\.id))) != nil
+            } else { successor = false }
+            guard AppleCompletionPolicy.includes(saved: store.progress(for: playbackID(file)), activity: activity,
+                successorAvailable: successor, removedAt: store.isRemovedFromContinueWatching(mediaID: playbackID(file)) ? .distantFuture : nil) else { return nil }
+            return (group, activity.updatedAt)
+        }
+        return eligible.sorted { $0.1 > $1.1 }.map(\.0)
     }
     func refreshProgress() {
         let store = ApplePlaybackStore()
@@ -277,23 +311,40 @@ final class AppleLocalLibraryStore {
         sources = sourceStore.sources.filter { $0.isEnabled && ($0.kind == .library || $0.kind == .nas) }
         var files: [AppleLibraryItem] = []
         var errors: [String] = []
-        var pendingIndexWrites: [(source: AppleSource, items: [AppleLibraryItem])] = []
+        var pendingIndexWrites: [(source: AppleSource, items: [AppleLibraryItem], status: AppleLibraryScanStatus)] = []
         for source in sources {
             do {
-                let scanned: [AppleLibraryItem]
+                let result: AppleLibraryScanResult
                 if source.kind == .nas {
                     let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
-                    scanned = try await AppleSMBNetworkLibraryScanner(client: AppleSMBClient()).scan(source: source, credentials: credentials)
-                } else { scanned = try await AppleLibraryScanner().scan(source: source) }
+                    result = try await AppleSMBNetworkLibraryScanner(client: AppleSMBClient()).scan(source: source, credentials: credentials)
+                } else { result = await AppleLibraryScanner().scanResult(source: source) }
+                guard !Task.isCancelled else {
+                    staleSourceIDs.insert(source.id)
+                    try? await mediaIndex.replace(instanceID: source.id, with: [], scanStatus: .failed)
+                    return
+                }
+                guard result.status != .failed else { throw AppleLibrarySourceError.unavailable }
+                let previous = groups.flatMap(\.items).filter { $0.sourceID == source.id }
+                let scanned = result.retaining(previous)
+                if result.status == .complete { staleSourceIDs.remove(source.id) }
+                else { staleSourceIDs.insert(source.id) }
                 let dated = try await AppleLibraryMetadataResolver.shared.datedItems(scanned, sourceID: source.id)
                 appleTrace("library scanned \"\(source.name)\": \(scanned.count) files")
                 files += dated
                 sourceStore.recordValidationSuccess(id: source.id, summary: "Connected · \(scanned.count) playable files",
                     discoveredItemCount: scanned.count, capabilities: ["Browse", "Playback", "Seeking"])
-                pendingIndexWrites.append((source, dated))
-            } catch is CancellationError { return }
+                pendingIndexWrites.append((source, result.status == .complete ? dated : result.items, result.status))
+            } catch is CancellationError {
+                staleSourceIDs.insert(source.id)
+                try? await mediaIndex.replace(instanceID: source.id, with: [], scanStatus: .failed)
+                return
+            }
             catch {
                 appleTraceFailure("library scan \"\(source.name)\" failed: \(error.localizedDescription)")
+                files += groups.flatMap(\.items).filter { $0.sourceID == source.id }
+                staleSourceIDs.insert(source.id)
+                pendingIndexWrites.append((source, [], .failed))
                 errors.append("\(source.name): \(error.localizedDescription)")
                 sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
             }
@@ -323,6 +374,7 @@ final class AppleLocalLibraryStore {
         let snapshot = files
         groups = await Task.detached { AppleLibrarySeries.groups(snapshot) }.value
         offlineIDs = newOfflineIDs
+        episodesByGroup = await Self.episodeCandidates(groups: groups, sources: sources, offlineIDs: newOfflineIDs)
         metadata.merge(newMetadata) { current, _ in current }
         contentDidChange()
         appleTrace("library grouped: \(groups.count) titles")
@@ -335,9 +387,9 @@ final class AppleLocalLibraryStore {
         // a spinner for nearly three seconds after it already had the files
         // (measured 2026-09-15). The write still happens, just no longer in
         // front of the picture.
-        for (source, items) in pendingIndexWrites {
+        for (source, items, status) in pendingIndexWrites {
             do {
-                try await mediaIndex.replace(instanceID: source.id, with: AppleMediaIngestion.libraryRecords(source: source, items: items))
+                try await mediaIndex.replace(instanceID: source.id, with: AppleMediaIngestion.libraryRecords(source: source, items: items), scanStatus: status)
             } catch is CancellationError { return }
             catch {
                 // This device's own storage, not the source: the shelves are
@@ -390,7 +442,9 @@ final class AppleLocalLibraryStore {
             await resolve(group, sourceStore: sourceStore, settings: settings)
         }
         appleTrace("library eager metadata resolved")
-        lastScan = Date()
+        let completedSources = pendingIndexWrites.filter { $0.status == .complete }
+        for entry in completedSources { lastSuccessfulScanBySource[entry.source.id] = .now }
+        if pendingIndexWrites.allSatisfy({ $0.status == .complete }) { lastScan = .now }
         let sourceDigest = ApplePlaybackIdentity.digest(for: sources.map(\.id.uuidString).sorted().joined(separator: ","))
         
         let snapshots = groups.map { group in
@@ -412,7 +466,9 @@ final class AppleLocalLibraryStore {
             }
         }
         
-        AppleLaunchWorkPolicy.recordScan(sourceDigest: sourceDigest, date: lastScan ?? Date())
+        if pendingIndexWrites.allSatisfy({ $0.status == .complete }) {
+            AppleLaunchWorkPolicy.recordScan(sourceDigest: sourceDigest, date: lastScan ?? Date())
+        }
     }
     func localFiles(for item: AppleCatalogItem, group: AppleLibrarySeries? = nil, episode: AppleStremioEpisode? = nil) -> [AppleLibraryItem] {
         let matches = matchingGroups(item)

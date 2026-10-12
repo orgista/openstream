@@ -104,14 +104,18 @@ enum AppleSMBDirectoryWalker {
         root: [AppleSMBDirectoryEntry],
         load: @Sendable (String) async throws -> [AppleSMBDirectoryEntry]
     ) async throws -> [AppleSMBDirectoryEntry] {
+        try Task.checkCancellation()
         var valuesByPath = Dictionary(uniqueKeysWithValues: root.map { ($0.path, $0) })
         var pending = root.filter(\.isDirectory).map(\.path).sorted(by: localizedPathOrder)
         var visited = Set<String>()
         while let path = pending.first {
+            try Task.checkCancellation()
             pending.removeFirst()
             guard visited.insert(path).inserted else { continue }
             let nested = try await load(path).sorted(by: { localizedPathOrder($0.path, $1.path) })
+            try Task.checkCancellation()
             for entry in nested where valuesByPath[entry.path] == nil {
+                try Task.checkCancellation()
                 valuesByPath[entry.path] = entry
             }
             pending = Array(Set(pending + nested.filter(\.isDirectory).map(\.path)))
@@ -119,6 +123,56 @@ enum AppleSMBDirectoryWalker {
                 .sorted(by: localizedPathOrder)
         }
         return valuesByPath.values.sorted { localizedPathOrder($0.path, $1.path) }
+    }
+
+    /// Library traversal has generous safety bounds and tolerates denied children.
+    /// Queue/identity keys remain the original paths; browse filtering never applies.
+    static func scan(
+        root: [AppleSMBDirectoryEntry],
+        maximumEntries: Int,
+        maximumFolders: Int,
+        load: @Sendable (String) async throws -> [AppleSMBDirectoryEntry]
+    ) async throws -> (entries: [AppleSMBDirectoryEntry], status: AppleLibraryScanStatus) {
+        try Task.checkCancellation()
+        var valuesByPath: [String: AppleSMBDirectoryEntry] = [:]
+        var pending: [String] = []
+        var scheduled = Set<String>()
+        var cursor = 0
+        var entryCount = 0
+        var status = AppleLibraryScanStatus.complete
+
+        func collect(_ entries: [AppleSMBDirectoryEntry]) throws {
+            for entry in entries {
+                try Task.checkCancellation()
+                guard entryCount < maximumEntries else { status = .partial; break }
+                entryCount += 1
+                if valuesByPath[entry.path] == nil { valuesByPath[entry.path] = entry }
+                if entry.isDirectory && !scheduled.contains(entry.path) {
+                    guard pending.count < maximumFolders else { status = .partial; continue }
+                    scheduled.insert(entry.path)
+                    pending.append(entry.path)
+                }
+            }
+        }
+
+        try collect(root)
+        while cursor < pending.count {
+            try Task.checkCancellation()
+            guard entryCount < maximumEntries else { status = .partial; break }
+            let path = pending[cursor]
+            cursor += 1
+            do {
+                let entries = try await load(path)
+                try Task.checkCancellation()
+                try collect(entries)
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError { throw error }
+                status = .partial
+            }
+        }
+        try Task.checkCancellation()
+        return (valuesByPath.values.sorted { localizedPathOrder($0.path, $1.path) }, status)
     }
 
     private static func localizedPathOrder(_ lhs: String, _ rhs: String) -> Bool {
@@ -669,18 +723,29 @@ public actor AppleSMBClient: AppleNetworkShareClient {
 struct AppleSMBNetworkLibraryScanner: Sendable {
     private let client: any AppleNetworkShareClient
 
-    init(client: any AppleNetworkShareClient) {
+    private let maximumEntries: Int
+    private let maximumFolders: Int
+
+    init(client: any AppleNetworkShareClient, maximumEntries: Int = 100_000, maximumFolders: Int = 20_000) {
         self.client = client
+        self.maximumEntries = max(1, maximumEntries)
+        self.maximumFolders = max(1, maximumFolders)
     }
 
-    func scan(source: AppleSource, credentials: AppleSMBCredentials) async throws -> [AppleLibraryItem] {
+    @concurrent func scan(source: AppleSource, credentials: AppleSMBCredentials) async throws -> AppleLibraryScanResult {
+        try Task.checkCancellation()
         let parts = try AppleSMBEndpointPolicy.parts(from: source.url)
-        let root = try await client.listDirectory(
-            url: source.url,
-            credentials: credentials,
-            recursive: false
-        )
-        let entries = try await AppleSMBDirectoryWalker.walk(root: root) { path in
+        let root: [AppleSMBDirectoryEntry]
+        do {
+            root = try await client.listDirectory(url: source.url, credentials: credentials, recursive: false)
+        } catch {
+            try Task.checkCancellation()
+            if error is CancellationError { throw error }
+            return AppleLibraryScanResult(items: [], status: .failed)
+        }
+        try Task.checkCancellation()
+        let snapshot = try await AppleSMBDirectoryWalker.scan(root: root,
+            maximumEntries: maximumEntries, maximumFolders: maximumFolders) { path in
             let url = try AppleSMBEndpointPolicy.makeURL(
                 host: parts.host,
                 port: parts.port,
@@ -689,7 +754,8 @@ struct AppleSMBNetworkLibraryScanner: Sendable {
             )
             return try await client.listDirectory(url: url, credentials: credentials, recursive: false)
         }
-        return try entries.compactMap { entry in
+        let items: [AppleLibraryItem] = try snapshot.entries.compactMap { entry in
+            try Task.checkCancellation()
             guard !entry.isDirectory,
                   AppleLibraryScanner.supportedExtensions.contains(
                     URL(fileURLWithPath: entry.name).pathExtension.lowercased()
@@ -708,6 +774,8 @@ struct AppleSMBNetworkLibraryScanner: Sendable {
                 sizeBytes: entry.sizeBytes
             )
         }
+        try Task.checkCancellation()
+        return AppleLibraryScanResult(items: items, status: snapshot.status)
     }
 }
 
