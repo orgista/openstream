@@ -1,5 +1,57 @@
 # Deliveries
 
+## OpenStream build 18 TestFlight delivery — October 11, 2026 (iOS, tvOS, visionOS, macOS)
+
+Owner: "Ship 18" (ASC max was 17 on IOS/TV_OS/VISION_OS/MAC_OS). Source `main`
+`dc5e24e2b8d0704f4d8b4cad5838a57523a52b0c`, `git archive` into Dev-Mini `/Volumes/DevExt/dev/openstream-build/wt-b18`
+(external NVMe, the mini's project disk since 2026-10-10). TestFlight flavour: all four archives used
+`CURRENT_PROJECT_VERSION=18` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
+Uploaded with `asc publish testflight … --group "Internal,Reddit" --submit --confirm --test-notes … --locale en-US --wait`.
+No App Store (no-add-on) archive was built; no App Store version, review notes or submission were touched.
+
+| Platform | Build ID | Live status (read back 2026-10-11) |
+|---|---|---|
+| iOS 18 | c5aa1f98-4287-4c28-9d50-627542303201 | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| tvOS 18 | b2125f8a-defd-41cc-b28a-9dda1d3a1b03 | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| visionOS 18 | b0d7e671-f3e2-4324-b610-ada062165d2a | VALID / internal IN_BETA_TESTING / external (Reddit) IN_BETA_TESTING |
+| macOS 18 | d416f526-039f-4d9d-ab15-1c9f975d812a | VALID / internal IN_BETA_TESTING / external (Reddit) WAITING_FOR_BETA_REVIEW |
+
+- [x] 1 Authorization/numbers: owner said "Ship 18"; ASC readback 17 was the max on all four platforms.
+- [x] 2 Source: main HEAD recorded; local-disk tree on the mini; zero-byte Swift check empty; `swift build` OK; gate
+      **3027 tests / 384 suites passed** (first run, no flakes).
+- [x] 3 Signing: no new targets since b17 (pbxproj change = one UI test file). App, Widgets, Watch, Messages, Share, Top Shelf,
+      Mac app each have a Release profile pin and an ExportOptions line; all 8 profiles ACTIVE in `asc profiles list`
+      (expire 2027-09). Nothing created or changed.
+- [x] 4 `check-no-addons-in-release.sh` PASS; no placeholder hits; no `TODO(ship)`; nothing in OWNER-TODO marks a release
+      blocker. Release + add-ons builds on fresh throwaway iPhone 17 / Apple TV 4K / Vision Pro sims (created, then
+      deleted) were running after 30 s with no `openstream.sources.v1` in the app defaults (No Sources first run).
+      Screenshots were not possible: `simctl io screenshot` is "Operation not permitted" over SSH.
+- [x] 5 Tracing default unchanged (no `OpenStreamTraceDefault`). Groups Internal + Reddit on all four builds.
+- [x] 6 Every bundle CFBundleVersion 18 (app, Share, Messages, Widgets, Watch, Top Shelf, Mac); exported IPAs
+      `codesign --verify --deep --strict` OK, team 2VQ74PD5YG, get-task-allow false; pkg signed by 3rd Party Mac Developer
+      Installer: Raster Inc; `sdk-floor-check` passes on all four archives; add-on markers present in all four.
+- [ ] 6 Mac Release launch not exercised: the App Store-signed archive app refuses to run outside the store (launchd
+      error 163), and an ad hoc Release build needs a Mac development profile ("requires a provisioning profile");
+      creating one needs the owner's OK. Same shared code as the other three platforms.
+- [x] 6 Smoke on iPhone 16e DevPlus with the b18 archive exported ad hoc and installed (devicectl shows 1.0 (18)) over the
+      owner's imported setup: `testBLibraryPlaysAShareTitle` passed twice, `testFTitleTrailerKeepsPlaying` passed.
+      The first attempt ran against an older ad hoc build left on the phone (1.0 (1)), because the E2E test plan has no
+      target-app path; it was re-run after an explicit `devicectl device install`.
+- [x] 6 Real-iPhone trailer: `trailer view inserted` → `trailer native reveal: exact 16:9 slot` took 2.0 s and 1.6 s.
+- [ ] Not exercised: play/resume and the title trailer on a real Apple TV (none paired with the mini).
+- [x] 7 Uploads VALID on all four (readback above); What to Test notes set per platform and read back word for word (en-US).
+- [ ] 8 GitHub release not run (pending, under the same authorization).
+
+What to Test — iOS: > New: Live redesign. Video sits edge to edge at the top, with an On Now list and a Watching pill under it. A fixed category row with Events, one search button. / New: Picture in Picture for Live. / New: Live errors show one symbol, a short title naming the source, and one button. / New: iPhone hero uses textless key art; the title page has a 16:9 trailer header with a sound control. / Fixed: iOS 18 navigation and VoiceOver, Settings wording, multiview keeps its channels. / Engine updated.
+tvOS: > Fixed: Top Shelf now shows your titles instead of a blurry logo. Open the app once, then check the shelf. / Fixed: Set Up from iPhone now imports on Apple TV. / Fixed: Apple TV focus and the Guide sheet. / New: Live errors show one symbol, a short title naming the source, and one button. / Engine updated.
+visionOS: > New: Live redesign with an On Now list and a category row with Events. / New: Live errors show one symbol, a short title naming the source, and one button. / Engine updated.
+macOS: > New: Live errors show one symbol, a short title naming the source, and one button. / Fixed: iCloud sync cleanup and Settings wording. / Engine updated.
+
+Build-only change for the archive: `Ship18-<platform>` copies of the AppStore schemes with the UITests entry at
+`buildForArchiving = NO` (inside the build tree only). Exports ran with `/usr/bin` first on PATH. Artifacts:
+`/Volumes/DevExt/openstream-b18/` (four `.xcarchive`s, `export-<platform>-b18`, ad hoc export, `logs/`). The worktree
+and its DerivedData were removed from the mini.
+
 ## OpenStream build 17 TestFlight delivery — October 9, 2026 (iOS, tvOS, visionOS, macOS)
 
 Owner: "lets push the next build to test flight" (ASC max was 16 on IOS/TV_OS/VISION_OS/MAC_OS → ship 17).
