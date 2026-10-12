@@ -255,7 +255,7 @@ struct AppleTVBillboardActions: View {
             .accessibilityIdentifier("home.featured.play")
 
             // The primary pill already is Details when nothing plays.
-            if button.action != .details {
+            if button.showsDetailsButton {
                 Button {
                     returnTarget = .details
                     onDetails()

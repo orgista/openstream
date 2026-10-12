@@ -94,6 +94,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// family, `EXT-X-MEDIA:TYPE=SUBTITLES` renditions in HLS.
     /// The stream's own chapter markers, for Skip Intro. Empty when the file
     /// carries none, which is most of them — see `AppleChapterMarkers`.
+    public private(set) var chapterMediaVersion: UUID?
     public private(set) var chapters: [AppleChapter] = []
     /// Filled by `describeTracks`, which already reads the format description
     /// for the trace — the number was being logged and thrown away.
@@ -158,6 +159,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
 
     public func load(_ request: ApplePlaybackRequest) async throws {
         teardown()
+        chapterMediaVersion = UUID()
+        chapters = []
         loadGeneration &+= 1
         let generation = loadGeneration
         failure = nil
@@ -237,6 +240,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// Reads the chapter markers AVFoundation exposes as timed metadata groups
     /// — the MPEG-4 family's chapter tracks and Matroska chapters.
     private func loadChapters(of asset: AVURLAsset, item: AVPlayerItem) async {
+        let version = chapterMediaVersion
         guard let locales = try? await asset.load(.availableChapterLocales) else { return }
         let preferred = locales.isEmpty ? [] : locales.map(\.identifier)
         guard let groups = try? await asset.loadChapterMetadataGroups(
@@ -251,8 +255,10 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             let start = group.timeRange.start.seconds
             let end = group.timeRange.end.seconds
             guard start.isFinite, end.isFinite, end > start else { continue }
-            parsed.append(AppleChapter(title: title, start: start, end: end))
+            parsed.append(AppleChapter(title: title, start: start, end: end,
+                                      provenance: .init(source: .embeddedAVFoundation, mediaVersion: version)))
         }
+        guard self.item === item, chapterMediaVersion == version, !Task.isCancelled else { return }
         chapters = parsed
         guard !parsed.isEmpty else { return }
         appleTrace("native engine chapters: \(parsed.count) — \(parsed.map(\.title).prefix(6).joined(separator: ", "))")
@@ -299,6 +305,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     public func pause() { player?.pause() }
 
     public func stop() {
+        chapterMediaVersion = nil
         loadGeneration &+= 1
         legibleGroup = nil
         legibleOptions = [:]

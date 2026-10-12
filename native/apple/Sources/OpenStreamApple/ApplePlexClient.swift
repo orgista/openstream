@@ -64,6 +64,28 @@ public struct ApplePlexPage: Codable, Equatable, Sendable {
     public let totalSize: Int
 }
 
+/// A video hub advertised by the server; its key stays in memory, never in saved display state.
+public struct ApplePlexHub: Decodable, Sendable {
+    public let hubIdentifier: String
+    public let key: String
+    public let title: String
+    public let type: String
+    public let items: [ApplePlexItem]
+    public let totalSize: Int
+
+    private enum CodingKeys: String, CodingKey { case hubIdentifier, key, title, type, Metadata, size, totalSize }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        hubIdentifier = try values.decodeIfPresent(String.self, forKey: .hubIdentifier) ?? ""
+        key = try values.decodeIfPresent(String.self, forKey: .key) ?? ""
+        title = try values.decodeIfPresent(String.self, forKey: .title) ?? ""
+        type = try values.decodeIfPresent(String.self, forKey: .type) ?? ""
+        items = try values.decodeIfPresent([ApplePlexItem].self, forKey: .Metadata) ?? []
+        totalSize = try values.decodeIfPresent(Int.self, forKey: .totalSize)
+            ?? values.decodeIfPresent(Int.self, forKey: .size) ?? items.count
+    }
+}
+
 public struct ApplePlexItem: Codable, Equatable, Sendable {
     public let ratingKey: String
     public let key: String
@@ -366,6 +388,36 @@ extension ApplePlexClient {
         }
     }
     
+    public func homeHubs(session: AppleMediaServerSession, sectionKey: String) async throws -> [ApplePlexHub] {
+        struct Response: Decodable {
+            let MediaContainer: Container
+            struct Container: Decodable { let Hub: [ApplePlexHub]? }
+        }
+        var components = URLComponents(url: session.baseURL.appendingPathComponent("hubs/sections/\(sectionKey)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "count", value: "20"), URLQueryItem(name: "includeGuids", value: "1")]
+        let data = try await performRequest(url: components.url!, token: session.accessToken)
+        return try JSONDecoder().decode(Response.self, from: data).MediaContainer.Hub ?? []
+    }
+
+    public func hubItems(session: AppleMediaServerSession, key: String, start: Int, size: Int) async throws -> ApplePlexPage {
+        // Server-provided paths must never forward the token to another origin or accept credentials in a query.
+        guard let keyComponents = URLComponents(string: key), keyComponents.scheme == nil,
+              keyComponents.host == nil, keyComponents.fragment == nil, key.hasPrefix("/"), !key.hasPrefix("//"),
+              !keyComponents.path.split(separator: "/").contains(".."),
+              !(keyComponents.queryItems ?? []).contains(where: {
+                  ["x-plex-token", "token", "access_token", "api_key"].contains($0.name.lowercased())
+              }) else { throw AppleMediaServerError.unsupported }
+        var components = URLComponents(url: session.baseURL.appendingPathComponent(String(keyComponents.path.dropFirst())), resolvingAgainstBaseURL: false)!
+        components.queryItems = (keyComponents.queryItems ?? []).filter { $0.name != "includeGuids" }
+            + [URLQueryItem(name: "includeGuids", value: "1")]
+        let data = try await performRequest(url: components.url!, token: session.accessToken, headers: [
+            "X-Plex-Container-Start": String(max(0, start)), "X-Plex-Container-Size": String(min(100, max(1, size)))
+        ])
+        let container = try JSONDecoder().decode(ItemContainer.self, from: data).MediaContainer
+        let items = container.Metadata ?? []
+        return ApplePlexPage(items: items, totalSize: container.totalSize ?? container.size ?? items.count)
+    }
+
     public func sections(session: AppleMediaServerSession) async throws -> [ApplePlexSection] {
         let url = session.baseURL.appendingPathComponent("library/sections")
         let data = try await performRequest(url: url, token: session.accessToken)

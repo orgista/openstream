@@ -348,9 +348,6 @@ struct AppleFeaturedActions: View {
     }
 
     #if !os(tvOS)
-    /// The primary button already is Details when nothing plays.
-    private var showsDetailsButton: Bool { button.action != .details }
-
     @ViewBuilder
     private var legacyBody: some View {
         if isLandscapeLayout {
@@ -363,7 +360,7 @@ struct AppleFeaturedActions: View {
                 }
                 .appleHeroPrimaryButtonState(button)
                 .accessibilityIdentifier("home.featured.play")
-                if showsDetailsButton {
+                if button.showsDetailsButton {
                     Button(action: onDetails) {
                         AppleDetailActionButtonLabel(title: "Details", glyph: .systemImage("info.circle"), kind: .download,
                                                     width: AppleDetailMetrics.landscapeIPadActionButtonWidth)
@@ -387,7 +384,7 @@ struct AppleFeaturedActions: View {
             .appleHeroPrimaryButtonState(button)
             .accessibilityIdentifier("home.featured.play")
 
-            if showsDetailsButton {
+            if button.showsDetailsButton {
                 Button(action: onDetails) {
                     Label("Details", systemImage: "info.circle")
                         .frame(maxWidth: buttonWidth)

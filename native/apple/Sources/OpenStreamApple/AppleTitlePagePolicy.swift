@@ -336,6 +336,10 @@ public enum AppleTitlePagePolicy {
 
         public var isHidden: Bool { action == nil }
 
+        /// A Details primary already opens the title page; another info
+        /// button would offer the same action twice.
+        public var showsDetailsButton: Bool { action != .details }
+
         public init(action: PrimaryAction?, isDownloaded: Bool = false) {
             self.action = action
             title = (action ?? .play).displayTitle(hasCompletedDownload: isDownloaded)

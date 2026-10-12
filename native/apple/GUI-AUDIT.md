@@ -59,7 +59,7 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
       observed in the Discover capture match `AppleHeroRotation.maximumCandidates = 5`.
       A pixel probe of the fill returned an empty crop; that was a bad crop window, **not**
       a missing fill, and is not reported as a defect.
-- [x] B5 Pills — measured: Play 86–273, Details 309–498, **36 pt gap** (needs ≥24), one baseline
+- [F] B5 Pills — 2026-10-12: Details-only heroes omit duplicate info; My List and playable info retained, paging focus repaired. Button/focus tests; serial Swift 3158 / 392, iOS/tvOS arm64 builds. Earlier spacing evidence: measured: Play 86–273, Details 309–498, **36 pt gap** (needs ≥24), one baseline
 - [x] B6 **Checklist row was wrong, not the app.** The first row is *meant* to peek —
       `AppleTVBillboardMetrics` documents it and a test asserts it. Corrected.
 - [x] B7 **Checklist row was wrong, not the app.** There is no glyph pair on tvOS: the whole
@@ -69,6 +69,7 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
       live — are now removed. Verified where the pair does exist: on iPhone it sits in the
       stock toolbar, right-aligned with the large title, inside the safe area, white not blue.
 - [x] B8 Row titles align — shelf title edge x=81 against the 80 pt column
+- [x] Plex lessons 9 (2026-10-12): provider hubs page and refresh only affected rows, including empty-to-eligible restoration; routes/order and silent fallback retained. Fake Plex/Jellyfin/Emby fixtures; serial Swift 3158 / 392, iOS/tvOS arm64 builds. No device UI run.
 
 ### Library
 - [x] Plex lessons 5–6 (2026-10-12): filename rows retain ambiguous files without invented episode coordinates; explicit parts hand off, versions stay alternatives; durable correction store only, no new correction UI. AppleLibraryLessonsTests; full gate 3093 / 386; iOS/tvOS arm64 compilation confirmed. Runtime handoff not exercised on a device.
@@ -159,7 +160,7 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
       falling back and re-offering everything), no preference lists everything, a *guessed*
       language that matches nothing still lists everything, and the order follows the viewer's
       preference order.
-- [F] B32 Skip-intro affordance (chapter markers) — policy + engine + button done 2026-09-16
+- [F] B32 Skip-intro affordance (chapter markers) — policy + engine + button done 2026-09-16; 2026-10-12: typed embedded source/media version and validated timing; invalid/duplicate/stale markers and unknown-runtime seeks rejected. Chapter policy/engine tests; serial Swift 3158 / 392, iOS/tvOS arm64 builds.
 
 ### Settings
 - [F] Remaining panes (worker audit 2026-09-17, cited): iOS/visionOS Settings root now lists

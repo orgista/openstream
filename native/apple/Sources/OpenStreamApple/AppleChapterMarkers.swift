@@ -1,12 +1,53 @@
 import Foundation
 
+/// Only approved embedded chapter transports are represented here.
+public enum AppleChapterSource: Equatable, Sendable {
+    case embeddedContainer
+    case embeddedAVFoundation
+}
+
+public struct AppleChapterProvenance: Equatable, Sendable {
+    public let source: AppleChapterSource
+    /// Opaque identity for this loaded media version, never a transport URL.
+    public let mediaVersion: UUID?
+
+    public init(source: AppleChapterSource, mediaVersion: UUID? = nil) {
+        self.source = source
+        self.mediaVersion = mediaVersion
+    }
+}
+
+/// Created only after finite, ordered bounds and the current runtime are checked.
+public struct AppleChapterValidatedTiming: Equatable, Sendable {
+    public let start: Double
+    public let end: Double
+    public let mediaDuration: Double?
+    fileprivate init(start: Double, end: Double, mediaDuration: Double?) {
+        self.start = start
+        self.end = end
+        self.mediaDuration = mediaDuration
+    }
+}
+
+public struct AppleValidatedChapter: Equatable, Sendable {
+    public let chapter: AppleChapter
+    public let timing: AppleChapterValidatedTiming
+    fileprivate init(chapter: AppleChapter, timing: AppleChapterValidatedTiming) {
+        self.chapter = chapter
+        self.timing = timing
+    }
+}
+
 /// One chapter from a stream's own metadata.
 public struct AppleChapter: Equatable, Sendable {
     public let title: String
     public let start: Double
     public let end: Double
+    public let provenance: AppleChapterProvenance
 
-    public init(title: String, start: Double, end: Double) {
+    public init(title: String, start: Double, end: Double,
+                provenance: AppleChapterProvenance = .init(source: .embeddedContainer)) {
+        self.provenance = provenance
         self.title = title
         self.start = start
         self.end = end
@@ -60,18 +101,34 @@ public enum AppleChapterMarkers: Sendable {
     /// scrubber. The first chapter's start is the scrubber's own left end and
     /// gets no mark; starts outside the runtime and duplicates are dropped.
     /// Empty until the runtime is known.
-    public static func scrubberFractions(chapters: [AppleChapter], duration: Double?) -> [Double] {
+    public static func validated(
+        _ chapters: [AppleChapter], duration: Double?, mediaVersion: UUID? = nil
+    ) -> [AppleValidatedChapter] {
+        if let duration, !duration.isFinite || duration <= 0 { return [] }
+        var starts = Set<Double>()
+        return chapters.compactMap { chapter in
+            guard chapter.provenance.mediaVersion == mediaVersion,
+                  chapter.start.isFinite, chapter.end.isFinite,
+                  chapter.start >= 0, chapter.end > chapter.start,
+                  duration.map({ chapter.end <= $0 }) ?? true,
+                  starts.insert(chapter.start).inserted else { return nil }
+            return AppleValidatedChapter(chapter: chapter, timing: .init(
+                start: chapter.start, end: chapter.end, mediaDuration: duration))
+        }.sorted { $0.timing.start < $1.timing.start }
+    }
+
+    public static func scrubberFractions(chapters: [AppleChapter], duration: Double?, mediaVersion: UUID? = nil) -> [Double] {
         guard let duration, duration.isFinite, duration > 0 else { return [] }
         var seen = Set<Int>()
-        return chapters
-            .map { $0.start / duration }
+        return validated(chapters, duration: duration, mediaVersion: mediaVersion)
+            .map { $0.timing.start / duration }
             .filter { $0.isFinite && $0 > 0.001 && $0 < 0.999 }
             .sorted()
             .filter { seen.insert(Int(($0 * 10_000).rounded())).inserted }
     }
 
-    public static func intro(in chapters: [AppleChapter], duration: Double? = nil) -> AppleChapter? {
-        chapters.first { chapter in
+    public static func intro(in chapters: [AppleChapter], duration: Double? = nil, mediaVersion: UUID? = nil) -> AppleChapter? {
+        validated(chapters, duration: duration, mediaVersion: mediaVersion).map(\.chapter).first { chapter in
             guard introTitles.contains(normalized(chapter.title)) else { return false }
             guard chapter.duration >= minimumDuration, chapter.duration <= maximumDuration else { return false }
             if let duration, duration > 0, chapter.duration > duration * maximumDurationFraction { return false }
@@ -94,8 +151,11 @@ public enum AppleChapterMarkers: Sendable {
     }
 
     /// Where Skip Intro seeks to — the first frame after the opening.
-    public static func skipDestination(intro: AppleChapter) -> Double {
-        intro.end
+    public static func skipDestination(
+        intro: AppleChapter, duration: Double?, mediaVersion: UUID? = nil
+    ) -> Double? {
+        guard duration != nil else { return nil }
+        return validated([intro], duration: duration, mediaVersion: mediaVersion).first?.timing.end
     }
 
     /// Lowercased, punctuation removed, whitespace collapsed: "Opening

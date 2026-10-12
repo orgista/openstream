@@ -35,6 +35,37 @@ import AetherEngine
         return (coordinator, AppleTransportOverlayModel(coordinator: coordinator, isLive: false))
     }
 
+    @Test func chapterSeekRevalidatesTheCurrentRuntimeAndVersion() async {
+        let engine = ChapterFakeEngine()
+        engine.duration = 1000
+        let version = UUID()
+        engine.chapterMediaVersion = version
+        let marker = AppleChapter(title: "Opening", start: 10, end: 70,
+                                  provenance: .init(source: .embeddedContainer, mediaVersion: version))
+        engine.chapters = [marker]
+        let (coordinator, model) = makeModel(engine)
+        engine.duration = 40 // No duration event has reached the overlay yet.
+        await model.skipIntro()
+        await model.jump(to: marker)
+        #expect(engine.seeks.isEmpty)
+        engine.duration = 1000
+        engine.chapterMediaVersion = UUID()
+        await model.skipIntro()
+        await model.jump(to: marker)
+        #expect(engine.seeks.isEmpty)
+        coordinator.stop()
+    }
+
+    @Test func unknownRuntimeNeverSeeksToAnUnboundedIntro() async {
+        let engine = ChapterFakeEngine()
+        engine.chapters = [AppleChapter(title: "Intro", start: 0, end: 60)]
+        let (coordinator, model) = makeModel(engine)
+        await model.skipIntro()
+        await model.jump(to: engine.chapters[0])
+        #expect(engine.seeks.isEmpty)
+        coordinator.stop()
+    }
+
     // MARK: - Event ordering
 
     @Test func aRuntimeArrivingAfterTheChaptersRetractsAnOverlongOpening() async {
@@ -180,6 +211,7 @@ final class ChapterFakeEngine: ApplePlaybackEngine {
     var audioTracks: [ApplePlaybackTrack] = []
     var subtitleTracks: [ApplePlaybackTrack] = []
     var subtitleCues: [AppleSubtitleCue] = []
+    var chapterMediaVersion: UUID? = nil
     var chapters: [AppleChapter] = []
     var failure: ApplePlaybackFailure? = nil
     var avPlayer: AVPlayer? { nil }

@@ -384,7 +384,8 @@ extension AppleMediaServerClient {
         sortBy: String = "SortName",
         sortOrder: String = "Ascending",
         startIndex: Int = 0,
-        limit: Int = 100
+        limit: Int = 100,
+        genres: [String] = []
     ) async throws -> AppleMediaServerItemPage {
         var query: [URLQueryItem] = []
         if let parentID = parentID {
@@ -393,6 +394,7 @@ extension AppleMediaServerClient {
         if !includeTypes.isEmpty {
             query.append(URLQueryItem(name: "IncludeItemTypes", value: includeTypes.map(\.rawValue).joined(separator: ",")))
         }
+        if !genres.isEmpty { query.append(URLQueryItem(name: "Genres", value: genres.joined(separator: "|"))) }
         query.append(URLQueryItem(name: "Recursive", value: recursive ? "true" : "false"))
         query.append(URLQueryItem(name: "SortBy", value: sortBy))
         query.append(URLQueryItem(name: "SortOrder", value: sortOrder))
@@ -426,6 +428,17 @@ extension AppleMediaServerClient {
         let req = request(url: url, token: session.accessToken)
         let data = try await perform(req)
         return try JSONDecoder().decode([AppleMediaServerItem].self, from: data)
+    }
+
+    public func nextUp(session: AppleMediaServerSession, parentID: String, startIndex: Int = 0, limit: Int = 20) async throws -> AppleMediaServerItemPage {
+        let query = [URLQueryItem(name: "UserId", value: session.userID),
+                     URLQueryItem(name: "ParentId", value: parentID),
+                     URLQueryItem(name: "StartIndex", value: String(max(0, startIndex))),
+                     URLQueryItem(name: "Limit", value: String(min(100, max(1, limit)))),
+                     URLQueryItem(name: "Fields", value: "Overview,ProductionYear,Genres,ProviderIds,CommunityRating,RunTimeTicks,SeriesId,SeasonId")]
+        let url = try normalizedURL(base: session.baseURL, path: "Shows/NextUp", queryItems: query)
+        let data = try await perform(request(url: url, token: session.accessToken))
+        return try JSONDecoder().decode(AppleMediaServerItemPage.self, from: data)
     }
 
     public func resume(

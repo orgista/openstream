@@ -36,6 +36,12 @@ public enum AppleTVHeroPaging {
         }
     }
 
+    /// Page turns keep focus on the trailing action. When the primary
+    /// already opens Details, My List is the trailing action instead.
+    public static func availableTarget(_ target: Target, showsDetailsButton: Bool) -> Target {
+        target == .details && !showsDetailsButton ? .myList : target
+    }
+
     /// Whether the stops accept focus: only from inside the hero, and only
     /// when there is another page to turn to.
     public static func stopsAreFocusable(focused: Target?, pageCount: Int) -> Bool {

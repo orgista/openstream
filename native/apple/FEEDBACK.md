@@ -4632,3 +4632,12 @@ Library filenames now carry explicit episode ranges, air dates, extra roles and 
 The matching store now saves the selected title and its evidence outside the artwork cache. A manual correction survives rescanning or replacing that cache, without changing saved file progress. There was no existing correction control, so this step adds the store API only.
 
 Verified with 3093 Swift tests in 386 suites and iOS/tvOS Debug builds, including arm64 recompilation of every changed source. The multipart handoff still merits a device spot-check. No commit or upload.
+
+
+## 2026-10-12 — Provider rows, chapters and hero Details
+
+Home can use supported Plex hubs and Jellyfin/Emby Next Up and genre rows. Rows page and refresh individually; empty or unavailable hubs fall back quietly. A Next Up row can appear after an episode finishes without refreshing unrelated rows, in its original position. Existing title routes and custom row order stay intact.
+
+Chapters now carry their embedded source and loaded-media version. Invalid, duplicate or outdated boundaries cannot drive a seek beyond the current runtime. Content without chapters still gets no invented intro. A Details-only hero no longer repeats the info action; My List stays available, and tvOS paging skips the missing control.
+
+Verified with 3,158 Swift tests in 392 suites and iOS/tvOS Debug builds, including arm64 recompilation of all 14 changed production files. The full suite passed serially after an unrelated metadata timing failure under parallel load. Device UI was not exercised. No commit or upload.

@@ -138,6 +138,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// mapped for `AppleChapterMarkers`. B32: the Skip Intro button used to
     /// read chapters from the native engine only, so it never appeared on the
     /// engine route that plays most content.
+    private var acceptsChapterUpdates = false
+    public private(set) var chapterMediaVersion: UUID?
     public private(set) var chapters: [AppleChapter] = [] {
         didSet {
             guard chapters != oldValue else { return }
@@ -252,6 +254,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     public func load(_ request: ApplePlaybackRequest) async throws {
+        acceptsChapterUpdates = false
+        chapterMediaVersion = UUID()
+        chapters = []
         liveBuffer = .stored()
         isLiveBufferSession = request.isLive
         loadGeneration &+= 1
@@ -304,6 +309,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // engine's menu option is the one line in `engineTitleID` once it lands.
         if let disc = request.hints.disc { appleTrace(disc.traceLine) }
         discFileURL = request.hints.disc != nil ? (request.hints.libraryFileURL ?? request.url) : nil
+        acceptsChapterUpdates = true
         do {
             _ = try await aether.load(
                 url: sourceURL,
@@ -312,7 +318,11 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                 discTitleID: request.hints.disc?.engineTitleID
             )
         } catch {
-            if generation == loadGeneration { performCaptionHandoff(captionHandoff.reloadFinished(succeeded: false)) }
+            if generation == loadGeneration {
+                acceptsChapterUpdates = false
+                chapters = []
+                performCaptionHandoff(captionHandoff.reloadFinished(succeeded: false))
+            }
             throw error
         }
         print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
@@ -499,6 +509,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     public func stop() {
+        acceptsChapterUpdates = false
+        chapterMediaVersion = nil
+        chapters = []
         loadGeneration &+= 1
         captionObservation?.cancel()
         captionObservation = nil
@@ -692,7 +705,14 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .sink { [weak self] index in self?.activeAudioTrackID = index }
             .store(in: &cancellables)
         aether.$mediaChapters
-            .sink { [weak self] infos in self?.chapters = infos.map(Self.mapChapter) }
+            .sink { [weak self] infos in
+                guard let self, self.acceptsChapterUpdates, let version = self.chapterMediaVersion else { return }
+                self.chapters = infos.map { info in
+                    let chapter = Self.mapChapter(info)
+                    return AppleChapter(title: chapter.title, start: chapter.start, end: chapter.end,
+                                        provenance: .init(source: .embeddedContainer, mediaVersion: version))
+                }
+            }
             .store(in: &cancellables)
         aether.$discTitles
             .sink { [weak self] titles in

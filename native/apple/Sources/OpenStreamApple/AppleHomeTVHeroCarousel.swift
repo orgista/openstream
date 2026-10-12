@@ -113,7 +113,8 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
 
 /// The Apple TV Discover hero's buttons, after the Apple TV app on tvOS: the
 /// white "▶ Resume S1, E3" / "▶ Play" pill, then round My List (+ / ✓) and
-/// Details (ⓘ) buttons. Details stays a button because the title and wordmark
+/// Details (ⓘ) buttons when the primary plays. A Details primary omits the
+/// duplicate round info button. Details stays a button because the title and wordmark
 /// are not focusable: making them so would put a stop between Play and the tab
 /// bar. The two paging stops sit either side (`AppleTVHeroPaging`).
 struct AppleHomeTVHeroActions: View {
@@ -153,22 +154,33 @@ struct AppleHomeTVHeroActions: View {
             .accessibilityValue(isInList ? "Saved" : "Not saved")
             .accessibilityIdentifier("home.featured.my-list")
 
-            Button {
-                willOpenPage(.details)
-                onDetails()
-            } label: {
-                Label(AppleSemanticAction.info.label, systemImage: AppleSemanticAction.info.symbol)
-                    .labelStyle(.iconOnly)
+            if button.showsDetailsButton {
+                Button {
+                    willOpenPage(.details)
+                    onDetails()
+                } label: {
+                    Label(AppleSemanticAction.info.label, systemImage: AppleSemanticAction.info.symbol)
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(AppleTVHeroRoundButtonStyle())
+                .focused(focus, equals: .details)
+                .accessibilityIdentifier("home.featured.details")
             }
-            .buttonStyle(AppleTVHeroRoundButtonStyle())
-            .focused(focus, equals: .details)
-            .accessibilityIdentifier("home.featured.details")
             pagingStop(.nextPage)
         }
         // The stops take no room: Play stays on the copy's leading edge.
         .padding(.horizontal, -(M.pillGap + M.pagingStopWidth))
         .frame(width: M.actionsFocusWidth, alignment: .leading)
         .focusSection()
+        .onAppear(perform: restoreAvailableFocus)
+        .onChange(of: focus.wrappedValue) { restoreAvailableFocus() }
+        .onChange(of: button.showsDetailsButton) { restoreAvailableFocus() }
+    }
+
+    private func restoreAvailableFocus() {
+        guard let target = focus.wrappedValue else { return }
+        let available = AppleTVHeroPaging.availableTarget(target, showsDetailsButton: button.showsDetailsButton)
+        if available != target { focus.wrappedValue = available }
     }
 
     /// An invisible stop that turns the page the moment it takes focus.

@@ -87,10 +87,15 @@ public final class AppleTransportOverlayModel {
     /// Seeks to the first frame after the opening, through the same
     /// coordinator path the scrubber uses.
     public func skipIntro() async {
-        guard let introChapter else { return }
+        refreshIntroChapter()
+        guard let introChapter, coordinator.engine.duration != nil,
+              let approved = AppleChapterMarkers.validated(
+                coordinator.engine.chapters, duration: coordinator.engine.duration,
+                mediaVersion: coordinator.engine.chapterMediaVersion
+              ).first(where: { $0.chapter == introChapter }) else { return }
         hasSkippedIntro = true
         bumpActivity()
-        let destination = AppleChapterMarkers.skipDestination(intro: introChapter)
+        let destination = approved.timing.end
         appleTrace("skip intro → \(Int(destination))s")
         await coordinator.userSeek(to: destination)
     }
@@ -99,9 +104,12 @@ public final class AppleTransportOverlayModel {
     /// known now. Idempotent and write-guarded, so calling it from both
     /// `.tracks` and `.duration` costs no extra Observation invalidation.
     private func refreshIntroChapter() {
-        let all = coordinator.engine.chapters
+        let all = AppleChapterMarkers.validated(
+            coordinator.engine.chapters, duration: coordinator.engine.duration,
+            mediaVersion: coordinator.engine.chapterMediaVersion).map(\.chapter)
         if chapters != all { chapters = all }
-        let found = AppleChapterMarkers.intro(in: all, duration: duration)
+        let found = AppleChapterMarkers.intro(in: all, duration: coordinator.engine.duration,
+                                              mediaVersion: coordinator.engine.chapterMediaVersion)
         if introChapter != found { introChapter = found }
     }
 
@@ -112,14 +120,20 @@ public final class AppleTransportOverlayModel {
 
     /// Where the chapter marks sit on the scrubber, as fractions of it.
     public var chapterMarkFractions: [Double] {
-        AppleChapterMarkers.scrubberFractions(chapters: chapters, duration: duration)
+        AppleChapterMarkers.scrubberFractions(chapters: chapters, duration: duration,
+                                            mediaVersion: coordinator.engine.chapterMediaVersion)
     }
 
     /// Seeks to a chapter's start through the scrubber's path.
     public func jump(to chapter: AppleChapter) async {
+        guard coordinator.engine.duration != nil,
+              let approved = AppleChapterMarkers.validated(
+                coordinator.engine.chapters, duration: coordinator.engine.duration,
+                mediaVersion: coordinator.engine.chapterMediaVersion
+              ).first(where: { $0.chapter == chapter }) else { return }
         bumpActivity()
         appleTrace("chapter → \(chapter.title) at \(Int(chapter.start))s")
-        await coordinator.userSeek(to: max(0, chapter.start))
+        await coordinator.userSeek(to: approved.timing.start)
     }
 
     /// Re-reads the engine's real seekable span. Write-guarded: the position
@@ -136,6 +150,7 @@ public final class AppleTransportOverlayModel {
 
     /// Drops the opening and the sticky skip when the engine leaves the item.
     private func clearIntroForNewItem() {
+        if !chapters.isEmpty { chapters = [] }
         if introChapter != nil { introChapter = nil }
         if hasSkippedIntro { hasSkippedIntro = false }
     }
@@ -277,11 +292,7 @@ public final class AppleTransportOverlayModel {
             engineActive: coordinator.engine.activeAudioTrackID,
             pending: coordinator.pendingAudioPick, current: nil)
         self.subtitleTracks = coordinator.engine.subtitleTracks
-        self.chapters = coordinator.engine.chapters
-        self.introChapter = AppleChapterMarkers.intro(
-            in: coordinator.engine.chapters,
-            duration: coordinator.engine.duration
-        )
+        refreshIntroChapter()
         // The same persisted list the coordinator reads when no host hands it
         // one, so the menu and the auto-selection agree on the languages. The
         // key existing *is* the explicit choice — `AppleSettingsStore` derives

@@ -87,6 +87,21 @@ struct AppleTitlePagePolicyTests {
             type: "movie", progress: partWay, selectedEpisode: nil, isPlayable: true, trailer: trailer) == .resume(episode: nil))
     }
 
+    @Test func detailsPrimaryHidesTheDuplicateDetailsButton() {
+        #expect(AppleTitlePagePolicy.HeroButton(action: .details).showsDetailsButton == false)
+        #expect(AppleTitlePagePolicy.HeroButton(action: .details, isDownloaded: true).showsDetailsButton == false)
+    }
+
+    @Test(arguments: [AppleTitlePagePolicy.PrimaryAction.play, .playEpisode("S1, E3"),
+                      .resume(episode: nil), .resume(episode: "S2, E4"), .playTrailer])
+    func playablePrimaryKeepsTheDetailsButton(_ action: AppleTitlePagePolicy.PrimaryAction) {
+        #expect(AppleTitlePagePolicy.HeroButton(action: action).showsDetailsButton)
+    }
+
+    @Test func pendingPrimaryKeepsDetailsAvailable() {
+        #expect(AppleTitlePagePolicy.HeroButton(action: nil).showsDetailsButton)
+    }
+
     @Test func heroPlayKeepsTheOfflineWording() {
         #expect(AppleTitlePagePolicy.HeroButton(action: .play, isDownloaded: true).title == "Play Offline")
         #expect(AppleTitlePagePolicy.HeroButton(action: .details, isDownloaded: true).title == "Details")

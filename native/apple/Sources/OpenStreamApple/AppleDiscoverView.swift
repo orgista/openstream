@@ -1045,7 +1045,17 @@ struct AppleDiscoverView: View {
                                 AppleCatalogCard(item: item)
                             }
                             .accessibilityIdentifier("home.ms.\(shelf.id).\(item.mediaID)")
+                            .onAppear {
+                                guard AppleCatalogPaging.isNearEnd(itemID: item.id, in: shelf.items) else { return }
+                                Task { await mediaServerLibrary.loadMore(shelfID: shelf.id) }
+                            }
                         }
+                    }
+                }
+                .task { await mediaServerLibrary.refreshIfNeeded(shelfID: shelf.id) }
+                .contextMenu {
+                    Button("Refresh", systemImage: "arrow.clockwise") {
+                        Task { await mediaServerLibrary.refresh(shelfID: shelf.id) }
                     }
                 }
             }

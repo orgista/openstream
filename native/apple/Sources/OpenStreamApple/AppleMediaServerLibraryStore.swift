@@ -50,6 +50,151 @@ public final class AppleMediaServerLibraryStore {
     private var sourceIndex: [UUID: AppleSource] = [:]
     private var sessionIndex: [UUID: AppleMediaServerSession] = [:]
     
+    private enum HubRequest: Sendable, Equatable {
+        case plex(key: String, nextUp: Bool)
+        case nextUp(parentID: String)
+        case genre(parentID: String, name: String, type: AppleMediaServerItemType)
+    }
+    private struct HubState: Sendable, Equatable {
+        let request: HubRequest
+        var offset: Int
+        var total: Int
+        var exhausted = false
+        var refreshedAt = Date()
+    }
+    private var hubStates: [String: HubState] = [:]
+    private var hubDefinitions: [String: Shelf] = [:]
+    private var shelfOrder: [String] = []
+    private var loadingHubs: Set<String> = []
+    private var hubRevisions: [String: UInt64] = [:]
+
+    public func canLoadMore(shelfID: String) -> Bool {
+        guard let state = hubStates[shelfID], let shelf = shelves.first(where: { $0.id == shelfID }) else { return false }
+        return !state.exhausted && state.offset < state.total && shelf.items.count < AppleCatalogPaging.maximumItems
+    }
+
+    public func loadMore(shelfID: String) async {
+        guard canLoadMore(shelfID: shelfID) else { return }
+        await updateHub(shelfID: shelfID, replacing: false)
+    }
+
+    public func refresh(shelfID: String) async {
+        // Refresh wins over an older page request; the request revision prevents that page committing later.
+        hubRevisions[shelfID, default: 0] &+= 1
+        loadingHubs.remove(shelfID)
+        await updateHub(shelfID: shelfID, replacing: true)
+    }
+
+    public func refreshIfNeeded(shelfID: String, now: Date = .now) async {
+        guard let state = hubStates[shelfID], now.timeIntervalSince(state.refreshedAt) >= 60 else { return }
+        await refresh(shelfID: shelfID)
+    }
+
+    /// A delivered terminal event can change its own rows and the server's next-episode hub.
+    internal func refreshAffectedHubs(reference: AppleMediaServerItemReference) async {
+        let episodic = index[reference]?.type == .episode || plexIndex[reference]?.type == .episode
+        let affected = shelfOrder.compactMap { hubDefinitions[$0] }.filter { shelf in
+            guard shelf.sourceID == reference.sourceID, let state = hubStates[shelf.id] else { return false }
+            let isNextUp: Bool
+            switch state.request {
+            case .nextUp: isNextUp = episodic
+            case .plex(_, let nextUp): isNextUp = episodic && nextUp
+            case .genre: isNextUp = false
+            }
+            return isNextUp || shelves.first(where: { $0.id == shelf.id })?.items.contains { $0.mediaID == reference.mediaID } == true
+        }.map(\.id)
+        for id in affected { await refresh(shelfID: id) }
+    }
+
+    private func updateHub(shelfID: String, replacing: Bool) async {
+        guard !loadingHubs.contains(shelfID), let state = hubStates[shelfID],
+              let shelf = hubDefinitions[shelfID],
+              let source = sourceIndex[shelf.sourceID], source.isEnabled,
+              let session = sessionIndex[shelf.sourceID] else { return }
+        let requestGeneration = generation
+        let revision = hubRevisions[shelfID, default: 0]
+        loadingHubs.insert(shelfID)
+        defer { if generation == requestGeneration, hubRevisions[shelfID, default: 0] == revision { loadingHubs.remove(shelfID) } }
+        let start = replacing ? 0 : state.offset
+        do {
+            let items: [AppleCatalogItem]
+            let rawCount: Int
+            let total: Int
+            var rawItems: [AppleMediaServerItem] = []
+            var plexItems: [ApplePlexItem] = []
+            switch state.request {
+            case .plex(let key, _):
+                let page = try await plexClient.hubItems(session: session, key: key, start: start, size: 20)
+                plexItems = page.items
+                rawCount = page.items.count
+                total = page.totalSize
+                items = page.items.filter { Self.isEligible($0) }.map { catalogItem($0, source: source, session: session) }
+            case .nextUp(let parentID):
+                let page = try await client.nextUp(session: session, parentID: parentID, startIndex: start)
+                rawItems = page.items
+                rawCount = page.items.count
+                total = page.totalRecordCount
+                items = page.items.filter { Self.isEligible($0) }.map { catalogItem($0, source: source, session: session) }
+            case .genre(let parentID, let name, let type):
+                let page = try await client.items(session: session, parentID: parentID, includeTypes: [type], startIndex: start, limit: 20, genres: [name])
+                rawItems = page.items
+                rawCount = page.items.count
+                total = page.totalRecordCount
+                items = page.items.filter { Self.isEligible($0) }.map { catalogItem($0, source: source, session: session) }
+            }
+            guard !Task.isCancelled, generation == requestGeneration,
+                  hubRevisions[shelfID, default: 0] == revision, hubStates[shelfID] != nil,
+                  sessionIndex[shelf.sourceID] == session else { return }
+            let position = shelves.firstIndex(where: { $0.id == shelfID })
+            // A successful empty refresh revokes the old row's eligibility. Other rows remain the fallback.
+            guard !items.isEmpty else {
+                if replacing {
+                    if let position { shelves.remove(at: position) }
+                    hubStates[shelfID]?.offset = 0
+                    hubStates[shelfID]?.total = total
+                    hubStates[shelfID]?.exhausted = true
+                    hubStates[shelfID]?.refreshedAt = Date()
+                    persist()
+                } else {
+                    hubStates[shelfID]?.exhausted = true
+                    hubStates[shelfID]?.refreshedAt = Date()
+                }
+                return
+            }
+            let existing = position.map { shelves[$0].items } ?? []
+            let merged = AppleCatalogPaging.merge(replacing ? [] : existing,
+                page: AppleCatalogPage(items: items, receivedCount: rawCount), pageSize: 1)
+            let updated = Shelf(id: shelf.id, title: shelf.title, sourceID: shelf.sourceID, items: merged.items)
+            if let position { shelves[position] = updated }
+            else {
+                let preceding = Set(shelfOrder.prefix { $0 != shelfID })
+                let insertion = shelves.filter { preceding.contains($0.id) }.count
+                shelves.insert(updated, at: insertion)
+            }
+            var nextState = state
+            nextState.offset = start + rawCount
+            nextState.total = total
+            nextState.exhausted = merged.isExhausted || nextState.offset >= total
+            nextState.refreshedAt = Date()
+            hubStates[shelfID] = nextState
+            for item in rawItems { index[.init(sourceID: shelf.sourceID, itemID: item.id)] = item }
+            for item in plexItems { plexIndex[.init(sourceID: shelf.sourceID, itemID: item.ratingKey)] = item }
+            persist()
+        } catch {
+            // Optional discovery hubs are never a source connection error.
+            if !Task.isCancelled, generation == requestGeneration, hubRevisions[shelfID, default: 0] == revision {
+                hubStates[shelfID]?.refreshedAt = Date()
+            }
+        }
+    }
+
+    nonisolated private static func isEligible(_ item: ApplePlexItem) -> Bool {
+        [.movie, .show, .episode].contains(item.type) && !item.ratingKey.isEmpty && !item.title.isEmpty
+    }
+    nonisolated private static func isEligible(_ item: AppleMediaServerItem) -> Bool {
+        [.movie, .series, .episode].contains(item.type) && !item.id.isEmpty && !item.name.isEmpty
+    }
+
     private struct CachedDetail: Sendable {
         let detail: AppleMediaServerDetail
         let fetchedAt: Date
@@ -108,6 +253,13 @@ public final class AppleMediaServerLibraryStore {
     }
     
     public func clear(sourceID: UUID) {
+        for shelf in hubDefinitions.values.filter({ $0.sourceID == sourceID }) {
+            hubStates.removeValue(forKey: shelf.id)
+            hubDefinitions.removeValue(forKey: shelf.id)
+            shelfOrder.removeAll { $0 == shelf.id }
+            hubRevisions[shelf.id, default: 0] &+= 1
+            loadingHubs.remove(shelf.id)
+        }
         shelves.removeAll { $0.sourceID == sourceID }
         continueWatching.removeAll { AppleMediaServerItemReference.parse($0.mediaID)?.sourceID == sourceID }
         let keysToRemove = index.keys.filter { $0.sourceID == sourceID }
@@ -237,6 +389,7 @@ public final class AppleMediaServerLibraryStore {
 
     public func reload(sources: [AppleSource], session: @MainActor @Sendable (AppleSource) throws -> AppleMediaServerSession?) async {
         generation += 1
+        loadingHubs.removeAll()
         let currentGeneration = generation
         isLoading = true
         
@@ -253,6 +406,7 @@ public final class AppleMediaServerLibraryStore {
             let sourceID: UUID
             let items: [AppleCatalogItem]
             let rawItems: [AppleMediaServerItem]
+            var hub: HubState? = nil
         }
         
         struct SourceResult: Sendable {
@@ -308,6 +462,18 @@ public final class AppleMediaServerLibraryStore {
                                     items: shelfItems,
                                     rawItems: []
                                 ))
+                                let hubs = (try? await plexClient.homeHubs(session: sess, sectionKey: section.key)) ?? []
+                                for hub in hubs where ["movie", "show", "episode"].contains(hub.type) && !hub.hubIdentifier.isEmpty {
+                                    let eligible = hub.items.filter { Self.isEligible($0) }
+                                    guard !hub.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                                          !rawShelves.contains(where: { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == hub.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }) else { continue }
+                                    allPlexItems += eligible
+                                    let id = "ms:\(source.id.uuidString.lowercased()):\(section.key):hub:\(hub.hubIdentifier)"
+                                    guard !rawShelves.contains(where: { $0.id == id }) else { continue }
+                                    rawShelves.append(RawShelf(id: id, title: hub.title, sourceID: source.id,
+                                        items: eligible.map { plexCatalogMapper($0, source, sess) }, rawItems: [],
+                                        hub: HubState(request: .plex(key: hub.key, nextUp: hub.hubIdentifier.lowercased().contains("ondeck") || hub.hubIdentifier.lowercased().contains("nextup")), offset: hub.items.count, total: hub.totalSize)))
+                                }
                             }
                             
                             return SourceResult(
@@ -342,9 +508,25 @@ public final class AppleMediaServerLibraryStore {
                                 items: shelfItems,
                                 rawItems: latestItems
                             ))
-                            rawShelves += Self.genreShelves(items: shelfItems, sourceID: source.id, libraryID: library.id)
-                                .map { RawShelf(id: $0.id, title: $0.title, sourceID: $0.sourceID,
-                                               items: $0.items, rawItems: []) }
+                            if library.collectionType == .tvshows,
+                               let next = try? await client.nextUp(session: sess, parentID: library.id) {
+                                allRawItems += next.items
+                                rawShelves.append(RawShelf(id: "ms:\(source.id.uuidString.lowercased()):\(library.id):nextup",
+                                    title: "Next up in \(library.name)", sourceID: source.id,
+                                    items: next.items.filter { Self.isEligible($0) }.map { catalogMapper($0, source, sess) }, rawItems: next.items,
+                                    hub: HubState(request: .nextUp(parentID: library.id), offset: next.items.count, total: next.totalRecordCount)))
+                            }
+                            for genre in Self.genreShelves(items: shelfItems, sourceID: source.id, libraryID: library.id) {
+                                guard !rawShelves.contains(where: { $0.title.lowercased() == genre.title.lowercased() }) else { continue }
+                                let type: AppleMediaServerItemType = library.collectionType == .movies ? .movie : .series
+                                let page = try? await client.items(session: sess, parentID: library.id, includeTypes: [type], limit: 20, genres: [genre.title])
+                                let eligible = page?.items.filter { Self.isEligible($0) } ?? []
+                                allRawItems += eligible
+                                rawShelves.append(RawShelf(id: genre.id, title: genre.title, sourceID: source.id,
+                                    items: eligible.isEmpty ? genre.items : eligible.map { catalogMapper($0, source, sess) }, rawItems: eligible,
+                                    hub: HubState(request: .genre(parentID: library.id, name: genre.title, type: type),
+                                        offset: page?.items.count ?? 0, total: page?.totalRecordCount ?? 0)))
+                            }
                         }
                         
                         return SourceResult(
@@ -404,6 +586,14 @@ public final class AppleMediaServerLibraryStore {
                 nextCW.append(contentsOf: self.continueWatching.filter { AppleMediaServerItemReference.parse($0.mediaID)?.sourceID == res.sourceID })
             } else {
                 self.failures.removeValue(forKey: res.sourceID)
+                let oldIDs = hubDefinitions.values.filter { $0.sourceID == res.sourceID }.map(\.id)
+                for id in oldIDs { hubStates.removeValue(forKey: id); hubDefinitions.removeValue(forKey: id) }
+                for shelf in res.shelves {
+                    if let hub = shelf.hub {
+                        hubStates[shelf.id] = hub
+                        hubDefinitions[shelf.id] = Shelf(id: shelf.id, title: shelf.title, sourceID: shelf.sourceID, items: [])
+                    }
+                }
                 nextShelves.append(contentsOf: res.shelves.map { Shelf(id: $0.id, title: $0.title, sourceID: $0.sourceID, items: $0.items) })
                 nextCW.append(contentsOf: res.continueWatching)
                 
@@ -448,7 +638,19 @@ public final class AppleMediaServerLibraryStore {
             }
         }
         
-        self.shelves = finalShelves
+        let oldOrder = shelfOrder
+        shelfOrder = sources.flatMap { source in
+            if let result = sortedResults.first(where: { $0.sourceID == source.id }), result.error == nil {
+                return result.shelves.map(\.id)
+            }
+            return oldOrder.filter { id in
+                hubDefinitions[id]?.sourceID == source.id || finalShelves.contains { $0.id == id && $0.sourceID == source.id }
+            }
+        }
+        self.shelves = finalShelves.filter { !($0.items.isEmpty && hubDefinitions[$0.id] != nil) }
+        let liveSourceIDs = Set(sources.map(\.id))
+        hubDefinitions = hubDefinitions.filter { liveSourceIDs.contains($0.value.sourceID) }
+        hubStates = hubStates.filter { hubDefinitions[$0.key] != nil }
         let localStore = ApplePlaybackStore()
         self.continueWatching = dedupedCW.filter { item in
             !localStore.isRemovedFromContinueWatching(mediaID: item.mediaID)
@@ -597,8 +799,15 @@ public final class AppleMediaServerLibraryStore {
     }
 
     internal func flushRemoteProgress(now: Date = .now) async {
+        var affected: Set<AppleMediaServerItemReference> = []
         await outbox.drain(now: now, availableSources: Set(sessionIndex.keys)) { [self] entry in
             guard let session = sessionIndex[entry.sourceID] else { throw AppleMediaServerError.unreachable }
+            var delivered = false
+            defer {
+                if delivered, entry.event == .stopped || entry.event == .scrobble {
+                    affected.insert(.init(sourceID: entry.sourceID, itemID: entry.itemID))
+                }
+            }
             if entry.kind == .plex {
                 let item = try await plexClient.item(session: session, ratingKey: entry.itemID)
                 if entry.event == .scrobble {
@@ -611,7 +820,7 @@ public final class AppleMediaServerLibraryStore {
                     if entry.event == .stopped {
                         let count = item.viewCount ?? 0
                         if let observed = entry.observedPlayCount {
-                            if count > observed { return }
+                            if count > observed { delivered = true; return }
                         } else {
                             outbox.checkpointPlayCount(entryID: entry.id, count: count)
                         }
@@ -629,7 +838,7 @@ public final class AppleMediaServerLibraryStore {
                     let fresh = try await client.item(session: session, id: entry.itemID)
                     let count = fresh.userData?.playCount ?? 0
                     if let observed = entry.observedPlayCount {
-                        if count > observed { return }
+                        if count > observed { delivered = true; return }
                     } else {
                         // Checkpoint the authoritative pre-stop count before the
                         // request. Partial stops can increment too on some servers.
@@ -639,7 +848,9 @@ public final class AppleMediaServerLibraryStore {
                 case .scrobble: break
                 }
             }
+            delivered = true
         }
+        for reference in affected { await refreshAffectedHubs(reference: reference) }
     }
 
     /// Mirrors a finished play into the in-memory item and the resume row at

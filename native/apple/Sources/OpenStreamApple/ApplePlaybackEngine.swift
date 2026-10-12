@@ -219,6 +219,7 @@ public protocol ApplePlaybackEngine: AnyObject {
     /// The stream's own chapter markers (Matroska chapters, MPEG-4 chapter
     /// tracks), for Skip Intro. Empty when the file carries none.
     var chapters: [AppleChapter] { get }
+    var chapterMediaVersion: UUID? { get }
     var failure: ApplePlaybackFailure? { get }
     /// Non-nil only on `.avPlayer` routes.
     var avPlayer: AVPlayer? { get }
@@ -336,4 +337,5 @@ public extension ApplePlaybackEngine {
 
 public extension ApplePlaybackEngine {
     var chapters: [AppleChapter] { [] }
+    var chapterMediaVersion: UUID? { nil }
 }

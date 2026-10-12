@@ -18,6 +18,16 @@ struct AppleTVHeroPagingTests {
         #expect(AppleTVHeroPaging.turn(for: target) == nil)
     }
 
+    @Test func detailsFocusFallsBackToMyListWhenThePrimaryAlreadyOpensDetails() {
+        #expect(AppleTVHeroPaging.availableTarget(.details, showsDetailsButton: false) == .myList)
+        #expect(AppleTVHeroPaging.availableTarget(.details, showsDetailsButton: true) == .details)
+    }
+
+    @Test(arguments: [AppleTVHeroPaging.Target.play, .myList, .previousPage, .nextPage])
+    func hidingDetailsKeepsOtherFocusTargets(_ target: AppleTVHeroPaging.Target) {
+        #expect(AppleTVHeroPaging.availableTarget(target, showsDetailsButton: false) == target)
+    }
+
     @Test func noFocusNeverTurnsThePage() {
         #expect(AppleTVHeroPaging.turn(for: nil) == nil)
     }
