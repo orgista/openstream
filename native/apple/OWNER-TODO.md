@@ -8,13 +8,15 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 ## Open
 
 - [ ] **Apple TV posters: title on focus (owner 2026-10-12: "titles on focus").** Posters stay clean; the focused
-      poster shows its title underneath, like the Apple TV app's focus caption. Building now.
+      poster shows its title underneath, like the Apple TV app's focus caption. Built in 12aa663; simulator check running.
 - [ ] **Full e2e after the 2026-10-12 polish queue: NOT PASSED; fixes in, re-run running.** Unit gate and all 4
       platform builds passed. iPhone UI tests on DevPlus: 11 passed / 29 failed / 58 skipped. The iPhone app sat at 100%
       CPU for 144 s: Top Shelf publishing rebuilt all playback history once per title (from 11a3d75). That is fixed in
       5e70036, which also stops the background iCloud save replacing "Configuration imported". Gate: 3160 tests.
-      Simulators stalled before app start (dyld); cause not yet known (machine or code). The re-run on DevPlus and the
-      tvOS sim is with Codex. Results: verification-artifacts/e2e-2026-10-12/.
+      Re-run on DevPlus: 13 passed / 27 failed; import (369 s → 48 s) and the download Live Activity now pass. Most
+      remaining failures are stub-data tests that need a simulator. The simulator stall was the machine, not the app:
+      a Debug build on the external drive hangs at launch (AGENTS.md now says build simulator apps on the internal disk).
+      Codex is running the simulator plans (iOS + tvOS). Results: verification-artifacts/e2e-2026-10-12/.
 - [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
