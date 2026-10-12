@@ -73,6 +73,20 @@ struct AppleTVCardCaptionFocus: ViewModifier {
     }
 }
 
+/// A poster's title that appears under it only while it is focused, dropping
+/// clear of the lifted art like `AppleTVCardCaptionFocus`.
+struct AppleTVFocusedCaption: ViewModifier {
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isFocused ? 1 : 0)
+            .offset(y: isFocused ? AppleTVDetailMetrics.cardCaptionFocusDrop : 0)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isFocused)
+    }
+}
+
 /// Draws only the label: tvOS's stock plain style still lifts and brightens a
 /// focused button, which put a light box behind the My List and Rate discs
 /// ("a box over a circle", owner 16:25). Controls that draw their own focus

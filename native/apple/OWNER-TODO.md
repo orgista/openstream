@@ -7,6 +7,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Apple TV posters: title on focus (owner 2026-10-12: "titles on focus").** Posters stay clean; the focused
+      poster shows its title underneath, like the Apple TV app's focus caption. Building now.
 - [ ] **Full e2e after the 2026-10-12 polish queue: NOT PASSED; fixes in, re-run running.** Unit gate and all 4
       platform builds passed. iPhone UI tests on DevPlus: 11 passed / 29 failed / 58 skipped. The iPhone app sat at 100%
       CPU for 144 s: Top Shelf publishing rebuilt all playback history once per title (from 11a3d75). That is fixed in
@@ -403,8 +405,6 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
       (2026-10-12: 229cabe removed the extra fade over bright hero art; only the approved billboard fade is left.
       If that was the one, tick this.)
-- [ ] **Apple TV posters: titles underneath? (2026-10-12)** tvOS posters have never shown titles (Apple TV app
-      style), but the Netflix rule says "titles under posters". Keep as is, or add titles on the TV too?
 - [ ] **Check on your phone/TV (2026-10-12 polish, 1e91143..36da38c):** Top Picks (no duplicates), Continue
       Watching order + next episode after a finished one + "see all" when the row is full. The tvOS sim and tests
       pass, but these need real watch history, which only your devices have (DevPlus screenshots come out black).

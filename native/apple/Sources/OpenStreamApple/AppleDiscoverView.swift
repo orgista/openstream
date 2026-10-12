@@ -2430,6 +2430,16 @@ extension View {
         #endif
     }
 
+    /// Shown only while the card is focused (Apple TV only).
+    @ViewBuilder
+    func appleTVFocusedCaption() -> some View {
+        #if os(tvOS)
+        modifier(AppleTVFocusedCaption())
+        #else
+        self
+        #endif
+    }
+
     @ViewBuilder
     func appleTVCardArtworkFocus(cornerRadius: CGFloat) -> some View {
         #if os(tvOS)
@@ -2687,6 +2697,17 @@ struct AppleCatalogCard: View {
                     .overlay(alignment: .topLeading) { captionLines(reservingTitleLines: false) }
                     .frame(width: cardWidth, alignment: .leading)
                     .appleTVCardCaptionFocus()
+            } else if showsFocusTitle {
+                // Apple TV posters stay clean; the focused one names itself
+                // underneath (owner 2026-10-12: "titles on focus"). The line
+                // is always reserved so the row does not jump.
+                Text(item.name)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: cardWidth, alignment: .leading)
+                    .accessibilityHidden(true)
+                    .appleTVFocusedCaption()
             }
         }
         .contentShape(Rectangle())
@@ -2729,6 +2750,15 @@ struct AppleCatalogCard: View {
         return isLandscapeCard
         #else
         return true
+        #endif
+    }
+
+    /// Apple TV portrait posters: a one-line title shown only while focused.
+    private var showsFocusTitle: Bool {
+        #if os(tvOS)
+        return !showsTitle && !isLandscapeCard && sizing != .portraitPromo
+        #else
+        return false
         #endif
     }
 
