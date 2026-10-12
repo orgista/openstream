@@ -106,9 +106,26 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         if local.sourceTombstones.contains(where: { id, date in
             cloud.sourceTombstones[id].map { $0 < date } ?? true
         }) { return true }
+        if playbackContribution(local, cloud: cloud) { return true }
         if cloud.sources.isEmpty { return true }
         guard let localSavedAt else { return false }
         return localSavedAt > cloud.savedAt
+    }
+
+    /// Playback has per-item clocks; the configuration clock must not hide a
+    /// later rewind/reset on a device whose settings snapshot is older.
+    static func playbackContribution(_ local: AppleConfigurationSnapshot, cloud: AppleConfigurationSnapshot) -> Bool {
+        let merged = cloud.merging(local)
+        guard let projectedData = try? merged.cloudData(), let cloudData = try? cloud.cloudData(),
+              let projected = try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: projectedData),
+              let cloud = try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: cloudData) else {
+            // A quota failure must surface at write time instead of silently
+            // dropping a pending terminal barrier.
+            return local.playbackTerminals != cloud.playbackTerminals
+        }
+        return projected.playbackProgress != cloud.playbackProgress || projected.playbackActivity != cloud.playbackActivity
+            || projected.playbackTerminals != cloud.playbackTerminals || projected.watchedHistory != cloud.watchedHistory
+            || projected.watchedTombstones != cloud.watchedTombstones || projected.continueWatchingRemovals != cloud.continueWatchingRemovals
     }
 
     /// Do two snapshots carry different configurations, ignoring when each

@@ -171,9 +171,9 @@ struct AppleWatchedHistoryTests {
         let (store, defaults) = try makeStore()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let mediaID = "fixture-episode"
-        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100)])
+        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100, updatedAt: Date(timeIntervalSince1970: 100))])
         store.markUnwatched(mediaID: mediaID)
-        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100)])
+        store.restoreConfigurationProgress([try key(mediaID): ApplePlaybackProgress(position: 100, duration: 100, updatedAt: Date(timeIntervalSince1970: 100))])
         #expect(store.completedMediaIDs(among: [mediaID]).isEmpty)
     }
 
@@ -312,7 +312,7 @@ struct AppleWatchedHistoryTests {
     }
 
     @Test func cloudByteTrimDropsOldTombstonesBeforeNewProgress() throws {
-        let longPart = String(repeating: "a", count: 4_000)
+        let longPart = String(repeating: "a", count: 3_500)
         let progress = Dictionary(uniqueKeysWithValues: (0..<150).map {
             ("progress-\($0)", ApplePlaybackProgress(position: 10, duration: 100,
                 updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart))
@@ -341,12 +341,12 @@ struct AppleWatchedHistoryTests {
     }
 
     @Test func cloudByteTrimDropsTheOldestOfEitherList() throws {
-        let longPart = String(repeating: "a", count: 4_000)
+        let longPart = String(repeating: "a", count: 3_500)
         let progress = Dictionary(uniqueKeysWithValues: (0..<150).map {
             ("progress-\($0)", ApplePlaybackProgress(position: 10, duration: 100,
                 updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart))
         })
-        // About 5% over the budget, so only a few dozen re-encodes.
+        // Include retained terminal clocks while leaving newer resumes within the budget.
         let history = Dictionary(uniqueKeysWithValues: (0..<350).map {
             ("watched-\($0)-" + String(repeating: "b", count: 1_000), Date(timeIntervalSince1970: Double($0)))
         })

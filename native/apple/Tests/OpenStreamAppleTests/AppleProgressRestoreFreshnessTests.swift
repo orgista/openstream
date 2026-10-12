@@ -35,13 +35,13 @@ struct AppleProgressRestoreFreshnessTests {
         let past = Date(timeIntervalSince1970: 1_000)
         let now = Date(timeIntervalSince1970: 2_000)
         let mine = AppleConfigurationSnapshot(playbackProgress: [
-            "a": .init(position: 10, duration: 100, updatedAt: now),
-            "b": .init(position: 10, duration: 100, updatedAt: past),
+            "a": .init(position: 10, duration: 1_000, updatedAt: now),
+            "b": .init(position: 10, duration: 1_000, updatedAt: past),
         ])
         let theirs = AppleConfigurationSnapshot(playbackProgress: [
-            "a": .init(position: 90, duration: 100, updatedAt: past),
-            "b": .init(position: 90, duration: 100, updatedAt: now),
-            "c": .init(position: 5, duration: 100, updatedAt: past),
+            "a": .init(position: 90, duration: 1_000, updatedAt: past),
+            "b": .init(position: 90, duration: 1_000, updatedAt: now),
+            "c": .init(position: 5, duration: 1_000, updatedAt: past),
         ])
         let merged = mine.merging(theirs).playbackProgress
         #expect(merged["a"]?.position == 10)
@@ -68,7 +68,7 @@ struct AppleProgressRestoreFreshnessTests {
             let store = ApplePlaybackStore(defaults: defaults)
             store.restoreConfigurationProgress(decoded.playbackProgress)
             store.restoreConfigurationWatchedHistory(decoded.watchedHistory, tombstones: decoded.watchedTombstones)
-            #expect(store.configurationProgress().count == 10_000)
+            #expect(store.configurationProgress().isEmpty, "equal-time completion supersedes old resume entries")
             _ = try decoded.cloudData()
         }
         #expect(elapsed < .seconds(10), "10k-title restore took \(elapsed)")

@@ -39,6 +39,84 @@ public struct ApplePlaybackProgress: Codable, Equatable, Sendable {
     }
 }
 
+/// Monotonic per-title barriers. Keep each kind independently: a later row
+/// removal must not discard the completion/reset that blocks stale resumes.
+public struct ApplePlaybackTerminalEvents: Codable, Equatable, Sendable {
+    public var completedAt: Date?
+    public var resetAt: Date?
+    public var removedAt: Date?
+    public var playedAt: Date?
+
+    public init(completedAt: Date? = nil, resetAt: Date? = nil, removedAt: Date? = nil, playedAt: Date? = nil) {
+        self.completedAt = completedAt
+        self.resetAt = resetAt
+        self.removedAt = removedAt
+        self.playedAt = playedAt
+    }
+
+    var progressBarrier: Date? { [completedAt, resetAt].compactMap { $0 }.max() }
+
+    func merging(_ other: Self) -> Self {
+        Self(completedAt: [completedAt, other.completedAt].compactMap { $0 }.max(),
+             resetAt: [resetAt, other.resetAt].compactMap { $0 }.max(),
+             removedAt: [removedAt, other.removedAt].compactMap { $0 }.max(),
+             playedAt: [playedAt, other.playedAt].compactMap { $0 }.max())
+    }
+}
+
+/// Shared by local restore and cloud merge; equal clocks must yield the same
+/// result regardless of device or restore order.
+enum ApplePlaybackConvergence {
+    static func freshest(_ a: ApplePlaybackProgress, _ b: ApplePlaybackProgress) -> ApplePlaybackProgress {
+        if a.updatedAt != b.updatedAt { return a.updatedAt > b.updatedAt ? a : b }
+        if a.isComplete != b.isComplete { return a.isComplete ? a : b }
+        if a.position != b.position { return a.position > b.position ? a : b }
+        if a.duration != b.duration { return a.duration > b.duration ? a : b }
+        if a.partID == nil { return b.partID == nil ? a : b }
+        if b.partID == nil { return a }
+        return (a.partID ?? "") >= (b.partID ?? "") ? a : b
+    }
+
+    static func terminals(_ explicit: [String: ApplePlaybackTerminalEvents],
+                          watched: [String: Date], unwatched: [String: Date],
+                          removals: [String: Date], activity: [String: ApplePlaybackProgress]) -> [String: ApplePlaybackTerminalEvents] {
+        var result = explicit
+        func add(_ key: String, _ event: ApplePlaybackTerminalEvents) {
+            result[key] = (result[key] ?? .init()).merging(event)
+        }
+        for (key, date) in watched { add(key, .init(completedAt: date)) }
+        for (key, date) in unwatched { add(key, .init(resetAt: date)) }
+        for (key, date) in removals { add(key, .init(removedAt: date)) }
+        for (key, progress) in activity where progress.isComplete { add(key, .init(completedAt: progress.updatedAt)) }
+        // Retain every title's playback clock even when the ordinary cloud
+        // resume/activity lists trim its offset.
+        for (key, progress) in activity { add(key, .init(playedAt: progress.updatedAt)) }
+        return result
+    }
+
+    static func history(_ history: AppleWatchedHistory, terminals: [String: ApplePlaybackTerminalEvents]) -> AppleWatchedHistory {
+        var result = history
+        // Only upgrade known watched identities: show-level completion
+        // barriers must not turn a finished episode into a watched show.
+        for key in history.watched.keys {
+            if let date = terminals[key]?.completedAt { result.merge(watched: [key: date], tombstones: [:]) }
+        }
+        result.merge(watched: [:], tombstones: terminals.compactMapValues(\.resetAt))
+        return result
+    }
+
+    static func reconciled(_ progress: [String: ApplePlaybackProgress], terminals: [String: ApplePlaybackTerminalEvents]) -> [String: ApplePlaybackProgress] {
+        progress.filter { key, value in
+            let part = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
+            let barrier = [terminals[key]?.progressBarrier, value.partID.flatMap { terminals[$0]?.progressBarrier },
+                part.flatMap { terminals[$0]?.progressBarrier }].compactMap { $0 }.max()
+            if barrier.map({ value.updatedAt <= $0 }) == true { return false }
+            if terminals[key]?.playedAt.map({ value.updatedAt < $0 }) == true { return false }
+            return true
+        }
+    }
+}
+
 /// Where a title starts when the viewer presses Play: the position the store
 /// holds for that exact part, or nil to start at the beginning. One place, so
 /// every play path in the detail page agrees — they all passed `nil` before,
@@ -97,7 +175,10 @@ public final class ApplePlaybackStore {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        migrateLegacyPlaybackStateIfNeeded()
     }
+
+    private let terminalKey = "openstream.playback.terminals.v1"
 
     private let activityKey = "openstream.playback.activity.v1"
     private let episodesKey = "openstream.playback.availableEpisodes.v1"
@@ -105,7 +186,7 @@ public final class ApplePlaybackStore {
     private var activityData: Data?
     private var activityCache: [String: ApplePlaybackProgress]?
 
-    func activities() -> [String: ApplePlaybackProgress] {
+    private func rawActivities() -> [String: ApplePlaybackProgress] {
         let data = defaults.data(forKey: activityKey)
         if let activityCache, data == activityData { return activityCache }
         let values = data.flatMap { try? JSONDecoder().decode([String: ApplePlaybackProgress].self, from: $0) } ?? [:]
@@ -114,8 +195,27 @@ public final class ApplePlaybackStore {
         return values
     }
 
+    func activities() -> [String: ApplePlaybackProgress] {
+        let terminals = configurationPlaybackTerminals()
+        return rawActivities().filter { key, value in
+            let part = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
+            let reset = [terminals[key]?.resetAt, part.flatMap { terminals[$0]?.resetAt }].compactMap { $0 }.max()
+            if reset.map({ value.updatedAt <= $0 }) == true { return false }
+            return terminals[key]?.playedAt.map({ value.updatedAt >= $0 }) ?? true
+        }
+    }
+
     public func lastActivity(for mediaID: String) -> ApplePlaybackProgress? {
-        ApplePlaybackIdentity.storageKey(for: mediaID).flatMap { activities()[$0] } ?? progress(for: mediaID)
+        guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
+        let saved = entries()[key]
+        let activity = activities()[key].map { value in saved.map { ApplePlaybackConvergence.freshest(value, $0) } ?? value } ?? saved
+        guard let activity else { return nil }
+        let partKey = activity.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
+        let terminals = configurationPlaybackTerminals()
+        let reset = [terminals[key]?.resetAt, partKey.flatMap { terminals[$0]?.resetAt }].compactMap { $0 }.max()
+        if reset.map({ activity.updatedAt <= $0 }) == true { return nil }
+        if terminals[key]?.playedAt.map({ activity.updatedAt < $0 }) == true { return nil }
+        return activity
     }
 
     func availableEpisodes() async -> [String: [AppleStremioEpisode]] {
@@ -163,13 +263,21 @@ public final class ApplePlaybackStore {
     public func completedMediaIDs(among mediaIDs: [String]) -> Set<String> {
         let watched = watchedEntries()
         let tombstones = storedWatchedTombstones()
-        let all = entries()
+        let terminals = configurationPlaybackTerminals()
+        let all = entries().merging(activities().filter { key, value in
+            value.partID == nil || value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:)) == key
+        }, uniquingKeysWith: ApplePlaybackConvergence.freshest)
         return Set(mediaIDs.filter { mediaID in
             guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
             #if DEBUG
             if AppleWatchedHistoryFixture.isSeeded(mediaID: mediaID, storageKey: storageKey) { return true }
             #endif
             if tombstones[storageKey] != nil { return false }
+            if let reset = terminals[storageKey]?.resetAt {
+                let completion = [watched[storageKey], all[storageKey].flatMap { $0.isComplete ? $0.updatedAt : nil }]
+                    .compactMap { $0 }.max()
+                if completion.map({ $0 <= reset }) ?? true { return false }
+            }
             return watched[storageKey] != nil || all[storageKey]?.isComplete == true
         })
     }
@@ -186,11 +294,13 @@ public final class ApplePlaybackStore {
         #if DEBUG
         AppleWatchedHistoryFixture.unwatched.remove(storageKey)
         #endif
+        recordTerminal(storageKey, .init(completedAt: date))
         persistWatched(history.watched, tombstones: history.tombstones)
+        reconcileStoredProgress()
     }
 
-    /// "Mark as Unwatched": records a deletion event. A resumable
-    /// position for it, if any, stays.
+    /// "Mark as Unwatched": records a reset event that supersedes older
+    /// resume/activity, including copies later restored from another device.
     public func markUnwatched(mediaID: String, at date: Date = .now) {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
         var watched = watchedEntries()
@@ -204,7 +314,9 @@ public final class ApplePlaybackStore {
         #endif
         var history = AppleWatchedHistory(watched: watched, tombstones: storedWatchedTombstones())
         history.merge(watched: [:], tombstones: [storageKey: date])
+        recordTerminal(storageKey, .init(resetAt: date))
         persistWatched(history.watched, tombstones: history.tombstones)
+        reconcileStoredProgress()
         var progress = entries()
         if progress[storageKey]?.isComplete == true {
             progress.removeValue(forKey: storageKey)
@@ -217,8 +329,9 @@ public final class ApplePlaybackStore {
     /// again (a later progress save).
     public func removeFromContinueWatching(mediaID: String, at date: Date = .now) {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
+        recordTerminal(storageKey, .init(removedAt: date))
         var removed = continueWatchingRemovals()
-        removed[storageKey] = date
+        removed[storageKey] = max(removed[storageKey] ?? .distantPast, date)
         persistRemovals(removed)
     }
 
@@ -227,7 +340,9 @@ public final class ApplePlaybackStore {
     public func isRemovedFromContinueWatching(mediaID: String) -> Bool {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
         return AppleContinueWatchingRemovalPolicy.isRemoved(
-            removedAt: continueWatchingRemovals()[storageKey], lastPlayedAt: activities()[storageKey]?.updatedAt ?? entries()[storageKey]?.updatedAt)
+            removedAt: configurationPlaybackTerminals()[storageKey]?.removedAt,
+            lastPlayedAt: [activities()[storageKey]?.updatedAt, entries()[storageKey]?.updatedAt,
+                configurationPlaybackTerminals()[storageKey]?.playedAt].compactMap { $0 }.max())
     }
 
     public func progress(for url: URL) -> ApplePlaybackProgress? {
@@ -267,13 +382,18 @@ public final class ApplePlaybackStore {
         var activity = activities()
         activity[storageKey] = progress
         if activity.count > Self.watchedHistoryLimit {
-            activity = Dictionary(uniqueKeysWithValues: activity.sorted { $0.value.updatedAt > $1.value.updatedAt }
+            let barriers = ApplePlaybackConvergence.terminals(configurationPlaybackTerminals(), watched: [:], unwatched: [:],
+                removals: [:], activity: activity)
+            defaults.set(try? JSONEncoder().encode(barriers), forKey: terminalKey)
+            activity = Dictionary(uniqueKeysWithValues: activity.sorted { $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt }
                 .prefix(Self.watchedHistoryLimit).map { ($0.key, $0.value) })
         }
         activityCache = activity
         activityData = try? JSONEncoder().encode(activity)
         defaults.set(activityData, forKey: activityKey)
+        recordTerminal(storageKey, .init(playedAt: progress.updatedAt))
         if progress.isComplete {
+            recordTerminal(storageKey, .init(completedAt: progress.updatedAt))
             current.removeValue(forKey: storageKey)
             // A series keeps its entry under the show and names the episode
             // in `partID`; the episode is what was finished, not the show.
@@ -295,6 +415,7 @@ public final class ApplePlaybackStore {
     }
 
     private func clear(storageKey: String) {
+        recordTerminal(storageKey, .init(resetAt: .now))
         var activity = activities()
         activity.removeValue(forKey: storageKey)
         activityCache = activity
@@ -375,7 +496,10 @@ public final class ApplePlaybackStore {
     }
 
     private func persistStoredWatched(_ history: AppleWatchedHistory, notify: Bool) {
-        let bounded = history.newest(Self.watchedHistoryLimit)
+        let barriers = ApplePlaybackConvergence.terminals(configurationPlaybackTerminals(), watched: history.watched,
+            unwatched: history.tombstones, removals: [:], activity: [:])
+        defaults.set(try? JSONEncoder().encode(barriers), forKey: terminalKey)
+        let bounded = ApplePlaybackConvergence.history(history, terminals: barriers).newest(Self.watchedHistoryLimit)
         watchedCache = bounded.watched
         watchedCachedData = try? JSONEncoder().encode(bounded.watched)
         unwatchedCache = bounded.tombstones
@@ -395,7 +519,13 @@ public final class ApplePlaybackStore {
 
     func configurationProgress() -> [String: ApplePlaybackProgress] { entries() }
 
-    func configurationContinueWatchingRemovals() -> [String: Date] { continueWatchingRemovals() }
+    func configurationContinueWatchingRemovals() -> [String: Date] {
+        configurationPlaybackTerminals().compactMapValues { event in
+            guard let removed = event.removedAt,
+                  AppleContinueWatchingRemovalPolicy.isRemoved(removedAt: removed, lastPlayedAt: event.playedAt) else { return nil }
+            return removed
+        }
+    }
 
     /// Merges a backup's or another device's removals into this one: the
     /// newest removal per title wins.
@@ -406,6 +536,8 @@ public final class ApplePlaybackStore {
             guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
             normalized[storageKey] = max(normalized[storageKey] ?? date, date)
         }
+        restoreConfigurationPlaybackTerminals(ApplePlaybackConvergence.terminals([:], watched: [:], unwatched: [:],
+            removals: normalized, activity: [:]))
         let current = continueWatchingRemovals()
         let merged = AppleContinueWatchingRemovalPolicy.merged(current, normalized)
         guard merged != current else { return }
@@ -422,6 +554,9 @@ public final class ApplePlaybackStore {
     }
 
     private func persistRemovals(_ removals: [String: Date], notify: Bool = true) {
+        let terminals = ApplePlaybackConvergence.terminals(configurationPlaybackTerminals(), watched: [:], unwatched: [:],
+            removals: removals, activity: [:])
+        defaults.set(try? JSONEncoder().encode(terminals), forKey: terminalKey)
         let bounded = Self.boundedWatchedHistory(removals, limit: Self.continueWatchingRemovalLimit)
         removedCache = bounded
         removedCachedData = bounded.isEmpty ? nil : try? JSONEncoder().encode(bounded)
@@ -434,12 +569,30 @@ public final class ApplePlaybackStore {
     /// per title the freshest `updatedAt` wins, so a snapshot written before
     /// this device's last play never winds it back (V6).
     func restoreConfigurationProgress(_ incoming: [String: ApplePlaybackProgress]) {
-        persist(entries().merging(incoming) { mine, theirs in theirs.updatedAt >= mine.updatedAt ? theirs : mine })
+        var normalized: [String: ApplePlaybackProgress] = [:]
+        for (key, value) in incoming {
+            guard let storageKey = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            normalized[storageKey] = normalized[storageKey].map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+        }
+        // Preserve complete legacy entries as activity before their resume is removed.
+        let completions = normalized.filter { $0.value.isComplete }
+        restoreConfigurationPlaybackActivity(completions)
+        var watched: [String: Date] = [:]
+        for (key, value) in completions {
+            let finished = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:)) ?? key
+            watched[finished] = max(watched[finished] ?? .distantPast, value.updatedAt)
+        }
+        restoreConfigurationWatchedHistory(watched)
+        persist(ApplePlaybackConvergence.reconciled(entries().merging(normalized, uniquingKeysWith: ApplePlaybackConvergence.freshest),
+            terminals: configurationPlaybackTerminals()))
     }
 
     /// Backups and iCloud always read and write the stored history, never a
     /// review build's in-memory fixture.
-    func configurationWatchedHistory() -> [String: Date] { storedWatchedHistory().watched }
+    func configurationWatchedHistory() -> [String: Date] {
+        let history = storedWatchedHistory()
+        return ApplePlaybackConvergence.history(history, terminals: configurationPlaybackTerminals()).watched
+    }
 
     func configurationWatchedTombstones() -> [String: Date] { storedWatchedHistory().tombstones }
 
@@ -459,8 +612,104 @@ public final class ApplePlaybackStore {
         }
         var merged = current
         merged.merge(watched: normalized.watched, tombstones: normalized.tombstones)
+        restoreConfigurationPlaybackTerminals(ApplePlaybackConvergence.terminals([:], watched: normalized.watched,
+            unwatched: normalized.tombstones, removals: [:], activity: [:]))
         guard merged.watched != current.watched || merged.tombstones != current.tombstones else { return }
         persistStoredWatched(merged, notify: true)
+    }
+
+    /// The additive terminal key is also the migration marker. Preserve a
+    /// legacy completed episode's part/activity before reconciling its resume,
+    /// and do this once so constructing stores during rendering stays cheap.
+    private func migrateLegacyPlaybackStateIfNeeded() {
+        guard defaults.data(forKey: terminalKey) == nil else { return }
+        let progress = entries()
+        var activity: [String: ApplePlaybackProgress] = [:]
+        for (key, value) in rawActivities() {
+            guard let key = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            activity[key] = activity[key].map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+        }
+        func dates(_ values: [String: Date]) -> [String: Date] {
+            var normalized: [String: Date] = [:]
+            for (key, date) in values {
+                guard let key = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+                normalized[key] = max(normalized[key] ?? .distantPast, date)
+            }
+            return normalized
+        }
+        var history = AppleWatchedHistory(watched: dates(storedWatchedEntries()), tombstones: dates(storedWatchedTombstones()))
+        for (key, value) in progress where value.isComplete {
+            activity[key] = activity[key].map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+            let finished = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:)) ?? key
+            history.merge(watched: [finished: value.updatedAt], tombstones: [:])
+        }
+        let terminals = ApplePlaybackConvergence.terminals([:], watched: history.watched, unwatched: history.tombstones,
+            removals: dates(continueWatchingRemovals()), activity: activity.merging(progress, uniquingKeysWith: ApplePlaybackConvergence.freshest))
+        defaults.set(try? JSONEncoder().encode(terminals), forKey: terminalKey)
+        // Fresh installs need only the marker; leave absent legacy blobs absent.
+        guard !progress.isEmpty || !activity.isEmpty || !history.watched.isEmpty || !history.tombstones.isEmpty else { return }
+        activityCache = activity
+        activityData = try? JSONEncoder().encode(activity)
+        defaults.set(activityData, forKey: activityKey)
+        persistStoredWatched(history, notify: false)
+        let reconciled = ApplePlaybackConvergence.reconciled(progress, terminals: terminals)
+        cache = reconciled
+        cachedData = try? JSONEncoder().encode(reconciled)
+        defaults.set(cachedData, forKey: key)
+    }
+
+    func configurationPlaybackActivity() -> [String: ApplePlaybackProgress] { activities() }
+
+    func configurationPlaybackTerminals() -> [String: ApplePlaybackTerminalEvents] {
+        let explicit = defaults.data(forKey: terminalKey).flatMap {
+            try? JSONDecoder().decode([String: ApplePlaybackTerminalEvents].self, from: $0)
+        } ?? [:]
+        return ApplePlaybackConvergence.terminals(explicit, watched: storedWatchedEntries(),
+            unwatched: storedWatchedTombstones(), removals: continueWatchingRemovals(),
+            activity: rawActivities().merging(entries(), uniquingKeysWith: ApplePlaybackConvergence.freshest))
+    }
+
+    func hasLocalPlaybackState(mediaID: String) -> Bool {
+        guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
+        return entries()[key] != nil || activities()[key] != nil || configurationPlaybackTerminals()[key] != nil
+    }
+
+    private func recordTerminal(_ key: String, _ event: ApplePlaybackTerminalEvents) {
+        var values = configurationPlaybackTerminals()
+        values[key] = (values[key] ?? .init()).merging(event)
+        defaults.set(try? JSONEncoder().encode(values), forKey: terminalKey)
+    }
+
+    func restoreConfigurationPlaybackTerminals(_ incoming: [String: ApplePlaybackTerminalEvents]) {
+        var values = configurationPlaybackTerminals()
+        for (key, event) in incoming {
+            guard let key = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            values[key] = (values[key] ?? .init()).merging(event)
+        }
+        defaults.set(try? JSONEncoder().encode(values), forKey: terminalKey)
+        reconcileStoredProgress()
+    }
+
+    func restoreConfigurationPlaybackActivity(_ incoming: [String: ApplePlaybackProgress]) {
+        var values = activities()
+        for (key, value) in incoming {
+            guard let key = ApplePlaybackIdentity.storageKey(for: key) else { continue }
+            values[key] = values[key].map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+        }
+        // Materialize barriers before activity's ordinary size limit can retire them.
+        restoreConfigurationPlaybackTerminals(ApplePlaybackConvergence.terminals([:], watched: [:], unwatched: [:], removals: [:], activity: values))
+        values = Dictionary(uniqueKeysWithValues: values.sorted {
+            $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt
+        }.prefix(Self.watchedHistoryLimit).map { ($0.key, $0.value) })
+        activityCache = values
+        activityData = try? JSONEncoder().encode(values)
+        defaults.set(activityData, forKey: activityKey)
+    }
+
+    private func reconcileStoredProgress() {
+        let current = entries()
+        let reconciled = ApplePlaybackConvergence.reconciled(current, terminals: configurationPlaybackTerminals())
+        if current != reconciled { persist(reconciled) }
     }
 
     private func persist(_ entries: [String: ApplePlaybackProgress]) {

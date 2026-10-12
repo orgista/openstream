@@ -95,7 +95,10 @@ struct AppleMediaServerLibraryStoreTests {
             return (json.data(using: .utf8)!, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         
-        let store = AppleMediaServerLibraryStore(client: client)
+        let defaultsName = "media-server-tests-\(UUID())"
+        let progressDefaults = UserDefaults(suiteName: defaultsName)!
+        defer { progressDefaults.removePersistentDomain(forName: defaultsName) }
+        let store = AppleMediaServerLibraryStore(client: client, progressDefaults: progressDefaults)
         
         await store.reload(sources: [source1, source2, source3]) { s in
             if s.id == source1.id { return session1 }
@@ -219,7 +222,10 @@ struct AppleMediaServerLibraryStoreTests {
             return (json.data(using: .utf8)!, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         
-        let store = AppleMediaServerLibraryStore(client: client)
+        let defaultsName = "media-server-tests-\(UUID())"
+        let progressDefaults = UserDefaults(suiteName: defaultsName)!
+        defer { progressDefaults.removePersistentDomain(forName: defaultsName) }
+        let store = AppleMediaServerLibraryStore(client: client, progressDefaults: progressDefaults)
         await store.reload(sources: [source]) { _ in return session }
         
         let refMovie = AppleMediaServerItemReference(sourceID: sourceID, itemID: "m1")
@@ -262,7 +268,7 @@ struct AppleMediaServerLibraryStoreTests {
         #expect(meta.mediaType == "movie")
         #expect(meta.runtimeMinutes == 120)
     }
-    @Test("Merged resume prefers further position unless played")
+    @Test("Merged resume keeps local activity over stale server state")
     func testMergedResume() {
         let local = ApplePlaybackProgress(position: 100, duration: 200, updatedAt: Date())
         let serverUnplayed = AppleMediaServerItem.UserData(positionSeconds: 50, played: false, isFavorite: false, playCount: 0)
@@ -271,7 +277,7 @@ struct AppleMediaServerLibraryStoreTests {
         
         let serverPlayed = AppleMediaServerItem.UserData(positionSeconds: 0, played: true, isFavorite: false, playCount: 1)
         let merged2 = AppleMediaServerLibraryStore.mergedResume(local: local, server: serverPlayed)
-        #expect(merged2 == 0) // played = true wins
+        #expect(merged2 == 100) // a real local rewatch wins
         
         let localNone: ApplePlaybackProgress? = nil
         let merged3 = AppleMediaServerLibraryStore.mergedResume(local: localNone, server: serverUnplayed)
@@ -280,6 +286,13 @@ struct AppleMediaServerLibraryStoreTests {
         let serverNone: AppleMediaServerItem.UserData? = nil
         let merged4 = AppleMediaServerLibraryStore.mergedResume(local: local, server: serverNone)
         #expect(merged4 == 100)
+        let rewind = ApplePlaybackProgress(position: 20, duration: 200, updatedAt: Date())
+        let staleAhead = AppleMediaServerItem.UserData(positionSeconds: 150, played: false, isFavorite: false, playCount: 0)
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: rewind, server: staleAhead) == 20)
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: rewind, server: serverPlayed) == 20)
+        let rewatchItem = AppleMediaServerItem(id: "rewatch", name: "Fixture", type: .movie,
+            runtimeSeconds: 200, userData: serverPlayed)
+        #expect(AppleMediaServerLibraryStore.resumePosition(for: rewatchItem, local: rewind) == 20)
     }
 
     @Test("Remote progress sink reports to client and updates item")
@@ -333,7 +346,10 @@ struct AppleMediaServerLibraryStoreTests {
             return (json.data(using: .utf8)!, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         
-        let store = AppleMediaServerLibraryStore(client: client)
+        let defaultsName = "media-server-tests-\(UUID())"
+        let progressDefaults = UserDefaults(suiteName: defaultsName)!
+        defer { progressDefaults.removePersistentDomain(forName: defaultsName) }
+        let store = AppleMediaServerLibraryStore(client: client, progressDefaults: progressDefaults)
         await store.reload(sources: [source]) { _ in return session }
         
         let ref = AppleMediaServerItemReference(sourceID: sourceID, itemID: "m1")
@@ -352,8 +368,8 @@ struct AppleMediaServerLibraryStoreTests {
         store.handleRemoteProgress(mediaID: mediaID, position: 25, duration: 100, event: .progress)
         store.handleRemoteProgress(mediaID: mediaID, position: 30, duration: 100, event: .paused)
         
-        await waitUntil { state.progress == 3 && state.pausedSent }
-        #expect(state.progress == 3) // It sends what it gets. Throttling is in Coordinator
+        await waitUntil { state.progress == 1 && state.pausedSent }
+        #expect(state.progress == 1) // Consecutive ticks coalesce to the latest paused state
         #expect(state.pausedSent == true)
         
         // Stopped at 40% (moved to front of continue watching)
@@ -439,7 +455,10 @@ struct AppleMediaServerLibraryStoreTests {
             return (Data(), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         
-        let store = AppleMediaServerLibraryStore(client: client, plexClient: plexClient)
+        let defaultsName = "media-server-tests-\(UUID())"
+        let progressDefaults = UserDefaults(suiteName: defaultsName)!
+        defer { progressDefaults.removePersistentDomain(forName: defaultsName) }
+        let store = AppleMediaServerLibraryStore(client: client, plexClient: plexClient, progressDefaults: progressDefaults)
         await store.reload(sources: [embySource, plexSource]) { s in
             if s.id == embySourceID { return embySession }
             if s.id == plexSourceID { return plexSession }

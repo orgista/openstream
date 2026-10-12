@@ -361,6 +361,46 @@ struct AppleDeviceResetTests {
     #expect(synced.merging(stale).sources.isEmpty)
 }
 
+@MainActor @Test func cloudControllerMergesPlaybackEvenWhenGlobalSnapshotIsOlder() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    _ = try device.sources.addIPTV(name: "Local fixture", type: .m3u, endpoint: "https://fixture.example/playlist.m3u")
+    let old = Date(timeIntervalSince1970: 100), newer = Date(timeIntervalSince1970: 200)
+    device.defaults.set(Date(timeIntervalSince1970: 500), forKey: "openstream.backup.savedAt.v1")
+    let key = try #require(ApplePlaybackIdentity.storageKey(for: "fixture-film"))
+    let store = ApplePlaybackStore(defaults: device.defaults)
+    store.restoreConfigurationProgress([key: .init(position: 900, duration: 3600, updatedAt: old)])
+    let cloud = AppleConfigurationSnapshot(savedAt: old, playbackProgress: [key: .init(position: 30, duration: 3600, updatedAt: newer)])
+    device.cloud.set(try cloud.cloudData(), forKey: "openstream.configuration.v1")
+    await device.controller.start()
+    #expect(store.progress(for: "fixture-film")?.position == 30)
+    #expect(device.sources.sources.map(\.name) == ["Local fixture"])
+    store.clear(mediaID: "fixture-film")
+    await device.controller.syncNow()
+    let published = try JSONDecoder().decode(AppleConfigurationSnapshot.self,
+        from: #require(device.cloud.data(forKey: "openstream.configuration.v1")))
+    #expect(published.playbackTerminals[key]?.resetAt != nil)
+    #expect(published.playbackProgress[key] == nil)
+}
+
+@MainActor @Test func newerCloudSnapshotReceivesOfflineLocalCompletionBarrier() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    _ = try device.sources.addIPTV(name: "Fixture", type: .m3u, endpoint: "https://fixture.example/playlist.m3u")
+    let key = try #require(ApplePlaybackIdentity.storageKey(for: "fixture-film"))
+    let store = ApplePlaybackStore(defaults: device.defaults)
+    store.save(mediaID: "fixture-film", position: 3590, duration: 3600)
+    let cloud = AppleConfigurationSnapshot(savedAt: Date(timeIntervalSinceNow: 60), sources: device.sources.sources,
+        playbackProgress: [key: .init(position: 900, duration: 3600, updatedAt: Date(timeIntervalSince1970: 100))])
+    device.cloud.set(try cloud.cloudData(), forKey: "openstream.configuration.v1")
+    await device.controller.start()
+    await device.controller.syncNow()
+    let published = try JSONDecoder().decode(AppleConfigurationSnapshot.self,
+        from: #require(device.cloud.data(forKey: "openstream.configuration.v1")))
+    #expect(published.playbackTerminals[key]?.completedAt != nil)
+    #expect(published.playbackProgress[key] == nil)
+}
+
 /// One device's stores on throwaway defaults, keychain and index file.
 @MainActor
 private struct BackupTestDevice {

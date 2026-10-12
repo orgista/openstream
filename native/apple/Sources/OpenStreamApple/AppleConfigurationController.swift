@@ -271,14 +271,27 @@ final class AppleConfigurationController {
             )
             guard case .apply(let snapshot) = decision else {
                 appleTrace("configuration sync read: \(decision.traceDescription)")
-                if decision == .notNewer { updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) } }
+                if decision == .notNewer {
+                    // Settings and sources retain their existing snapshot rule;
+                    // playback always reconciles its independent item clocks.
+                    if let data = cloud.data(forKey: Self.cloudKey) {
+                        let snapshot = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: data)
+                        applying = true
+                        restorePlayback(snapshot)
+                        applying = false
+                        lastContent = try contentFingerprint()
+                        if AppleConfigurationSyncPolicy.playbackContribution(try capture(), cloud: snapshot) { scheduleWrite() }
+                    }
+                    updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) }
+                }
                 return
             }
             pendingWrite?.cancel()
             try await apply(snapshot, secrets: nil, mergeSources: false)
             defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
-            if sources.sourceTombstones != snapshot.sourceTombstones { scheduleWrite() }
+            let hasPlaybackContribution = AppleConfigurationSyncPolicy.playbackContribution(try capture(), cloud: snapshot)
+            if sources.sourceTombstones != snapshot.sourceTombstones || hasPlaybackContribution { scheduleWrite() }
             if !sources.sources.isEmpty || !sources.sourceTombstones.isEmpty { heldSources = true }
             appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
             updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) }
@@ -393,7 +406,9 @@ final class AppleConfigurationController {
             watchedTombstones: ApplePlaybackStore(defaults: defaults).configurationWatchedTombstones(),
             watchlist: mediaIndex.records.filter(\.isFavorite),
             ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue),
-            continueWatchingRemovals: ApplePlaybackStore(defaults: defaults).configurationContinueWatchingRemovals())
+            continueWatchingRemovals: ApplePlaybackStore(defaults: defaults).configurationContinueWatchingRemovals(),
+            playbackTerminals: ApplePlaybackStore(defaults: defaults).configurationPlaybackTerminals(),
+            playbackActivity: ApplePlaybackStore(defaults: defaults).configurationPlaybackActivity())
         snapshot.preservedSourcePayloads = sources.preservedConfigurationSources
         return snapshot
     }
@@ -443,11 +458,7 @@ final class AppleConfigurationController {
             do { try settings.restoreConfigurationCredentials(secrets.settingsCredentials) }
             catch { appleTraceFailure("configuration apply: skipped settings sign-ins: \(appleErrorLabel(error))") }
         }
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(
-            snapshot.watchedHistory, tombstones: snapshot.watchedTombstones)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationContinueWatchingRemovals(
-            snapshot.continueWatchingRemovals)
+        restorePlayback(snapshot)
         AppleTitleRatingStore(defaults: defaults).restoreConfigurationRatings(snapshot.ratings)
         do { try await mediaIndex.restoreConfigurationWatchlist(snapshot.watchlist) }
         catch { appleTraceFailure("configuration apply: skipped the watchlist: \(appleErrorLabel(error))") }
@@ -466,6 +477,16 @@ final class AppleConfigurationController {
     /// the viewer taps Restore from iCloud: an empty device must not publish
     /// over the other devices' configuration, nor refill itself on its own.
     private var cloudRestoreHeld: Bool { defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey) }
+
+    private func restorePlayback(_ snapshot: AppleConfigurationSnapshot) {
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationPlaybackTerminals(snapshot.playbackTerminals)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationPlaybackActivity(snapshot.playbackActivity)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(
+            snapshot.watchedHistory, tombstones: snapshot.watchedTombstones)
+        ApplePlaybackStore(defaults: defaults).restoreConfigurationContinueWatchingRemovals(
+            snapshot.continueWatchingRemovals)
+    }
 
     private func scheduleWrite() {
         guard AppleConfigurationSyncPolicy.publishesChanges(), !cloudRestoreHeld else { return }

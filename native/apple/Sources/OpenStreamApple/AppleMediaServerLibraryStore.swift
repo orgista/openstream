@@ -60,6 +60,7 @@ public final class AppleMediaServerLibraryStore {
         let session: AppleMediaServerSession
         let mediaSourceID: String
         let playSessionID: String?
+        let playbackID = UUID()
     }
 
     private var activeTickets: [String: AppleMediaServerPlaybackTicket] = [:]
@@ -67,11 +68,15 @@ public final class AppleMediaServerLibraryStore {
 
     private let client: AppleMediaServerClient
     private let plexClient: ApplePlexClient
+    internal var automaticallyDeliversRemoteProgress = true
+    private let outbox: AppleRemoteProgressOutbox
+    private var deliveryTask: Task<Void, Never>?
     private var generation: Int = 0
     
-    public init(client: AppleMediaServerClient = AppleMediaServerClient(), plexClient: ApplePlexClient = ApplePlexClient()) {
+    public init(client: AppleMediaServerClient = AppleMediaServerClient(), plexClient: ApplePlexClient = ApplePlexClient(), progressDefaults: UserDefaults = .standard) {
         self.client = client
         self.plexClient = plexClient
+        self.outbox = AppleRemoteProgressOutbox(defaults: progressDefaults)
     }
     
     public func plexItem(for reference: AppleMediaServerItemReference) -> ApplePlexItem? {
@@ -85,6 +90,11 @@ public final class AppleMediaServerLibraryStore {
     /// Keep the server's resume fraction on the shelf record as well as its title page.
     public func continueWatchingRecord(for catalogItem: AppleCatalogItem, source: AppleSource) -> AppleMediaRecord {
         var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: catalogItem)
+        let localStore = ApplePlaybackStore()
+        if localStore.hasLocalPlaybackState(mediaID: catalogItem.mediaID) {
+            record.progress = localStore.progress(for: catalogItem.mediaID).map { $0.duration > 0 ? min($0.position / $0.duration, 1) : 0 } ?? 0
+            return record
+        }
         guard let reference = AppleMediaServerItemReference.parse(catalogItem.mediaID),
               let item = index[reference], let data = item.userData, !data.played,
               let duration = item.runtimeSeconds, duration.isFinite, duration > 0,
@@ -115,6 +125,10 @@ public final class AppleMediaServerLibraryStore {
         sourceIndex.removeValue(forKey: sourceID)
         sessionIndex.removeValue(forKey: sourceID)
         failures.removeValue(forKey: sourceID)
+        if sessionIndex.isEmpty {
+            deliveryTask?.cancel()
+            deliveryTask = nil
+        }
         persist()
     }
     
@@ -251,6 +265,17 @@ public final class AppleMediaServerLibraryStore {
             let error: String?
         }
         
+        sessionIndex = Dictionary(uniqueKeysWithValues: validSources.map { ($0.source.id, $0.session) })
+        // A disabled or signed-out source keeps its outbox. Only removal from
+        // the complete source list is an explicit deletion of delivery state.
+        outbox.retainSources(Set(sources.map(\.id)))
+        if sessionIndex.isEmpty {
+            deliveryTask?.cancel()
+            deliveryTask = nil
+        } else {
+            scheduleRemoteDelivery()
+        }
+
         let client = self.client
         let plexClient = self.plexClient
         let catalogMapper: @Sendable (AppleMediaServerItem, AppleSource, AppleMediaServerSession) -> AppleCatalogItem = self.catalogItem
@@ -424,7 +449,12 @@ public final class AppleMediaServerLibraryStore {
         }
         
         self.shelves = finalShelves
-        self.continueWatching = dedupedCW
+        let localStore = ApplePlaybackStore()
+        self.continueWatching = dedupedCW.filter { item in
+            !localStore.isRemovedFromContinueWatching(mediaID: item.mediaID)
+                && (!localStore.hasLocalPlaybackState(mediaID: item.mediaID)
+                    || localStore.progress(for: item.mediaID)?.resumePosition != nil)
+        }
         self.lastLoadedAt = Date()
         self.isLoading = false
         
@@ -487,27 +517,18 @@ public final class AppleMediaServerLibraryStore {
     }
 
     public static func mergedResume(local: ApplePlaybackProgress?, server: AppleMediaServerItem.UserData?) -> Double? {
-        if let s = server, s.played {
-            return s.positionSeconds
-        }
-        let l = local?.position ?? 0
-        let s = server?.positionSeconds ?? 0
-        if l == 0 && s == 0 {
-            return local?.position ?? server?.positionSeconds
-        }
-        return max(l, s)
+        // Provider offsets have no comparable update timestamp. A local
+        // position is authoritative, including a deliberate rewind/rewatch.
+        local?.position ?? server?.positionSeconds
     }
 
     public static func resumePosition(for item: AppleMediaServerItem, local: ApplePlaybackProgress? = nil) -> Double? {
-        guard let position = mergedResume(local: local, server: item.userData),
-              let duration = item.runtimeSeconds,
-              duration > 0 else { return nil }
-        
-        if position >= 15.0, item.userData?.played != true,
-           !AppleCompletionPolicy.isComplete(position: position, duration: duration) {
-            return position
-        }
-        return nil
+        if let local { return local.resumePosition }
+        guard let position = item.userData?.positionSeconds,
+              let duration = item.runtimeSeconds, duration > 0,
+              position >= 15, item.userData?.played != true,
+              !AppleCompletionPolicy.isComplete(position: position, duration: duration) else { return nil }
+        return position
     }
 
     public func attach(to coordinator: ApplePlaybackCoordinator) {
@@ -519,8 +540,13 @@ public final class AppleMediaServerLibraryStore {
 
     internal func handleRemoteProgress(mediaID: String, position: Double, duration: Double, event: ApplePlaybackCoordinator.RemoteProgressEvent) {
         guard let ref = AppleMediaServerItemReference.parse(mediaID),
-              let ticket = activeTickets[mediaID] else { return }
+              let ticket = activeTickets[mediaID], !stoppedSessions.contains(mediaID) else { return }
         
+        let completed = event == .stopped && AppleCompletionPolicy.isComplete(position: position, duration: duration)
+        let baseline = ticket.session.kind == .plex ? (plexIndex[ref]?.viewCount ?? 0) : (index[ref]?.userData?.playCount ?? 0)
+        let pendingTarget = outbox.entries.filter { $0.sourceID == ref.sourceID && $0.itemID == ref.itemID }
+            .compactMap(\.targetPlayCount).max() ?? baseline
+        let completionTarget = completed ? max(baseline, pendingTarget, outbox.highestCompletionTarget(for: ref)) + 1 : nil
         if event == .stopped {
             // One stop per play: a second .stopped for the same request is ignored
             // until `playbackRequest` hands out a new ticket for this media id.
@@ -529,34 +555,89 @@ public final class AppleMediaServerLibraryStore {
             applyStop(reference: ref, mediaID: mediaID, position: position, duration: duration)
         }
         
-        Task {
-            do {
-                if ticket.session.kind == .plex {
-                    guard let pItem = plexIndex[ref] else { return }
-                    let state: ApplePlexClient.PlaybackState
-                    switch event {
-                    case .started, .progress: state = .playing
-                    case .paused: state = .paused
-                    case .stopped: state = .stopped
-                    }
-                    try await self.plexClient.reportTimeline(session: ticket.session, item: pItem, state: state, positionSeconds: position)
-                    if event == .stopped && AppleCompletionPolicy.isComplete(position: position, duration: duration) {
-                        try await self.plexClient.markPlayed(session: ticket.session, ratingKey: ref.itemID)
+        let remoteEvent: AppleRemoteProgressOutbox.Event
+        switch event {
+        case .started: remoteEvent = .started
+        case .progress: remoteEvent = .progress
+        case .paused: remoteEvent = .paused
+        case .stopped: remoteEvent = .stopped
+        }
+        var batch: [AppleRemoteProgressOutbox.Entry] = [.init(sourceID: ref.sourceID, itemID: ref.itemID,
+            playbackID: ticket.playbackID, kind: ticket.session.kind,
+            mediaSourceID: ticket.session.kind == .plex ? "" : ticket.mediaSourceID, playSessionID: ticket.playSessionID,
+            event: remoteEvent, position: max(0, position), duration: max(0, duration), targetPlayCount: nil)]
+        if event == .stopped, ticket.session.kind == .plex,
+           AppleCompletionPolicy.isComplete(position: position, duration: duration) {
+            batch.append(.init(sourceID: ref.sourceID, itemID: ref.itemID,
+                playbackID: ticket.playbackID, kind: .plex, mediaSourceID: "",
+                playSessionID: ticket.playSessionID, event: .scrobble, position: position,
+                duration: duration, targetPlayCount: completionTarget))
+        }
+        outbox.enqueue(batch)
+        scheduleRemoteDelivery()
+    }
+
+    private func scheduleRemoteDelivery() {
+        guard automaticallyDeliversRemoteProgress, !outbox.isDelivering, !outbox.entries.isEmpty else { return }
+        deliveryTask?.cancel()
+        deliveryTask = Task { [weak self] in
+            guard !Task.isCancelled, let self else { return }
+            await self.flushRemoteProgress()
+            self.deliveryTask = nil
+            if let next = self.outbox.nextAttemptAt(availableSources: Set(self.sessionIndex.keys)) {
+                let delay = max(0.05, next.timeIntervalSinceNow)
+                self.deliveryTask = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    guard let self else { return }
+                    self.deliveryTask = nil
+                    self.scheduleRemoteDelivery()
+                }
+            }
+        }
+    }
+
+    internal func flushRemoteProgress(now: Date = .now) async {
+        await outbox.drain(now: now, availableSources: Set(sessionIndex.keys)) { [self] entry in
+            guard let session = sessionIndex[entry.sourceID] else { throw AppleMediaServerError.unreachable }
+            if entry.kind == .plex {
+                let item = try await plexClient.item(session: session, ratingKey: entry.itemID)
+                if entry.event == .scrobble {
+                    // A timeout may mean PMS applied the increment but its response
+                    // was lost. Inspect the count before every retry or relaunch.
+                    if (item.viewCount ?? 0) < (entry.targetPlayCount ?? 1) {
+                        try await plexClient.markPlayed(session: session, ratingKey: entry.itemID)
                     }
                 } else {
-                    switch event {
-                    case .started:
-                        try await self.client.reportPlaybackStart(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position)
-                    case .progress:
-                        try await self.client.reportPlaybackProgress(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position, isPaused: false)
-                    case .paused:
-                        try await self.client.reportPlaybackProgress(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position, isPaused: true)
-                    case .stopped:
-                        try await self.client.reportPlaybackStopped(session: ticket.session, itemID: ref.itemID, mediaSourceID: ticket.mediaSourceID, playSessionID: ticket.playSessionID, positionSeconds: position)
+                    if entry.event == .stopped {
+                        let count = item.viewCount ?? 0
+                        if let observed = entry.observedPlayCount {
+                            if count > observed { return }
+                        } else {
+                            outbox.checkpointPlayCount(entryID: entry.id, count: count)
+                        }
                     }
+                    let state: ApplePlexClient.PlaybackState = entry.event == .stopped ? .stopped : entry.event == .paused ? .paused : .playing
+                    try await plexClient.reportTimeline(session: session, item: item, state: state, positionSeconds: entry.position)
                 }
-            } catch {
-                appleTrace("Remote progress failed: \(AppleDiagnosticRedactor.describe(error))")
+            } else {
+                switch entry.event {
+                case .started:
+                    try await client.reportPlaybackStart(session: session, itemID: entry.itemID, mediaSourceID: entry.mediaSourceID, playSessionID: entry.playSessionID, positionSeconds: entry.position)
+                case .progress, .paused:
+                    try await client.reportPlaybackProgress(session: session, itemID: entry.itemID, mediaSourceID: entry.mediaSourceID, playSessionID: entry.playSessionID, positionSeconds: entry.position, isPaused: entry.event == .paused)
+                case .stopped:
+                    let fresh = try await client.item(session: session, id: entry.itemID)
+                    let count = fresh.userData?.playCount ?? 0
+                    if let observed = entry.observedPlayCount {
+                        if count > observed { return }
+                    } else {
+                        // Checkpoint the authoritative pre-stop count before the
+                        // request. Partial stops can increment too on some servers.
+                        outbox.checkpointPlayCount(entryID: entry.id, count: count)
+                    }
+                    try await client.reportPlaybackStopped(session: session, itemID: entry.itemID, mediaSourceID: entry.mediaSourceID, playSessionID: entry.playSessionID, positionSeconds: entry.position)
+                case .scrobble: break
+                }
             }
         }
     }
@@ -575,10 +656,12 @@ public final class AppleMediaServerLibraryStore {
         )
         let newItem = item.withUserData(newUserData)
         index[ref] = newItem
+        detailCache.removeValue(forKey: ref)
         continueWatching.removeAll(where: { $0.mediaID == mediaID })
         if !played, let source = sourceIndex[ref.sourceID], let sess = sessionIndex[ref.sourceID] {
             continueWatching.insert(catalogItem(newItem, source: source, session: sess), at: 0)
         }
+        persist()
     }
 
     public func detail(for reference: AppleMediaServerItemReference) async throws -> AppleMediaServerDetail {
@@ -750,7 +833,10 @@ public final class AppleMediaServerLibraryStore {
             )
             
             let position: Double?
-            if resume, let offset = plexItem.viewOffsetSeconds, let dur = plexItem.durationSeconds {
+            let localStore = ApplePlaybackStore()
+            if resume, localStore.hasLocalPlaybackState(mediaID: mediaID) {
+                position = localStore.progress(for: mediaID)?.resumePosition
+            } else if resume, let offset = plexItem.viewOffsetSeconds, let dur = plexItem.durationSeconds {
                 position = (plexItem.viewCount ?? 0) > 0 || AppleCompletionPolicy.isComplete(position: offset, duration: dur)
                     ? nil : offset
             } else {
@@ -803,8 +889,9 @@ public final class AppleMediaServerLibraryStore {
             playSessionID: info.playSessionID
         )
 
-        let local = ApplePlaybackStore().progress(for: mediaID)
-        let position = resume ? Self.resumePosition(for: item, local: local) : nil
+        let localStore = ApplePlaybackStore()
+        let position = resume ? (localStore.hasLocalPlaybackState(mediaID: mediaID)
+            ? localStore.progress(for: mediaID)?.resumePosition : Self.resumePosition(for: item)) : nil
         
         let title: String
         if item.type == .episode {

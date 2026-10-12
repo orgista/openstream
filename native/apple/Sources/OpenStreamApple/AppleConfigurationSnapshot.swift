@@ -86,9 +86,12 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     /// `playbackProgress`. Older snapshots have none.
     public var continueWatchingRemovals: [String: Date]
 
+    public var playbackTerminals: [String: ApplePlaybackTerminalEvents]
+    public var playbackActivity: [String: ApplePlaybackProgress]
+
     private enum CodingKeys: String, CodingKey {
         case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchedTombstones, watchlist, ratings
-        case continueWatchingRemovals, sourceTombstones
+        case continueWatchingRemovals, sourceTombstones, playbackTerminals, playbackActivity
     }
 
     public init(savedAt: Date = .now, sources: [AppleSource] = [], sourceTombstones: [UUID: Date] = [:], settings: [String: Data] = [:],
@@ -96,7 +99,9 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
                 watchedHistory: [String: Date] = [:],
                 watchedTombstones: [String: Date] = [:],
                 watchlist: [AppleMediaRecord] = [], ratings: [String: Int] = [:],
-                continueWatchingRemovals: [String: Date] = [:]) {
+                continueWatchingRemovals: [String: Date] = [:],
+                playbackTerminals: [String: ApplePlaybackTerminalEvents] = [:],
+                playbackActivity: [String: ApplePlaybackProgress] = [:]) {
         formatVersion = 1
         self.savedAt = savedAt
         self.sourceTombstones = sourceTombstones
@@ -114,6 +119,11 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         }
         self.ratings = ratings
         self.continueWatchingRemovals = continueWatchingRemovals
+        self.playbackActivity = playbackActivity.merging(playbackProgress.filter { $0.value.isComplete },
+            uniquingKeysWith: ApplePlaybackConvergence.freshest)
+        self.playbackTerminals = ApplePlaybackConvergence.terminals(playbackTerminals, watched: watchedHistory,
+            unwatched: watchedTombstones, removals: continueWatchingRemovals,
+            activity: playbackActivity.merging(playbackProgress, uniquingKeysWith: ApplePlaybackConvergence.freshest))
     }
 
     public init(from decoder: Decoder) throws {
@@ -143,6 +153,12 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         ratings = try container.decode([String: Int].self, forKey: .ratings)
         continueWatchingRemovals = try container.decodeIfPresent([String: Date].self,
                                                                  forKey: .continueWatchingRemovals) ?? [:]
+        playbackActivity = (try container.decodeIfPresent([String: ApplePlaybackProgress].self, forKey: .playbackActivity) ?? [:])
+            .merging(playbackProgress.filter { $0.value.isComplete }, uniquingKeysWith: ApplePlaybackConvergence.freshest)
+        playbackTerminals = ApplePlaybackConvergence.terminals(
+            try container.decodeIfPresent([String: ApplePlaybackTerminalEvents].self, forKey: .playbackTerminals) ?? [:],
+            watched: watchedHistory, unwatched: watchedTombstones, removals: continueWatchingRemovals,
+            activity: playbackActivity.merging(playbackProgress, uniquingKeysWith: ApplePlaybackConvergence.freshest))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -156,6 +172,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         try container.encode(sourcePayloads + preservedSourcePayloads, forKey: .sources)
         try container.encode(settings, forKey: .settings)
         try container.encode(playbackProgress, forKey: .playbackProgress)
+        if !playbackTerminals.isEmpty { try container.encode(playbackTerminals, forKey: .playbackTerminals) }
+        if !playbackActivity.isEmpty { try container.encode(playbackActivity, forKey: .playbackActivity) }
         try container.encode(watchedHistory, forKey: .watchedHistory)
         if !watchedTombstones.isEmpty { try container.encode(watchedTombstones, forKey: .watchedTombstones) }
         try container.encode(watchlist, forKey: .watchlist)
@@ -188,11 +206,14 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             }
         // Resume position: the freshest of the two per title, so a snapshot
         // written before this device's last play never winds it back (V6).
-        result.playbackProgress = playbackProgress.merging(incoming.playbackProgress) { mine, theirs in
-            theirs.updatedAt >= mine.updatedAt ? theirs : mine
-        }
+        result.playbackTerminals = playbackTerminals.merging(incoming.playbackTerminals) { $0.merging($1) }
+        result.playbackActivity = playbackActivity.merging(incoming.playbackActivity, uniquingKeysWith: ApplePlaybackConvergence.freshest)
+        result.playbackProgress = ApplePlaybackConvergence.reconciled(
+            playbackProgress.merging(incoming.playbackProgress, uniquingKeysWith: ApplePlaybackConvergence.freshest),
+            terminals: result.playbackTerminals)
         var history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
         history.merge(watched: incoming.watchedHistory, tombstones: incoming.watchedTombstones)
+        history = ApplePlaybackConvergence.history(history, terminals: result.playbackTerminals)
         result.watchedHistory = history.watched
         result.watchedTombstones = history.tombstones
         result.continueWatchingRemovals = AppleContinueWatchingRemovalPolicy.merged(
@@ -204,44 +225,151 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         try validate()
         var copy = self
         copy.sources = sources.map(Self.portableSource)
-        let newest = playbackProgress.sorted {
-            $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt
-        }.prefix(Self.cloudEntryLimit)
-        copy.playbackProgress = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
-        let newestWatched = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
-            .newest(Self.cloudEntryLimit)
-        copy.watchedHistory = newestWatched.watched
-        copy.watchedTombstones = newestWatched.tombstones
-        copy.continueWatchingRemovals = ApplePlaybackStore.boundedWatchedHistory(
-            continueWatchingRemovals, limit: Self.cloudEntryLimit)
+        copy.playbackTerminals = ApplePlaybackConvergence.terminals(playbackTerminals, watched: watchedHistory,
+            unwatched: watchedTombstones, removals: continueWatchingRemovals,
+            activity: playbackActivity.merging(playbackProgress, uniquingKeysWith: ApplePlaybackConvergence.freshest))
+        copy.playbackProgress = Self.newestCloudProgress(ApplePlaybackConvergence.reconciled(playbackProgress,
+            terminals: copy.playbackTerminals))
+        copy.playbackActivity = Self.newestCloudProgress(playbackActivity.filter { key, value in
+            let part = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
+            let reset = [copy.playbackTerminals[key]?.resetAt, value.partID.flatMap { copy.playbackTerminals[$0]?.resetAt },
+                part.flatMap { copy.playbackTerminals[$0]?.resetAt }].compactMap { $0 }.max()
+            if reset.map({ value.updatedAt <= $0 }) == true { return false }
+            return copy.playbackTerminals[key]?.playedAt.map({ value.updatedAt >= $0 }) ?? true
+        })
+        let history = ApplePlaybackConvergence.history(AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones),
+            terminals: copy.playbackTerminals).newest(Self.cloudEntryLimit)
+        copy.watchedHistory = history.watched
+        copy.watchedTombstones = history.tombstones
+        copy.continueWatchingRemovals = ApplePlaybackStore.boundedWatchedHistory(continueWatchingRemovals, limit: Self.cloudEntryLimit)
+
+        let links = CloudStateLinks(snapshot: copy)
+        let terminalEntries: [CloudTerminalEntry] = copy.playbackTerminals.map { key, value in
+            let dates: [Date?] = [value.completedAt, value.resetAt, value.removedAt, value.playedAt]
+            let eventDate: Date = dates.compactMap { $0 }.max() ?? .distantPast
+            return CloudTerminalEntry(key: key, date: eventDate)
+        }
+        let entries: [CloudTerminalEntry] = terminalEntries.sorted { lhs, rhs in
+            lhs.date == rhs.date ? lhs.key < rhs.key : lhs.date > rhs.date
+        }
+        let activityDates: [Date] = Array(copy.playbackProgress.values).map { $0.updatedAt }
+            + Array(copy.playbackActivity.values).map { $0.updatedAt }
+        let oldestActivity: Date? = activityDates.min()
+        let linked = Set(links.progress.keys).union(links.activity.keys)
+        var retained = Set(entries.prefix(Self.cloudTerminalLimit).map { $0.key }).union(linked)
+        if let oldestActivity { retained.formUnion(entries.filter { $0.date > oldestActivity }.map { $0.key }) }
+        for entry in entries where !retained.contains(entry.key) {
+            _ = copy.retireCloudTerminal(entry, links: links, estimateBytes: false)
+        }
+
         var data = try Self.encoder.encode(copy)
-        // Large episode identifiers can still exceed the quota with fewer
-        // than 500 entries. The oldest entry of either list goes first.
-        let progressEntries: [CloudTrimEntry] = newest.map { CloudTrimEntry(key: $0.key, date: $0.value.updatedAt, isWatched: false) }
-        let watchedEntries: [CloudTrimEntry] = newestWatched.watched.map { CloudTrimEntry(key: $0.key, date: $0.value, isWatched: true) }
-            + newestWatched.tombstones.map { CloudTrimEntry(key: $0.key, date: $0.value, isWatched: true) }
-        var oldestFirst = (progressEntries + watchedEntries).sorted(by: CloudTrimEntry.isOlder)[...]
-        while data.count > Self.maximumCloudBytes, let entry = oldestFirst.popFirst() {
-            if entry.isWatched {
-                copy.watchedHistory.removeValue(forKey: entry.key)
-                copy.watchedTombstones.removeValue(forKey: entry.key)
+        // Retire the oldest item bundles first, including any stale state
+        // that could recreate a retired barrier during decoding. Estimate
+        // batches from individual rows, then verify the actual payload size;
+        // a large history never requires one full encode per retired title.
+        var oldestFirst = entries.reversed().filter { copy.playbackTerminals[$0.key] != nil }[...]
+        while data.count > Self.maximumCloudBytes, !oldestFirst.isEmpty {
+            var excess = data.count - Self.maximumCloudBytes
+            while excess > 0, let entry = oldestFirst.popFirst() {
+                // An individual newest item or the unrelated configuration
+                // payload cannot fit: surface the existing quota error.
+                if copy.playbackTerminals.count == 1 {
+                    data = try Self.encoder.encode(copy)
+                    guard data.count <= Self.maximumCloudBytes else { throw AppleConfigurationError.tooLarge }
+                    return data
+                }
+                excess -= copy.retireCloudTerminal(entry, links: links)
             }
-            else { copy.playbackProgress.removeValue(forKey: entry.key) }
             data = try Self.encoder.encode(copy)
         }
         guard data.count <= Self.maximumCloudBytes else { throw AppleConfigurationError.tooLarge }
         return data
     }
 
-    private struct CloudTrimEntry {
+    private static func newestCloudProgress(_ values: [String: ApplePlaybackProgress]) -> [String: ApplePlaybackProgress] {
+        Dictionary(uniqueKeysWithValues: values.sorted {
+            $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt
+        }.prefix(cloudEntryLimit).map { ($0.key, $0.value) })
+    }
+
+    private struct CloudTerminalEntry {
         let key: String
         let date: Date
-        let isWatched: Bool
+    }
 
-        static func isOlder(_ lhs: Self, _ rhs: Self) -> Bool {
-            lhs.date == rhs.date ? lhs.key > rhs.key : lhs.date < rhs.date
+    private struct CloudStateLinks {
+        let progress: [String: Set<String>]
+        let activity: [String: Set<String>]
+        let history: [String: Set<String>]
+
+        init(snapshot: AppleConfigurationSnapshot) {
+            func keys(_ values: [String: ApplePlaybackProgress]) -> [String: Set<String>] {
+                var result: [String: Set<String>] = [:]
+                for (key, value) in values {
+                    var identities = Set([key])
+                    if let normalized = ApplePlaybackIdentity.storageKey(for: key) { identities.insert(normalized) }
+                    if let part = value.partID {
+                        identities.insert(part)
+                        if let normalized = ApplePlaybackIdentity.storageKey(for: part) { identities.insert(normalized) }
+                    }
+                    for identity in identities { result[identity, default: []].insert(key) }
+                }
+                return result
+            }
+            progress = keys(snapshot.playbackProgress)
+            activity = keys(snapshot.playbackActivity)
+            var histories: [String: Set<String>] = [:]
+            let allKeys = Set(snapshot.watchedHistory.keys).union(snapshot.watchedTombstones.keys).union(snapshot.continueWatchingRemovals.keys)
+            for key in allKeys {
+                histories[key, default: []].insert(key)
+                if let normalized = ApplePlaybackIdentity.storageKey(for: key) { histories[normalized, default: []].insert(key) }
+            }
+            history = histories
         }
     }
+
+    private static func cloudEntryBytes<Value: Encodable>(_ key: String, _ value: Value) -> Int {
+        max(1, ((try? encoder.encode([key: value]).count) ?? 2) - 1)
+    }
+
+    @discardableResult
+    private mutating func retireCloudTerminal(_ entry: CloudTerminalEntry, links: CloudStateLinks, estimateBytes: Bool = true) -> Int {
+        var bytes = 0
+        if let value = playbackTerminals.removeValue(forKey: entry.key), estimateBytes {
+            bytes += Self.cloudEntryBytes(entry.key, value)
+        }
+        for key in links.progress[entry.key] ?? [] {
+            if let value = playbackProgress[key], value.updatedAt <= entry.date {
+                if estimateBytes { bytes += Self.cloudEntryBytes(key, value) }
+                playbackProgress.removeValue(forKey: key)
+            }
+        }
+        for key in links.activity[entry.key] ?? [] {
+            if let value = playbackActivity[key], value.updatedAt <= entry.date {
+                if estimateBytes { bytes += Self.cloudEntryBytes(key, value) }
+                playbackActivity.removeValue(forKey: key)
+            }
+        }
+        for key in links.history[entry.key] ?? [] {
+            if let date = watchedHistory[key], date <= entry.date {
+                if estimateBytes { bytes += Self.cloudEntryBytes(key, date) }
+                watchedHistory.removeValue(forKey: key)
+            }
+            if let date = watchedTombstones[key], date <= entry.date {
+                if estimateBytes { bytes += Self.cloudEntryBytes(key, date) }
+                watchedTombstones.removeValue(forKey: key)
+            }
+            if let date = continueWatchingRemovals[key], date <= entry.date {
+                if estimateBytes { bytes += Self.cloudEntryBytes(key, date) }
+                continueWatchingRemovals.removeValue(forKey: key)
+            }
+        }
+        return max(1, bytes)
+    }
+
+    /// The cloud horizon retains these newest barriers as well as clocks
+    /// linked to retained activity; local storage and backups remain complete.
+    static let cloudTerminalLimit = 2_000
 
     /// Newest entries of each history the iCloud copy keeps.
     static let cloudEntryLimit = 500
