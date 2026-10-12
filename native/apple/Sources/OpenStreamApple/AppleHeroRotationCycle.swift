@@ -17,6 +17,7 @@ extension AppleHeroRotation {
         private var elapsedBeforeRun: TimeInterval = 0
         /// When the current run began; nil while paused.
         private var runningSince: Date?
+        private var awaitsPresentation = false
 
         public init(count: Int, index: Int = 0, interval: TimeInterval = AppleHeroRotation.interval, now: Date = .now) {
             self.count = max(count, 0)
@@ -30,7 +31,7 @@ extension AppleHeroRotation {
         /// How far the active page's timer has run, 0...1 — the fill of the
         /// active dot.
         public func progress(at now: Date) -> Double {
-            guard interval > 0 else { return 0 }
+            guard interval > 0, !awaitsPresentation else { return 0 }
             let running = runningSince.map { max(0, now.timeIntervalSince($0)) } ?? 0
             return min(max((elapsedBeforeRun + running) / interval, 0), 1)
         }
@@ -38,8 +39,30 @@ extension AppleHeroRotation {
         /// When the page changes on its own, or nil when it will not (paused, or
         /// nothing to move to).
         public var dueDate: Date? {
-            guard count > 1, interval > 0, let runningSince else { return nil }
+            guard !awaitsPresentation, count > 1, interval > 0, let runningSince else { return nil }
             return runningSince.addingTimeInterval(max(interval - elapsedBeforeRun, 0))
+        }
+
+        /// Loading is independent of focus/visibility pause. No dwell is
+        /// consumed until the gate presents the requested art and copy.
+        public mutating func waitForPresentation() {
+            awaitsPresentation = true
+            elapsedBeforeRun = 0
+        }
+
+        public mutating func didPresent(at now: Date) {
+            guard awaitsPresentation else { return }
+            awaitsPresentation = false
+            elapsedBeforeRun = 0
+            if runningSince != nil { runningSince = now }
+        }
+
+        /// The indicator belongs to the art actually on screen, even while a
+        /// different requested page is still loading.
+        public func indicator(showing index: Int) -> Self {
+            var shown = self
+            shown.index = index
+            return shown
         }
 
         public mutating func pause(at now: Date) {

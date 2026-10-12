@@ -1,15 +1,8 @@
 import CoreGraphics
 import SwiftUI
 
-/// The fades over a hero's art, per hero and per `AppleHeroArtTone`. Over
-/// dark art (and before the art is measured) every hero draws exactly the
-/// fade it always has. Over bright art it follows the Apple TV app: a
-/// leading-to-trailing fade sized to the copy block as well as a deeper
-/// bottom one, and a soft shadow under the wordmark and text (N20). While a
-/// trailer is on screen the still's tone no longer applies: the Mac and iPad
-/// hero draws its one gentle fade over art and video alike (N30), so the
-/// trailer starting never changes the darkness.
-///
+/// The approved fades over each hero's art. Bright art changes only the
+/// existing copy shadow; it never adds or strengthens a gradient.
 /// Pure, so the gate can check it without a window.
 public struct AppleHeroScrim: Equatable, Sendable {
     public struct Stop: Equatable, Sendable {
@@ -40,7 +33,7 @@ public struct AppleHeroScrim: Equatable, Sendable {
         self.copyShadow = copyShadow
     }
 
-    /// The soft shadow the Apple TV app puts under its hero copy over bright art.
+    /// The existing soft shadow under hero copy over bright art.
     public static let brightCopyShadow = Shadow(opacity: 0.55, radius: 12)
     /// The lighter shadow under the Mac and iPad hero's copy over any other
     /// art or the trailer: with the gentle fade, it is what keeps the text
@@ -62,27 +55,13 @@ public struct AppleHeroScrim: Equatable, Sendable {
         return last.opacity
     }
 
-    /// A leading fade that covers the copy block and clears `tail` past it.
-    private static func leadingFade(copyTrailing: CGFloat, edge: Double, body: Double,
-                                    holdsUntil minimumHold: CGFloat, tail: CGFloat) -> [Stop] {
-        let hold = min(max(copyTrailing, minimumHold), 0.9)
-        let clear = min(max(hold + tail, hold + 0.05), 1)
-        return [Stop(location: 0, opacity: edge), Stop(location: hold, opacity: body), Stop(location: clear, opacity: 0)]
-    }
-
     // MARK: Mac and iPad (`AppleHomeMacHero`)
 
     /// `copyTrailing`: the copy column's trailing edge as a fraction of the
     /// hero's width.
     public static func wide(tone: AppleHeroArtTone, videoIsShowing: Bool, copyTrailing: CGFloat) -> Self {
-        guard tone.isBright, !videoIsShowing else {
-            return Self(leading: AppleMacHeroFade.leading, bottom: AppleMacHeroFade.bottom,
-                        copyShadow: wideCopyShadow)
-        }
-        return Self(
-            leading: leadingFade(copyTrailing: copyTrailing, edge: 0.92, body: 0.9, holdsUntil: 0.3, tail: 0.4),
-            bottom: [Stop(location: 0, opacity: 1), Stop(location: 0.25, opacity: 0.7), Stop(location: 0.5, opacity: 0)],
-            copyShadow: brightCopyShadow)
+        Self(leading: AppleMacHeroFade.leading, bottom: AppleMacHeroFade.bottom,
+             copyShadow: tone.isBright && !videoIsShowing ? brightCopyShadow : wideCopyShadow)
     }
 
     // MARK: iPhone portrait (`AppleHomePhoneHero`)
@@ -96,16 +75,8 @@ public struct AppleHeroScrim: Equatable, Sendable {
         Stop(location: 0.68, opacity: 0),
     ]
 
-    /// The copy is centred, so the deeper fade is the bottom one alone.
     public static func phone(tone: AppleHeroArtTone) -> Self {
-        guard tone.isBright else { return Self(bottom: phoneBottom) }
-        return Self(bottom: [
-            Stop(location: 0, opacity: 1),
-            Stop(location: 0.2, opacity: 1),
-            Stop(location: 0.4, opacity: 0.82),
-            Stop(location: 0.58, opacity: 0.55),
-            Stop(location: 0.8, opacity: 0),
-        ], copyShadow: brightCopyShadow)
+        Self(bottom: phoneBottom, copyShadow: tone.isBright ? brightCopyShadow : nil)
     }
 
     // MARK: Apple TV (`AppleTVBillboard`)
@@ -117,11 +88,7 @@ public struct AppleHeroScrim: Equatable, Sendable {
     ]
 
     public static func tv(tone: AppleHeroArtTone, copyTrailing: CGFloat) -> Self {
-        guard tone.isBright else { return Self(bottom: tvBottom) }
-        return Self(
-            leading: leadingFade(copyTrailing: copyTrailing, edge: 0.8, body: 0.6, holdsUntil: 0.3, tail: 0.25),
-            bottom: [Stop(location: 0, opacity: 1), Stop(location: 0.3, opacity: 0.85), Stop(location: 0.8, opacity: 0)],
-            copyShadow: brightCopyShadow)
+        Self(bottom: tvBottom, copyShadow: tone.isBright ? brightCopyShadow : nil)
     }
 
     // MARK: The featured hero (`AppleFeaturedHero`: iPad accessibility sizes,
@@ -134,11 +101,7 @@ public struct AppleHeroScrim: Equatable, Sendable {
     ]
 
     public static func featured(tone: AppleHeroArtTone, copyTrailing: CGFloat) -> Self {
-        guard tone.isBright else { return Self(bottom: featuredBottom) }
-        return Self(
-            leading: leadingFade(copyTrailing: copyTrailing, edge: 0.75, body: 0.6, holdsUntil: 0.25, tail: 0.25),
-            bottom: [Stop(location: 0, opacity: 0.92), Stop(location: 0.35, opacity: 0.7), Stop(location: 0.8, opacity: 0)],
-            copyShadow: brightCopyShadow)
+        Self(bottom: featuredBottom, copyShadow: tone.isBright ? brightCopyShadow : nil)
     }
 }
 

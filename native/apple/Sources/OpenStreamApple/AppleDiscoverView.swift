@@ -80,6 +80,7 @@ struct AppleDiscoverView: View {
     @State private var showsSelectedHero = false
     @State private var selectedCatalog: AppleCatalogSection?
     @State private var showsCatalog = false
+    @State private var showsContinueWatching = false
     // macOS is in this list now. It was left out of all four of these debug
     // review hooks, which is why a headless macOS sweep could photograph the
     // Settings tree but never the title page, the episode list or the player —
@@ -134,7 +135,7 @@ struct AppleDiscoverView: View {
     }
 
     private struct RecommendationResult: Sendable {
-        var localContinueWatching: [IndexedCatalogItem] = []
+        var continueWatching: [IndexedCatalogItem] = []
         var picks: [IndexedCatalogItem] = []
         var heroes: [IndexedCatalogItem] = []
     }
@@ -189,7 +190,7 @@ struct AppleDiscoverView: View {
     }
 
     var body: some View {
-        let localContinueWatching = recommendations.localContinueWatching
+        let continueWatching = recommendations.continueWatching
         let picks = recommendations.picks
         let heroes = recommendations.heroes
         let recommendationRevision = recommendationRevision
@@ -268,7 +269,7 @@ struct AppleDiscoverView: View {
                         // One list of rails. The iPhone held upright and the
                         // Mac order it by the A4 rhythm (stills, then posters,
                         // then stills); everywhere else it is the list as built.
-                        let continueShelf = continueWatchingShelf(local: localContinueWatching)
+                        let continueShelf = continueWatchingShelf(values: continueWatching)
                         ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
                             railView(rail, continueWatching: continueShelf, picks: picks)
                         }
@@ -335,6 +336,22 @@ struct AppleDiscoverView: View {
                 catalogSection(liveSection(selectedCatalog), source: source).catalogList
                     .environment(\.appleTabToolbar, tabToolbarContext)
             }
+        }
+        .navigationDestination(isPresented: $showsContinueWatching) {
+            let shelf = continueWatchingShelf(values: recommendations.continueWatching)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    continueWatchingCards(shelf.values, isFixture: shelf.isFixture)
+                }
+                .padding()
+            }
+            .task(id: recommendationRevision) {
+                await rebuildRecommendations(for: recommendationRevision)
+            }
+            .navigationTitle("Continue Watching")
+            .scrollIndicators(.never)
+            .environment(\.appleDiscoverRows, discoverRowStyle)
+            .environment(\.appleTabToolbar, tabToolbarContext)
         }
         .navigationDestination(isPresented: $showsSelectedHero) {
             if let selectedHero {
@@ -481,6 +498,7 @@ struct AppleDiscoverView: View {
             handledRouteRevision = router.revision
             showsSelectedHero = false
             showsCatalog = false
+            showsContinueWatching = false
             #if DEBUG
             visionReviewDetail = false
             #endif
@@ -601,7 +619,7 @@ struct AppleDiscoverView: View {
         if snapshot.lookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
         let local = Array(entries.compactMap { entry in
             entry.resolution.match.map { IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source) }
-        }.prefix(AppleContinueWatchingResolver.maximumCount))
+        })
         var seen = Set(local.map(\.item.mediaID))
         let merged = AppleCatalogShelfPolicy.uniqueByID(local + snapshot.serverContinueWatching.filter {
             seen.insert($0.item.mediaID).inserted
@@ -617,7 +635,7 @@ struct AppleDiscoverView: View {
         let heroes = featuredCandidates(snapshot, visibleSections: visibleSections,
             continueWatching: heroContinueWatching, picks: picks, identities: &identities)
         try Task.checkCancellation()
-        return RecommendationResult(localContinueWatching: local, picks: picks, heroes: heroes)
+        return RecommendationResult(continueWatching: heroContinueWatching, picks: picks, heroes: heroes)
     }
 
     /// What the hero rotates through: what the owner is part-way into first,
@@ -675,17 +693,10 @@ struct AppleDiscoverView: View {
                                             })
     }
 
-    /// Continue Watching less the titles the viewer removed and has not
-    /// played since. Top Picks still reads the full list as viewing history.
-    private func withoutRemoved(_ values: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
-        _ = continueWatchingRemovalRevision
-        let store = ApplePlaybackStore()
-        return values.filter { !store.isRemovedFromContinueWatching(mediaID: $0.record.id) }
-    }
-
     private func removeFromContinueWatching(_ value: IndexedCatalogItem) {
         appleTrace("discover.continue.remove id=\(value.record.id)")
         ApplePlaybackStore().removeFromContinueWatching(mediaID: value.record.id)
+        recommendations.continueWatching.removeAll { $0.id == value.id }
         continueWatchingRemovalRevision &+= 1
     }
 
@@ -872,12 +883,11 @@ struct AppleDiscoverView: View {
     /// Continue Watching as the shelf shows it. Review builds can stand in an
     /// in-memory fixture (`-OpenStreamDebugContinueWatching YES`) when the
     /// simulator has no progress; it is never written anywhere.
-    private func continueWatchingShelf(local: [IndexedCatalogItem]) -> (values: [IndexedCatalogItem], isFixture: Bool) {
-        let merged = withoutRemoved(mergedContinueWatching(local: local))
+    private func continueWatchingShelf(values: [IndexedCatalogItem]) -> (values: [IndexedCatalogItem], isFixture: Bool) {
         #if DEBUG
-        if merged.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
+        if values.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
         #endif
-        return (merged, false)
+        return (values, false)
     }
 
     private func discoverRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DiscoverRail] {
@@ -921,11 +931,12 @@ struct AppleDiscoverView: View {
                           picks: [IndexedCatalogItem]) -> some View {
         switch rail {
         case .continueWatching:
-            if discoverRowStyle != nil {
-                continueWatchingRowShelf(continueWatching.values, isFixture: continueWatching.isFixture)
-            } else {
-                indexedShelf(title: "Continue Watching", identifier: "continue", values: continueWatching.values,
-                             showsProgress: true)
+            AppleMediaShelf(title: "Continue Watching",
+                onOpen: AppleContinueWatchingResolver.hasFullList(count: continueWatching.values.count)
+                    ? { showsContinueWatching = true } : nil,
+                headingIdentifier: "home.continue.heading") {
+                continueWatchingCards(AppleContinueWatchingResolver.rail(continueWatching.values),
+                                      isFixture: continueWatching.isFixture)
             }
         case .library:
             AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
@@ -971,25 +982,32 @@ struct AppleDiscoverView: View {
 
     /// A2 on the iPhone and the Mac: stills with the time left, the accent
     /// bar, and a caption row carrying a ⋯ menu.
-    private func continueWatchingRowShelf(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+    @ViewBuilder
+    private func continueWatchingCards(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+        if discoverRowStyle != nil {
+            continueWatchingRowCards(values, isFixture: isFixture)
+        } else {
+            indexedCards(identifier: "continue", values: values, showsProgress: true)
+        }
+    }
+
+    private func continueWatchingRowCards(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
         let store = ApplePlaybackStore()
-        return AppleMediaShelf(title: "Continue Watching") {
-            ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
-                AppleContinueWatchingTile(
-                    item: value.item,
-                    info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
-                    isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
-                    onOpenTitle: { selectHero(value, autoPlay: false) },
-                    onToggleList: { toggleHeroInList(value) },
-                    onRemove: { removeFromContinueWatching(value) }
-                ) {
-                    detail(value)
-                }
-                #if DEBUG
-                .environment(\.appleDebugTileHover, AppleRailHoverFixture.isEnabled && index == 1)
-                #endif
-                .accessibilityIdentifier("home.continue.\(value.id)")
+        return ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
+            AppleContinueWatchingTile(
+                item: value.item,
+                info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
+                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                onOpenTitle: { selectHero(value, autoPlay: false) },
+                onToggleList: { toggleHeroInList(value) },
+                onRemove: { removeFromContinueWatching(value) }
+            ) {
+                detail(value)
             }
+            #if DEBUG
+            .environment(\.appleDebugTileHover, AppleRailHoverFixture.isEnabled && index == 1)
+            #endif
+            .accessibilityIdentifier("home.continue.\(value.id)")
         }
     }
 
@@ -1365,26 +1383,30 @@ struct AppleDiscoverView: View {
         values: [IndexedCatalogItem],
         showsProgress: Bool
     ) -> some View {
-        let store = ApplePlaybackStore()
         AppleMediaShelf(title: title) {
-            ForEach(values) { value in
-                NavigationLink { detail(value) } label: {
-                    AppleCatalogCard(
-                        item: value.item,
-                        sizing: showsProgress ? .continueWatching : .featured,
-                        progress: showsProgress ? (AppleContinueWatchingResolver.progress(
-                            isSeries: value.item.type == "series", saved: store.progress(for: value.item.mediaID) ?? store.progress(for: value.record.id),
-                            recordProgress: value.record.progress) ?? 0) : nil)
-                }
-                .contextMenu {
-                    if showsProgress {
-                        Button("Remove from Continue Watching", systemImage: "xmark.circle") {
-                            removeFromContinueWatching(value)
-                        }
+            indexedCards(identifier: identifier, values: values, showsProgress: showsProgress)
+        }
+    }
+
+    private func indexedCards(identifier: String, values: [IndexedCatalogItem], showsProgress: Bool) -> some View {
+        let store = ApplePlaybackStore()
+        return ForEach(values) { value in
+            NavigationLink { detail(value) } label: {
+                AppleCatalogCard(
+                    item: value.item,
+                    sizing: showsProgress ? .continueWatching : .featured,
+                    progress: showsProgress ? (AppleContinueWatchingResolver.progress(
+                        isSeries: value.item.type == "series", saved: store.progress(for: value.item.mediaID) ?? store.progress(for: value.record.id),
+                        recordProgress: value.record.progress) ?? 0) : nil)
+            }
+            .contextMenu {
+                if showsProgress {
+                    Button("Remove from Continue Watching", systemImage: "xmark.circle") {
+                        removeFromContinueWatching(value)
                     }
                 }
-                .accessibilityIdentifier("home.\(identifier).\(value.id)")
             }
+            .accessibilityIdentifier("home.\(identifier).\(value.id)")
         }
     }
 

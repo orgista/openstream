@@ -16,6 +16,12 @@ enum AppleContinueWatchingResolver {
     /// How many titles a Continue Watching row shows.
     static let maximumCount = 12
 
+    static func rail<Value>(_ entries: [Value]) -> [Value] {
+        Array(entries.prefix(maximumCount))
+    }
+
+    static func hasFullList(count: Int) -> Bool { count > maximumCount }
+
     enum Resolution: Equatable, Sendable {
         /// A loaded shelf lists the title, by the record id or by one of its
         /// merged sources.

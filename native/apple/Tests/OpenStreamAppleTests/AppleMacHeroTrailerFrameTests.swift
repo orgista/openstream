@@ -48,10 +48,11 @@ struct AppleMacHeroTrailerFrameTests {
         #expect(AppleHeroScrim.opacity(of: AppleMacHeroFade.bottom, at: 0) == 1)
     }
 
-    @Test("Bright art keeps its deeper fade until the trailer is on screen")
-    func brightArtStillDeepens() {
+    @Test("Bright art keeps the approved fade and existing copy shadow")
+    func brightArtKeepsApprovedFade() {
         let bright = AppleHeroScrim.wide(tone: .bright, videoIsShowing: false, copyTrailing: 0.37)
-        #expect(AppleHeroScrim.opacity(of: bright.leading, at: 0) > AppleHeroScrim.opacity(of: AppleMacHeroFade.leading, at: 0))
+        #expect(bright.leading == AppleMacHeroFade.leading)
+        #expect(bright.bottom == AppleMacHeroFade.bottom)
         #expect(bright.copyShadow == AppleHeroScrim.brightCopyShadow)
     }
 }

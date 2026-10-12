@@ -50,8 +50,7 @@ struct AppleHomeMacHero<Actions: View>: View {
                     videoIsShowing = state.isOnScreen
                 }
                 .overlay {
-                    // Over the art-to-video crossfade's own 0.6 s, so a
-                    // bright still's deeper fade lifts with it, not before.
+                    // The approved fade stays the same over art and video.
                     AppleHeroScrimView(scrim: scrim)
                         .animation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration), value: scrim)
                 }

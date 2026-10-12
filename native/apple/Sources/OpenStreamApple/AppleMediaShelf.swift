@@ -155,8 +155,7 @@ struct AppleFeaturedHero<Actions: View>: View {
 
     private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
 
-    /// Over bright art under the copy, a fade sized to the copy block from
-    /// the leading edge, a deeper bottom one and a shadow under the text.
+    /// Bright art keeps the approved fade and existing copy shadow.
     private var scrim: AppleHeroScrim {
         let map = artLuminance ?? AppleHeroArtMeasurement.map(artMeasurement, for: stillURL)
         let frame = CGSize(width: max(viewportSize.width - 32, 0), height: featuredHeight)
@@ -206,8 +205,7 @@ struct AppleFeaturedHero<Actions: View>: View {
                     // "Remarkably Bright Creatures" over a lit aquarium was
                     // unreadable on iPad (2026-09-15). One fade, nowhere else.
                     //
-                    // Over bright art it deepens and gains a leading fade
-                    // sized to the copy (N20, `AppleHeroScrim.featured`).
+                    // Bright art changes only the existing copy shadow.
                     .overlay {
                         AppleHeroScrimView(scrim: scrim)
                             .animation(.easeInOut(duration: 0.4), value: scrim)

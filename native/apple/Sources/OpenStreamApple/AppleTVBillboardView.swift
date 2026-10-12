@@ -37,9 +37,7 @@ struct AppleTVBillboard<Actions: View>: View {
 
     private var stillURL: URL? { item.backgroundURL ?? item.posterURL }
 
-    /// Over bright art under the copy, the Apple TV app's fade from the
-    /// leading edge sized to the copy, a deeper bottom one and a soft shadow
-    /// under the text (N20). Dark art keeps the one fade.
+    /// Bright art keeps the approved billboard fade and existing copy shadow.
     private var scrim: AppleHeroScrim {
         let map = artLuminance ?? AppleHeroArtMeasurement.map(artMeasurement, for: stillURL)
         let frame = CGSize(width: M.screenSize.width, height: M.artHeight)

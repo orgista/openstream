@@ -132,15 +132,6 @@ struct AppleHeroLuminanceCacheTests {
 
 @Suite("Hero scrim policy")
 struct AppleHeroScrimTests {
-    private let samples = stride(from: CGFloat(0), through: 1, by: 0.05).map { $0 }
-
-    /// The bright scrim is at least as dark as the standard one everywhere.
-    private func covers(_ bright: [AppleHeroScrim.Stop], _ standard: [AppleHeroScrim.Stop]) -> Bool {
-        samples.allSatisfy {
-            AppleHeroScrim.opacity(of: bright, at: $0) + 0.0001 >= AppleHeroScrim.opacity(of: standard, at: $0)
-        }
-    }
-
     @Test("Dark and unmeasured art keep the standard fades; the wide hero's copy has its light shadow",
           arguments: [AppleHeroArtTone.dark, .unknown])
     func darkIsUnchanged(tone: AppleHeroArtTone) {
@@ -163,40 +154,32 @@ struct AppleHeroScrimTests {
         #expect(AppleHeroScrim.opacity(of: bottom, at: 0) == 1)
     }
 
-    @Test("Bright art: a leading fade sized to the copy, a deeper bottom one and a shadow on every hero")
-    func brightStrengthens() {
+    @Test("Bright art keeps only the approved fades and its existing copy shadow")
+    func brightKeepsApprovedFades() {
         let wide = AppleHeroScrim.wide(tone: .bright, videoIsShowing: false, copyTrailing: 0.37)
-        #expect(covers(wide.leading, AppleMacHeroFade.leading))
-        #expect(covers(wide.bottom, AppleMacHeroFade.bottom))
+        #expect(wide.leading == AppleMacHeroFade.leading)
+        #expect(wide.bottom == AppleMacHeroFade.bottom)
         #expect(wide.copyShadow == AppleHeroScrim.brightCopyShadow)
-
         let phone = AppleHeroScrim.phone(tone: .bright)
-        #expect(covers(phone.bottom, AppleHeroScrim.phoneBottom))
-        #expect(phone.copyShadow != nil)
-
+        #expect(phone.leading.isEmpty)
+        #expect(phone.bottom == AppleHeroScrim.phoneBottom)
+        #expect(phone.copyShadow == AppleHeroScrim.brightCopyShadow)
         let tv = AppleHeroScrim.tv(tone: .bright, copyTrailing: 0.4)
-        #expect(!tv.leading.isEmpty)
-        #expect(covers(tv.bottom, AppleHeroScrim.tvBottom))
-        #expect(tv.copyShadow != nil)
-
+        #expect(tv.leading.isEmpty)
+        #expect(tv.bottom == AppleHeroScrim.tvBottom)
+        #expect(tv.copyShadow == AppleHeroScrim.brightCopyShadow)
         let featured = AppleHeroScrim.featured(tone: .bright, copyTrailing: 0.5)
-        #expect(!featured.leading.isEmpty)
-        #expect(covers(featured.bottom, AppleHeroScrim.featuredBottom))
-        #expect(featured.copyShadow != nil)
+        #expect(featured.leading.isEmpty)
+        #expect(featured.bottom == AppleHeroScrim.featuredBottom)
+        #expect(featured.copyShadow == AppleHeroScrim.brightCopyShadow)
     }
 
-    @Test("The leading fade holds across the copy column and clears after it",
-          arguments: [CGFloat(0.2), 0.37, 0.5, 0.7])
-    func leadingFadeFollowsTheCopy(copyTrailing: CGFloat) throws {
-        for scrim in [AppleHeroScrim.tv(tone: .bright, copyTrailing: copyTrailing),
-                      .featured(tone: .bright, copyTrailing: copyTrailing),
-                      .wide(tone: .bright, videoIsShowing: false, copyTrailing: copyTrailing)] {
-            #expect(AppleHeroScrim.opacity(of: scrim.leading, at: copyTrailing) >= 0.55)
-            let clear = try #require(scrim.leading.last)
-            #expect(clear.opacity == 0)
-            #expect(clear.location > copyTrailing)
-            #expect(scrim.leading.map(\.location) == scrim.leading.map(\.location).sorted())
-        }
+    @Test("Copy width never adds a bright-art fade", arguments: [CGFloat(0.2), 0.37, 0.5, 0.7])
+    func copyWidthKeepsApprovedFade(copyTrailing: CGFloat) {
+        #expect(AppleHeroScrim.tv(tone: .bright, copyTrailing: copyTrailing).leading.isEmpty)
+        #expect(AppleHeroScrim.featured(tone: .bright, copyTrailing: copyTrailing).leading.isEmpty)
+        #expect(AppleHeroScrim.wide(tone: .bright, videoIsShowing: false, copyTrailing: copyTrailing).leading
+            == AppleMacHeroFade.leading)
     }
 
     @Test("While a Mac trailer plays the standard fade stays, whatever the still was (N27, N30)",

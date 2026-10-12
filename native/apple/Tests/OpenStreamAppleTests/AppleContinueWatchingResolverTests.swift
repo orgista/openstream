@@ -54,6 +54,14 @@ struct AppleContinueWatchingResolverTests {
 
     // MARK: Order
 
+    @Test(arguments: [0, 11, 12, 13, 30])
+    func fullListActionExistsOnlyBeyondRailCap(count: Int) {
+        let entries = Array(0..<count)
+        #expect(AppleContinueWatchingResolver.rail(entries) == Array(entries.prefix(12)))
+        #expect(AppleContinueWatchingResolver.hasFullList(count: count) == (count > 12))
+        #expect(entries.count == count)
+    }
+
     @Test func listsOnlyUnfinishedTitlesMostRecentlyWatchedFirst() {
         let older = record(listed, progress: 0.9)
         let newer = record(unlisted("tt0000102", name: "Night Train"), progress: 0.1)

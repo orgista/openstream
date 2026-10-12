@@ -25,8 +25,8 @@ struct AppleHeroPageSlots: Equatable {
 /// Holds the billboard on the page it is showing until the page the clock
 /// asks for has decoded its backdrop and wordmark, then hands over the new
 /// index so art, wordmark and copy change on the same frame. The rotation
-/// clock itself is untouched; the next page is fetched a tick ahead, so the
-/// change normally lands on time. See `AppleHeroPageSwap`.
+/// owner can start its dwell clock when `onPresent` reports settled art.
+/// See `AppleHeroPageSwap`.
 ///
 /// The Apple TV has used it since 2026-09-22 (674ff48); the iPad and a phone
 /// on its side followed the same day, after the iPad showed one title's
@@ -35,9 +35,12 @@ struct AppleHeroPageGate<Content: View>: View {
     let pages: [AppleHeroPageArt]
     let requested: Int
     let slots: AppleHeroPageSlots
+    var presentationRequest: Int = 0
     /// The page index to draw, and whether its wordmark failed to load (the
     /// billboard then falls back to the text title).
     @ViewBuilder let content: (_ index: Int, _ wordmarkFailed: Bool) -> Content
+
+    var onPresent: (_ index: Int) -> Void = { _ in }
 
     @State private var shownID: String?
     @State private var readyKeys: Set<String> = []
@@ -67,6 +70,7 @@ struct AppleHeroPageGate<Content: View>: View {
                 }
             }
             .onChange(of: requestedPage, initial: true) { advance() }
+            .onChange(of: presentationRequest) { advance() }
             .onChange(of: readyKeys) { advance() }
             // A new size (a rotation) must be fetched again before it counts.
             .onChange(of: backdropSize) { readyKeys = [] }
@@ -86,7 +90,7 @@ struct AppleHeroPageGate<Content: View>: View {
     private var pagesToWarm: [AppleHeroPageArt] {
         AppleHeroPageSwap.pagesToWarm(requested: requested, count: pages.count)
             .map { pages[$0] }
-            .filter { $0.id != shownID && !readyKeys.contains($0.key) }
+            .filter { !readyKeys.contains($0.key) }
     }
 
     private func advance() {
@@ -99,6 +103,9 @@ struct AppleHeroPageGate<Content: View>: View {
             appleTrace("hero page \(next) (requested \(requestedPage.id), ready=\(readyKeys.contains(requestedPage.key)))")
         }
         shownID = next
+        if next == requestedPage.id, readyKeys.contains(requestedPage.key) {
+            onPresent(shownIndex)
+        }
     }
 }
 

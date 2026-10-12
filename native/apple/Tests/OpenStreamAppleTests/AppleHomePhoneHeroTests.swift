@@ -10,6 +10,61 @@ import Testing
 struct AppleHeroRotationCycleTests {
     private let start = Date(timeIntervalSinceReferenceDate: 1_000)
 
+    @Test func slowArtGetsTwelveSecondsAfterPresentation() {
+        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        cycle.step(by: 1, at: start.addingTimeInterval(12))
+        cycle.waitForPresentation()
+        #expect(cycle.dueDate == nil)
+        #expect(cycle.progress(at: start.addingTimeInterval(40)) == 0)
+        let movedWhileLoading = cycle.advanceIfDue(at: start.addingTimeInterval(40))
+        #expect(movedWhileLoading == false)
+        cycle.didPresent(at: start.addingTimeInterval(40))
+        #expect(cycle.dueDate == start.addingTimeInterval(52))
+        let movedEarly = cycle.advanceIfDue(at: start.addingTimeInterval(51))
+        #expect(movedEarly == false)
+        let movedOnTime = cycle.advanceIfDue(at: start.addingTimeInterval(52))
+        #expect(movedOnTime)
+    }
+
+    @Test func manualPagingWhileLoadingKeepsShownIndicatorAndFocusPause() {
+        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        cycle.pause(at: start)
+        cycle.step(by: 1, at: start)
+        cycle.waitForPresentation()
+        cycle.step(by: 1, at: start.addingTimeInterval(1))
+        cycle.waitForPresentation()
+        #expect(cycle.indicator(showing: 0).index == 0)
+        #expect(cycle.index == 2)
+        cycle.didPresent(at: start.addingTimeInterval(40))
+        #expect(cycle.isPaused)
+        #expect(cycle.dueDate == nil)
+        cycle.resume(at: start.addingTimeInterval(50))
+        #expect(cycle.dueDate == start.addingTimeInterval(62))
+        #expect(cycle.indicator(showing: 2).index == 2)
+    }
+
+    @Test func repeatedReadyNotificationsDoNotRestartVisibleDwell() {
+        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        cycle.waitForPresentation()
+        cycle.didPresent(at: start.addingTimeInterval(10))
+        cycle.didPresent(at: start.addingTimeInterval(15))
+        #expect(cycle.dueDate == start.addingTimeInterval(22))
+        // A reset that keeps the same title still gets a fresh visible dwell.
+        cycle.waitForPresentation()
+        cycle.didPresent(at: start.addingTimeInterval(20))
+        #expect(cycle.dueDate == start.addingTimeInterval(32))
+    }
+
+    @Test func initialArtAndVisibilityPauseDoNotConsumeDwell() {
+        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        cycle.waitForPresentation()
+        cycle.pause(at: start.addingTimeInterval(2))
+        cycle.resume(at: start.addingTimeInterval(30))
+        #expect(cycle.dueDate == nil)
+        cycle.didPresent(at: start.addingTimeInterval(40))
+        #expect(cycle.dueDate == start.addingTimeInterval(52))
+    }
+
     @Test func theTimerFillsOverOneInterval() {
         let cycle = AppleHeroRotation.Cycle(count: 3, interval: 12, now: start)
         #expect(cycle.progress(at: start) == 0)

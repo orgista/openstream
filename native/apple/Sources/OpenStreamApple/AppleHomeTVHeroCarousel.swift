@@ -31,6 +31,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     @ViewBuilder let page: (_ index: Int, _ wordmarkFailed: Bool, _ context: AppleHomeTVHeroContext) -> Page
 
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
+    @State private var presentationRequest = 0
     @FocusState private var focus: AppleTVHeroPaging.Target?
     /// The button whose page is open; focus coming back from it stays there.
     @State private var returnTarget: AppleTVHeroPaging.Target?
@@ -39,13 +40,17 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
 
     var body: some View {
         let requested = min(cycle.index, max(pages.count - 1, 0))
-        AppleHeroPageGate(pages: pages, requested: requested, slots: slots) { shown, wordmarkFailed in
+        AppleHeroPageGate(pages: pages, requested: requested, slots: slots,
+                          presentationRequest: presentationRequest) { shown, wordmarkFailed in
             page(shown, wordmarkFailed, AppleHomeTVHeroContext(
-                cycle: cycle,
+                cycle: cycle.indicator(showing: shown),
                 focus: $focus,
                 pagingEnabled: AppleTVHeroPaging.stopsAreFocusable(focused: focus, pageCount: cycle.count),
                 willOpenPage: { returnTarget = $0 }
             ))
+        } onPresent: { shown in
+            guard shown == cycle.index else { return }
+            cycle.didPresent(at: .now)
         }
         .onChange(of: focus) { old, target in
             if old == nil, let target {
@@ -59,6 +64,8 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
             }
             guard let turn = AppleTVHeroPaging.turn(for: target) else { return }
             cycle.step(by: turn.offset, at: .now)
+            cycle.waitForPresentation()
+            presentationRequest &+= 1
             focus = turn.refocus
         }
         .appleHeroVisibility { visible in
@@ -77,7 +84,10 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
             // for the page that is showing.
             guard let due = cycle.dueDate else { return }
             do { try await Task.sleep(for: .seconds(max(due.timeIntervalSinceNow, 0))) } catch { return }
-            cycle.advanceIfDue(at: .now)
+            if cycle.advanceIfDue(at: .now) {
+                cycle.waitForPresentation()
+                presentationRequest &+= 1
+            }
         }
     }
 
@@ -95,6 +105,8 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     private func restart(showing id: String?) {
         let index = id.flatMap { id in pages.firstIndex(where: { $0.id == id }) } ?? 0
         cycle = AppleHeroRotation.Cycle(count: pages.count, index: index)
+        cycle.waitForPresentation()
+        presentationRequest &+= 1
         if isPaused { cycle.pause(at: .now) }
     }
 }
