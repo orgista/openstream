@@ -10,7 +10,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
-      Build 18 release: in progress 2026-10-12.
+      Build 18 release: PUBLISHED 2026-10-12 — https://github.com/orgista/openstream-apple/releases/tag/v1.0-18
 - [ ] **Top Shelf: possible second cause (2026-10-12).** The tvOS brand assets had only the wide Top Shelf image; the
       standard 1920x720 "Top Shelf Image" was missing, so tvOS can stretch the logo. Added it (same art); ships in the
       next build. The dynamic shelf fix is already in build 18 (see the Top Shelf item below).
@@ -407,6 +407,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
 
 ## Done
+
+- [x] **Plex lessons 9 — provider home hubs. Closed 2026-10-12 (done, verified):** supported Plex video hubs and Jellyfin/Emby Next Up and genre rows reuse existing title routes, custom row grouping and bounded paging; affected-row refresh preserves other rows, silently handles unavailable hubs and restores newly eligible empty hubs in their original position. Fake-server fixtures cover all three providers, duplicate headings, required-endpoint cache retention, paging and stale requests. Full serial Swift 3158 / 392; iOS/tvOS Debug builds confirmed all 14 changed production Swift files recompiled for arm64. No commit.
+- [x] **Plex lessons 11 — chapter provenance. Closed 2026-10-12 (done, verified):** embedded chapter source, opaque loaded-media version and validated timing reach both engines and the transport overlay; invalid, duplicate and outdated markers are rejected, and chapter/intro seeks recheck the current runtime and version. Unknown runtime never seeks; chapter-free content gets no invented intro. Chapter policy and engine tests; full serial Swift 3158 / 392; iOS/tvOS arm64 compilation confirmed. Fingerprinting remains tabled. No commit.
+- [x] **Hero Details duplication. Closed 2026-10-12 (done, verified):** tvOS omits the round info button when the primary opens Details, retaining My List and Play behavior; paging restores unavailable Details focus to My List. iPhone/iPad/Mac dedicated rows already omit the duplicate; fallback rows share the tested button policy. Button/focus policy tests; full serial Swift 3158 / 392; iOS/tvOS arm64 compilation confirmed. No commit.
 
 - [x] **Netflix polish 5 — accessible recommendation union. Closed 2026-10-12 (done, verified):** all current enabled catalogs, including duplicate-heading catalogs, indexed playable titles and server shelves; bounded configuration-isolated TMDB recommendation/similar cache retains seed/origin and piggybacks on existing metadata requests. Off-main indexed intersection rejects inaccessible/ambiguous targets; metadata-off and expiry respected. Union, transport, cache-bound/concurrency and inaccessible-target tests; serial Swift 3139 / 391; iOS/tvOS builds. No commit.
 - [x] **Netflix polish 6 — unseen picks and one seed row. Closed 2026-10-12 (done, verified):** Top Picks prioritizes relevant unseen titles; Continue Watching retains resume order. At most one >=6-item “Because you watched” row follows configured rails with heading deduplication and no extra UI text. Order/boundary/affinity tests; serial Swift 3139 / 391; iOS/tvOS builds; muted F2107E8F local-fixture capture `verification-artifacts/polish-2-2026-10-12/because-watched.png`; seed removed. No commit.

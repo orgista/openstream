@@ -40,7 +40,11 @@ No App Store (no-add-on) archive was built; no App Store version, review notes o
 - [x] 6 Real-iPhone trailer: `trailer view inserted` → `trailer native reveal: exact 16:9 slot` took 2.0 s and 1.6 s.
 - [ ] Not exercised: play/resume and the title trailer on a real Apple TV (none paired with the mini).
 - [x] 7 Uploads VALID on all four (readback above); What to Test notes set per platform and read back word for word (en-US).
-- [ ] 8 GitHub release not run (pending, under the same authorization).
+- [x] 8 GitHub release published 2026-10-12 (owner: "yes for all releases"): https://github.com/orgista/openstream-apple/releases/tag/v1.0-18
+      Public source commit c39907c (from abd81e6 + release-only fixes: UI-test LAN default removed, gitleaks allow
+      comment, release-script fixes; app code identical). Assets: iOS/tvOS/visionOS unsigned IPAs + Mac ad-hoc zip +
+      SHA256SUMS (verified on the Studio). Gates: scrub, gitleaks (export + public tree), zero-byte, add-on markers,
+      SDK floors, source fingerprint unchanged. First CHANGELOG.md and altstore-source.json added to the public repo.
 
 What to Test — iOS: > New: Live redesign. Video sits edge to edge at the top, with an On Now list and a Watching pill under it. A fixed category row with Events, one search button. / New: Picture in Picture for Live. / New: Live errors show one symbol, a short title naming the source, and one button. / New: iPhone hero uses textless key art; the title page has a 16:9 trailer header with a sound control. / Fixed: iOS 18 navigation and VoiceOver, Settings wording, multiview keeps its channels. / Engine updated.
 tvOS: > Fixed: Top Shelf now shows your titles instead of a blurry logo. Open the app once, then check the shelf. / Fixed: Set Up from iPhone now imports on Apple TV. / Fixed: Apple TV focus and the Guide sheet. / New: Live errors show one symbol, a short title naming the source, and one button. / Engine updated.

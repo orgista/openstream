@@ -73,3 +73,6 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Build the release from the exact commit that went to TestFlight (DELIVERIES.md "Source"), not a newer main.
       `github-release.sh` needs a git checkout on `main` and `gitleaks` on Dev-Mini (brew); the public checkout can live
       at `/Volumes/DevExt/dev/openstream-release/` via `OPENSTREAM_PUBLIC_CHECKOUT`.
+- [ ] Before running it: add a `## [<version> (<build>)] - <date>` section to the public checkout's CHANGELOG.md (the
+      notes come from it; use the What to Test lines). Publish from the Studio: bundle the new public commit from the mini,
+      fetch it into a fresh clone, `git push`, then `gh release create` with the assets (verify SHA256SUMS first).
