@@ -82,7 +82,7 @@ else:
         sums = []
         for asset, platform in zip(assets, ['iOS', 'tvOS', 'visionOS', 'macOS']):
             verify_zip(asset, version, build, platform)
-            digest = hashlib.file_digest(asset.open('rb'), 'sha256').hexdigest()
+            digest = hashlib.sha256(asset.read_bytes()).hexdigest()
             sums.append(f'{digest}  {asset.name}')
             print(f'{asset.name}: {asset.stat().st_size} bytes; SHA256 {digest}')
         (release / 'SHA256SUMS.txt').write_text('\n'.join(sums) + '\n')
