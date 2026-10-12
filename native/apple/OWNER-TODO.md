@@ -387,6 +387,13 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       (4) Long-pressing a Discover poster opens it, while Library/Continue Watching posters show a menu, and a
       shelf's "See all" is a plain text list. Give every poster the menu and make "See all" a poster grid?
 - [ ] **"Remove the gradient"** — the screenshot was lost (2026-09-25). Which gradient? Retake it.
+      (2026-10-12: 229cabe removed the extra fade over bright hero art; only the approved billboard fade is left.
+      If that was the one, tick this.)
+- [ ] **Apple TV posters: titles underneath? (2026-10-12)** tvOS posters have never shown titles (Apple TV app
+      style), but the Netflix rule says "titles under posters". Keep as is, or add titles on the TV too?
+- [ ] **Check on your phone/TV (2026-10-12 polish, 1e91143..36da38c):** Top Picks (no duplicates), Continue
+      Watching order + next episode after a finished one + "see all" when the row is full. The tvOS sim and tests
+      pass, but these need real watch history, which only your devices have (DevPlus screenshots come out black).
 - [ ] **ServerPlus 3090:** passed a full overnight bench test on Windows (2026-09-27, 350 W, 0 errors), so it may
       be the DEG1/OCuLink path at 3090 power. The server runs a 2080 Ti for now (11 GB: the 27B local
       model is slow). Next: capped run on the server (200 W + locked clocks), or a new dock, or return it.
