@@ -13,6 +13,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       how suggestions are built vs AppleRecommendationRanker. Spec specs/rea-appletv-netflix-polish-2026-10-11.md;
       reports design/reference-apps/2026-10-11-appletv-hero-gui.md + 2026-10-11-netflix-artwork-suggestions.md, each
       ending in a ranked polish list for the owner to pick from.
+      DONE 2026-10-11 (both reports in). Apple TV: 12 items, top = tvOS posters hide titles
+      (AppleDiscoverView.swift:2412), extra leading fade on bright art (AppleHeroScrim.swift:119), hero timer runs
+      while art loads. Netflix: 14 items, top = recommendations get empty genres (AppleDiscoverView.swift:648/672),
+      duplicate titles across sources, history only from Continue Watching, likes not spreading to related titles,
+      missing backdrops. Owner: pick which to build.
 - [ ] **REA deep dives (owner 2026-10-11): Paramount+ live functions, Netflix GUI, Plex backend + features, Infuse engine +
       source setup for local sources.** One report each in design/reference-apps/, with what OpenStream should take.
       Plex = "longest in the game: what can we learn for how our app works" → extra step holds Plex's backend against
