@@ -168,7 +168,7 @@ struct AppleSimilarTitleRankerTests {
         #expect(AppleSimilarTitleKeywords.extract(from: nil).isEmpty)
     }
 
-    @Test("A fourth title repeating the leading genre loses ten points")
+    @Test("Repeated genres accumulate soft penalties against selected titles")
     func diversityPenalty() {
         let target = AppleSimilarTitleProfile(
             id: "movie:t", type: "movie", title: "Target", genres: ["Documentary"], year: 2000
@@ -185,8 +185,7 @@ struct AppleSimilarTitleRankerTests {
         }
         let ranked = AppleRecommendationRanker.rank(target: target, candidates: candidates)
         #expect(ranked.count == 4)
-        #expect(ranked.prefix(3).allSatisfy { $0.diversityPenalty == 0 })
-        #expect(ranked.last?.diversityPenalty == 10)
+        #expect(ranked.map(\.diversityPenalty) == [0, 10, 20, 30])
         #expect(ranked.last?.profile.id == "movie:4")
     }
 
@@ -209,6 +208,32 @@ struct AppleSimilarTitleRankerTests {
         let second = AppleRecommendationRanker.rank(target: target, candidates: [best, alpha, beta])
         #expect(first.map(\.profile.id) == ["movie:c", "movie:a", "movie:b"])
         #expect(first.map(\.profile.id) == second.map(\.profile.id))
+    }
+
+    @Test func incrementalDiversityPrefersDifferentFranchiseAndSourceWithStableTies() {
+        let target = AppleSimilarTitleProfile(id: "target", type: "movie", title: "Target", genres: ["Drama"])
+        let a = AppleSimilarTitleProfile(id: "a", type: "movie", title: "A", genres: ["Drama"],
+            franchiseID: "family", sourceID: "one")
+        let b = AppleSimilarTitleProfile(id: "b", type: "movie", title: "B", genres: ["Drama"],
+            franchiseID: "family", sourceID: "one")
+        let c = AppleSimilarTitleProfile(id: "c", type: "movie", title: "C", genres: ["Drama"],
+            franchiseID: "other", sourceID: "two")
+        let first = AppleRecommendationRanker.rank(target: target, candidates: [b, c, a])
+        let second = AppleRecommendationRanker.rank(target: target, candidates: [c, a, b])
+        #expect(first.map(\.id) == ["a", "c", "b"])
+        #expect(first == second)
+        #expect(first.last?.diversityPenalty == 32.5)
+    }
+
+    @Test func unknownDiversitySignalsAreNeutralAndPenaltiesNeverExcludeRelevantTitles() {
+        let target = AppleSimilarTitleProfile(id: "target", type: "movie", title: "Target", imdbRating: 8)
+        let candidates = (0..<20).map {
+            AppleSimilarTitleProfile(id: "\($0)", type: "movie", title: "Title \($0)", imdbRating: 1,
+                franchiseID: "known", sourceID: "one")
+        }
+        #expect(AppleRecommendationRanker.rank(target: target, candidates: candidates, limit: 20).count == 20)
+        let missing = AppleCatalogShelfPolicy.DiversitySignals()
+        #expect(AppleCatalogShelfPolicy.diversityPenalty(missing, selected: [missing, missing], unit: 10) == 0)
     }
 
     @Test("Shared director and cast add up to twenty points")

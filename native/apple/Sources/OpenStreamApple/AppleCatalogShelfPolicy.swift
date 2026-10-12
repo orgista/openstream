@@ -1,6 +1,46 @@
 import Foundation
 
 enum AppleCatalogShelfPolicy {
+    /// Incremental soft overlap cost for recommendation composition only.
+    /// Authoritative catalog ranks and Continue Watching never call this.
+    struct DiversitySignals: Sendable {
+        let primaryGenre: String?
+        let franchise: String?
+        let source: String?
+
+        init(primaryGenre: String? = nil, franchise: String? = nil, source: String? = nil) {
+            func clean(_ value: String?) -> String? {
+                guard let value else { return nil }
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return normalized.isEmpty ? nil : normalized
+            }
+            self.primaryGenre = clean(primaryGenre)
+            self.franchise = clean(franchise)
+            self.source = clean(source)
+        }
+    }
+
+    static func diversityPenalty(_ signals: DiversitySignals, selected: [DiversitySignals], unit: Double) -> Double {
+        selected.reduce(0) { total, prior in
+            total + (signals.primaryGenre != nil && signals.primaryGenre == prior.primaryGenre ? unit : 0)
+                + (signals.franchise != nil && signals.franchise == prior.franchise ? unit : 0)
+                + (signals.source != nil && signals.source == prior.source ? unit * 0.25 : 0)
+        }
+    }
+
+    /// Conservative sequel families only; a common first word is not a franchise.
+    static func franchise(title: String) -> String? {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let colon = name.firstIndex(of: ":"), name[..<colon].split(separator: " ").count >= 2 {
+            return String(name[..<colon])
+        }
+        var words = name.split(separator: " ")
+        guard let last = words.last, Int(last) != nil || ["ii", "iii", "iv", "v", "vi"].contains(last),
+              words.count >= 3 else { return nil }
+        words.removeLast()
+        return words.joined(separator: " ")
+    }
+
     static func hasDiscoverContent(hasCatalog: Bool, hasLocalLibrary: Bool, hasMediaServerItems: Bool) -> Bool {
         hasCatalog || hasLocalLibrary || hasMediaServerItems
     }

@@ -263,7 +263,7 @@ struct AppleFeaturedHero<Actions: View>: View {
         } else {
             AppleCatalogArtwork(url: stillURL, onImageLoad: { [stillURL] image in
                 if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
-            })
+            }, purpose: item.backgroundURL == nil ? .poster : .hero)
         }
     }
 

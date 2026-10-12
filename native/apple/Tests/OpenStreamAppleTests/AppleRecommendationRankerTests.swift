@@ -5,6 +5,28 @@ import Foundation
 @Suite("AppleRecommendationRanker Tests")
 struct AppleRecommendationRankerTests {
     
+    @Test func topPicksDiversifySelectedGenresFranchisesAndSourcesWithStableTies() {
+        let a = AppleRankableTitle(id: "a", genres: ["Drama"], releaseYear: 2020, metadataCompleteness: 1,
+            isResumable: false, isCompleted: false, franchiseID: "same", sourceID: "one")
+        let b = AppleRankableTitle(id: "b", genres: ["Drama"], releaseYear: 2020, metadataCompleteness: 1,
+            isResumable: false, isCompleted: false, franchiseID: "same", sourceID: "one")
+        let c = AppleRankableTitle(id: "c", genres: ["Comedy"], releaseYear: 2020, metadataCompleteness: 1,
+            isResumable: false, isCompleted: false, franchiseID: "other", sourceID: "two")
+        let first = AppleRecommendationRanker.rank([b, c, a], history: [], ratings: [:], now: .distantPast, limit: 3)
+        let second = AppleRecommendationRanker.rank([c, a, b], history: [], ratings: [:], now: .distantPast, limit: 3)
+        #expect(first.map(\.id) == ["a", "c", "b"])
+        #expect(first == second)
+    }
+
+    @Test func shelfDiversityNeverReordersAuthoritativeTopTen() throws {
+        let catalog = try JSONDecoder().decode(AppleStremioCatalog.self, from: Data(#"{"id":"top-10","type":"movie","name":"Top 10"}"#.utf8))
+        let source = AppleSource(kind: .stremio, name: "Fixture", url: try #require(URL(string: "https://fixture.example/manifest.json")))
+        let items = (0..<10).map { AppleCatalogItem(mediaID: "fixture-\($0)", type: "movie", name: "Fixture \($0)", genres: ["Drama"]) }
+        let section = AppleCatalogSection(source: source, catalog: catalog, items: items)
+        let shown = AppleCatalogShelfPolicy.visibleSections([section], activeSourceIDs: [source.id])
+        #expect(shown.first?.items == items)
+    }
+
     @Test("Resumable wins")
     func testResumableWins() {
         let t1 = AppleRankableTitle(id: "1", genres: ["Action"], releaseYear: 2020, metadataCompleteness: 1.0, isResumable: false, isCompleted: false)

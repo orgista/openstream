@@ -837,7 +837,10 @@ struct AppleDiscoverView: View {
             return AppleRankableTitle(id: id, genres: genresByID[id] ?? [],
                 releaseYear: AppleRecommendationInputs.releaseYear(value.item),
                 metadataCompleteness: AppleRecommendationInputs.metadataCompleteness(value.item),
-                isResumable: resumable.contains(id), isCompleted: finished.contains(id))
+                isResumable: resumable.contains(id), isCompleted: finished.contains(id),
+                primaryGenre: value.item.genres?.first,
+                franchiseID: AppleCatalogShelfPolicy.franchise(title: value.item.name),
+                sourceID: value.source.id.uuidString)
         }
         let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: now, limit: 20)
         return ranked.compactMap { byID[$0.id] }
@@ -2326,6 +2329,7 @@ struct AppleCatalogCard: View {
     let progress: Double?
     /// "57 MIN LEFT" on a Discover Continue Watching still (iPhone, Mac).
     let remainingLabel: String?
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
@@ -2356,6 +2360,14 @@ struct AppleCatalogCard: View {
     }
 
     private var usesRowStyle: Bool { activeRowStyle != nil }
+
+    private var artworkPurpose: AppleArtworkResolver.Purpose { isLandscapeCard ? .resume : .poster }
+
+    private var artworkRequestID: String {
+        [item.id, item.posterURL?.absoluteString ?? "", item.backgroundURL?.absoluteString ?? "",
+         artworkPurpose.rawValue, artworkPurpose.size(pixelWidth: cardWidth * displayScale),
+         AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration)].joined(separator: "|")
+    }
 
     private var resolvedPosterURL: URL? {
         AppleCatalogArtworkPolicy.next(
@@ -2418,7 +2430,8 @@ struct AppleCatalogCard: View {
                 artworkPlate = AppleCatalogArtworkPolicy.plate(of: image)
                 artworkFraming = AppleCatalogArtworkPolicy.framing(
                     landscapeCard: isLandscapeCard, imageWidth: image.width, imageHeight: image.height)
-            })
+            }, purpose: AppleCatalogArtworkPolicy.purpose(of: resolvedPosterURL, item: item,
+                fallback: fallbackArtwork, preferred: artworkPurpose))
                 // A portrait poster in a 16:9 card is drawn whole, centred.
                 .frame(width: posterAspect.map { cardHeight * $0 } ?? cardWidth, height: cardHeight)
                 // A black plate lets the tile through where it is black; the
@@ -2494,27 +2507,26 @@ struct AppleCatalogCard: View {
                     artworkRetries += 1
                     failedArtworkURLs = []
                 }
-                .task(id: item.id) {
+                .task(id: artworkRequestID) {
                     #if DEBUG
                     if sizing == .ranked {
                         AppleInteractionTrace.record(.network,
                             "ranked artwork title=\(item.name) background=\(AppleCatalogArtworkPolicy.traceID(item.backgroundURL)) poster=\(AppleCatalogArtworkPolicy.traceID(item.posterURL))")
                     }
                     #endif
-                    // A Discover row still (iPhone, Mac) wants the backdrop: a
-                    // title that arrives with a poster only (a Top 10 match
-                    // found by search) asks TMDB for one rather than cropping
-                    // the poster into 16:9. Other platforms keep their behaviour.
-                    let wantsBackdrop = usesRowStyle && isLandscapeCard && item.backgroundURL == nil
-                    guard item.posterURL == nil || wantsBackdrop else { return }
-                    fallbackArtwork = await AppleArtworkResolver.shared.resolve(
-                        mediaID: item.mediaID,
+                    let artwork = await AppleArtworkResolver.shared.resolve(
+                        mediaID: item.imdbID ?? item.mediaID,
                         type: item.type,
-                        existingPosterURL: wantsBackdrop ? nil : item.posterURL,
+                        existingPosterURL: item.posterURL,
                         existingBackgroundURL: item.backgroundURL,
+                        purpose: artworkPurpose,
+                        pixelWidth: cardWidth * displayScale,
                         configuration: metadataConfiguration
                     )
+                    guard !Task.isCancelled else { return }
+                    fallbackArtwork = artwork
                 }
+
                 .task(id: artworkPlate) {
                     // A logo-only poster with no backdrop of its own: look one
                     // up once, for the card to draw the logo over.
@@ -2525,6 +2537,8 @@ struct AppleCatalogCard: View {
                         type: item.type,
                         existingPosterURL: nil,
                         existingBackgroundURL: nil,
+                        purpose: .resume,
+                        pixelWidth: cardWidth * displayScale,
                         configuration: metadataConfiguration
                     )
                 }
@@ -2702,15 +2716,30 @@ struct AppleCatalogArtwork: View {
     /// The decoded image, for a hero that measures its art (`AppleHeroLuminanceMap`).
     var onImageLoad: ((CGImage) -> Void)? = nil
 
+    var purpose: AppleArtworkResolver.Purpose? = nil
+    @Environment(\.displayScale) private var displayScale
+    @State private var displayedPixels = CGSize.zero
+
+    private var displayRequest: AppleCatalogArtworkPolicy.DisplayRequest {
+        AppleCatalogArtworkPolicy.displayRequest(url: url, pixels: displayedPixels, purpose: purpose)
+    }
+
     var body: some View {
-        AppleRemoteImage(url: url, contentMode: contentMode, placeholderSystemImage: "",
+        let request = displayRequest
+        AppleRemoteImage(url: request.url, contentMode: contentMode, placeholderSystemImage: "",
                          onLoad: onLoad == nil && onImageLoad == nil ? nil : { [onLoad, onImageLoad] image in
                              onLoad?()
                              onImageLoad?(image)
                          },
-                         onFailure: onFailure,
+                         onFailure: request.waitsForGeometry ? nil : onFailure,
                          loadingFill: loadingFill,
-                         keepsImageWhileReloading: keepsImageWhileReloading)
+                         keepsImageWhileReloading: keepsImageWhileReloading || request.fixedPixelDimension != nil,
+                         fixedPixelDimension: request.fixedPixelDimension)
+            .background { if request.waitsForGeometry { loadingFill } }
+            .onGeometryChange(for: CGSize.self) { geometry in
+                CGSize(width: (geometry.size.width * displayScale).rounded(.up),
+                       height: (geometry.size.height * displayScale).rounded(.up))
+            } action: { displayedPixels = $0 }
     }
 }
 
@@ -5798,7 +5827,7 @@ struct AppleCatalogItemDetailView: View {
         let candidates = relatedItems
         let ranked = await AppleSimilarTitleKeywordCache.shared.rankSimilar(
             target: AppleSimilarTitleProfile(item: target),
-            candidates: candidates.map(AppleSimilarTitleProfile.init(item:)),
+            candidates: candidates.map { AppleSimilarTitleProfile(item: $0, sourceID: source.id.uuidString) },
             limit: 12
         )
         guard !Task.isCancelled else { return }

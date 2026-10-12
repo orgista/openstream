@@ -1,55 +1,145 @@
 import Foundation
 import SwiftUI
 
-/// Session-cached poster/backdrop fallback for catalog items whose source
-/// add-on (e.g. Cinemeta on newly listed titles) does not return a poster
-/// image. Looked up from TMDB by IMDb id when the metadata client is
-/// enabled; never used to replace artwork the add-on already provided.
+/// Bounded, session-only artwork lookup. Source URLs remain untouched.
 public actor AppleArtworkResolver {
+    public enum Purpose: String, Sendable, Hashable {
+        case poster, resume, hero, logo
+
+        public func size(pixelWidth: Double) -> String {
+            let sizes: [Int]
+            switch self {
+            case .poster: sizes = [92, 154, 185, 342, 500, 780]
+            case .resume, .hero: sizes = [300, 780, 1280]
+            case .logo: sizes = [45, 92, 154, 185, 300, 500]
+            }
+            let width = pixelWidth.isFinite ? max(1, pixelWidth) : 1
+            guard width <= Double(sizes.last ?? 1) else { return "original" }
+            // Prefer the larger variant on an exact distance tie.
+            let nearest = sizes.min {
+                let left = abs(Double($0) - width), right = abs(Double($1) - width)
+                return left == right ? $0 > $1 : left < right
+            } ?? 500
+            return "w\(nearest)"
+        }
+    }
+
     public struct Artwork: Equatable, Sendable {
         public let posterURL: URL?
         public let backgroundURL: URL?
+        public let logoURL: URL?
+
+        public init(posterURL: URL?, backgroundURL: URL?, logoURL: URL? = nil) {
+            self.posterURL = posterURL
+            self.backgroundURL = backgroundURL
+            self.logoURL = logoURL
+        }
+    }
+
+    private struct Key: Hashable {
+        let title: String
+        let kind: String
+        let purpose: Purpose
+        let size: String
+        let configuration: String
     }
 
     public static let shared = AppleArtworkResolver()
-
-    private var cache: [String: Artwork] = [:]
+    private var cache: [Key: Artwork] = [:]
+    private var misses: Set<Key> = []
+    private var inFlight: [Key: Task<Artwork?, Never>] = [:]
+    private var activeLookups = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var lookups = 0
     private let tmdbClient: AppleTMDBClient
+    private let maximumLookups: Int
+    private let maximumConcurrentLookups: Int
 
-    public init(tmdbClient: AppleTMDBClient = AppleTMDBClient()) {
+    public init(tmdbClient: AppleTMDBClient = AppleTMDBClient(), maximumLookups: Int = 512,
+                maximumConcurrentLookups: Int = 8) {
         self.tmdbClient = tmdbClient
+        self.maximumLookups = max(1, maximumLookups)
+        self.maximumConcurrentLookups = max(1, maximumConcurrentLookups)
     }
 
-    /// Returns TMDB fallback artwork for `mediaID`, or nil when the item
-    /// already has a poster, TMDB is disabled, the id isn't an IMDb id, or
-    /// the lookup fails. Successful results are cached in-session per id so
-    /// a card visible in multiple shelves only triggers one request.
+    private func acquireSlot() async {
+        if activeLookups < maximumConcurrentLookups {
+            activeLookups += 1
+        } else {
+            await withCheckedContinuation { waiting.append($0) }
+        }
+    }
+
+    private func releaseSlot() {
+        if waiting.isEmpty { activeLookups -= 1 }
+        else { waiting.removeFirst().resume() }
+    }
+
     public func resolve(
         mediaID: String,
         type: String,
         existingPosterURL: URL?,
         existingBackgroundURL: URL? = nil,
+        existingLogoURL: URL? = nil,
+        purpose: Purpose = .poster,
+        pixelWidth: Double? = nil,
         configuration: AppleTMDBConfiguration?
     ) async -> Artwork? {
-        guard existingPosterURL == nil else { return nil }
-        let key = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return nil }
-        if let cached = cache[key] { return cached }
-        guard let configuration else { return nil }
-        let imdbID = String(key.split(separator: ":").first ?? Substring(key))
+        // Check settings before the cache as well: metadata-off must never
+        // expose a previously cached lookup or start new requests.
+        guard let configuration, !Task.isCancelled else { return nil }
+        switch purpose {
+        case .poster: guard existingPosterURL == nil else { return nil }
+        case .resume, .hero: guard existingBackgroundURL == nil else { return nil }
+        case .logo: guard existingLogoURL == nil else { return nil }
+        }
+        let id = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imdbID = String(id.split(separator: ":").first ?? "")
         guard AppleStremioMetadataClient.isIMDBIdentifier(imdbID) else { return nil }
         let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let kind: AppleMediaKind = ["series", "episode"].contains(normalizedType) ? .series : .movie
-        guard let details = try? await tmdbClient.details(imdbID: imdbID, kind: kind, configuration: configuration),
-              details.posterURL != nil else {
+        let series = ["series", "episode"].contains(normalizedType)
+        let size = pixelWidth.map { purpose.size(pixelWidth: $0) }
+            ?? (purpose == .poster || purpose == .logo ? "w500" : "w1280")
+        let key = Key(title: imdbID, kind: series ? "series" : "movie", purpose: purpose,
+                      size: size, configuration: configuration.credential)
+        let fallback: Artwork?
+        if let cached = cache[key] {
+            fallback = cached
+        } else if misses.contains(key) {
             return nil
+        } else if let pending = inFlight[key] {
+            fallback = await pending.value
+        } else {
+            guard lookups < maximumLookups else { return nil }
+            lookups += 1
+            let client = tmdbClient
+            // Shared work belongs to the resolver, not the first visible card.
+            // One disappearing card must not cancel the other waiters.
+            let task = Task {
+                await self.acquireSlot()
+                let details = try? await client.details(imdbID: imdbID,
+                    kind: series ? .series : .movie, configuration: configuration)
+                self.releaseSlot()
+                guard let details else { return nil as Artwork? }
+                let posterSize = purpose == .poster ? size : "w500"
+                let backdropSize = purpose == .resume || purpose == .hero ? size : "w1280"
+                let value = Artwork(
+                    posterURL: AppleTMDBClient.resizedArtworkURL(details.posterURL, size: posterSize),
+                    backgroundURL: AppleTMDBClient.resizedArtworkURL(details.backdropURL, size: backdropSize),
+                    logoURL: AppleTMDBClient.resizedArtworkURL(details.logoURL, size: purpose == .logo ? size : "w500"))
+                guard value.posterURL != nil || value.backgroundURL != nil || value.logoURL != nil else { return nil }
+                return value
+            }
+            inFlight[key] = task
+            fallback = await task.value
+            inFlight[key] = nil
+            if let fallback { cache[key] = fallback } else { misses.insert(key) }
         }
-        let value = Artwork(
-            posterURL: details.posterURL,
-            backgroundURL: details.backdropURL ?? existingBackgroundURL
-        )
-        cache[key] = value
-        return value
+        guard let fallback, !Task.isCancelled else { return nil }
+        // Do not put a caller's supplied URLs in the shared fallback cache.
+        return Artwork(posterURL: existingPosterURL ?? fallback.posterURL,
+                       backgroundURL: existingBackgroundURL ?? fallback.backgroundURL,
+                       logoURL: existingLogoURL ?? fallback.logoURL)
     }
 }
 

@@ -9,6 +9,8 @@ public struct AppleSimilarTitleProfile: Sendable, Equatable, Identifiable {
     /// Canonical IMDb id when the media id is one, used to dedupe the same
     /// title arriving from several catalogs.
     public let canonicalID: String?
+    public let franchiseID: String?
+    public let sourceID: String?
     public let type: String
     public let title: String
     public let genres: [String]
@@ -32,7 +34,9 @@ public struct AppleSimilarTitleProfile: Sendable, Equatable, Identifiable {
         year: Int? = nil,
         imdbRating: Double? = nil,
         keywords: Set<String> = [],
-        canonicalID: String? = nil
+        canonicalID: String? = nil,
+        franchiseID: String? = nil,
+        sourceID: String? = nil
     ) {
         self.id = id
         self.type = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -46,6 +50,8 @@ public struct AppleSimilarTitleProfile: Sendable, Equatable, Identifiable {
         self.imdbRating = imdbRating
         self.keywords = keywords
         self.canonicalID = canonicalID
+        self.franchiseID = franchiseID ?? AppleCatalogShelfPolicy.franchise(title: title)
+        self.sourceID = sourceID
     }
 
     public var primaryGenre: String? { genres.first.map { $0.lowercased() } }
@@ -63,13 +69,15 @@ public struct AppleSimilarTitleProfile: Sendable, Equatable, Identifiable {
             year: year,
             imdbRating: imdbRating,
             keywords: keywords,
-            canonicalID: canonicalID
+            canonicalID: canonicalID,
+            franchiseID: franchiseID,
+            sourceID: sourceID
         )
     }
 }
 
 public extension AppleSimilarTitleProfile {
-    init(item: AppleCatalogItem) {
+    init(item: AppleCatalogItem, sourceID: String? = nil) {
         self.init(
             id: item.id,
             type: item.type,
@@ -81,7 +89,8 @@ public extension AppleSimilarTitleProfile {
             writers: item.writers ?? [],
             year: item.year ?? AppleStremioMetadataClient.leadingYear(item.releaseInfo),
             imdbRating: item.rating,
-            canonicalID: AppleStremioMetadataClient.canonicalMediaID(item.mediaID)
+            canonicalID: AppleStremioMetadataClient.canonicalMediaID(item.imdbID ?? item.mediaID),
+            sourceID: sourceID
         )
     }
 }
@@ -132,9 +141,9 @@ public extension AppleRecommendationRanker {
     /// 100 points total — genre Jaccard x35, synopsis keyword Jaccard x25,
     /// cast/crew overlap up to 20 (director +10, each shared cast or writer +5,
     /// capped at 10), year proximity 10 - min(|delta|, 10), and the IMDb rating
-    /// prior x10. Candidates whose primary genre repeats the primary genre of
-    /// the three strongest matches lose 10 points so one genre cannot fill the
-    /// whole shelf. Missing fields score 0 rather than excluding a candidate.
+    /// prior x10. Selection applies incremental soft penalties for repeated
+    /// primary genres, known sequel families and source IDs. Missing signals
+    /// remain neutral; relevant candidates are never removed by the penalty.
     static func rank(
         target: AppleSimilarTitleProfile,
         candidates: [AppleSimilarTitleProfile],
@@ -189,26 +198,33 @@ public extension AppleRecommendationRanker {
             ))
         }
 
+        scored = scored.filter { $0.score > 0 }
         scored.sort(by: isOrderedBefore)
 
-        let leadGenres = Set(scored.prefix(3).compactMap { $0.profile.primaryGenre })
-        var adjusted = scored.enumerated().map { index, candidate -> AppleSimilarTitleCandidate in
-            guard index >= 3,
-                  let primary = candidate.profile.primaryGenre,
-                  leadGenres.contains(primary) else { return candidate }
-            return AppleSimilarTitleCandidate(
-                profile: candidate.profile,
-                score: candidate.score - similarDiversityPenalty,
-                genreScore: candidate.genreScore,
-                keywordScore: candidate.keywordScore,
-                peopleScore: candidate.peopleScore,
-                yearScore: candidate.yearScore,
-                ratingScore: candidate.ratingScore,
-                diversityPenalty: similarDiversityPenalty
-            )
+        var selected: [AppleCatalogShelfPolicy.DiversitySignals] = []
+        var result: [AppleSimilarTitleCandidate] = []
+        // Recompute against actual picks; a one-shot adjustment against the
+        // initial leaders cannot react when a diverse title moves ahead.
+        while !scored.isEmpty, result.count < limit {
+            let adjusted = scored.map { candidate in
+                let signals = AppleCatalogShelfPolicy.DiversitySignals(
+                    primaryGenre: candidate.profile.primaryGenre,
+                    franchise: candidate.profile.franchiseID, source: candidate.profile.sourceID)
+                let penalty = AppleCatalogShelfPolicy.diversityPenalty(signals, selected: selected,
+                                                                       unit: similarDiversityPenalty)
+                return AppleSimilarTitleCandidate(profile: candidate.profile, score: candidate.score - penalty,
+                    genreScore: candidate.genreScore, keywordScore: candidate.keywordScore,
+                    peopleScore: candidate.peopleScore, yearScore: candidate.yearScore,
+                    ratingScore: candidate.ratingScore, diversityPenalty: penalty)
+            }
+            guard let best = adjusted.min(by: isOrderedBefore) else { break }
+            scored.removeAll { $0.id == best.id }
+            // A soft penalty changes order, never membership of relevant titles.
+            result.append(best)
+            selected.append(AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: best.profile.primaryGenre,
+                franchise: best.profile.franchiseID, source: best.profile.sourceID))
         }
-        adjusted.sort(by: isOrderedBefore)
-        return adjusted.filter { $0.score > 0 }.prefix(limit).map { $0 }
+        return result
     }
 
     static func jaccard(_ lhs: Set<String>, _ rhs: Set<String>) -> Double {

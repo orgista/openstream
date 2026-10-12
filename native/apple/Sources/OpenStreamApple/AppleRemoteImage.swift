@@ -203,9 +203,11 @@ struct AppleTrimmedTitleLogo: View {
             }
             .task(id: "\(url.absoluteString)|\(Int(geometry.size.width))x\(Int(geometry.size.height))@\(displayScale)") {
                 guard !Task.isCancelled else { return }
+                let requestedURL = AppleTMDBClient.resizedArtworkURL(url,
+                    size: AppleArtworkResolver.Purpose.logo.size(pixelWidth: geometry.size.width * displayScale)) ?? url
                 if imageURL != url { image = nil }
                 do {
-                    if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "logo-trimmed"),
+                    if let cachedData = await AppleArtworkDiskCache.shared.data(for: requestedURL, variant: "logo-trimmed"),
                        let source = CGImageSourceCreateWithData(cachedData as CFData, nil),
                        let cachedImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
                         guard !Task.isCancelled else { return }
@@ -216,7 +218,7 @@ struct AppleTrimmedTitleLogo: View {
                     }
 
                     let decoded = try await AppleRemoteImageCache.shared.image(
-                        url: url,
+                        url: requestedURL,
                         maximumPixelDimension: min(2_560, max(256, Int(max(geometry.size.width, geometry.size.height) * displayScale * 4)))
                     )
                     guard !Task.isCancelled else { return }
@@ -227,12 +229,12 @@ struct AppleTrimmedTitleLogo: View {
                         #if canImport(AppKit)
                         let rep = NSBitmapImageRep(cgImage: finalImage)
                         if let pngData = rep.representation(using: .png, properties: [:]) {
-                            await AppleArtworkDiskCache.shared.store(pngData, for: url, variant: "logo-trimmed")
+                            await AppleArtworkDiskCache.shared.store(pngData, for: requestedURL, variant: "logo-trimmed")
                         }
                         #else
                         let uiImage = UIImage(cgImage: finalImage)
                         if let pngData = uiImage.pngData() {
-                            await AppleArtworkDiskCache.shared.store(pngData, for: url, variant: "logo-trimmed")
+                            await AppleArtworkDiskCache.shared.store(pngData, for: requestedURL, variant: "logo-trimmed")
                         }
                         #endif
                     }

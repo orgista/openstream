@@ -7,14 +7,20 @@ public struct AppleRankableTitle: Sendable, Equatable {
     public let metadataCompleteness: Double
     public let isResumable: Bool
     public let isCompleted: Bool
+    public let primaryGenre: String?
+    public let franchiseID: String?
+    public let sourceID: String?
 
-    public init(id: String, genres: [String], releaseYear: Int?, metadataCompleteness: Double, isResumable: Bool, isCompleted: Bool) {
+    public init(id: String, genres: [String], releaseYear: Int?, metadataCompleteness: Double, isResumable: Bool, isCompleted: Bool, primaryGenre: String? = nil, franchiseID: String? = nil, sourceID: String? = nil) {
         self.id = id
         self.genres = AppleRecommendationInputs.normalizedGenres(genres)
         self.releaseYear = releaseYear
         self.metadataCompleteness = max(0, min(1, metadataCompleteness))
         self.isResumable = isResumable
         self.isCompleted = isCompleted
+        self.primaryGenre = primaryGenre ?? genres.first
+        self.franchiseID = franchiseID
+        self.sourceID = sourceID
     }
 }
 
@@ -102,7 +108,7 @@ public enum AppleRecommendationRanker {
             return (title, min(4, viewingAffinity) + min(1, likedAffinity) + ratingWeight(ratings[title.id]))
         }
 
-        scoredTitles.sort { lhs, rhs in
+        func ordered(_ lhs: ScoredTitle, _ rhs: ScoredTitle) -> Bool {
             let l = lhs.title
             let r = rhs.title
             
@@ -131,8 +137,22 @@ public enum AppleRecommendationRanker {
             return l.id < r.id
         }
         
-        let result = scoredTitles.prefix(limit).map { $0.title }
-        return Array(result)
+        var selected: [AppleCatalogShelfPolicy.DiversitySignals] = []
+        var result: [AppleRankableTitle] = []
+        while !scoredTitles.isEmpty, result.count < limit {
+            let adjusted = scoredTitles.map { value -> ScoredTitle in
+                let signals = AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: value.title.primaryGenre,
+                    franchise: value.title.franchiseID, source: value.title.sourceID)
+                return (value.title, value.score - AppleCatalogShelfPolicy.diversityPenalty(signals,
+                    selected: selected, unit: 0.35))
+            }
+            guard let best = adjusted.min(by: ordered) else { break }
+            result.append(best.title)
+            selected.append(AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: best.title.primaryGenre,
+                franchise: best.title.franchiseID, source: best.title.sourceID))
+            scoredTitles.removeAll { $0.title.id == best.title.id }
+        }
+        return result
     }
 }
 

@@ -584,6 +584,22 @@ public struct AppleTMDBClient: Sendable {
         return clean.isEmpty ? nil : String(clean.prefix(limit))
     }
 
+    /// Resize only TMDB's unsigned image URLs produced by this client.
+    /// Provider URLs, including signed URLs and query strings, stay exact.
+    static func isResizableArtworkURL(_ url: URL?) -> Bool {
+        guard let url, url.scheme == "https", url.host == "image.tmdb.org",
+              url.query == nil, url.fragment == nil, url.user == nil, url.password == nil else { return false }
+        let parts = url.path.split(separator: "/")
+        return parts.count >= 4 && parts[0] == "t" && parts[1] == "p"
+            && (parts[2] == "original" || (parts[2].first == "w" && Int(parts[2].dropFirst()) != nil))
+    }
+
+    static func resizedArtworkURL(_ url: URL?, size: String) -> URL? {
+        guard let url, isResizableArtworkURL(url) else { return url }
+        let parts = url.path.split(separator: "/")
+        return imageURL(path: "/" + parts.dropFirst(3).joined(separator: "/"), width: size)
+    }
+
     private static func imageURL(path: String?, width: String) -> URL? {
         guard let path = bounded(path, limit: 300), path.hasPrefix("/") else { return nil }
         return URL(string: "https://image.tmdb.org/t/p/\(width)\(path)")

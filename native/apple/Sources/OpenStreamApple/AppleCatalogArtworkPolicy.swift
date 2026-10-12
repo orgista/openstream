@@ -1,12 +1,45 @@
 import CoreGraphics
 import Foundation
-#if DEBUG
 import CryptoKit
-#endif
 
 /// Ordered image attempts, shared by portrait and landscape catalog cards.
 /// An HTTP/decode failure must advance to the next URL, just like a nil URL.
 enum AppleCatalogArtworkPolicy {
+    struct DisplayRequest: Equatable {
+        let url: URL?
+        let fixedPixelDimension: Int?
+        let waitsForGeometry: Bool
+    }
+
+    static func configurationMarker(_ configuration: AppleTMDBConfiguration?) -> String {
+        guard let configuration else { return "metadata-off" }
+        return "metadata-" + SHA256.hash(data: Data(configuration.credential.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Both fetch URL and decode budget are quantized, so live resizing
+    /// within a bucket cannot restart the remote image's geometry-keyed task.
+    static func displayRequest(url: URL?, pixels: CGSize,
+                               purpose: AppleArtworkResolver.Purpose?) -> DisplayRequest {
+        guard AppleTMDBClient.isResizableArtworkURL(url) else {
+            return DisplayRequest(url: url, fixedPixelDimension: nil, waitsForGeometry: false)
+        }
+        guard pixels.width.isFinite, pixels.height.isFinite, pixels.width > 0, pixels.height > 0 else {
+            return DisplayRequest(url: nil, fixedPixelDimension: 256, waitsForGeometry: true)
+        }
+        var treatment = purpose ?? (pixels.width > pixels.height ? .resume : .poster)
+        // The metadata client's fixed URLs identify the supported image family
+        // when older callers use a portrait fallback in a landscape frame.
+        let originalSize = url?.path.split(separator: "/").dropFirst(2).first
+        if originalSize == "w500", treatment != .logo { treatment = .poster }
+        if originalSize == "w1280", treatment == .poster { treatment = .resume }
+        let bucket = treatment.size(pixelWidth: pixels.width)
+        let width = Int(bucket.dropFirst()) ?? 2_560
+        let dimension = treatment == .poster ? Int((Double(width) * 1.5).rounded(.up)) : width
+        return DisplayRequest(url: AppleTMDBClient.resizedArtworkURL(url, size: bucket),
+                              fixedPixelDimension: min(2_560, max(64, dimension)), waitsForGeometry: false)
+    }
+
     #if DEBUG
     /// Correlates image attempts without recording URLs, hosts, or credentials.
     static func traceID(_ url: URL?) -> String {
@@ -18,9 +51,19 @@ enum AppleCatalogArtworkPolicy {
 
     static func candidates(item: AppleCatalogItem, landscape: Bool,
                            fallback: AppleArtworkResolver.Artwork? = nil) -> [URL] {
+        candidates(item: item, purpose: landscape ? .resume : .poster, fallback: fallback)
+    }
+
+    static func candidates(item: AppleCatalogItem, purpose: AppleArtworkResolver.Purpose,
+                           fallback: AppleArtworkResolver.Artwork? = nil) -> [URL] {
+        if purpose == .logo {
+            var seen = Set<URL>()
+            return [item.logoURL, fallback?.logoURL].compactMap { $0 }.filter { seen.insert($0).inserted }
+        }
+        let landscape = purpose == .resume || purpose == .hero
         let supplied = landscape
-            ? [item.backgroundURL, item.posterURL]
-            : [item.posterURL, item.backgroundURL]
+            ? [item.backgroundURL, fallback?.backgroundURL, item.posterURL]
+            : [item.posterURL, fallback?.posterURL, item.backgroundURL]
         var values = supplied.compactMap { $0 }
         // Cinemeta's image service also works when an add-on returns no art,
         // or a stale art URL. It requires a canonical IMDb id, never a title
@@ -33,6 +76,18 @@ enum AppleCatalogArtworkPolicy {
                             : [fallback?.posterURL, fallback?.backgroundURL]).compactMap { $0 }
         var seen = Set<URL>()
         return values.filter { seen.insert($0).inserted }
+    }
+
+    /// A poster used as a landscape fallback still needs a poster size.
+    static func purpose(of url: URL?, item: AppleCatalogItem,
+                        fallback: AppleArtworkResolver.Artwork?, preferred: AppleArtworkResolver.Purpose) -> AppleArtworkResolver.Purpose {
+        guard let url else { return preferred }
+        if url == item.backgroundURL || url == fallback?.backgroundURL {
+            return preferred == .hero ? .hero : .resume
+        }
+        if url == item.posterURL || url == fallback?.posterURL { return .poster }
+        if url == item.logoURL || url == fallback?.logoURL { return .logo }
+        return preferred
     }
 
     /// Cinemeta's image-service art for an IMDb id: "poster" or "background".
