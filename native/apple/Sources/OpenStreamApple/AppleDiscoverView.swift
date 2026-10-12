@@ -6014,7 +6014,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var visibleEpisodes: [AppleStremioEpisode] {
-        AppleStremioEpisodePolicy.episodes(in: episodeList.selectedSeason, from: episodeList.episodes)
+        AppleLocalLibraryStore.visibleEpisodes(in: episodeList.selectedSeason, from: episodeList.episodes)
     }
 
     private func episodeMetadata(_ episode: AppleStremioEpisode) -> String {
@@ -6134,7 +6134,7 @@ struct AppleCatalogItemDetailView: View {
         result.sourceID = selectedID ?? presentation.request.url
         // Every path that opens the player from this page comes through here,
         // so wiring the next episode once covers all of them.
-        result.nextEpisode = nextEpisodeContext()
+        result.nextEpisode = nextLocalPartContext(selectedID: selectedID) ?? nextEpisodeContext()
         result.coordinator.trackCarryOver = playbackUI.trackCarryOver
         playbackUI.trackCarryOver = nil
         // Every stream failed before anything played: close the player, then
@@ -6231,10 +6231,42 @@ struct AppleCatalogItemDetailView: View {
     /// replaced in one step. Closing it first and presenting the next a moment
     /// later raced the cover's dismissal: the new player was never shown and
     /// the viewer was left on the title page (iPhone 27 v2 re-run, 2/2).
+    private func nextLocalPartContext(selectedID: URL?) -> AppleNextEpisodeContext? {
+        guard let selectedID,
+              let group = ((localGroup.map { [$0] } ?? []) + library.matchingGroups(item)).first(where: {
+                  $0.items.contains { $0.url == selectedID }
+              }), let current = group.items.first(where: { $0.url == selectedID }),
+              let next = group.nextPart(after: current) else { return nil }
+        return AppleNextEpisodeContext(title: next.name) { carryOver in
+            Task { @MainActor in
+                guard self.playbackUI.presentation?.sourceID == selectedID else { return }
+                let ending = self.playbackUI.presentation?.id
+                do {
+                    let presentation = try await self.library.presentation(for: next,
+                        sourceStore: self.localSourceStore ?? AppleSourceStore(), settings: self.settings)
+                    guard !Task.isCancelled, self.playbackUI.presentation?.id == ending else { return }
+                    self.playbackUI.trackCarryOver = carryOver.isEmpty ? nil : carryOver
+                    self.playbackCoordinator = presentation.coordinator
+                    self.playbackUI.presentation = self.configuredSources(presentation, selectedID: next.url)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard self.playbackUI.presentation?.id == ending else { return }
+                    self.playbackUI.presentation = nil
+                    self.playbackCoordinator.fail(error)
+                }
+            }
+        }
+    }
+
     private func nextEpisodeContext() -> AppleNextEpisodeContext? {
         guard let selectedEpisodeID = episodeList.selectedEpisodeID,
-              let current = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }),
-              let next = AppleStremioEpisodePolicy.following(current, in: episodeList.episodes) else { return nil }
+              let current = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }) else { return nil }
+        let currentFiles = library.localFiles(for: item, group: localGroup, episode: current)
+        let remaining = episodeList.episodes.filter { candidate in
+            candidate.id == current.id || !currentFiles.contains { AppleLocalLibraryStore.matchesEpisode($0, episode: candidate) }
+        }
+        guard let next = AppleStremioEpisodePolicy.following(current, in: remaining) else { return nil }
         return AppleNextEpisodeContext(title: next.displayTitle) { carryOver in
             Task { @MainActor in
                 // One handover per episode, however many times it is asked for.
@@ -6951,6 +6983,7 @@ struct AppleCatalogItemDetailView: View {
             episodes: loadedEpisodes.filter { $0.season == season }) { return resumed.id }
         return AppleStremioEpisodePolicy.defaultEpisode(in: season, from: loadedEpisodes,
             completedIDs: playbackStore.completedMediaIDs(among: loadedEpisodes.map(\.id)))?.id
+            ?? loadedEpisodes.first(where: { $0.id.hasPrefix("local-file-") })?.id
     }
 
     /// The Apple TV app's Up Next across the whole show — the season the page

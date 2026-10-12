@@ -71,6 +71,7 @@ Status: `[ ]` not checked · `[x]` checked, correct · `[!]` defect found · `[F
 - [x] B8 Row titles align — shelf title edge x=81 against the 80 pt column
 
 ### Library
+- [x] Plex lessons 5–6 (2026-10-12): filename rows retain ambiguous files without invented episode coordinates; explicit parts hand off, versions stay alternatives; durable correction store only, no new correction UI. AppleLibraryLessonsTests; full gate 3093 / 386; iOS/tvOS arm64 compilation confirmed. Runtime handoff not exercised on a device.
 - [F] B9 Loading state centred (fixed 2026-09-15)
 - [x] B10 Shelf order — correct **by construction**: the body emits Continue Watching, then
       per source Movies/Shows/Other, then Recently Added, in that order and nothing reorders them
