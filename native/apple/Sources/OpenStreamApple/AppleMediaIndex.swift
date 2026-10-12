@@ -588,6 +588,8 @@ public enum AppleMediaIngestion {
 @MainActor
 @Observable
 public final class AppleMediaIndexStore {
+    /// Cheap invalidation for derived snapshots, including same-count edits.
+    public private(set) var revision: UInt64 = 0
     public private(set) var records: [AppleMediaRecord] = []
     /// Same records keyed by id. `record(id:)` was a linear scan over the
     /// whole index — about 220 ms on the owner's library — on the content
@@ -628,6 +630,7 @@ public final class AppleMediaIndexStore {
     }
 
     private func setRecords(_ values: [AppleMediaRecord]) {
+        revision &+= 1
         records = values
         recordsByID = Dictionary(values.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         recordOffsetByID = Dictionary(values.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })

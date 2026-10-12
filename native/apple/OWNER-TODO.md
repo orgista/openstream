@@ -393,6 +393,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Done
 
+- [x] **Netflix suggestions 1 — real genres and release years. Closed 2026-10-12 (done, verified):** normalized candidate/history genres, item.year/leading-year parsing; `genresAndLeadingYearsAreNormalizedWithoutInventingMetadata`, missing-genre/recency tests; full Swift gate 3044 / 384, tvOS build recompiled. Revision-keyed task caches the render inputs; snapshot work runs off MainActor. Diff left for lead review; no commit.
+- [x] **Netflix suggestions 2 — canonical title deduplication. Closed 2026-10-12 (done, verified):** kind/IDs/year identity, stable accessible representative, retained playback routes, unique ranking/hero slots; identity, duplicate-ranker, hero and route-retention tests; full Swift gate 3044 / 384, tvOS build recompiled. One identity memo serves ranking and hero canonicalization; identity-reuse test passes. Diff left for lead review; no commit.
+- [x] **Netflix suggestions 3 — real viewing history. Closed 2026-10-12 (done, verified):** saved progress/completed dates joined to known metadata, meaningful-progress threshold, bounded history and per-show cap, unknown dates preserved; viewing-date, unknown-date, episode/autosave and history-budget tests; full Swift gate 3044 / 384, tvOS build recompiled. Full index/resolver walk runs off MainActor; same-count index-revision test passes. Diff left for lead review; no commit.
+- [x] **Netflix suggestions 4 — bounded ratings and related-title affinity. Closed 2026-10-12 (done, verified):** `.none` neutral, dislikes excluded, comparable capped scores and bounded genre transfer from likes; unrated-neutrality, dislike/like-transfer and comparable-weight tests; full Swift gate 3044 / 384, tvOS build recompiled. Set/remove/restore rating revisions invalidate the cached result; revision test passes. Diff left for lead review; no commit.
+
 - [x] **Security fixes from the Mythos check (2026-10-07)** — nothing critical. 1–3 + subtitle bomb + Messages links FIXED
       2026-10-08 (tokens in cache files: protected + kept out of backups, not yet removed). ATS (4) WON'T DO (2026-10-08): IPTV playlists, guides, logos and
       remote media servers are often plain http; narrowing would break them. Code already forces https for TMDB/Trakt/etc.

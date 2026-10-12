@@ -2409,3 +2409,8 @@ brought back on screen after the walk had scrolled past their row.
 - [x] iOS 18.6: legacy navigation/bright hero and fullscreen accessibility UI test passes on the rebuilt app (35.554 s); both final result attachments inspected.
 - [F] System UI calls: 38 pt TV shelf titles, iPhone native tab minimization, preserved YouTube attribution and source-provided start offsets; deprecated receipt recommendation retained. iOS/tvOS compile proof recorded.
 - [x] Final full gate 3026 tests / 384 suites (8.856 s); iOS/tvOS each recompile all 15 changed sources, with the final Live guard recompiled again. Zero-byte Swift and whitespace checks clean. No commit/upload; Googlebook stays open for ship.
+
+
+## 2026-10-12 — Netflix suggestions 1–4
+
+- [x] Real normalized genres/year inputs; canonical unique recommendations/heroes with alternate routes; progress/completed history and per-show cap; neutral/capped ratings and related-title genre affinity. Seventeen regression tests; full Swift gate 3044 / 384. Lead review follow-up: body reads cached Top Picks/heroes; a cheap revision-keyed task captures Sendable inputs, then a structured @concurrent pass scans/ranks/canonicalizes with one identity memo. Cancellation/current-revision guards prevent stale publication. Rating set/remove/restore and same-count index edits invalidate the cache. tvOS build confirmed recompilation of AppleDiscoverView, AppleRecommendationRanker, AppleMediaIndex, AppleMediaServerLibraryStore and AppleTitleRatingStore. No rendered UI/device check claimed; no UI text, timing or rail changes.

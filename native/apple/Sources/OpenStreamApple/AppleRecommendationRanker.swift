@@ -10,7 +10,7 @@ public struct AppleRankableTitle: Sendable, Equatable {
 
     public init(id: String, genres: [String], releaseYear: Int?, metadataCompleteness: Double, isResumable: Bool, isCompleted: Bool) {
         self.id = id
-        self.genres = genres
+        self.genres = AppleRecommendationInputs.normalizedGenres(genres)
         self.releaseYear = releaseYear
         self.metadataCompleteness = max(0, min(1, metadataCompleteness))
         self.isResumable = isResumable
@@ -21,13 +21,15 @@ public struct AppleRankableTitle: Sendable, Equatable {
 public struct AppleViewingSignal: Sendable, Equatable {
     public let titleID: String
     public let genres: [String]
-    public let at: Date
+    public let at: Date?
+    public let showID: String?
     public let completed: Bool
 
-    public init(titleID: String, genres: [String], at: Date, completed: Bool) {
+    public init(titleID: String, genres: [String], at: Date?, completed: Bool, showID: String? = nil) {
         self.titleID = titleID
-        self.genres = genres
+        self.genres = AppleRecommendationInputs.normalizedGenres(genres)
         self.at = at
+        self.showID = showID
         self.completed = completed
     }
 }
@@ -40,6 +42,10 @@ public enum AppleTitleRating: Int, Sendable, Equatable {
 }
 
 public enum AppleRecommendationRanker {
+    private static func ratingWeight(_ rating: AppleTitleRating?) -> Double {
+        switch rating { case .some(.up): 1; case .some(.doubleUp): 2; case .some(.none), nil, .some(.down): 0 }
+    }
+
     public static func rank(
         _ titles: [AppleRankableTitle],
         history: [AppleViewingSignal],
@@ -47,67 +53,55 @@ public enum AppleRecommendationRanker {
         now: Date,
         limit: Int
     ) -> [AppleRankableTitle] {
-        
+        guard limit > 0 else { return [] }
+        // One strongest observation per title/show. Saves are snapshots, not
+        // visits, and a hundred episodes must not outweigh a hundred films.
         struct HistoryStats {
             var genres: Set<String>
-            var mostRecentAt: Date
-            var visits: Int
+            var weight: Double
         }
-        
         var historySummary: [String: HistoryStats] = [:]
         for signal in history {
-            if let existing = historySummary[signal.titleID] {
-                historySummary[signal.titleID] = HistoryStats(
-                    genres: existing.genres.union(signal.genres),
-                    mostRecentAt: max(existing.mostRecentAt, signal.at),
-                    visits: existing.visits + 1
-                )
+            let weight = AppleRecommendationInputs.viewingWeight(signal, now: now)
+            let key = signal.showID ?? signal.titleID
+            if let existing = historySummary[key] {
+                historySummary[key] = HistoryStats(genres: existing.genres.union(signal.genres),
+                                                  weight: max(existing.weight, weight))
             } else {
-                historySummary[signal.titleID] = HistoryStats(
-                    genres: Set(signal.genres),
-                    mostRecentAt: signal.at,
-                    visits: 1
-                )
+                historySummary[key] = HistoryStats(genres: Set(signal.genres), weight: weight)
             }
         }
-        
-        let validTitles = titles.filter { title in
-            return ratings[title.id] != .down
+        // Bounded liked seeds also include history titles no longer in a shelf.
+        var likedGenres: [String: Set<String>] = [:]
+        for title in titles { likedGenres[title.id, default: []].formUnion(title.genres) }
+        for signal in history { likedGenres[signal.titleID, default: []].formUnion(signal.genres) }
+        let likedSeeds = ratings.keys.sorted().compactMap { id -> (String, Set<String>, Double)? in
+            let weight = ratingWeight(ratings[id])
+            guard weight > 0, let genres = likedGenres[id], !genres.isEmpty else { return nil }
+            return (id, genres, weight)
         }
-        
         typealias ScoredTitle = (title: AppleRankableTitle, score: Double)
-        
+        var seen = Set<String>()
+        let validTitles = titles.filter { ratings[$0.id] != .down && seen.insert($0.id).inserted }
         var scoredTitles: [ScoredTitle] = validTitles.map { title in
-            let titleGenres = Set(title.genres)
-            var affinityScore: Double = 0
-
-            if let rating = ratings[title.id] {
-                affinityScore += rating == .doubleUp ? 200 : 100
-            }
-            
-            if !titleGenres.isEmpty {
-                for (_, stats) in historySummary {
-                    let overlap = Double(titleGenres.intersection(stats.genres).count)
-                    if overlap > 0 {
-                        let daysAgo = max(0, now.timeIntervalSince(stats.mostRecentAt) / 86400.0)
-                        let recencyWeight = pow(0.5, daysAgo / 14.0)
-                        let repeatFactor = log1p(Double(stats.visits))
-                        affinityScore += overlap * recencyWeight * repeatFactor
-                    }
+            let genres = Set(title.genres)
+            var viewingAffinity: Double = 0
+            if !genres.isEmpty {
+                for stats in historySummary.values {
+                    let overlap = Double(genres.intersection(stats.genres).count) / Double(genres.count)
+                    viewingAffinity += overlap * stats.weight
                 }
             }
-            
-            if let rating = ratings[title.id] {
-                if rating == .up {
-                    affinityScore *= 1.5
-                } else if rating == .doubleUp {
-                    affinityScore *= 2.5
-                }
+            var likedAffinity: Double = 0
+            for (id, seedGenres, weight) in likedSeeds where id != title.id && !genres.isEmpty {
+                let overlap = Double(genres.intersection(seedGenres).count) / Double(genres.count)
+                likedAffinity += overlap * weight * 0.5
             }
-            
-            return (title: title, score: affinityScore)
+            // Each component uses the same small scale; explicit ratings no
+            // longer add 100/200 then multiply every other signal.
+            return (title, min(4, viewingAffinity) + min(1, likedAffinity) + ratingWeight(ratings[title.id]))
         }
-        
+
         scoredTitles.sort { lhs, rhs in
             let l = lhs.title
             let r = rhs.title
@@ -116,14 +110,6 @@ public enum AppleRecommendationRanker {
                 return l.isResumable
             }
             
-            // completed titles after unwatched at equal score; wait, it says:
-            // "completed titles after unwatched at equal score"
-            // Let's check completed status first? "completed titles after unwatched at equal score"
-            // Wait, does it mean completed titles are always after unwatched IF their scores are equal?
-            // "resumable first; then affinity score... completed titles after unwatched at equal score"
-            // This means score takes precedence over completed.
-            
-            // Wait, to be safe against floating point equality, let's use a small epsilon or just exact equality.
             if abs(lhs.score - rhs.score) > 1e-8 {
                 return lhs.score > rhs.score
             }
@@ -147,5 +133,140 @@ public enum AppleRecommendationRanker {
         
         let result = scoredTitles.prefix(limit).map { $0.title }
         return Array(result)
+    }
+}
+
+/// Pure inputs from metadata and saved playback snapshots. Never fetches.
+enum AppleRecommendationInputs {
+    /// Scoped to one snapshot: artwork/genre enrichment can reuse an ID,
+    /// while kind, year, canonical IDs and source-local identities cannot.
+    struct IdentityMemo {
+        private struct Key: Hashable {
+            let mediaID: String
+            let type: String
+            let name: String
+            let year: Int?
+            let releaseInfo: String?
+            let imdbID: String?
+            let sourceID: String
+        }
+        private var identities: [Key: String] = [:]
+        var count: Int { identities.count }
+
+        mutating func identity(_ item: AppleCatalogItem, sourceID: String) -> String {
+            let key = Key(mediaID: item.mediaID, type: item.type, name: item.name, year: item.year,
+                          releaseInfo: item.releaseInfo, imdbID: item.imdbID, sourceID: sourceID)
+            if let id = identities[key] { return id }
+            let id = AppleRecommendationInputs.identity(item, sourceID: sourceID)
+            identities[key] = id
+            return id
+        }
+    }
+
+    static func normalizedGenres(_ values: [String]) -> [String] {
+        Array(Set(values.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+                .lowercased()
+        }.filter { !$0.isEmpty })).sorted()
+    }
+
+    static func genres(_ item: AppleCatalogItem) -> [String] { normalizedGenres(item.genres ?? []) }
+
+    static func releaseYear(_ item: AppleCatalogItem) -> Int? {
+        if let year = item.year { return year }
+        guard let raw = item.releaseInfo?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.count >= 4, raw.prefix(4).allSatisfy({ $0.isASCII && $0.isNumber }),
+              raw.dropFirst(4).first?.isNumber != true,
+              let year = Int(raw.prefix(4)), (1870...2200).contains(year) else { return nil }
+        return year
+    }
+
+    static func identity(_ item: AppleCatalogItem, sourceID: String = "") -> String {
+        let mediaID = item.mediaID.lowercased()
+        let parts = mediaID.split(separator: ":")
+        let episode = AppleMediaSeriesInfo(mediaID: mediaID)
+        let suffix = episode.map { "|s\($0.season)e\($0.episode)" } ?? ""
+        let root = episode == nil ? mediaID : parts.dropLast(2).joined(separator: ":")
+        let strongID = item.imdbID ?? (AppleStremioMetadataClient.isIMDBIdentifier(root) ? root : nil)
+            ?? (root.hasPrefix("tmdb:") ? root : nil)
+        let identity: String
+        if let strongID {
+            identity = "\(item.type)|id|\(strongID)\(suffix)"
+        } else if let year = releaseYear(item), !item.name.isEmpty {
+            let name = item.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+                .lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            identity = "\(item.type)|title|\(name)|\(year)\(suffix)"
+        } else {
+            // Unknown year and opaque IDs cannot safely merge by name alone.
+            identity = "\(item.type)|source|\(sourceID)|\(mediaID)"
+        }
+        return ApplePlaybackIdentity.digest(for: identity)
+    }
+
+    static func metadataCompleteness(_ item: AppleCatalogItem) -> Double {
+        Double([item.summary != nil, item.posterURL != nil, item.backgroundURL != nil,
+                releaseYear(item) != nil, item.rating != nil, !genres(item).isEmpty,
+                item.logoURL != nil, item.imdbID != nil].filter { $0 }.count) / 8
+    }
+
+    static func prefers(_ item: AppleCatalogItem, sourceID: String, accessible: Bool,
+                        over other: AppleCatalogItem, sourceID otherSourceID: String, accessible otherAccessible: Bool) -> Bool {
+        if accessible != otherAccessible { return accessible }
+        let quality = metadataCompleteness(item), otherQuality = metadataCompleteness(other)
+        if quality != otherQuality { return quality > otherQuality }
+        return sourceID + "|" + item.id < otherSourceID + "|" + other.id
+    }
+
+    static func playbackRoutes(_ records: [AppleMediaRecord]) -> [AppleMediaAvailability] {
+        var routes: [String: AppleMediaAvailability] = [:]
+        for route in records.flatMap(\.availability) {
+            let key = route.instanceID.uuidString + "|" + route.itemReference
+            if let old = routes[key], old.lastVerified >= route.lastVerified { continue }
+            routes[key] = route
+        }
+        return routes.keys.sorted().compactMap { routes[$0] }
+    }
+
+    static func signal(titleID: String, genres: [String], progress: [ApplePlaybackProgress],
+                       completedDates: [Date], recordProgress: Double?, showID: String? = nil, now: Date = .now) -> AppleViewingSignal? {
+        let meaningful = progress.filter {
+            $0.position.isFinite && $0.duration.isFinite && $0.duration > 0
+                && ($0.isComplete || $0.position >= 60 || $0.position / $0.duration >= 0.05)
+        }
+        let observations = meaningful.map {
+            AppleViewingSignal(titleID: titleID, genres: genres, at: $0.updatedAt,
+                               completed: $0.isComplete, showID: showID)
+        } + completedDates.map {
+            AppleViewingSignal(titleID: titleID, genres: genres, at: $0, completed: true, showID: showID)
+        }
+        if !observations.isEmpty { return boundedHistory(observations, now: now, limit: 1).first }
+        guard let fraction = recordProgress, fraction.isFinite, fraction >= 0.05 else { return nil }
+        return AppleViewingSignal(titleID: titleID, genres: genres, at: nil,
+            completed: fraction >= ApplePlaybackProgress.completionFraction, showID: showID)
+    }
+
+    static func viewingWeight(_ signal: AppleViewingSignal, now: Date) -> Double {
+        let recency = signal.at.map { pow(0.5, max(0, now.timeIntervalSince($0) / 86400) / 14) } ?? 0.25
+        return recency * (signal.completed ? 1 : 0.5)
+    }
+
+    static func boundedHistory(_ values: [AppleViewingSignal], now: Date = .now, limit: Int = 500) -> [AppleViewingSignal] {
+        var byTitle: [String: AppleViewingSignal] = [:]
+        for value in values {
+            let key = value.showID ?? value.titleID
+            if let old = byTitle[key] {
+                // Keep the strongest actual observation. Combining an old
+                // completion with a recent partial date would invent evidence.
+                let weight = viewingWeight(value, now: now), oldWeight = viewingWeight(old, now: now)
+                let chosen = weight > oldWeight || (weight == oldWeight && value.titleID < old.titleID) ? value : old
+                byTitle[key] = AppleViewingSignal(titleID: chosen.titleID, genres: old.genres + value.genres,
+                    at: chosen.at, completed: chosen.completed, showID: chosen.showID)
+            } else { byTitle[key] = value }
+        }
+        return Array(byTitle.values.sorted {
+            if $0.at != $1.at { return ($0.at ?? .distantPast) > ($1.at ?? .distantPast) }
+            return $0.titleID < $1.titleID
+        }.prefix(max(0, limit)))
     }
 }

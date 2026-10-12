@@ -38,8 +38,9 @@ public final class AppleMediaServerLibraryStore {
         }
     }
 
-    public private(set) var shelves: [Shelf] = []
-    public private(set) var continueWatching: [AppleCatalogItem] = []
+    public private(set) var contentRevision: UInt64 = 0
+    public private(set) var shelves: [Shelf] = [] { didSet { contentRevision &+= 1 } }
+    public private(set) var continueWatching: [AppleCatalogItem] = [] { didSet { contentRevision &+= 1 } }
     public private(set) var isLoading = false
     public private(set) var failures: [UUID: String] = [:]
     public private(set) var lastLoadedAt: Date?

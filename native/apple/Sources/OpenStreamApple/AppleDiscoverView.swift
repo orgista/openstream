@@ -1,8 +1,8 @@
 import SwiftUI
+import Combine
 import AVFoundation
 import ImageIO
 #if os(iOS) || os(visionOS)
-import Combine
 import UIKit
 import WebKit
 #endif
@@ -93,6 +93,11 @@ struct AppleDiscoverView: View {
     @State private var reviewScrollPosition = ScrollPosition(edge: .top)
     #endif
     @State private var catalogLookup = AppleCatalogSearchLookup()
+    @State private var catalogLookupRevision: UInt64 = 0
+    @State private var ratingStoreRevision = AppleTitleRatingStore.revision
+    @State private var heroArtworkRevision: UInt64 = 0
+    @State private var recommendations = RecommendationResult()
+    @State private var recommendationsRevision: String?
     @State private var top10Week: AppleNetflixTop10Week?
     @State private var top10Error: String?
     @State private var library = AppleLocalLibraryStore.shared
@@ -121,11 +126,35 @@ struct AppleDiscoverView: View {
     let backupController: AppleConfigurationController?
     private let playbackResolver: AppleStremioPlaybackResolver
 
-    private struct IndexedCatalogItem: Identifiable {
+    private struct IndexedCatalogItem: Identifiable, Sendable {
         let record: AppleMediaRecord
         let item: AppleCatalogItem
         let source: AppleSource
         var id: String { record.id }
+    }
+
+    private struct RecommendationResult: Sendable {
+        var localContinueWatching: [IndexedCatalogItem] = []
+        var picks: [IndexedCatalogItem] = []
+        var heroes: [IndexedCatalogItem] = []
+    }
+
+    /// Capture actor-owned data once, then transfer only immutable values.
+    private struct RecommendationSnapshot: Sendable {
+        let sections: [AppleCatalogSection]
+        let sources: [AppleSource]
+        let records: [AppleMediaRecord]
+        let lookup: AppleCatalogSearchLookup
+        let progress: [String: ApplePlaybackProgress]
+        let completed: [String: Date]
+        let unwatched: [String: Date]
+        let removed: [String: Date]
+        let ratings: [String: AppleTitleRating]
+        let serverContinueWatching: [IndexedCatalogItem]
+        let serverShelves: [AppleMediaServerLibraryStore.Shelf]
+        let artwork: [String: AppleHeroArtworkUpgrade.Artwork]
+        let debugHeroTitle: String?
+        let now: Date
     }
 
     init(
@@ -160,14 +189,10 @@ struct AppleDiscoverView: View {
     }
 
     var body: some View {
-        // Once per pass. The billboard, the Top Picks row, Continue Watching
-        // and the prefetch key each rebuilt these on their own — Top Picks
-        // walks and digests every catalog item — and all of it ran on the
-        // main thread between the catalog cache landing and the billboard's
-        // first draw at launch.
-        let localContinueWatching = continueWatching
-        let picks = topPicks(continueWatching: localContinueWatching)
-        let heroes = featuredCandidates(continueWatching: withoutRemoved(mergedContinueWatching(local: localContinueWatching)), picks: picks)
+        let localContinueWatching = recommendations.localContinueWatching
+        let picks = recommendations.picks
+        let heroes = recommendations.heroes
+        let recommendationRevision = recommendationRevision
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
             hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
@@ -323,6 +348,13 @@ struct AppleDiscoverView: View {
                     .padding()
             }
         }
+        .task(id: recommendationRevision) {
+            await rebuildRecommendations(for: recommendationRevision)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AppleTitleRatingStore.changeNotification)
+            .receive(on: RunLoop.main)) { _ in
+                ratingStoreRevision = AppleTitleRatingStore.revision
+            }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
         #if os(visionOS)
         .buttonStyle(.plain)
@@ -518,28 +550,99 @@ struct AppleDiscoverView: View {
         .environment(\.appleTabToolbar, tabToolbarContext)
     }
 
+    /// All selection inputs have cheap revision tokens. Geometry, scrolling,
+    /// carousel ticks and wordmark publication do not invalidate this snapshot.
+    private var recommendationRevision: String {
+        let sectionsIdentity = catalogLookupIdentity
+        return "\(sectionsIdentity)|lookup:\(catalogLookupRevision)|play:\(ApplePlaybackProgressFeed.shared.revision)"
+            + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
+            + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
+    }
+
+    private func rebuildRecommendations(for revision: String) async {
+        // A rating may change while this screen is covered and unsubscribed.
+        ratingStoreRevision = AppleTitleRatingStore.revision
+        guard revision == recommendationRevision, recommendationsRevision != revision else { return }
+        let store = ApplePlaybackStore()
+        #if DEBUG
+        let wanted = UserDefaults.standard.string(forKey: "OpenStreamHeroTitle")
+        #else
+        let wanted: String? = nil
+        #endif
+        let snapshot = RecommendationSnapshot(sections: catalogStore.sections, sources: sourceStore.sources,
+            records: mediaIndex.records, lookup: catalogLookup, progress: store.configurationProgress(),
+            completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
+            removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
+            serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
+            artwork: heroArtwork, debugHeroTitle: wanted, now: .now)
+        do {
+            let result = try await Self.buildRecommendations(snapshot)
+            guard !Task.isCancelled, revision == recommendationRevision else { return }
+            recommendations = result
+            recommendationsRevision = revision
+        } catch is CancellationError {
+            // Disappearance or a newer revision owns the next result.
+        } catch {
+            assertionFailure("Unexpected recommendation preparation error")
+        }
+    }
+
+    @concurrent nonisolated private static func buildRecommendations(_ snapshot: RecommendationSnapshot) async throws -> RecommendationResult {
+        try Task.checkCancellation()
+        let visibleSections = AppleCatalogShelfPolicy.visibleSections(snapshot.sections,
+            activeSourceIDs: Set(snapshot.sources.filter(\.isEnabled).map(\.id)))
+        let saved: (AppleMediaRecord) -> ApplePlaybackProgress? = { record in
+            ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.progress[$0] }
+        }
+        let ordered = AppleContinueWatchingResolver.inProgress(snapshot.records, saved: saved) {
+            saved($0)?.updatedAt ?? $0.lastVerified
+        }
+        let entries = AppleContinueWatchingResolver.entries(ordered, in: [snapshot.lookup])
+        if snapshot.lookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
+        let local = Array(entries.compactMap { entry in
+            entry.resolution.match.map { IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source) }
+        }.prefix(AppleContinueWatchingResolver.maximumCount))
+        var seen = Set(local.map(\.item.mediaID))
+        let merged = AppleCatalogShelfPolicy.uniqueByID(local + snapshot.serverContinueWatching.filter {
+            seen.insert($0.item.mediaID).inserted
+        })
+        let heroContinueWatching = merged.filter { value in
+            guard let key = ApplePlaybackIdentity.storageKey(for: value.record.id) else { return true }
+            return !AppleContinueWatchingRemovalPolicy.isRemoved(removedAt: snapshot.removed[key],
+                lastPlayedAt: snapshot.progress[key]?.updatedAt)
+        }
+        var identities = AppleRecommendationInputs.IdentityMemo()
+        let picks = try topPicks(snapshot, visibleSections: visibleSections, continueWatching: local, identities: &identities)
+        try Task.checkCancellation()
+        let heroes = featuredCandidates(snapshot, visibleSections: visibleSections,
+            continueWatching: heroContinueWatching, picks: picks, identities: &identities)
+        try Task.checkCancellation()
+        return RecommendationResult(localContinueWatching: local, picks: picks, heroes: heroes)
+    }
+
     /// What the hero rotates through: what the owner is part-way into first,
     /// then the recommendations, then the newest catalog items (FEEDBACK X9) —
     /// only titles with a backdrop, so no page is a poster or a placeholder
     /// with no title over it. The first catalog offers more than five so the
     /// rotation can still fill once the art-less ones are passed over.
-    private func featuredCandidates(continueWatching: [IndexedCatalogItem],
-                                    picks: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
+    nonisolated private static func featuredCandidates(_ snapshot: RecommendationSnapshot,
+                                    visibleSections: [AppleCatalogSection], continueWatching: [IndexedCatalogItem],
+                                    picks: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) -> [IndexedCatalogItem] {
         var values = continueWatching
         values += picks
         // A media-server-only library has no add-on catalog sections, but its
         // titles belong in the billboard just like every other playable title.
-        values += mediaServerLibrary.shelves.flatMap(\.items)
+        values += snapshot.serverShelves.flatMap(\.items)
             .filter { !$0.name.isEmpty && AppleCatalogDiscoveryPolicy.isTitleType($0.type) }
             .compactMap { item in
                 guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
-                      let source = sourceStore.sources.first(where: { $0.id == reference.sourceID }) else { return nil }
+                      let source = snapshot.sources.first(where: { $0.id == reference.sourceID }) else { return nil }
                 return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
                                           item: item, source: source)
             }
         // Movies and shows only: a tv or channel shelf is no billboard.
         if let section = visibleSections.first(where: { AppleCatalogDiscoveryPolicy.isTitleType($0.catalog.type) }),
-           let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
+           let source = snapshot.sources.first(where: { $0.id == section.sourceID }) {
             // A poster-only entry (no name) has no title to put on a billboard.
             values += section.items.filter { !$0.name.isEmpty }
                 .prefix(AppleHeroRotation.maximumCandidates * 4).map { item in
@@ -550,10 +653,10 @@ struct AppleDiscoverView: View {
         #if DEBUG
         // `OpenStreamHeroTitle` leads the rotation with a title picked by
         // name, so a headless sweep can photograph one particular hero.
-        if let wanted = UserDefaults.standard.string(forKey: "OpenStreamHeroTitle"), !wanted.isEmpty,
+        if let wanted = snapshot.debugHeroTitle, !wanted.isEmpty,
            let pinned = visibleSections.lazy.compactMap({ section in
                section.items.first { $0.name.localizedCaseInsensitiveContains(wanted) }.flatMap { item in
-                   self.sourceStore.sources.first { $0.id == section.sourceID }.map { source in
+                   snapshot.sources.first { $0.id == section.sourceID }.map { source in
                        IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
                                           item: item, source: source)
                    }
@@ -562,34 +665,14 @@ struct AppleDiscoverView: View {
             values.insert(pinned, at: 0)
         }
         #endif
-        return AppleHeroRotation.candidates(values, id: \.record.id,
-                                            hasBackdrop: { AppleHeroRotation.hasBackdrop(heroItem($0.item)) })
-    }
-
-    /// Most recently watched first, like every other Continue Watching row.
-    /// It was sorted by how far through each title was, which put whatever was
-    /// closest to finishing at the front — and the billboard follows this
-    /// order, so the home screen led with the wrong title too.
-    ///
-    /// A title no loaded shelf lists any more still shows: it resolves as
-    /// Search does, through its merged sources or its IMDb id
-    /// (`AppleContinueWatchingResolver`, N52). Only one nothing can open is
-    /// left out, and that is logged once — not before the lookup's first
-    /// off-main build lands, when it knows no sources and everything fails.
-    private var continueWatching: [IndexedCatalogItem] {
-        let store = ApplePlaybackStore()
-        let ordered = AppleContinueWatchingResolver.inProgress(mediaIndex.records,
-            saved: { store.progress(for: $0.id) }) {
-            store.progress(for: $0.id)?.updatedAt ?? $0.lastVerified
-        }
-        let entries = AppleContinueWatchingResolver.entries(ordered, in: [catalogLookup])
-        if catalogLookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
-        return entries
-            .compactMap { entry in
-                entry.resolution.match.map { IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source) }
-            }
-            .prefix(AppleContinueWatchingResolver.maximumCount)
-            .map { $0 }
+        return AppleHeroRotation.candidates(canonicalized(values, identities: &identities), id: { identities.identity($0.item, sourceID: $0.source.id.uuidString) },
+                                            hasBackdrop: { value in
+                                                let item = value.item
+                                                let upgraded = snapshot.artwork[item.mediaID].map {
+                                                    item.withHeroArtwork(backgroundURL: $0.backdropURL, logoURL: $0.logoURL)
+                                                } ?? item
+                                                return AppleHeroRotation.hasBackdrop(upgraded)
+                                            })
     }
 
     /// Continue Watching less the titles the viewer removed and has not
@@ -639,51 +722,114 @@ struct AppleDiscoverView: View {
         return AppleCatalogShelfPolicy.uniqueByID(resolved)
     }
 
-    private func topPicks(continueWatching: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
-        let ratingStore = AppleTitleRatingStore()
-        let ratings = ratingStore.allRatings
-        let history = continueWatching.map { value in
-                AppleViewingSignal(
-                    titleID: ApplePlaybackIdentity.digest(for: value.item.mediaID),
-                    genres: [],
-                    at: value.record.lastVerified,
-                    completed: value.record.progress.map { $0 >= ApplePlaybackProgress.completionFraction } ?? false
-                )
+    /// Keep the first title's slot (in particular the lead resume hero), but
+    /// choose a deterministic playable representative and retain every route.
+    nonisolated private static func canonicalized(_ values: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) -> [IndexedCatalogItem] {
+        let representatives = AppleHeroRotation.candidates(values, id: { identities.identity($0.item, sourceID: $0.source.id.uuidString) }, preferring: {
+            AppleRecommendationInputs.prefers($0.item, sourceID: $0.source.id.uuidString, accessible: $0.source.isEnabled,
+                over: $1.item, sourceID: $1.source.id.uuidString, accessible: $1.source.isEnabled)
+        }, limit: .max)
+        let groups = Dictionary(grouping: values, by: { identities.identity($0.item, sourceID: $0.source.id.uuidString) })
+        return representatives.map { value in
+            var record = value.record
+            record.availability = AppleRecommendationInputs.playbackRoutes(
+                groups[identities.identity(value.item, sourceID: value.source.id.uuidString), default: []].map(\.record))
+            return IndexedCatalogItem(record: record, item: value.item, source: value.source)
+        }
+    }
+
+    nonisolated private static func topPicks(_ snapshot: RecommendationSnapshot, visibleSections: [AppleCatalogSection],
+                                            continueWatching: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) throws -> [IndexedCatalogItem] {
+        let now = snapshot.now
+        let storedRatings = snapshot.ratings
+        let progress = snapshot.progress
+        let completed = snapshot.completed
+        let unwatched = snapshot.unwatched
+        var candidates: [IndexedCatalogItem] = []
+        for section in visibleSections where AppleCatalogDiscoveryPolicy.isTitleType(section.catalog.type) {
+            guard let source = snapshot.sources.first(where: { $0.id == section.sourceID && $0.isEnabled }) else { continue }
+            try Task.checkCancellation()
+            candidates += section.items.map { item in
+                IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+                                   item: item, source: source)
             }
+        }
+        var historyValues = candidates + continueWatching
+        // Use already-loaded metadata for indexed history, including titles
+        // which are no longer present in a visible catalog. No enrichment ask.
+        for record in snapshot.records where record.kind == .movie || record.kind == .series || record.kind == .episode {
+            try Task.checkCancellation()
+            if let match = AppleContinueWatchingResolver.resolve(record, in: [snapshot.lookup]).match {
+                historyValues.append(IndexedCatalogItem(record: record, item: match.item, source: match.source))
+            } else if let id = record.canonicalID {
+                // Historical episodes may no longer be listed. Their canonical
+                // root still lets the ranker cap all of a show's observations.
+                let item = AppleCatalogItem(mediaID: id, type: record.kind.rawValue, name: record.title,
+                    summary: record.summary, year: record.year)
+                if let source = record.availability.lazy.compactMap({ route in
+                    snapshot.sources.first { $0.id == route.instanceID }
+                }).first {
+                    historyValues.append(IndexedCatalogItem(record: record, item: item, source: source))
+                }
+            }
+        }
+        var ratings: [String: AppleTitleRating] = [:]
+        var signals: [AppleViewingSignal] = []
+        var resumable = Set<String>()
+        var finished = Set<String>()
+        var genresByID: [String: [String]] = [:]
+        for value in historyValues {
+            try Task.checkCancellation()
+            let id = identities.identity(value.item, sourceID: value.source.id.uuidString)
+            let genres = AppleRecommendationInputs.genres(value.item)
+            genresByID[id, default: []] += genres
+            let keys = Array(Set([value.record.id, value.item.mediaID]
+                + AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id)))
+            let storageKeys = keys.compactMap { ApplePlaybackIdentity.storageKey(for: $0) }
+            let saved = storageKeys.compactMap { progress[$0] }
+            let dates = storageKeys.compactMap { completed[$0] }
+            // Ratings are persisted by media id; map all alternate IDs to the
+            // same recommendation identity. An explicit dislike wins a conflict.
+            if let rating = storedRatings[ApplePlaybackIdentity.digest(for: value.item.mediaID)] {
+                let old = ratings[id]
+                if old != .down, rating == .down || rating.rawValue > (old?.rawValue ?? 0) { ratings[id] = rating }
+            }
+            var showID: String?
+            if AppleMediaSeriesInfo(mediaID: value.item.mediaID) != nil {
+                let root = value.item.mediaID.split(separator: ":").dropLast(2).joined(separator: ":")
+                let show = AppleCatalogItem(mediaID: root, type: "series", name: value.item.name,
+                    year: AppleRecommendationInputs.releaseYear(value.item), imdbID: value.item.imdbID)
+                showID = identities.identity(show, sourceID: value.source.id.uuidString)
+            }
+            let recordProgress = saved.isEmpty && !storageKeys.contains(where: { unwatched[$0] != nil })
+                ? value.record.progress : nil
+            if let signal = AppleRecommendationInputs.signal(titleID: id, genres: genres, progress: saved,
+                completedDates: dates, recordProgress: recordProgress, showID: showID, now: now) {
+                signals.append(signal)
+            }
+            // Candidate watched state is independent of which observation has
+            // the strongest taste weight (a later rewatch may be only partial).
+            if !dates.isEmpty || saved.contains(where: { $0.isComplete })
+                || (recordProgress ?? 0) >= ApplePlaybackProgress.completionFraction { finished.insert(id) }
+            if saved.contains(where: { $0.resumePosition != nil })
+                || (saved.isEmpty && (value.record.progress ?? 0) > 0
+                    && (value.record.progress ?? 1) < ApplePlaybackProgress.completionFraction) {
+                resumable.insert(id)
+            }
+        }
+        let history = AppleRecommendationInputs.boundedHistory(signals, now: now)
         guard !history.isEmpty || !ratings.isEmpty else { return [] }
-        var values: [String: IndexedCatalogItem] = [:]
-        for section in visibleSections {
-            guard let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) else { continue }
-            for item in section.items {
-                let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-                values[record.id] = IndexedCatalogItem(record: record, item: item, source: source)
-            }
+        let unique = canonicalized(candidates, identities: &identities)
+        let byID = Dictionary(uniqueKeysWithValues: unique.map { (identities.identity($0.item, sourceID: $0.source.id.uuidString), $0) })
+        let rankable = unique.map { value in
+            let id = identities.identity(value.item, sourceID: value.source.id.uuidString)
+            return AppleRankableTitle(id: id, genres: genresByID[id] ?? [],
+                releaseYear: AppleRecommendationInputs.releaseYear(value.item),
+                metadataCompleteness: AppleRecommendationInputs.metadataCompleteness(value.item),
+                isResumable: resumable.contains(id), isCompleted: finished.contains(id))
         }
-        // One digest per title. The lookup below used to digest every
-        // candidate again for every ranked title — twenty passes over the
-        // whole catalog.
-        var byDigest: [String: IndexedCatalogItem] = [:]
-        let finished = ApplePlaybackStore().completedMediaIDs(among: Array(values.keys))
-        let rankable = values.values.map { value in
-            let digest = ApplePlaybackIdentity.digest(for: value.item.mediaID)
-            if byDigest[digest] == nil { byDigest[digest] = value }
-            return AppleRankableTitle(
-                id: digest,
-                genres: [],
-                releaseYear: Int(value.item.releaseInfo ?? ""),
-                metadataCompleteness: Double([
-                    value.item.summary != nil,
-                    value.item.posterURL != nil,
-                    value.item.releaseInfo != nil,
-                    value.item.rating != nil
-                ].filter { $0 }.count) / 4,
-                isResumable: (value.record.progress ?? 0) > 0 && (value.record.progress ?? 1) < ApplePlaybackProgress.completionFraction,
-                isCompleted: (value.record.progress ?? 0) >= ApplePlaybackProgress.completionFraction
-                    || finished.contains(value.record.id)
-            )
-        }
-        let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: .now, limit: 20)
-        return ranked.compactMap { byDigest[$0.id] }
+        let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: now, limit: 20)
+        return ranked.compactMap { byID[$0.id] }
     }
 
     /// A row on the home screen, in the order it is drawn.
@@ -1048,6 +1194,7 @@ struct AppleDiscoverView: View {
             )
             guard !Task.isCancelled else { return }
             heroArtwork[hero.item.mediaID] = upgrade
+            heroArtworkRevision &+= 1
         }
     }
 
@@ -1274,6 +1421,7 @@ struct AppleDiscoverView: View {
         )
         guard !Task.isCancelled else { return }
         catalogLookup = updated
+        catalogLookupRevision &+= 1
         #if DEBUG
         // Only once the lookup exists, so every fixture rank matches a
         // catalogue title and nothing falls back to a network search.

@@ -566,3 +566,21 @@ import Testing
 private final class RecordLookupChangeFlag {
     var changed = false
 }
+
+
+@MainActor
+@Test func mediaIndexRevisionChangesForSameCountContentUpdates() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "recommendation-index-revision-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    let record = AppleMediaRecord(canonicalID: "tt1234567", kind: .movie, title: "Film",
+        availability: [.init(instanceID: UUID(), capability: .resolvable, itemReference: "movie|tt1234567")])
+    let initial = store.revision
+    try await store.upsert(record)
+    #expect(store.revision > initial)
+    let loaded = store.revision
+    try await store.setFavorite(true, recordID: record.id)
+    #expect(store.revision > loaded)
+    #expect(store.records.count == 1)
+    #expect(store.record(id: record.id)?.isFavorite == true)
+}

@@ -95,4 +95,19 @@ struct AppleHeroRotationTests {
         #expect(value >= 0 && value <= 1)
         #expect(AppleHeroRotation.progress(at: past, interval: 0) == 0)
     }
+    @Test func duplicateHeroesChooseStableAccessibleMetadataWithoutChangingOrder() {
+        let sparse = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "Film")
+        let rich = AppleCatalogItem(mediaID: "tmdb:7", type: "movie", name: "Film",
+            backgroundURL: URL(string: "https://fixture.example/backdrop"), summary: "Summary", genres: ["Drama"], imdbID: "tt1234567")
+        let other = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Other")
+        let values = AppleHeroRotation.candidates([sparse, other, rich],
+            id: { AppleRecommendationInputs.identity($0) },
+            preferring: { AppleRecommendationInputs.metadataCompleteness($0) > AppleRecommendationInputs.metadataCompleteness($1) })
+        #expect(values == [rich, other])
+        #expect(AppleRecommendationInputs.prefers(sparse, sourceID: "a", accessible: true,
+            over: rich, sourceID: "b", accessible: false))
+        #expect(AppleRecommendationInputs.prefers(rich, sourceID: "a", accessible: true,
+            over: rich, sourceID: "b", accessible: true))
+    }
+
 }

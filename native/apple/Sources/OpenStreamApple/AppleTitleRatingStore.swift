@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public extension AppleTitleRating {
     static var selectableCases: [AppleTitleRating] { [.down, .up, .doubleUp] }
@@ -14,6 +15,16 @@ public extension AppleTitleRating {
 extension AppleTitleRating: Identifiable {}
 
 public struct AppleTitleRatingStore: @unchecked Sendable {
+    static let changeNotification = Notification.Name("OpenStreamTitleRatingsChanged")
+    private static let revisionCounter = Mutex<UInt64>(0)
+    /// Process-local invalidation; persisted ratings remain the source of truth.
+    static var revision: UInt64 { revisionCounter.withLock { $0 } }
+
+    private static func didChange() {
+        revisionCounter.withLock { $0 &+= 1 }
+        NotificationCenter.default.post(name: changeNotification, object: nil)
+    }
+
     private let defaults: UserDefaults
     private let keyPrefix = "openstream.title-rating.v1."
 
@@ -37,6 +48,7 @@ public struct AppleTitleRatingStore: @unchecked Sendable {
             ids.remove(id)
         }
         defaults.set(Array(ids).sorted(), forKey: "\(keyPrefix)ids")
+        Self.didChange()
     }
 
     public var allRatings: [String: AppleTitleRating] {
@@ -55,6 +67,7 @@ public struct AppleTitleRatingStore: @unchecked Sendable {
         let valid = values.filter { AppleTitleRating(rawValue: $0.value) != nil }
         for (id, rating) in valid { defaults.set(rating, forKey: keyPrefix + id) }
         defaults.set(valid.keys.sorted(), forKey: "\(keyPrefix)ids")
+        Self.didChange()
     }
 
     private func key(for mediaID: String) -> String {

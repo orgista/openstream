@@ -4605,3 +4605,12 @@ Links from other apps now ask you to play Live TV or YouTube; movie links open t
 External subtitles now show as selected only after valid captions arrive, and a failed download can be retried. TV shelf headings are 38 pt; the iPhone uses the system shrinking tab bar. YouTube attribution stays visible. Trailers only skip a title card when the source supplies a start offset. The recommended receipt check stays.
 
 The full tests pass: 3,026 tests in 384 suites. The iOS 18.6 navigation/accessibility check and final iOS/tvOS builds pass. All 101 Muse items have an individual disposition in OWNER-TODO (35 covered, 66 dropped). Device, account and soak checks are labelled separately; they are not claimed as tested. Googlebook stays open for shipping. No OpenStream commit or upload was made.
+
+
+## 2026-10-12 — Suggestion inputs
+
+Suggestions now use the genres and release years already available for a title, plus saved viewing dates and finished titles. Repeated source listings share one recommendation or hero slot, while playback sources stay available. One show's many episodes cannot dominate suggestions. Likes can help surface related titles; an unrated title receives no rating boost, and dislikes still exclude the title.
+
+Suggestions and hero selection are now prepared off the render path when their catalog, viewing, rating and metadata inputs change.
+
+All 3,044 tests in 384 suites pass, including 17 new checks. The tvOS app builds and recompiles the changed files. The changes are left uncommitted for the lead to review.

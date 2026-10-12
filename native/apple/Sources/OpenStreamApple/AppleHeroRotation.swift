@@ -44,13 +44,20 @@ public enum AppleHeroRotation: Sendable {
     public static func candidates<Value>(
         _ values: [Value],
         id: (Value) -> String,
+        preferring: ((Value, Value) -> Bool)? = nil,
         limit: Int = maximumCandidates
     ) -> [Value] {
-        var seen = Set<String>()
+        guard limit > 0 else { return [] }
+        var positions: [String: Int] = [:]
         var result: [Value] = []
-        for value in values where seen.insert(id(value)).inserted {
-            result.append(value)
-            if result.count == limit { break }
+        for value in values {
+            let key = id(value)
+            if let position = positions[key] {
+                if preferring?(value, result[position]) == true { result[position] = value }
+            } else if result.count < limit {
+                positions[key] = result.count
+                result.append(value)
+            }
         }
         return result
     }
