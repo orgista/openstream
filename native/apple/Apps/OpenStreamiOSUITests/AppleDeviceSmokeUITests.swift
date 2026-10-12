@@ -292,8 +292,8 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
     /// Settings › Sources › Add Media Server › Jellyfin with the demo account.
     private func addDemoServer() throws {
         guard let user = environment["OPENSTREAM_DEMO_USER"], let password = environment["OPENSTREAM_DEMO_PASS"],
-              !user.isEmpty, !password.isEmpty else { throw XCTSkip("OPENSTREAM_DEMO_USER/PASS not set") }
-        let server = environment["OPENSTREAM_DEMO_URL"].flatMap { $0.isEmpty ? nil : $0 } ?? "http://192.168.1.87:8096"
+              let server = environment["OPENSTREAM_DEMO_URL"],
+              !user.isEmpty, !password.isEmpty, !server.isEmpty else { throw XCTSkip("OPENSTREAM_DEMO_URL/USER/PASS not set") }
         launch(["-OpenStreamVisionScreen", "add-media-server"])
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any.matching(identifier: "sources.mediaServer.kind").firstMatch.waitForExistence(timeout: 30))
