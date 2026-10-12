@@ -206,13 +206,18 @@ public final class ApplePlaybackStore {
     }
 
     func activities() -> [String: ApplePlaybackProgress] {
+        let fingerprint = derivedStateFingerprint()
+        if let filteredActivityCache, filteredActivityFingerprint == fingerprint { return filteredActivityCache }
         let terminals = configurationPlaybackTerminals()
-        return rawActivities().filter { key, value in
+        let values = rawActivities().filter { key, value in
             let part = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
             let reset = [terminals[key]?.resetAt, part.flatMap { terminals[$0]?.resetAt }].compactMap { $0 }.max()
             if reset.map({ value.updatedAt <= $0 }) == true { return false }
             return terminals[key]?.playedAt.map({ value.updatedAt >= $0 }) ?? true
         }
+        filteredActivityCache = values
+        filteredActivityFingerprint = derivedStateFingerprint()
+        return values
     }
 
     public func lastActivity(for mediaID: String) -> ApplePlaybackProgress? {
@@ -671,12 +676,32 @@ public final class ApplePlaybackStore {
     func configurationPlaybackActivity() -> [String: ApplePlaybackProgress] { activities() }
 
     func configurationPlaybackTerminals() -> [String: ApplePlaybackTerminalEvents] {
+        // Rebuilding this decodes and merges every stored map; per-title
+        // callers (Top Shelf, Continue Watching) ran it several times per
+        // record and pinned the CPU on large libraries (e2e 2026-10-12).
+        let fingerprint = derivedStateFingerprint()
+        if let terminalsCache, terminalsFingerprint == fingerprint { return terminalsCache }
         let explicit = defaults.data(forKey: terminalKey).flatMap {
             try? JSONDecoder().decode([String: ApplePlaybackTerminalEvents].self, from: $0)
         } ?? [:]
-        return ApplePlaybackConvergence.terminals(explicit, watched: storedWatchedEntries(),
+        let values = ApplePlaybackConvergence.terminals(explicit, watched: storedWatchedEntries(),
             unwatched: storedWatchedTombstones(), removals: continueWatchingRemovals(),
             activity: rawActivities().merging(entries(), uniquingKeysWith: ApplePlaybackConvergence.freshest))
+        // `entries()` may normalize and rewrite its blob, so fingerprint after.
+        terminalsCache = values
+        terminalsFingerprint = derivedStateFingerprint()
+        return values
+    }
+
+    private var terminalsCache: [String: ApplePlaybackTerminalEvents]?
+    private var terminalsFingerprint: [Data?]?
+    private var filteredActivityCache: [String: ApplePlaybackProgress]?
+    private var filteredActivityFingerprint: [Data?]?
+
+    /// The stored blobs every derived map is built from. Comparing them is a
+    /// memcmp; decoding them is what was slow.
+    private func derivedStateFingerprint() -> [Data?] {
+        [terminalKey, watchedKey, unwatchedKey, continueWatchingRemovedKey, activityKey, key].map { defaults.data(forKey: $0) }
     }
 
     func hasLocalPlaybackState(mediaID: String) -> Bool {

@@ -26,6 +26,35 @@ struct AppleContinueWatchingRemovalTests {
         #expect(merged == ["a": newer, "b": newer, "c": older])
     }
 
+    /// e2e 2026-10-12: Top Shelf asked this per title and every call rebuilt
+    /// the terminal map from all stored history, pinning the CPU for minutes.
+    @MainActor @Test func perTitleQueriesStayCheapOnALargeLibrary() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        for index in 0..<800 { store.save(mediaID: "fixture-\(index)", position: 600, duration: 6_000) }
+        for index in stride(from: 0, to: 800, by: 7) { store.removeFromContinueWatching(mediaID: "fixture-\(index)") }
+        let start = Date()
+        var removed = 0
+        for index in 0..<800 {
+            if store.isRemovedFromContinueWatching(mediaID: "fixture-\(index)") { removed += 1 }
+            _ = store.lastActivity(for: "fixture-\(index)")
+        }
+        #expect(removed == 115)
+        #expect(Date().timeIntervalSince(start) < 2)
+    }
+
+    @MainActor @Test func cachedAnswersFollowWritesFromAnotherStore() throws {
+        let (store, defaults) = try makeStore()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        store.save(mediaID: "fixture-film", position: 600, duration: 6_000)
+        #expect(!store.isRemovedFromContinueWatching(mediaID: "fixture-film"))
+        ApplePlaybackStore(defaults: defaults).removeFromContinueWatching(mediaID: "fixture-film")
+        #expect(store.isRemovedFromContinueWatching(mediaID: "fixture-film"))
+        ApplePlaybackStore(defaults: defaults).save(mediaID: "fixture-film", position: 700, duration: 6_000)
+        #expect(!store.isRemovedFromContinueWatching(mediaID: "fixture-film"))
+        #expect(store.lastActivity(for: "fixture-film")?.resumePosition == 700)
+    }
+
     @MainActor @Test func removingKeepsProgressAndHistoryAndSurvivesRelaunch() throws {
         let (store, defaults) = try makeStore()
         defer { defaults.removePersistentDomain(forName: suiteName) }

@@ -495,14 +495,16 @@ final class AppleConfigurationController {
             do { try await Task.sleep(for: .seconds(2)) }
             catch { return }
             guard let self, self.syncEnabled, !Task.isCancelled else { return }
-            self.writeNow()
+            // A background save keeps whatever the viewer last asked for on
+            // screen ("Configuration imported" was replaced two seconds later).
+            self.writeNow(announce: false)
         }
     }
 
     /// Writes the snapshot to iCloud now, unless `mayPublish` keeps iCloud's
-    /// sources. Returns whether it wrote.
+    /// sources. Returns whether it wrote. `announce` shows the saved message.
     @discardableResult
-    private func writeNow() -> Bool {
+    private func writeNow(announce: Bool = true) -> Bool {
         guard syncEnabled, AppleConfigurationSyncPolicy.publishesChanges(), !cloudRestoreHeld else { return false }
         pendingWrite?.cancel()
         do {
@@ -522,7 +524,7 @@ final class AppleConfigurationController {
             cloud.synchronize()
             appleTrace("configuration sync: sent \(sources.sources.count) sources to iCloud")
             updateStatus { $0.recordingSent(at: .now, sourceCount: self.sources.sources.count) }
-            result = "Configuration saved for iCloud"
+            if announce { result = "Configuration saved for iCloud" }
             return true
         } catch {
             result = error.localizedDescription
