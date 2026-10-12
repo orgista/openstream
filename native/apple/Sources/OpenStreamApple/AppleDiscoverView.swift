@@ -202,15 +202,7 @@ struct AppleDiscoverView: View {
                 || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty
         )
         Group {
-            if !hasContent && (catalogIsStillLoading || mediaServerLibrary.isLoading) {
-                ProgressView()
-                    .controlSize(.large)
-                    .accessibilityLabel("Loading")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    #if os(tvOS)
-                    .background(Color.black.ignoresSafeArea())
-                    #endif
-            } else if !hasContent {
+            if !hasContent && !discoverIsLoading && !reviewLoadingState {
                 discoverEmptyState
                 // The black ground was on the populated branch only, so an
                 // empty Discover fell through to the tvOS system material —
@@ -225,55 +217,66 @@ struct AppleDiscoverView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: sectionSpacing) {
-                        // The billboard cycles through the candidates. Only
-                        // this subtree re-renders on the tick; the shelves
-                        // below it are untouched.
-                        if !heroes.isEmpty {
-                            #if DEBUG
-                            let _ = AppleLaunchClock.mark("discover.hero")
-                            #endif
-                            AppleHomeHeroCarousel(
-                                pageIDs: heroes.map(\.id), items: heroes.map { heroItem($0.item) },
-                                wordmarks: heroes.map { heroWordmark($0, item: heroItem($0.item)) },
-                                viewportSize: viewportSize, phoneLayout: phoneHeroLayout,
-                                wideLayout: usesPadHero ? padHeroLayout : macHeroLayout
-                            ) { index, failed, mode, count, shown, tv in
-                                featuredHero(heroes[index], rotationCount: count, rotationIndex: shown,
-                                    wordmarkFailed: failed, phone: mode == .phone, mac: mode == .mac,
-                                    pad: mode == .pad, tv: tv)
-                            }
-                            .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
-                                // What the cache already knows draws at once;
-                                // the rest is asked for now that the billboard
-                                // has drawn, first page first. Two fixed cache
-                                // peeks left a fresh install on the names for
-                                // the whole session (owner 2026-09-29).
-                                var unanswered = await resolveHeroWordmarks(heroes)
-                                unanswered = await fetchHeroWordmarks(unanswered)
-                                guard !Task.isCancelled else { return }
-                                heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
-                                // Last, and only after the billboard has long
-                                // since drawn: the textless backdrop is an
-                                // upgrade, never something first paint waits on.
-                                await upgradeHeroArtwork(heroes)
-                                // An add-on that could not be reached is asked
-                                // again, a bounded number of times.
-                                var retry = 1
-                                while !unanswered.isEmpty, let delay = AppleHeroWordmarkFetch.retryDelay(retry) {
-                                    try? await Task.sleep(for: delay)
-                                    guard !Task.isCancelled else { return }
+                        if !hasContent || reviewLoadingState {
+                            AppleDiscoverLoadingContent(presentation: heroPresentation, viewport: viewportSize,
+                                phoneLayout: phoneHeroLayout, wideLayout: usesPadHero ? padHeroLayout : macHeroLayout,
+                                rowStyle: discoverRowStyle)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Loading")
+                                .accessibilityIdentifier("home.loading")
+                                .allowsHitTesting(false)
+                                .transaction { $0.animation = nil }
+                        } else {
+                            // The billboard cycles through the candidates. Only
+                            // this subtree re-renders on the tick; the shelves
+                            // below it are untouched.
+                            if !heroes.isEmpty {
+                                #if DEBUG
+                                let _ = AppleLaunchClock.mark("discover.hero")
+                                #endif
+                                AppleHomeHeroCarousel(
+                                    pageIDs: heroes.map(\.id), items: heroes.map { heroItem($0.item) },
+                                    wordmarks: heroes.map { heroWordmark($0, item: heroItem($0.item)) },
+                                    viewportSize: viewportSize, phoneLayout: phoneHeroLayout,
+                                    wideLayout: usesPadHero ? padHeroLayout : macHeroLayout
+                                ) { index, failed, mode, count, shown, tv in
+                                    featuredHero(heroes[index], rotationCount: count, rotationIndex: shown,
+                                        wordmarkFailed: failed, phone: mode == .phone, mac: mode == .mac,
+                                        pad: mode == .pad, tv: tv)
+                                }
+                                .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
+                                    // What the cache already knows draws at once;
+                                    // the rest is asked for now that the billboard
+                                    // has drawn, first page first. Two fixed cache
+                                    // peeks left a fresh install on the names for
+                                    // the whole session (owner 2026-09-29).
+                                    var unanswered = await resolveHeroWordmarks(heroes)
                                     unanswered = await fetchHeroWordmarks(unanswered)
-                                    retry += 1
+                                    guard !Task.isCancelled else { return }
+                                    heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
+                                    // Last, and only after the billboard has long
+                                    // since drawn: the textless backdrop is an
+                                    // upgrade, never something first paint waits on.
+                                    await upgradeHeroArtwork(heroes)
+                                    // An add-on that could not be reached is asked
+                                    // again, a bounded number of times.
+                                    var retry = 1
+                                    while !unanswered.isEmpty, let delay = AppleHeroWordmarkFetch.retryDelay(retry) {
+                                        try? await Task.sleep(for: delay)
+                                        guard !Task.isCancelled else { return }
+                                        unanswered = await fetchHeroWordmarks(unanswered)
+                                        retry += 1
+                                    }
                                 }
                             }
-                        }
 
-                        // One list of rails. The iPhone held upright and the
-                        // Mac order it by the A4 rhythm (stills, then posters,
-                        // then stills); everywhere else it is the list as built.
-                        let continueShelf = continueWatchingShelf(values: continueWatching)
-                        ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
-                            railView(rail, continueWatching: continueShelf, picks: picks)
+                            // One list of rails. The iPhone held upright and the
+                            // Mac order it by the A4 rhythm (stills, then posters,
+                            // then stills); everywhere else it is the list as built.
+                            let continueShelf = continueWatchingShelf(values: continueWatching)
+                            ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
+                                railView(rail, continueWatching: continueShelf, picks: picks)
+                            }
                         }
                     }
                     #if os(tvOS)
@@ -1527,6 +1530,18 @@ struct AppleDiscoverView: View {
             try? await Task.sleep(for: .milliseconds(50))
             showsSearch = true
         }
+    }
+
+    private var reviewLoadingState: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "OpenStreamReviewDiscoverLoading")
+        #else
+        false
+        #endif
+    }
+
+    private var discoverIsLoading: Bool {
+        catalogIsStillLoading || mediaServerLibrary.isLoading || library.isLoading
     }
 
     private var catalogIsStillLoading: Bool {

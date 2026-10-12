@@ -26,9 +26,14 @@ public struct AppleTitleRatingStore: @unchecked Sendable {
     }
 
     private let defaults: UserDefaults
-    private let keyPrefix = "openstream.title-rating.v1."
+    private let keyPrefix: String
+    public let namespace: String
 
-    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    public init(defaults: UserDefaults = .standard, namespace: String = AppleTasteNamespace.local) {
+        self.defaults = defaults
+        self.namespace = namespace
+        keyPrefix = AppleTasteNamespace.key("openstream.title-rating.v1", namespace: namespace) + "."
+    }
 
     public func rating(for mediaID: String) -> AppleTitleRating? {
         guard let value = defaults.object(forKey: key(for: mediaID)) as? Int,

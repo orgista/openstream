@@ -4,6 +4,52 @@ import Foundation
 
 @Suite("More Like This ranking")
 struct AppleSimilarTitleRankerTests {
+    @Test func provenanceAndScoreCapsAreSafeAndDeterministic() throws {
+        let target = AppleSimilarTitleProfile(id: "https://fixture.example/seed?token=private", type: "movie",
+            title: "Seed", genres: ["Drama"], cast: ["Person", "Other", "Third"], director: "Director", year: Int.min,
+            keywords: ["rescue"])
+        let candidates = ["b", "a"].map { AppleSimilarTitleProfile(id: $0, type: "movie", title: $0,
+            genres: ["Drama"], cast: ["Person", "Other", "Third"], director: "Director", year: Int.max,
+            imdbRating: .infinity, keywords: ["rescue"]) }
+        let ranked = AppleRecommendationRanker.rank(target: target, candidates: candidates)
+        let first = try #require(ranked.first)
+        #expect(first.genreScore == 35)
+        #expect(first.keywordScore == 25)
+        #expect(first.peopleScore == 20)
+        #expect(first.yearScore == 0)
+        #expect(first.ratingScore == 0)
+        #expect(first.seedDigest == ApplePlaybackIdentity.digest(for: target.id))
+        #expect(first.debugTrace.contains("private") == false)
+        #expect(first.debugTrace.contains("https") == false)
+        #expect(ranked == AppleRecommendationRanker.rank(target: target, candidates: candidates.reversed()))
+    }
+
+    @Test func keywordCacheReplacesChangedInputsAndIsolatesNamespaces() async {
+        let cache = AppleSimilarTitleKeywordCache(capacity: 2)
+        let old = await cache.keywords(id: "same", text: "Space galaxy astronauts", genres: ["Sci-Fi"], namespace: "one")
+        let changed = await cache.keywords(id: "same", text: "Detectives investigate murder", genres: ["Crime"], namespace: "one")
+        #expect(old != changed)
+        #expect(changed == AppleSimilarTitleKeywords.extract(from: "Detectives investigate murder"))
+        let other = await cache.keywords(id: "same", text: "Space galaxy astronauts", genres: ["Sci-Fi"], namespace: "two")
+        #expect(other == old)
+        #expect(await cache.cachedInput(id: "same", namespace: "one")?.genres == ["crime"])
+        _ = await cache.keywords(id: "same", text: "Detectives investigate murder", genres: ["Mystery"], namespace: "one")
+        #expect(await cache.cachedInput(id: "same", namespace: "one")?.genres == ["mystery"])
+        #expect(await cache.keywords(id: "same", text: nil, namespace: "one") == [])
+        #expect(await cache.keywords(id: "same", text: "Space galaxy astronauts", namespace: "one") == old)
+    }
+
+    @Test func metadataReplacementDoesNotConsumeExtraCapacity() async {
+        let cache = AppleSimilarTitleKeywordCache(capacity: 2)
+        _ = await cache.keywords(id: "a", text: "Space galaxy")
+        _ = await cache.keywords(id: "b", text: "Detectives murder")
+        _ = await cache.keywords(id: "a", text: "Rescue firefighters")
+        #expect(await cache.cachedInput(id: "b") != nil)
+        _ = await cache.keywords(id: "c", text: "Castle knights")
+        #expect(await cache.cachedInput(id: "a") == nil)
+        #expect(await cache.cachedInput(id: "b") != nil)
+    }
+
     private func profile(
         id: String,
         type: String = "movie",
@@ -136,6 +182,8 @@ struct AppleSimilarTitleRankerTests {
             candidates: [duplicateOfTarget, first, duplicateOfFirst]
         )
         #expect(ranked.map(\.profile.id) == ["movie:a"])
+        #expect(ranked == AppleRecommendationRanker.rank(target: target,
+            candidates: [duplicateOfFirst, first, duplicateOfTarget]))
     }
 
     @Test("Genre Jaccard carries 35 points at a full match")

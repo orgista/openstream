@@ -15,7 +15,7 @@ public struct AppleRankableTitle: Sendable, Equatable {
         self.id = id
         self.genres = AppleRecommendationInputs.normalizedGenres(genres)
         self.releaseYear = releaseYear
-        self.metadataCompleteness = max(0, min(1, metadataCompleteness))
+        self.metadataCompleteness = metadataCompleteness.isFinite ? max(0, min(1, metadataCompleteness)) : 0
         self.isResumable = isResumable
         self.isCompleted = isCompleted
         self.primaryGenre = primaryGenre ?? genres.first
@@ -48,6 +48,27 @@ public enum AppleTitleRating: Int, Sendable, Equatable {
 }
 
 public enum AppleRecommendationRanker {
+    struct Seed: Sendable, Equatable {
+        enum Kind: String, Sendable { case viewing, liked }
+        let digest: String
+        let kind: Kind
+        let contribution: Double
+    }
+
+    struct Candidate: Sendable, Equatable {
+        let title: AppleRankableTitle
+        let viewingScore: Double
+        let likedScore: Double
+        let ratingScore: Double
+        var diversityPenalty: Double = 0
+        let seeds: [Seed]
+        var score: Double { viewingScore + likedScore + ratingScore - diversityPenalty }
+        var debugTrace: String {
+            "recommendation candidate=\(ApplePlaybackIdentity.digest(for: title.id)) viewing=\(viewingScore) liked=\(likedScore) rating=\(ratingScore) diversity=\(diversityPenalty) seeds="
+                + seeds.map { "\($0.kind.rawValue):\($0.digest):\($0.contribution)" }.joined(separator: ",")
+        }
+    }
+
     private static func ratingWeight(_ rating: AppleTitleRating?) -> Double {
         switch rating { case .some(.up): 1; case .some(.doubleUp): 2; case .some(.none), nil, .some(.down): 0 }
     }
@@ -59,6 +80,15 @@ public enum AppleRecommendationRanker {
         now: Date,
         limit: Int
     ) -> [AppleRankableTitle] {
+        let result = rankWithProvenance(titles, history: history, ratings: ratings, now: now, limit: limit)
+        #if DEBUG
+        for candidate in result { AppleInteractionTrace.record(.screen, candidate.debugTrace) }
+        #endif
+        return result.map(\.title)
+    }
+
+    static func rankWithProvenance(_ titles: [AppleRankableTitle], history: [AppleViewingSignal],
+                                   ratings: [String: AppleTitleRating], now: Date, limit: Int) -> [Candidate] {
         guard limit > 0 else { return [] }
         // One strongest observation per title/show. Saves are snapshots, not
         // visits, and a hundred episodes must not outweigh a hundred films.
@@ -77,35 +107,51 @@ public enum AppleRecommendationRanker {
                 historySummary[key] = HistoryStats(genres: Set(signal.genres), weight: weight)
             }
         }
+        let viewingSeeds = historySummary.keys.sorted().compactMap { key -> (String, HistoryStats)? in
+            guard let stats = historySummary[key] else { return nil }
+            return (ApplePlaybackIdentity.digest(for: key), stats)
+        }
         // Bounded liked seeds also include history titles no longer in a shelf.
         var likedGenres: [String: Set<String>] = [:]
         for title in titles { likedGenres[title.id, default: []].formUnion(title.genres) }
         for signal in history { likedGenres[signal.titleID, default: []].formUnion(signal.genres) }
-        let likedSeeds = ratings.keys.sorted().compactMap { id -> (String, Set<String>, Double)? in
+        let likedSeeds = ratings.keys.sorted().compactMap { id -> (String, String, Set<String>, Double)? in
             let weight = ratingWeight(ratings[id])
             guard weight > 0, let genres = likedGenres[id], !genres.isEmpty else { return nil }
-            return (id, genres, weight)
+            return (id, ApplePlaybackIdentity.digest(for: id), genres, weight)
         }
-        typealias ScoredTitle = (title: AppleRankableTitle, score: Double)
+        typealias ScoredTitle = Candidate
         var seen = Set<String>()
         let validTitles = titles.filter { ratings[$0.id] != .down && seen.insert($0.id).inserted }
         var scoredTitles: [ScoredTitle] = validTitles.map { title in
             let genres = Set(title.genres)
+            var seeds: [Seed] = []
             var viewingAffinity: Double = 0
             if !genres.isEmpty {
-                for stats in historySummary.values {
+                for (digest, stats) in viewingSeeds {
                     let overlap = Double(genres.intersection(stats.genres).count) / Double(genres.count)
-                    viewingAffinity += overlap * stats.weight
+                    let contribution = overlap * stats.weight
+                    viewingAffinity += contribution
+                    if contribution > 0 {
+                        seeds.append(Seed(digest: digest, kind: .viewing,
+                                          contribution: contribution))
+                    }
                 }
             }
             var likedAffinity: Double = 0
-            for (id, seedGenres, weight) in likedSeeds where id != title.id && !genres.isEmpty {
+            for (id, digest, seedGenres, weight) in likedSeeds where id != title.id && !genres.isEmpty {
                 let overlap = Double(genres.intersection(seedGenres).count) / Double(genres.count)
-                likedAffinity += overlap * weight * 0.5
+                let contribution = overlap * weight * 0.5
+                likedAffinity += contribution
+                if contribution > 0 {
+                    seeds.append(Seed(digest: digest, kind: .liked,
+                                      contribution: contribution))
+                }
             }
             // Each component uses the same small scale; explicit ratings no
             // longer add 100/200 then multiply every other signal.
-            return (title, min(4, viewingAffinity) + min(1, likedAffinity) + ratingWeight(ratings[title.id]))
+            return Candidate(title: title, viewingScore: min(4, viewingAffinity), likedScore: min(1, likedAffinity),
+                             ratingScore: ratingWeight(ratings[title.id]), seeds: seeds)
         }
 
         func ordered(_ lhs: ScoredTitle, _ rhs: ScoredTitle) -> Bool {
@@ -116,7 +162,7 @@ public enum AppleRecommendationRanker {
                 return l.isResumable
             }
             
-            if abs(lhs.score - rhs.score) > 1e-8 {
+            if lhs.score != rhs.score {
                 return lhs.score > rhs.score
             }
             
@@ -130,7 +176,7 @@ public enum AppleRecommendationRanker {
                 return lYear > rYear
             }
             
-            if abs(l.metadataCompleteness - r.metadataCompleteness) > 1e-8 {
+            if l.metadataCompleteness != r.metadataCompleteness {
                 return l.metadataCompleteness > r.metadataCompleteness
             }
             
@@ -138,16 +184,17 @@ public enum AppleRecommendationRanker {
         }
         
         var selected: [AppleCatalogShelfPolicy.DiversitySignals] = []
-        var result: [AppleRankableTitle] = []
+        var result: [Candidate] = []
         while !scoredTitles.isEmpty, result.count < limit {
             let adjusted = scoredTitles.map { value -> ScoredTitle in
                 let signals = AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: value.title.primaryGenre,
                     franchise: value.title.franchiseID, source: value.title.sourceID)
-                return (value.title, value.score - AppleCatalogShelfPolicy.diversityPenalty(signals,
-                    selected: selected, unit: 0.35))
+                var adjusted = value
+                adjusted.diversityPenalty = AppleCatalogShelfPolicy.diversityPenalty(signals, selected: selected, unit: 0.35)
+                return adjusted
             }
             guard let best = adjusted.min(by: ordered) else { break }
-            result.append(best.title)
+            result.append(best)
             selected.append(AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: best.title.primaryGenre,
                 franchise: best.title.franchiseID, source: best.title.sourceID))
             scoredTitles.removeAll { $0.title.id == best.title.id }

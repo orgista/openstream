@@ -144,7 +144,7 @@ public enum AppleDetailResume {
 @MainActor
 public final class ApplePlaybackStore {
     private let defaults: UserDefaults
-    private let key = "openstream.playback.progress.v1"
+    private let key: String
 
     /// In-memory copy of the progress map. UserDefaults stays the backing
     /// store (write-through), but reads and each per-tick save no longer
@@ -157,8 +157,8 @@ public final class ApplePlaybackStore {
     /// Continue Watching), so without this nothing remembered it: no episode
     /// ever showed its tick and "next episode" always meant the first one.
     /// Watching a finished episode again does not take it off this list.
-    private let watchedKey = "openstream.playback.watched.v1"
-    private let unwatchedKey = "openstream.playback.unwatched.v1"
+    private let watchedKey: String
+    private let unwatchedKey: String
     private var watchedCache: [String: Date]?
     private var watchedCachedData: Data?
     private var unwatchedCache: [String: Date]?
@@ -167,21 +167,31 @@ public final class ApplePlaybackStore {
     nonisolated public static let watchedHistoryLimit = 5_000
     /// Titles the viewer took off Continue Watching, and when. The progress
     /// stays; the row leaves the title out until it is played again.
-    private let continueWatchingRemovedKey = "openstream.playback.continueWatchingRemoved.v1"
+    private let continueWatchingRemovedKey: String
     private var removedCache: [String: Date]?
     private var removedCachedData: Data?
     /// The newest this many removals are kept.
     nonisolated public static let continueWatchingRemovalLimit = 500
 
-    public init(defaults: UserDefaults = .standard) {
+    public let namespace: String
+
+    public init(defaults: UserDefaults = .standard, namespace: String = AppleTasteNamespace.local) {
         self.defaults = defaults
+        self.namespace = namespace
+        key = AppleTasteNamespace.key("openstream.playback.progress.v1", namespace: namespace)
+        watchedKey = AppleTasteNamespace.key("openstream.playback.watched.v1", namespace: namespace)
+        unwatchedKey = AppleTasteNamespace.key("openstream.playback.unwatched.v1", namespace: namespace)
+        continueWatchingRemovedKey = AppleTasteNamespace.key("openstream.playback.continueWatchingRemoved.v1", namespace: namespace)
+        terminalKey = AppleTasteNamespace.key("openstream.playback.terminals.v1", namespace: namespace)
+        activityKey = AppleTasteNamespace.key("openstream.playback.activity.v1", namespace: namespace)
+        episodesKey = AppleTasteNamespace.key("openstream.playback.availableEpisodes.v1", namespace: namespace)
         migrateLegacyPlaybackStateIfNeeded()
     }
 
-    private let terminalKey = "openstream.playback.terminals.v1"
+    private let terminalKey: String
 
-    private let activityKey = "openstream.playback.activity.v1"
-    private let episodesKey = "openstream.playback.availableEpisodes.v1"
+    private let activityKey: String
+    private let episodesKey: String
 
     private var activityData: Data?
     private var activityCache: [String: ApplePlaybackProgress]?

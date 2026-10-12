@@ -5,6 +5,29 @@ import Foundation
 @Suite("AppleRecommendationRanker Tests")
 struct AppleRecommendationRankerTests {
     
+    @Test func provenanceRetainsCappedComponentsAndSafeSeeds() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let title = AppleRankableTitle(id: "candidate", genres: ["Drama"], releaseYear: nil,
+            metadataCompleteness: 1, isResumable: false, isCompleted: false)
+        let history = (0..<20).map { AppleViewingSignal(titleID: "https://fixture.example/\($0)?token=private",
+            genres: ["Drama"], at: now, completed: true) }
+        let ratings = Dictionary(uniqueKeysWithValues: history.map { ($0.titleID, AppleTitleRating.doubleUp) })
+        let value = try #require(AppleRecommendationRanker.rankWithProvenance([title], history: history,
+            ratings: ratings, now: now, limit: 1).first)
+        #expect(value.viewingScore == 4)
+        #expect(value.likedScore == 1)
+        #expect(value.ratingScore == 0)
+        #expect(value.score == 5)
+        #expect(value.seeds.filter { $0.kind == .viewing }.count == 20)
+        #expect(value.seeds.filter { $0.kind == .liked }.count == 20)
+        #expect(value.debugTrace.contains("private") == false)
+        #expect(value.debugTrace.contains("https") == false)
+        #expect(value.debugTrace.contains("token") == false)
+        let reversed = AppleRecommendationRanker.rankWithProvenance([title], history: history.reversed(),
+            ratings: ratings, now: now, limit: 1)
+        #expect(reversed.first == value)
+    }
+
     @Test func topPicksDiversifySelectedGenresFranchisesAndSourcesWithStableTies() {
         let a = AppleRankableTitle(id: "a", genres: ["Drama"], releaseYear: 2020, metadataCompleteness: 1,
             isResumable: false, isCompleted: false, franchiseID: "same", sourceID: "one")

@@ -106,6 +106,17 @@ public struct AppleSimilarTitleCandidate: Sendable, Equatable, Identifiable {
     public let yearScore: Double
     public let ratingScore: Double
     public let diversityPenalty: Double
+    /// Only a digest is retained for provenance; source identities may contain credentials.
+    private(set) var seedDigest: String? = nil
+    var debugTrace: String {
+        "similar candidate=\(ApplePlaybackIdentity.digest(for: id)) seed=\(seedDigest ?? "none") genre=\(genreScore) keyword=\(keywordScore) people=\(peopleScore) year=\(yearScore) rating=\(ratingScore) diversity=\(diversityPenalty)"
+    }
+
+    func seeded(by digest: String?) -> Self {
+        var value = self
+        value.seedDigest = digest
+        return value
+    }
 
     public var id: String { profile.id }
 
@@ -151,13 +162,14 @@ public extension AppleRecommendationRanker {
     ) -> [AppleSimilarTitleCandidate] {
         guard limit > 0 else { return [] }
         let targetGenres = Set(target.genres.map { $0.lowercased() })
-        let targetPeople = Set((target.cast + target.writers).map { normalizedName($0) })
+        let targetPeople = Set((target.cast + target.writers).map { normalizedName($0) }.filter { !$0.isEmpty })
         let targetDirector = target.director.map { normalizedName($0) }
 
+        let seedDigest = ApplePlaybackIdentity.digest(for: target.canonicalID ?? target.id)
         var seen = Set<String>()
         seen.insert(target.canonicalID ?? target.id)
         var scored: [AppleSimilarTitleCandidate] = []
-        for candidate in candidates {
+        for candidate in candidates.sorted(by: { $0.id < $1.id }) {
             guard candidate.type == target.type, candidate.id != target.id else { continue }
             let identity = candidate.canonicalID ?? candidate.id
             guard seen.insert(identity).inserted else { continue }
@@ -172,13 +184,14 @@ public extension AppleRecommendationRanker {
                 peopleScore += 10
             }
             let sharedPeople = Set((candidate.cast + candidate.writers).map { normalizedName($0) })
+                .filter { !$0.isEmpty }
                 .intersection(targetPeople)
                 .count
             peopleScore += min(Double(sharedPeople) * 5, 10)
 
             var yearScore: Double = 0
             if let targetYear = target.year, let candidateYear = candidate.year {
-                yearScore = 10 - Double(min(abs(targetYear - candidateYear), 10))
+                yearScore = max(0, 10 - min(abs(Double(targetYear) - Double(candidateYear)), 10))
             }
 
             var ratingScore: Double = 0
@@ -195,7 +208,7 @@ public extension AppleRecommendationRanker {
                 peopleScore: peopleScore,
                 yearScore: yearScore,
                 ratingScore: ratingScore
-            ))
+            ).seeded(by: seedDigest))
         }
 
         scored = scored.filter { $0.score > 0 }
@@ -215,7 +228,7 @@ public extension AppleRecommendationRanker {
                 return AppleSimilarTitleCandidate(profile: candidate.profile, score: candidate.score - penalty,
                     genreScore: candidate.genreScore, keywordScore: candidate.keywordScore,
                     peopleScore: candidate.peopleScore, yearScore: candidate.yearScore,
-                    ratingScore: candidate.ratingScore, diversityPenalty: penalty)
+                    ratingScore: candidate.ratingScore, diversityPenalty: penalty).seeded(by: candidate.seedDigest)
             }
             guard let best = adjusted.min(by: isOrderedBefore) else { break }
             scored.removeAll { $0.id == best.id }
@@ -224,6 +237,9 @@ public extension AppleRecommendationRanker {
             selected.append(AppleCatalogShelfPolicy.DiversitySignals(primaryGenre: best.profile.primaryGenre,
                 franchise: best.profile.franchiseID, source: best.profile.sourceID))
         }
+        #if DEBUG
+        for candidate in result { AppleInteractionTrace.record(.screen, candidate.debugTrace) }
+        #endif
         return result
     }
 
@@ -238,12 +254,17 @@ public extension AppleRecommendationRanker {
         _ lhs: AppleSimilarTitleCandidate,
         _ rhs: AppleSimilarTitleCandidate
     ) -> Bool {
-        if abs(lhs.score - rhs.score) > 1e-9 { return lhs.score > rhs.score }
-        let lhsRating = lhs.profile.imdbRating ?? -1
-        let rhsRating = rhs.profile.imdbRating ?? -1
-        if abs(lhsRating - rhsRating) > 1e-9 { return lhsRating > rhsRating }
+        if lhs.score != rhs.score { return lhs.score > rhs.score }
+        let lhsRating = boundedRating(lhs.profile.imdbRating)
+        let rhsRating = boundedRating(rhs.profile.imdbRating)
+        if lhsRating != rhsRating { return lhsRating > rhsRating }
         if lhs.profile.title != rhs.profile.title { return lhs.profile.title < rhs.profile.title }
         return lhs.profile.id < rhs.profile.id
+    }
+
+    private static func boundedRating(_ value: Double?) -> Double {
+        guard let value, value.isFinite else { return -1 }
+        return min(max(value, 0), 10)
     }
 
     private static func normalizedName(_ value: String) -> String {
@@ -312,19 +333,38 @@ public enum AppleSimilarTitleKeywords {
 public actor AppleSimilarTitleKeywordCache {
     public static let shared = AppleSimilarTitleKeywordCache()
 
-    private var cache: [String: Set<String>] = [:]
-    private var order: [String] = []
+    private struct Key: Hashable {
+        let namespace: String
+        let id: String
+    }
+    struct Input: Equatable, Sendable {
+        let text: String?
+        let genres: [String]
+    }
+    private struct Entry {
+        let input: Input
+        let keywords: Set<String>
+    }
+    private var cache: [Key: Entry] = [:]
+    private var order: [Key] = []
     private let capacity: Int
 
     public init(capacity: Int = 512) {
         self.capacity = max(1, capacity)
     }
 
-    public func keywords(id: String, text: String?) -> Set<String> {
-        if let cached = cache[id] { return cached }
+    func cachedInput(id: String, namespace: String = AppleTasteNamespace.local) -> Input? {
+        cache[Key(namespace: namespace, id: id)]?.input
+    }
+
+    public func keywords(id: String, text: String?, genres: [String] = [],
+                         namespace: String = AppleTasteNamespace.local) -> Set<String> {
+        let key = Key(namespace: namespace, id: id)
+        let input = Input(text: text, genres: AppleRecommendationInputs.normalizedGenres(genres))
+        if let cached = cache[key], cached.input == input { return cached.keywords }
         let keywords = AppleSimilarTitleKeywords.extract(from: text)
-        cache[id] = keywords
-        order.append(id)
+        if cache[key] == nil { order.append(key) }
+        cache[key] = Entry(input: input, keywords: keywords)
         if order.count > capacity, let oldest = order.first {
             order.removeFirst()
             cache.removeValue(forKey: oldest)
@@ -336,11 +376,12 @@ public actor AppleSimilarTitleKeywordCache {
     public func rankSimilar(
         target: AppleSimilarTitleProfile,
         candidates: [AppleSimilarTitleProfile],
-        limit: Int = 12
+        limit: Int = 12,
+        namespace: String = AppleTasteNamespace.local
     ) -> [AppleSimilarTitleCandidate] {
-        let hydratedTarget = target.withKeywords(keywords(id: target.id, text: target.overview))
+        let hydratedTarget = target.withKeywords(keywords(id: target.id, text: target.overview, genres: target.genres, namespace: namespace))
         let hydratedCandidates = candidates.map { candidate in
-            candidate.withKeywords(keywords(id: candidate.id, text: candidate.overview))
+            candidate.withKeywords(keywords(id: candidate.id, text: candidate.overview, genres: candidate.genres, namespace: namespace))
         }
         return AppleRecommendationRanker.rank(
             target: hydratedTarget,
