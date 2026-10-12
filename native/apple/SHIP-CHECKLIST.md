@@ -66,4 +66,10 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 
 ## 8. GitHub release (after TestFlight)
 - [ ] Under the same owner authorization **"ship N"**, run `scripts/release/github-release.sh <version> N` to prepare all four platform downloads, checksums, notes, and the committed public checkout.
-- [ ] The owner's lead reviews the scrub/gitleaks gates and every artifact, then runs the printed publish commands. Nothing ships to GitHub without the same "ship N"; preparation never pushes, creates releases, or uploads.
+- [ ] The lead reviews the scrub/gitleaks gates and every artifact, then runs the printed publish commands
+      (`git push` of the public checkout + `gh release create` on orgista/openstream-apple) from the Studio, where `gh`
+      is logged in. **Owner 2026-10-12: "yes for all releases" — every "ship N" includes this GitHub release; no
+      separate approval.** The preparation script itself still never pushes; the lead runs the printed commands.
+- [ ] Build the release from the exact commit that went to TestFlight (DELIVERIES.md "Source"), not a newer main.
+      `github-release.sh` needs a git checkout on `main` and `gitleaks` on Dev-Mini (brew); the public checkout can live
+      at `/Volumes/DevExt/dev/openstream-release/` via `OPENSTREAM_PUBLIC_CHECKOUT`.

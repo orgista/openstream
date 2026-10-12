@@ -7,6 +7,14 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
+      also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
+      release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
+      Build 18 release: in progress 2026-10-12.
+- [ ] **Top Shelf: possible second cause (2026-10-12).** The tvOS brand assets had only the wide Top Shelf image; the
+      standard 1920x720 "Top Shelf Image" was missing, so tvOS can stretch the logo. Added it (same art); ships in the
+      next build. The dynamic shelf fix is already in build 18 (see the Top Shelf item below).
+
 - [ ] **Polish to perfection from two references (owner 2026-10-11): "Apple TV is the main GUI I am trying to emulate
       with heroes, and Netflix for icons [and] suggestion algorithm. Our design is in a good place but both those apps
       can help us bring it to perfection."** REA run: Apple TV app hero/shelves vs our billboard; Netflix artwork/icons +
