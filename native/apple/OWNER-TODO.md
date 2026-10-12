@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Full e2e after the 2026-10-12 polish queue: NOT PASSED; fixes in, re-run running.** Unit gate and all 4
+      platform builds passed. iPhone UI tests on DevPlus: 11 passed / 29 failed / 58 skipped. The iPhone app sat at 100%
+      CPU for 144 s: Top Shelf publishing rebuilt all playback history once per title (from 11a3d75). That is fixed in
+      5e70036, which also stops the background iCloud save replacing "Configuration imported". Gate: 3160 tests.
+      Simulators stalled before app start (dyld); cause not yet known (machine or code). The re-run on DevPlus and the
+      tvOS sim is with Codex. Results: verification-artifacts/e2e-2026-10-12/.
 - [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
