@@ -302,7 +302,7 @@ struct AppleSetupReceiveSession {
         }
     }
 
-    let privateKey: Curve25519.KeyAgreement.PrivateKey
+    let privateKey: Curve25519.KeyAgreement.PrivateKey // gitleaks:allow (type declaration, no key material)
     let sessionID: String
     let code: String
     let expiresAt: Date
