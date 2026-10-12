@@ -369,12 +369,25 @@ public struct AppleTMDBClient: Sendable {
                 // `videos` is only ever read for trailers, which the Apple TV
                 // does not play (`AppleTitlePagePolicy.offersTrailers`).
                 URLQueryItem(name: "append_to_response",
-                             value: AppleTitlePagePolicy.offersTrailers() ? "credits,videos,images" : "credits,images"),
+                             value: AppleTitlePagePolicy.offersTrailers() ? "credits,videos,images,recommendations,similar" : "credits,images,recommendations,similar"),
                 URLQueryItem(name: "include_image_language", value: "en,null"),
             ],
             configuration: configuration,
             as: DetailsEnvelope.self
         )
+        let type = mediaKind == .series ? "series" : "movie"
+        let targets = [(envelope.recommendations, AppleTMDBRelation.Origin.recommendation),
+                       (envelope.similar, AppleTMDBRelation.Origin.similar)].flatMap { list, origin in
+            (list?.results ?? []).prefix(20).compactMap { value -> AppleTMDBRelation.Target? in
+                guard value.id > 0 else { return nil }
+                let title = String((value.title ?? value.name ?? "").prefix(300))
+                let date = value.releaseDate ?? value.firstAirDate ?? ""
+                let year = Int(date.prefix(4)).flatMap { (1870...2200).contains($0) ? $0 : nil }
+                return AppleTMDBRelation.Target(id: value.id, type: type, title: title, year: year, origin: origin)
+            }
+        }
+        await AppleTMDBRelationCache.shared.store(AppleTMDBRelation(seedID: imdb, type: type,
+            targets: targets, storedAt: .now), configuration: configuration)
         return Self.details(from: envelope)
     }
 
@@ -616,7 +629,25 @@ public struct AppleTMDBClient: Sendable {
 
     private struct FindResult: Decodable, Sendable { let id: Int }
 
+    private struct RelationsEnvelope: Decodable, Sendable {
+        let results: [RelationResult]
+    }
+    private struct RelationResult: Decodable, Sendable {
+        let id: Int
+        let title: String?
+        let name: String?
+        let releaseDate: String?
+        let firstAirDate: String?
+        enum CodingKeys: String, CodingKey {
+            case id, title, name
+            case releaseDate = "release_date"
+            case firstAirDate = "first_air_date"
+        }
+    }
+
     private struct DetailsEnvelope: Decodable, Sendable {
+        let recommendations: RelationsEnvelope?
+        let similar: RelationsEnvelope?
         let runtime: Int?
         let episodeRunTime: [Int]?
         let genres: [NamedValue]
@@ -634,7 +665,7 @@ public struct AppleTMDBClient: Sendable {
         let originalLanguage: String?
 
         enum CodingKeys: String, CodingKey {
-            case runtime, genres, credits, videos, images, tagline, overview
+            case runtime, genres, credits, videos, images, tagline, overview, recommendations, similar
             case episodeRunTime = "episode_run_time"
             case posterPath = "poster_path"
             case backdropPath = "backdrop_path"
@@ -647,6 +678,8 @@ public struct AppleTMDBClient: Sendable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            recommendations = try? container.decode(RelationsEnvelope.self, forKey: .recommendations)
+            similar = try? container.decode(RelationsEnvelope.self, forKey: .similar)
             runtime = try? container.decode(Int.self, forKey: .runtime)
             episodeRunTime = try? container.decode([Int].self, forKey: .episodeRunTime)
             genres = (try? container.decode([NamedValue].self, forKey: .genres)) ?? []

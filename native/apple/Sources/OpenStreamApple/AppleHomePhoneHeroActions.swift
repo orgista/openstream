@@ -36,8 +36,8 @@ struct AppleHomePhoneHeroActions: View {
 
             if let isInList {
                 Button(action: onToggleList) {
-                    Label(isInList ? "In My List" : "Add to My List",
-                          systemImage: isInList ? "checkmark" : "plus")
+                    Label(AppleSemanticAction.myList(saved: isInList).label,
+                          systemImage: AppleSemanticAction.myList(saved: isInList).symbol)
                         .labelStyle(.iconOnly)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)

@@ -49,7 +49,7 @@ public enum AppleTitleRating: Int, Sendable, Equatable {
 
 public enum AppleRecommendationRanker {
     struct Seed: Sendable, Equatable {
-        enum Kind: String, Sendable { case viewing, liked }
+        enum Kind: String, Sendable { case viewing, liked, related }
         let digest: String
         let kind: Kind
         let contribution: Double
@@ -60,11 +60,12 @@ public enum AppleRecommendationRanker {
         let viewingScore: Double
         let likedScore: Double
         let ratingScore: Double
+        var relationScore: Double = 0
         var diversityPenalty: Double = 0
         let seeds: [Seed]
-        var score: Double { viewingScore + likedScore + ratingScore - diversityPenalty }
+        var score: Double { viewingScore + likedScore + ratingScore + relationScore - diversityPenalty }
         var debugTrace: String {
-            "recommendation candidate=\(ApplePlaybackIdentity.digest(for: title.id)) viewing=\(viewingScore) liked=\(likedScore) rating=\(ratingScore) diversity=\(diversityPenalty) seeds="
+            "recommendation candidate=\(ApplePlaybackIdentity.digest(for: title.id)) viewing=\(viewingScore) liked=\(likedScore) rating=\(ratingScore) related=\(relationScore) diversity=\(diversityPenalty) seeds="
                 + seeds.map { "\($0.kind.rawValue):\($0.digest):\($0.contribution)" }.joined(separator: ",")
         }
     }
@@ -78,9 +79,11 @@ public enum AppleRecommendationRanker {
         history: [AppleViewingSignal],
         ratings: [String: AppleTitleRating],
         now: Date,
-        limit: Int
+        limit: Int,
+        preferUnseen: Bool = false,
+        relationIDs: [String: Set<String>] = [:]
     ) -> [AppleRankableTitle] {
-        let result = rankWithProvenance(titles, history: history, ratings: ratings, now: now, limit: limit)
+        let result = rankWithProvenance(titles, history: history, ratings: ratings, now: now, limit: limit, preferUnseen: preferUnseen, relationIDs: relationIDs)
         #if DEBUG
         for candidate in result { AppleInteractionTrace.record(.screen, candidate.debugTrace) }
         #endif
@@ -88,7 +91,8 @@ public enum AppleRecommendationRanker {
     }
 
     static func rankWithProvenance(_ titles: [AppleRankableTitle], history: [AppleViewingSignal],
-                                   ratings: [String: AppleTitleRating], now: Date, limit: Int) -> [Candidate] {
+                                   ratings: [String: AppleTitleRating], now: Date, limit: Int, preferUnseen: Bool = false,
+                                   relationIDs: [String: Set<String>] = [:], requiresAffinity: Bool = false) -> [Candidate] {
         guard limit > 0 else { return [] }
         // One strongest observation per title/show. Saves are snapshots, not
         // visits, and a hundred episodes must not outweigh a hundred films.
@@ -148,17 +152,32 @@ public enum AppleRecommendationRanker {
                                       contribution: contribution))
                 }
             }
+            let related = (relationIDs[title.id] ?? []).sorted().compactMap { seed -> Seed? in
+                guard let stats = historySummary[seed], stats.weight > 0 else { return nil }
+                return Seed(digest: ApplePlaybackIdentity.digest(for: seed), kind: .related,
+                            contribution: min(1, stats.weight))
+            }
+            seeds += related
             // Each component uses the same small scale; explicit ratings no
             // longer add 100/200 then multiply every other signal.
             return Candidate(title: title, viewingScore: min(4, viewingAffinity), likedScore: min(1, likedAffinity),
-                             ratingScore: ratingWeight(ratings[title.id]), seeds: seeds)
+                             ratingScore: ratingWeight(ratings[title.id]), relationScore: min(1, related.reduce(0) { $0 + $1.contribution }), seeds: seeds)
+        }
+
+        if requiresAffinity {
+            scoredTitles.removeAll { $0.viewingScore + $0.likedScore + $0.relationScore <= 0 }
         }
 
         func ordered(_ lhs: ScoredTitle, _ rhs: ScoredTitle) -> Bool {
             let l = lhs.title
             let r = rhs.title
             
-            if l.isResumable != r.isResumable {
+            if preferUnseen {
+                let lSeen = l.isResumable || l.isCompleted
+                let rSeen = r.isResumable || r.isCompleted
+                if lSeen != rSeen { return !lSeen }
+            }
+            if !preferUnseen, l.isResumable != r.isResumable {
                 return l.isResumable
             }
             

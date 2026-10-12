@@ -73,7 +73,7 @@ struct AppleContinueWatchingTile<Destination: View>: View {
                 Menu {
                     actions
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Image(systemName: AppleSemanticAction.more.symbol)
                         .font(style.menuGlyphFont)
                         .foregroundStyle(.white.opacity(0.4))
                         .frame(width: 44, height: 32)
@@ -90,10 +90,10 @@ struct AppleContinueWatchingTile<Destination: View>: View {
 
     @ViewBuilder
     private var actions: some View {
-        Button(item.type == "movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle",
+        Button(item.type == "movie" ? "Go to Movie" : "Go to Show", systemImage: AppleSemanticAction.info.symbol,
                action: onOpenTitle)
-        Button(isInList ? "Remove from My List" : "Add to My List",
-               systemImage: isInList ? "checkmark" : "plus", action: onToggleList)
+        Button(AppleSemanticAction.myList(saved: isInList).label,
+               systemImage: AppleSemanticAction.myList(saved: isInList).symbol, action: onToggleList)
         Button("Remove from Continue Watching", systemImage: "xmark.circle", action: onRemove)
     }
 }

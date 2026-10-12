@@ -24,9 +24,9 @@ public struct AppleArtworkImage: Equatable, Sendable {
 
 /// Which picture a hero should draw, and what kind of picture it is.
 ///
-/// The kind matters as much as the path: a poster already carries the film's
-/// own title treatment, so a hero showing one must not draw a second copy of
-/// the name over it (`AppleTVBillboardTitleTreatment`).
+/// Artwork identity is independent of the title lockup. Poster fallback art
+/// may carry lettering; the active `AppleHeroTitlePolicy` still supplies a
+/// title so fallback art never leaves the hero unnamed.
 public enum AppleHeroArtworkChoice: Equatable, Sendable {
     /// A backdrop with no title burned in — what the app wants, because it
     /// renders the wordmark itself.

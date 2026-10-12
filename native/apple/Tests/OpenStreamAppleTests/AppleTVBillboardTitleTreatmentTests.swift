@@ -2,28 +2,21 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-/// Owner 2026-09-15, two complaints that turned out to be one decision:
-/// *"artwork with word mark and then the work mark is redundant"* and
-/// *"the heros don't load the word mark art just text"*.
-@Suite("Billboard title treatment")
+@Suite("Active billboard title policy")
 struct AppleTVBillboardTitleTreatmentTests {
-    private typealias T = AppleTVBillboardTitleTreatment
-    private let logo = URL(string: "https://example.com/logo.png")!
-
-    @Test func aPosterFallbackDrawsNoTitleBecauseTheArtAlreadyHasOne() {
-        // "72 Hours" had no backdrop, so the poster was used — and the poster
-        // has the title burned into it.
-        #expect(T.choose(hasBackdrop: false, wordmark: nil) == .none)
-        // Even with a wordmark available: over a poster it is still a repeat.
-        #expect(T.choose(hasBackdrop: false, wordmark: logo) == .none)
+    @Test func posterFallbackStillNamesTheTitle() {
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false) == .name)
     }
 
-    @Test func aBackdropPrefersTheWordmarkOverPlainText() {
-        #expect(T.choose(hasBackdrop: true, wordmark: logo) == .wordmark(logo))
+    @Test func readyBackdropWordmarkWins() throws {
+        let logo = try #require(URL(string: "https://fixture.example/logo.png"))
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: logo, loaded: logo, failed: nil, graceExpired: false) == .wordmark(logo))
     }
 
-    @Test func aBackdropWithNoWordmarkStillNamesTheTitle() {
-        // Never leave the viewer with an unlabelled picture.
-        #expect(T.choose(hasBackdrop: true, wordmark: nil) == .text)
+    @Test func detailAndHomeKeepTheSameGraceAndStickyFallback() throws {
+        #expect(AppleTitleLogoPolicy.loadingGrace == AppleHeroTitlePolicy.loadingGrace)
+        let logo = try #require(URL(string: "https://fixture.example/logo.png"))
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: logo, loaded: logo, failed: nil, graceExpired: true, nameShown: true) == .name)
+        #expect(!AppleTitleLogoPolicy.keepsLoadResult(true, shown: .text))
     }
 }

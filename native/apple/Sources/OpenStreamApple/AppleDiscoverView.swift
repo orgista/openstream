@@ -97,6 +97,7 @@ struct AppleDiscoverView: View {
     @State private var catalogLookupRevision: UInt64 = 0
     @State private var ratingStoreRevision = AppleTitleRatingStore.revision
     @State private var heroArtworkRevision: UInt64 = 0
+    @State private var relationRevision = AppleTMDBRelationCache.revision
     @State private var recommendations = RecommendationResult()
     @State private var recommendationsRevision: String?
     @State private var top10Week: AppleNetflixTop10Week?
@@ -138,11 +139,14 @@ struct AppleDiscoverView: View {
         var continueWatching: [IndexedCatalogItem] = []
         var picks: [IndexedCatalogItem] = []
         var heroes: [IndexedCatalogItem] = []
+        var seedHeading: String?
+        var seedItems: [IndexedCatalogItem] = []
     }
 
     /// Capture actor-owned data once, then transfer only immutable values.
     private struct RecommendationSnapshot: Sendable {
         let sections: [AppleCatalogSection]
+        let relations: [AppleTMDBRelation]
         let sources: [AppleSource]
         let records: [AppleMediaRecord]
         let lookup: AppleCatalogSearchLookup
@@ -377,6 +381,8 @@ struct AppleDiscoverView: View {
             .receive(on: RunLoop.main)) { _ in
                 ratingStoreRevision = AppleTitleRatingStore.revision
             }
+        .onReceive(NotificationCenter.default.publisher(for: AppleTMDBRelationCache.changeNotification)
+            .receive(on: RunLoop.main)) { _ in relationRevision = AppleTMDBRelationCache.revision }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
         #if os(visionOS)
         .buttonStyle(.plain)
@@ -579,12 +585,14 @@ struct AppleDiscoverView: View {
         let sectionsIdentity = catalogLookupIdentity
         return "\(sectionsIdentity)|lookup:\(catalogLookupRevision)|play:\(ApplePlaybackProgressFeed.shared.revision)"
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
+            + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
     }
 
     private func rebuildRecommendations(for revision: String) async {
         // A rating may change while this screen is covered and unsubscribed.
         ratingStoreRevision = AppleTitleRatingStore.revision
+        relationRevision = AppleTMDBRelationCache.revision
         guard revision == recommendationRevision, recommendationsRevision != revision else { return }
         let store = ApplePlaybackStore()
         #if DEBUG
@@ -592,7 +600,8 @@ struct AppleDiscoverView: View {
         #else
         let wanted: String? = nil
         #endif
-        let snapshot = RecommendationSnapshot(sections: catalogStore.sections, sources: sourceStore.sources,
+        let snapshot = RecommendationSnapshot(sections: catalogStore.sections,
+            relations: await AppleTMDBRelationCache.shared.snapshot(configuration: metadataConfiguration), sources: sourceStore.sources,
             records: mediaIndex.records, lookup: catalogLookup, progress: store.configurationProgress(),
             activity: store.activities(), availableEpisodes: await store.availableEpisodes(),
             completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
@@ -652,12 +661,13 @@ struct AppleDiscoverView: View {
                 lastPlayedAt: snapshot.activity[key]?.updatedAt ?? snapshot.progress[key]?.updatedAt)
         }
         var identities = AppleRecommendationInputs.IdentityMemo()
-        let picks = try topPicks(snapshot, visibleSections: visibleSections, continueWatching: local, identities: &identities)
+        let selection = try topPicks(snapshot, visibleSections: visibleSections, continueWatching: local, identities: &identities)
         try Task.checkCancellation()
         let heroes = featuredCandidates(snapshot, visibleSections: visibleSections,
-            continueWatching: heroContinueWatching, picks: picks, identities: &identities)
+            continueWatching: heroContinueWatching, picks: selection.picks, identities: &identities)
         try Task.checkCancellation()
-        return RecommendationResult(continueWatching: heroContinueWatching, picks: picks, heroes: heroes)
+        return RecommendationResult(continueWatching: heroContinueWatching, picks: selection.picks, heroes: heroes,
+            seedHeading: selection.seedHeading, seedItems: selection.seedItems)
     }
 
     /// What the hero rotates through: what the owner is part-way into first,
@@ -772,20 +782,30 @@ struct AppleDiscoverView: View {
     }
 
     nonisolated private static func topPicks(_ snapshot: RecommendationSnapshot, visibleSections: [AppleCatalogSection],
-                                            continueWatching: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) throws -> [IndexedCatalogItem] {
+                                            continueWatching: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) throws -> RecommendationResult {
         let now = snapshot.now
         let storedRatings = snapshot.ratings
         let progress = snapshot.progress
         let completed = snapshot.completed
         let unwatched = snapshot.unwatched
         var candidates: [IndexedCatalogItem] = []
-        for section in visibleSections where AppleCatalogDiscoveryPolicy.isTitleType(section.catalog.type) {
-            guard let source = snapshot.sources.first(where: { $0.id == section.sourceID && $0.isEnabled }) else { continue }
+        for match in AppleRecommendationRowPolicy.accessibleCatalogs(snapshot.sections, sources: snapshot.sources) {
             try Task.checkCancellation()
-            candidates += section.items.map { item in
-                IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
-                                   item: item, source: source)
+            candidates.append(IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item), item: match.item, source: match.source))
+        }
+        for shelf in snapshot.serverShelves {
+            for item in shelf.items where AppleCatalogDiscoveryPolicy.isTitleType(item.type) {
+                guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
+                      let source = snapshot.sources.first(where: { $0.id == reference.sourceID && $0.isEnabled }) else { continue }
+                candidates.append(IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source))
             }
+        }
+        // Indexed playable titles can outlive a catalog's current page.
+        for record in snapshot.records where record.kind == .movie || record.kind == .series {
+            try Task.checkCancellation()
+            guard let match = AppleContinueWatchingResolver.resolve(record, in: [snapshot.lookup]).match,
+                  match.source.isEnabled else { continue }
+            candidates.append(IndexedCatalogItem(record: record, item: match.item, source: match.source))
         }
         var historyValues = candidates + continueWatching
         // Use already-loaded metadata for indexed history, including titles
@@ -851,9 +871,23 @@ struct AppleDiscoverView: View {
             }
         }
         let history = AppleRecommendationInputs.boundedHistory(signals, now: now)
-        guard !history.isEmpty || !ratings.isEmpty else { return [] }
+        guard !history.isEmpty || !ratings.isEmpty else { return RecommendationResult() }
         let unique = canonicalized(candidates, identities: &identities)
         let byID = Dictionary(uniqueKeysWithValues: unique.map { (identities.identity($0.item, sourceID: $0.source.id.uuidString), $0) })
+        // Intersect cached TMDB links with routes the viewer can actually open.
+        // No link creates a synthetic playable item or performs enrichment here.
+        var relationIDs: [String: Set<String>] = [:]
+        let watched = Set(history.map { $0.showID ?? $0.titleID })
+        let relationIndex = AppleTMDBRelation.accessibleIndex(byID.mapValues(\.item))
+        for relation in snapshot.relations {
+            try Task.checkCancellation()
+            let seedItem = AppleCatalogItem(mediaID: relation.seedID, type: relation.type, name: "")
+            let seedID = identities.identity(seedItem, sourceID: "")
+            guard watched.contains(seedID) else { continue }
+            for target in relation.targets {
+                for id in target.accessibleIDs(in: relationIndex) { relationIDs[id, default: []].insert(seedID) }
+            }
+        }
         let rankable = unique.map { value in
             let id = identities.identity(value.item, sourceID: value.source.id.uuidString)
             return AppleRankableTitle(id: id, genres: genresByID[id] ?? [],
@@ -864,8 +898,37 @@ struct AppleDiscoverView: View {
                 franchiseID: AppleCatalogShelfPolicy.franchise(title: value.item.name),
                 sourceID: value.source.id.uuidString)
         }
-        let ranked = AppleRecommendationRanker.rank(rankable, history: history, ratings: ratings, now: now, limit: 20)
-        return ranked.compactMap { byID[$0.id] }
+        let ranked = AppleRecommendationRanker.rankWithProvenance(rankable, history: history, ratings: ratings,
+            now: now, limit: 20, preferUnseen: true, relationIDs: relationIDs, requiresAffinity: true)
+        #if DEBUG
+        for candidate in ranked { AppleInteractionTrace.record(.screen, candidate.debugTrace) }
+        #endif
+        let relevant = ranked.filter { $0.viewingScore + $0.likedScore + $0.relationScore > 0 }
+        var result = RecommendationResult(picks: relevant.prefix(20).compactMap { byID[$0.title.id] })
+        let headings = visibleSections.map { $0.shelfTitle ?? AppleCatalogShelfPolicy.title(for: $0.catalog) }
+            + snapshot.serverShelves.map(\.title)
+            + ["Continue Watching", "Library", "Top Picks for You", "Top 10 Movies in the US", "Top 10 Shows in the US"]
+        // One meaningful watched seed, most recent first. New rows are appended
+        // after the viewer's configured rails, outside the automatic rhythm.
+        for seed in history.prefix(8) {
+            let seedID = seed.showID ?? seed.titleID
+            guard let value = historyValues.first(where: {
+                identities.identity($0.item, sourceID: $0.source.id.uuidString) == seedID
+            }) else { continue }
+            let related = AppleRecommendationRanker.rankWithProvenance(rankable.filter {
+                $0.id != seedID && !$0.isResumable && !$0.isCompleted
+                    && (!Set($0.genres).isDisjoint(with: seed.genres) || relationIDs[$0.id]?.contains(seedID) == true)
+            }, history: [seed], ratings: ratings, now: now, limit: 20,
+                preferUnseen: true, relationIDs: relationIDs, requiresAffinity: true)
+                .filter { $0.viewingScore + $0.relationScore > 0 }.prefix(20)
+                .compactMap { byID[$0.title.id] }
+            guard let heading = AppleRecommendationRowPolicy.heading(seed: value.item.name,
+                count: related.count, existing: headings) else { continue }
+            result.seedHeading = heading
+            result.seedItems = related
+            break
+        }
+        return result
     }
 
     /// A row on the home screen, in the order it is drawn.
@@ -874,6 +937,7 @@ struct AppleDiscoverView: View {
         case library
         case mediaServer(String)
         case topPicks
+        case becauseWatched
         case top10(String)
         case top10StaleNote
         case catalog(String)
@@ -886,6 +950,7 @@ struct AppleDiscoverView: View {
             case .library: AppleDiscoverRowOrder.library
             case .mediaServer: AppleDiscoverRowOrder.mediaServers
             case .topPicks: AppleDiscoverRowOrder.topPicks
+            case .becauseWatched: "becauseWatched"
             case .top10(let type): type == "movie" ? AppleDiscoverRowOrder.top10Movies : AppleDiscoverRowOrder.top10Shows
             case .top10StaleNote: "top10StaleNote"
             case .catalog(let id): AppleDiscoverRowOrder.catalogID(id)
@@ -948,7 +1013,7 @@ struct AppleDiscoverView: View {
             let lastTop10 = ordered.lastIndex { if case .top10 = $0 { true } else { false } }
             ordered.insert(.top10StaleNote, at: lastTop10.map { $0 + 1 } ?? ordered.count)
         }
-        return ordered
+        return AppleRecommendationRowPolicy.appendingSeed(recommendations.seedHeading == nil ? nil : .becauseWatched, to: ordered)
     }
 
     @ViewBuilder
@@ -983,6 +1048,10 @@ struct AppleDiscoverView: View {
                         }
                     }
                 }
+            }
+        case .becauseWatched:
+            if let heading = recommendations.seedHeading {
+                indexedShelf(title: heading, identifier: "because-watched", values: recommendations.seedItems, showsProgress: false)
             }
         case .topPicks:
             indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: picks, showsProgress: false)
@@ -1416,13 +1485,21 @@ struct AppleDiscoverView: View {
     private func indexedCards(identifier: String, values: [IndexedCatalogItem], showsProgress: Bool) -> some View {
         let store = ApplePlaybackStore()
         return ForEach(values) { value in
+            let key = AppleTitleProgressIdentity.key(
+                among: AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id),
+                progress: { store.progress(for: $0) }) ?? value.record.id
+            let saved = store.progress(for: key)
             NavigationLink { detail(value) } label: {
                 AppleCatalogCard(
                     item: value.item,
                     sizing: showsProgress ? .continueWatching : .featured,
                     progress: showsProgress ? (AppleContinueWatchingResolver.progress(
-                        isSeries: value.item.type == "series", saved: store.progress(for: value.item.mediaID) ?? store.progress(for: value.record.id),
-                        recordProgress: value.record.progress) ?? 0) : nil)
+                        isSeries: value.item.type == "series", saved: saved,
+                        recordProgress: value.record.progress) ?? 0) : nil,
+                    resumeCaption: showsProgress ? saved.flatMap {
+                        AppleContinueWatchingCaption.tvLine(type: value.item.type, partID: $0.partID,
+                            position: $0.position, duration: $0.duration)
+                    } : nil)
             }
             .contextMenu {
                 if showsProgress {
@@ -1747,7 +1824,7 @@ struct AppleSearchView: View {
             get: { pendingSharedPlayer != nil },
             set: { if !$0 { pendingSharedPlayer = nil } }
         ), titleVisibility: .visible, presenting: pendingSharedPlayer) { presentation in
-            Button("Play", systemImage: "play.fill") {
+            Button(AppleSemanticAction.play.label, systemImage: AppleSemanticAction.play.symbol) {
                 sharedPlayer = presentation
                 pendingSharedPlayer = nil
             }
@@ -2363,6 +2440,7 @@ struct AppleCatalogCard: View {
     let progress: Double?
     /// "57 MIN LEFT" on a Discover Continue Watching still (iPhone, Mac).
     let remainingLabel: String?
+    let resumeCaption: String?
     @Environment(\.displayScale) private var displayScale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -2379,12 +2457,13 @@ struct AppleCatalogCard: View {
     private let discCatalog = AppleDiscCatalog.shared
 
     init(item: AppleCatalogItem, sizing: AppleCatalogCardSizing = .catalog, viewportWidth: CGFloat? = nil,
-         progress: Double? = nil, remainingLabel: String? = nil) {
+         progress: Double? = nil, remainingLabel: String? = nil, resumeCaption: String? = nil) {
         self.item = item
         self.sizing = sizing
         self.viewportWidth = viewportWidth
         self.progress = progress
         self.remainingLabel = remainingLabel
+        self.resumeCaption = resumeCaption
     }
 
     /// The Discover row style (iPhone, Mac) applies to the home rails only,
@@ -2447,6 +2526,11 @@ struct AppleCatalogCard: View {
                 .font(.caption)
                 .lineLimit(2, reservesSpace: reservingTitleLines)
                 .truncationMode(.tail)
+            #if os(tvOS)
+            if let resumeCaption {
+                Text(resumeCaption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            #endif
             if let captionYear {
                 Text(captionYear)
                     .font(.caption)
@@ -4260,11 +4344,11 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSIconRow: some View {
         HStack(alignment: .appleTVControlCenter, spacing: 0) {
             Button(action: toggleFavorite) {
-                AppleTVDetailIconLabel(title: "My List", systemImage: titleActions.isFavorite ? "checkmark" : "plus")
+                AppleTVDetailIconLabel(title: "My List", systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol)
             }
             .buttonStyle(AppleTVBareButtonStyle())
             .focused($tvDetailFocus, equals: .myList)
-            .accessibilityLabel(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+            .accessibilityLabel(AppleSemanticAction.myList(saved: titleActions.isFavorite).label)
             .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             tvOSRateControl
         }
@@ -5435,8 +5519,8 @@ struct AppleCatalogItemDetailView: View {
         // "My ListRate" (measured on the iPad, 2026-09-17), so the row supplies
         // the gap itself at those sizes.
         HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 0) {
-            detailIconAction("My List", systemImage: titleActions.isFavorite ? "checkmark" : "plus", action: toggleFavorite)
-                .accessibilityLabel(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+            detailIconAction("My List", systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol, action: toggleFavorite)
+                .accessibilityLabel(AppleSemanticAction.myList(saved: titleActions.isFavorite).label)
                 .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             rateControl
         }
@@ -5513,15 +5597,15 @@ struct AppleCatalogItemDetailView: View {
         switch downloadCoordinator.state {
         case .resolving: .progress
         case .downloading, .resuming:
-            .systemImage("arrow.down.circle")
+            .systemImage(AppleSemanticAction.download(.active).symbol)
         case .paused:
-            .systemImage("pause.circle")
+            .systemImage(AppleSemanticAction.download(.paused).symbol)
         case .completed:
-            .systemImage("checkmark.square")
+            .systemImage(AppleSemanticAction.download(.completed).symbol)
         case .failed, .cancelled:
-            .systemImage("arrow.clockwise")
+            .systemImage(AppleSemanticAction.download(.retry).symbol)
         case .idle:
-            .systemImage("arrow.down")
+            .systemImage(AppleSemanticAction.download(.idle).symbol)
         }
     }
 
@@ -5668,11 +5752,11 @@ struct AppleCatalogItemDetailView: View {
     private func episodeDownloadGlyph(_ indicator: AppleEpisodeDownloadIndicator) -> some View {
         switch indicator {
         case .idle:
-            Image(systemName: "arrow.down")
+            Image(systemName: AppleSemanticAction.download(.idle).symbol)
         case .otherInProgress:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(systemName: AppleSemanticAction.download(.active).symbol)
         case .downloaded:
-            Image(systemName: "checkmark.square")
+            Image(systemName: AppleSemanticAction.download(.completed).symbol)
         case .preparing:
             ProgressView().controlSize(.small)
         case .downloading(let fraction), .paused(let fraction):
@@ -6075,12 +6159,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func ratingGlyph(for value: AppleTitleRating?, selected: Bool) -> String {
-        switch value {
-        case .down: return selected ? "hand.thumbsdown.fill" : "hand.thumbsdown"
-        case .up: return selected ? "hand.thumbsup.fill" : "hand.thumbsup"
-        case .doubleUp: return selected ? "heart.fill" : "heart"
-        case .some(.none), nil: return "hand.thumbsup"
-        }
+        AppleSemanticAction.rating(value, selected: selected).symbol
     }
 
     private func selectRating(_ value: AppleTitleRating) {
@@ -9219,8 +9298,8 @@ extension AppleCatalogItemDetailView {
             HStack(spacing: 12) {
                 Button(action: toggleFavorite) {
                     AppleTitlePageRoundButtonLabel(
-                        title: titleActions.isFavorite ? "Remove from My List" : "Add to My List",
-                        systemImage: titleActions.isFavorite ? "checkmark" : "plus"
+                        title: AppleSemanticAction.myList(saved: titleActions.isFavorite).label,
+                        systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol
                     )
                     .contentTransition(.symbolEffect(.replace))
                 }
@@ -9384,7 +9463,7 @@ extension AppleCatalogItemDetailView {
         Button(action: performDownloadAction) {
             switch downloadGlyph {
             case .progress, .disc:
-                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
+                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: AppleSemanticAction.download(.preparing).symbol, showsProgress: true)
             case .systemImage(let name):
                 AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: name)
             }
@@ -10106,12 +10185,12 @@ extension AppleCatalogItemDetailView {
             }
 
             Button(action: toggleFavorite) {
-                AppleTitlePageMacRoundLabel(title: titleActions.isFavorite ? "Remove from My List" : "Add to My List",
-                                            systemImage: titleActions.isFavorite ? "checkmark" : "plus")
+                AppleTitlePageMacRoundLabel(title: AppleSemanticAction.myList(saved: titleActions.isFavorite).label,
+                                            systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
-            .help(titleActions.isFavorite ? "Remove from My List" : "Add to My List")
+            .help(AppleSemanticAction.myList(saved: titleActions.isFavorite).label)
             .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
             .accessibilityIdentifier("detail.my-list")
 
@@ -10119,7 +10198,7 @@ extension AppleCatalogItemDetailView {
                 Button(action: performDownloadAction) {
                     switch downloadGlyph {
                     case .progress, .disc:
-                        AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: "arrow.down", showsProgress: true)
+                        AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: AppleSemanticAction.download(.preparing).symbol, showsProgress: true)
                     case .systemImage(let name):
                         AppleTitlePageMacRoundLabel(title: downloadButtonLabel, systemImage: name)
                     }

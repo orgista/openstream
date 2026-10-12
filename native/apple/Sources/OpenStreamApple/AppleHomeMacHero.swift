@@ -260,15 +260,15 @@ struct AppleHomeMacHeroActions: View {
 
             if let isInList {
                 Button(action: onToggleList) {
-                    Label(isInList ? "In My List" : "Add to My List",
-                          systemImage: isInList ? "checkmark" : "plus")
+                    Label(AppleSemanticAction.myList(saved: isInList).label,
+                          systemImage: AppleSemanticAction.myList(saved: isInList).symbol)
                         .labelStyle(.iconOnly)
                         .font(.system(size: 15, weight: .semibold))
                         .frame(width: AppleMacHeroLayout.listButtonSide, height: AppleMacHeroLayout.listButtonSide)
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
-                .help(isInList ? "Remove from My List" : "Add to My List")
+                .help(AppleSemanticAction.myList(saved: isInList).label)
                 .accessibilityValue(isInList ? "Saved" : "Not saved")
                 .accessibilityIdentifier("home.featured.my-list")
             }

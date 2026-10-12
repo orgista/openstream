@@ -165,7 +165,7 @@ import Testing
                 #expect(request.url?.path == "/3/movie/42")
                 let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
                 #expect(queryItems?.contains(URLQueryItem(name: "include_image_language", value: "en,null")) == true)
-                #expect(queryItems?.contains(URLQueryItem(name: "append_to_response", value: "credits,videos,images")) == true)
+                #expect(queryItems?.contains(URLQueryItem(name: "append_to_response", value: "credits,videos,images,recommendations,similar")) == true)
                 body = Data(detailsBody.utf8)
             }
             return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
@@ -346,8 +346,8 @@ import Testing
     /// back to the text title rather than showing nothing.
     @Test func theBillboardDrawsTheWordmarkOnceTheLibraryHeroHasOne() throws {
         let wordmark = try #require(URL(string: "https://fixture.example/wordmark.png"))
-        #expect(AppleTVBillboardTitleTreatment.choose(hasBackdrop: true, wordmark: wordmark)
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: wordmark, loaded: wordmark, failed: nil, graceExpired: false)
             == .wordmark(wordmark))
-        #expect(AppleTVBillboardTitleTreatment.choose(hasBackdrop: true, wordmark: nil) == .text)
+        #expect(AppleHeroTitlePolicy.presentation(wordmark: nil, loaded: nil, failed: nil, graceExpired: false) == .name)
     }
 }

@@ -71,7 +71,7 @@ public enum AppleTitlePagePolicy {
         }
 
         public var systemImage: String {
-            self == .details ? "info.circle" : "play.fill"
+            self == .details ? AppleSemanticAction.info.symbol : AppleSemanticAction.play.symbol
         }
 
         public var title: String {

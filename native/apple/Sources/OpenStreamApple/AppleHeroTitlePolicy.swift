@@ -24,13 +24,9 @@ enum AppleHeroTitlePresentation: Equatable, Sendable {
     var showsName: Bool { self == .name }
 }
 
-/// The hero always shows its title (owner/driver 2026-09-23: a Binnelanders
-/// page drew neither wordmark nor name). It replaces, for the heroes, the
-/// old rule (`AppleTVBillboardTitleTreatment`) that left the slot empty when
-/// the art was a poster — that was the Binnelanders page: no backdrop, so the
-/// poster was drawn and the title dropped. The rotation now only picks titles
-/// with a backdrop (`AppleHeroRotation.hasBackdrop`), and when none has one
-/// the name still goes over whatever art there is.
+/// The active home-title policy, used by AppleHeroTitleLockup on every
+/// platform, including AppleTVBillboardView. A poster fallback still names
+/// the title; loaded logos win until the text fallback becomes sticky.
 enum AppleHeroTitlePolicy {
     /// How long a page holds its wordmark's slot empty while the mark
     /// loads. Owner, N62: the hero showed the name, then swapped to the logo

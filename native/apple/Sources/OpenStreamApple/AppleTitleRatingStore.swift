@@ -8,7 +8,7 @@ public extension AppleTitleRating {
         switch self { case .down: "Not for Me"; case .none: "Not Rated"; case .up: "I Like This"; case .doubleUp: "Love This" }
     }
     var systemImage: String {
-        switch self { case .down: "hand.thumbsdown.fill"; case .none: "hand.thumbsup"; case .up: "hand.thumbsup.fill"; case .doubleUp: "hand.thumbsup.fill" }
+        AppleSemanticAction.rating(self, selected: self != .none).symbol
     }
 }
 

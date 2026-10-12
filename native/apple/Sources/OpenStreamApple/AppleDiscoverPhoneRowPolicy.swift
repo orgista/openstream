@@ -147,6 +147,20 @@ enum AppleRailPaging {
 
 /// The copy under and on a Continue Watching still.
 enum AppleContinueWatchingCaption {
+    /// TV uses one compact local-data line; no guessed episode or runtime.
+    static func tvLine(type: String, partID: String?, position: Double, duration: Double) -> String? {
+        guard position.isFinite, duration.isFinite, duration > 0, position > 0,
+              !AppleCompletionPolicy.isComplete(position: position, duration: duration) else { return nil }
+        if type == "series" || type == "episode" {
+            guard let value = episode(partID: partID) else { return nil }
+            return "S\(value.season) E\(value.episode)"
+        }
+        guard type == "movie", duration - position < Double(Int.max / 60) else { return nil }
+        // Keep TV's compact minutes-only line, independent of the phone pill.
+        let minutes = max(1, Int((duration - position) / 60 + 0.5))
+        return "\(minutes) min left"
+    }
+
     /// "57 MIN LEFT", "1 HR 5 MIN LEFT"; nil when the length is not known, so
     /// the pill is hidden rather than guessed (DESIGN-SPEC: real time only).
     static func remainingLabel(position: Double, duration: Double) -> String? {

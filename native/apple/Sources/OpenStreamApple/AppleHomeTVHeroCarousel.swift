@@ -144,7 +144,7 @@ struct AppleHomeTVHeroActions: View {
             .accessibilityIdentifier("home.featured.play")
 
             Button(action: onToggleList) {
-                Label(isInList ? "In My List" : "Add to My List", systemImage: isInList ? "checkmark" : "plus")
+                Label(AppleSemanticAction.myList(saved: isInList).label, systemImage: AppleSemanticAction.myList(saved: isInList).symbol)
                     .labelStyle(.iconOnly)
                     .contentTransition(.symbolEffect(.replace))
             }
@@ -157,7 +157,7 @@ struct AppleHomeTVHeroActions: View {
                 willOpenPage(.details)
                 onDetails()
             } label: {
-                Label("Details", systemImage: "info")
+                Label(AppleSemanticAction.info.label, systemImage: AppleSemanticAction.info.symbol)
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(AppleTVHeroRoundButtonStyle())
@@ -193,6 +193,8 @@ struct AppleTVHeroRoundButtonStyle: ButtonStyle {
     private struct StyledBody: View {
         @Environment(\.isFocused) private var isFocused
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+        @Environment(\.colorSchemeContrast) private var contrast
         let configuration: ButtonStyleConfiguration
 
         private typealias M = AppleTVBillboardMetrics
@@ -200,9 +202,20 @@ struct AppleTVHeroRoundButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .font(.system(size: M.pillGlyphSize, weight: .semibold))
-                .foregroundStyle(isFocused ? Color.black : Color.white)
                 .frame(width: M.pillSize.height, height: M.pillSize.height)
-                .background(isFocused ? Color.white : Color.white.opacity(0.16), in: .circle)
+                .background {
+                    if isFocused {
+                        Circle().fill(.white)
+                    } else if reduceTransparency || contrast == .increased {
+                        Circle().fill(.background)
+                    } else {
+                        Circle().fill(.regularMaterial)
+                    }
+                }
+                .foregroundStyle(isFocused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
+                .overlay {
+                    if contrast == .increased { Circle().stroke(.primary, lineWidth: 2) }
+                }
                 .scaleEffect(reduceMotion ? 1 : (isFocused ? 1.06 : 1))
                 .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 14, y: 6)
                 .opacity(configuration.isPressed ? 0.7 : 1)
