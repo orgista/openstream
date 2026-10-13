@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import OpenStreamApple
 
@@ -6,6 +7,76 @@ import Testing
 /// new saved position republishes even when the media records are unchanged.
 @MainActor
 struct AppleTopShelfPublisherProgressTests {
+    @Test func aFailedWriteIsRetriedOnTheNextUnchangedPublish() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-topshelf-retry-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "openstream-topshelf-retry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let publisher = AppleTopShelfPublisher(writer: AppleTopShelfSnapshotWriter(containerProvider: { root }))
+        let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
+
+        // The missing directory makes the real writer fail; no mock bypasses its I/O.
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        #expect(reader.read() == nil)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        #expect(try #require(reader.read()).version == 1)
+    }
+
+    @Test func anUnavailableContainerIsRetriedOnTheNextUnchangedPublish() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-topshelf-container-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let available = Mutex(false)
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { available.withLock { $0 ? root : nil } })
+        let suite = "openstream-topshelf-container-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let publisher = AppleTopShelfPublisher(writer: writer)
+        let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
+
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        #expect(reader.read() == nil)
+        available.withLock { $0 = true }
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        #expect(try #require(reader.read()).version == 1)
+    }
+
+    @Test func aMissingContainerReportsAWriteFailure() async throws {
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { nil })
+        await #expect(throws: (any Error).self) {
+            try await writer.write(records: [], enabled: true)
+        }
+    }
+
+    @Test func aWrittenSnapshotIsReadableAndDisablingRemovesIt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-topshelf-readable-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = AppleSource(kind: .stremio, name: "Fixture",
+                                 url: URL(string: "https://fixture.example/manifest.json")!)
+        let item = AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Fixture Movie")
+        let section = AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "movie", id: "top"),
+                                          items: [item])
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
+        let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
+
+        try await writer.write(records: [], sections: [section], enabled: true)
+        let snapshot = try #require(reader.read())
+        #expect(snapshot.topPicks.map(\.title) == ["Fixture Movie"])
+        #expect(AppleTopShelfContentBuilder.sections(for: snapshot).map(\.title) == ["Top Picks"])
+        try await writer.write(records: [], enabled: false)
+        #expect(reader.read() == nil)
+        // Already absent is a successful privacy opt-out too.
+        try await writer.write(records: [], enabled: false)
+    }
+
     @Test func aNewSavedPositionRepublishesWithUnchangedRecords() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "openstream-topshelf-publisher-\(UUID().uuidString)", directoryHint: .isDirectory)

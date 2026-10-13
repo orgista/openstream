@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Observes `AppleCatalogStore.sections` and `AppleMediaIndexStore.records`
 /// and republishes the Top Shelf snapshot whenever either changes, so
@@ -9,6 +10,7 @@ import Foundation
 @MainActor
 public final class AppleTopShelfPublisher {
     public static let shared = AppleTopShelfPublisher()
+    private static let logger = Logger(subsystem: "com.orgista.openstream.topshelf", category: "publisher")
 
     private let writer: AppleTopShelfSnapshotWriter
     private var lastDigest: String?
@@ -61,11 +63,25 @@ public final class AppleTopShelfPublisher {
         let liveDigest = ApplePlaybackIdentity.digest(for: String(decoding: (try? JSONEncoder().encode([favorites, recents])) ?? Data(), as: UTF8.self))
         let combinedDigest = digest + liveDigest
         guard combinedDigest != lastDigest else { return }
-        lastDigest = combinedDigest
-        try? await writer.write(records: records, sections: sections, sources: sources,
-                                watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
-                                successorAvailable: successorAvailable, removedAt: removals,
-                                favoriteChannels: favorites, recentChannels: recents, enabled: enabled)
+        do {
+            try await writer.write(records: records, sections: sections, sources: sources,
+                                   watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
+                                   successorAvailable: successorAvailable, removedAt: removals,
+                                   favoriteChannels: favorites, recentChannels: recents, enabled: enabled)
+            // Only a completed write/removal may suppress the next identical publish.
+            lastDigest = combinedDigest
+        } catch {
+            let failure: String
+            if error is AppleTopShelfSnapshotWriter.WriteError {
+                failure = "Top Shelf snapshot publish failed: no app-group container"
+            } else {
+                // Error descriptions can include paths or payloads; codes are enough to diagnose I/O.
+                let error = error as NSError
+                failure = "Top Shelf snapshot \(enabled ? "write" : "removal") failed: \(error.domain) code=\(error.code)"
+            }
+            AppleInteractionTrace.record(.failure, failure)
+            Self.logger.error("\(failure, privacy: .public)")
+        }
     }
 
     private static func digest(

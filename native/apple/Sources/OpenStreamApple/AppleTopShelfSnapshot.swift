@@ -214,6 +214,10 @@ public struct AppleTopShelfSnapshotReader: Sendable {
 }
 
 public actor AppleTopShelfSnapshotWriter {
+    public enum WriteError: Error, Sendable {
+        case containerUnavailable
+    }
+
     public static let shared = AppleTopShelfSnapshotWriter()
     /// The shared container every system surface reads through.
     ///
@@ -274,10 +278,14 @@ public actor AppleTopShelfSnapshotWriter {
         recentChannels: [AppleTopShelfSnapshot.Item] = [],
         enabled: Bool
     ) throws {
-        guard let root = containerProvider() else { return }
+        guard let root = containerProvider() else { throw WriteError.containerUnavailable }
         let url = root.appending(path: Self.filename)
         guard enabled else {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                // An already absent snapshot is a completed opt-out.
+            }
             notify()
             return
         }
@@ -309,9 +317,10 @@ public actor AppleTopShelfSnapshotWriter {
             favoriteChannels: favoriteChannels, recentChannels: recentChannels
         )
         let data = try JSONEncoder().encode(snapshot)
-        #if os(iOS) || os(tvOS) || os(visionOS)
+        #if os(iOS) || os(visionOS)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         #else
+        // The tvOS extension opens the file separately, including while the app is inactive.
         try data.write(to: url, options: .atomic)
         #endif
         notify()
