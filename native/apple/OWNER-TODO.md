@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Use all Fable usage each week, personal and work (owner 2026-10-12).** Running on personal Fable: REA of the
+      Mac TV app (specs/rea-mac-tv-app-2026-10-12.md) and a deep review of today's commits
+      (specs/fable-review-2026-10-12.md). **Work account login expired:** the owner needs to log in again (Terminal:
+      `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`, then close the window). Then the heaviest Fable jobs
+      move to work.
+
 - [ ] **Real Apple TV connected (owner 2026-10-12): "OfficePlus" (Apple TV 4K) on Dev-Mini.** Owner OK'd e2e on it
       and REA research there on the Apple TV app, Netflix and others (UI only; no DRM or sign-in workarounds;
       screenshots stay in verification-artifacts, never in the public repo). Owner OK'd a tvOS development profile:
