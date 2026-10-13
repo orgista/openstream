@@ -19,15 +19,18 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       `osascript … tell application "Terminal"` opens a new window by itself.
 - [ ] **Use agy and Muse where possible (owner 2026-10-12).** agy takes short review and check prompts (agy-task.sh);
       Muse takes text-only work (REA write-ups, copy, reviews). Codex keeps the heavy simulator and device runs.
+      agy reviewed the Live Pause fix (a58593f). **Muse is logged out since 2026-10-11** (ServerPlus runner stopped,
+      AUTH-EXPIRED.txt). The owner needs to log in to muse.ai again so its cookies can be re-exported. Queued meanwhile:
+      57-openstream-tv-netflix-published.md (what Apple and Netflix publish about TV home screens).
 
 - [ ] **Apple TV posters: title on focus (owner 2026-10-12: "titles on focus").** Posters stay clean; the focused
       poster shows its title underneath, like the Apple TV app's focus caption. Built in 12aa663; verified on the tvOS simulator (only the focused poster shows its title).
-- [ ] **Full e2e after the 2026-10-12 polish queue: nearly green.** Fixed along the way: a CPU hot loop from
-      Top Shelf publishing (5e70036), the import message being overwritten (5e70036), and Reset deleting the app
-      group's system file, which broke widgets and Top Shelf (8af3ce3). The test data and outdated tests are fixed
-      too (8af3ce3). Simulators: Apple TV 20 pass / 0 fail, iPhone 38 pass / 3 fail. All 3 failures are one bug:
-      the inline Live player's Pause button doesn't respond to a tap. Codex is fixing it. Simulator apps must be
-      built on the mini's internal disk (AGENTS.md). Results: verification-artifacts/e2e-2026-10-12/.
+- [ ] **Full e2e after the 2026-10-12 polish queue: green except 2 known.** Fixed: Top Shelf CPU hot loop
+      (5e70036), import message overwritten (5e70036), Reset breaking widgets and Top Shelf (8af3ce3), Live tab Pause
+      not responding (a58593f). Test data and outdated tests fixed (8af3ce3). Simulators: Apple TV 20 pass / 0 fail,
+      iPhone 39 pass / 2 fail. The 2 failures: the AirPlay picker has no simulator UI, and the Messages share test is
+      flaky only in full runs. Next: the same plans on the real Apple TV (OfficePlus). Results:
+      verification-artifacts/e2e-2026-10-12/.
 - [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
