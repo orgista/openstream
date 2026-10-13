@@ -17,12 +17,16 @@
     ],
     "environmentVariableEntries": [
       {
-        "key": "OPENSTREAM_TEST_M3U",
-        "value": "$(OPENSTREAM_TEST_M3U)"
-      },
-      {
         "key": "OPENSTREAM_STUB_DIR",
         "value": "$(SRCROOT)/TestPlans/Stubs"
+      },
+      {
+        "key": "OPENSTREAM_ALLOW_MUTATING_UI_TESTS",
+        "value": "1"
+      },
+      {
+        "key": "OPENSTREAM_STUB_MEDIA_BASE",
+        "value": "http://127.0.0.1:8767"
       }
     ],
     "language": "en",

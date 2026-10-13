@@ -37,6 +37,11 @@ public enum AppleDeviceReset {
     /// Left in place inside a wiped Library: cfprefsd owns the plist files and
     /// the defaults domain is cleared through `UserDefaults` instead.
     static let preservedDirectoryNames: Set<String> = ["Preferences"]
+    /// The system's own bookkeeping in a container root (for example
+    /// `.com.apple.mobile_container_manager.metadata.plist`). Deleting it
+    /// unregistered the app group, so widgets and Top Shelf lost their
+    /// container (e2e 2026-10-12).
+    static func isSystemBookkeeping(_ name: String) -> Bool { name.hasPrefix(".com.apple.") }
 
     /// What one reset removed; for the trace and the tests.
     struct Report: Equatable {
@@ -125,7 +130,8 @@ public enum AppleDeviceReset {
         for directory in directories {
             guard let children = try? fileManager.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil, options: []) else { continue }
-            for child in children where !preservedDirectoryNames.contains(child.lastPathComponent) {
+            for child in children where !preservedDirectoryNames.contains(child.lastPathComponent)
+                && !isSystemBookkeeping(child.lastPathComponent) {
                 if emptied.contains(child.resolvingSymlinksInPath().path) { continue }
                 do {
                     try fileManager.removeItem(at: child)

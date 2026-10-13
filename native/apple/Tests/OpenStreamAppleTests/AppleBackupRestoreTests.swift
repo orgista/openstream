@@ -268,6 +268,24 @@ struct AppleDeviceResetTests {
         #expect(defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey))
     }
 
+    /// e2e 2026-10-12: the group root's container metadata was deleted and the
+    /// app group stopped existing for widgets and Top Shelf.
+    @Test func theWipeKeepsTheSystemsContainerBookkeeping() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appending(path: "reset-group-\(UUID())", directoryHint: .isDirectory)
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root.appending(path: "Library/Caches"), withIntermediateDirectories: true)
+        let metadata = root.appending(path: ".com.apple.mobile_container_manager.metadata.plist")
+        try Data([1]).write(to: metadata)
+        try Data([1]).write(to: root.appending(path: "topshelf.json"))
+
+        let report = AppleDeviceReset.wipe(directories: AppleDeviceReset.libraryTree(root: root))
+
+        #expect(report.failedItems == 0)
+        #expect(fileManager.fileExists(atPath: metadata.path))
+        #expect(!fileManager.fileExists(atPath: root.appending(path: "topshelf.json").path))
+    }
+
     @Test func theBackupKeySurvivesTheKeychainWipe() throws {
         try #require(AppleKeychainStore.testMemory != nil, "needs the in-process test keychain")
         #expect(!AppleDeviceReset.localKeychainServices.contains(AppleICloudBackupKeychain.defaultService))

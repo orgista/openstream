@@ -67,12 +67,42 @@ public enum AppleNetworkStub {
     /// line naming the missing file's request.
     static func response(for request: URLRequest, root: URL) throws -> (Data, URLResponse) {
         guard let url = request.url else { throw Error.unmatched("no url") }
-        guard let fixture = AppleNetworkStubPolicy.fixtureURL(for: url, root: root),
-              let data = try? Data(contentsOf: fixture) else {
+        var fixtureRequestURL = url
+        #if DEBUG && OPENSTREAM_ADDONS
+        // A launched E2E run also uses the normal default metadata fallback.
+        // Route it to the fictional fixture host; no real host belongs in the
+        // checked-in fixture tree. Task-local unit-test roots keep their exact paths.
+        if launchRoot != nil, url.host == AppleMediaMetadataClient.defaultMetadataSource.url.host,
+           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.host = "fixture.example"
+            if let mapped = components.url { fixtureRequestURL = mapped }
+        }
+        #endif
+        guard let fixture = AppleNetworkStubPolicy.fixtureURL(for: fixtureRequestURL, root: root),
+              let fixtureData = try? Data(contentsOf: fixture) else {
             let line = AppleNetworkStubPolicy.missDescription(for: url)
             AppleInteractionTrace.record(.network, line)
             throw Error.unmatched(line)
         }
+        #if DEBUG
+        var data = fixtureData
+        if UserDefaults.standard.bool(forKey: "OpenStreamStubEmptyStreams"), url.path.hasPrefix("/stream/") {
+            data = Data(#"{"streams":[]}"#.utf8)
+        }
+        // Only the E2E route rewrites fictional media hosts to its loopback server.
+        // Control-plane requests and artwork still come from the stub files.
+        if let base = UserDefaults.standard.string(forKey: "OpenStreamStubMediaBase"),
+           let mediaURL = URL(string: base), mediaURL.scheme == "http",
+           mediaURL.host == "127.0.0.1", mediaURL.user == nil, mediaURL.password == nil,
+           var text = String(data: data, encoding: .utf8) {
+            for path in ["/media/", "/live/", "/slow/", "/e2e-download/"] {
+                text = text.replacingOccurrences(of: "https://fixture.example" + path, with: base + path)
+            }
+            data = Data(text.utf8)
+        }
+        #else
+        let data = fixtureData
+        #endif
         let response = HTTPURLResponse(
             url: url, statusCode: 200, httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json", "Content-Length": "\(data.count)"]

@@ -23,7 +23,11 @@ public enum AppleDevSourcesImport {
             // A stubbed run (`-OpenStreamStubNetwork <dir>`) takes the sources
             // beside its fixtures, read in place: that file is a repo fixture,
             // not a copy, so it is never deleted.
-            if let stubbed = AppleNetworkStub.devSourcesURL { pendingData = try? Data(contentsOf: stubbed) }
+            if let stubbed = AppleNetworkStub.devSourcesURL {
+                pendingData = try? Data(contentsOf: stubbed)
+            } else if let root = AppleNetworkStub.root {
+                pendingData = try? Data(contentsOf: root.appendingPathComponent("e2e-sources.json"))
+            }
             return
         }
         let url = URL(fileURLWithPath: path)
@@ -66,6 +70,16 @@ public enum AppleDevSourcesImport {
             appleTrace(AppleDevSourcesPolicy.traceLine(for: source, outcome: outcome))
         }
         apply(file.settings, to: settings)
+        // Widget/Top Shelf E2E tests need unfinished progress, without playing a clip to completion.
+        if AppleNetworkStub.isActive, UserDefaults.standard.bool(forKey: "OpenStreamStubContinueWatching"),
+           let source = sourceStore.sources.first(where: { $0.isAddon && $0.url.host == "fixture.example" }) {
+            // Use the ingestion identity the publisher reads, not a transport ID.
+            // Movie Six has no private Library copy merged into its catalog record.
+            let item = AppleCatalogItem(mediaID: "tt0000006", type: "movie", name: "Stub Movie Six")
+            let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+            settings.topShelfEnabled = true
+            ApplePlaybackStore().save(mediaID: record.id, position: 120, duration: 5400)
+        }
         let skipped = file.problems.count + file.ignoredKinds.count
         appleTrace(AppleDevSourcesPolicy.summaryLine(added: added, exists: exists, failed: failed, skipped: skipped))
     }
@@ -96,13 +110,22 @@ public enum AppleDevSourcesImport {
                 let finalName = AppleMediaServerFormPolicy.defaultName(kind: kind, typedName: name,
                                                                        publicInfo: info, host: baseURL.host)
                 _ = try store.addMediaServer(kind: kind, name: finalName, session: session)
-            case .folder(let name, let path):
+            case .folder(let name, let fixturePath):
+                let path = fixturePath == "$STUB_ROOT/library"
+                    ? AppleNetworkStub.root?.appendingPathComponent("library").path ?? fixturePath
+                    : fixturePath
                 var isDirectory: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
                     return .failed("the folder does not exist")
                 }
+                // Resolve the fixture token before checking identity. Re-importing
+                // the same folder on each UI-test launch otherwise changes its revision.
+                let folderURL = URL(fileURLWithPath: path, isDirectory: true)
+                if fixturePath == "$STUB_ROOT/library", store.sources.contains(where: {
+                    $0.kind == .library && $0.url.standardizedFileURL == folderURL.standardizedFileURL
+                }) { return .exists }
                 try store.addLibraryFolder(name: name.isEmpty ? "Folder" : name,
-                                           url: URL(fileURLWithPath: path, isDirectory: true), bookmarkData: nil)
+                                           url: folderURL, bookmarkData: nil)
             }
             return .added
         } catch {

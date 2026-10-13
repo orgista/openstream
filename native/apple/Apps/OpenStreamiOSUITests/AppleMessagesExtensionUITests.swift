@@ -47,35 +47,34 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         XCTAssertTrue(messages.textViews.firstMatch.waitForExistence(timeout: 10)
                       || messages.textFields.firstMatch.waitForExistence(timeout: 5),
                       "the conversation never opened")
-        // "Apps" on iOS 18; the same control is unlabelled on iOS 26, where it
-        // is the only button sitting left of the compose field.
-        var apps = messages.buttons["Apps"]
-        if !apps.waitForExistence(timeout: 8) {
-            let leftOfCompose = NSPredicate { element, _ in
-                guard let element = element as? XCUIElementAttributes else { return false }
-                return element.frame.minX < 60 && element.frame.minY > 400
-            }
-            let candidate = messages.buttons.matching(leftOfCompose).firstMatch
-            XCTAssertTrue(candidate.waitForExistence(timeout: 5),
-                          "no Apps button: \(messages.buttons.allElementsBoundByIndex.map { "\($0.identifier)/\($0.label)" })")
-            apps = candidate
-        }
-        apps.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        // The send menu is a collection of app cells; wait for it rather than
-        // for a clock.
-        XCTAssertTrue(messages.cells.firstMatch.waitForExistence(timeout: 10), "the send menu never opened")
+        // Match the compose field's adjacent add button, rather than an arbitrary
+        // unlabelled button below y=400 (which can be a transcript control).
+        let compose = messages.textViews.firstMatch.exists ? messages.textViews.firstMatch : messages.textFields.firstMatch
+        let namedApps = messages.buttons.matching(NSPredicate(format:
+            "identifier == %@ OR label == %@ OR label == %@", "Apps", "Apps", "Add")).firstMatch
+        let adjacentApps = messages.buttons.matching(NSPredicate { value, _ in
+            guard let button = value as? XCUIElementAttributes else { return false }
+            let field = compose.frame
+            return button.frame.maxX <= field.minX + 8 && abs(button.frame.midY - field.midY) < 36
+        }).firstMatch
+        let apps = namedApps.exists ? namedApps : adjacentApps
+        XCTAssertTrue(apps.waitForExistence(timeout: 8), "no Apps control beside compose: \(messages.debugDescription)")
+        apps.tap()
 
-        // The send menu is a lazy collection view whose last rows sit below the
-        // screen, so a third-party app is absent from the hierarchy until it
-        // has been scrolled into view.
-        let entry = messages.cells.matching(
-            NSPredicate(format: "identifier CONTAINS %@", "com.orgista.openstream.messages")
-        ).firstMatch
-        for _ in 0..<5 where !entry.waitForExistence(timeout: 2) {
-            messages.swipeUp()
+        // Host versions expose menu entries as cells, buttons, or combined elements.
+        let entry = messages.descendants(matching: .any).matching(NSPredicate(format:
+            "identifier CONTAINS %@ OR label == %@", "com.orgista.openstream.messages", "oStream")).firstMatch
+        for _ in 0..<6 {
+            if entry.exists, !entry.frame.isEmpty, messages.frame.contains(entry.frame) { break }
+            let more = messages.buttons["More"].firstMatch
+            if more.exists, more.isHittable { more.tap() } else { messages.swipeUp() }
         }
-        XCTAssertTrue(entry.exists, "oStream is not listed in the Messages send menu")
-        entry.tap()
+        XCTAssertTrue(entry.exists && !entry.frame.isEmpty && messages.frame.contains(entry.frame),
+                      "oStream is not visible in the Messages menu: \(messages.debugDescription)")
+        // Like ConversationList above, Messages nests app cells that XCTest
+        // reports as unhittable even when the full cell is visible. Tap its
+        // visible centre; the extension and staged bubble assertions still prove the selection.
+        entry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         let row = messages.buttons["messages.share.row"].firstMatch
         guard row.waitForExistence(timeout: 10) else {

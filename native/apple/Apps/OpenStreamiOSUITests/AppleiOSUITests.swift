@@ -41,6 +41,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     private func launch(screen: String? = nil) {
         if let screen { app.launchArguments += ["-OpenStreamVisionScreen", screen] }
         app.launchArguments += ["-OpenStreamTrace", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
     }
 
@@ -213,12 +214,29 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
         let metadata = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@", "Metadata")).firstMatch
+        scrollToControl(metadata, in: app)
         XCTAssertTrue(metadata.waitForExistence(timeout: 30), "no Metadata row")
         metadata.tap()
 
+        let enabled = app.switches["Use Metadata APIs"].firstMatch
+        XCTAssertTrue(enabled.waitForExistence(timeout: 10))
+        if enabled.value as? String == "0" {
+            enabled.switches.firstMatch.tap()
+            addTeardownBlock { [self] in
+                app.terminate()
+                app.launchArguments = []
+                launch(screen: "metadata")
+                let toggle = app.switches["Use Metadata APIs"].firstMatch
+                XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+                if toggle.value as? String == "1" { toggle.switches.firstMatch.tap() }
+                XCTAssertEqual(toggle.value as? String, "0", "Metadata setting was not restored")
+            }
+        }
         let field = app.secureTextFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20), "no field to type into")
+        XCTAssertTrue(field.isEnabled, "the fixture must enable Metadata for this typing scenario")
         field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the field did not receive keyboard focus")
         let typed = "abc123test"
         field.typeText(typed)
         Thread.sleep(forTimeInterval: 2.0)
@@ -228,6 +246,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // focused is the failure being chased.
         app.navigationBars.buttons.firstMatch.tap()
         Thread.sleep(forTimeInterval: 2.0)
+        scrollToControl(metadata, in: app)
         metadata.tap()
         Thread.sleep(forTimeInterval: 2.5)
         attach("typing-after-returning")
@@ -308,6 +327,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
         let metadata = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@", "Metadata")).firstMatch
+        scrollToControl(metadata, in: app)
         XCTAssertTrue(metadata.waitForExistence(timeout: 30), "no Metadata row in Settings")
         metadata.tap()
 
@@ -379,7 +399,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let field = app.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20), "the search field never appeared")
         field.tap()
-        field.typeText("jury duty")
+        field.typeText("stub series")
         Thread.sleep(forTimeInterval: 8.0)
         attach("ios-search-jury-duty")
 
@@ -391,8 +411,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // Result rows are buttons. Counting any element let the empty state
         // pass — "No Results for “jury duty”" contains the query (N35).
         let jury = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", "Jury Duty")).count
-        XCTAssertGreaterThan(jury, 0, "no Jury Duty rows came back at all")
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "Stub Series")).count
+        XCTAssertGreaterThan(jury, 0, "no Stub Series rows came back at all")
         print("SEARCH rows mentioning Jury Duty: \(jury)")
     }
 
@@ -470,6 +490,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "the app never came to the foreground")
 
         let live = app.switches["settings.live.enabled"]
+        scrollToControl(live, in: app)
         XCTAssertTrue(live.waitForExistence(timeout: 30), "no Show Live tab switch")
         XCTAssertTrue(live.isEnabled, "the switch was already disabled before anything was touched")
         print("TABTOGGLE before: frame=\(live.frame) hittable=\(live.isHittable) value=\(String(describing: live.value)) type=\(live.elementType.rawValue)")
@@ -642,6 +663,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             addFixtureAddon(failing)
             app.terminate()
         }
+        if failing == nil { app.launchArguments += ["-OpenStreamStubEmptyStreams", "YES"] }
         launch(screen: "detail")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
         let play = app.buttons["detail.play"].firstMatch
@@ -973,8 +995,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // iPadOS draws no inline title under its top tab bar; the selected
             // tab names the page there (N35).
             if screen == "live", UIDevice.current.userInterfaceIdiom == .phone {
-                XCTAssertTrue(app.navigationBars.staticTexts["Live"].firstMatch.exists,
-                              "Live must use a navigation title, not a toolbar button")
+                // Owner item 9: Live has no navigation title; its video and guide name the surface.
+                XCTAssertFalse(app.navigationBars.staticTexts["Live"].firstMatch.exists,
+                               "Live must stay title-free (owner item 9)")
+                XCTAssertTrue(app.buttons["live.guide"].firstMatch.waitForExistence(timeout: 30))
             }
             if screen == "source-detail", app.staticTexts["Connected"].firstMatch.exists {
                 XCTAssertFalse(app.staticTexts["Username and password are required."].exists,
@@ -1327,11 +1351,19 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if turned {
             XCTAssertFalse(coveredTabBar.exists && coveredTabBar.isHittable,
                            "the tab bar came back over the landscape player")
-            let surface = app.buttons["player.controls.show"].firstMatch
-            XCTAssertEqual(surface.frame.width, app.frame.width, accuracy: 1,
-                           "the video does not fill the screen in landscape")
-            XCTAssertEqual(surface.frame.height, app.frame.height, accuracy: 1,
-                           "the video does not fill the screen in landscape")
+            // The touch surface belongs to the transport and respects landscape
+            // safe-area insets (62 pt sides on this simulator). Measure the
+            // fullscreen player container, whose video is constrained to its edges.
+            // The app/window ancestor also contains Close and always fills
+            // the screen. Exclude ancestors containing the covered tab bar
+            // so this measures the modal player's own container.
+            let player = try XCTUnwrap(app.otherElements.containing(.button, identifier: "player.close")
+                .allElementsBoundByIndex.first { $0.descendants(matching: .tabBar).count == 0 },
+                "no fullscreen player container")
+            XCTAssertEqual(player.frame.width, app.frame.width, accuracy: 1,
+                           "the video container does not fill the screen in landscape")
+            XCTAssertEqual(player.frame.height, app.frame.height, accuracy: 1,
+                           "the video container does not fill the screen in landscape")
             attach("player-landscape")
         } else {
             attach("player-would-not-turn")
@@ -2215,6 +2247,61 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         return false
     }
 
+    /// Live now starts in the inline stage. Its UIKit chrome can be hidden or
+    /// connecting while its controls still have accessibility frames. Raise it
+    /// and wait for an actual hit point before the crawler judges those controls.
+    @discardableResult
+    private func revealInlineLiveControls(timeout: TimeInterval = 3) -> Bool {
+        let stage = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        guard stage.waitForExistence(timeout: min(timeout, 2)) else { return false }
+        // UIKit's representable controls can be AX siblings of SwiftUI's
+        // stage element. Scope by the visible stage frame instead of ancestry.
+        let controls = app.buttons.matching(identifier: "player.play-pause")
+        func ready() -> Bool {
+            controls.allElementsBoundByIndex.contains {
+                !$0.frame.isEmpty && stage.frame.contains($0.frame) && isSafelyHittable($0)
+            }
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if ready() { return true }
+            // UIKit controls can be visible inside a SwiftUI representable
+            // while XCTest reports no accessibility hit point. Verify a real
+            // centre touch pauses and resumes before accepting that locator.
+            if !app.progressIndicators["live.loading"].exists,
+               let pause = controls.allElementsBoundByIndex.first(where: {
+                   $0.isEnabled && $0.label == "Pause" && stage.frame.contains($0.frame)
+               }) {
+                pause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                let paused = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate { _, _ in pause.exists && pause.label == "Play" }, object: nil)], timeout: 3) == .completed
+                if paused {
+                    pause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    let resumed = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                        predicate: NSPredicate { _, _ in pause.exists && pause.label == "Pause" }, object: nil)], timeout: 3) == .completed
+                    if resumed {
+                        print("INLINE LIVE coordinate touch paused and resumed the visible control")
+                        return true
+                    }
+                }
+                print("INLINE LIVE visible Pause refused a coordinate touch")
+                break
+            }
+            if stage.exists, !stage.frame.isEmpty, app.frame.contains(stage.frame) {
+                stage.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+            }
+            Thread.sleep(forTimeInterval: 0.4)
+        } while Date() < deadline
+        let isReady = ready()
+        if !isReady {
+            print("INLINE LIVE stage=\(stage.frame) type=\(stage.elementType.rawValue) controls=\(controls.count)")
+            for control in controls.allElementsBoundByIndex.prefix(6) {
+                print("INLINE LIVE control=\(control.frame) hittable=\(isSafelyHittable(control)) label=\(control.label)")
+            }
+        }
+        return isReady
+    }
+
     /// The cross-device scaling sweep (2026-09-20): Discover, Library, Live and
     /// the full-screen live player with its channel picker open, in every
     /// orientation this device supports, so the same screens can be compared
@@ -2468,8 +2555,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
         channel.tap()
+        // Channel selection changes the inline preview; enter fullscreen explicitly.
+        XCTAssertTrue(revealInlineLiveControls(timeout: 60), "inline Live controls never became ready")
+        let fullscreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(fullscreen.exists && fullscreen.isEnabled && app.frame.contains(fullscreen.frame),
+                      "Full Screen is not an enabled visible control")
+        fullscreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let close = app.buttons["player.close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 10), "Guide selection did not open full screen")
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen did not open the player")
         attach("live-direct-fullscreen")
 
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
@@ -2988,8 +3081,20 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     }
 
     private func crawlStateString(_ scene: CrawlScene, target: CrawlTarget?) -> String {
-        let own = target.flatMap { crawlFind($0, in: scene) }
-            .map { "\($0.label)|\($0.value)|\($0.isSelected)|\($0.isEnabled)" } ?? "none"
+        // A retained UIKit controller can expose the same identifier as the
+        // foreground one. Observe every matching control's state, rather than
+        // letting an inactive first match conceal the foreground response.
+        let own = target.map { target in
+            if !target.identifier.hasPrefix("player."), !target.identifier.hasPrefix("live.player.") {
+                return crawlFind(target, in: scene)
+                    .map { "\($0.label)|\($0.value)|\($0.isSelected)|\($0.isEnabled)" } ?? "none"
+            }
+            return scene.nodes.filter {
+                $0.type == target.type && (target.identifier.isEmpty
+                    ? $0.label == target.label : $0.identifier == target.identifier)
+            }.map { "\($0.label)|\($0.value)|\($0.isSelected)|\($0.isEnabled)" }
+                .sorted().joined(separator: ";")
+        } ?? "none"
         return [
             // A link that opens Safari answers by taking the app off screen.
             "state:\(scene.appState)",
@@ -3097,6 +3202,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // The transport hides itself, and a screen read with the chrome
             // down holds one control: the clear surface that brings it back.
             if isPlayer, revealPlayerControls() { scene = crawlScene() }
+            else if route == "live", scene.sheets == 0, scene.alerts == 0,
+                    revealInlineLiveControls() { scene = crawlScene() }
             let here = crawlTargets(from: scene, includesTabs: screen.includesTabs, playerOnly: isPlayer)
             for target in here where isCrawlExit(target) && !handled.contains(target.signature) {
                 handled.insert(target.signature)
@@ -3147,6 +3254,12 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // is past the edge of the screen while a good part of the cell is
             // in plain sight and takes a finger. Press the part that is there.
             var hitOffset: CGVector? = nil
+            if target.identifier == "player.controls.show", reach == .blocked {
+                // The surface's centre is covered by Play/Pause. A background
+                // touch belongs in a clear part of the video, and must still
+                // change the chrome state to count as a response.
+                hitOffset = crawlPlayerBackgroundHitOffset(element.frame, scene: scene)
+            }
             if reach == .offScreen, let live = (try? element.snapshot())?.frame,
                let offset = crawlVisibleHitOffset(live) {
                 hitOffset = offset
@@ -3203,12 +3316,19 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             if let collection = target.collection {
                 crawlPressesPerCollection[collection] = (crawlPressesPerCollection[collection] ?? 0) + 1
             }
+            // Scrolling may move the target after the original scene snapshot.
+            scene = crawlScene()
             let before = crawlStateString(scene, target: target)
             pressForCrawl(element, node: node, at: hitOffset)
             let (answered, _) = waitForCrawlResponse(from: before, target: target)
             result.pressed += 1
             if answered {
                 crawlNote("   ✓ \(target.name) — responded")
+            } else if target.label == "Refresh", element.exists, element.isEnabled {
+                // Reloading the deterministic fixture may return identical content.
+                // The reload control must be available again, with no loading indicator.
+                XCTAssertFalse(app.progressIndicators.firstMatch.exists, "Refresh did not finish")
+                crawlNote("   ✓ \(target.name) — reload completed with identical content")
             } else if crawlIsBackgroundAction(target) {
                 crawlNote("   ✓ \(target.name) — background action: the art stays until the video can play")
             } else if node.isSelected {
@@ -3228,6 +3348,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // screen is given a moment to finish before it is read.
             Thread.sleep(forTimeInterval: 0.6)
             var after = crawlScene()
+            if target.identifier == "player.controls.show", answered {
+                XCTAssertTrue(revealPlayerControls(), "Playback controls did not return after the background touch")
+                after = crawlScene()
+            }
             if crawlMenuRect(after) != nil {
                 crawlMenu(owner: element, ownerName: target.name, scene: &after, result: &result)
             }
@@ -3277,7 +3401,15 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // up, and a chevron tapped while the player is still dismissing is
             // a tap on the player.
             Thread.sleep(forTimeInterval: 1.5)
-            scene = restoreCrawlScreen(baseline: baseline, screen: screen)
+            if screen.route == "first-run" {
+                // Connect dismisses the welcome sheet. Re-enter it before
+                // judging its other exit, rather than querying a retained hidden button.
+                launchForCrawl(screen)
+                scene = crawlScene()
+                crawlBarRect = tabBarRectForCrawl()
+            } else {
+                scene = restoreCrawlScreen(baseline: baseline, screen: screen)
+            }
             Thread.sleep(forTimeInterval: 1)
             if crawlFind(target, in: scene) == nil {
                 guard relaunches < 8 else { break }
@@ -3310,6 +3442,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             result.pressed += 1
             if answered {
                 crawlNote("   ✓ \(target.name) — responded")
+            } else if target.label == "Refresh", element.exists, element.isEnabled {
+                // Reloading the deterministic fixture may return identical content.
+                // The reload control must be available again, with no loading indicator.
+                XCTAssertFalse(app.progressIndicators.firstMatch.exists, "Refresh did not finish")
+                crawlNote("   ✓ \(target.name) — reload completed with identical content")
             } else if crawlIsBackgroundAction(target) {
                 crawlNote("   ✓ \(target.name) — background action: the art stays until the video can play")
             } else {
@@ -3497,7 +3634,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // Scoped to the menu: a track called "English" is also a row on the
             // page behind the player, and `firstMatch` reached through the menu
             // and reported the row underneath as untouchable.
-            guard let element = crawlMenuElement(named: name, in: rect) else {
+            let currentRect = crawlMenuRect(scene) ?? rect
+            guard let element = crawlMenuElement(named: name, in: currentRect) else {
                 result.skipped += 1
                 crawlNote("   ↳ · \(name) — not pressed: it left the menu before its turn")
                 continue
@@ -3578,11 +3716,15 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// The button with that label that is inside the open menu.
     private func crawlMenuElement(named name: String, in rect: CGRect) -> XCUIElement? {
         let matches = app.buttons.matching(NSPredicate(format: "label == %@", name))
+        var retained: XCUIElement?
         for element in matches.allElementsBoundByIndex.prefix(6) {
             guard let frame = (try? element.snapshot())?.frame else { continue }
-            if rect.insetBy(dx: -4, dy: -4).contains(CGPoint(x: frame.midX, y: frame.midY)) { return element }
+            if rect.insetBy(dx: -4, dy: -4).contains(CGPoint(x: frame.midX, y: frame.midY)) {
+                if isSafelyHittable(element) { return element }
+                if retained == nil { retained = element }
+            }
         }
-        return nil
+        return retained
     }
 
     private func crawlMenuItems(_ scene: CrawlScene, rect: CGRect) -> [CrawlNode] {
@@ -3715,6 +3857,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // Discover and Live pull their shelves over the network; the rest of the
         // app is drawn by the time the first frame lands.
         Thread.sleep(forTimeInterval: ["discover", "live", "library", "detail", "episodes"].contains(screen.route) ? 8 : 2)
+        if screen.route == "live", !app.buttons.matching(identifier: "player.close")
+            .allElementsBoundByIndex.contains(where: { isSafelyHittable($0) }) {
+            _ = revealInlineLiveControls(timeout: 60)
+        }
     }
 
     private func openForCrawl(_ opener: CrawlOpener) -> Bool {
@@ -3730,13 +3876,26 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             revealPlayerControls()
             return true
         case .livePlayer:
+            let closes = app.buttons.matching(identifier: "player.close")
+            // A channel that is already playing can enter fullscreen on
+            // rotation. Its guide is then behind the modal, not tappable.
+            revealPlayerControls()
+            if closes.allElementsBoundByIndex.contains(where: { isSafelyHittable($0) }) { return true }
             let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
             guard channels.firstMatch.waitForExistence(timeout: 60),
                   tapIfPossible(channels.firstMatch) else { return false }
-            guard app.buttons["player.close"].waitForExistence(timeout: 40) else { return false }
+            // Selecting a channel changes the inline preview (owner Live design).
+            // Full Screen is a separate action; a hidden close control is not proof of entry.
+            revealPlayerControls()
+            if !closes.allElementsBoundByIndex.contains(where: { isSafelyHittable($0) }) {
+                // Rotation can already have entered fullscreen on iPhone.
+                guard revealInlineLiveControls(timeout: 60),
+                      tapIfPossible(app.buttons["player.fullscreen"].firstMatch),
+                      closes.firstMatch.waitForExistence(timeout: 40) else { return false }
+            }
             Thread.sleep(forTimeInterval: 4)
             revealPlayerControls()
-            return true
+            return closes.allElementsBoundByIndex.contains(where: { isSafelyHittable($0) })
         }
     }
 
@@ -3779,6 +3938,22 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         return CGVector(dx: visible.midX - frame.minX, dy: visible.midY - frame.minY)
     }
 
+    private func crawlPlayerBackgroundHitOffset(_ frame: CGRect, scene: CrawlScene) -> CGVector? {
+        guard scene.alerts == 0, scene.sheets == 0, !frame.isEmpty,
+              crawlScreenRect.contains(frame), !app.progressIndicators["live.loading"].exists else { return nil }
+        let controls = scene.nodes.filter {
+            ($0.identifier.hasPrefix("player.") || $0.identifier.hasPrefix("live.player."))
+                && $0.identifier != "player.controls.show"
+        }
+        for (x, y) in [(0.2, 0.5), (0.5, 0.3), (0.3, 0.6), (0.7, 0.6)] {
+            let point = CGPoint(x: frame.minX + frame.width * x, y: frame.minY + frame.height * y)
+            if !controls.contains(where: { $0.frame.contains(point) }) {
+                return CGVector(dx: point.x - frame.minX, dy: point.y - frame.minY)
+            }
+        }
+        return nil
+    }
+
     /// Whole words only. "Disconnect" is not "connect", and a title with
     /// "send" in it is not the Send button.
     private func matchesCrawlWord(_ target: CrawlTarget, _ word: String) -> Bool {
@@ -3795,15 +3970,25 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// started five downloads the walk then could not cancel.
     private func resolveCrawlTarget(_ target: CrawlTarget) -> XCUIElement {
         let query = app.descendants(matching: target.type)
-        switch (target.identifier.isEmpty, target.label.isEmpty) {
-        case (false, false):
-            return query.matching(NSPredicate(format: "identifier == %@ AND label == %@",
-                                              target.identifier, target.label)).firstMatch
-        case (false, true):
-            return query.matching(identifier: target.identifier).firstMatch
-        default:
-            return query.matching(NSPredicate(format: "label == %@", target.label)).firstMatch
+        let matches: XCUIElementQuery
+        // Play/Pause and Mute/Unmute can change labels between the scene
+        // snapshot and the touch. The identifier is their stable identity.
+        if target.identifier.hasPrefix("player.") || target.identifier.hasPrefix("live.player.") {
+            matches = query.matching(identifier: target.identifier)
+        } else if !target.identifier.isEmpty && !target.label.isEmpty {
+            matches = query.matching(NSPredicate(format: "identifier == %@ AND label == %@",
+                                                target.identifier, target.label))
+        } else if !target.identifier.isEmpty {
+            matches = query.matching(identifier: target.identifier)
+        } else {
+            matches = query.matching(NSPredicate(format: "label == %@", target.label))
         }
+        let candidates = matches.allElementsBoundByIndex
+        if candidates.count > 1, let foreground = candidates.first(where: { isSafelyHittable($0) }) {
+            crawlNote("   (\(target.name): using the hittable match among \(candidates.count) retained controls)")
+            return foreground
+        }
+        return matches.firstMatch
     }
 
     /// The floating tab bar, whichever edge it floats at: the phone puts it
@@ -3814,13 +3999,18 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     }
 
     private func tabBarRectForCrawl() -> CGRect {
-        if let snapshot = try? app.tabBars.firstMatch.snapshot(), snapshot.frame.height > 0 {
+        let bar = app.tabBars.firstMatch
+        if let snapshot = try? bar.snapshot(), snapshot.frame.height > 0 {
+            // A presented sheet (notably first-run) keeps the covered tab bar
+            // in the hierarchy. Its rectangle does not cover the sheet's buttons.
+            guard bar.buttons.allElementsBoundByIndex.contains(where: { isSafelyHittable($0) }) else { return .null }
             return snapshot.frame
         }
         // iPadOS does not publish its tab bar as a `tabBar` at all; the items
         // come through as loose buttons, so the bar is their union.
         let items = crawlScene().nodes
-            .filter { $0.type == .button && Self.crawlTabLabels.contains($0.label) }
+            .filter { $0.type == .button && Self.crawlTabLabels.contains($0.label)
+                && ($0.frame.maxY < app.frame.minY + 120 || $0.frame.minY > app.frame.maxY - 120) }
             .map(\.frame)
         guard items.count >= 2 else { return .null }
         return items.dropFirst().reduce(items[0]) { $0.union($1) }
@@ -3839,7 +4029,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if frame.width < 1 || frame.height < 1 { return .blocked }
         let screen = crawlScreenRect
         guard screen.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return .offScreen }
-        if element.isHittable { return .hittable }
+        // Test geometry first: XCTest can report a row hittable while its switch
+        // or centre is under the floating tab bar.
         // Half a row showing at the foot of a list — or at the foot of the
         // window, on an iPad running the app in a resizable one — is scrolling
         // to do, not a control drawn over. So is a row under the tab bar. Only
@@ -3853,14 +4044,27 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
             return .offScreen
         }
+        if element.isHittable { return .hittable }
+        if crawlContentOverlapsNavigationBar(element, frame: frame) { return .offScreen }
         return .blocked
+    }
+
+    /// Scroll content can retain a frame under the pinned navigation bar.
+    /// The episodes crawl saw My List/Rate at y=62, beneath that bar. Its
+    /// own toolbar buttons are identified by ancestry and remain tappable targets.
+    private func crawlContentOverlapsNavigationBar(_ element: XCUIElement, frame: CGRect) -> Bool {
+        let bar = app.navigationBars.firstMatch
+        guard bar.exists, frame.intersects(bar.frame) else { return false }
+        let toolbarControl = bar.descendants(matching: element.elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", element.identifier, element.label)).firstMatch
+        return !toolbarControl.exists
     }
 
     /// Scrolls a control back into view for its press. A card that has run off
     /// the end of a horizontal row is dragged back along its own row, so the
     /// shelf under the finger is the shelf that moves.
     private func revealForCrawl(_ element: XCUIElement, node: CrawlNode, isTab: Bool) -> CrawlReach {
-        var frame = node.frame
+        var frame = (try? element.snapshot())?.frame ?? node.frame
         for _ in 0..<6 {
             let reach = classifyForCrawl(element, frame: frame, isTab: isTab)
             guard reach == .offScreen else { return reach }
@@ -3871,7 +4075,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // and on a title page is the hero, and the hero takes the gesture.
             // On the iPad that left twenty-three cards reported as off the
             // screen when the page had simply never moved.
-            if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
+            if !isTab, crawlContentOverlapsNavigationBar(element, frame: frame) {
+                crawlScrollUp()
+            } else if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
                 // Push the content away from the bar it is hiding under.
                 if crawlBarRect.midY < screen.midY { crawlScrollUp() } else { crawlScrollDown() }
             }
@@ -3951,6 +4157,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if screen.opener != .none { covers = ["live.picker.close"] }
         var scene = crawlScene()
         for attempt in 0..<7 {
+            // First-run is itself a sheet under test, not a cover to dismiss.
+            if screen.route == "first-run",
+               isSafelyHittable(app.buttons["Connect Media Server"].firstMatch),
+               isSafelyHittable(app.buttons["Not Now"].firstMatch) { return scene }
             let present = Set(scene.nodes.map(\.identifier))
             for cover in covers where present.contains(cover) {
                 if tapIfPossible(app.buttons[cover].firstMatch) { Thread.sleep(forTimeInterval: 0.6) }
@@ -4048,6 +4258,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             app.terminate()
             app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
             app.launchArguments = ["-OpenStreamTrace", "YES"] + extra
+            configureFixtureLaunch(app)
             app.launch()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
             Thread.sleep(forTimeInterval: 20)
@@ -4276,6 +4487,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
             app.launchArguments = ["-OpenStreamTrace", "YES", "-openstream.settings.trailer.autoplay.v1", "NO"] + extra
             if let screen { app.launchArguments += ["-OpenStreamVisionScreen", screen] }
+            configureFixtureLaunch(app)
             app.launch()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
             Thread.sleep(forTimeInterval: settle)

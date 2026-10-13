@@ -1,5 +1,5 @@
 {
-  "id": "org.openstream.stub",
+  "id": "org.openstream.aio-metadata.fixture",
   "version": "1.0.0",
   "name": "Stub Add-on",
   "description": "Offline fixtures for UI tests",
@@ -9,7 +9,8 @@
     "stream"
   ],
   "types": [
-    "movie"
+    "movie",
+    "series"
   ],
   "idPrefixes": [
     "tt"
@@ -17,8 +18,25 @@
   "catalogs": [
     {
       "type": "movie",
-      "id": "top",
-      "name": "Stub Movies"
+      "id": "films",
+      "name": "Stub Movies",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "type": "series",
+      "id": "shows",
+      "name": "Stub Series",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": false
+        }
+      ]
     }
   ]
 }

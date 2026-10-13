@@ -18,6 +18,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
     }
 
     func testDiscoverRowOpensATitleFromStubsAndComesBack() {
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 

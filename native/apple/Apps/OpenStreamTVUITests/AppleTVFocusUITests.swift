@@ -37,6 +37,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             app.launchArguments += ["-OpenStreamVisionScreen", screen,
                                     "-OpenStreamTrace", "YES"]
         }
+        configureFixtureLaunch(app)
         app.launch()
     }
 
@@ -129,6 +130,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         if let date = ProcessInfo.processInfo.environment["OPENSTREAM_GUIDE_DATE"] {
             app.launchArguments += ["-OpenStreamDebugGuideDate", date]
         }
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(element("live.tv.info").waitForExistence(timeout: 30))
         try await Task.sleep(for: .seconds(3))
@@ -211,6 +213,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             "-openstream.settings.captions.preference.v1", "off",
             "-openstream.settings.subtitle.languages.v1", "(en)"
         ]
+        configureFixtureLaunch(app)
         app.launch()
         try await Task.sleep(for: .milliseconds(200))
         remote.press(.up)
@@ -1180,6 +1183,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
             app.launchArguments = ["-OpenStreamVisionScreen", screen, "-OpenStreamTrace", "YES",
                                    "-openstream.settings.trailer.autoplay.v1", "NO"]
+            configureFixtureLaunch(app)
             app.launch()
             Thread.sleep(forTimeInterval: settle)
             log("\(screen)-open")
@@ -1286,6 +1290,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         // Settings: down the sidebar to Discover, across into its pane, down to
         // the Discover Rows link.
         app.launchArguments = ["-OpenStreamVisionScreen", "settings", "-OpenStreamTrace", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         Thread.sleep(forTimeInterval: 10)
         log("settings-open")
@@ -1359,6 +1364,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         app.launchArguments = ["-OpenStreamVisionScreen", "discover", "-OpenStreamTrace", "YES",
                                "-openstream.settings.trailer.autoplay.v1", "NO",
                                "-OpenStreamDebugDiscoverOrder", order]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(wait(for: element("home.featured.play"), 60), "the Discover billboard never appeared")
         Thread.sleep(forTimeInterval: 8)
@@ -1410,6 +1416,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
 
         app.launchArguments = ["-OpenStreamVisionScreen", "live", "-OpenStreamTrace", "YES",
                                "-OpenStreamDebugSharedChannelChoices", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         let leave = app.buttons["Leave SharePlay"]
         XCTAssertTrue(wait(for: leave, 90), "the SharePlay source dialog never appeared")
@@ -1475,6 +1482,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             app.launchArguments = ["-OpenStreamVisionScreen", screen, "-OpenStreamTrace", "YES",
                                    "-OpenStreamDebugDownloadOptions", which,
                                    "-openstream.settings.trailer.autoplay.v1", "NO"]
+            configureFixtureLaunch(app)
             app.launch()
             let cancel = app.buttons[cancelTitle]
             XCTAssertTrue(wait(for: cancel, 90), "the \(which) download prompt never appeared")
@@ -1510,6 +1518,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         app.launchArguments += ["-OpenStreamVisionScreen", "detail", "-OpenStreamTrace", "YES",
                                 "-OpenStreamDebugWatchedFixture", seeds,
                                 "-openstream.settings.trailer.autoplay.v1", "NO"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(wait(for: element("detail.play"), 40), "the title page never appeared")
         let isEpisode = NSPredicate(format: "label BEGINSWITH %@", "Play S")
@@ -1558,6 +1567,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         guard !ids.isEmpty else { throw XCTSkip("Set OPENSTREAM_FILL_IDS to measure title page fill.") }
         let hold = TimeInterval(environment["OPENSTREAM_FILL_HOLD"] ?? "") ?? 20
         app.launchArguments += ["-OpenStreamTrace", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         Thread.sleep(forTimeInterval: 14)
         let board = XCUIApplication(bundleIdentifier: "com.apple.PineBoard")
@@ -1594,6 +1604,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             "-OpenStreamVisionPlaybackURL", origin.appendingPathComponent("channel1.m3u8").absoluteString,
             "-OpenStreamMultiviewFixture", "YES", "-OpenStreamMultiviewCount", "4",
             "-OpenStreamMultiviewTemplate", origin.absoluteString + "channel{channel}.m3u8"]
+        configureFixtureLaunch(app)
         app.launch()
         let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'multiview.tile.'"))
         XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 20))
@@ -1631,6 +1642,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             url.deletingLastPathComponent().appendingPathComponent("epg.xml").absoluteString,
             "-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES",
             "-openstream.settings.trailer.autoplay.v1", "NO"]
+        configureFixtureLaunch(app)
         app.launch()
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'guide.play.'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 20))

@@ -31,6 +31,7 @@ final class AppleiOSLiveActivityUITests: OpenStreamUITestCase {
 
     func testDownloadStartsALiveActivityAndTheIslandShowsIt() throws {
         app.launchArguments += ["-OpenStreamVisionScreen", "detail", "-OpenStreamTrace", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
 
@@ -107,6 +108,7 @@ final class AppleiOSLiveActivityUITests: OpenStreamUITestCase {
     /// Only meaningful on a simulator whose sole download is this suite's.
     func testZRemoveTheDownloadThisSuiteMade() {
         app.launchArguments += ["-OpenStreamVisionScreen", "storage", "-OpenStreamTrace", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60))
         let delete = app.buttons["Delete All Downloads"].firstMatch

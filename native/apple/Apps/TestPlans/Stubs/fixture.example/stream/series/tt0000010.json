@@ -1,0 +1,8 @@
+{
+  "streams": [
+    {
+      "name": "Stub 1080p",
+      "url": "https://fixture.example/e2e-download/e2e-long.mp4"
+    }
+  ]
+}

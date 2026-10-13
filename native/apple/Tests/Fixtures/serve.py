@@ -210,6 +210,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 ],
             })
 
+        # E2E playback keeps a long generated clip alive; downloads trickle so
+        # the tests can observe and cancel the real downloading state.
+        if path in ("/media/e2e-long.mp4", "/e2e-download/e2e-long.mp4"):
+            clip = getattr(self.server, "e2e_media", None)
+            if clip is None:
+                return self._send_simple(404, b"no E2E clip configured")
+            return self._serve_file(clip, allow_range=True, throttle=path.startswith("/e2e-download/"))
+
         if path.startswith("/media/"):
             name = path[len("/media/"):]
             fpath = self._safe_path(root, name)
@@ -246,7 +254,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
             name = path[len("/live/"):]
             if not name.endswith(".ts"):
                 return self._send_simple(404, b"not found")
-            fpath = self._safe_path(root, name)
+            if name in ("cbs.ts", "fixture-news.ts", "fixture-film.ts") and getattr(self.server, "e2e_live", None):
+                fpath = self.server.e2e_live
+            else:
+                fpath = self._safe_path(root, name)
             if fpath is None:
                 return self._send_simple(404, b"not found")
             return self._serve_live(fpath)
@@ -260,7 +271,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # file serving (with optional byte-range)
     # ------------------------------------------------------------------
-    def _serve_file(self, fpath, allow_range):
+    def _serve_file(self, fpath, allow_range, throttle=False):
         if not os.path.isfile(fpath):
             return self._send_simple(404, b"not found")
 
@@ -318,10 +329,13 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     f.seek(start)
                 remaining = cl
                 while remaining > 0:
-                    chunk = f.read(min(65536, remaining))
+                    chunk = f.read(min(8192 if throttle else 65536, remaining))
                     if not chunk:
                         break
                     self.wfile.write(chunk)
+                    if throttle:
+                        self.wfile.flush()
+                        time.sleep(0.3)
                     remaining -= len(chunk)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -342,9 +356,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if self.command == "HEAD":
             return
 
-        chunk_size = 64 * 1024
-        target_bps = 1.5 * 1024 * 1024
+        chunk_size = getattr(self.server, "live_chunk_size", 64 * 1024)
+        target_bps = getattr(self.server, "live_target_bps", 1.5 * 1024 * 1024)
         sleep_per_chunk = chunk_size / target_bps
+        bootstrap_remaining = getattr(self.server, "live_bootstrap_bytes", 0)
 
         try:
             while True:
@@ -357,7 +372,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
                         self.wfile.write(chunk)
                         self.wfile.write(b"\r\n")
                         self.wfile.flush()
-                        time.sleep(sleep_per_chunk)
+                        if bootstrap_remaining > 0:
+                            bootstrap_remaining -= len(chunk)
+                        else:
+                            time.sleep(sleep_per_chunk)
         except (BrokenPipeError, ConnectionResetError):
             # Client disconnected; send the final chunk if possible.
             try:

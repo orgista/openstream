@@ -92,6 +92,8 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
         // run the app once first: a widget added before that draws its
         // placeholder and proves nothing.
         app.launchArguments += ["-OpenStreamVisionScreen", "discover"]
+        app.launchArguments += ["-OpenStreamStubContinueWatching", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
         Thread.sleep(forTimeInterval: 12)
@@ -250,6 +252,7 @@ final class AppleiOSConfigurationTransferUITests: OpenStreamUITestCase {
 
     func testConfigurationExportsThroughTheSaveSheetAndImportsBack() {
         app.launchArguments += ["-OpenStreamVisionScreen", "backup"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
 

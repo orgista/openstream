@@ -29,6 +29,8 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         //    whatever the last session happened to leave behind.
         let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
         app.launchArguments += ["-OpenStreamTrace", "YES"]
+        app.launchArguments += ["-OpenStreamStubContinueWatching", "YES"]
+        configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
         // The publisher runs off the catalog/media stores once they load.

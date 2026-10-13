@@ -29,4 +29,16 @@ class OpenStreamUITestCase: XCTestCase {
         ["-OpenStreamStubNetwork", stubDirectory, "-OpenStreamResetOnLaunch", "YES",
          "-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES"]
     }
+    /// Test-plan arguments belong to the runner. Forward fixture settings to each
+    /// app launch, including tests that replace launchArguments between routes.
+    func configureFixtureLaunch(_ app: XCUIApplication) {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false else { return }
+        let mediaBase = ProcessInfo.processInfo.environment["OPENSTREAM_STUB_MEDIA_BASE"] ?? "http://127.0.0.1:8767"
+        for (key, value) in [("-OpenStreamStubNetwork", Self.stubDirectory),
+                             ("-OpenStreamStubMediaBase", mediaBase),
+                             ("-OpenStreamMuteAudio", "YES"), ("-OpenStreamTrace", "YES")] {
+            if !app.launchArguments.contains(key) { app.launchArguments += [key, value] }
+        }
+    }
+
 }

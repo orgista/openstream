@@ -4,7 +4,7 @@
     "type": "movie",
     "name": "Stub Movie Five",
     "poster": "https://fixture.example/poster/5.jpg",
-    "description": "Stub Movie Five: a title served from the stub catalog.",
+    "description": "Stub Movie Five follows a fictional crew testing a local video player. This synopsis is generated test content, with no connection to a released film or show.",
     "releaseInfo": "2024",
     "imdbRating": "7.0",
     "genres": [
@@ -12,6 +12,7 @@
     ],
     "runtime": "90 min",
     "year": "2024",
-    "background": "https://fixture.example/background/tt0000005.jpg"
+    "background": "https://fixture.example/background/tt0000005.jpg",
+    "logo": "https://fixture.example/art/wordmark.png"
   }
 }
