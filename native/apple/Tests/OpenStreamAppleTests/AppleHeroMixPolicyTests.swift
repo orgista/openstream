@@ -27,7 +27,6 @@ struct AppleHeroMixPolicyTests {
         #expect(deck.contains("pick2"))
         #expect(deck.contains("release"))
         if count == 5 { #expect(deck == ["resume0", "pick1", "pick2", "release", "resume1"]) }
-        #expect(values.count == count + 4) // Selection does not evict shelf entries.
     }
 
     @Test func sparseAndNoConfidenceUseExistingOrder() {
@@ -133,4 +132,54 @@ struct AppleHeroMixPolicyTests {
         #expect(state(.nan, 1000).meaningfulProgress == false)
         #expect(state(1000, 1000).completed)
     }
+
+    @MainActor private func resume(_ id: String, source: AppleSource, at: Date?, type: String = "movie") -> AppleDiscoverView.IndexedCatalogItem {
+        let item = AppleCatalogItem(mediaID: id, type: type, name: id,
+            backgroundURL: URL(string: "https://fixture.example/backdrop.jpg"))
+        return .init(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+                     item: item, source: source, continueWatchingUpdatedAt: at)
+    }
+
+    @MainActor private func recommendations(_ resumes: [AppleDiscoverView.IndexedCatalogItem], sources: [AppleSource]) async throws -> AppleDiscoverView.RecommendationResult {
+        try await AppleDiscoverView.buildRecommendations(.init(sections: [], relations: [], sources: sources,
+            records: [], lookup: AppleCatalogSearchLookup(), progress: [:], activity: [:], availableEpisodes: [:],
+            completed: [:], unwatched: [:], removed: [:], ratings: [:], serverContinueWatching: resumes,
+            serverShelves: [], artwork: [:], debugHeroTitle: nil, now: now))
+    }
+
+    @MainActor @Test func undatedServerResumeDoesNotBeatRealWatchDate() async throws {
+        let source = AppleSource(kind: .mediaServer, name: "Fixture", url: URL(string: "https://fixture.example")!)
+        let undated = resume(AppleMediaServerItemReference(sourceID: source.id, itemID: "a").mediaID, source: source, at: nil)
+        let dated = resume(AppleMediaServerItemReference(sourceID: source.id, itemID: "z").mediaID, source: source, at: Date(timeIntervalSince1970: 1_700_000_000))
+        let result = try await recommendations([undated, dated], sources: [source])
+        #expect(result.heroes.first?.id == dated.id)
+    }
+
+    @MainActor @Test(arguments: [AppleXtreamReference.Kind.movie, .series])
+    func xtreamResumesRemainHeroEligible(kind: AppleXtreamReference.Kind) async throws {
+        let source = AppleSource(kind: .liveTV, name: "Fixture", url: URL(string: "https://fixture.example")!)
+        let value = resume(AppleXtreamReference(sourceID: source.id, kind: kind, providerID: "1").mediaID, source: source, at: now, type: kind == .series ? "series" : "movie")
+        let result = try await recommendations([value], sources: [source])
+        #expect(result.heroes.map(\.id) == [value.id])
+        var disabled = source
+        disabled.isEnabled = false
+        #expect(try await recommendations([value], sources: [disabled]).heroes.isEmpty)
+    }
+
+    @MainActor @Test func displacedHeroResumesRemainInContinueWatching() async throws {
+        let source = AppleSource(kind: .mediaServer, name: "Fixture", url: URL(string: "https://fixture.example")!)
+        let values = (0..<8).map { index in
+            resume(AppleMediaServerItemReference(sourceID: source.id, itemID: "item\(index)").mediaID,
+                   source: source, at: now.addingTimeInterval(Double(-index)))
+        }
+        let result = try await recommendations(values, sources: [source])
+        #expect(result.heroes.count == AppleHeroRotation.maximumCandidates)
+        #expect(result.continueWatching.map(\.id) == values.map(\.id))
+        #expect(Set(result.continueWatching.map(\.id)).subtracting(result.heroes.map(\.id)).count == 3)
+    }
+
+    @Test func releaseDayFormatterIsReused() {
+        #expect(AppleHeroMixPolicy.releaseDayFormatter === AppleHeroMixPolicy.releaseDayFormatter)
+    }
+
 }

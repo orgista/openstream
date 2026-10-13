@@ -251,6 +251,14 @@ public final class AppleMediaServerLibraryStore {
         return record
     }
 
+    /// Match the same local/server freshness decision as the displayed resume fraction.
+    func continueWatchingUpdatedAt(for mediaID: String, store: ApplePlaybackStore) -> Date? {
+        let data = playbackState(for: mediaID)?.data
+        let local = store.lastActivity(for: mediaID)?.updatedAt
+        return Self.prefersServer(data, localUpdatedAt: store.localPlaybackUpdatedAt(mediaID: mediaID))
+            ? data?.lastPlayedDate : local
+    }
+
     private func playbackState(for mediaID: String) -> (data: AppleMediaServerItem.UserData?, duration: Double?)? {
         guard let reference = AppleMediaServerItemReference.parse(mediaID) else { return nil }
         if let plex = plexIndex[reference] {

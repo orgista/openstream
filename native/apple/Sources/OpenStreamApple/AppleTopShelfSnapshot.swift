@@ -259,11 +259,18 @@ public actor AppleTopShelfSnapshotWriter {
     }
 
     private let containerProvider: @Sendable () -> URL?
+    private let snapshotLocation: @Sendable (URL) -> URL
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
-    }) {
+    }, snapshotLocation: @escaping @Sendable (URL) -> URL = { snapshotURL(in: $0) }) {
         self.containerProvider = containerProvider
+        self.snapshotLocation = snapshotLocation
+    }
+
+    func snapshotExists() -> Bool {
+        guard let root = containerProvider() else { return false }
+        return FileManager.default.fileExists(atPath: snapshotLocation(root).path)
     }
 
     /// - Parameters:
@@ -291,15 +298,18 @@ public actor AppleTopShelfSnapshotWriter {
         enabled: Bool
     ) throws {
         guard let root = containerProvider() else { throw WriteError.containerUnavailable }
-        let url = Self.snapshotURL(in: root)
+        let url = snapshotLocation(root)
         #if os(tvOS)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         #endif
         guard enabled else {
-            do {
-                try FileManager.default.removeItem(at: url)
-            } catch let error as CocoaError where error.code == .fileNoSuchFile {
-                // An already absent snapshot is a completed opt-out.
+            // The extension can still read a snapshot left by older builds at the root.
+            for location in Set([url, root.appending(path: Self.filename)]) {
+                do {
+                    try FileManager.default.removeItem(at: location)
+                } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                    // An already absent snapshot is a completed opt-out.
+                }
             }
             notify()
             return

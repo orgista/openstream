@@ -5,8 +5,43 @@ import Testing
 
 /// Review of 2b1f930: the Top Shelf bar follows the playback store, so a
 /// new saved position republishes even when the media records are unchanged.
+@Suite(.serialized)
 @MainActor
 struct AppleTopShelfPublisherProgressTests {
+    @Test func purgedSnapshotIsRepublishedWithoutInputChanges() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let publisher = AppleTopShelfPublisher(writer: .init(containerProvider: { root }))
+        let url = AppleTopShelfSnapshotWriter.snapshotURL(in: root)
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        try FileManager.default.removeItem(at: url)
+        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func disablingRemovesCachesAndLegacySnapshots() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cache = root.appending(path: "Library/Caches").appending(path: AppleTopShelfSnapshotWriter.filename)
+        let legacy = root.appending(path: AppleTopShelfSnapshotWriter.filename)
+        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root }, snapshotLocation: { _ in cache })
+        try Data("legacy".utf8).write(to: legacy)
+        try Data("cached".utf8).write(to: cache)
+        try await writer.write(records: [], enabled: false)
+        #expect(FileManager.default.fileExists(atPath: cache.path) == false)
+        #expect(FileManager.default.fileExists(atPath: legacy.path) == false)
+        // Opting out also removes legacy data when the cache was already purged.
+        try Data("legacy".utf8).write(to: legacy)
+        try await writer.write(records: [], enabled: false)
+        #expect(FileManager.default.fileExists(atPath: legacy.path) == false)
+    }
+
     @Test func oneCompletionSnapshotServesManyEpisodeLists() throws {
         let suite = UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))

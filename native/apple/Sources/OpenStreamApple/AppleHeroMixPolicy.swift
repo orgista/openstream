@@ -17,12 +17,13 @@ enum AppleHeroMixPolicy {
     struct Candidate: Sendable {
         let id: String
         var resumeAt: Date? = nil
+        var isResume = false
         var relevant = false
         var releaseDate: Date? = nil
         var state = State()
         var accessible = true
         var hasBackdrop = true
-        var unseen: Bool { resumeAt == nil && !state.meaningfulProgress && !state.completed }
+        var unseen: Bool { !isResume && resumeAt == nil && !state.meaningfulProgress && !state.completed }
     }
 
     /// Values arrive in today's fallback order, already represented by canonical title+kind.
@@ -36,7 +37,7 @@ enum AppleHeroMixPolicy {
             guard result.count < AppleHeroRotation.maximumCandidates, seen.insert(value.id).inserted else { return }
             result.append(value.id)
         }
-        let resumes = pool.filter { $0.resumeAt != nil }.sorted {
+        let resumes = pool.filter { $0.isResume || $0.resumeAt != nil }.sorted {
             if $0.resumeAt != $1.resumeAt { return ($0.resumeAt ?? .distantPast) > ($1.resumeAt ?? .distantPast) }
             return $0.id < $1.id
         }
@@ -67,15 +68,20 @@ enum AppleHeroMixPolicy {
         return result
     }
 
-    /// A strict calendar day or ISO timestamp, never a year or a fabricated January 1.
-    static func releaseDate(_ raw: String?) -> Date? {
-        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), raw.count >= 10 else { return nil }
-        let day = String(raw.prefix(10))
+    static let releaseDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.isLenient = false
+        return formatter
+    }()
+
+    /// A strict calendar day or ISO timestamp, never a year or a fabricated January 1.
+    static func releaseDate(_ raw: String?) -> Date? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), raw.count >= 10 else { return nil }
+        let day = String(raw.prefix(10))
+        let formatter = releaseDayFormatter
         guard let date = formatter.date(from: day), formatter.string(from: date) == day else { return nil }
         if raw.count == 10 { return date }
         guard raw.dropFirst(10).first == "T" else { return nil }

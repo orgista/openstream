@@ -63,7 +63,8 @@ public final class AppleTopShelfPublisher {
         let recents = AppleLiveSystemChannels.supported(live.recents, sourceIDs: sourceIDs)
         let liveDigest = ApplePlaybackIdentity.digest(for: String(decoding: (try? JSONEncoder().encode([favorites, recents])) ?? Data(), as: UTF8.self))
         let combinedDigest = digest + liveDigest
-        guard combinedDigest != lastDigest else { return }
+        let snapshotExists = enabled ? await writer.snapshotExists() : true
+        guard combinedDigest != lastDigest || !snapshotExists else { return }
         do {
             try await writer.write(records: records, sections: sections, sources: sources,
                                    watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,

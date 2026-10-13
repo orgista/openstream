@@ -141,7 +141,7 @@ struct AppleDiscoverView: View {
         }
     }
 
-    private struct IndexedCatalogItem: Identifiable, Sendable {
+    struct IndexedCatalogItem: Identifiable, Sendable {
         let record: AppleMediaRecord
         let item: AppleCatalogItem
         let source: AppleSource
@@ -149,7 +149,7 @@ struct AppleDiscoverView: View {
         var id: String { record.id }
     }
 
-    private struct RecommendationResult: Sendable {
+    struct RecommendationResult: Sendable {
         var continueWatching: [IndexedCatalogItem] = []
         var picks: [IndexedCatalogItem] = []
         var heroes: [IndexedCatalogItem] = []
@@ -159,7 +159,7 @@ struct AppleDiscoverView: View {
     }
 
     /// Capture actor-owned data once, then transfer only immutable values.
-    private struct RecommendationSnapshot: Sendable {
+    struct RecommendationSnapshot: Sendable {
         let sections: [AppleCatalogSection]
         let relations: [AppleTMDBRelation]
         let sources: [AppleSource]
@@ -646,7 +646,7 @@ struct AppleDiscoverView: View {
         }
     }
 
-    @concurrent nonisolated private static func buildRecommendations(_ snapshot: RecommendationSnapshot) async throws -> RecommendationResult {
+    @concurrent nonisolated static func buildRecommendations(_ snapshot: RecommendationSnapshot) async throws -> RecommendationResult {
         try Task.checkCancellation()
         let visibleSections = AppleCatalogShelfPolicy.visibleSections(snapshot.sections,
             activeSourceIDs: Set(snapshot.sources.filter(\.isEnabled).map(\.id)))
@@ -728,6 +728,7 @@ struct AppleDiscoverView: View {
             guard enabled.contains(value.source.id) else { return false }
             // Current server shelves and lookup-resolved resumes already carry playable routes.
             return AppleMediaServerItemReference.parse(value.item.mediaID) != nil
+                || AppleXtreamReference.parse(value.item.mediaID) != nil
                 || catalogs[value.source.id, default: []].contains { $0.item.mediaID == value.item.mediaID }
                 || AppleContinueWatchingResolver.resolve(value.record, in: [snapshot.lookup]).match != nil
         }
@@ -742,10 +743,12 @@ struct AppleDiscoverView: View {
         }
         values += AppleHeroMixPolicy.fairlyGather(sections + servers)
         let relevant = Set(picks.map { identities.identity($0.item, sourceID: $0.source.id.uuidString) })
+        var resumeIDs = Set<String>()
         var resumeDates: [String: Date] = [:]
         for value in continueWatching.filter(accessible) {
             let id = identities.identity(value.item, sourceID: value.source.id.uuidString)
-            let date = value.continueWatchingUpdatedAt ?? value.record.lastVerified
+            resumeIDs.insert(id)
+            guard let date = value.continueWatchingUpdatedAt else { continue }
             resumeDates[id] = max(resumeDates[id] ?? .distantPast, date)
         }
         // A richer representative may lack the duplicate route's known release date.
@@ -765,7 +768,7 @@ struct AppleDiscoverView: View {
             let upgraded = snapshot.artwork[item.mediaID].map {
                 item.withHeroArtwork(backgroundURL: $0.backdropURL, logoURL: $0.logoURL)
             } ?? item
-            return AppleHeroMixPolicy.Candidate(id: id, resumeAt: resumeDates[id], relevant: relevant.contains(id),
+            return AppleHeroMixPolicy.Candidate(id: id, resumeAt: resumeDates[id], isResume: resumeIDs.contains(id), relevant: relevant.contains(id),
                 releaseDate: releaseDates[id], state: states[id] ?? .init(),
                 hasBackdrop: AppleHeroRotation.hasBackdrop(upgraded))
         }
@@ -807,7 +810,8 @@ struct AppleDiscoverView: View {
             if let existing = visibleLocal.first(where: { $0.item.mediaID == item.mediaID }) {
                 guard AppleMediaServerItemReference.parse(item.mediaID) != nil else { return existing }
                 let record = mediaServerLibrary.continueWatchingRecord(for: item, source: existing.source, store: playbackStore)
-                return IndexedCatalogItem(record: record, item: item, source: existing.source)
+                return IndexedCatalogItem(record: record, item: item, source: existing.source,
+                    continueWatchingUpdatedAt: mediaServerLibrary.continueWatchingUpdatedAt(for: item.mediaID, store: playbackStore))
             }
             if let reference = AppleXtreamReference.parse(item.mediaID),
                let source = AppleXtreamLibraryStore.shared.source(reference) {
@@ -815,12 +819,14 @@ struct AppleDiscoverView: View {
                 if let progress = playbackStore.progress(for: record.id) {
                     record.progress = AppleWatchProgress.fraction(position: progress.position, duration: progress.duration)
                 }
-                return IndexedCatalogItem(record: record, item: item, source: source)
+                return IndexedCatalogItem(record: record, item: item, source: source,
+                    continueWatchingUpdatedAt: playbackStore.lastActivity(for: item.mediaID)?.updatedAt)
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
                   let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
             let record = mediaServerLibrary.continueWatchingRecord(for: item, source: source, store: playbackStore)
-            return IndexedCatalogItem(record: record, item: item, source: source)
+            return IndexedCatalogItem(record: record, item: item, source: source,
+                continueWatchingUpdatedAt: mediaServerLibrary.continueWatchingUpdatedAt(for: item.mediaID, store: playbackStore))
         }
         // The merge keys on `mediaID`, the shelf keys on `record.id`: a local
         // record and a server record can agree on the second and differ on the

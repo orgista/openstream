@@ -325,6 +325,7 @@ struct AppleMediaServerLibraryStoreTests {
         let beforeTerminals = local.configurationPlaybackTerminals()
         let record = library.continueWatchingRecord(for: item, source: source, store: local)
         #expect(record.progress == (played ? 0 : 0.3))
+        #expect(library.continueWatchingUpdatedAt(for: item.mediaID, store: local) == formatter.date(from: timestamp))
         #expect(library.shouldIncludeInContinueWatching(mediaID: reference.mediaID, store: local) == (played == false))
         #expect(local.configurationProgress() == beforeProgress)
         #expect(local.configurationPlaybackTerminals() == beforeTerminals)
@@ -549,6 +550,10 @@ struct AppleMediaServerLibraryStoreTests {
         let refP1 = AppleMediaServerItemReference(sourceID: plexSourceID, itemID: "p1")
         let detailP1 = try await store.detail(for: refP1)
         #expect(detailP1.item.userData?.lastPlayedDate == Date(timeIntervalSince1970: 1_700_000_100))
+        let localDates = ApplePlaybackStore(defaults: progressDefaults)
+        #expect(store.continueWatchingUpdatedAt(for: refP1.mediaID, store: localDates) == Date(timeIntervalSince1970: 1_700_000_100))
+        localDates.save(mediaID: refP1.mediaID, position: 100, duration: 1000)
+        #expect(store.continueWatchingUpdatedAt(for: refP1.mediaID, store: localDates) == localDates.lastActivity(for: refP1.mediaID)?.updatedAt)
         let staleLocal = ApplePlaybackProgress(position: 100, duration: 1000,
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000))
         #expect(AppleMediaServerLibraryStore.resumePosition(for: detailP1.item, local: staleLocal) == 50)

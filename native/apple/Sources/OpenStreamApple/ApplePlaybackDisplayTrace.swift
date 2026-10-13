@@ -21,21 +21,46 @@ struct ApplePlaybackDisplayTrace: Equatable, Sendable {
         + "preferredDisplayCriteria=\(preferredCriteria) "
         + "isDisplayCriteriaMatchingEnabled=\(flag(matchingEnabled)) "
         + "displayModeSwitchInProgress=\(flag(switchInProgress)) "
-        + "currentMode=\(currentMode) dynamicRangeMatched=unverified"
+        + "currentMode=\(currentMode) dynamicRangeRequested=\(flag(displayRequested)) dynamicRangeMatched=unverified"
+    }
+
+    private var displayRequested: Bool? {
+        guard let matchingEnabled, preferredCriteria != "unavailable" else { return nil }
+        return matchingEnabled && preferredCriteria != "none"
     }
 
     private func flag(_ value: Bool?) -> String {
         value.map { $0 ? "true" : "false" } ?? "unavailable"
     }
 
+    static func hlsSource(videoRanges: [AVVideoRange]) -> Self {
+        // A mixed master does not identify the selected variant. PQ is not proof of DV.
+        guard let range = videoRanges.first, videoRanges.allSatisfy({ $0 == range }) else { return Self() }
+        switch range {
+        case .sdr: return Self(source: "SDR")
+        case .hlg: return Self(source: "HLG")
+        case .pq: return Self(source: "PQ")
+        default: return Self()
+        }
+    }
+
     @MainActor
     static func source(for engine: any ApplePlaybackEngine) async -> Self {
         if let aether = engine as? AetherPlaybackEngine { return aether.displayTraceSource }
-        guard let item = engine.avPlayer?.currentItem,
-              let tracks = try? await item.asset.loadTracks(withMediaType: .video),
-              let track = tracks.first,
-              let descriptions = try? await track.load(.formatDescriptions),
-              let description = descriptions.first else { return Self() }
+        guard let item = engine.avPlayer?.currentItem else { return Self() }
+        let tracks = (try? await item.asset.loadTracks(withMediaType: .video)) ?? []
+        // Playing HLS items can expose tracks even when the asset has none.
+        for track in tracks + item.tracks.compactMap(\.assetTrack) {
+            guard let descriptions = try? await track.load(.formatDescriptions),
+                  let description = descriptions.first(where: { CMFormatDescriptionGetMediaType($0) == kCMMediaType_Video }) else { continue }
+            return source(description: description)
+        }
+        guard let asset = item.asset as? AVURLAsset else { return Self() }
+        let variants = (try? await asset.load(.variants)) ?? []
+        return hlsSource(videoRanges: variants.compactMap { $0.videoAttributes?.videoRange })
+    }
+
+    private static func source(description: CMFormatDescription) -> Self {
         let dimensions = CMVideoFormatDescriptionGetDimensions(description)
         let format = AppleAssetInspector.inspect(description: description,
             width: Int(dimensions.width), height: Int(dimensions.height), frameRate: 0)
