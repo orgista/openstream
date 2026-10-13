@@ -56,6 +56,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       shelf content file (topshelf-v1.json) was missing from the app's shared folder, so tvOS showed the static
       image. The write failed silently and was never retried. Fixed in the next build: a tvOS-safe write, a retry, and
       failures logged. Tests pass on the simulator; confirm on OfficePlus when the TV is awake.
+      2026-10-13 on OfficePlus: still the static image; the new log showed every write failing with error 513 (no
+      permission). Apple TV hardware won't let apps write the shared folder's top level, only its Library/Caches.
+      Fixed in 35c1522; Codex is confirming on the TV. Dummy plug: owner is buying an HDMI dummy plug for headless
+      testing (HDR plug suggested; Dolby Vision stays an eye check at ship + a DV-mode line in the app trace).
 - [ ] **Top Shelf: possible second cause (2026-10-12).** The tvOS brand assets had only the wide Top Shelf image; the
       standard 1920x720 "Top Shelf Image" was missing, so tvOS can stretch the logo. Added it (same art); ships in the
       next build. The dynamic shelf fix is already in build 18 (see the Top Shelf item below).
