@@ -5,11 +5,26 @@ public enum AppleCompletionPolicy {
     public static let fraction = 0.95
     public static let remainingSeconds = 30.0
 
+    /// Runtime bands apply to existing saved clocks without rewriting storage.
+    public static func playedThreshold(duration: Double) -> Double? {
+        guard duration.isFinite, duration > 0 else { return nil }
+        switch duration {
+        case ..<10: return duration
+        // Clips: the last 10 s, but never less than 90 % (a 10 s clip was
+        // "watched" at its first frame).
+        case ..<900: return max(duration * 0.9, duration - 10)
+        case ..<1800: return duration - 180
+        case ..<3900: return duration - 240
+        case ..<6000: return duration - 480
+        default: return duration - 660
+        }
+    }
+
     public static func isComplete(position: Double, duration: Double, providerWatched: Bool? = nil) -> Bool {
         if let providerWatched { return providerWatched }
         guard duration.isFinite, position.isFinite, duration > 0, position >= 0 else { return false }
         let position = min(position, duration)
-        return position >= duration * fraction || duration - position <= remainingSeconds
+        return playedThreshold(duration: duration).map { position >= $0 } ?? false
     }
 
     public static func successor(after partID: String?, episodes: [AppleStremioEpisode],

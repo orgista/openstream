@@ -10,6 +10,8 @@ struct AppleMediaShelf<Content: View>: View {
     var headingIdentifier: String = ""
     @ViewBuilder var content: () -> Content
     @Environment(\.appleDiscoverRows) private var rowStyle
+    @State private var artworkScrollIsMoving = false
+    @Environment(\.appleArtworkLoadsPaused) private var inheritedArtworkPause
     #if DEBUG
     @State private var reviewScrollPosition = ScrollPosition()
     #endif
@@ -83,6 +85,10 @@ struct AppleMediaShelf<Content: View>: View {
         .contentMargins(.horizontal, horizontalInset, for: .scrollContent)
         #endif
         .appleShelfTileSnapping()
+        .onScrollPhaseChange { _, phase in
+            artworkScrollIsMoving = phase != .idle
+        }
+        .environment(\.appleArtworkLoadsPaused, AppleArtworkLoadingPolicy.shouldPause(isScrolling: artworkScrollIsMoving, focusSettled: !inheritedArtworkPause))
         .scrollIndicators(.never)
         #if DEBUG
         .scrollPosition($reviewScrollPosition)

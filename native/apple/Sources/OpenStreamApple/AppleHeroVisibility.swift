@@ -53,6 +53,10 @@ private struct AppleHeroVisibilityReader: ViewModifier {
                 report()
             }
             .onChange(of: scenePhase) { report() }
+            .onScrollVisibilityChange(threshold: 0.5) { visible in
+                isOnScreen = visible
+                report()
+            }
     }
 
     private func report() {

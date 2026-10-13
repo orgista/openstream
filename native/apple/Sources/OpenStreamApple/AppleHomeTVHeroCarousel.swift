@@ -30,6 +30,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     let slots: AppleHeroPageSlots
     @ViewBuilder let page: (_ index: Int, _ wordmarkFailed: Bool, _ context: AppleHomeTVHeroContext) -> Page
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var presentationRequest = 0
     @FocusState private var focus: AppleTVHeroPaging.Target?
@@ -92,7 +93,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     }
 
     private var isPaused: Bool {
-        !heroIsVisible || AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
+        reduceMotion || !heroIsVisible || AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
     }
 
     /// Holds the timer where it is, or runs it on from there.

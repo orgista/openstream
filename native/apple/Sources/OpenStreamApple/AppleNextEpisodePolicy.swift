@@ -63,6 +63,7 @@ public enum AppleNextEpisodePolicy: Sendable {
     }
 
     static let defaultLeadSeconds: Double = 20
+    static let countdownSeconds: Double = 15
 
     /// Nothing is offered for a live stream, a movie, an episode with no
     /// successor, or one whose duration is not known yet — a card that cannot
@@ -78,9 +79,10 @@ public enum AppleNextEpisodePolicy: Sendable {
     }
 
     /// Seconds left, clamped at zero and rounded up so the label counts
-    /// 20, 19, … 1 rather than showing 0 for the last whole second.
+    /// 15, 14, … 1 rather than showing 0 for the last whole second.
     public static func secondsRemaining(position: Double, duration: Double) -> Int {
-        max(0, Int((duration - position).rounded(.up)))
+        guard position.isFinite, duration.isFinite else { return 0 }
+        return Int(min(countdownSeconds, max(0, duration - position - (defaultLeadSeconds - countdownSeconds))).rounded(.up))
     }
 
     /// The card to show, or nil for "nothing yet".
@@ -99,14 +101,14 @@ public enum AppleNextEpisodePolicy: Sendable {
               isEligible(duration: duration, hasNext: true, isLive: isLive),
               let duration else { return nil }
         let remaining = duration - position
-        guard remaining <= leadSeconds, remaining >= 0 else { return nil }
+        guard position.isFinite, position >= 0, remaining <= leadSeconds, remaining >= 0 else { return nil }
         return AppleNextEpisodePrompt(
             title: nextTitle,
             secondsRemaining: secondsRemaining(position: position, duration: duration)
         )
     }
 
-    /// True once the episode has run out and the next one should start by
+    /// True once the fifteen-second countdown expires and the next one starts by
     /// itself. `isEnabled` is the viewer's "Auto Play Next Episode" setting;
     /// with it off the card still appears and still works, it just never fires
     /// on its own.
@@ -127,7 +129,7 @@ public enum AppleNextEpisodePolicy: Sendable {
         guard isEnabled, !isDismissed, nextTitle != nil,
               isEligible(duration: duration, hasNext: true, isLive: isLive),
               let duration else { return false }
-        return hasEnded || position >= duration - endTolerance
+        return position.isFinite && (hasEnded || position >= duration - (defaultLeadSeconds - countdownSeconds))
     }
 
     /// How close to the duration counts as the end without an `.ended` event.
@@ -154,6 +156,7 @@ public struct AppleTrackCarryOver: Equatable, Sendable {
         case language(String, hearingImpaired: Bool, forced: Bool)
     }
 
+    public var autoPlayChain: AppleAutoPlayChain? = nil
     public var audioLanguage: String?
     public var subtitle: Subtitle
 
@@ -164,7 +167,7 @@ public struct AppleTrackCarryOver: Equatable, Sendable {
 
     public static let none = AppleTrackCarryOver()
 
-    public var isEmpty: Bool { audioLanguage == nil && subtitle == .unchanged }
+    public var isEmpty: Bool { audioLanguage == nil && subtitle == .unchanged && autoPlayChain == nil }
 
     /// What is playing now. A track with no language carries nothing.
     public static func capture(

@@ -4641,3 +4641,12 @@ Home can use supported Plex hubs and Jellyfin/Emby Next Up and genre rows. Rows 
 Chapters now carry their embedded source and loaded-media version. Invalid, duplicate or outdated boundaries cannot drive a seek beyond the current runtime. Content without chapters still gets no invented intro. A Details-only hero no longer repeats the info action; My List stays available, and tvOS paging skips the missing control.
 
 Verified with 3,158 Swift tests in 392 suites and iOS/tvOS Debug builds, including arm64 recompilation of all 14 changed production files. The full suite passed serially after an unrelated metadata timing failure under parallel load. Device UI was not exercised. No commit or upload.
+
+
+## 2026-10-13 — Apple TV behaviour rules
+
+Heroes keep the approved 12-second dwell, pause when hidden or while a trailer plays, and stop automatic rotation on the last title. Watched status now follows runtime bands. The existing Next Episode card counts down from 15 seconds, and unattended playback stops after three episodes or two hours until you interact. The stock player still has its existing Next Episode action rather than a countdown card.
+
+Home rows drop titles repeated in the previous three collections while preserving provider IDs that refer to different titles. Continue Watching keeps its order, appends new entries and refreshes after Mark Watched or Remove. Focus work waits 200 ms; artwork loads defer during scrolling and catalog rows warm up to 20 items ahead. Motion, power and supported system video preferences stop inline video.
+
+Verified on Dev-Mini: 3178 Swift tests in 398 suites, tvOS E2E 20/0 and iOS E2E 40/1. The remaining failure is the known AirPlay system-button response check; Messages passed. Both app builds recompiled all 26 changed/new source files, and original simulator data restored with matching hashes. The REA 5-second image/1-second video-end timing was not applied because the recorded owner dwell decision takes precedence. No commit or upload.

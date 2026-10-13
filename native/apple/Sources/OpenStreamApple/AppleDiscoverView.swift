@@ -68,6 +68,7 @@ struct AppleDiscoverView: View {
     /// Moves when the viewer removes a title from Continue Watching, so the
     /// row redraws without it (the store itself is not observed here).
     @State private var continueWatchingRemovalRevision = 0
+    @State private var continueWatchingChangeRevision = 0
     @State private var loadedCache = false
     /// The source configuration whose catalog refresh last finished; until it
     /// matches the current one an empty page is loading, not empty.
@@ -99,6 +100,7 @@ struct AppleDiscoverView: View {
     @State private var heroArtworkRevision: UInt64 = 0
     @State private var relationRevision = AppleTMDBRelationCache.revision
     @State private var recommendations = RecommendationResult()
+    @State private var artworkScrollIsMoving = false
     @State private var recommendationsRevision: String?
     @State private var top10Week: AppleNetflixTop10Week?
     @State private var top10Error: String?
@@ -132,6 +134,7 @@ struct AppleDiscoverView: View {
         let record: AppleMediaRecord
         let item: AppleCatalogItem
         let source: AppleSource
+        var continueWatchingUpdatedAt: Date? = nil
         var id: String { record.id }
     }
 
@@ -278,8 +281,8 @@ struct AppleDiscoverView: View {
                             // Mac order it by the A4 rhythm (stills, then posters,
                             // then stills); everywhere else it is the list as built.
                             let continueShelf = continueWatchingShelf(values: continueWatching)
-                            ForEach(discoverRails(continueWatching: continueShelf.values, picks: picks)) { rail in
-                                railView(rail, continueWatching: continueShelf, picks: picks)
+                            ForEach(displayedRails(continueWatching: continueShelf.values, picks: picks)) { row in
+                                railView(row.rail, continueWatching: continueShelf, picks: picks, allowed: row.allowed)
                             }
                         }
                     }
@@ -290,6 +293,8 @@ struct AppleDiscoverView: View {
                     #endif
                     .environment(\.appleDiscoverRows, discoverRowStyle)
                 }
+                .onScrollPhaseChange { _, phase in artworkScrollIsMoving = phase != .idle }
+                .environment(\.appleArtworkLoadsPaused, artworkScrollIsMoving)
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
                 #if os(iOS)
                 .refreshable { await refreshContent() }
@@ -373,6 +378,14 @@ struct AppleDiscoverView: View {
                 ProgressView()
                     .padding()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ApplePlaybackProgressFeed.continueWatchingChangeNotification)) { _ in
+            continueWatchingChangeRevision &+= 1
+        }
+        .task(id: continueWatchingChangeRevision) {
+            guard continueWatchingChangeRevision > 0 else { return }
+            do { try await Task.sleep(for: AppleContinueWatchingResolver.refreshDelay) } catch { return }
+            continueWatchingRemovalRevision &+= 1
         }
         .task(id: recommendationRevision) {
             await rebuildRecommendations(for: recommendationRevision)
@@ -609,8 +622,10 @@ struct AppleDiscoverView: View {
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
             artwork: heroArtwork, debugHeroTitle: wanted, now: .now)
         do {
-            let result = try await Self.buildRecommendations(snapshot)
+            var result = try await Self.buildRecommendations(snapshot)
             guard !Task.isCancelled, revision == recommendationRevision else { return }
+            result.continueWatching = AppleContinueWatchingResolver.merge(recommendations.continueWatching,
+                incoming: result.continueWatching, id: { $0.record.id }, timestamp: { $0.continueWatchingUpdatedAt ?? $0.record.lastVerified })
             recommendations = result
             recommendationsRevision = revision
         } catch is CancellationError {
@@ -649,7 +664,10 @@ struct AppleDiscoverView: View {
         let entries = AppleContinueWatchingResolver.entries(ordered, in: [snapshot.lookup])
         if snapshot.lookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
         let local = Array(entries.compactMap { entry in
-            entry.resolution.match.map { IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source) }
+            entry.resolution.match.map {
+                IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source,
+                    continueWatchingUpdatedAt: activity(entry.record)?.updatedAt)
+            }
         })
         var seen = Set(local.map(\.item.mediaID))
         let merged = AppleCatalogShelfPolicy.uniqueByID(local + snapshot.serverContinueWatching.filter {
@@ -1016,27 +1034,79 @@ struct AppleDiscoverView: View {
         return AppleRecommendationRowPolicy.appendingSeed(recommendations.seedHeading == nil ? nil : .becauseWatched, to: ordered)
     }
 
+    private struct DisplayedRail: Identifiable {
+        let rail: DiscoverRail
+        let allowed: Set<String>
+        var id: DiscoverRail { rail }
+    }
+
+    private func rowIdentity(_ item: AppleCatalogItem, source: AppleSource? = nil) -> String {
+        AppleCatalogShelfPolicy.identity(item, source: source)
+    }
+
+    private func top10Identity(_ entry: AppleNetflixTop10Entry, type: String) -> String {
+        if let match = catalogLookup.match(title: entry.title, type: type,
+            seasonTitle: entry.seasonTitle, ignoringLeadingArticle: true) { return rowIdentity(match.item, source: match.source) }
+        return "\(type):\(entry.title.lowercased())"
+    }
+
+    private func displayedRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DisplayedRail] {
+        let rails = discoverRails(continueWatching: continueWatching, picks: picks)
+        let keys = rails.map { rail -> [String] in
+            switch rail {
+            case .continueWatching: return AppleContinueWatchingResolver.rail(continueWatching).map { rowIdentity($0.item, source: $0.source) }
+            case .library: return library.resolvedGroups.map { rowIdentity(library.catalogItem(for: $0)) }
+            case .mediaServer(let id): return (mediaServerLibrary.shelves.first { $0.id == id }?.items ?? []).map { rowIdentity($0) }
+            case .topPicks: return picks.map { rowIdentity($0.item, source: $0.source) }
+            case .becauseWatched: return recommendations.seedItems.map { rowIdentity($0.item, source: $0.source) }
+            case .top10(let type): return (type == "movie" ? top10Week?.films ?? [] : top10Week?.tv ?? []).map { top10Identity($0, type: type) }
+            case .catalog(let id):
+                guard let section = visibleSections.first(where: { $0.id == id }) else { return [] }
+                let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked ? Array(section.items.prefix(10)) : section.items
+                let source = sourceStore.sources.first { $0.id == section.sourceID }
+                return items.map { rowIdentity($0, source: source) }
+            case .top10StaleNote: return []
+            }
+        }
+        // A status note is not a collection and does not consume the window.
+        let content = rails.indices.filter { rails[$0] != .top10StaleNote }
+        let deduped = AppleCatalogShelfPolicy.deduplicatedRows(content.map { keys[$0] })
+        var allowed: [Int: Set<String>] = [:]
+        for (index, row) in zip(content, deduped) { allowed[index] = Set(row) }
+        return rails.indices.map { DisplayedRail(rail: rails[$0], allowed: allowed[$0] ?? []) }
+    }
+
+    private func rowItems<Value>(_ values: [Value], allowed: Set<String>, item: (Value) -> AppleCatalogItem,
+                                 source: (Value) -> AppleSource? = { _ in nil }) -> [Value] {
+        var seen = Set<String>()
+        return values.filter {
+            let key = rowIdentity(item($0), source: source($0))
+            return allowed.contains(key) && seen.insert(key).inserted
+        }
+    }
+
     @ViewBuilder
     private func railView(_ rail: DiscoverRail, continueWatching: (values: [IndexedCatalogItem], isFixture: Bool),
-                          picks: [IndexedCatalogItem]) -> some View {
+                          picks: [IndexedCatalogItem], allowed: Set<String>) -> some View {
         switch rail {
         case .continueWatching:
             AppleMediaShelf(title: "Continue Watching",
                 onOpen: AppleContinueWatchingResolver.hasFullList(count: continueWatching.values.count)
                     ? { showsContinueWatching = true } : nil,
                 headingIdentifier: "home.continue.heading") {
-                continueWatchingCards(AppleContinueWatchingResolver.rail(continueWatching.values),
+                continueWatchingCards(rowItems(AppleContinueWatchingResolver.rail(continueWatching.values), allowed: allowed, item: { $0.item }, source: { $0.source }),
                                       isFixture: continueWatching.isFixture)
             }
         case .library:
-            AppleLocalTitleShelf(title: "Your Library", groups: library.resolvedGroups,
+            AppleLocalTitleShelf(title: "Your Library", groups: rowItems(library.resolvedGroups, allowed: allowed, item: { library.catalogItem(for: $0) }),
                 sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings,
                 tabToolbar: tabToolbarContext, opensFullList: false)
                 .accessibilityIdentifier("home.your-library")
         case .mediaServer(let id):
             if let shelf = mediaServerLibrary.shelves.first(where: { $0.id == id }) {
+                let displayedItems = rowItems(shelf.items, allowed: allowed, item: { $0 })
                 AppleMediaShelf(title: shelf.title) {
-                    ForEach(shelf.items, id: \.mediaID) { item in
+                    ForEach(displayedItems, id: \.mediaID) { item in
                         if let ref = AppleMediaServerItemReference.parse(item.mediaID),
                            let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) {
                             let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
@@ -1046,7 +1116,7 @@ struct AppleDiscoverView: View {
                             }
                             .accessibilityIdentifier("home.ms.\(shelf.id).\(item.mediaID)")
                             .onAppear {
-                                guard AppleCatalogPaging.isNearEnd(itemID: item.id, in: shelf.items) else { return }
+                                guard AppleCatalogPaging.isNearEnd(itemID: item.id, in: displayedItems) else { return }
                                 Task { await mediaServerLibrary.loadMore(shelfID: shelf.id) }
                             }
                         }
@@ -1061,15 +1131,15 @@ struct AppleDiscoverView: View {
             }
         case .becauseWatched:
             if let heading = recommendations.seedHeading {
-                indexedShelf(title: heading, identifier: "because-watched", values: recommendations.seedItems, showsProgress: false)
+                indexedShelf(title: heading, identifier: "because-watched", values: rowItems(recommendations.seedItems, allowed: allowed, item: { $0.item }, source: { $0.source }), showsProgress: false)
             }
         case .topPicks:
-            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: picks, showsProgress: false)
+            indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: rowItems(picks, allowed: allowed, item: { $0.item }, source: { $0.source }), showsProgress: false)
         case .top10(let type):
             if type == "movie" {
-                top10Shelf(title: "Top 10 Movies in the US", entries: top10Week?.films ?? [], type: "movie")
+                top10Shelf(title: "Top 10 Movies in the US", entries: top10Week?.films ?? [], type: "movie", allowed: allowed)
             } else {
-                top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series")
+                top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series", allowed: allowed)
             }
         case .top10StaleNote:
             Text("Top 10 lists are stale because the latest update could not be downloaded.")
@@ -1079,7 +1149,7 @@ struct AppleDiscoverView: View {
         case .catalog(let id):
             if let section = visibleSections.first(where: { $0.id == id }),
                let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-                catalogSection(section, source: source)
+                catalogSection(section, source: source, allowed: allowed)
             }
         }
     }
@@ -1158,8 +1228,12 @@ struct AppleDiscoverView: View {
     }
 
     @ViewBuilder
-    private func top10Shelf(title: String, entries: [AppleNetflixTop10Entry], type: String) -> some View {
-        let ordered = entries.sorted { $0.rank < $1.rank }
+    private func top10Shelf(title: String, entries: [AppleNetflixTop10Entry], type: String, allowed: Set<String>) -> some View {
+        var seen = Set<String>()
+        let ordered = entries.sorted { $0.rank < $1.rank }.filter {
+            let key = top10Identity($0, type: type)
+            return allowed.contains(key) && seen.insert(key).inserted
+        }
         if !ordered.isEmpty {
             // Ranked shelves retain the standard row spacing and focus treatment.
             AppleMediaShelf(title: title) {
@@ -1191,7 +1265,7 @@ struct AppleDiscoverView: View {
         return live
     }
 
-    private func catalogSection(_ section: AppleCatalogSection, source: AppleSource) -> AppleCatalogSectionView {
+    private func catalogSection(_ section: AppleCatalogSection, source: AppleSource, allowed: Set<String>? = nil) -> AppleCatalogSectionView {
         AppleCatalogSectionView(
             section: section,
             source: source,
@@ -1208,7 +1282,8 @@ struct AppleDiscoverView: View {
             onOpen: { selectedCatalog = section; showsCatalog = true },
             onReachEnd: { [catalogStore, sourceStore] in
                 Task { await catalogStore.loadNextPage(sectionID: section.id, sources: sourceStore.sources) }
-            }
+            },
+            allowedIdentities: allowed
         )
     }
 
@@ -2192,15 +2267,20 @@ private struct AppleCatalogSectionView: View {
     /// Asks for the catalog's next page (`AppleCatalogPaging`); the store
     /// ignores it for a catalog without `skip` or one that has run out.
     var onReachEnd: (() -> Void)? = nil
+    var allowedIdentities: Set<String>? = nil
     @FocusState private var focusedItemID: String?
+    @State private var artworkSettledFocusID: String?
+    @State private var artworkVisibleItemID: String?
+    @Environment(\.appleArtworkLoadsPaused) private var inheritedArtworkPause
 
     private var title: String {
         section.shelfTitle ?? AppleCatalogShelfPolicy.title(for: section.catalog)
     }
 
     private var displayedItems: [AppleCatalogItem] {
-        AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
+        let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
             ? Array(section.items.prefix(10)) : section.items
+        return AppleCatalogShelfPolicy.visibleItems(items, allowed: allowedIdentities, source: source)
     }
 
     var body: some View {
@@ -2211,7 +2291,7 @@ private struct AppleCatalogSectionView: View {
                     detail(item)
                 } label: {
                     if AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked {
-                        AppleTop10Card(item: item, rank: index + 1)
+                        AppleTop10Card(item: item, rank: (section.items.firstIndex { $0.id == item.id } ?? index) + 1)
                     } else if AppleCatalogShelfPolicy.style(for: section.catalog) == .featured {
                         ApplePortraitPromoCard(item: item, viewportWidth: viewportWidth)
                     } else {
@@ -2221,10 +2301,29 @@ private struct AppleCatalogSectionView: View {
                 .focused($focusedItemID, equals: item.id)
                 .accessibilityIdentifier("home.media.\(item.id)")
                 .onAppear { requestMoreIfNearEnd(item) }
+                .onScrollVisibilityChange(threshold: 0.5) { visible in
+                    if visible { artworkVisibleItemID = item.id }
+                }
             }
         } destination: { catalogList }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.catalog.\(section.id)")
+        .environment(\.appleArtworkLoadsPaused, inheritedArtworkPause || (focusedItemID != nil && artworkSettledFocusID != focusedItemID))
+        .task(id: "\(section.id)|anchor:\(focusedItemID ?? artworkVisibleItemID ?? "")|scroll:\(inheritedArtworkPause)") {
+            guard !inheritedArtworkPause else { return }
+            do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
+            let anchor = focusedItemID ?? artworkVisibleItemID
+            let urls = anchor.map { AppleArtworkPrefetchPolicy.ahead(after: $0, in: displayedItems) }
+                ?? AppleArtworkPrefetchPolicy.urls(sections: [displayedItems])
+            await AppleRemoteImageCache.shared.prefetch(urls)
+        }
+        // The focused poster's art loads once focus has rested for the dwell,
+        // on every platform and whether or not its detail is prefetched below.
+        .task(id: focusedItemID) {
+            guard let focusedItemID else { return }
+            do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
+            artworkSettledFocusID = focusedItemID
+        }
         #if os(tvOS)
         .defaultFocus($focusedItemID, section.items.first?.id)
         // A poster that keeps focus is the next page the viewer opens, so
@@ -2267,7 +2366,7 @@ private struct AppleCatalogSectionView: View {
     /// A ranked Top 10 row shows ten and never pages.
     private func requestMoreIfNearEnd(_ item: AppleCatalogItem) {
         guard let onReachEnd, AppleCatalogShelfPolicy.style(for: section.catalog) != .ranked,
-              AppleCatalogPaging.isNearEnd(itemID: item.id, in: section.items) else { return }
+              AppleCatalogPaging.isNearEnd(itemID: item.id, in: displayedItems) else { return }
         onReachEnd()
     }
 
@@ -2496,6 +2595,8 @@ struct AppleCatalogCard: View {
 
     private var artworkPurpose: AppleArtworkResolver.Purpose { isLandscapeCard ? .resume : .poster }
 
+    @Environment(\.appleArtworkLoadsPaused) private var artworkLoadsPaused
+
     private var artworkRequestID: String {
         [item.id, item.posterURL?.absoluteString ?? "", item.backgroundURL?.absoluteString ?? "",
          artworkPurpose.rawValue, artworkPurpose.size(pixelWidth: cardWidth * displayScale),
@@ -2645,7 +2746,9 @@ struct AppleCatalogCard: View {
                     artworkRetries += 1
                     failedArtworkURLs = []
                 }
-                .task(id: artworkRequestID) {
+                .task(id: artworkRequestID + "|paused:\(artworkLoadsPaused)") {
+                    guard !artworkLoadsPaused else { return }
+                    do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
                     #if DEBUG
                     if sizing == .ranked {
                         AppleInteractionTrace.record(.network,
@@ -2906,6 +3009,7 @@ struct AppleCatalogItemDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -3376,6 +3480,9 @@ struct AppleCatalogItemDetailView: View {
         }
         // Art-first: the autoplaying trailer is not even looked for until the
         // hero still is on screen, and at low priority behind the page.
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
+            lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
         .task(id: AppleTrailerArtFirstPolicy.autoplayRequestID(
             itemID: item.id, enabled: allowsTrailerAutoplay, art: heroStill.art, keys: trailerCandidates
         ), priority: .low) {
@@ -4818,7 +4925,7 @@ struct AppleCatalogItemDetailView: View {
     /// The trailer's web view — its request — only goes in once the hero
     /// still has settled; until then a started trailer waits, unseen.
     private var trailerPreviewIsShown: Bool {
-        heroTrailer.hasStarted && trailerEmbedURL != nil
+        !reduceMotion && !lowPowerMode && systemAllowsTrailerVideo && heroTrailer.hasStarted && trailerEmbedURL != nil
             && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: heroStill.art, pressed: true)
             && !playbackCoordinator.phase.isBusy && playbackUI.presentation == nil
     }
@@ -4826,19 +4933,28 @@ struct AppleCatalogItemDetailView: View {
     /// Never on the Apple TV, which plays no trailer — so its title page
     /// never probes or resolves one either. The Mac's plays by itself as its
     /// Discover hero does (N69, owner 2026-09-25).
+    private var systemAllowsTrailerVideo: Bool {
+        #if os(iOS) || os(visionOS)
+        UIAccessibility.isVideoAutoplayEnabled
+        #else
+        true
+        #endif
+    }
+
     private var allowsTrailerAutoplay: Bool {
+        guard !lowPowerMode, systemAllowsTrailerVideo else { return false }
         #if os(visionOS)
-        AppleTrailerPreviewPolicy.titlePageAutoplays(on: .vision, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
+        return AppleTrailerPreviewPolicy.titlePageAutoplays(on: .vision, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #elseif os(iOS)
-        AppleTrailerPreviewPolicy.titlePageAutoplays(
+        return AppleTrailerPreviewPolicy.titlePageAutoplays(
             on: .phoneOrPad, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion,
             systemVideoAutoplayEnabled: systemVideoAutoplayEnabled
         )
         #elseif os(macOS)
-        usesMacTitlePage
+        return usesMacTitlePage
             && AppleTrailerPreviewPolicy.titlePageAutoplays(on: .mac, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #else
-        AppleTrailerPreviewPolicy.titlePageAutoplays(on: .tv, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
+        return AppleTrailerPreviewPolicy.titlePageAutoplays(on: .tv, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #endif
     }
 

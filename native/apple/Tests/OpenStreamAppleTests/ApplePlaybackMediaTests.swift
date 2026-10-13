@@ -21,8 +21,8 @@ import Testing
     let store = ApplePlaybackStore(defaults: defaults)
     let rawMediaID = "/fixture/Movies/private-title.mp4"
 
-    store.save(mediaID: rawMediaID, position: 569, duration: 600)
-    #expect(store.progress(for: rawMediaID)?.resumePosition == 569)
+    store.save(mediaID: rawMediaID, position: 589, duration: 600)
+    #expect(store.progress(for: rawMediaID)?.resumePosition == 589)
 
     let data = try #require(defaults.data(forKey: "openstream.playback.progress.v1"))
     let persisted = try JSONDecoder().decode([String: ApplePlaybackProgress].self, from: data)
@@ -30,7 +30,7 @@ import Testing
     #expect(ApplePlaybackIdentity.isStorageKey(key))
     #expect(!key.contains("private-title"))
 
-    store.save(mediaID: rawMediaID, position: 570, duration: 600)
+    store.save(mediaID: rawMediaID, position: 590, duration: 600)
     #expect(store.progress(for: rawMediaID) == nil)
 }
 

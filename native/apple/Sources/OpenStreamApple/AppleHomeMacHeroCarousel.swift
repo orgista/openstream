@@ -124,7 +124,7 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
         #endif
         return AppleHeroRotation.cycleIsPaused(isTouching: isHovering, trailerIsPlaying: trailer.isPlaying,
                                         trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested,
-                                        isHidden: !heroIsVisible)
+                                        isHidden: !heroIsVisible || reduceMotion)
     }
 
     /// Holds the timer where it is, or runs it on from there.

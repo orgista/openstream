@@ -21,9 +21,9 @@ struct AppleNextEpisodeHandoffTests {
             position: 1795.2, duration: 1800, nextTitle: "S1 E2", hasEnded: true))
     }
 
-    @Test func aTickWithinHalfASecondOfTheEndCounts() {
+    @Test func aTickAfterTheFifteenSecondCountdownCounts() {
         #expect(AppleNextEpisodePolicy.shouldAutoAdvance(position: 1799.6, duration: 1800, nextTitle: "S1 E2"))
-        #expect(!AppleNextEpisodePolicy.shouldAutoAdvance(position: 1799.4, duration: 1800, nextTitle: "S1 E2"))
+        #expect(!AppleNextEpisodePolicy.shouldAutoAdvance(position: 1794.9, duration: 1800, nextTitle: "S1 E2"))
     }
 
     @Test func theEndStillRespectsNotNowAndTheSetting() {

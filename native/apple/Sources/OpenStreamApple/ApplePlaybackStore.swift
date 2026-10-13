@@ -312,6 +312,7 @@ public final class ApplePlaybackStore {
         recordTerminal(storageKey, .init(completedAt: date))
         persistWatched(history.watched, tombstones: history.tombstones)
         reconcileStoredProgress()
+        NotificationCenter.default.post(name: ApplePlaybackProgressFeed.continueWatchingChangeNotification, object: nil)
     }
 
     /// "Mark as Unwatched": records a reset event that supersedes older
@@ -348,6 +349,7 @@ public final class ApplePlaybackStore {
         var removed = continueWatchingRemovals()
         removed[storageKey] = max(removed[storageKey] ?? .distantPast, date)
         persistRemovals(removed)
+        NotificationCenter.default.post(name: ApplePlaybackProgressFeed.continueWatchingChangeNotification, object: nil)
     }
 
     /// Whether the viewer took `mediaID` off Continue Watching and has not

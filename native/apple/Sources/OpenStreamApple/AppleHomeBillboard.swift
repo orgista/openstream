@@ -523,7 +523,13 @@ private struct AppleHomeHeroPreview: View {
     @Environment(\.displayScale) private var displayScale
     #endif
 
+    @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+
     private var shouldPreview: Bool {
+        guard !reduceMotion, !lowPowerMode else { return false }
+        #if os(iOS) || os(visionOS)
+        guard systemVideoAutoplayEnabled else { return false }
+        #endif
         #if os(macOS)
         let active = isVisible && isPresented && isInWindow && scenePhase == .active
             && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: art, pressed: trailerRequest != nil)
@@ -623,6 +629,9 @@ private struct AppleHomeHeroPreview: View {
             #endif
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { artFrameSize = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
+            lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
         .onAppear {
             isPresented = true
             #if DEBUG && os(iOS)

@@ -53,6 +53,7 @@ struct AppleRemoteImage: View {
     /// (67 pt in a 1440 pt window, 627 pt in a 3440 pt one; N44).
     var fillAlignment: Alignment? = nil
 
+    @Environment(\.appleArtworkLoadsPaused) private var loadsPaused
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
     @State private var failed = false
@@ -74,7 +75,9 @@ struct AppleRemoteImage: View {
                     loadingFill
                 }
             }
-            .task(id: loadIdentity(url: url, size: geometry.size)) {
+            .task(id: loadIdentity(url: url, size: geometry.size) + "|paused:\(loadsPaused)") {
+                guard !loadsPaused else { return }
+                do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
                 if !keepsImageWhileReloading { image = nil }
                 failed = false
                 guard let url else {

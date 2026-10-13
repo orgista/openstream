@@ -27,7 +27,7 @@ struct AppleHeroRotationCycleTests {
     }
 
     @Test func manualPagingWhileLoadingKeepsShownIndicatorAndFocusPause() {
-        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        var cycle = AppleHeroRotation.Cycle(count: 4, now: start)
         cycle.pause(at: start)
         cycle.step(by: 1, at: start)
         cycle.waitForPresentation()
@@ -73,7 +73,7 @@ struct AppleHeroRotationCycleTests {
         #expect(cycle.dueDate == start.addingTimeInterval(12))
     }
 
-    @Test func itAdvancesAndWrapsWhenDue() {
+    @Test func itAdvancesWhenDueAndStopsAtTheLastPage() {
         var cycle = AppleHeroRotation.Cycle(count: 2, interval: 12, now: start)
         let early = cycle.advanceIfDue(at: start.addingTimeInterval(11))
         #expect(!early)
@@ -82,8 +82,9 @@ struct AppleHeroRotationCycleTests {
         #expect(cycle.index == 1)
         #expect(cycle.progress(at: start.addingTimeInterval(12)) == 0)
         let wrapped = cycle.advanceIfDue(at: start.addingTimeInterval(24))
-        #expect(wrapped)
-        #expect(cycle.index == 0)
+        #expect(!wrapped)
+        #expect(cycle.index == 1)
+        #expect(cycle.dueDate == nil)
     }
 
     @Test func pausingHoldsTheFillAndResumingCarriesOn() {

@@ -159,13 +159,16 @@ public final class AppleTransportOverlayModel {
     public var nextEpisodePrompt: AppleNextEpisodePrompt? {
         // A provider's error clip is not the episode ending.
         guard nextEpisode != nil, !coordinator.isPlaceholderPlayback else { return nil }
-        return AppleNextEpisodePolicy.prompt(
+        let prompt = AppleNextEpisodePolicy.prompt(
             position: position,
             duration: duration,
             nextTitle: nextEpisodeTitle,
             isLive: isLive,
             isDismissed: nextEpisodeDismissed
         )
+        guard let prompt else { return nil }
+        return autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance()
+            ? prompt : AppleNextEpisodePrompt(title: prompt.title, secondsRemaining: 0)
     }
 
     /// The viewer saying "no". Hides the card and cancels the auto-advance
@@ -178,14 +181,17 @@ public final class AppleTransportOverlayModel {
     /// Tells the player whether `.ended` hands over to the next episode
     /// (stay open) or closes it.
     private func syncEndHandOff() {
-        coordinator.handsOffAtEnd = AppleNextEpisodePolicy.handsOffAtEnd(
+        // Once a handoff starts, keep this player open while its successor resolves.
+        // The cap limits the next request, not the request already in flight.
+        coordinator.handsOffAtEnd = hasAdvancedToNextEpisode || AppleNextEpisodePolicy.handsOffAtEnd(
             hasNext: nextEpisode != nil && nextEpisodeTitle != nil, isLive: isLive,
-            isDismissed: nextEpisodeDismissed, isEnabled: autoPlayNextEpisode)
+            isDismissed: nextEpisodeDismissed, isEnabled: autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance())
     }
 
     /// Starts the next episode now, from the card.
     public func playNextEpisode() {
         guard let nextEpisode else { return }
+        coordinator.autoPlayChain.interacted()
         hasAdvancedToNextEpisode = true
         // This one stays on screen until the next is ready; it must not keep
         // talking over the wait.
@@ -525,9 +531,10 @@ public final class AppleTransportOverlayModel {
             nextTitle: nextEpisodeTitle,
             isLive: isLive,
             isDismissed: nextEpisodeDismissed,
-            isEnabled: autoPlayNextEpisode,
+            isEnabled: autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance(),
             hasEnded: hasEnded
         ) else { return }
+        coordinator.autoPlayChain.didAdvance()
         hasAdvancedToNextEpisode = true
         appleTrace("next episode auto-advance → \(nextEpisodeTitle ?? "?")")
         nextEpisode()
@@ -560,6 +567,8 @@ public final class AppleTransportOverlayModel {
     /// Called by the view on any user interaction (tap, focus move, remote
     /// press). Re-shows the controls and restarts the auto-hide timer.
     public func bumpActivity() {
+        coordinator.autoPlayChain.interacted()
+        syncEndHandOff()
         controlsVisible = true
         scheduleAutoHide()
     }
@@ -650,6 +659,7 @@ public final class AppleTransportOverlayModel {
             }
             // A load boundary replaces the item and with it the window.
             refreshSeekableRange()
+            syncEndHandOff()
             if phase == .ended { advanceToNextEpisodeIfDue(hasEnded: true) }
             // Phase is otherwise read directly from the coordinator;
             // re-evaluate auto-hide.
@@ -662,6 +672,7 @@ public final class AppleTransportOverlayModel {
             // The window slides with the stream: re-read it on every tick so
             // the badge, the scrubber and the skip bounds all follow the edge.
             refreshSeekableRange()
+            syncEndHandOff()
             advanceToNextEpisodeIfDue()
             // Cues carry source PTS and the active cue rolls with the position;
             // re-read on each tick so the overlay renders the current cue, but

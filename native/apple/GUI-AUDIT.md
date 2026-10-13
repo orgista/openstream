@@ -2422,3 +2422,15 @@ brought back on screen after the walk had scrolled past their row.
 
 - [x] Safe source scans retain stale offline records and groups; deletion requires completeness; successful-scan dates persist. Lead-review correction: NAS Library uses the original network scanner and raw path/URL/ID conversion, with 100,000-entry / 20,000-folder bounds; browse scanner unchanged. Slash variants, 302 folders / 12,080 files, denied-child retention/stamp, failed-root, safety-bound and cancellation fixtures pass; full Swift gate 3082 / 385; iOS/tvOS Debug builds confirm AppleNetworkShare, AppleLocalLibraryStore and the restored AppleSMBLibraryScanner recompiled.
 - [x] Completion activity and available successors feed Discover/Library/Top Shelf through one policy. Completed bars suppressed and finished series excluded; save/index-sync, boundary, removal and successor fixtures pass. No rendered UI changes or device verification claimed.
+
+
+## 2026-10-13 — Apple TV REA behaviours
+
+- [x] #1 Hero retains the recorded 12-second visible-page/trailer-remainder dwell; automatic rotation stops on the last page, manual paging remains, and visibility/background/Reduce Motion pause applies. Cycle/presentation/visibility policy tests pass. REA 5-second/1-second timing conflicts with OWNER-TODO's retained dwell decision.
+- [x] #2 Completion uses runtime bands without changing stored progress; each band edge, invalid clocks, provider authority, resume and successor policies tested.
+- [x] #3 Existing custom post-play card appears within 20 seconds of the end with a 15-second countdown; carried session stops unattended playback at 3 episodes or 2 hours, interaction resets it. Cap, carryover and pending-third-episode handoff tests pass. Stock AVKit has its existing contextual action, no countdown-card surface.
+- [x] #4 Hero/title-page video honours Reduce Motion, Low Power Mode and the public UIKit video-autoplay preference; power notifications arrive on the main run loop. Pure restriction tests pass; existing tvOS no-trailer rule retained.
+- [x] #5 Three prior collections plus within-row dedup follow final row order, using existing canonical/source-scoped identities. Soft diversity and surviving Top 10 rank numbers retained. Opaque-provider, strong-ID, window and filtered-tail paging tests pass; full catalog contents remain available through See All.
+- [x] #7 Continue Watching appends new records, replaces newer timestamps in place and refreshes 500 ms after Mark Watched/Remove. Membership/removal, stale/equal timestamps and duplicate merge tests pass.
+- [x] #9 Focus/artwork work waits 200 ms, new loads defer during scrolling, and settled catalog focus/visibility prefetches up to 20 items ahead. Bounds, dedup and pause policies tested.
+- [x] Final Dev-Mini serial gate: 3178 tests / 398 suites. Final E2E: tvOS 20 passed / 0 failed; iOS 40 passed / 1 failed (known AirPlay no-visible-response case; Messages passed). Both builds confirm all 26 changed/new production files recompiled for arm64. App/group/host data restore hashes verified, simulators shut down. No commit or upload; items 6/8/10 skipped per spec.

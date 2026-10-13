@@ -50,12 +50,12 @@ struct AppleArtworkPrefetchPolicyEdgeTests {
         #expect(urls == [])
     }
 
-    @Test("The default perSection caps a section at 12 items when the caller does not pass one")
-    func defaultPerSectionCapsAtTwelveItems() {
-        let items = (1 ... 13).map { makeItem(id: "\($0)", poster: "https://fixture.example/poster\($0).jpg") }
+    @Test("The default perSection caps a section at 20 items when the caller does not pass one")
+    func defaultPerSectionCapsAtTwentyItems() {
+        let items = (1 ... 21).map { makeItem(id: "\($0)", poster: "https://fixture.example/poster\($0).jpg") }
         let urls = AppleArtworkPrefetchPolicy.urls(sections: [items])
-        #expect(urls.count == 12)
-        #expect(urls == (1 ... 12).map { URL(string: "https://fixture.example/poster\($0).jpg")! })
+        #expect(urls.count == 20)
+        #expect(urls == (1 ... 20).map { URL(string: "https://fixture.example/poster\($0).jpg")! })
     }
 
     @Test("A detail item with no art de-duplicates its own repeated episode thumbnails")

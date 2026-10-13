@@ -146,11 +146,13 @@ struct AppleTransportOverlay: View {
             // The choices made in this episode go with it to the next.
             model.nextEpisode = { [weak model, coordinator] in
                 let engine = coordinator.engine
-                nextEpisode.start(AppleTrackCarryOver.capture(
+                var carry = AppleTrackCarryOver.capture(
                     audioTracks: engine.audioTracks,
                     activeAudioID: model?.selectedAudioID ?? engine.activeAudioTrackID,
                     subtitleTracks: engine.subtitleTracks,
-                    activeSubtitleID: engine.activeSubtitleTrackID))
+                    activeSubtitleID: engine.activeSubtitleTrackID)
+                carry.autoPlayChain = coordinator.autoPlayChain
+                nextEpisode.start(carry)
             }
             model.nextEpisodeTitle = nextEpisode.title
             model.autoPlayNextEpisode = UserDefaults.standard.object(

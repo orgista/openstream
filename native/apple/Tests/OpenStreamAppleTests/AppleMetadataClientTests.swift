@@ -235,10 +235,10 @@ func titlePageTrailerAutoplaysWithTheSettingOnAndReduceMotionOff(device: AppleTr
     #expect(AppleTrailerPreviewPolicy.titlePageAutoplays(on: .mac, setting: true, reduceMotion: false))
 }
 
-@Test func onlyThePhoneAndPadTitlePageFollowSystemVideoAutoplay() {
+@Test func allTitlePagesFollowSystemVideoAutoplay() {
     #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(
         on: .phoneOrPad, setting: true, reduceMotion: false, systemVideoAutoplayEnabled: false))
-    #expect(AppleTrailerPreviewPolicy.titlePageAutoplays(
+    #expect(!AppleTrailerPreviewPolicy.titlePageAutoplays(
         on: .mac, setting: true, reduceMotion: false, systemVideoAutoplayEnabled: false))
 }
 

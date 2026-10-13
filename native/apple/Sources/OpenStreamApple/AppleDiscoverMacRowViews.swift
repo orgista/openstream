@@ -99,6 +99,8 @@ struct AppleMacRail<Content: View>: View {
     @ViewBuilder let content: Content
     @State private var geometry = AppleRailPaging.Geometry()
     @State private var isHovered = false
+    @State private var artworkScrollIsMoving = false
+    @Environment(\.appleArtworkLoadsPaused) private var inheritedArtworkPause
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -108,6 +110,8 @@ struct AppleMacRail<Content: View>: View {
                     .background(alignment: .leading) { anchors }
             }
             .scrollIndicators(.never)
+            .onScrollPhaseChange { _, phase in artworkScrollIsMoving = phase != .idle }
+            .environment(\.appleArtworkLoadsPaused, AppleArtworkLoadingPolicy.shouldPause(isScrolling: artworkScrollIsMoving, focusSettled: !inheritedArtworkPause))
             .buttonStyle(.plain)
             .onScrollGeometryChange(for: AppleRailPaging.Geometry.self) { scroll in
                 AppleRailPaging.Geometry(offset: scroll.contentOffset.x, contentWidth: scroll.contentSize.width,

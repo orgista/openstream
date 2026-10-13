@@ -132,7 +132,7 @@ public enum AppleMetadataPrefetcher: Sendable {
     /// How long a poster must keep focus before its title page is fetched
     /// ahead of a press. Shorter, and every poster a swipe passes over would
     /// cost add-on requests.
-    public static let focusDwell: Duration = .milliseconds(500)
+    public static let focusDwell: Duration = .milliseconds(200)
 
     /// Only a canonical `tt…` id can be warmed: the page asks every request
     /// with that id, and a catalog-specific id would first need a lookup the

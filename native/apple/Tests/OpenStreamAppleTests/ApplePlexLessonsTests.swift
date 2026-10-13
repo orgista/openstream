@@ -115,7 +115,7 @@ struct ApplePlexLessonsTests {
         #expect(after.retaining(before.items).map(\.relativePath) == ["one.mp4"])
     }
 
-    @Test(arguments: [(0.0, 20.0, true), (70.0, 100.0, true), (69.0, 100.0, false), (949.0, 1000.0, false),
+    @Test(arguments: [(0.0, 20.0, false), (90.0, 100.0, true), (89.0, 100.0, false), (819.0, 1000.0, false),
                       (950.0, 1000.0, true), (1969.0, 2000.0, true)])
     func completionBoundaries(_ value: (Double, Double, Bool)) {
         #expect(AppleCompletionPolicy.isComplete(position: value.0, duration: value.1) == value.2)

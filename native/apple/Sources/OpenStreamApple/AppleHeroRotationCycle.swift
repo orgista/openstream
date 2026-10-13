@@ -39,7 +39,7 @@ extension AppleHeroRotation {
         /// When the page changes on its own, or nil when it will not (paused, or
         /// nothing to move to).
         public var dueDate: Date? {
-            guard !awaitsPresentation, count > 1, interval > 0, let runningSince else { return nil }
+            guard !awaitsPresentation, count > 1, index < count - 1, interval > 0, let runningSince else { return nil }
             return runningSince.addingTimeInterval(max(interval - elapsedBeforeRun, 0))
         }
 

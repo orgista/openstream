@@ -16,6 +16,8 @@ public final class ApplePlaybackProgressFeed {
     /// Moves on every save or clear, in any `ApplePlaybackStore`.
     public private(set) var revision = 0
 
+    public static let continueWatchingChangeNotification = Notification.Name("OpenStreamContinueWatchingChanged")
+
     private init() {}
 
     /// `store`'s progress for `mediaID`, read so the caller is invalidated by

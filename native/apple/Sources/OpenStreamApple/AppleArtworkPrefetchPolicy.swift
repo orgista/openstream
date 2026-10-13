@@ -8,7 +8,7 @@ public enum AppleArtworkPrefetchPolicy {
     /// - Parameters:
     ///   - sections: The sections of items.
     ///   - perSection: The maximum number of items to inspect per section.
-    public static func urls(sections: [[AppleCatalogItem]], perSection: Int = 12) -> [URL] {
+    public static func urls(sections: [[AppleCatalogItem]], perSection: Int = 20) -> [URL] {
         var urls: [URL] = []
         var seen: Set<URL> = []
 
@@ -27,6 +27,12 @@ public enum AppleArtworkPrefetchPolicy {
             }
         }
         return urls
+    }
+
+    /// Warm the next twenty items from the settled focus, excluding that item.
+    public static func ahead(after itemID: String, in items: [AppleCatalogItem]) -> [URL] {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return [] }
+        return urls(sections: [Array(items.dropFirst(index + 1).prefix(20))], perSection: 20)
     }
 
     /// Returns the URLs to prefetch for a detail view.

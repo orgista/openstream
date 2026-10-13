@@ -13,6 +13,28 @@ import os
 /// rebuilt from its IMDb id when its add-on is enabled. What still cannot
 /// open is hidden everywhere, and why is logged once.
 enum AppleContinueWatchingResolver {
+    static let refreshDelay: Duration = .milliseconds(500)
+
+    /// Incoming membership is authoritative; ordering is stable across refreshes.
+    static func merge<Value, Stamp: Comparable>(_ current: [Value], incoming: [Value],
+        id: (Value) -> String, timestamp: (Value) -> Stamp) -> [Value] {
+        let incomingIDs = Set(incoming.map(id))
+        var seen = Set<String>()
+        var result = current.filter { incomingIDs.contains(id($0)) && seen.insert(id($0)).inserted }
+        var positions = Dictionary(result.enumerated().map { (id($0.element), $0.offset) },
+            uniquingKeysWith: { first, _ in first })
+        for value in incoming {
+            let key = id(value)
+            if let index = positions[key] {
+                if timestamp(value) > timestamp(result[index]) { result[index] = value }
+            } else {
+                positions[key] = result.count
+                result.append(value)
+            }
+        }
+        return result
+    }
+
     /// How many titles a Continue Watching row shows.
     static let maximumCount = 12
 
@@ -139,7 +161,7 @@ enum AppleContinueWatchingResolver {
         return records.compactMap { record in
             let resolution = resolve(record, in: lookups)
             if let match = resolution.match {
-                guard seenItemIDs.insert(match.item.id).inserted else { return nil }
+                guard seenItemIDs.insert(AppleCatalogShelfPolicy.identity(match.item, source: match.source)).inserted else { return nil }
             }
             return Entry(record: record, resolution: resolution)
         }

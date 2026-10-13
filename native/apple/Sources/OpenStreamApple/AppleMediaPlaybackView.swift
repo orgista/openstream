@@ -785,12 +785,16 @@ struct AppleMediaPlayerView: View {
         guard let nextEpisode, !stockRouteHandedOff, !coordinator.isPlaceholderPlayback,
               AppleNextEpisodePolicy.handsOffAtEnd(hasNext: true, isLive: request.isLive,
                                                    isDismissed: false, isEnabled: autoPlay) else { return false }
+        guard manual || coordinator.autoPlayChain.canAdvance() else { return false }
+        if manual { coordinator.autoPlayChain.interacted() } else { coordinator.autoPlayChain.didAdvance() }
         stockRouteHandedOff = true
         appleTrace("next episode (stock route) → \(nextEpisode.title)")
         let engine = coordinator.engine
-        nextEpisode.start(AppleTrackCarryOver.capture(
+        var carry = AppleTrackCarryOver.capture(
             audioTracks: engine.audioTracks, activeAudioID: engine.activeAudioTrackID,
-            subtitleTracks: engine.subtitleTracks, activeSubtitleID: engine.activeSubtitleTrackID))
+            subtitleTracks: engine.subtitleTracks, activeSubtitleID: engine.activeSubtitleTrackID)
+        carry.autoPlayChain = coordinator.autoPlayChain
+        nextEpisode.start(carry)
         return true
     }
 

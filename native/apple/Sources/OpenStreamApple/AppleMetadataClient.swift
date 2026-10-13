@@ -151,9 +151,10 @@ public enum AppleTMDBError: Error, Equatable, LocalizedError, Sendable {
 public enum AppleTrailerPreviewPolicy {
     public static func shouldAutoplay(
         reduceMotion: Bool,
-        systemVideoAutoplayEnabled: Bool
+        systemVideoAutoplayEnabled: Bool,
+        lowPowerMode: Bool = false
     ) -> Bool {
-        !reduceMotion && systemVideoAutoplayEnabled
+        !reduceMotion && systemVideoAutoplayEnabled && !lowPowerMode
     }
 
     /// The devices a title page's hero trailer can autoplay on.
@@ -170,9 +171,11 @@ public enum AppleTrailerPreviewPolicy {
         on device: TitlePageDevice,
         setting: Bool,
         reduceMotion: Bool,
-        systemVideoAutoplayEnabled: Bool = true
+        systemVideoAutoplayEnabled: Bool = true,
+        lowPowerMode: Bool = false
     ) -> Bool {
-        guard setting, !reduceMotion else { return false }
+        guard setting, shouldAutoplay(reduceMotion: reduceMotion,
+            systemVideoAutoplayEnabled: systemVideoAutoplayEnabled, lowPowerMode: lowPowerMode) else { return false }
         switch device {
         case .phoneOrPad: return systemVideoAutoplayEnabled
         case .vision, .mac: return true

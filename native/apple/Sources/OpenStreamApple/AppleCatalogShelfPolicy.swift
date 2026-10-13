@@ -1,6 +1,36 @@
 import Foundation
 
 enum AppleCatalogShelfPolicy {
+    /// Deduplication follows final display order, independently of soft ranking.
+    static func deduplicatedRows(_ rows: [[String]]) -> [[String]] {
+        var result: [[String]] = []
+        for row in rows {
+            let prior = Set(result.suffix(3).flatMap { $0 })
+            var seen = Set<String>()
+            result.append(row.filter { !prior.contains($0) && seen.insert($0).inserted })
+        }
+        return result
+    }
+
+    /// Opaque add-on IDs belong to their provider. Strong IDs and known title/year
+    /// identities still merge across providers, as recommendation diversity does.
+    static func identity(_ item: AppleCatalogItem, source: AppleSource? = nil) -> String {
+        #if OPENSTREAM_ADDONS
+        let scope = source?.kind == .stremio ? source?.id.uuidString ?? "" : ""
+        #else
+        let scope = ""
+        #endif
+        return AppleRecommendationInputs.identity(item, sourceID: scope)
+    }
+
+    static func visibleItems(_ items: [AppleCatalogItem], allowed: Set<String>? = nil, source: AppleSource? = nil) -> [AppleCatalogItem] {
+        var seen = Set<String>()
+        return items.filter {
+            let key = identity($0, source: source)
+            return (allowed?.contains(key) ?? true) && seen.insert(key).inserted
+        }
+    }
+
     /// Incremental soft overlap cost for recommendation composition only.
     /// Authoritative catalog ranks and Continue Watching never call this.
     struct DiversitySignals: Sendable {

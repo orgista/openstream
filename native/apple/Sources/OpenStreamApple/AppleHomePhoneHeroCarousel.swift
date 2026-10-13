@@ -82,7 +82,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     private var isPaused: Bool {
         AppleHeroRotation.cycleIsPaused(isTouching: isTouching, trailerIsPlaying: trailer.isPlaying,
                                         trailerIsMuted: trailer.isMuted, trailerWasRequested: trailer.isRequested,
-                                        isHidden: !heroIsVisible)
+                                        isHidden: !heroIsVisible || reduceMotion)
     }
 
     /// Horizontal only: vertical drags belong to the page's scroll view, and

@@ -12,6 +12,10 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     let phoneLayout: AppleHomePhoneHeroLayout
     let wideLayout: AppleMacHeroLayout
     @ViewBuilder let page: (Int, Bool, AppleHomePresentationPolicy.Hero, Int, Int, AppleHomeTVHeroContext?) -> Page
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var rotatingCycle = AppleHeroRotation.Cycle(count: 0)
+    @State private var rotatingHeroIsVisible = false
+    @State private var rotatingTrailerIsPlaying = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -95,13 +99,39 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     }
     #if !os(macOS) && !os(tvOS)
     private var rotatingHero: some View {
-        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: AppleHeroRotation.interval)) { context in
-            if let index = AppleHeroRotation.index(at: context.date, count: items.count) {
+        Group {
+            if let index = rotatingCycle.pages(available: items.count)?.shown {
                 AppleHeroPageGate(pages: art, requested: index, slots: slots) { shown, failed in
                     page(shown, failed, .rotating, items.count, shown, nil)
-                }.padding(.horizontal, 16)
+                } onPresent: { shown in
+                    if shown == rotatingCycle.index { rotatingCycle.didPresent(at: .now) }
+                }
+                .padding(.horizontal, 16)
             }
         }
+        .onChange(of: pageIDs, initial: true) { _, _ in
+            rotatingCycle = AppleHeroRotation.Cycle(count: pageIDs.count)
+            rotatingCycle.waitForPresentation()
+            holdRotatingHero()
+        }
+        .appleHeroVisibility { visible in
+            rotatingHeroIsVisible = visible
+            holdRotatingHero()
+        }
+        .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
+            rotatingTrailerIsPlaying = state.isPlaying
+            holdRotatingHero()
+        }
+        .onChange(of: reduceMotion) { holdRotatingHero() }
+        .task(id: rotatingCycle) {
+            guard let due = rotatingCycle.dueDate else { return }
+            do { try await Task.sleep(for: .seconds(max(due.timeIntervalSinceNow, 0))) } catch { return }
+            if rotatingCycle.advanceIfDue(at: .now) { rotatingCycle.waitForPresentation() }
+        }
+    }
+    private func holdRotatingHero() {
+        if reduceMotion || !rotatingHeroIsVisible || rotatingTrailerIsPlaying { rotatingCycle.pause(at: .now) }
+        else { rotatingCycle.resume(at: .now) }
     }
     #endif
 

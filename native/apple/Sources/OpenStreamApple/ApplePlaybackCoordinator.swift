@@ -226,7 +226,12 @@ public final class ApplePlaybackCoordinator {
     /// The previous episode's audio and subtitle choices, applied once this
     /// stream's tracks are known (`AppleTrackCarryOver`). Each half clears
     /// itself when applied.
-    @ObservationIgnored var trackCarryOver: AppleTrackCarryOver?
+    @ObservationIgnored var trackCarryOver: AppleTrackCarryOver? {
+        didSet {
+            if let chain = trackCarryOver?.autoPlayChain { autoPlayChain = chain }
+        }
+    }
+    var autoPlayChain = AppleAutoPlayChain()
     /// Set by the transport while the end of this stream will start the next
     /// episode; the player then stays open at `.ended` for the handover.
     @ObservationIgnored var handsOffAtEnd = false
@@ -996,6 +1001,7 @@ public final class ApplePlaybackCoordinator {
     /// language not found yet stays pending.
     private func applyTrackCarryOver() {
         guard var carry = trackCarryOver else { return }
+        carry.autoPlayChain = nil
         let audio = engine.audioTracks
         if carry.audioLanguage != nil, !audio.isEmpty {
             if let id = carry.audioTrackID(in: audio), id != engine.activeAudioTrackID {

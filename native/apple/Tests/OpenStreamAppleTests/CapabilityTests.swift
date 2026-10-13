@@ -167,7 +167,7 @@ import Testing
     #expect(ApplePlaybackProgress(position: 5, duration: 600).resumePosition == nil)
     #expect(ApplePlaybackProgress(position: 120, duration: 600).resumePosition == 120)
     #expect(ApplePlaybackProgress(position: 569, duration: 600).resumePosition == 569)
-    #expect(ApplePlaybackProgress(position: 570, duration: 600).resumePosition == nil)
+    #expect(ApplePlaybackProgress(position: 570, duration: 600).resumePosition == 570)
     #expect(ApplePlaybackProgress(position: 590, duration: 600).resumePosition == nil)
 }
 

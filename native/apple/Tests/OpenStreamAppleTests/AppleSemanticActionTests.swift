@@ -19,7 +19,7 @@ struct AppleSemanticActionTests {
         #expect(AppleContinueWatchingCaption.tvLine(type: "series", partID: nil, position: 120, duration: 2400) == nil)
         #expect(AppleContinueWatchingCaption.tvLine(type: "movie", partID: nil, position: 120, duration: 2400) == "38 min left")
         #expect(AppleContinueWatchingCaption.tvLine(type: "movie", partID: nil, position: 0, duration: 0) == nil)
-        #expect(AppleContinueWatchingCaption.tvLine(type: "movie", partID: nil, position: 80, duration: 100) == nil)
+        #expect(AppleContinueWatchingCaption.tvLine(type: "movie", partID: nil, position: 90, duration: 100) == nil)
         #expect(AppleContinueWatchingCaption.tvLine(type: "movie", partID: nil, position: .nan, duration: 2400) == nil)
         #expect(AppleContinueWatchingCaption.tvLine(type: "series", partID: "tt1234567:2:5", position: 2399, duration: 2400) == nil)
     }
