@@ -41,6 +41,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
       Build 18 release: PUBLISHED 2026-10-12 — https://github.com/orgista/openstream-apple/releases/tag/v1.0-18
+- [ ] **Top Shelf on the real TV (owner 2026-10-12: "tv shelf still doesn't work").** OfficePlus with build 18: the
+      shelf content file (topshelf-v1.json) was missing from the app's shared folder, so tvOS showed the static
+      image. The write failed silently and was never retried. Fixed in the next build: a tvOS-safe write, a retry, and
+      failures logged. Tests pass on the simulator; confirm on OfficePlus when the TV is awake.
 - [ ] **Top Shelf: possible second cause (2026-10-12).** The tvOS brand assets had only the wide Top Shelf image; the
       standard 1920x720 "Top Shelf Image" was missing, so tvOS can stretch the logo. Added it (same art); ships in the
       next build. The dynamic shelf fix is already in build 18 (see the Top Shelf item below).
