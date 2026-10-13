@@ -7,6 +7,14 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Overnight 2026-10-13 (all in the next build):** Apple TV app behaviours from the REA of the Mac TV app (17e7041):
+      heroes pause and stop on the last item, watched by runtime band, post-play countdown with a 3-episode / 2-hour
+      autoplay cap, Reduce Motion / Low Power stop auto video, no repeats across rows, faster artwork. Fable review of
+      all of 2026-10-12: 15 findings, 14 fixed (15216f9). The 2 serious ones: library artwork/details never saved on a
+      real Apple TV, and posters flashed grey after scrolling. Lead change: Apple TV keeps playback history in app
+      settings, not in purgeable files. Gate 3204 tests; simulators tvOS 20/0, iOS 40/1 (AirPlay, known).
+      Next: Codex measures Apple TV 4/7/8/10 and writes proposals for Netflix 8/11 (hero choice, badges) for the owner.
+
 - [ ] **Use all Fable usage each week, personal and work (owner 2026-10-12).** Done on personal Fable: REA of the
       Mac TV app (report in verification-artifacts/rea-mac-tv-2026-10-12/). Paused (5-hour window): a deep review of today's commits
       (specs/fable-review-2026-10-12.md). **Work account login expired:** the owner needs to log in again (Terminal:
