@@ -207,7 +207,7 @@ public struct AppleTopShelfSnapshotReader: Sendable {
     /// empty state from nil rather than failing.
     public func read() -> AppleTopShelfSnapshot? {
         guard let root = containerProvider() else { return nil }
-        let url = root.appending(path: AppleTopShelfSnapshotWriter.filename)
+        let url = AppleTopShelfSnapshotWriter.snapshotURL(in: root)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(AppleTopShelfSnapshot.self, from: data)
     }
@@ -246,6 +246,18 @@ public actor AppleTopShelfSnapshotWriter {
     }()
     public static let filename = "topshelf-v1.json"
 
+    /// Where the snapshot lives inside the group container. Apple TV hardware
+    /// refuses writes to the container's top level (NSCocoaErrorDomain 513 on
+    /// OfficePlus, 2026-10-13; the simulator allows it), so on tvOS it goes in
+    /// the container's Library/Caches, which the Top Shelf extension reads too.
+    public static func snapshotURL(in root: URL) -> URL {
+        #if os(tvOS)
+        root.appending(path: "Library/Caches", directoryHint: .isDirectory).appending(path: filename)
+        #else
+        root.appending(path: filename)
+        #endif
+    }
+
     private let containerProvider: @Sendable () -> URL?
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
@@ -279,7 +291,10 @@ public actor AppleTopShelfSnapshotWriter {
         enabled: Bool
     ) throws {
         guard let root = containerProvider() else { throw WriteError.containerUnavailable }
-        let url = root.appending(path: Self.filename)
+        let url = Self.snapshotURL(in: root)
+        #if os(tvOS)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #endif
         guard enabled else {
             do {
                 try FileManager.default.removeItem(at: url)

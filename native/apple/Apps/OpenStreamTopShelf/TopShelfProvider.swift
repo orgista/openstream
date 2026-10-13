@@ -55,8 +55,12 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             completionHandler(nil)
             return
         }
-        let url = root.appending(path: "topshelf-v1.json")
-        guard let data = try? Data(contentsOf: url) else {
+        // Apple TV hardware only lets the app write the group container's
+        // Library/Caches (513 at the top level); the top level is a fallback
+        // for snapshots written by older builds.
+        let url = root.appending(path: "Library/Caches/topshelf-v1.json")
+        let legacyURL = root.appending(path: "topshelf-v1.json")
+        guard let data = (try? Data(contentsOf: url)) ?? (try? Data(contentsOf: legacyURL)) else {
             log.error("no snapshot at \(url.path, privacy: .public) — the app has not published one")
             completionHandler(nil)
             return
