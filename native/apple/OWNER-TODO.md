@@ -9,8 +9,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 - [ ] **Real Apple TV connected (owner 2026-10-12): "OfficePlus" (Apple TV 4K) on Dev-Mini.** Owner OK'd e2e on it
       and REA research there on the Apple TV app, Netflix and others (UI only; no DRM or sign-in workarounds;
-      screenshots stay in verification-artifacts, never in the public repo). Blocker: there is no tvOS development
-      profile that includes OfficePlus (it is registered on the portal). Creating one needs the owner's OK.
+      screenshots stay in verification-artifacts, never in the public repo). Owner OK'd a tvOS development profile:
+      three created 2026-10-12 (app, Top Shelf, wildcard runner; OfficePlus only; existing certificate). Spec:
+      specs/appletv-device-2026-10-12.md; it runs after the Live Pause fix. Installing our test build replaces the
+      OpenStream copy on that TV; reinstall build 18 from TestFlight afterwards.
 - [x] **Agents leave windows open (owner 2026-10-12: "like 20" Terminal windows).** Rule added to the workspace
       AGENTS.md ("Clean up after yourself"). Dev-Mini now runs `~/Developer/bin/tidy-gui.sh` whenever the build lock is
       released: it closes idle Terminal windows and quits Simulator when nothing is booted. Gotcha found:
