@@ -13,7 +13,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       all of 2026-10-12: 15 findings, 14 fixed (15216f9). The 2 serious ones: library artwork/details never saved on a
       real Apple TV, and posters flashed grey after scrolling. Lead change: Apple TV keeps playback history in app
       settings, not in purgeable files. Gate 3204 tests; simulators tvOS 20/0, iOS 40/1 (AirPlay, known).
-      Next: Codex measures Apple TV 4/7/8/10 and writes proposals for Netflix 8/11 (hero choice, badges) for the owner.
+      Apple TV 4/7/8/10 measured on the sim: no gap, nothing changed (verification-artifacts/remaining-polish-2026-10-13.md).
+      **Owner decisions 2026-10-13:** Netflix 8 hero = "Mix": slot 1 is the title you're watching; of the other 4, up to 2
+      unseen picks and 1 unseen release from the last 90 days; leftovers keep today's order (building now). Netflix 11
+      badges = "No new labels": posters stay as they are.
 
 - [ ] **Use all Fable usage each week, personal and work (owner 2026-10-12).** Done on personal Fable: REA of the
       Mac TV app (report in verification-artifacts/rea-mac-tv-2026-10-12/). Paused (5-hour window): a deep review of today's commits
