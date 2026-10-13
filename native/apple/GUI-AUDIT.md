@@ -2434,3 +2434,8 @@ brought back on screen after the walk had scrolled past their row.
 - [x] #7 Continue Watching appends new records, replaces newer timestamps in place and refreshes 500 ms after Mark Watched/Remove. Membership/removal, stale/equal timestamps and duplicate merge tests pass.
 - [x] #9 Focus/artwork work waits 200 ms, new loads defer during scrolling, and settled catalog focus/visibility prefetches up to 20 items ahead. Bounds, dedup and pause policies tested.
 - [x] Final Dev-Mini serial gate: 3178 tests / 398 suites. Final E2E: tvOS 20 passed / 0 failed; iOS 40 passed / 1 failed (known AirPlay no-visible-response case; Messages passed). Both builds confirm all 26 changed/new production files recompiled for arm64. App/group/host data restore hashes verified, simulators shut down. No commit or upload; items 6/8/10 skipped per spec.
+
+
+## 2026-10-13 — Netflix 8 hero mix
+
+- [x] Lead eligible resume stays first; up to two relevant unseen picks and one unseen release within 90 days displace extra hero resumes only. Canonical dedup, stable representatives, fair section gathering, dislikes/accessibility and real watch state covered by AppleHeroMixPolicyTests. Continue Watching, 12-second dwell, focus/offscreen holds, artwork gating, buttons, crop/fade and Netflix 11 labels unchanged. Recovered serial Swift gate: 3219 tests / 400 suites. Full E2E: tvOS 20/0; iOS 40/1 (known AirPlay response failure). Both simulator builds recompiled AppleDiscoverView and AppleHeroMixPolicy for arm64; app/group/host restore hashes verified and simulators shut down. OfficePlus untouched; no commit or upload.

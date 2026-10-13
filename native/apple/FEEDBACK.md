@@ -4650,3 +4650,10 @@ Heroes keep the approved 12-second dwell, pause when hidden or while a trailer p
 Home rows drop titles repeated in the previous three collections while preserving provider IDs that refer to different titles. Continue Watching keeps its order, appends new entries and refreshes after Mark Watched or Remove. Focus work waits 200 ms; artwork loads defer during scrolling and catalog rows warm up to 20 items ahead. Motion, power and supported system video preferences stop inline video.
 
 Verified on Dev-Mini: 3178 Swift tests in 398 suites, tvOS E2E 20/0 and iOS E2E 40/1. The remaining failure is the known AirPlay system-button response check; Messages passed. Both app builds recompiled all 26 changed/new source files, and original simulator data restored with matching hashes. The REA 5-second image/1-second video-end timing was not applied because the recorded owner dwell decision takes precedence. No commit or upload.
+
+
+## 2026-10-13 — Discover hero mix
+
+Discover keeps your most recent eligible Continue Watching title first, then makes room for up to two unseen suggestions and one unseen release with a known date within 90 days. Unfilled slots keep the existing fallback order. Disliked and unavailable titles are excluded; titles displaced from the hero remain in Continue Watching. Hero timing, artwork, controls and labels stay as approved.
+
+The recovered serial Swift gate passed 3,219 tests in 400 suites. Full simulator E2E met the baseline: Apple TV 20 passed / 0 failed; iOS 40 passed / 1 known AirPlay response failure. Both app builds recompiled the changed source files. Original app, group and host data restored with matching hashes, and both simulators shut down. OfficePlus was untouched. No commit or upload.
