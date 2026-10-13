@@ -24,6 +24,18 @@ Pass signing on the xcodebuild command line (manual style, these specifiers); do
 - Close everything you open; leave the TV on its Home Screen at the end.
 
 ## Work
+0. **FIRST, Top Shelf (owner 2026-10-12: "tv shelf still doesn't work", on TestFlight build 18).** Before installing
+   anything, test the build that is on the TV now: note its version (`devicectl device info apps`). Start streaming
+   the extension's logs (`log stream --predicate 'subsystem == "com.orgista.openstream.topshelf"'`, or
+   `devicectl`/`log collect --device` for OfficePlus), then launch OpenStream, wait for Discover, press Home, and
+   focus OpenStream's icon in the top row (XCUIRemote from a UI-test runner, or ask the lead). Capture a screenshot and
+   the extension's log line: it states which exit was taken (no app-group container / no snapshot / unreadable /
+   serving N sections). Also copy the app-group snapshot `topshelf-v1.json` if `devicectl` can read the group
+   container. Find the root cause and report it with that evidence before step 1. If it is an app bug, you may fix
+   it (smallest change + unit test), then prove it on the TV with our dev build.
+   Signing hint: per-target specifiers can't go on the xcodebuild command line. Build with CODE_SIGNING_ALLOWED=NO,
+   then sign the extension and the app yourself with the OfficePlus profiles and their entitlements (embedded profile
+   + `codesign --entitlements`), and install with `devicectl device install app`.
 1. Build and install OpenStream tvOS (Debug, stub-capable) on OfficePlus and run the E2E-tvOS plan there with the
    stub fixtures (`Tests/Fixtures/run-e2e.py` if it supports a device; else xcodebuild test with the plan). Report
    per test vs the sim result (sim: 20 pass / 0 fail / 16 skipped). Include the Top Shelf test.
