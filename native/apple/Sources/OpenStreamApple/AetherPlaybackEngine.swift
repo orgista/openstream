@@ -667,6 +667,21 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         rebuildSubtitleTracks()
     }
 
+    /// Reuses the engine's existing probe; tracing never opens the stream again.
+    var displayTraceSource: ApplePlaybackDisplayTrace {
+        let range: String
+        switch aether.sourceVideoFormat {
+        case .dolbyVision: range = "DV"
+        case .hdr10: range = "HDR10"
+        case .hdr10Plus: range = "HDR10+"
+        case .hlg: range = "HLG"
+        case .sdr: range = "SDR"
+        }
+        return ApplePlaybackDisplayTrace(source: range,
+            profile: aether.sourceDVProfile.map(String.init),
+            renderer: outputInfo.dynamicRange?.rawValue ?? "unknown")
+    }
+
     public var outputInfo: ApplePlaybackOutputInfo {
         guard (phase == .playing || phase == .paused), route != .none, route != .audioOnly else { return ApplePlaybackOutputInfo(dynamicRange: nil) }
         let range: ApplePlaybackOutputInfo.DynamicRange

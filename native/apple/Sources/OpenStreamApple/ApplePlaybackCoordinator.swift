@@ -407,6 +407,7 @@ public final class ApplePlaybackCoordinator {
 
     isolated deinit {
         AppleChannelHealthStore.shared.endLivePlayback(self)
+        displayTraceTask?.cancel()
         externalSubtitleTask?.cancel()
         observationTask?.cancel()
         loadTask?.cancel()
@@ -421,6 +422,7 @@ public final class ApplePlaybackCoordinator {
 
     /// Every write to `phase` goes through here, so the display assertion can
     /// never drift out of step with what is on screen.
+    private var displayTraceTask: Task<Void, Never>?
     private var attemptCountedStart = false
     private var attemptCountedFailure = false
 
@@ -444,12 +446,34 @@ public final class ApplePlaybackCoordinator {
         switch next {
         case .playing where !attemptCountedStart:
             attemptCountedStart = true
+            recordPlaybackDisplay()
             AppleInteractionTrace.count { $0.recordStarted(isLive: isLive) }
         case .failed(let failure) where !attemptCountedFailure:
             attemptCountedFailure = true
             AppleInteractionTrace.count { $0.recordFailure(failure.kind, isLive: isLive) }
         default:
             break
+        }
+    }
+
+    /// One bounded diagnostic per attempt, outside the frame/render callbacks.
+    private func recordPlaybackDisplay() {
+        guard AppleInteractionTrace.isEnabled else { return }
+        displayTraceTask?.cancel()
+        let attempt = generation
+        displayTraceTask = Task { @MainActor [weak self] in
+            // Let the playing publisher commit its willSet values and AVKit settle.
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            guard let self, !Task.isCancelled, self.generation == attempt else { return }
+            var snapshot = await ApplePlaybackDisplayTrace.source(for: self.engine)
+            guard !Task.isCancelled, self.generation == attempt else { return }
+            snapshot.readDisplay()
+            for _ in 0..<6 where snapshot.switchInProgress == true {
+                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                guard !Task.isCancelled, self.generation == attempt else { return }
+                snapshot.readDisplay()
+            }
+            AppleInteractionTrace.record(.playback, snapshot.line)
         }
     }
 
@@ -571,6 +595,8 @@ public final class ApplePlaybackCoordinator {
     }
 
     private func beginAttempt(_ request: ApplePlaybackRequest) async {
+        displayTraceTask?.cancel()
+        displayTraceTask = nil
         generation &+= 1
         let attempt = generation
         if let channelID = request.restrictionChannelID {
@@ -666,6 +692,8 @@ public final class ApplePlaybackCoordinator {
         AppleChannelHealthStore.shared.endLivePlayback(self)
         sleepTimer.cancel()
         sharedPlayback?.suspendForLocalTransition()
+        displayTraceTask?.cancel()
+        displayTraceTask = nil
         generation &+= 1
         externalSubtitleTask?.cancel()
         externalSubtitleTask = nil

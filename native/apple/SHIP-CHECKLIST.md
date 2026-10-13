@@ -50,6 +50,7 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Groups: `Internal,Reddit` (owner 2026-10-08: TraceEnabled was merged into Reddit, which now gets traced builds).
 
 ## 6. Archive and verify (one build at a time, `disk-guard.sh` first)
+- [ ] On a real Apple TV play the DV fixture/title; the TV shows its Dolby Vision badge and the trace line says DV requested + matched.
 - [ ] `CURRENT_PROJECT_VERSION=N` in the app and **every** embedded bundle (read each Info.plist).
 - [ ] `codesign --verify --deep --strict` passes; team 2VQ74PD5YG; `get-task-allow` false.
 - [ ] Mac: `pkgutil --check-signature` shows "3rd Party Mac Developer Installer: Raster Inc".
