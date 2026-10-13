@@ -9,16 +9,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 - [ ] **Apple TV posters: title on focus (owner 2026-10-12: "titles on focus").** Posters stay clean; the focused
       poster shows its title underneath, like the Apple TV app's focus caption. Built in 12aa663; verified on the tvOS simulator (only the focused poster shows its title).
-- [ ] **Full e2e after the 2026-10-12 polish queue: NOT PASSED; fixes in, re-run running.** Unit gate and all 4
-      platform builds passed. iPhone UI tests on DevPlus: 11 passed / 29 failed / 58 skipped. The iPhone app sat at 100%
-      CPU for 144 s: Top Shelf publishing rebuilt all playback history once per title (from 11a3d75). That is fixed in
-      5e70036, which also stops the background iCloud save replacing "Configuration imported". Gate: 3160 tests.
-      Re-run on DevPlus: 13 passed / 27 failed; import (369 s → 48 s) and the download Live Activity now pass. Most
-      remaining failures are stub-data tests that need a simulator. The simulator stall was the machine, not the app:
-      a Debug build on the external drive hangs at launch (AGENTS.md now says build simulator apps on the internal disk).
-      Simulator runs: iOS 18 pass / 23 fail, tvOS 4 / 16; no app bug found. The failures are missing test data (no
-      series, no Live channel list, a catalog file name mismatch) and tests that no longer match the screens. Codex
-      is fixing the test side (specs/e2e-fixtures-2026-10-12.md). Results: verification-artifacts/e2e-2026-10-12/.
+- [ ] **Full e2e after the 2026-10-12 polish queue: nearly green.** Fixed along the way: a CPU hot loop from
+      Top Shelf publishing (5e70036), the import message being overwritten (5e70036), and Reset deleting the app
+      group's system file, which broke widgets and Top Shelf (8af3ce3). The test data and outdated tests are fixed
+      too (8af3ce3). Simulators: Apple TV 20 pass / 0 fail, iPhone 38 pass / 3 fail. All 3 failures are one bug:
+      the inline Live player's Pause button doesn't respond to a tap. Codex is fixing it. Simulator apps must be
+      built on the mini's internal disk (AGENTS.md). Results: verification-artifacts/e2e-2026-10-12/.
 - [ ] **GitHub releases on every ship (owner 2026-10-12: "yes for all releases build into all pipes that it should be
       also being pushed to github").** Rule recorded in SHIP-CHECKLIST §8: every "ship N" also publishes the GitHub
       release (orgista/openstream-apple: public source snapshot + iOS/tvOS/visionOS IPAs + Mac zip + checksums).
