@@ -7,6 +7,17 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Real Apple TV connected (owner 2026-10-12): "OfficePlus" (Apple TV 4K) on Dev-Mini.** Owner OK'd e2e on it
+      and REA research there on the Apple TV app, Netflix and others (UI only; no DRM or sign-in workarounds;
+      screenshots stay in verification-artifacts, never in the public repo). Blocker: there is no tvOS development
+      profile that includes OfficePlus (it is registered on the portal). Creating one needs the owner's OK.
+- [x] **Agents leave windows open (owner 2026-10-12: "like 20" Terminal windows).** Rule added to the workspace
+      AGENTS.md ("Clean up after yourself"). Dev-Mini now runs `~/Developer/bin/tidy-gui.sh` whenever the build lock is
+      released: it closes idle Terminal windows and quits Simulator when nothing is booted. Gotcha found:
+      `osascript … tell application "Terminal"` opens a new window by itself.
+- [ ] **Use agy and Muse where possible (owner 2026-10-12).** agy takes short review and check prompts (agy-task.sh);
+      Muse takes text-only work (REA write-ups, copy, reviews). Codex keeps the heavy simulator and device runs.
+
 - [ ] **Apple TV posters: title on focus (owner 2026-10-12: "titles on focus").** Posters stay clean; the focused
       poster shows its title underneath, like the Apple TV app's focus caption. Built in 12aa663; verified on the tvOS simulator (only the focused poster shows its title).
 - [ ] **Full e2e after the 2026-10-12 polish queue: nearly green.** Fixed along the way: a CPU hot loop from
