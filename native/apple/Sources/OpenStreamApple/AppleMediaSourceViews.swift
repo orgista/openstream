@@ -2327,6 +2327,10 @@ private struct AppleLiveFullScreenControls: View {
         .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
         .modifier(ApplePINPresenter())
         #if os(iOS)
+        // UIKit's modal flag alone leaves the presenting SwiftUI inline
+        // controls exposed. Isolate this cover just like the VOD player.
+        .background(ApplePlayerAccessibilityModal().frame(width: 0, height: 0))
+        .accessibilityAddTraits(.isModal)
         // The transport's full-screen "show channels" Button fires on any
         // touch that lifts inside it — gesture priority does not stop it — so
         // a channel swipe also opened the Channels list (DevPlus, 2026-10-06).
@@ -2627,7 +2631,9 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         hosting.view.isUserInteractionEnabled = false
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         addChild(hosting)
-        view.addSubview(hosting.view)
+        // Keep the full-frame cue host below the controls. Its non-interactive
+        // view still participates in accessibility hit testing.
+        view.insertSubview(hosting.view, aboveSubview: playerViewController.view)
         NSLayoutConstraint.activate([
             hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),

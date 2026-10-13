@@ -2554,15 +2554,33 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         launch(screen: "live")
         let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
+        let originalChannelID = channel.identifier.replacingOccurrences(of: "guide.play.", with: "")
         channel.tap()
-        // Channel selection changes the inline preview; enter fullscreen explicitly.
+        // Selection may leave the preview inline or present the player.
+        // Return from any modal before testing the actual inline controls.
+        let initialClose = app.buttons["player.close"]
+        if initialClose.waitForExistence(timeout: 10) {
+            XCTAssertFalse(app.buttons["player.fullscreen"].exists, "covered inline chrome leaked through the modal")
+            initialClose.tap()
+        }
         XCTAssertTrue(revealInlineLiveControls(timeout: 60), "inline Live controls never became ready")
+        let pause = app.buttons["player.play-pause"].firstMatch
+        XCTAssertTrue(pause.isHittable, "inline Pause has no touch target after dismissal")
+        pause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in pause.exists && pause.label == "Play" }, object: nil)], timeout: 3),
+            .completed, "a real inline Pause touch did not pause playback")
+        pause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in pause.exists && pause.label == "Pause" }, object: nil)], timeout: 3),
+            .completed, "a real inline Play touch did not resume playback")
         let fullscreen = app.buttons["player.fullscreen"].firstMatch
         XCTAssertTrue(fullscreen.exists && fullscreen.isEnabled && app.frame.contains(fullscreen.frame),
                       "Full Screen is not an enabled visible control")
         fullscreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let close = app.buttons["player.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen did not open the player")
+        XCTAssertFalse(app.buttons["player.fullscreen"].exists, "covered inline chrome leaked through the modal")
         attach("live-direct-fullscreen")
 
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
@@ -2589,7 +2607,6 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(pickerShown, "Channels button did not open the picker")
         attach("live-channel-picker")
         XCTAssertGreaterThan(choices.count, 1)
-        let originalChannelID = channel.identifier.replacingOccurrences(of: "guide.play.", with: "")
         let replacement = choices.allElementsBoundByIndex.first {
             $0.identifier != "live.picker.channel.\(originalChannelID)" && $0.isHittable
         }

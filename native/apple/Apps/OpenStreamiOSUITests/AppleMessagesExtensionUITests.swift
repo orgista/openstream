@@ -104,7 +104,17 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         let staged = messages.links.matching(
             NSPredicate(format: "label BEGINSWITH %@", label)
         ).firstMatch
-        XCTAssertTrue(staged.waitForExistence(timeout: 10), "no bubble was composed for \(title)")
+        var composed = staged.waitForExistence(timeout: 10)
+        if !composed, messages.state != .runningForeground {
+            // The system host can leave the foreground after share selection.
+            // Return to the conversation before reading
+            // the staged message; a missing bubble must still fail.
+            print("Messages host left foreground after share selection: \(messages.state.rawValue)")
+            messages.activate()
+            XCTAssertTrue(messages.wait(for: .runningForeground, timeout: 5), "Messages did not return")
+            composed = staged.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(composed, "no bubble was composed for \(title)")
         XCTAssertTrue(messages.buttons["sendButton"].exists, "composed bubble is not sendable")
 
         // Never leave the draft behind: this runs on the owner's simulator.
