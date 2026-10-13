@@ -112,3 +112,66 @@ private struct SortObservationCredentialStub: AppleCredentialStoring {
 private final class SortObservationChangeFlag {
     var changed = false
 }
+
+@MainActor @Test func unnumberedLocalEpisodesReadLegacyWatchedWithoutRewritingHistory() throws {
+    let suite = "local-legacy-watched-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = ApplePlaybackStore(defaults: defaults)
+    let source = UUID()
+    let files = ["Pilot.mkv", "Finale.mkv"].map {
+        AppleLibraryItem(sourceID: source, name: $0, url: URL(fileURLWithPath: "/" + $0),
+            relativePath: "Shows/Example/Season 1/" + $0, sizeBytes: 1)
+    }
+    var group = try #require(AppleLibrarySeries.groups([files[0]]).first)
+    group.items = files
+    let episodes = AppleLocalLibraryStore.episodes(group: group, mediaID: "tt-example", enriched: [])
+    let watchedAt = Date(timeIntervalSince1970: 100)
+    store.markWatched(mediaID: "tt-example:1:1", at: watchedAt)
+    let originalHistory = store.configurationWatchedHistory()
+    let completed = AppleLocalLibraryStore.completedEpisodeIDs(episodes, group: group, mediaID: "tt-example", store: store)
+    #expect(completed == [episodes[0].id])
+    #expect(episodes[0].id == AppleLocalLibraryStore.fileEpisodeID(files[0]))
+    #expect(AppleLocalLibraryStore.nextFilenameEpisode(in: episodes, completedIDs: completed)?.id == episodes[1].id)
+    #expect(store.configurationWatchedHistory() == originalHistory)
+    #expect(store.configurationWatchedHistory()[episodes[0].id] == nil)
+    store.markUnwatched(mediaID: episodes[0].id, at: watchedAt.addingTimeInterval(1))
+    #expect(AppleLocalLibraryStore.completedEpisodeIDs(episodes, group: group, mediaID: "tt-example", store: store).isEmpty)
+    let legacyKey = try #require(ApplePlaybackIdentity.storageKey(for: "tt-example:1:1"))
+    #expect(store.configurationWatchedHistory()[legacyKey] == watchedAt)
+    store.markWatched(mediaID: episodes[0].id, at: watchedAt.addingTimeInterval(2))
+    #expect(AppleLocalLibraryStore.completedEpisodeIDs(episodes, group: group, mediaID: "tt-example", store: store) == [episodes[0].id])
+}
+
+@MainActor @Test func legacyUnwatchedLocalEpisodeDoesNotRegainItsTick() throws {
+    let suite = "local-legacy-reset-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = ApplePlaybackStore(defaults: defaults)
+    let file = AppleLibraryItem(sourceID: UUID(), name: "Pilot.mkv", url: URL(fileURLWithPath: "/Pilot.mkv"),
+        relativePath: "Shows/Example/Season 1/Pilot.mkv", sizeBytes: 1)
+    let group = try #require(AppleLibrarySeries.groups([file]).first)
+    let episodes = AppleLocalLibraryStore.episodes(group: group, mediaID: "tt-example", enriched: [])
+    store.markWatched(mediaID: "tt-example:1:1", at: Date(timeIntervalSince1970: 100))
+    store.markUnwatched(mediaID: "tt-example:1:1", at: Date(timeIntervalSince1970: 101))
+    #expect(AppleLocalLibraryStore.completedEpisodeIDs(episodes, group: group, mediaID: "tt-example", store: store).isEmpty)
+}
+
+@MainActor @Test func filenameAliasDoesNotBorrowDeduplicatedNumberedEpisodeHistory() throws {
+    let suite = "local-legacy-dedup-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = ApplePlaybackStore(defaults: defaults)
+    let source = UUID()
+    let numbered = AppleLibraryItem(sourceID: source, name: "Example.S01E02.mkv", url: URL(fileURLWithPath: "/Example.S01E02.mkv"),
+        relativePath: "Shows/Example/Season 1/Example.S01E02.mkv", sizeBytes: 1)
+    let filename = AppleLibraryItem(sourceID: source, name: "Pilot.mkv", url: URL(fileURLWithPath: "/Pilot.mkv"),
+        relativePath: "Shows/Example/Season 1/Pilot.mkv", sizeBytes: 1)
+    var group = try #require(AppleLibrarySeries.groups([numbered]).first)
+    group.items = [numbered, filename]
+    let episodes = AppleLocalLibraryStore.episodes(group: group, mediaID: "tt-example", enriched: [])
+    store.markWatched(mediaID: "tt-example:1:2", at: Date(timeIntervalSince1970: 100))
+    let completed = AppleLocalLibraryStore.completedEpisodeIDs(episodes, group: group, mediaID: "tt-example", store: store)
+    #expect(completed == ["tt-example:1:2"])
+    #expect(completed.contains(AppleLocalLibraryStore.fileEpisodeID(filename)) == false)
+}

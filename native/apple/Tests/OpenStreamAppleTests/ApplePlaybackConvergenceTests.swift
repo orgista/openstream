@@ -7,15 +7,114 @@ struct ApplePlaybackConvergenceTests {
     private let terminal = Date(timeIntervalSince1970: 200)
     private let later = Date(timeIntervalSince1970: 300)
 
-    @Test(arguments: [false, true]) func completionAndResetBeatOldOfflineProgress(reset: Bool) {
+    @Test(arguments: [false, true]) func completionBlocksOldProgressAndUnwatchPreservesResume(reset: Bool) {
         let events = ApplePlaybackTerminalEvents(completedAt: reset ? nil : terminal, resetAt: reset ? terminal : nil)
         let finished = AppleConfigurationSnapshot(playbackTerminals: ["film": events])
         let offline = AppleConfigurationSnapshot(playbackProgress: ["film": .init(position: 600, duration: 3600, updatedAt: old)])
-        #expect(finished.merging(offline).playbackProgress.isEmpty)
-        #expect(offline.merging(finished).playbackProgress.isEmpty)
+        #expect(finished.merging(offline).playbackProgress.isEmpty == (reset == false))
+        #expect(offline.merging(finished).playbackProgress.isEmpty == (reset == false))
         let rewind = AppleConfigurationSnapshot(playbackProgress: ["film": .init(position: 30, duration: 3600, updatedAt: later)])
         #expect(finished.merging(rewind).playbackProgress["film"]?.position == 30)
         #expect(rewind.merging(finished).playbackProgress["film"]?.position == 30)
+    }
+
+
+    @Test func finishingAnEpisodePreservesAnotherEpisodesResumeInEitherMergeOrder() {
+        let resume = ApplePlaybackProgress(position: 1200, duration: 3600, updatedAt: old, partID: "show:2:4")
+        let completed = ApplePlaybackProgress(position: 3590, duration: 3600, updatedAt: terminal, partID: "show:1:1")
+        let tv = AppleConfigurationSnapshot(playbackProgress: ["show": resume])
+        // Includes the old-format show terminal to verify existing owner snapshots remain readable.
+        let phone = AppleConfigurationSnapshot(playbackTerminals: ["show": .init(completedAt: terminal, playedAt: terminal)],
+            playbackActivity: ["show": completed])
+        #expect(tv.merging(phone).playbackProgress["show"] == resume)
+        #expect(phone.merging(tv).playbackProgress["show"] == resume)
+        let sameEpisode = AppleConfigurationSnapshot(playbackProgress: ["show": .init(position: 1200, duration: 3600,
+            updatedAt: old, partID: "show:1:1")])
+        #expect(sameEpisode.merging(phone).playbackProgress.isEmpty)
+    }
+
+    @MainActor @Test func episodeSaveRecordsCompletionUnderTheFinishedPart() throws {
+        let name = "playback-episode.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        store.save(mediaID: "show", position: 3590, duration: 3600, partID: "show:1:1")
+        let show = try #require(ApplePlaybackIdentity.storageKey(for: "show"))
+        let episode = try #require(ApplePlaybackIdentity.storageKey(for: "show:1:1"))
+        #expect(store.configurationPlaybackTerminals()[show]?.completedAt == nil)
+        #expect(store.configurationPlaybackTerminals()[episode]?.completedAt != nil)
+    }
+
+    @MainActor @Test func localSaveSurvivesAFutureRemoteClockAndRepeatedRestore() throws {
+        let name = "playback-clock.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let key = try #require(ApplePlaybackIdentity.storageKey(for: "film"))
+        let future = Date(timeIntervalSinceNow: 180)
+        store.restoreConfigurationPlaybackTerminals([key: .init(playedAt: future)])
+        store.save(mediaID: "film", position: 2400, duration: 3600)
+        let saved = try #require(store.progress(for: "film"))
+        #expect(saved.updatedAt > future)
+        #expect(store.lastActivity(for: "film") == saved)
+        store.restoreConfigurationPlaybackTerminals([key: .init(playedAt: future)])
+        let reloaded = ApplePlaybackStore(defaults: defaults)
+        #expect(reloaded.progress(for: "film") == saved)
+        #expect(reloaded.activities()[key] == saved)
+    }
+
+    @MainActor @Test func unwatchPreservesAnUnfinishedRewatchAfterRelaunch() throws {
+        let name = "playback-unwatch.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        store.markWatched(mediaID: "show:1:1", at: old)
+        store.save(mediaID: "show", position: 1200, duration: 3600, partID: "show:1:1")
+        store.markUnwatched(mediaID: "show:1:1", at: Date(timeIntervalSinceNow: 60))
+        let reloaded = ApplePlaybackStore(defaults: defaults)
+        #expect(reloaded.isWatched(mediaID: "show:1:1") == false)
+        #expect(reloaded.progress(for: "show")?.position == 1200)
+        #expect(reloaded.lastActivity(for: "show")?.position == 1200)
+    }
+
+    @MainActor @Test func cachedTerminalsFollowSavesAndAnotherStoresChanges() throws {
+        let name = "playback-cache.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        store.save(mediaID: "film", position: 1200, duration: 3600)
+        let key = try #require(ApplePlaybackIdentity.storageKey(for: "film"))
+        #expect(store.configurationPlaybackTerminals()[key]?.playedAt == store.progress(for: "film")?.updatedAt)
+        store.save(mediaID: "film", position: 3590, duration: 3600)
+        #expect(store.configurationPlaybackTerminals()[key]?.completedAt == store.lastActivity(for: "film")?.updatedAt)
+        let future = Date(timeIntervalSinceNow: 180)
+        ApplePlaybackStore(defaults: defaults).markUnwatched(mediaID: "film", at: future)
+        #expect(store.configurationPlaybackTerminals()[key]?.resetAt == future)
+        #expect(store.isWatched(mediaID: "film") == false)
+    }
+
+    @MainActor @Test func immediateLocalUserEventsFollowMonotonicPlaybackClock() throws {
+        let name = "playback-events.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let film = try #require(ApplePlaybackIdentity.storageKey(for: "film"))
+        store.restoreConfigurationPlaybackTerminals([film: .init(playedAt: Date(timeIntervalSinceNow: 180))])
+        store.save(mediaID: "film", position: 1200, duration: 3600)
+        store.save(mediaID: "film", position: 1500, duration: 3600)
+        store.removeFromContinueWatching(mediaID: "film")
+        #expect(store.isRemovedFromContinueWatching(mediaID: "film"))
+        store.save(mediaID: "film", position: 3590, duration: 3600)
+        #expect(store.isRemovedFromContinueWatching(mediaID: "film") == false)
+        store.markUnwatched(mediaID: "film")
+        #expect(store.isWatched(mediaID: "film") == false)
+        #expect(store.lastActivity(for: "film") == nil)
+        store.markWatched(mediaID: "film")
+        #expect(store.isWatched(mediaID: "film"))
+        let key = try #require(ApplePlaybackIdentity.storageKey(for: "historical"))
+        let historical = Date(timeIntervalSince1970: 1)
+        store.removeFromContinueWatching(mediaID: "historical", at: historical)
+        #expect(store.configurationPlaybackTerminals()[key]?.removedAt == historical)
     }
 
     @Test func equalTimestampProgressMergesDeterministically() {
@@ -123,13 +222,13 @@ struct ApplePlaybackConvergenceTests {
         defaults.set(try JSONEncoder().encode([reset: terminal, fresh: terminal]), forKey: "openstream.playback.unwatched.v1")
         let store = ApplePlaybackStore(defaults: defaults)
         #expect(store.progress(for: "finished") == nil)
-        #expect(store.progress(for: "reset") == nil)
+        #expect(store.progress(for: "reset")?.position == 60)
         #expect(store.progress(for: "fresh")?.position == 30)
         #expect(store.isWatched(mediaID: "show:1:1"))
         #expect(store.isWatched(mediaID: "show") == false)
         #expect(store.lastActivity(for: "show")?.partID == "show:1:1")
         #expect(store.configurationPlaybackActivity()[show]?.isComplete == true)
-        #expect(store.configurationProgress().count == 1)
+        #expect(store.configurationProgress().count == 2)
         let terminals = try #require(defaults.data(forKey: "openstream.playback.terminals.v1"))
         _ = ApplePlaybackStore(defaults: defaults)
         #expect(defaults.data(forKey: "openstream.playback.terminals.v1") == terminals)
@@ -230,7 +329,7 @@ struct ApplePlaybackConvergenceTests {
         let newest = Dictionary(uniqueKeysWithValues: (0..<2000).map {
             ("new-\($0)-" + String(repeating: "n", count: 700), ApplePlaybackTerminalEvents(resetAt: later.addingTimeInterval(Double($0))))
         })
-        let terminals = newest.merging([key: .init(completedAt: terminal), episodeKey: .init(removedAt: terminal)]) { $0.merging($1) }
+        let terminals = newest.merging([key: .init(removedAt: terminal), episodeKey: .init(completedAt: terminal, removedAt: terminal)]) { $0.merging($1) }
         let snapshot = AppleConfigurationSnapshot(playbackProgress: [key: progress], watchedHistory: [episodeKey: old],
             continueWatchingRemovals: [key: old], playbackTerminals: terminals, playbackActivity: [key: progress])
         let data = try snapshot.cloudData()

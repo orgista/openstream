@@ -18,6 +18,7 @@ final class AppleConfigurationController {
     private let cloud: AppleCloudKeyValueStore
     private let backupKeys: any AppleBackupKeyStoring
     private var pendingWrite: Task<Void, Never>?
+    private var pendingLocalChange: Task<Void, Never>?
     private var keychainRetry: Task<Void, Never>?
     /// Whether this device has had any source since launch. See
     /// `AppleConfigurationSyncPolicy.mayPublish`.
@@ -229,7 +230,24 @@ final class AppleConfigurationController {
         } catch { result = "Could not update Keychain sync" }
     }
 
-    func localChanged() {
+    /// One playback save writes several defaults keys. Capture only after
+    /// that burst settles, rather than encoding a snapshot for every key.
+    @discardableResult
+    func localChanged() -> Task<Void, Never>? {
+        guard started, !applying else { return nil }
+        pendingLocalChange?.cancel()
+        let task = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.pendingLocalChange = nil
+            self.processLocalChange()
+        }
+        pendingLocalChange = task
+        return task
+    }
+
+    private func processLocalChange() {
         guard started, !applying else { return }
         if !sources.sources.isEmpty { heldSources = true }
         do {
@@ -259,6 +277,13 @@ final class AppleConfigurationController {
             appleTrace("configuration sync read held: reset, waiting for Restore from iCloud")
             return
         }
+        // A queued local edit must stamp its configuration clock before a
+        // cloud read decides whether an incoming setup is newer.
+        if pendingLocalChange != nil {
+            pendingLocalChange?.cancel()
+            pendingLocalChange = nil
+            processLocalChange()
+        }
         do {
             applying = true
             try sources.refreshConfigurationKeychain()
@@ -280,7 +305,7 @@ final class AppleConfigurationController {
                         restorePlayback(snapshot)
                         applying = false
                         lastContent = try contentFingerprint()
-                        if AppleConfigurationSyncPolicy.playbackContribution(try capture(), cloud: snapshot) { scheduleWrite() }
+                        if await AppleConfigurationSyncPolicy.playbackContributionOffMain(try capture(), cloud: snapshot) { scheduleWrite() }
                     }
                     updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) }
                 }
@@ -290,7 +315,7 @@ final class AppleConfigurationController {
             try await apply(snapshot, secrets: nil, mergeSources: false)
             defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
-            let hasPlaybackContribution = AppleConfigurationSyncPolicy.playbackContribution(try capture(), cloud: snapshot)
+            let hasPlaybackContribution = await AppleConfigurationSyncPolicy.playbackContributionOffMain(try capture(), cloud: snapshot)
             if sources.sourceTombstones != snapshot.sourceTombstones || hasPlaybackContribution { scheduleWrite() }
             if !sources.sources.isEmpty || !sources.sourceTombstones.isEmpty { heldSources = true }
             appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
@@ -398,17 +423,18 @@ final class AppleConfigurationController {
             let address = AppleConfigurationSnapshot.publicAddress(url).absoluteString
             values[key] = try PropertyListSerialization.data(fromPropertyList: [address], format: .binary, options: 0)
         }
+        let playback = ApplePlaybackStore(defaults: defaults)
         var snapshot = AppleConfigurationSnapshot(
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
             sources: sources.sources, sourceTombstones: sources.sourceTombstones, settings: values,
-            playbackProgress: ApplePlaybackStore(defaults: defaults).configurationProgress(),
-            watchedHistory: ApplePlaybackStore(defaults: defaults).configurationWatchedHistory(),
-            watchedTombstones: ApplePlaybackStore(defaults: defaults).configurationWatchedTombstones(),
+            playbackProgress: playback.configurationProgress(),
+            watchedHistory: playback.configurationWatchedHistory(),
+            watchedTombstones: playback.configurationWatchedTombstones(),
             watchlist: mediaIndex.records.filter(\.isFavorite),
             ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue),
-            continueWatchingRemovals: ApplePlaybackStore(defaults: defaults).configurationContinueWatchingRemovals(),
-            playbackTerminals: ApplePlaybackStore(defaults: defaults).configurationPlaybackTerminals(),
-            playbackActivity: ApplePlaybackStore(defaults: defaults).configurationPlaybackActivity())
+            continueWatchingRemovals: playback.configurationContinueWatchingRemovals(),
+            playbackTerminals: playback.configurationPlaybackTerminals(),
+            playbackActivity: playback.configurationPlaybackActivity())
         snapshot.preservedSourcePayloads = sources.preservedConfigurationSources
         return snapshot
     }
@@ -479,12 +505,13 @@ final class AppleConfigurationController {
     private var cloudRestoreHeld: Bool { defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey) }
 
     private func restorePlayback(_ snapshot: AppleConfigurationSnapshot) {
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationPlaybackTerminals(snapshot.playbackTerminals)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationPlaybackActivity(snapshot.playbackActivity)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationProgress(snapshot.playbackProgress)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationWatchedHistory(
+        let playback = ApplePlaybackStore(defaults: defaults)
+        playback.restoreConfigurationPlaybackTerminals(snapshot.playbackTerminals)
+        playback.restoreConfigurationPlaybackActivity(snapshot.playbackActivity)
+        playback.restoreConfigurationProgress(snapshot.playbackProgress)
+        playback.restoreConfigurationWatchedHistory(
             snapshot.watchedHistory, tombstones: snapshot.watchedTombstones)
-        ApplePlaybackStore(defaults: defaults).restoreConfigurationContinueWatchingRemovals(
+        playback.restoreConfigurationContinueWatchingRemovals(
             snapshot.continueWatchingRemovals)
     }
 

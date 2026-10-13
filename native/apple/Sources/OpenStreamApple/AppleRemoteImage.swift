@@ -57,6 +57,7 @@ struct AppleRemoteImage: View {
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
     @State private var failed = false
+    @State private var loadingGate = AppleArtworkLoadingGate()
     /// The load `image` belongs to.
     @State private var imageIdentity: String?
 
@@ -75,9 +76,13 @@ struct AppleRemoteImage: View {
                     loadingFill
                 }
             }
-            .task(id: loadIdentity(url: url, size: geometry.size) + "|paused:\(loadsPaused)") {
-                guard !loadsPaused else { return }
-                do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
+            .onChange(of: loadsPaused, initial: true) { _, paused in
+                loadingGate.isPaused = paused
+            }
+            .task(id: loadIdentity(url: url, size: geometry.size)) {
+                let identity = loadIdentity(url: url, size: geometry.size)
+                guard AppleArtworkLoadingPolicy.needsReload(loadedIdentity: imageIdentity, requestedIdentity: identity, hasImage: image != nil) else { return }
+                loadingGate.isPaused = loadsPaused
                 if !keepsImageWhileReloading { image = nil }
                 failed = false
                 guard let url else {
@@ -87,13 +92,22 @@ struct AppleRemoteImage: View {
                     return
                 }
                 do {
+                    let pixelDimension = maximumPixelDimension(for: geometry.size)
+                    let inMemory = AppleRemoteImageCache.shared.cachedImage(url: url, maximumPixelDimension: pixelDimension)
+                    let isCached: Bool
+                    if inMemory != nil {
+                        isCached = true
+                    } else {
+                        isCached = await AppleArtworkDiskCache.shared.contains(url: url, variant: "raw")
+                    }
+                    try await loadingGate.waitUntilReady(isCached: isCached)
                     let loaded = try await AppleRemoteImageCache.shared.image(
                         url: url,
                         maximumPixelDimension: maximumPixelDimension(for: geometry.size)
                     )
                     guard !Task.isCancelled else { return }
                     image = loaded
-                    imageIdentity = loadIdentity(url: url, size: geometry.size)
+                    imageIdentity = identity
                     #if DEBUG
                     AppleLaunchClock.count(fixedPixelDimension != nil || keepsImageWhileReloading ? "image.hero" : "image.card",
                                            marking: [1, 8, 16, 32])

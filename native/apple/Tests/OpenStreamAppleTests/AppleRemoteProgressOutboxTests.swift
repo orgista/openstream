@@ -23,6 +23,23 @@ struct AppleRemoteProgressOutboxTests {
     }
     private let sourceID = UUID()
 
+    @Test func fileMigrationPreservesPendingEventsAndCompletionCheckpoints() throws {
+        let storage = defaults()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { clean(storage); try? FileManager.default.removeItem(at: root) }
+        let legacy = AppleRemoteProgressOutbox(defaults: storage)
+        let completion = entry(.scrobble)
+        legacy.enqueue(completion)
+        legacy.checkpointPlayCount(entryID: completion.id, count: 0)
+        let expected = legacy.entries
+        let migrated = AppleRemoteProgressOutbox(defaults: storage, blobDirectory: root)
+        #expect(migrated.entries == expected)
+        #expect(storage.data(forKey: "openstream.remote-progress.outbox.v1") == nil)
+        let reopened = AppleRemoteProgressOutbox(defaults: storage, blobDirectory: root)
+        #expect(reopened.entries == expected)
+        #expect(reopened.highestCompletionTarget(for: .init(sourceID: sourceID, itemID: completion.itemID)) == 1)
+    }
+
     @Test("Failed stop survives relaunch and holds the next episode behind it")
     func failedStopRelaunch() async {
         let storage = defaults()

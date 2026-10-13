@@ -231,11 +231,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         copy.playbackProgress = Self.newestCloudProgress(ApplePlaybackConvergence.reconciled(playbackProgress,
             terminals: copy.playbackTerminals))
         copy.playbackActivity = Self.newestCloudProgress(playbackActivity.filter { key, value in
-            let part = value.partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
-            let reset = [copy.playbackTerminals[key]?.resetAt, value.partID.flatMap { copy.playbackTerminals[$0]?.resetAt },
-                part.flatMap { copy.playbackTerminals[$0]?.resetAt }].compactMap { $0 }.max()
-            if reset.map({ value.updatedAt <= $0 }) == true { return false }
-            return copy.playbackTerminals[key]?.playedAt.map({ value.updatedAt >= $0 }) ?? true
+            ApplePlaybackConvergence.activityIsCurrent(key: key, value: value, terminals: copy.playbackTerminals)
         })
         let history = ApplePlaybackConvergence.history(AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones),
             terminals: copy.playbackTerminals).newest(Self.cloudEntryLimit)

@@ -7,6 +7,19 @@ import Testing
 /// new saved position republishes even when the media records are unchanged.
 @MainActor
 struct AppleTopShelfPublisherProgressTests {
+    @Test func oneCompletionSnapshotServesManyEpisodeLists() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        store.markWatched(mediaID: "tt1:1:1")
+        store.save(mediaID: "tt2:1:1", position: 995, duration: 1000)
+        let snapshot = store.completionProgress()
+        #expect(store.completedMediaIDs(among: [], progress: snapshot).isEmpty)
+        #expect(store.completedMediaIDs(among: ["tt1:1:1", "tt1:1:2"], progress: snapshot) == ["tt1:1:1"])
+        #expect(store.completedMediaIDs(among: ["tt2:1:1", "tt2:1:2"], progress: snapshot) == ["tt2:1:1"])
+    }
+
     @Test func aFailedWriteIsRetriedOnTheNextUnchangedPublish() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "openstream-topshelf-retry-\(UUID().uuidString)", directoryHint: .isDirectory)

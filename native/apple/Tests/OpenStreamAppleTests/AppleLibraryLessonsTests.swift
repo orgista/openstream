@@ -66,6 +66,26 @@ struct AppleLibraryLessonsTests {
         #expect(AppleLibrarySeries.groups(copies).first?.nextPart(after: copies[0]) == nil)
     }
 
+    @Test func unavailableMatchDirectoryKeepsLookupAndLegacyCacheUsable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let blocked = root.appendingPathComponent("not-a-directory")
+        try Data([0]).write(to: blocked)
+        let item = file("Film.2024.mkv", source: UUID())
+        let candidate = AppleCatalogItem(mediaID: "tt0000004", type: "movie", name: "Film")
+        let cache = root.appendingPathComponent("cache")
+        let resolver = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _, _ in candidate }
+        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
+        let reopened = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _, _ in
+            Issue.record("A saved metadata entry must avoid another lookup")
+            return nil
+        }
+        #expect(try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
+        #expect(await reopened.cachedMetadata(for: AppleLibrarySeries.groups([item])).values.first == candidate)
+        #expect(await reopened.matchRecord(for: item) == nil)
+    }
+
     @Test func correctionSurvivesRescanAndCacheVersionChange() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

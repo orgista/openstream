@@ -22,7 +22,7 @@ final class AppleRemoteProgressOutbox {
         var nextAttemptAt = Date.distantPast
     }
 
-    private let defaults: UserDefaults
+    private let blobs: ApplePlaybackBlobStorage
     private let key = "openstream.remote-progress.outbox.v1"
     private(set) var entries: [Entry]
     private var completionTargets: [String: Int]
@@ -33,9 +33,9 @@ final class AppleRemoteProgressOutbox {
     private var inFlightID: UUID?
     private(set) var isDelivering = false
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        let state = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(State.self, from: $0) }
+    init(defaults: UserDefaults = .standard, blobDirectory: URL? = nil) {
+        blobs = ApplePlaybackBlobStorage.storage(defaults: defaults, directory: blobDirectory)
+        let state = blobs.data(forKey: key).flatMap { try? JSONDecoder().decode(State.self, from: $0) }
         entries = state?.entries ?? []
         completionTargets = state?.completionTargets ?? [:]
     }
@@ -136,6 +136,6 @@ final class AppleRemoteProgressOutbox {
     }
 
     private func persist() {
-        if let data = try? JSONEncoder().encode(State(entries: entries, completionTargets: completionTargets)) { defaults.set(data, forKey: key) }
+        if let data = try? JSONEncoder().encode(State(entries: entries, completionTargets: completionTargets)) { blobs.set(data, forKey: key) }
     }
 }

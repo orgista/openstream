@@ -47,7 +47,7 @@ actor AppleLibraryMetadataResolver {
         self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LibraryTitles-v1")
         self.matchDirectory = matchDirectory ?? directory?.appendingPathComponent("Matches")
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            ?? AppleStorageLocation.directory(.applicationSupport)
                 .appendingPathComponent("OpenStream").appendingPathComponent("LibraryMatches-v1")
         self.lookup = lookup
     }
@@ -101,7 +101,7 @@ actor AppleLibraryMetadataResolver {
         if !refresh, let cached, (cached.schema ?? 0) == Self.currentSchema,
            Date().timeIntervalSince(cached.checkedAt) < (cached.value == nil ? 3600 : 604800) {
             if let value = cached.value, matchRecord(for: item) == nil {
-                try saveMatch(for: item, candidate: value, provider: "legacyCache", explicitIDs: AppleLibraryTitleParser.parse(item).explicitIDs, isManual: false)
+                saveAutomaticMatch(for: item, candidate: value, provider: "legacyCache", explicitIDs: AppleLibraryTitleParser.parse(item).explicitIDs)
             }
             return cached.value
         }
@@ -123,7 +123,7 @@ actor AppleLibraryMetadataResolver {
         // A correction can arrive while the lookup is suspended. It always wins.
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
         if let value {
-            try saveMatch(for: item, candidate: value, provider: evidence?.provider ?? "unknown", explicitIDs: parsed.explicitIDs, isManual: false)
+            saveAutomaticMatch(for: item, candidate: value, provider: evidence?.provider ?? "unknown", explicitIDs: parsed.explicitIDs)
         }
         let entry = Entry(value: value, checkedAt: Date(), addedAt: cached?.addedAt ?? Date(),
                           schema: Self.currentSchema)
@@ -144,6 +144,18 @@ actor AppleLibraryMetadataResolver {
     func correctMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem, provider: String,
                       explicitIDs: [String: String] = [:]) throws {
         try saveMatch(for: item, candidate: candidate, provider: provider, explicitIDs: explicitIDs, isManual: true)
+    }
+
+    private func saveAutomaticMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem,
+                                    provider: String, explicitIDs: [String: String]) {
+        do {
+            try saveMatch(for: item, candidate: candidate, provider: provider, explicitIDs: explicitIDs, isManual: false)
+        } catch {
+            // Automatic match persistence must not hide an otherwise usable metadata result.
+            // Error descriptions can carry paths; retain only the domain/code.
+            let failure = error as NSError
+            AppleInteractionTrace.record(.failure, "Library match write failed: \(failure.domain) code=\(failure.code)")
+        }
     }
 
     private func saveMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem, provider: String,

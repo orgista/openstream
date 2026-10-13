@@ -66,8 +66,8 @@ struct AppleNextEpisodePolicyTests {
 
     @Test func theCountdownCountsDown() {
         let prompt = AppleNextEpisodePolicy.prompt(position: 1788, duration: 1800, nextTitle: "S1 E2")
-        #expect(prompt?.secondsRemaining == 7)
-        #expect(prompt?.countdownLabel == "Next Episode in 7s")
+        #expect(prompt?.secondsRemaining == 12)
+        #expect(prompt?.countdownLabel == "Next Episode in 12s")
     }
 
     /// The label never reads "in 0s" — at the end it is just the action.
@@ -109,15 +109,21 @@ struct AppleNextEpisodePolicyTests {
             position: 1800, duration: 1800, nextTitle: "S1 E2"))
     }
 
-    @Test func fifteenSecondsAfterTheCardStartsTheNextEpisode() {
-        #expect(AppleNextEpisodePolicy.shouldAutoAdvance(position: 1795, duration: 1800, nextTitle: "S1 E2"))
+    @Test func theLastFiveSecondsRemainPlayable() {
+        #expect(AppleNextEpisodePolicy.shouldAutoAdvance(position: 1795, duration: 1800, nextTitle: "S1 E2") == false)
+        #expect(AppleNextEpisodePolicy.secondsRemaining(position: 1795, duration: 1800) == 5)
         #expect(AppleNextEpisodePolicy.prompt(position: 1779.99, duration: 1800, nextTitle: "S1 E2") == nil)
         #expect(AppleNextEpisodePolicy.prompt(position: .nan, duration: 1800, nextTitle: "S1 E2") == nil)
     }
 
     @Test func itDoesNotStartEarly() {
         #expect(!AppleNextEpisodePolicy.shouldAutoAdvance(
-            position: 1794.99, duration: 1800, nextTitle: "S1 E2"))
+            position: 1799.49, duration: 1800, nextTitle: "S1 E2"))
+    }
+
+    @Test func finalPositionToleranceAndEngineEndStillAdvance() {
+        #expect(AppleNextEpisodePolicy.shouldAutoAdvance(position: 1799.5, duration: 1800, nextTitle: "S1 E2"))
+        #expect(AppleNextEpisodePolicy.shouldAutoAdvance(position: 1798, duration: 1800, nextTitle: "S1 E2", hasEnded: true))
     }
 
     /// With the setting off the card still appears and still works — only the

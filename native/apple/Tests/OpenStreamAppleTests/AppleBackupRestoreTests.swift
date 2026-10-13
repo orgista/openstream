@@ -302,6 +302,37 @@ struct AppleDeviceResetTests {
         #expect(AppleBackupEnvelope.keyID(for: kept) == AppleBackupEnvelope.keyID(for: key))
     }
 
+    @MainActor @Test func defaultsBurstDefersFingerprintUntilTheBurstSettles() async throws {
+        let device = try BackupTestDevice(keys: MemoryBackupKeys())
+        defer { device.tearDown() }
+        device.defaults.set(false, forKey: AppleKeychainStore.syncPreferenceKey)
+        await device.controller.start()
+        let savedAtKey = "openstream.backup.savedAt.v1"
+        device.defaults.removeObject(forKey: savedAtKey)
+        device.defaults.set(false, forKey: AppleSettingsStore.autoPlayNextEpisodeKey)
+        _ = device.controller.localChanged()
+        device.defaults.set(true, forKey: AppleSettingsStore.autoPlayNextEpisodeKey)
+        device.defaults.set(false, forKey: AppleSettingsStore.autoPlayNextEpisodeKey)
+        let lastChange = try #require(device.controller.localChanged())
+        #expect(device.defaults.object(forKey: savedAtKey) == nil)
+        await lastChange.value
+        #expect(device.defaults.object(forKey: savedAtKey) as? Date != nil)
+        let saved = device.defaults.object(forKey: savedAtKey) as? Date
+        await device.controller.localChanged()?.value
+        #expect(device.defaults.object(forKey: savedAtKey) as? Date == saved)
+    }
+
+    @MainActor @Test func cloudReadFlushesAPendingLocalEditBeforeComparingClocks() async throws {
+        let device = try BackupTestDevice(keys: MemoryBackupKeys())
+        defer { device.tearDown() }
+        await device.controller.start()
+        device.defaults.removeObject(forKey: "openstream.backup.savedAt.v1")
+        device.defaults.set(false, forKey: AppleSettingsStore.autoPlayNextEpisodeKey)
+        device.controller.localChanged()
+        await device.controller.readCloud()
+        #expect(device.defaults.object(forKey: "openstream.backup.savedAt.v1") as? Date != nil)
+    }
+
     /// After a reset the empty device neither refills itself from iCloud nor
     /// writes to it, until the viewer taps Restore from iCloud.
     @MainActor @Test func afterAResetICloudWaitsForRestoreAndIsNeverWritten() async throws {

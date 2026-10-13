@@ -39,13 +39,14 @@ public final class AppleTopShelfPublisher {
         var successorAvailable = Set<String>()
         var removals: [String: Date] = [:]
         let episodesByKey = await playbackStore.availableEpisodes()
+        let completionProgress = playbackStore.completionProgress()
         for record in records {
             if let latest = playbackStore.lastActivity(for: record.id) { activity[record.id] = latest }
             if playbackStore.isRemovedFromContinueWatching(mediaID: record.id) { removals[record.id] = .distantFuture }
             if record.kind == .series, let key = ApplePlaybackIdentity.storageKey(for: record.id) {
                 let episodes = episodesByKey[key] ?? []
-                if AppleCompletionPolicy.successor(after: activity[record.id]?.partID, episodes: episodes,
-                    completedIDs: playbackStore.completedMediaIDs(among: episodes.map(\.id))) != nil {
+                if !episodes.isEmpty, AppleCompletionPolicy.successor(after: activity[record.id]?.partID, episodes: episodes,
+                    completedIDs: playbackStore.completedMediaIDs(among: episodes.map(\.id), progress: completionProgress)) != nil {
                     successorAvailable.insert(record.id)
                 }
             }

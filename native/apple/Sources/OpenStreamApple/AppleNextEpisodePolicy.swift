@@ -82,7 +82,7 @@ public enum AppleNextEpisodePolicy: Sendable {
     /// 15, 14, … 1 rather than showing 0 for the last whole second.
     public static func secondsRemaining(position: Double, duration: Double) -> Int {
         guard position.isFinite, duration.isFinite else { return 0 }
-        return Int(min(countdownSeconds, max(0, duration - position - (defaultLeadSeconds - countdownSeconds))).rounded(.up))
+        return Int(min(countdownSeconds, max(0, duration - position)).rounded(.up))
     }
 
     /// The card to show, or nil for "nothing yet".
@@ -108,7 +108,7 @@ public enum AppleNextEpisodePolicy: Sendable {
         )
     }
 
-    /// True once the fifteen-second countdown expires and the next one starts by
+    /// True when the current episode ends and the next one starts by
     /// itself. `isEnabled` is the viewer's "Auto Play Next Episode" setting;
     /// with it off the card still appears and still works, it just never fires
     /// on its own.
@@ -129,7 +129,7 @@ public enum AppleNextEpisodePolicy: Sendable {
         guard isEnabled, !isDismissed, nextTitle != nil,
               isEligible(duration: duration, hasNext: true, isLive: isLive),
               let duration else { return false }
-        return position.isFinite && (hasEnded || position >= duration - (defaultLeadSeconds - countdownSeconds))
+        return position.isFinite && (hasEnded || position >= duration - endTolerance)
     }
 
     /// How close to the duration counts as the end without an `.ended` event.

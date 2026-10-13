@@ -23,6 +23,45 @@ struct AppleConfigurationSyncTests {
         try AppleConfigurationSnapshot(savedAt: savedAt, sources: sources).cloudData()
     }
 
+    @Test func matchingPlaybackMapsNeedNoCloudProjection() {
+        let snapshot = AppleConfigurationSnapshot(savedAt: epoch,
+            watchedHistory: ["fixture-film": epoch],
+            watchedTombstones: ["fixture-reset": epoch],
+            continueWatchingRemovals: ["fixture-hidden": epoch])
+        var settingsOnly = snapshot
+        settingsOnly.ratings = ["fixture-film": 5]
+        #expect(!AppleConfigurationSyncPolicy.playbackMapsDiffer(snapshot, settingsOnly))
+        #expect(!AppleConfigurationSyncPolicy.playbackContribution(settingsOnly, cloud: snapshot))
+        var newPlayback = snapshot
+        newPlayback.continueWatchingRemovals["fixture-other"] = epoch
+        #expect(AppleConfigurationSyncPolicy.playbackMapsDiffer(newPlayback, snapshot))
+        #expect(AppleConfigurationSyncPolicy.playbackContribution(newPlayback, cloud: snapshot))
+    }
+
+    @Test func cheapComparisonIncludesEveryPlaybackMap() {
+        let empty = AppleConfigurationSnapshot(savedAt: epoch)
+        let progress = ApplePlaybackProgress(position: 60, duration: 3_600, updatedAt: epoch)
+        var variants = Array(repeating: empty, count: 6)
+        variants[0].playbackProgress["fixture-film"] = progress
+        variants[1].playbackActivity["fixture-film"] = progress
+        variants[2].playbackTerminals["fixture-film"] = ApplePlaybackTerminalEvents(playedAt: epoch)
+        variants[3].watchedHistory["fixture-film"] = epoch
+        variants[4].watchedTombstones["fixture-film"] = epoch
+        variants[5].continueWatchingRemovals["fixture-film"] = epoch
+        for snapshot in variants {
+            #expect(AppleConfigurationSyncPolicy.playbackMapsDiffer(snapshot, empty))
+            #expect(!AppleConfigurationSyncPolicy.playbackMapsDiffer(snapshot, snapshot))
+        }
+    }
+
+    @Test func contributionOffMainRetainsNewWatchedEvents() async {
+        let cloud = AppleConfigurationSnapshot(savedAt: epoch)
+        let local = AppleConfigurationSnapshot(savedAt: epoch.addingTimeInterval(-60),
+            watchedHistory: ["fixture-film": epoch])
+        #expect(await AppleConfigurationSyncPolicy.playbackContributionOffMain(local, cloud: cloud))
+        #expect(!AppleConfigurationSyncPolicy.playbackContribution(cloud, cloud: local))
+    }
+
     // MARK: - Which devices sync, and which of them publish
 
     @Test func theAppleTVSyncsWithoutAStoredPreference() {

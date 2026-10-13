@@ -315,7 +315,7 @@ struct AppleWatchedHistoryTests {
         let longPart = String(repeating: "a", count: 3_500)
         let progress = Dictionary(uniqueKeysWithValues: (0..<150).map {
             ("progress-\($0)", ApplePlaybackProgress(position: 10, duration: 100,
-                updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart))
+                updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart + "-\($0)"))
         })
         let tombstones = Dictionary(uniqueKeysWithValues: (0..<350).map {
             ("removed-\($0)-" + String(repeating: "b", count: 1_000), Date(timeIntervalSince1970: Double($0)))
@@ -344,7 +344,7 @@ struct AppleWatchedHistoryTests {
         let longPart = String(repeating: "a", count: 3_500)
         let progress = Dictionary(uniqueKeysWithValues: (0..<150).map {
             ("progress-\($0)", ApplePlaybackProgress(position: 10, duration: 100,
-                updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart))
+                updatedAt: Date(timeIntervalSince1970: Double(1_000 + $0)), partID: longPart + "-\($0)"))
         })
         // Include retained terminal clocks while leaving newer resumes within the budget.
         let history = Dictionary(uniqueKeysWithValues: (0..<350).map {

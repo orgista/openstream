@@ -72,6 +72,7 @@ public enum AppleDeviceReset {
     /// removed from disk.
     @MainActor
     static func discardInMemoryState() {
+        ApplePlaybackBlobStorage.discardAfterReset()
         AppleLocalLibraryStore.shared.discardAfterReset()
         AppleChannelHealthStore.shared.discardAfterReset()
         ApplePlaybackFailureHistory.shared.removeAll()

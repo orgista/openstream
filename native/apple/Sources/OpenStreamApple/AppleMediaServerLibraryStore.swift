@@ -232,20 +232,51 @@ public final class AppleMediaServerLibraryStore {
         index[reference]
     }
     
-    /// Keep the server's resume fraction on the shelf record as well as its title page.
-    public func continueWatchingRecord(for catalogItem: AppleCatalogItem, source: AppleSource) -> AppleMediaRecord {
+    /// Keep the freshest local or server resume fraction on the shelf record.
+    public func continueWatchingRecord(for catalogItem: AppleCatalogItem, source: AppleSource,
+                                      store localStore: ApplePlaybackStore = ApplePlaybackStore()) -> AppleMediaRecord {
         var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: catalogItem)
-        let localStore = ApplePlaybackStore()
-        if localStore.hasLocalPlaybackState(mediaID: catalogItem.mediaID) {
+        let server = playbackState(for: catalogItem.mediaID)
+        if !Self.prefersServer(server?.data, localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: catalogItem.mediaID)) {
             record.progress = localStore.progress(for: catalogItem.mediaID).map { $0.duration > 0 ? min($0.position / $0.duration, 1) : 0 } ?? 0
             return record
         }
-        guard let reference = AppleMediaServerItemReference.parse(catalogItem.mediaID),
-              let item = index[reference], let data = item.userData, !data.played,
-              let duration = item.runtimeSeconds, duration.isFinite, duration > 0,
-              data.positionSeconds.isFinite, data.positionSeconds > 0 else { return record }
+        guard let server, let data = server.data, !data.played,
+              let duration = server.duration, duration.isFinite, duration > 0,
+              data.positionSeconds.isFinite, data.positionSeconds > 0 else {
+            record.progress = 0
+            return record
+        }
         record.progress = min(data.positionSeconds / duration, 1)
         return record
+    }
+
+    private func playbackState(for mediaID: String) -> (data: AppleMediaServerItem.UserData?, duration: Double?)? {
+        guard let reference = AppleMediaServerItemReference.parse(mediaID) else { return nil }
+        if let plex = plexIndex[reference] {
+            return (Self.playbackData(for: plex), plex.durationSeconds)
+        }
+        guard let item = index[reference] else { return nil }
+        return (item.userData, item.runtimeSeconds)
+    }
+
+    private static func playbackData(for plex: ApplePlexItem) -> AppleMediaServerItem.UserData {
+        .init(positionSeconds: plex.viewOffsetSeconds ?? 0, played: (plex.viewCount ?? 0) > 0,
+              playCount: plex.viewCount ?? 0, lastPlayedDate: plex.lastViewedAt)
+    }
+
+    /// A newer server completion hides a stale local row without rewriting its saved state.
+    public func shouldIncludeInContinueWatching(mediaID: String, store: ApplePlaybackStore) -> Bool {
+        let server = playbackState(for: mediaID)
+        if Self.prefersServer(server?.data, localUpdatedAt: store.localPlaybackUpdatedAt(mediaID: mediaID)) {
+            guard let data = server?.data else { return true }
+            if data.played { return false }
+            if let duration = server?.duration,
+               AppleCompletionPolicy.isComplete(position: data.positionSeconds, duration: duration) { return false }
+            return true
+        }
+        return !store.isRemovedFromContinueWatching(mediaID: mediaID)
+            && (!store.hasLocalPlaybackState(mediaID: mediaID) || store.progress(for: mediaID)?.resumePosition != nil)
     }
 
     public func source(for reference: AppleMediaServerItemReference) -> AppleSource? {
@@ -653,9 +684,7 @@ public final class AppleMediaServerLibraryStore {
         hubStates = hubStates.filter { hubDefinitions[$0.key] != nil }
         let localStore = ApplePlaybackStore()
         self.continueWatching = dedupedCW.filter { item in
-            !localStore.isRemovedFromContinueWatching(mediaID: item.mediaID)
-                && (!localStore.hasLocalPlaybackState(mediaID: item.mediaID)
-                    || localStore.progress(for: item.mediaID)?.resumePosition != nil)
+            shouldIncludeInContinueWatching(mediaID: item.mediaID, store: localStore)
         }
         self.lastLoadedAt = Date()
         self.isLoading = false
@@ -718,14 +747,20 @@ public final class AppleMediaServerLibraryStore {
         }
     }
 
-    public static func mergedResume(local: ApplePlaybackProgress?, server: AppleMediaServerItem.UserData?) -> Double? {
-        // Provider offsets have no comparable update timestamp. A local
-        // position is authoritative, including a deliberate rewind/rewatch.
-        local?.position ?? server?.positionSeconds
+    private static func prefersServer(_ server: AppleMediaServerItem.UserData?, localUpdatedAt: Date?) -> Bool {
+        guard server != nil else { return localUpdatedAt == nil }
+        guard let localUpdatedAt else { return true }
+        return server?.lastPlayedDate.map { $0 > localUpdatedAt } ?? false
     }
 
-    public static func resumePosition(for item: AppleMediaServerItem, local: ApplePlaybackProgress? = nil) -> Double? {
-        if let local { return local.resumePosition }
+    public static func mergedResume(local: ApplePlaybackProgress?, server: AppleMediaServerItem.UserData?) -> Double? {
+        if !prefersServer(server, localUpdatedAt: local?.updatedAt) { return local?.position }
+        return server?.played == true ? nil : server?.positionSeconds
+    }
+
+    public static func resumePosition(for item: AppleMediaServerItem, local: ApplePlaybackProgress? = nil,
+                                      localUpdatedAt: Date? = nil) -> Double? {
+        if !prefersServer(item.userData, localUpdatedAt: localUpdatedAt ?? local?.updatedAt) { return local?.resumePosition }
         guard let position = item.userData?.positionSeconds,
               let duration = item.runtimeSeconds, duration > 0,
               position >= 15, item.userData?.played != true,
@@ -863,7 +898,8 @@ public final class AppleMediaServerLibraryStore {
             positionSeconds: played ? 0 : position,
             played: played || (old?.played ?? false),
             isFavorite: old?.isFavorite ?? false,
-            playCount: (old?.playCount ?? 0) + (played ? 1 : 0)
+            playCount: (old?.playCount ?? 0) + (played ? 1 : 0),
+            lastPlayedDate: old?.lastPlayedDate
         )
         let newItem = item.withUserData(newUserData)
         index[ref] = newItem
@@ -917,7 +953,8 @@ public final class AppleMediaServerLibraryStore {
                         positionSeconds: viewOffset,
                         played: (plex.viewCount ?? 0) > 0,
                         isFavorite: false,
-                        playCount: plex.viewCount ?? 0
+                        playCount: plex.viewCount ?? 0,
+                        lastPlayedDate: plex.lastViewedAt
                     )
                 }
                 
@@ -1045,15 +1082,10 @@ public final class AppleMediaServerLibraryStore {
             
             let position: Double?
             let localStore = ApplePlaybackStore()
-            if resume, localStore.hasLocalPlaybackState(mediaID: mediaID) {
-                position = localStore.progress(for: mediaID)?.resumePosition
-            } else if resume, let offset = plexItem.viewOffsetSeconds, let dur = plexItem.durationSeconds {
-                position = (plexItem.viewCount ?? 0) > 0 || AppleCompletionPolicy.isComplete(position: offset, duration: dur)
-                    ? nil : offset
-            } else {
-                position = nil
-            }
-            
+            position = resume ? Self.resumePosition(for: item.withUserData(Self.playbackData(for: plexItem)),
+                local: localStore.progress(for: mediaID),
+                localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: mediaID)) : nil
+
             let title: String
             if item.type == .episode {
                 let sIdx = item.parentIndexNumber.map { String($0) } ?? "?"
@@ -1101,8 +1133,8 @@ public final class AppleMediaServerLibraryStore {
         )
 
         let localStore = ApplePlaybackStore()
-        let position = resume ? (localStore.hasLocalPlaybackState(mediaID: mediaID)
-            ? localStore.progress(for: mediaID)?.resumePosition : Self.resumePosition(for: item)) : nil
+        let position = resume ? Self.resumePosition(for: item, local: localStore.progress(for: mediaID),
+            localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: mediaID)) : nil
         
         let title: String
         if item.type == .episode {

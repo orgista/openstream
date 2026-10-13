@@ -76,12 +76,14 @@ public struct AppleMediaServerItem: Codable, Equatable, Sendable {
         public let played: Bool
         public let isFavorite: Bool
         public let playCount: Int
+        public let lastPlayedDate: Date?
         
         private enum CodingKeys: String, CodingKey {
             case playbackPositionTicks = "PlaybackPositionTicks"
             case played = "Played"
             case isFavorite = "IsFavorite"
             case playCount = "PlayCount"
+            case lastPlayedDate = "LastPlayedDate"
         }
         
         public init(from decoder: Decoder) throws {
@@ -91,13 +93,23 @@ public struct AppleMediaServerItem: Codable, Equatable, Sendable {
             played = try container.decodeIfPresent(Bool.self, forKey: .played) ?? false
             isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
             playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
+            if let value = try container.decodeIfPresent(String.self, forKey: .lastPlayedDate) {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let fractional = formatter.date(from: value)
+                formatter.formatOptions = [.withInternetDateTime]
+                lastPlayedDate = fractional ?? formatter.date(from: value)
+            } else {
+                lastPlayedDate = nil
+            }
         }
         
-        public init(positionSeconds: Double = 0, played: Bool = false, isFavorite: Bool = false, playCount: Int = 0) {
+        public init(positionSeconds: Double = 0, played: Bool = false, isFavorite: Bool = false, playCount: Int = 0, lastPlayedDate: Date? = nil) {
             self.positionSeconds = positionSeconds
             self.played = played
             self.isFavorite = isFavorite
             self.playCount = playCount
+            self.lastPlayedDate = lastPlayedDate
         }
         
         public func encode(to encoder: Encoder) throws {
@@ -106,6 +118,11 @@ public struct AppleMediaServerItem: Codable, Equatable, Sendable {
             try container.encode(played, forKey: .played)
             try container.encode(isFavorite, forKey: .isFavorite)
             try container.encode(playCount, forKey: .playCount)
+            if let lastPlayedDate {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                try container.encode(formatter.string(from: lastPlayedDate), forKey: .lastPlayedDate)
+            }
         }
     }
     

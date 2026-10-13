@@ -100,7 +100,6 @@ struct AppleDiscoverView: View {
     @State private var heroArtworkRevision: UInt64 = 0
     @State private var relationRevision = AppleTMDBRelationCache.revision
     @State private var recommendations = RecommendationResult()
-    @State private var artworkScrollIsMoving = false
     @State private var recommendationsRevision: String?
     @State private var top10Week: AppleNetflixTop10Week?
     @State private var top10Error: String?
@@ -129,6 +128,18 @@ struct AppleDiscoverView: View {
     /// view has made it.
     let backupController: AppleConfigurationController?
     private let playbackResolver: AppleStremioPlaybackResolver
+
+    /// Keep scroll phase updates below Discover's recommendation/rail preparation.
+    /// Artwork still observes the pause through its existing environment value.
+    private struct ArtworkScrollPauseModifier: ViewModifier {
+        @State private var isMoving = false
+
+        func body(content: Content) -> some View {
+            content
+                .onScrollPhaseChange { _, phase in isMoving = phase != .idle }
+                .environment(\.appleArtworkLoadsPaused, isMoving)
+        }
+    }
 
     private struct IndexedCatalogItem: Identifiable, Sendable {
         let record: AppleMediaRecord
@@ -293,8 +304,7 @@ struct AppleDiscoverView: View {
                     #endif
                     .environment(\.appleDiscoverRows, discoverRowStyle)
                 }
-                .onScrollPhaseChange { _, phase in artworkScrollIsMoving = phase != .idle }
-                .environment(\.appleArtworkLoadsPaused, artworkScrollIsMoving)
+                .modifier(ArtworkScrollPauseModifier())
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
                 #if os(iOS)
                 .refreshable { await refreshContent() }
@@ -754,24 +764,31 @@ struct AppleDiscoverView: View {
         let serverItems = mediaServerLibrary.continueWatching + AppleXtreamLibraryStore.shared.continueWatching
         // Once per pass: `continueWatching` filters the whole media index, and
         // it was being rebuilt again for every merged item below.
-        let localItems = local.map { $0.item }
+        let playbackStore = ApplePlaybackStore()
+        let visibleLocal = local.filter { value in
+            AppleMediaServerItemReference.parse(value.item.mediaID) == nil
+                || mediaServerLibrary.shouldIncludeInContinueWatching(mediaID: value.item.mediaID, store: playbackStore)
+        }
+        let localItems = visibleLocal.map { $0.item }
         let mergedItems = AppleMediaServerLibraryStore.mergedContinueWatching(local: localItems, server: serverItems)
 
         let resolved = mergedItems.compactMap { item -> IndexedCatalogItem? in
-            if let existing = local.first(where: { $0.item.mediaID == item.mediaID }) {
-                return existing
+            if let existing = visibleLocal.first(where: { $0.item.mediaID == item.mediaID }) {
+                guard AppleMediaServerItemReference.parse(item.mediaID) != nil else { return existing }
+                let record = mediaServerLibrary.continueWatchingRecord(for: item, source: existing.source, store: playbackStore)
+                return IndexedCatalogItem(record: record, item: item, source: existing.source)
             }
             if let reference = AppleXtreamReference.parse(item.mediaID),
                let source = AppleXtreamLibraryStore.shared.source(reference) {
                 var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-                if let progress = ApplePlaybackStore().progress(for: record.id) {
+                if let progress = playbackStore.progress(for: record.id) {
                     record.progress = AppleWatchProgress.fraction(position: progress.position, duration: progress.duration)
                 }
                 return IndexedCatalogItem(record: record, item: item, source: source)
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
                   let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
-            let record = mediaServerLibrary.continueWatchingRecord(for: item, source: source)
+            let record = mediaServerLibrary.continueWatchingRecord(for: item, source: source, store: playbackStore)
             return IndexedCatalogItem(record: record, item: item, source: source)
         }
         // The merge keys on `mediaID`, the shelf keys on `record.id`: a local
@@ -7231,16 +7248,20 @@ struct AppleCatalogItemDetailView: View {
         if let saved = savedEpisode(in: loadedEpisodes.filter { $0.season == season }) { return saved.id }
         if let resumed = library.resumeEpisode(for: item, group: localGroup,
             episodes: loadedEpisodes.filter { $0.season == season }) { return resumed.id }
+        let completed = AppleLocalLibraryStore.completedEpisodeIDs(loadedEpisodes, group: localGroup,
+            mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, store: playbackStore)
         return AppleStremioEpisodePolicy.defaultEpisode(in: season, from: loadedEpisodes,
-            completedIDs: playbackStore.completedMediaIDs(among: loadedEpisodes.map(\.id)))?.id
-            ?? loadedEpisodes.first(where: { $0.id.hasPrefix("local-file-") })?.id
+            completedIDs: completed)?.id
+            ?? AppleLocalLibraryStore.nextFilenameEpisode(in: loadedEpisodes, completedIDs: completed)?.id
     }
 
     /// The Apple TV app's Up Next across the whole show — the season the page
     /// opens on when nothing is part-watched.
     private func upNextEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
-        AppleStremioEpisodePolicy.upNext(from: loaded,
-            completedIDs: playbackStore.completedMediaIDs(among: loaded.map(\.id)))
+        let completed = AppleLocalLibraryStore.completedEpisodeIDs(loaded, group: localGroup,
+            mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, store: playbackStore)
+        return AppleStremioEpisodePolicy.upNext(from: loaded, completedIDs: completed)
+            ?? AppleLocalLibraryStore.nextFilenameEpisode(in: loaded, completedIDs: completed)
     }
 
     /// Mark as Watched / Mark as Unwatched on an episode (the Apple TV app's
@@ -7272,9 +7293,9 @@ struct AppleCatalogItemDetailView: View {
     /// Finished episodeList.episodes on the visible list, read through the feed so a
     /// finish, mark or unmark redraws the ticks.
     private var watchedEpisodeIDs: Set<String> {
-        !titlePageIsCovered
-            ? ApplePlaybackProgressFeed.shared.completedMediaIDs(among: visibleEpisodes.map(\.id), in: playbackStore)
-            : playbackStore.completedMediaIDs(among: visibleEpisodes.map(\.id))
+        if !titlePageIsCovered { _ = ApplePlaybackProgressFeed.shared.revision }
+        return AppleLocalLibraryStore.completedEpisodeIDs(visibleEpisodes, group: localGroup,
+            mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, store: playbackStore)
     }
 }
 

@@ -268,6 +268,68 @@ struct AppleMediaServerLibraryStoreTests {
         #expect(meta.mediaType == "movie")
         #expect(meta.runtimeMinutes == 120)
     }
+    @Test("Newer server progress and completion supersede local activity")
+    func newerServerPlaybackWins() throws {
+        let local = ApplePlaybackProgress(position: 100, duration: 1000,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let newer = try JSONDecoder().decode(AppleMediaServerItem.UserData.self, from: Data("""
+            {"PlaybackPositionTicks":3000000000,"Played":false,"LastPlayedDate":"2023-11-14T22:15:00.0000000Z"}
+            """.utf8))
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: local, server: newer) == 300)
+        let item = AppleMediaServerItem(id: "fixture", name: "Fixture", type: .movie,
+            runtimeSeconds: 1000, userData: newer)
+        #expect(AppleMediaServerLibraryStore.resumePosition(for: item, local: local) == 300)
+        let completed = try JSONDecoder().decode(AppleMediaServerItem.UserData.self, from: Data("""
+            {"PlaybackPositionTicks":0,"Played":true,"LastPlayedDate":"2023-11-14T22:15:00Z"}
+            """.utf8))
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: local, server: completed) == nil)
+        #expect(AppleMediaServerLibraryStore.resumePosition(for: item.withUserData(completed), local: local) == nil)
+        let laterLocal = ApplePlaybackProgress(position: 30, duration: 1000,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_200))
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: laterLocal, server: completed) == 30)
+        let equalLocal = ApplePlaybackProgress(position: 40, duration: 1000,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100))
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: equalLocal, server: newer) == 40)
+        let roundTrip = try JSONDecoder().decode(AppleMediaServerItem.UserData.self, from: JSONEncoder().encode(newer))
+        #expect(AppleMediaServerLibraryStore.mergedResume(local: local, server: roundTrip) == 300)
+    }
+
+    @Test("Shared playback store reconciles server shelves without rewriting saved data", arguments: [false, true])
+    func serverShelfFreshness(played: Bool) async throws {
+        let suiteName = "server-freshness-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = AppleSource(id: UUID(), kind: .mediaServer, name: "Fixture",
+            url: try #require(URL(string: "https://fixture.example/jellyfin/")), isEnabled: true)
+        let session = AppleMediaServerSession(kind: .jellyfin, baseURL: source.url, accessToken: "fixture", userID: "fixture")
+        let reference = AppleMediaServerItemReference(sourceID: source.id, itemID: "movie")
+        let local = ApplePlaybackStore(defaults: defaults)
+        local.save(mediaID: reference.mediaID, position: 100, duration: 1000)
+        let saved = try #require(local.progress(for: reference.mediaID))
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: saved.updatedAt.addingTimeInterval(60))
+        let movie = """
+            {"Id":"movie","Name":"Fixture","Type":"Movie","RunTimeTicks":10000000000,
+             "UserData":{"PlaybackPositionTicks":\(played ? 0 : 3000000000),"Played":\(played),"LastPlayedDate":"\(timestamp)"}}
+            """
+        let client = AppleMediaServerClient(loader: { request in
+            let json = request.url?.path.hasSuffix("Resume") == true
+                ? "{\"Items\":[\(movie)],\"TotalRecordCount\":1}" : "{\"Items\":[],\"TotalRecordCount\":0}"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(json.utf8), response)
+        })
+        let library = AppleMediaServerLibraryStore(client: client, progressDefaults: defaults)
+        await library.reload(sources: [source]) { _ in session }
+        let item = AppleCatalogItem(mediaID: reference.mediaID, type: "movie", name: "Fixture")
+        let beforeProgress = local.configurationProgress()
+        let beforeTerminals = local.configurationPlaybackTerminals()
+        let record = library.continueWatchingRecord(for: item, source: source, store: local)
+        #expect(record.progress == (played ? 0 : 0.3))
+        #expect(library.shouldIncludeInContinueWatching(mediaID: reference.mediaID, store: local) == (played == false))
+        #expect(local.configurationProgress() == beforeProgress)
+        #expect(local.configurationPlaybackTerminals() == beforeTerminals)
+    }
+
     @Test("Merged resume keeps local activity over stale server state")
     func testMergedResume() {
         let local = ApplePlaybackProgress(position: 100, duration: 200, updatedAt: Date())
@@ -449,7 +511,7 @@ struct AppleMediaServerLibraryStoreTests {
                 """.data(using: .utf8)!, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
             } else if urlStr.contains("library/metadata/p1") {
                 return ("""
-                {"MediaContainer": {"size": 1, "Metadata": [{"ratingKey": "p1", "key": "/library/metadata/p1", "type": "movie", "title": "Plex OnDeck", "viewOffset": 50000, "duration": 1000000, "Media": [{"id": "m1", "Part": [{"id": "part1", "key": "/library/parts/1/123/file.mp4"}]}]}]}}
+                {"MediaContainer": {"size": 1, "Metadata": [{"ratingKey": "p1", "key": "/library/metadata/p1", "type": "movie", "title": "Plex OnDeck", "lastViewedAt": 1700000100, "viewOffset": 50000, "duration": 1000000, "Media": [{"id": "m1", "Part": [{"id": "part1", "key": "/library/parts/1/123/file.mp4"}]}]}]}}
                 """.data(using: .utf8)!, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
             }
             return (Data(), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
@@ -486,6 +548,10 @@ struct AppleMediaServerLibraryStoreTests {
         // Playback & Resume rule (50s / 1000s -> 5%)
         let refP1 = AppleMediaServerItemReference(sourceID: plexSourceID, itemID: "p1")
         let detailP1 = try await store.detail(for: refP1)
+        #expect(detailP1.item.userData?.lastPlayedDate == Date(timeIntervalSince1970: 1_700_000_100))
+        let staleLocal = ApplePlaybackProgress(position: 100, duration: 1000,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(AppleMediaServerLibraryStore.resumePosition(for: detailP1.item, local: staleLocal) == 50)
         let req = try await store.playbackRequest(for: detailP1.item, in: detailP1, resume: true)
         #expect(req.url.absoluteString.contains("/library/parts/1/123/file.mp4"))
         #expect(req.resumePosition == 50.0)

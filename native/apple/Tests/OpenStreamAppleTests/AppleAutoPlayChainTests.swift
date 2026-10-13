@@ -38,6 +38,8 @@ struct AppleAutoPlayChainTests {
         model.bumpActivity()
         #expect(coordinator.handsOffAtEnd)
         model.apply(.position(1795))
+        #expect(starts == 0)
+        model.apply(.position(1799.5))
         #expect(starts == 1)
         #expect(coordinator.autoPlayChain.episodes == 2)
     }
@@ -51,9 +53,11 @@ struct AppleAutoPlayChainTests {
         model.nextEpisode = { starts += 1 }
         model.apply(.duration(1800))
         model.apply(.position(1795))
+        #expect(starts == 0)
+        model.apply(.position(1799.5))
         #expect(starts == 1)
         #expect(coordinator.autoPlayChain.episodes == 3)
-        model.apply(.position(1796))
+        model.apply(.position(1799.6))
         #expect(coordinator.handsOffAtEnd)
         model.apply(.phase(.ended))
         #expect(coordinator.handsOffAtEnd)

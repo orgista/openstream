@@ -58,7 +58,7 @@ struct AppleProgressRestoreFreshnessTests {
             let key = "tt\(1_000_000 + index):1:\(index % 24)"
             progress[key] = .init(position: Double(index % 3_000), duration: 3_600,
                                   updatedAt: Date(timeIntervalSince1970: Double(index)))
-            watched[key] = Date(timeIntervalSince1970: Double(index))
+            watched[key] = Date(timeIntervalSince1970: Double(index) - 1)
         }
         let snapshot = AppleConfigurationSnapshot(playbackProgress: progress, watchedHistory: watched)
         let clock = ContinuousClock()
@@ -68,7 +68,7 @@ struct AppleProgressRestoreFreshnessTests {
             let store = ApplePlaybackStore(defaults: defaults)
             store.restoreConfigurationProgress(decoded.playbackProgress)
             store.restoreConfigurationWatchedHistory(decoded.watchedHistory, tombstones: decoded.watchedTombstones)
-            #expect(store.configurationProgress().isEmpty, "equal-time completion supersedes old resume entries")
+            #expect(store.configurationProgress().count == 10_000)
             _ = try decoded.cloudData()
         }
         #expect(elapsed < .seconds(10), "10k-title restore took \(elapsed)")

@@ -112,10 +112,25 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         return localSavedAt > cloud.savedAt
     }
 
+    /// Ignore setup-only changes before projecting the potentially large
+    /// cloud payload. These are all the maps compared after projection too.
+    static func playbackMapsDiffer(_ lhs: AppleConfigurationSnapshot, _ rhs: AppleConfigurationSnapshot) -> Bool {
+        lhs.playbackProgress != rhs.playbackProgress || lhs.playbackActivity != rhs.playbackActivity
+            || lhs.playbackTerminals != rhs.playbackTerminals || lhs.watchedHistory != rhs.watchedHistory
+            || lhs.watchedTombstones != rhs.watchedTombstones || lhs.continueWatchingRemovals != rhs.continueWatchingRemovals
+    }
+
+    @concurrent
+    static func playbackContributionOffMain(_ local: AppleConfigurationSnapshot, cloud: AppleConfigurationSnapshot) async -> Bool {
+        playbackContribution(local, cloud: cloud)
+    }
+
     /// Playback has per-item clocks; the configuration clock must not hide a
     /// later rewind/reset on a device whose settings snapshot is older.
     static func playbackContribution(_ local: AppleConfigurationSnapshot, cloud: AppleConfigurationSnapshot) -> Bool {
+        guard playbackMapsDiffer(local, cloud) else { return false }
         let merged = cloud.merging(local)
+        guard playbackMapsDiffer(merged, cloud) else { return false }
         guard let projectedData = try? merged.cloudData(), let cloudData = try? cloud.cloudData(),
               let projected = try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: projectedData),
               let cloud = try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: cloudData) else {
@@ -123,9 +138,7 @@ public enum AppleConfigurationSyncPolicy: Sendable {
             // dropping a pending terminal barrier.
             return local.playbackTerminals != cloud.playbackTerminals
         }
-        return projected.playbackProgress != cloud.playbackProgress || projected.playbackActivity != cloud.playbackActivity
-            || projected.playbackTerminals != cloud.playbackTerminals || projected.watchedHistory != cloud.watchedHistory
-            || projected.watchedTombstones != cloud.watchedTombstones || projected.continueWatchingRemovals != cloud.continueWatchingRemovals
+        return playbackMapsDiffer(projected, cloud)
     }
 
     /// Do two snapshots carry different configurations, ignoring when each

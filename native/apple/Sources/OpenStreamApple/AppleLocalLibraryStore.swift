@@ -561,6 +561,48 @@ final class AppleLocalLibraryStore {
         }
     }
 
+    /// Read the old positional episode key without rewriting watched history or
+    /// changing the file identity. A reset on the current row takes precedence.
+    static func completedEpisodeIDs(_ episodes: [AppleStremioEpisode], group: AppleLibrarySeries?,
+                                    mediaID: String, store: ApplePlaybackStore) -> Set<String> {
+        var completed = store.completedMediaIDs(among: episodes.map(\.id))
+        guard let group else { return completed }
+        let rowIDs = Set(episodes.map(\.id))
+        var legacySeen = Set<String>()
+        let aliases = group.items.enumerated().compactMap { index, file -> (String, String)? in
+            let parsed = AppleLibraryTitleParser.parse(file)
+            let legacy = "\(mediaID):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)"
+            // The old row builder deduplicated these keys. Do not borrow a
+            // numbered episode's history for a filename row it had suppressed.
+            guard legacySeen.insert(legacy).inserted else { return nil }
+            let current = fileEpisodeID(file)
+            return rowIDs.contains(current) ? (current, legacy) : nil
+        }
+        guard !aliases.isEmpty else { return completed }
+        let legacyCompleted = store.completedMediaIDs(among: aliases.map { $0.1 })
+        let terminals = store.configurationPlaybackTerminals()
+        let tombstones = store.configurationWatchedTombstones()
+        let watched = store.configurationWatchedHistory()
+        let progress = store.completionProgress()
+        for (current, legacy) in aliases where !completed.contains(current) && legacyCompleted.contains(legacy) {
+            guard let key = ApplePlaybackIdentity.storageKey(for: current),
+                  let legacyKey = ApplePlaybackIdentity.storageKey(for: legacy) else { continue }
+            let reset = [terminals[key]?.resetAt, tombstones[key]].compactMap { $0 }.max()
+            let completedAt = [watched[legacyKey], progress[legacyKey].flatMap { $0.isComplete ? $0.updatedAt : nil }]
+                .compactMap { $0 }.max()
+            if let reset, completedAt.map({ $0 <= reset }) ?? true { continue }
+            completed.insert(current)
+        }
+        return completed
+    }
+
+    /// Filename rows have no invented season/number, so the numbered episode
+    /// policy excludes them. Keep their displayed order when selecting a row.
+    static func nextFilenameEpisode(in episodes: [AppleStremioEpisode], completedIDs: Set<String>) -> AppleStremioEpisode? {
+        let files = episodes.filter { $0.id.hasPrefix("local-file-") }
+        return files.first { !completedIDs.contains($0.id) } ?? files.first
+    }
+
     static func format(_ file: AppleLibraryItem) -> String {
         let resolution = file.name.range(of: #"(?i)\b(?:\d{3,4}p|[48]K)\b"#, options: .regularExpression).map { String(file.name[$0]).uppercased() }
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
