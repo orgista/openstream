@@ -8,14 +8,24 @@ public final class AppleIPTVGuideStore {
     private let diskCache: AppleIPTVGuideDiskCache
     public private(set) var channelNames: [String: [String: String]] = [:]
     public var channelDisplayNames: [String: String] = [:]
+    public var channelProviderIDs: [String: String] = [:]
     public var manualChannelMapping: [String: String] = [:] {
         didSet {
             guard manualChannelMapping != oldValue else { return }
             restoredKeys.removeAll()
-            caches.removeAll()
+            changedSources.formUnion(configurations.keys)
+            // A newly selected station must never display the old station's listings.
+            for id in Set(oldValue.keys).union(manualChannelMapping.keys)
+                where oldValue[id] != manualChannelMapping[id] {
+                if mappingEvidence[id]?.providerID != manualChannelMapping[id] {
+                    caches[id] = nil
+                    mappingEvidence[id] = nil
+                }
+            }
             revision &+= 1
         }
     }
+    public private(set) var mappingEvidence: [String: AppleIPTVGuideMappingEvidence] = [:]
     private var restoredKeys = Set<String>()
 
     private struct ChannelCache: Sendable {
@@ -77,13 +87,17 @@ public final class AppleIPTVGuideStore {
     private func setConfiguration(_ value: Configuration?, key: String) {
         guard configurations[key] != value else { return }
         if configurations[key] != nil { changedSources.insert(key) }
-        xmltvCaches[key] = nil
-        configurations[key] = value
-        channelNames[key] = nil
-        restoredKeys.remove(key)
-        caches = caches.filter { cacheKey, _ in
-            key.isEmpty ? cacheKey.contains(":") : !cacheKey.hasPrefix(key + ":")
+        if case .xmltv(let oldURL, _, let oldOffset, _, _)? = configurations[key],
+           case .xmltv(let newURL, _, let newOffset, _, _)? = value,
+           oldURL == newURL, oldOffset == newOffset {
+            // Mapping/shift changes can be projected from the retained raw provider guide.
+        } else {
+            xmltvCaches[key] = nil
+            channelNames[key] = nil
         }
+        configurations[key] = value
+        restoredKeys.remove(key)
+        // Keep the last successful projection until a replacement is ready.
         revision &+= 1
     }
 
@@ -95,6 +109,7 @@ public final class AppleIPTVGuideStore {
             guard let prefix = key.split(separator: ":").first, UUID(uuidString: String(prefix)) != nil else { return true }
             return keys.contains(String(prefix))
         }
+        mappingEvidence = mappingEvidence.filter { keys.contains(sourceKey($0.key)) || sourceKey($0.key).isEmpty }
         revision &+= 1
     }
 
@@ -105,9 +120,29 @@ public final class AppleIPTVGuideStore {
     public func refreshVisible(channelIDs: Set<String>, force: Bool = false, now: Date = .now) async {
         for key in configurations.keys.sorted() {
             guard let configuration = configurations[key], !changedSources.contains(key), restoredKeys.insert(key).inserted else { continue }
-            let snapshot = await diskCache.snapshot(key: diskKey(key, configuration), now: now)
+            let assignments = manualChannelMapping
+            let mapped = await diskCache.snapshot(key: evidenceDiskKey(key, configuration), now: now)
+            guard configurations[key] == configuration, manualChannelMapping == assignments, !Task.isCancelled else { continue }
+            let mappedProgrammes = Dictionary(grouping: mapped.programmes, by: \.channelID)
+            for (id, evidence) in mapped.mappingEvidence ?? [:] {
+                guard assignments[id] == nil ? evidence.origin != .manual : assignments[id] == evidence.providerID else { continue }
+                let programmes = mappedProgrammes[id] ?? []
+                caches[id] = ChannelCache(programmes: programmes, fetchTime: evidence.fetchedAt)
+                var retained = evidence
+                retained.coverage = AppleIPTVGuideMappingEvidence.coverage(of: programmes)
+                mappingEvidence[id] = retained
+            }
+            if !mapped.programmes.isEmpty { revision &+= 1 }
+            var snapshot = await diskCache.snapshot(key: rawDiskKey(key, configuration), now: now)
+            if snapshot.isRawXMLTV == nil && snapshot.programmes.isEmpty {
+                snapshot = await diskCache.snapshot(key: diskKey(key, configuration), now: now)
+            }
+            if snapshot.isRawXMLTV == nil && snapshot.programmes.isEmpty {
+                // Before provider identity was separate, Live also folded manual assignments into the mapping key.
+                snapshot = await diskCache.snapshot(key: diskKey(key, configuration, manualLegacyMapping: true), now: now)
+            }
             let saved = snapshot.programmes
-            guard configurations[key] == configuration, !Task.isCancelled else { continue }
+            guard configurations[key] == configuration, manualChannelMapping == assignments, !Task.isCancelled else { continue }
             if case .xmltv = configuration {
                 channelNames[key] = snapshot.channelNames
                 if snapshot.isRawXMLTV == true {
@@ -127,15 +162,16 @@ public final class AppleIPTVGuideStore {
             let key = sourceKey(id)
             if case .xmltv? = configurations[key] {
                 guard !xmltvInFlight.contains(key) else { return false }
-                return force || caches[id] == nil || (xmltvCaches[key].map { now.timeIntervalSince($0.fetchTime) >= Self.xmltvExpiry } ?? true)
+                return force || changedSources.contains(key) || !projectionIsCurrent(id, configuration: configurations[key]) || caches[id] == nil || (xmltvCaches[key].map { now.timeIntervalSince($0.fetchTime) >= Self.xmltvExpiry } ?? true)
             }
-            return force || (caches[id].map { now.timeIntervalSince($0.fetchTime) >= expiry } ?? true)
+            return force || changedSources.contains(key) || !projectionIsCurrent(id, configuration: configurations[key]) || (caches[id].map { now.timeIntervalSince($0.fetchTime) >= expiry } ?? true)
         }
         let groups = Dictionary(grouping: stale) { id -> String in
             sourceKey(id)
         }
         for key in groups.keys.sorted() {
             guard !Task.isCancelled, let configuration = configurations[key] else { continue }
+            let assignments = manualChannelMapping
             let limit = AppleIPTVClient.maximumChannels
             var requested = Set(groups[key] ?? [])
             if case .xmltv(_, let mapping, _, _, _) = configuration {
@@ -152,6 +188,7 @@ public final class AppleIPTVGuideStore {
                 var fileChanged = false
                 var updatedXMLTV: XMLTVCache?
                 var providerIDs: [String: String] = [:]
+                var stagedEvidence: [String: AppleIPTVGuideMappingEvidence] = [:]
                 switch configuration {
                 case .xmltv(let url, let mapping, let offset, _, _):
                     let previous = xmltvCaches[key]
@@ -166,16 +203,30 @@ public final class AppleIPTVGuideStore {
                         updatedXMLTV = XMLTVCache(guide: guide, fetchTime: now, eTag: response.eTag,
                             lastModified: response.lastModified, contentDigest: response.contentDigest)
                     }
-                    guard !Task.isCancelled, configurations[key] == configuration else { continue }
+                    guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
+                    let available = Set(guide.channelNames.keys).union(guide.allProgrammes.map(\.channelID))
+                    let names = channelDisplayNames.filter { sourceKey($0.key) == key }
+                    let counts = Dictionary(grouping: names.keys) { AppleIPTVGuideMatching.normalize(names[$0] ?? "") }
                     for id in ids {
-                        if let manual = manualChannelMapping[id] { providerIDs[id] = manual }
-                        else if let exact = mapping[id], !guide.programmes(channelID: exact, in: DateInterval(start: .distantPast, end: .distantFuture)).isEmpty { providerIDs[id] = exact }
-                        else { providerIDs[id] = guide.channelMatchIndex.match(id: mapping[id] ?? id,
-                            name: channelDisplayNames[id] ?? id)?.channelID ?? mapping[id] ?? id }
+                        let shift = shifts(for: id, configuration: configuration)
+                        let evidence = AppleIPTVGuideMappingEvidence.resolve(id: id, declaredID: mapping[id],
+                            manualID: assignments[id], name: names[id] ?? id,
+                            uniqueName: (counts[AppleIPTVGuideMatching.normalize(names[id] ?? id)]?.count ?? 1) == 1,
+                            index: guide.channelMatchIndex, available: available, previous: mappingEvidence[id],
+                            defaultOffsetHours: offset, channelShiftHours: shift.channel,
+                            correctionHours: shift.correction, fetchedAt: updatedXMLTV?.fetchTime ?? previous?.fetchTime ?? now)
+                        if let evidence {
+                            stagedEvidence[id] = evidence
+                            providerIDs[id] = evidence.providerID
+                        } else if var retained = mappingEvidence[id] {
+                            retained.isStale = true
+                            stagedEvidence[id] = retained
+                            providerIDs[id] = retained.providerID
+                        }
                     }
                 case .xtream(let base, let user, let pass, _):
                     for id in ids {
-                        if let value = AppleIPTVGuideMatching.xtreamID(id, manualID: manualChannelMapping[id], sourceKey: key) {
+                        if let value = AppleIPTVGuideMatching.xtreamID(id, manualID: assignments[id], sourceKey: key) {
                             providerIDs[id] = String(value)
                         }
                     }
@@ -184,37 +235,37 @@ public final class AppleIPTVGuideStore {
                     guide = try await loader.load(xtreamBase: base, username: user, password: pass,
                         streamIDs: providerIDs.values.compactMap(Int.init).sorted(), archiveStreamIDs: archive)
                 }
-                guard !Task.isCancelled, configurations[key] == configuration else { continue }
+                guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
                 var stagedCaches: [String: ChannelCache] = [:]
                 for (index, id) in ids.enumerated() {
                     if index.isMultiple(of: 100) {
                         await Task.yield()
-                        guard !Task.isCancelled, configurations[key] == configuration else { break }
-                    }
-                    let shift: Double
-                    switch configuration {
-                    case .xmltv(_, _, _, let shifts, let correction): shift = (shifts[id] ?? 0) + correction
-                    case .xtream(_, _, _, let correction): shift = correction
+                        guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { break }
                     }
                     guard let providerID = providerIDs[id] else { continue }
-                    let programmes = guide.programmes(channelID: providerID,
-                        in: DateInterval(start: .distantPast, end: .distantFuture)).map { programme in
-                        AppleIPTVProgramme(id: "\(id):\(programme.id)", channelID: id, title: programme.title,
-                            subtitle: programme.subtitle, description: programme.description, start: programme.start.addingTimeInterval(shift * 3600),
-                            end: programme.end.addingTimeInterval(shift * 3600), category: programme.category, isLive: programme.isLive)
-                    }
-                    stagedCaches[id] = ChannelCache(programmes: programmes, fetchTime: now)
+                    let shift = shifts(for: id, configuration: configuration)
+                    let evidence = stagedEvidence[id] ?? AppleIPTVGuideMappingEvidence(providerID: providerID,
+                        declaredProviderID: channelProviderIDs[id] ?? providerID, origin: assignments[id].flatMap(Int.init) == Int(providerID) ? .manual : .providerID,
+                        confidence: 1, defaultOffsetHours: 0, channelShiftHours: shift.channel,
+                        correctionHours: shift.correction, fetchedAt: now, coverage: [], isStale: false)
+                    let replacement = AppleIPTVGuideMappingEvidence.replacement(providerProgrammes:
+                        guide.programmes(channelID: providerID, in: DateInterval(start: .distantPast, end: .distantFuture)),
+                        channelID: id, evidence: evidence, previousProgrammes: caches[id]?.programmes ?? [],
+                        previousEvidence: mappingEvidence[id])
+                    stagedEvidence[id] = replacement.evidence
+                    stagedCaches[id] = ChannelCache(programmes: replacement.programmes, fetchTime: replacement.evidence.fetchedAt)
                 }
-                guard !Task.isCancelled, configurations[key] == configuration else { continue }
+                guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
                 // Commit only the completed replacement. A cancelled mapping keeps the old guide.
                 if let updatedXMLTV { xmltvCaches[key] = updatedXMLTV }
                 changedSources.remove(key)
                 caches.merge(stagedCaches) { _, new in new }
+                mappingEvidence.merge(stagedEvidence) { _, new in new }
                 if case .xmltv = configuration { channelNames[key] = guide.channelNames }
                 revision &+= 1
                 if case .xmltv = configuration {
                     if fileChanged, let snapshot = xmltvCaches[key] {
-                        await diskCache.store(snapshot.guide.allProgrammes, key: diskKey(key, configuration),
+                        await diskCache.store(snapshot.guide.allProgrammes, key: rawDiskKey(key, configuration),
                             channelNames: snapshot.guide.channelNames, fetchedAt: snapshot.fetchTime, eTag: snapshot.eTag,
                             lastModified: snapshot.lastModified, contentDigest: snapshot.contentDigest, isRawXMLTV: true)
                     }
@@ -224,6 +275,11 @@ public final class AppleIPTVGuideStore {
                     }.values.flatMap(\.programmes)
                     await diskCache.store(sourceProgrammes, key: diskKey(key, configuration), channelNames: channelNames[key] ?? [:])
                 }
+                guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
+                let sourceCaches = caches.filter { sourceKey($0.key) == key }.values.flatMap(\.programmes)
+                let sourceEvidence = mappingEvidence.filter { sourceKey($0.key) == key }
+                await diskCache.store(sourceCaches, key: evidenceDiskKey(key, configuration),
+                    channelNames: channelNames[key] ?? [:], mappingEvidence: sourceEvidence)
                 let filled = ids.filter { !(caches[$0]?.programmes.isEmpty ?? true) }.count
                 appleTrace("guide loaded: \(filled)/\(ids.count) visible channels have programmes")
             } catch {
@@ -239,12 +295,51 @@ public final class AppleIPTVGuideStore {
         return UUID(uuidString: prefix) == nil ? "" : prefix
     }
 
-    private func diskKey(_ source: String, _ configuration: Configuration) -> String {
+    private func projectionIsCurrent(_ id: String, configuration: Configuration?) -> Bool {
+        guard let configuration, let evidence = mappingEvidence[id] else { return false }
+        let shift = shifts(for: id, configuration: configuration)
+        guard evidence.channelShiftHours == shift.channel, evidence.correctionHours == shift.correction else { return false }
+        if case .xmltv(_, let mapping, let offset, _, _) = configuration {
+            return evidence.defaultOffsetHours == offset && evidence.declaredProviderID == mapping[id]
+        }
+        return evidence.declaredProviderID == (channelProviderIDs[id] ?? evidence.providerID)
+    }
+
+    private func shifts(for id: String, configuration: Configuration) -> (channel: Double, correction: Double) {
+        switch configuration {
+        case .xmltv(_, _, _, let shifts, let correction):
+            return (AppleIPTVGuideMappingEvidence.finite(shifts[id] ?? 0), AppleIPTVGuideMappingEvidence.finite(correction))
+        case .xtream(_, _, _, let correction): return (0, AppleIPTVGuideMappingEvidence.finite(correction))
+        }
+    }
+
+    private func evidenceDiskKey(_ source: String, _ configuration: Configuration) -> String {
+        switch configuration {
+        case .xmltv(let url, _, _, _, _): return source + "|evidence-v1|xmltv|" + url.absoluteString
+        case .xtream(let url, let user, let password, _): return source + "|evidence-v1|xtream|" + url.absoluteString + "|" + user + "|" + password
+        }
+    }
+
+    private func rawDiskKey(_ source: String, _ configuration: Configuration) -> String {
+        switch configuration {
+        case .xmltv(let url, _, let offset, _, _): return source + "|raw-v1|" + url.absoluteString + "|" + String(offset)
+        case .xtream: return diskKey(source, configuration)
+        }
+    }
+
+    private func diskKey(_ source: String, _ configuration: Configuration, manualLegacyMapping: Bool = false) -> String {
         switch configuration {
         case .xmltv(let url, let mapping, let offset, let shifts, let correction):
+            var legacyMapping = mapping
+            if manualLegacyMapping {
+                for (id, manual) in manualChannelMapping where sourceKey(id) == source &&
+                    (mapping[id] != nil || channelDisplayNames[id] != nil) {
+                    legacyMapping[id] = manual
+                }
+            }
             return source + "|" + url.absoluteString + "|" + String(offset) + "|" + String(correction)
                 + "|" + manualChannelMapping.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: "|")
-                + "|" + mapping.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: "|")
+                + "|" + legacyMapping.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: "|")
                 + "|" + shifts.sorted { $0.key < $1.key }.map { $0.key + "=" + String($0.value) }.joined(separator: "|")
         case .xtream(let url, let user, let password, let correction):
             return source + "|" + url.absoluteString + "|" + user + "|" + password + "|" + String(correction)

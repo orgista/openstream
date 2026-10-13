@@ -4657,3 +4657,10 @@ Verified on Dev-Mini: 3178 Swift tests in 398 suites, tvOS E2E 20/0 and iOS E2E 
 Discover keeps your most recent eligible Continue Watching title first, then makes room for up to two unseen suggestions and one unseen release with a known date within 90 days. Unfilled slots keep the existing fallback order. Disliked and unavailable titles are excluded; titles displaced from the hero remain in Continue Watching. Hero timing, artwork, controls and labels stay as approved.
 
 The recovered serial Swift gate passed 3,219 tests in 400 suites. Full simulator E2E met the baseline: Apple TV 20 passed / 0 failed; iOS 40 passed / 1 known AirPlay response failure. Both app builds recompiled the changed source files. Original app, group and host data restored with matching hashes, and both simulators shut down. OfficePlus was untouched. No commit or upload.
+
+
+## 2026-10-13 — EPG assignments and cached guide data
+
+Guide assignments now remember the provider entry, how it matched, its time correction, and the programme times kept in the cache. Manual choices keep priority. A guide-ID change on a unique unchanged stream keeps the saved channel ID, so manual assignments, favorites and recents stay attached. Failed refreshes and missing manual targets retain the last guide; time corrections apply once to raw data.
+
+The final serial Swift gate passed 3,232 tests in 402 suites, including nine fixture tests for matching, identity, time correction, failed refreshes and old cache recovery. Both app builds recompiled all six changed source files. Full E2E met the baseline: tvOS 20/0, iOS 40/1 with only the known AirPlay response failure. Original app, shared-group and host data restored with matching hashes; both simulators shut down. The final old-cache fallback was verified by the subsequent Swift gate and platform builds after E2E. No commit or upload.

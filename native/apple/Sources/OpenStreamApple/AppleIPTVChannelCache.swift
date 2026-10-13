@@ -30,6 +30,21 @@ public actor AppleIPTVChannelCache {
             .appendingPathComponent("OpenStream/LiveChannels", isDirectory: true)
     }
 
+    /// A guide ID is provider metadata, not user-state identity. Only an unambiguous
+    /// unchanged transport within this source can carry an old local ID forward.
+    static func reconciled(_ channels: [AppleIPTVChannel], previous: [AppleIPTVChannel],
+                           sourceID: AppleSource.ID) -> [AppleIPTVChannel] {
+        let old = Dictionary(grouping: previous.filter { $0.sourceID == sourceID }, by: \.streamURL)
+        let new = Dictionary(grouping: channels.filter { $0.sourceID == sourceID }, by: \.streamURL)
+        let currentIDs = Set(channels.map(\.id))
+        return channels.map { channel in
+            guard channel.sourceID == sourceID, let candidates = old[channel.streamURL], candidates.count == 1,
+                  new[channel.streamURL]?.count == 1, let existing = candidates.first,
+                  existing.id == channel.id || !currentIDs.contains(existing.id) else { return channel }
+            return channel.withLocalIdentity(existing.id)
+        }
+    }
+
     public func snapshot(for sourceID: AppleSource.ID) -> Snapshot? {
         guard let url = fileURL(for: sourceID), let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(Snapshot.self, from: data)

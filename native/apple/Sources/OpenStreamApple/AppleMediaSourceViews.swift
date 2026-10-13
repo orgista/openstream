@@ -706,7 +706,9 @@ struct AppleLiveTVView: View {
             }
             for await (source, result) in group {
                 switch result {
-                case .success(let sourceChannels):
+                case .success(let receivedChannels):
+                    let sourceChannels = AppleIPTVChannelCache.reconciled(receivedChannels,
+                        previous: cached[source.id] ?? [], sourceID: source.id)
                     load.succeeded(source.id, channels: sourceChannels)
                     sourceCauses[source.id] = nil
                     await AppleIPTVChannelCache.shared.store(sourceChannels, for: source.id)
@@ -850,6 +852,9 @@ struct AppleLiveTVView: View {
         guard !visibleIDs.isEmpty else { return }
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         guideStore.channelDisplayNames = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0.name) })
+        guideStore.channelProviderIDs = Dictionary(uniqueKeysWithValues: channels.compactMap { channel in
+            channel.guideID.map { (channel.id, $0) }
+        })
         guideStore.manualChannelMapping = settings.guideChannelAssignments
         guideStore.retainSources(Set(sources.map(\.id)))
         guideStore.archiveChannelIDs = Set(channels.lazy.filter(AppleIPTVCatchUp.supportsCatchUp).map(\.id))
@@ -861,7 +866,7 @@ struct AppleLiveTVView: View {
             } else {
                 let sourceChannels = channels.filter { $0.sourceID == source.id }
                 let mapping = sourceChannels.reduce(into: [String: String]()) { result, channel in
-                    if let id = settings.guideChannelAssignments[channel.id] ?? channel.guideID { result[channel.id] = id }
+                    if let id = channel.guideID { result[channel.id] = id }
                 }
                 guideStore.configure(xmltvURL: sourceChannels.first?.guideURL, sourceID: source.id, channelMapping: mapping,
                     defaultOffsetHours: sourceChannels.first?.guideDefaultOffsetHours ?? 0,

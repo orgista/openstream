@@ -60,7 +60,11 @@ struct AppleIPTVGuideRobustnessTests {
         store.configure(xmltvURL: url)
         await store.refreshVisible(channelIDs: ["a"], now: now)
         let file = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .first { !$0.lastPathComponent.contains(".day.") })
+            .first { url in
+                guard let data = try? Data(contentsOf: url),
+                      let saved = try? JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: data) else { return false }
+                return saved.isRawXMLTV == true
+            })
         let original = try Data(contentsOf: file)
         let saved = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: original)
         #expect(saved.eTag == "v1")

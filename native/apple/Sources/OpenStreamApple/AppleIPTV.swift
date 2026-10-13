@@ -1,7 +1,7 @@
 import Foundation
 
 public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
-    public let id: String
+    public private(set) var id: String
     public let sourceID: AppleSource.ID
     public let name: String
     public let group: String
@@ -45,6 +45,13 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               let value = Int(raw), value > 0, value < 1_000_000 else { return nil }
         return value
+    }
+
+    /// Keeps saved settings keyed to the existing local channel while provider metadata changes.
+    func withLocalIdentity(_ id: String) -> Self {
+        var copy = self
+        copy.id = id
+        return copy
     }
 
     public func withProbedMediaKind(_ kind: AppleIPTVStreamProbeResult.MediaKind?) -> AppleIPTVChannel {

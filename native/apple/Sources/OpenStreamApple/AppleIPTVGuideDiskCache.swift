@@ -14,6 +14,7 @@ public actor AppleIPTVGuideDiskCache {
     public struct Snapshot: Codable, Sendable {
         public let programmes: [AppleIPTVProgramme]
         public let channelNames: [String: String]
+        public var mappingEvidence: [String: AppleIPTVGuideMappingEvidence]? = nil
         public var fetchedAt: Date? = nil
         public var eTag: String? = nil
         public var lastModified: String? = nil
@@ -65,20 +66,30 @@ public actor AppleIPTVGuideDiskCache {
             return snapshot
         }
         let valid = snapshot.programmes.filter { $0.end > now && $0.end > $0.start }
-        if valid.isEmpty { try? FileManager.default.removeItem(at: url) }
+        if valid.isEmpty && snapshot.mappingEvidence == nil { try? FileManager.default.removeItem(at: url) }
         return Snapshot(programmes: Array(valid.prefix(Self.maximumProgrammes)), channelNames: snapshot.channelNames,
+            mappingEvidence: snapshot.mappingEvidence,
             fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
             contentDigest: snapshot.contentDigest, isRawXMLTV: snapshot.isRawXMLTV)
     }
 
     public func store(_ programmes: [AppleIPTVProgramme], key: String, channelNames: [String: String] = [:],
+                      mappingEvidence: [String: AppleIPTVGuideMappingEvidence]? = nil,
                       fetchedAt: Date? = nil, eTag: String? = nil, lastModified: String? = nil,
                       contentDigest: String? = nil, isRawXMLTV: Bool? = nil, now: Date? = nil) {
-        guard let directory, let url = fileURL(key), (!programmes.isEmpty || isRawXMLTV == true) else { return }
+        guard let directory, let url = fileURL(key), (!programmes.isEmpty || isRawXMLTV == true || mappingEvidence != nil) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let values = isRawXMLTV == true ? Self.retained(programmes, now: now ?? fetchedAt ?? .now)
             : Array(programmes.prefix(Self.maximumProgrammes))
+        let grouped = mappingEvidence == nil ? [:] : Dictionary(grouping: values, by: \.channelID)
+        var retainedEvidence = mappingEvidence
+        for (id, value) in retainedEvidence ?? [:] {
+            var evidence = value
+            evidence.coverage = AppleIPTVGuideMappingEvidence.coverage(of: grouped[id] ?? [])
+            retainedEvidence?[id] = evidence
+        }
         var snapshot = Snapshot(programmes: isRawXMLTV == true ? [] : values, channelNames: channelNames,
+            mappingEvidence: retainedEvidence,
             fetchedAt: fetchedAt, eTag: eTag, lastModified: lastModified,
             contentDigest: contentDigest, isRawXMLTV: isRawXMLTV)
         var written: [URL] = []
