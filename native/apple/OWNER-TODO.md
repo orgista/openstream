@@ -437,11 +437,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
 ## Waiting on an owner decision
 
-- [ ] **Mac launch test for build 19 (2026-10-13):** the existing Mac Development profile (2026-09-24b) doesn't
-      include Dev-Mini, so the Mac Release build can't be launch-tested there ("Provisioning profile does not allow
-      this device", verification-artifacts/ship19-macos-launch-2026-10-13.log). OK to register Dev-Mini and regenerate
-      that profile? Otherwise build 19 ships with the same Mac launch gap as 18.
-
+- [x] **Mac launch test for build 19 (2026-10-13):** owner OK'd. Dev-Mini registered (ASC device X54DASSTUH,
+      Provisioning UDID) and new profile "OpenStream Mac Development 2026-10-13" (5CLWYB44Z7; certs 6BCK8Q8A2P mini +
+      DCJ4PSN9C6 Studio; devices Dev-Mini + Mac Studio) installed on the mini. Launch test queued for Codex.
 - [ ] **UX tour 2026-10-08: four calls for you** (details in verification-artifacts/ux-tour-2026-10-08/FINDINGS.md):
       (1) the iPhone/iPad player has no Picture in Picture or AirPlay button; PiP only starts when you leave
       the app. Add both to the top bar like the Apple TV app? (2) Discover and Search each have a Refresh button;
