@@ -12,7 +12,7 @@ struct AppleDiscoverLoadingContent: View {
     private var heroHeight: CGFloat {
         switch presentation {
         case .tv: AppleTVBillboardMetrics.artHeight
-        case .phone: AppleHomePhoneHeroLayout.portraitArtHeight(width: viewport.width, limit: phoneLayout.artHeight)
+        case .phone: phoneLayout.artHeight
         case .mac, .pad: wideLayout.height
         case .rotating:
             #if os(tvOS)

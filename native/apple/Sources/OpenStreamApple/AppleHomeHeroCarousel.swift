@@ -77,14 +77,15 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             #elseif os(iOS)
             if presentation == .phone || presentation == .pad {
                 AppleHomePhoneHeroCarousel(pageIDs: pageIDs,
-                    dotsCentreInset: presentation == .pad ? AppleMacHeroLayout.padDotsCentreInset : AppleHomePhoneHeroLayout.dotsCentreInset) { index in
+                    dotsCentreInset: presentation == .pad ? AppleMacHeroLayout.padDotsCentreInset : AppleHomePhoneHeroLayout.dotsCentreInset,
+                    advancesAfterVideoEnds: presentation == .phone) { index in
                     page(index, false, presentation, 0, 0, nil)
                 } preload: { index in
                     if presentation == .pad {
                         AppleHomeMacHeroPreload(item: items[index], wordmark: wordmarks[index], layout: wideLayout)
                     } else {
                         AppleHomePhoneHeroPreload(item: items[index], wordmark: wordmarks[index],
-                            width: viewportSize.width, artHeight: phoneLayout.artHeight)
+                            width: viewportSize.width, artHeight: phoneLayout.artHeight, topInset: phoneLayout.topInset)
                     }
                 }
                 .padding(.top, presentation == .pad ? -wideLayout.topOverlap : -phoneLayout.topOverlap)

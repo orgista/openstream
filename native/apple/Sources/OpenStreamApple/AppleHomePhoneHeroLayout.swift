@@ -52,20 +52,6 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
         return max(min(target, peekLimit), Self.minimumArtHeight)
     }
 
-    /// The portrait art's aspect: 1.25 × the width (538 pt on a 430 pt
-    /// iPhone), so a 2:3 key-art poster loses only its designed margins and a
-    /// 16:9 backdrop is not sliced to a sliver (owner items 6 and 19).
-    public static let portraitArtAspect: CGFloat = 1.25
-
-    /// The iPhone hero's art height for a screen `width` wide: 1.25 × width,
-    /// never taller than `limit` (`artHeight`, which keeps the first row
-    /// peeking above the tab bar) and never under `minimumArtHeight`.
-    /// An unmeasured width keeps `limit`.
-    public static func portraitArtHeight(width: CGFloat, limit: CGFloat) -> CGFloat {
-        guard width > 0 else { return limit }
-        return max(min((width * portraitArtAspect).rounded(), limit), minimumArtHeight)
-    }
-
     /// How far the hero is pulled up so its art starts at the top edge.
     public var topOverlap: CGFloat { topInset + Self.stackTopPadding }
 

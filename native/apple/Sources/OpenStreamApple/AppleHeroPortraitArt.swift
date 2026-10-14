@@ -8,18 +8,23 @@ import Foundation
 /// Order, first hit wins:
 /// 1. **Key art**: TMDB's textless (`null`-language) poster, with the wordmark
 ///    or the name drawn over it.
-/// 2. **Backdrop**: the textless backdrop, else whatever backdrop the item
-///    has, cropped with a fixed top bias (`focalPoint`).
-/// 3. **Poster card**: the item's own poster (which is assumed to carry its
-///    title) on a blurred copy of itself. The text title is then suppressed
-///    so the name never appears twice. Last resort; every hit is traced.
+/// 2. **Backdrop**: TMDB's textless backdrop, cropped with a fixed top bias
+///    (`focalPoint`).
+/// 3. **Card**: titled art on a blurred copy of itself, never cropped: the
+///    item's own poster, else its own backdrop. The text title is then
+///    suppressed so the name never appears twice. Every hit is traced.
 /// 4. Nothing: the name over black (`AppleHeroTitlePolicy`).
+///
+/// Only TMDB records which images are textless (a `null` language), so the
+/// item's own poster and backdrop count as titled: aspect-filling one into
+/// the full-bleed frame cut its printed title in half and put the wordmark
+/// under it a second time (lead review 2026-10-14).
 ///
 /// Media servers and IPTV map onto the same slots through the item:
 /// Jellyfin `Primary` / Plex `thumb` / Xtream `stream_icon` are the poster,
 /// Jellyfin `Backdrop` / Plex `art` / Xtream `backdrop_path` the backdrop,
-/// Jellyfin `Logo` / Plex `clearLogo` the wordmark. Their posters have no
-/// language, so they count as titled.
+/// Jellyfin `Logo` / Plex `clearLogo` the wordmark. None of them carries a
+/// language, so they count as titled too.
 public enum AppleHeroPortraitArt: Equatable, Sendable {
     case keyArt(URL)
     case backdrop(URL)
@@ -32,6 +37,7 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
         /// A poster whose language is unknown or set: treated as titled.
         public var poster: URL?
         public var textlessBackdrop: URL?
+        /// A backdrop whose language is unknown or set: treated as titled.
         public var backdrop: URL?
         public var logo: URL?
 
@@ -57,11 +63,6 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
         case poster, backdrop, fallback, none
     }
 
-    /// The iPhone's portrait hero never autoplays a trailer (owner default,
-    /// Mythos §4.2): trailers play on the title page's 16:9 header. iPad,
-    /// Mac and Apple TV keep their hero trailers.
-    public static let phoneHeroPlaysTrailers = false
-
     /// Constant top bias for slice 1 (a Vision focal point is slice 2).
     public static let focalPoint = CGPoint(x: 0.5, y: 0.35)
 
@@ -72,8 +73,8 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
     public static func choose(_ candidates: Candidates, failed: Set<URL> = []) -> AppleHeroPortraitArt {
         func usable(_ url: URL?) -> URL? { url.flatMap { failed.contains($0) ? nil : $0 } }
         if let poster = usable(candidates.textlessPoster) { return .keyArt(poster) }
-        if let backdrop = usable(candidates.textlessBackdrop) ?? usable(candidates.backdrop) { return .backdrop(backdrop) }
-        if let poster = usable(candidates.poster) { return .posterCard(poster) }
+        if let backdrop = usable(candidates.textlessBackdrop) { return .backdrop(backdrop) }
+        if let titled = usable(candidates.poster) ?? usable(candidates.backdrop) { return .posterCard(titled) }
         return .none
     }
 
@@ -122,6 +123,31 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
             y = -overflowY * min(max(focal.y, 0), 1)
         }
         return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// What the poster card leaves clear at the bottom of the art: the
+    /// metadata line, the buttons and the page dots (its title is suppressed).
+    public static let posterCardBottomReserve: CGFloat = 160
+    /// The card's width as a share of the screen's, when the height allows.
+    public static let posterCardWidthFraction: CGFloat = 0.6
+    /// The same for a titled backdrop, which is wider than it is tall.
+    public static let landscapeCardWidthFraction: CGFloat = 0.9
+
+    /// Where the card (a titled poster, or a titled backdrop) sits in a full-height hero (`frame` from the top
+    /// edge of the screen): centred across, and centred between the bottom
+    /// of the large title (`topInset`) and the copy, shrunk to fit there, so
+    /// the poster's own title is never under the navigation bar or the buttons.
+    public static func posterCardRect(posterAspect: CGFloat, in frame: CGSize, topInset: CGFloat) -> CGRect {
+        guard posterAspect > 0, frame.width > 0, frame.height > 0 else { return .zero }
+        let top = max(topInset, 0) + 12
+        let room = max(frame.height - posterCardBottomReserve - top, 0)
+        var width = frame.width * (posterAspect > 1 ? landscapeCardWidthFraction : posterCardWidthFraction)
+        var height = width / posterAspect
+        if height > room {
+            height = room
+            width = height * posterAspect
+        }
+        return CGRect(x: (frame.width - width) / 2, y: top + (room - height) / 2, width: width, height: height)
     }
 }
 

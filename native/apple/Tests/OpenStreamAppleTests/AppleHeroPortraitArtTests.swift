@@ -74,9 +74,33 @@ import Testing
         #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(textlessBackdrop))
     }
 
-    @Test func anyBackdropBeatsATitledPoster() {
-        let candidates = AppleHeroPortraitArt.Candidates(poster: poster, backdrop: backdrop)
-        #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(backdrop))
+    @Test func aTextlessBackdropBeatsATitledPoster() {
+        let candidates = AppleHeroPortraitArt.Candidates(poster: poster, textlessBackdrop: textlessBackdrop,
+                                                         backdrop: backdrop, logo: logo)
+        let art = AppleHeroPortraitArt.choose(candidates)
+        #expect(art == .backdrop(textlessBackdrop))
+        #expect(art.showsTitle)
+    }
+
+    /// Lead review 2026-10-14: the item's own backdrop may carry the title
+    /// ("SOU…" cut off, then the wordmark again under it), so it is never
+    /// aspect-filled; with only titled art the hero is the card, no title.
+    @Test(arguments: [
+        AppleHeroPortraitArt.Candidates(poster: URL(string: "https://fixture.example/poster-en.jpg")!,
+                                        backdrop: URL(string: "https://fixture.example/backdrop.jpg")!,
+                                        logo: URL(string: "https://fixture.example/logo.png")!),
+        AppleHeroPortraitArt.Candidates(poster: URL(string: "https://fixture.example/poster-en.jpg")!),
+    ])
+    func titledArtOnlyIsTheCardWithNoTitle(_ candidates: AppleHeroPortraitArt.Candidates) {
+        let art = AppleHeroPortraitArt.choose(candidates)
+        #expect(art == .posterCard(poster))
+        #expect(!art.showsTitle)
+    }
+
+    @Test func aTitledBackdropAloneIsACardNeverACrop() {
+        let art = AppleHeroPortraitArt.choose(.init(backdrop: backdrop, logo: logo))
+        #expect(art == .posterCard(backdrop))
+        #expect(!art.showsTitle)
     }
 
     @Test func aTitledPosterIsTheLastResortCard() {
@@ -93,8 +117,10 @@ import Testing
 
     @Test func aFailedImageMovesToTheNextKind() {
         #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster]) == .backdrop(textlessBackdrop))
-        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop]) == .backdrop(backdrop))
-        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop, backdrop]) == .posterCard(poster))
+        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop]) == .posterCard(poster))
+        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop, poster]) == .posterCard(backdrop))
+        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop, poster, backdrop])
+                == AppleHeroPortraitArt.none)
     }
 
     // MARK: Title suppression
@@ -111,13 +137,20 @@ import Testing
 
     // MARK: Server and IPTV items map onto the same order
 
-    @Test func aMediaServerItemWithABackdropUsesTheBackdrop() {
+    @Test func aMediaServerItemsOwnArtCountsAsTitled() {
         // Jellyfin Primary → posterURL, Backdrop → backgroundURL, Logo → logoURL.
         let item = AppleCatalogItem(mediaID: "jellyfin:abc", type: "movie", name: "Server Film",
                                     posterURL: poster, backgroundURL: backdrop, logoURL: logo)
         let candidates = AppleHeroPortraitArt.Candidates(item: item)
         #expect(candidates.logo == logo)
-        #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(backdrop))
+        #expect(AppleHeroPortraitArt.choose(candidates) == .posterCard(poster))
+    }
+
+    @Test func tmdbsTextlessBackdropBeatsTheItemsOwnArt() {
+        let item = AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Film",
+                                    posterURL: poster, backgroundURL: backdrop)
+        let candidates = AppleHeroPortraitArt.Candidates(item: item, tmdbBackdrop: textlessBackdrop, tmdbLogo: logo)
+        #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(textlessBackdrop))
     }
 
     @Test func anIPTVItemWithOnlyItsIconGetsTheCardWithNoTextTitle() {
@@ -135,9 +168,6 @@ import Testing
         #expect(candidates.logo == logo)
     }
 
-    @Test func thePhoneHeroIsStatic() {
-        #expect(AppleHeroPortraitArt.phoneHeroPlaysTrailers == false)
-    }
 
     // MARK: Crop
 
@@ -170,16 +200,59 @@ import Testing
 
     // MARK: Geometry
 
-    @Test func theArtIsOneAndAQuarterTimesTheWidth() {
-        #expect(AppleHomePhoneHeroLayout.portraitArtHeight(width: 430, limit: 680) == 538)
-        #expect(AppleHomePhoneHeroLayout.portraitArtHeight(width: 390, limit: 640) == 488)
+    /// Owner 2026-10-14: full-bleed again, as 0d100ce had it: from the top
+    /// edge to 73 % of the screen, held so ≥ 90 pt of the first row peeks
+    /// above the tab bar. The width no longer sets the height.
+    @Test(arguments: [
+        // iPhone SE (3rd gen): 667 pt, 49 pt tab bar: the peek clamp wins.
+        (AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 116, bottomInset: 49), CGFloat(466)),
+        // iPhone 16e: 844 pt, 83 pt tab bar: the peek clamp wins.
+        (AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83), CGFloat(609)),
+        // iPhone 15 Pro Max: 932 pt: 73 % of the screen.
+        (AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 155, bottomInset: 83), CGFloat(932 * 0.73)),
+    ])
+    func thePhoneArtIsFullBleed(_ layout: AppleHomePhoneHeroLayout, expected: CGFloat) {
+        #expect(abs(layout.artHeight - expected) < 0.5)
+        let peek = layout.containerHeight - layout.bottomInset - layout.artHeight - AppleHomePhoneHeroLayout.firstRowLead
+        #expect(peek >= AppleHomePhoneHeroLayout.minimumRowPeek - 0.001)
+        #expect(layout.topOverlap == layout.topInset + AppleHomePhoneHeroLayout.stackTopPadding)
     }
 
-    @Test func theArtKeepsTheRowPeekLimitAndTheFloor() {
-        // iPhone SE: the peek limit is lower than 1.25 × 375.
-        #expect(AppleHomePhoneHeroLayout.portraitArtHeight(width: 375, limit: 466) == 466)
-        #expect(AppleHomePhoneHeroLayout.portraitArtHeight(width: 300, limit: 600)
-                == AppleHomePhoneHeroLayout.minimumArtHeight)
-        #expect(AppleHomePhoneHeroLayout.portraitArtHeight(width: 0, limit: 600) == 600)
+    @Test func aPosterKeepsItsTopBiasInTheTallerFrame() {
+        // A 2:3 poster in 430 × 680 (15 Pro Max): it fills the height and
+        // loses 23 pt across, centred; nothing is lost top or bottom.
+        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
+                                                 in: CGSize(width: 430, height: 680))
+        #expect(abs(rect.height - 680) < 0.5)
+        #expect(abs(rect.width - 453.3) < 0.5)
+        #expect(abs(rect.midX - 215) < 0.5)
+        #expect(rect.minY == 0)
+    }
+
+    @Test(arguments: [
+        (CGSize(width: 375, height: 466), CGFloat(116)),
+        (CGSize(width: 390, height: 609), CGFloat(143)),
+        (CGSize(width: 430, height: 680), CGFloat(155)),
+    ])
+    func thePosterCardSitsBetweenTheTitleAndTheButtons(_ frame: CGSize, topInset: CGFloat) {
+        let card = AppleHeroPortraitArt.posterCardRect(posterAspect: 2.0 / 3.0, in: frame, topInset: topInset)
+        #expect(card.minY >= topInset)
+        #expect(card.maxY <= frame.height - AppleHeroPortraitArt.posterCardBottomReserve + 0.001)
+        #expect(card.width <= frame.width * AppleHeroPortraitArt.posterCardWidthFraction + 0.001)
+        #expect(abs(card.midX - frame.width / 2) < 0.001)
+        #expect(abs(card.width / card.height - 2.0 / 3.0) < 0.001)
+    }
+
+    @Test func aTitledBackdropCardIsWiderAndStillClearOfTheTitleAndButtons() {
+        let frame = CGSize(width: 390, height: 609)
+        let card = AppleHeroPortraitArt.posterCardRect(posterAspect: 16.0 / 9.0, in: frame, topInset: 143)
+        #expect(abs(card.width - frame.width * AppleHeroPortraitArt.landscapeCardWidthFraction) < 0.001)
+        #expect(card.minY >= 143)
+        #expect(card.maxY <= frame.height - AppleHeroPortraitArt.posterCardBottomReserve + 0.001)
+        #expect(abs(card.width / card.height - 16.0 / 9.0) < 0.001)
+    }
+
+    @Test func aPosterCardInAnUnmeasuredFrameIsEmpty() {
+        #expect(AppleHeroPortraitArt.posterCardRect(posterAspect: 2.0 / 3.0, in: .zero, topInset: 100) == .zero)
     }
 }

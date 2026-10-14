@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The iPhone portrait hero's art (Discover and Library): static, no trailer.
+/// The iPhone portrait hero's art (Discover and Library), from the top edge of
+/// the screen to 73 % of it; the trailer plays over it (`AppleHomeBillboard`).
 ///
 /// The art and its crop are settled before anything is drawn
 /// (`AppleHeroPortraitArt`): TMDB is asked first (cache, or at most
@@ -11,13 +12,22 @@ import SwiftUI
 /// viewer (owner items 6 and 19).
 struct AppleHomePhonePortraitStage: View {
     let item: AppleCatalogItem
+    /// The bottom of the large title, from the top of the art: the poster
+    /// card stays below it (`AppleHeroPortraitArt.posterCardRect`).
+    var topInset: CGFloat = 0
     /// Called once the art is on screen: the choice, its image (for the
     /// still's luminance reading) and the wordmark the choice brought.
     var onReady: (AppleHeroPortraitDecision, CGImage?) -> Void = { _, _ in }
+    /// Set by a hero whose trailer can play: receives the art exactly as it
+    /// is drawn, at the frame's size, for the trailer's cover, so the still
+    /// under a starting or ending trailer is these pixels and nothing jumps.
+    var onCover: ((CGImage?) -> Void)? = nil
 
     @Environment(\.appleTMDBConfiguration) private var configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
     @State private var shown: Shown?
+    @State private var size: CGSize = .zero
 
     struct Shown: Equatable {
         let decision: AppleHeroPortraitDecision
@@ -28,50 +38,48 @@ struct AppleHomePhonePortraitStage: View {
         }
     }
 
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .topLeading) {
-                Color.black
-                if let shown, let image = shown.image {
-                    art(shown.decision.art, image: image, size: proxy.size, focal: shown.focal)
-                        .transition(.opacity)
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
-        }
-        .accessibilityHidden(true)
-        .task(id: item.mediaID) { await settle() }
+    private struct CoverRequest: Equatable {
+        let shown: Shown?
+        let size: CGSize
+        let topInset: CGFloat
     }
 
-    @ViewBuilder
-    private func art(_ art: AppleHeroPortraitArt, image: CGImage, size: CGSize, focal: CGPoint) -> some View {
-        let imageSize = CGSize(width: image.width, height: image.height)
-        switch art {
-        case .keyArt:
-            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size)
-        case .backdrop:
-            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: focal,
-                                  subjectAnchor: CGPoint(x: 0.5, y: 0.4))
-        case .posterCard:
-            ZStack {
-                AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: CGPoint(x: 0.5, y: 0.5))
-                    .blur(radius: 40)
-                    .overlay(Color.black.opacity(0.35))
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: size.width * 0.6)
-                    .clipShape(.rect(cornerRadius: 12))
-                    .offset(y: -24)
-            }
-            .frame(width: size.width, height: size.height)
-        case .none:
+    var body: some View {
+        ZStack(alignment: .topLeading) {
             Color.black
+            if let shown, let image = shown.image, size.width > 0, size.height > 0 {
+                AppleHeroPortraitArtView(art: shown.decision.art, image: image, size: size, focal: shown.focal,
+                                         topInset: topInset)
+                    .transition(.opacity)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .accessibilityHidden(true)
+        .task(id: item.mediaID) { await settle() }
+        .task(id: CoverRequest(shown: shown, size: size, topInset: topInset)) { renderCover() }
+    }
+
+    /// Draws the shown art once more, off screen, at the frame's size.
+    private func renderCover() {
+        guard let onCover else { return }
+        guard let shown, let image = shown.image, size.width > 0, size.height > 0 else {
+            onCover(nil)
+            return
+        }
+        let renderer = ImageRenderer(content:
+            AppleHeroPortraitArtView(art: shown.decision.art, image: image, size: size, focal: shown.focal,
+                                     topInset: topInset)
+                .frame(width: size.width, height: size.height)
+                .background(Color.black))
+        renderer.scale = displayScale
+        renderer.isOpaque = true
+        onCover(renderer.cgImage)
     }
 
     private func settle() async {
+        appleTrace("hero portrait settle \(item.name)")
         if let remembered = AppleHeroPortraitMemory.decision(for: item.mediaID) {
             var image: CGImage?
             if let url = remembered.art.imageURL {
@@ -83,8 +91,10 @@ struct AppleHomePhonePortraitStage: View {
             show(Shown(decision: remembered, image: image, focal: focal), animated: false)
             return
         }
+        let started = ContinuousClock.now
         let tmdb = await tmdbArtwork()
         guard !Task.isCancelled else { return }
+        appleTrace("hero portrait tmdb \(tmdb == nil ? "none" : "answered") after \(Self.ms(since: started)) (\(item.name))")
         let candidates = AppleHeroPortraitArt.Candidates(item: item, tmdbPoster: tmdb?.posterURL,
                                                          tmdbBackdrop: tmdb?.backdropURL, tmdbLogo: tmdb?.logoURL)
         var failed = Set<URL>()
@@ -100,6 +110,7 @@ struct AppleHomePhonePortraitStage: View {
             do {
                 let image = try await AppleRemoteImageCache.shared.image(
                     url: url, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
+                appleTrace("hero portrait image \(art.source.rawValue) decoded after \(Self.ms(since: started)) (\(item.name))")
                 let focal = await focalPoint(for: art, image: image)
                 guard !Task.isCancelled else { return }
                 AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
@@ -114,6 +125,11 @@ struct AppleHomePhonePortraitStage: View {
                 failed.insert(url)
             }
         }
+    }
+
+    private static func ms(since start: ContinuousClock.Instant) -> String {
+        let elapsed = start.duration(to: .now).components
+        return "\(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000)ms"
     }
 
     private func tmdbArtwork() async -> AppleHeroArtworkUpgrade.Artwork? {
@@ -152,6 +168,45 @@ enum AppleHeroPortraitMemory {
     static func decision(for mediaID: String) -> AppleHeroPortraitDecision? { decisions[mediaID] }
     static func remember(_ decision: AppleHeroPortraitDecision, for mediaID: String) {
         if decisions[mediaID] == nil { decisions[mediaID] = decision }
+    }
+}
+
+/// One portrait hero's art at `size`: drawn on screen by the stage, and once
+/// more off screen for the trailer's cover.
+struct AppleHeroPortraitArtView: View {
+    let art: AppleHeroPortraitArt
+    let image: CGImage
+    let size: CGSize
+    var focal: CGPoint = AppleHeroPortraitArt.focalPoint
+    var topInset: CGFloat = 0
+
+    var body: some View {
+        let imageSize = CGSize(width: image.width, height: image.height)
+        switch art {
+        case .keyArt:
+            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size)
+        case .backdrop:
+            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: focal,
+                                  subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+        case .posterCard:
+            let card = AppleHeroPortraitArt.posterCardRect(posterAspect: imageSize.width / max(imageSize.height, 1),
+                                                           in: size, topInset: topInset)
+            ZStack(alignment: .topLeading) {
+                AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: CGPoint(x: 0.5, y: 0.5))
+                    .blur(radius: 40)
+                    .overlay(Color.black.opacity(0.35))
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: card.width, height: card.height)
+                    .clipShape(.rect(cornerRadius: 12))
+                    .offset(x: card.minX, y: card.minY)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .clipped()
+        case .none:
+            Color.black
+        }
     }
 }
 

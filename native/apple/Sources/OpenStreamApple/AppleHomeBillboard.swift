@@ -108,10 +108,7 @@ struct AppleHomeBillboard<Actions: View>: View {
         #if os(tvOS)
         .none
         #else
-        // The iPhone's portrait hero is static: its trailer plays on the
-        // title page, so the hero's button never says Play Trailer.
-        phone != nil && !AppleHeroPortraitArt.phoneHeroPlaysTrailers ? .none
-        : AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
+        AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
                                                  patienceElapsed: trailerLookupPatienceElapsed)
         #endif
     }
@@ -236,6 +233,8 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     /// The iPhone portrait hero's settled art (`AppleHomePhonePortraitStage`).
     @State private var portraitDecision: AppleHeroPortraitDecision?
+    /// That art as drawn, at the hero's size: the iPhone trailer's cover.
+    @State private var portraitCover: CGImage?
 
     private var stillURL: URL? {
         if phone != nil { return portraitDecision?.art.imageURL }
@@ -342,10 +341,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     @ViewBuilder
     private var featuredBody: some View {
         if let phone {
-            AppleHomePhoneHero(item: item,
-                               artHeight: AppleHomePhoneHeroLayout.portraitArtHeight(width: viewportSize.width,
-                                                                                     limit: phone.artHeight),
-                               copyFadeLine: phone.copyFadeLine,
+            AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
                                wordmark: wordmark ?? portraitDecision?.logo, wordmarkLookupPending: wordmarkLookupPending,
                                showsTitle: portraitDecision.map(\.art.showsTitle),
                                stage: stage, artLuminance: artLuminance,
@@ -364,21 +360,41 @@ struct AppleHomeBillboard<Actions: View>: View {
         }
     }
 
+    /// The iPhone trailer waits for its cover as well as the still, so the
+    /// view it goes into never shows anything but the art drawn under it.
+    private var phoneStillArt: AppleTrailerArtFirstPolicy.Art {
+        stillArt == .loaded && portraitCover == nil ? .loading : stillArt
+    }
+
     private var stage: AnyView {
-        if phone != nil, !AppleHeroPortraitArt.phoneHeroPlaysTrailers {
+        #if !os(tvOS)
+        if let phone {
+            // The settled portrait art, the trailer over it (muted autoplay,
+            // the Apple TV app's rules: `AppleHeroTrailerGate`), cropped to
+            // the same frame and crossfading in from the same pixels.
             return AnyView(
-                AppleHomePhonePortraitStage(item: item) { decision, image in
-                    portraitDecision = decision
-                    stillImage = image
-                    if let image, let url = decision.art.imageURL {
-                        loadedStill = AppleHeroLoadedStill(url: url, image: image)
-                        recordStill(.loaded)
-                    } else {
-                        recordStill(.failed)
-                    }
+                ZStack {
+                    AppleHomePhonePortraitStage(item: item, topInset: phone.copyFadeLine, onReady: { decision, image in
+                        portraitDecision = decision
+                        stillImage = image
+                        if let image, let url = decision.art.imageURL {
+                            loadedStill = AppleHeroLoadedStill(url: url, image: image)
+                            recordStill(.loaded)
+                        } else {
+                            recordStill(.failed)
+                        }
+                    }, onCover: { portraitCover = $0 })
+                    AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
+                                         trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
+                                         art: phoneStillArt, artworkImage: portraitCover, drawsArtworkURL: false,
+                                         // Under the top bar: the bottom of the art is under the copy.
+                                         controlTopInset: phone.copyFadeLine + 8,
+                                         onTrailerOnScreen: { trailerIsOnScreen = $0 })
+                        .id(item.id)
                 }
             )
         }
+        #endif
         return AnyView(
             ZStack {
                 // The still sits outside the per-title identity below. It
@@ -416,10 +432,8 @@ struct AppleHomeBillboard<Actions: View>: View {
                 AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
                                      trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
                                      art: stillArt,
-                                     artworkImage: phone != nil || mac != nil ? stillImage : nil,
+                                     artworkImage: mac != nil ? stillImage : nil,
                                      muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset },
-                                     // Under the top bar: the bottom of the art is under the copy.
-                                     controlTopInset: phone.map { $0.copyFadeLine + 8 },
                                      onTrailerOnScreen: { trailerIsOnScreen = $0 })
                     .id(item.id)
                 #endif
@@ -486,6 +500,9 @@ private struct AppleHomeHeroPreview: View {
     /// The still under it: the trailer is not asked for until it is up.
     var art: AppleTrailerArtFirstPolicy.Art = .loading
     var artworkImage: CGImage? = nil
+    /// False on the iPhone, whose cover is `artworkImage` alone, cropped as
+    /// its portrait art is: the item's backdrop URL would cover it.
+    var drawsArtworkURL = true
     /// The Mac hero's round mute button sits this far from the top of the
     /// art (below the toolbar); nil on every other hero.
     var muteTopInset: CGFloat? = nil
@@ -495,6 +512,7 @@ private struct AppleHomeHeroPreview: View {
     var onTrailerOnScreen: (Bool) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appleHeroIsCovered) private var isCovered
     @State private var isVisible = false
     @State private var isPresented = false
     @State private var embedURL: URL?
@@ -513,6 +531,8 @@ private struct AppleHomeHeroPreview: View {
     /// muted-only rule is lifted and the next hero starts with sound.
     @State private var soundUnlocked = false
     @State private var replayGeneration = 0
+    /// New each time the trailer plays to its end (`AppleHomeHeroTrailerStateKey.lastEnd`).
+    @State private var lastEnd: UUID?
     #if os(iOS) || os(visionOS)
     @State private var systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
     #endif
@@ -526,24 +546,21 @@ private struct AppleHomeHeroPreview: View {
     @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     private var shouldPreview: Bool {
-        guard !reduceMotion, !lowPowerMode else { return false }
         #if os(iOS) || os(visionOS)
-        guard systemVideoAutoplayEnabled else { return false }
+        let systemVideoAutoplay = systemVideoAutoplayEnabled
+        #else
+        let systemVideoAutoplay = true
         #endif
         #if os(macOS)
-        let active = isVisible && isPresented && isInWindow && scenePhase == .active
-            && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: art, pressed: trailerRequest != nil)
+        let windowIsVisible = isInWindow
         #else
-        let active = isVisible && isPresented && scenePhase == .active
-            && AppleTrailerArtFirstPolicy.mayRequestTrailer(art: art, pressed: trailerRequest != nil)
+        let windowIsVisible = true
         #endif
-        if trailerRequest != nil { return active }
-        let autoplay = active && settings.autoPlayTrailer && !reduceMotion
-        #if os(iOS) || os(visionOS)
-        return autoplay && systemVideoAutoplayEnabled
-        #else
-        return autoplay
-        #endif
+        return AppleHeroTrailerGate.plays(.init(
+            autoPlaySetting: settings.autoPlayTrailer, reduceMotion: reduceMotion, lowPower: lowPowerMode,
+            systemVideoAutoplay: systemVideoAutoplay, sceneIsActive: scenePhase == .active, halfVisible: isVisible,
+            isPresented: isPresented, isCovered: isCovered, windowIsVisible: windowIsVisible,
+            art: art, pressed: trailerRequest != nil))
     }
 
     /// The iPhone and iPad hero holds its art until the trailer's crop is
@@ -569,7 +586,7 @@ private struct AppleHomeHeroPreview: View {
             #if os(iOS) || os(visionOS)
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(
-                    url: embedURL, artworkURL: item.backgroundURL ?? item.posterURL,
+                    url: embedURL, artworkURL: drawsArtworkURL ? item.backgroundURL ?? item.posterURL : nil,
                     artworkImage: artworkImage,
                     isLandscape: true, isPlaying: $isPlaying, isMuted: $isMuted,
                     allowsSound: trailerRequest != nil || soundUnlocked,
@@ -643,7 +660,7 @@ private struct AppleHomeHeroPreview: View {
         .preference(key: AppleHomeHeroTrailerStateKey.self,
                     value: .init(isPlaying: shouldPreview && isPlaying,
                                  isOnScreen: shouldPreview && isPlaying && isRevealed, isMuted: isMuted,
-                                 isRequested: trailerRequest != nil))
+                                 isRequested: trailerRequest != nil, lastEnd: lastEnd))
         .onChange(of: settings.autoMuteTrailer) { _, muted in isMuted = muted }
         #if os(iOS) || os(visionOS)
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.videoAutoplayStatusDidChangeNotification)) { _ in
@@ -741,7 +758,10 @@ private struct AppleHomeHeroPreview: View {
         if AppleTrailerArtFirstPolicy.leavesForTheArt(forPlayerState: state) {
             // Nothing to say: the art crossfades back over whatever the
             // player showed, and stays. A finished trailer leaves the same way.
-            if state == "ended" { appleTrace("hero trailer ended: back to the art (\(item.name))") }
+            if state == "ended" {
+                appleTrace("hero trailer ended: back to the art (\(item.name))")
+                lastEnd = UUID()
+            }
             withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
                 stop()
             }

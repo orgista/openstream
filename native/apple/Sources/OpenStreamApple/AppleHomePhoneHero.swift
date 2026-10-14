@@ -29,7 +29,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
     /// is still being chosen (the title's place is held, unseen, so it
     /// appears with its art rather than before it).
     var showsTitle: Bool? = true
-    /// The portrait art (static on the iPhone), from `AppleHomeBillboard`.
+    /// The portrait art and the trailer over it, from `AppleHomeBillboard`.
     let stage: AnyView
     /// The still's luminance, once measured (`AppleHeroLuminanceCache`).
     var artLuminance: AppleHeroLuminanceMap? = nil

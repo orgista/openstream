@@ -76,6 +76,15 @@ extension AppleHeroRotation {
             runningSince = now
         }
 
+        /// The page's trailer has played to its end: the page moves on
+        /// `delay` after now (the Apple TV app's `autoAdvanceForIdleVideo`,
+        /// 1 s), or that long after the cycle resumes if it is held.
+        public mutating func videoEnded(at now: Date, delay: TimeInterval = AppleHeroRotation.afterVideoDelay) {
+            guard !awaitsPresentation, interval > 0 else { return }
+            elapsedBeforeRun = max(interval - max(delay, 0), 0)
+            if runningSince != nil { runningSince = now }
+        }
+
         /// Shows `target` (wrapping) with a fresh timer, keeping the paused or
         /// running state as it was.
         public mutating func show(_ target: Int, at now: Date) {
@@ -142,6 +151,9 @@ extension AppleHeroRotation {
     /// longer change this; the parameters stay for the callers. It also
     /// holds while nobody can see the hero (`heroIsVisible`), so the page is
     /// where it was when the viewer comes back.
+    /// How long after a hero's trailer ends the iPhone hero moves on.
+    public static let afterVideoDelay: TimeInterval = 1
+
     public static func cycleIsPaused(isTouching: Bool, trailerIsPlaying: Bool, trailerIsMuted _: Bool,
                                      trailerWasRequested _: Bool = false, isHidden: Bool = false) -> Bool {
         isHidden || isTouching || trailerIsPlaying

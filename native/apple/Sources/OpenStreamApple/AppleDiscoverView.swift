@@ -443,7 +443,10 @@ struct AppleDiscoverView: View {
             if screen == "search" { showsSearch = true }
             let scrollY = UserDefaults.standard.double(forKey: "OpenStreamDiscoverScrollY")
             if scrollY > 0, visibleSections.count > 0 {
-                try? await Task.sleep(for: .seconds(3))
+                // `OpenStreamDiscoverScrollDelay` scrolls later than 3 s, so a
+                // capture can see the hero's trailer playing and then stop.
+                let delay = UserDefaults.standard.double(forKey: "OpenStreamDiscoverScrollDelay")
+                try? await Task.sleep(for: .seconds(delay > 0 ? delay : 3))
                 guard !Task.isCancelled else { return }
                 reviewScrollPosition.scrollTo(y: scrollY)
             }
@@ -1989,6 +1992,8 @@ struct AppleSearchView: View {
             Button("Cancel", role: .cancel) { pendingSharedPlayer = nil }
         }
         .modifier(AppleMediaPlayerPresentationModifier(presentation: $sharedPlayer))
+        // The hero's trailer stops under the player (`AppleHeroTrailerGate`).
+        .environment(\.appleHeroIsCovered, sharedPlayer != nil)
         #if os(iOS)
         .safeAreaInset(edge: .bottom) {
             if hasCopiedURL {
@@ -7942,6 +7947,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             artworkStill.accessibilityIgnoresInvertColors = true
             cover.addSubview(artworkStill)
             artworkCover.clipsToBounds = true
+            // No URL: the caller's still is the whole cover (the iPhone hero).
+            artworkCover.isHidden = artworkURL == nil
             cover.addSubview(artworkCover)
             addSubview(cover)
 
@@ -8075,6 +8082,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func updateArtwork(_ url: URL?) {
             guard artworkURL != url else { return }
             artworkURL = url
+            artworkCover.isHidden = url == nil
             artworkCover.configuration = UIHostingConfiguration {
                 AppleCatalogArtwork(url: url)
             }.margins(.all, 0)
