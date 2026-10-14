@@ -19,6 +19,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 - [ ] **First-party agentic coding tools per platform (owner 2026-10-14).** Find Google's official Android/agentic
       coding skills and Apple's official agentic coding skills/tools for Xcode, install them for every agent, and use
       them for each platform.
+      Done 2026-10-14: Google's official android/skills (30 skills, SHA 5bda39f) installed for Claude, work Claude,
+      Codex, Codex headless and agy. Firebase skipped (no project uses it). **Apple:** Xcode 27's own skills export
+      (`xcrun agent skills export`) waits for an approval inside the Xcode window on Dev-Mini; the owner opens Xcode
+      there once via Screen Sharing and allows it, then the lead finishes the install. Xcode's MCP bridge needs a running
+      Xcode too, so it is not registered.
 - [ ] **Max out Codex and agy to 100% (owner 2026-10-14).** Overrides the 85% stop for Codex and agy.
 - [ ] **GitHub synced with every beta, pushes automatic (owner 2026-10-14).** "change never to ask please instead
       automatic I rather know but in general they should be synced with the builds if a new beta goes out github should
