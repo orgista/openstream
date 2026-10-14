@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Network shares: add several folders from one share, like Infuse (owner 2026-10-13).** Today adding a share
+      lets you pick one folder and that's it. Mapping the current flow and storage first so progress and matches
+      survive; then Codex builds it after Plex 7/8 Stage A.
+
 - [ ] **Overnight 2026-10-13 (all in the next build):** Apple TV app behaviours from the REA of the Mac TV app (17e7041):
       heroes pause and stop on the last item, watched by runtime band, post-play countdown with a 3-episode / 2-hour
       autoplay cap, Reduce Motion / Low Power stop auto video, no repeats across rows, faster artwork. Fable review of
