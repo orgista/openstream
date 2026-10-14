@@ -166,6 +166,37 @@ struct AppleHeroMixPolicyTests {
         #expect(try await recommendations([value], sources: [disabled]).heroes.isEmpty)
     }
 
+    @MainActor @Test(arguments: [AppleXtreamReference.Kind.movie, .series])
+    func mergedXtreamResumeUsesTitlePageRecordWatchDate(kind: AppleXtreamReference.Kind) async throws {
+        let suiteName = "ship19.xtream.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ApplePlaybackStore(defaults: defaults)
+        let source = AppleSource(kind: .liveTV, name: "Fixture", url: URL(string: "https://fixture.example")!)
+        let reference = AppleXtreamReference(sourceID: source.id, kind: kind, providerID: "1")
+        let value = resume(reference.mediaID, source: source, at: nil, type: kind == .series ? "series" : "movie")
+        // The title page writes both movies and series under progressRecordID, with an episode part for series.
+        store.save(mediaID: value.record.id, position: 600, duration: 1200,
+            partID: kind == .series ? reference.mediaID + ":1:1" : nil)
+        let activity = try #require(store.lastActivity(for: value.record.id))
+        #expect(store.lastActivity(for: value.item.mediaID) == nil)
+
+        let merged = AppleDiscoverView.mergedContinueWatching(local: [],
+            mediaServerLibrary: AppleMediaServerLibraryStore(progressDefaults: defaults),
+            xtreamItems: [value.item], xtreamSource: { $0 == reference ? source : nil },
+            sources: [source], playbackStore: store)
+        let resumed = try #require(merged.first)
+        #expect(merged.count == 1)
+        #expect(resumed.record.progress == 0.5)
+        #expect(resumed.continueWatchingUpdatedAt == activity.updatedAt)
+
+        let olderSource = AppleSource(kind: .mediaServer, name: "Older fixture", url: URL(string: "https://fixture.example")!)
+        let older = resume(AppleMediaServerItemReference(sourceID: olderSource.id, itemID: "older").mediaID,
+            source: olderSource, at: activity.updatedAt.addingTimeInterval(-86_400))
+        let result = try await recommendations([older] + merged, sources: [olderSource, source])
+        #expect(result.heroes.first?.id == value.id)
+    }
+
     @MainActor @Test func displacedHeroResumesRemainInContinueWatching() async throws {
         let source = AppleSource(kind: .mediaServer, name: "Fixture", url: URL(string: "https://fixture.example")!)
         let values = (0..<8).map { index in

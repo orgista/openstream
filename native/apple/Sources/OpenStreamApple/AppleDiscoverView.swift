@@ -795,10 +795,19 @@ struct AppleDiscoverView: View {
     }
 
     private func mergedContinueWatching(local: [IndexedCatalogItem]) -> [IndexedCatalogItem] {
-        let serverItems = mediaServerLibrary.continueWatching + AppleXtreamLibraryStore.shared.continueWatching
-        // Once per pass: `continueWatching` filters the whole media index, and
-        // it was being rebuilt again for every merged item below.
-        let playbackStore = ApplePlaybackStore()
+        Self.mergedContinueWatching(local: local, mediaServerLibrary: mediaServerLibrary,
+            xtreamItems: AppleXtreamLibraryStore.shared.continueWatching,
+            xtreamSource: { AppleXtreamLibraryStore.shared.source($0) },
+            sources: sourceStore.sources, playbackStore: ApplePlaybackStore())
+    }
+
+    /// The production merge with explicit inputs so tests use isolated playback storage.
+    static func mergedContinueWatching(local: [IndexedCatalogItem],
+        mediaServerLibrary: AppleMediaServerLibraryStore, xtreamItems: [AppleCatalogItem],
+        xtreamSource: (AppleXtreamReference) -> AppleSource?, sources: [AppleSource],
+        playbackStore: ApplePlaybackStore) -> [IndexedCatalogItem] {
+        // Once per pass: `continueWatching` filters the whole media index.
+        let serverItems = mediaServerLibrary.continueWatching + xtreamItems
         let visibleLocal = local.filter { value in
             AppleMediaServerItemReference.parse(value.item.mediaID) == nil
                 || mediaServerLibrary.shouldIncludeInContinueWatching(mediaID: value.item.mediaID, store: playbackStore)
@@ -814,16 +823,16 @@ struct AppleDiscoverView: View {
                     continueWatchingUpdatedAt: mediaServerLibrary.continueWatchingUpdatedAt(for: item.mediaID, store: playbackStore))
             }
             if let reference = AppleXtreamReference.parse(item.mediaID),
-               let source = AppleXtreamLibraryStore.shared.source(reference) {
+               let source = xtreamSource(reference) {
                 var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
                 if let progress = playbackStore.progress(for: record.id) {
                     record.progress = AppleWatchProgress.fraction(position: progress.position, duration: progress.duration)
                 }
                 return IndexedCatalogItem(record: record, item: item, source: source,
-                    continueWatchingUpdatedAt: playbackStore.lastActivity(for: item.mediaID)?.updatedAt)
+                    continueWatchingUpdatedAt: playbackStore.lastActivity(for: record.id)?.updatedAt)
             }
             guard let ref = AppleMediaServerItemReference.parse(item.mediaID),
-                  let source = sourceStore.sources.first(where: { $0.id == ref.sourceID }) else { return nil }
+                  let source = sources.first(where: { $0.id == ref.sourceID }) else { return nil }
             let record = mediaServerLibrary.continueWatchingRecord(for: item, source: source, store: playbackStore)
             return IndexedCatalogItem(record: record, item: item, source: source,
                 continueWatchingUpdatedAt: mediaServerLibrary.continueWatchingUpdatedAt(for: item.mediaID, store: playbackStore))
