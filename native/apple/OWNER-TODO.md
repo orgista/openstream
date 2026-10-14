@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **PRIORITY (owner 2026-10-13): ISO playback with real disc menus doesn't work on iOS; test all ISOs; Matilda
+      captions wrong.** Found: the engine already has DVD menus, the app never turned them on (Play Disc still plays
+      the main title). Spec specs/iso-menus-captions-2026-10-13.md: wire Play Disc / Skip to Movie / Disc Menu on every
+      platform, test every ISO, fix PGS caption display on Matilda (UHD DV remux, one English PGS track) and similar
+      files. Codex starts it right after Plex 7/8 Stage A.
+
 - [ ] **Network shares: add several folders from one share, like Infuse (owner 2026-10-13).** Today adding a share
       lets you pick one folder and that's it. Mapping the current flow and storage first so progress and matches
       survive; then Codex builds it after Plex 7/8 Stage A.
