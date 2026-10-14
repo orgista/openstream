@@ -4664,3 +4664,21 @@ The recovered serial Swift gate passed 3,219 tests in 400 suites. Full simulator
 Guide assignments now remember the provider entry, how it matched, its time correction, and the programme times kept in the cache. Manual choices keep priority. A guide-ID change on a unique unchanged stream keeps the saved channel ID, so manual assignments, favorites and recents stay attached. Failed refreshes and missing manual targets retain the last guide; time corrections apply once to raw data.
 
 The final serial Swift gate passed 3,232 tests in 402 suites, including nine fixture tests for matching, identity, time correction, failed refreshes and old cache recovery. Both app builds recompiled all six changed source files. Full E2E met the baseline: tvOS 20/0, iOS 40/1 with only the known AirPlay response failure. Original app, shared-group and host data restored with matching hashes; both simulators shut down. The final old-cache fallback was verified by the subsequent Swift gate and platform builds after E2E. No commit or upload.
+
+
+## 2026-10-14 — Disc menus and captions
+
+Play Disc now opens the real DVD menu. Skip to Movie and individual title choices start playback directly, and Disc Menu returns to navigation. Both DVD fixtures work on iPhone and Apple TV simulators; the iPhone can close the player from the menu. All eleven discovered Blu-ray images show a picture in both start modes on both simulators. Blu-ray menus are unavailable in the engine, so playback starts at the main title.
+
+Bitmap captions retain their authored placement and stay inside the viewport, including after iPhone rotation. Matilda English PGS and the tagged bitmap corpus pass On and Off checks on both simulators. All tagged text cases pass on both simulators. Feature verification totals 33 passes on each platform, with one untagged-caption policy skip each.
+
+The checks used a read-only HTTP fixture. Authenticated SMB remains unverified, and untagged M2TS captions stay hidden under the existing language rule. The Mac build passes, but its CLI launch did not produce a test window. The serial gate passes 3,302 tests in 408 suites. App and engine edits remain uncommitted; the public engine pin is unchanged.
+
+The TV baseline passes 20/0. iOS meets 40/1 cumulatively after focused detail/player retries, leaving only the known AirPlay failure. Earlier failed attempts remain in the evidence index. Original app, shared-group and host data and all three package files were restored with matching hashes; the simulators are shut down. No commit or upload.
+
+
+## 2026-10-14 — Disc menu review fixes
+
+DVD titles now return to their menu when they finish. Opening Disc Menu keeps the current DVD session and its resume point; Blu-ray films no longer offer that control. Skip to Movie keeps DVD navigation available, including a saved starting position. Subtitles without a language tag appear as Unknown, with numbers when needed, and require a manual choice.
+
+Both simulators passed all 34 disc/caption cases after correcting the tests for native controls and authored DVD resume behavior. The full baselines were Apple TV 20/0 and iPhone 40/1 (the existing Live AirPlay case). The final Swift suite passed 3,309 tests, and the engine DVD/HTTP suite passed 113. Original data was restored and test services stopped. Authenticated SMB remains untested because the saved Mini Keychain password requires interactive access; no credentials were created or changed. Evidence is under `verification-artifacts/iso-menus-2026-10-13/review-fixes-*`.

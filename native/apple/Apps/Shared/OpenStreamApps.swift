@@ -48,6 +48,8 @@ struct OpenStreamPlatformApp: App {
                 AppleLiveGuideFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-OpenStreamInlineLiveFixture") {
                 AppleLiveInlineFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-OpenStreamLibraryTitlesFixture") {
+                AppleLibraryTitlesDebugView()
             } else {
                 platformRoot
             }

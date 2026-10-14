@@ -32,35 +32,34 @@ struct AppleSubtitleTrackFilterTests {
         #expect(visible.isEmpty)
     }
 
-    /// Untagged broadcast captions stand in for the viewer's language when
-    /// nothing is tagged in it (US live TV carries English this way).
+    /// Untagged captions remain available only for manual selection.
     @Test(arguments: ["eia_608", "cc"])
-    func untaggedCaptionsStandInWhenNothingIsTagged(codec: String) {
+    func untaggedCaptionsAreManualChoices(codec: String) {
         let tracks = [track(99_608, nil, "Closed Captions", codec: codec)]
         let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["es"], isExplicitChoice: true)
-        #expect(visible.map(\.id) == [99_608])
+        #expect(visible.isEmpty)
     }
 
-    @Test func aLiveStreamWithOnlyUntaggedCC1ListsAndSelectsIt() {
+    @Test func aLiveStreamWithOnlyUntaggedCC1ListsButNeverSelectsIt() {
         let tracks = [track(99_608, nil, "CC1", codec: "eia_608")]
         #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [99_608])
-        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).map(\.id) == [99_608])
+        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).isEmpty)
         let entries = AppleSubtitleCueLayerPolicy.menuEntries(
             tracks: tracks, preferredLanguages: ["en"], languagesAreExplicit: false, activeTrackID: nil)
         #expect(entries.map(\.trackID) == [nil, 99_608])
     }
 
-    @Test func aTaggedEnglishTrackHidesTheUntaggedCC1() {
+    @Test func aTaggedEnglishTrackKeepsTheUnknownManualChoice() {
         let tracks = [track(99_608, "und", "CC1", codec: "eia_608"), track(2, "eng", "English", codec: "subrip")]
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [2])
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [2, 99_608])
         #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).map(\.id) == [2])
     }
 
     @Test func aTaggedSpanishCC3StaysHiddenBesideAnUntaggedCC1() {
         let tracks = [track(99_608, nil, "CC1", codec: "eia_608"), track(99_609, "es", "CC3", codec: "eia_608")]
         #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [99_608])
-        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).map(\.id) == [99_608])
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["es"]).map(\.id) == [99_609])
+        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).isEmpty)
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["es"]).map(\.id) == [99_609, 99_608])
     }
 
     @Test(arguments: [0, 1_000_000])
@@ -138,19 +137,21 @@ struct AppleSubtitleTrackFilterTests {
         #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["eng"]).map(\.id) == [1])
     }
 
-    @Test func aTitleNamingEnglishCountsWhenTheCodeIsMissing() {
-        let tracks = [track(0, nil, "English"), track(1, "und", "German"), track(2, "de", "Deutsch")]
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [0])
-        let german = AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["de"])
-        #expect(german.map(\.title) == ["German"])
-        #expect(Set(german.first?.memberIDs ?? []) == [1, 2])
+    @Test func missingTagsNeverGuessTheLanguageFromTheTitle() {
+        let tracks = [track(0, nil, "English", isDefault: true), track(1, "und", "German"), track(2, "de", "Deutsch")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["en"]).map(\.title) == ["Unknown 1", "Unknown 2"])
+        #expect(AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["en"]).isEmpty)
+        #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["de"]).map(\.title) == ["German", "Unknown 1", "Unknown 2"])
     }
 
-    @Test func untaggedSubtitleTracksAreNeverListed() {
-        let tracks = [track(0, "und", "Subtitle"), track(1, nil, "Track 2"), track(2, "", "Subtitle 3"),
-                      track(3, "eng", "English")]
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [3])
-        #expect(AppleSubtitleTrackFilter.menu(Array(tracks.prefix(3)), preferredLanguages: ["en"]).isEmpty)
+    @Test func unknownSubtitleTracksStaySeparateAndNumbered() {
+        let tracks = [track(0, "und", "Subtitle"), track(1, nil, "Track 2"), track(2, "", "Subtitle 3"), track(3, "eng", "English")]
+        let choices = AppleSubtitleTrackFilter.menuChoices(tracks.reversed(), preferredLanguages: ["en"], activeTrackID: 1)
+        #expect(choices.map(\.title) == ["English", "Unknown 1", "Unknown 2", "Unknown 3"])
+        #expect(choices.map(\.track.id) == [3, 0, 1, 2])
+        #expect(choices.map(\.memberIDs) == [[3], [0], [1], [2]])
+        #expect(AppleSubtitleTrackFilter.menuChoices([tracks[0]], preferredLanguages: ["en"]).map(\.title) == ["Unknown"])
+        #expect(AppleSubtitleTrackFilter.visible(Array(tracks.prefix(3)), preferredLanguages: ["en"]).isEmpty)
     }
 
     /// Owner 2026-09-28: no fallback to every language. The menu is Off alone.
@@ -211,8 +212,8 @@ struct AppleSubtitleTrackFilterTests {
             track(7, nil, "Unlabelled"),
         ]
         // Track 3 is Spanish whatever its title says; 6 and 7 are untagged.
-        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [4, 2])
-        #expect(AppleSubtitleTrackFilter.menu(tracks.reversed(), preferredLanguages: ["en"]).map(\.id) == [4, 2])
+        #expect(AppleSubtitleTrackFilter.menu(tracks, preferredLanguages: ["en"]).map(\.id) == [4, 2, 6, 7])
+        #expect(AppleSubtitleTrackFilter.menu(tracks.reversed(), preferredLanguages: ["en"]).map(\.id) == [4, 2, 6, 7])
     }
 
     @Test func menuLabelLanguageFormatting() {
@@ -222,11 +223,11 @@ struct AppleSubtitleTrackFilterTests {
         // menuLabel for "en-US" -> "English"
         #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, "en-US")) == "English")
         
-        // menuLabel for a track with no language and title "Subtitle 2" -> "Subtitle"
-        #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, nil, "Subtitle 2")) == "Subtitle")
+        // Missing tags remain Unknown, whatever the track title says.
+        #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, nil, "Subtitle 2")) == "Unknown")
         
-        // menuLabel title "English 1 (eng)" no language -> "English"
-        #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, nil, "English 1 (eng)")) == "English")
+        // A title naming English does not supply the missing language tag.
+        #expect(AppleSubtitleTrackFilter.menuLabel(for: track(0, nil, "English 1 (eng)")) == "Unknown")
     }
 
     @Test func normalisationReducesEveryFormToTheTwoLetterCode() {

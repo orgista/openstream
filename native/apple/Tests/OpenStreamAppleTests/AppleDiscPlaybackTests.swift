@@ -1,17 +1,64 @@
 import Foundation
+import CoreGraphics
+import AetherEngine
+import SwiftUI
 import Testing
 @testable import OpenStreamApple
 
 @Suite("Disc playback")
 struct AppleDiscPlaybackTests {
-    @Test("Play Disc and Skip to Movie both open the main title until the engine has a menu")
+    @Test("Play Disc opens navigation; explicit Titles and Skip to Movie bypass it")
     func startMapping() {
+        #expect(AppleDiscPlaybackChoice(start: .menu).engineStartMode == .menu)
+        #expect(AppleDiscPlaybackChoice(start: .mainTitle).engineStartMode == .mainTitle)
+        #expect(AppleDiscPlaybackChoice(start: .menu, titleID: 3).engineStartMode == .mainTitle)
         #expect(AppleDiscPlaybackStart.engineTitleID(start: .menu, titleID: nil) == nil)
         #expect(AppleDiscPlaybackStart.engineTitleID(start: .mainTitle, titleID: nil) == nil)
         #expect(AppleDiscPlaybackChoice(start: .mainTitle, titleID: 3).engineTitleID == 3)
         #expect(AppleDiscPlaybackChoice(start: .menu).traceLine.hasPrefix("disc start menu"))
         #expect(AppleDiscPlaybackChoice(start: .mainTitle).traceLine == "disc start main title")
         #expect(AppleDiscPlaybackChoice(start: .mainTitle, titleID: 2).traceLine == "disc start title 2")
+    }
+
+    @Test("The disc start choice reaches Aether load options")
+    func engineOptions() {
+        var request = ApplePlaybackRequest(url: URL(fileURLWithPath: "/tmp/menu-test.iso"), mediaID: "disc", sourceKind: .files)
+        #expect(AetherPlaybackEngine.loadOptions(for: request, headers: [:]).dvdStartMode == .mainTitle)
+        request.hints.disc = AppleDiscPlaybackChoice(start: .menu)
+        #expect(AetherPlaybackEngine.loadOptions(for: request, headers: [:]).dvdStartMode == .menu)
+        request.hints.disc = AppleDiscPlaybackChoice(start: .mainTitle)
+        #expect(AetherPlaybackEngine.loadOptions(for: request, headers: [:]).dvdStartMode == .mainTitle)
+        request.hints.disc = AppleDiscPlaybackChoice(start: .menu, titleID: 2)
+        #expect(AetherPlaybackEngine.loadOptions(for: request, headers: [:]).dvdStartMode == .mainTitle)
+    }
+
+    @Test("DVD title handoffs do not end the disc session")
+    func discPhaseHandoffs() {
+        #expect(AetherPlaybackEngine.forwardedPhase(.ended, hasDiscSession: true) == nil)
+        #expect(AetherPlaybackEngine.forwardedPhase(.idle, hasDiscSession: true) == nil)
+        #expect(AetherPlaybackEngine.forwardedPhase(.playing, hasDiscSession: true) == .playing)
+        #expect(AetherPlaybackEngine.forwardedPhase(.paused, hasDiscSession: true) == .paused)
+        #expect(AetherPlaybackEngine.forwardedPhase(.ended, hasDiscSession: false) == .ended)
+        #expect(AetherPlaybackEngine.forwardedPhase(.idle, hasDiscSession: false) == .idle)
+    }
+
+    @Test("Remote and keyboard arrows preserve DVD directions")
+    func menuDirections() {
+        #expect(AppleDiscMenuInput.direction(.up) == .up)
+        #expect(AppleDiscMenuInput.direction(.down) == .down)
+        #expect(AppleDiscMenuInput.direction(.left) == .left)
+        #expect(AppleDiscMenuInput.direction(.right) == .right)
+    }
+
+    @Test("A tap maps through the fitted picture after rotation, excluding letterbox")
+    func menuTap() {
+        for container in [CGSize(width: 402, height: 874), CGSize(width: 874, height: 402)] {
+            let picture = AppleVideoFitting.fittedRect(container: container, videoSize: CGSize(width: 4, height: 3))
+            #expect(AppleDiscMenuInput.normalizedPoint(CGPoint(x: picture.midX, y: picture.midY),
+                container: container, videoSize: CGSize(width: 4, height: 3)) == CGPoint(x: 0.5, y: 0.5))
+            #expect(AppleDiscMenuInput.normalizedPoint(CGPoint(x: -1, y: -1),
+                container: container, videoSize: CGSize(width: 4, height: 3)) == nil)
+        }
     }
 
     @Test("ISO images and files inside VIDEO_TS or BDMV are disc items; ordinary files are not")

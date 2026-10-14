@@ -12,6 +12,453 @@ import Vision
 final class AppleiOSUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
 
+    func testPGSCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("g-subs-pgs.mkv") }
+    func testM2TSPGSCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("ff-pgs-dts.m2ts") }
+    func testVobSubCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("ff-vobsub-reddwarf.mkv") }
+    func testLargeVobSubCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("ff-largeres-vobsub.mkv") }
+    func testMultiSubCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("ff-multisub.mkv") }
+    func testSRTASSCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("g-subs-srt-ass.mkv") }
+    func testASSCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("g-subs-srt-ass-ass.mkv") }
+    func testMatildaCaptionsOffAndOnStayInFrame() throws { try exerciseBitmapCaptions("Matilda") }
+
+    private func exerciseBitmapCaptions(_ name: String) throws {
+        guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_BITMAP_CAPTION_FIXTURES"],
+              let data = encoded.data(using: .utf8),
+              let cases = try JSONSerialization.jsonObject(with: data) as? [String: [String: Any]],
+              let fixture = cases[name] else { throw XCTSkip("Requires run-e2e.py --caption-fixtures") }
+        let track = fixture["track"] as? Int
+        let url = fixture["url"] as? String ?? ""
+        app.launchArguments = ["-OpenStreamVisionScreen", "add-files", "-OpenStreamVisionPlaybackURL", url,
+            "-OpenStreamVisionPlaybackIsLive", "NO", "-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES",
+            "-openstream.playback.engine", "engine", "-openstream.settings.captions.preference.v1", "off",
+            "-openstream.firstRunGuidanceSeen", "YES", "-openstream.settings.metadata.enabled.v1", "NO"]
+        configureFixtureLaunch(app)
+        if let smb = fixture["librarySMB"] as? String {
+            app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_SMB"] = smb
+            app.launchArguments += ["-OpenStreamLibraryTitlesFixture"]
+            app.launch()
+            let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'library.title.'")).firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 60), "SMB scanner could not read Matilda")
+            title.tap()
+            let play = app.buttons["detail.play"].firstMatch
+            XCTAssertTrue(play.waitForExistence(timeout: 30))
+            play.tap()
+        } else {
+            app.launch()
+        }
+        let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
+        guard ready.waitForExistence(timeout: 30) else {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "caption-\(name)-player-not-ready-hierarchy"
+            hierarchy.lifetime = .keepAlways; add(hierarchy)
+            XCTFail("Caption fixture never reached visible playback")
+            return
+        }
+        func setPlaybackPaused(_ paused: Bool) {
+            let surface = app.buttons["player.play-pause"].firstMatch
+            let native = app.buttons["Play/Pause"].firstMatch
+            for _ in 0..<3 {
+                if surface.exists || native.exists { break }
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+            }
+            let transport = surface.exists ? surface : native
+            XCTAssertTrue(transport.exists, "Playback transport is unavailable")
+            let desiredLabel = paused ? "Play" : "Pause"
+            if transport.label != desiredLabel {
+                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            XCTAssertTrue(app.buttons[desiredLabel].firstMatch.waitForExistence(timeout: 5),
+                          "Transport did not enter the requested state")
+        }
+        // Freeze the short corpus clip before XCTest waits for a menu to idle.
+        setPlaybackPaused(true)
+        let cueKind = fixture["kind"] as? String ?? "bitmap"
+        let cue = app.descendants(matching: .any)["player.caption.\(cueKind)"].firstMatch
+        XCTAssertFalse(cue.exists, "Captions Off rendered a subtitle")
+        let off = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        off.name = "caption-\(name)-off"; off.lifetime = .keepAlways; add(off)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "caption-\(name)-off-hierarchy"
+        hierarchy.lifetime = .keepAlways; add(hierarchy)
+        func openCaptionMenu() {
+            let captions = app.buttons["player.captions"].firstMatch
+            let more = app.buttons["player.more"].firstMatch
+            // Reveal either route's chrome, then act before its auto-hide timer.
+            for _ in 0..<3 where !captions.exists && !more.exists {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)).tap()
+            }
+            if captions.exists {
+                captions.tap()
+            } else {
+                XCTAssertTrue(more.exists, "Native player More control is unavailable")
+                more.tap()
+                let subtitles = app.buttons["player.subtitles"].firstMatch
+                XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
+                subtitles.tap()
+            }
+        }
+        if let reason = fixture["onUnavailable"] as? String { throw XCTSkip(reason) }
+        openCaptionMenu()
+        let choices = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'player.subtitle.track.' AND identifier != 'player.subtitle.track.off'"))
+        var choice = track.map { app.descendants(matching: .any)["player.subtitle.track.\($0)"].firstMatch } ?? choices.firstMatch
+        if !choice.exists, let label = fixture["label"] as? String {
+            choice = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+        }
+        if !choice.exists {
+            let more = app.buttons.matching(NSPredicate(format: "label == 'More…' OR identifier IN %@",
+                ["player.subtitle.more", "player.subtitles.more"])).firstMatch
+            if more.exists { more.tap() }
+        }
+        let menuHierarchy = XCTAttachment(string: app.debugDescription)
+        menuHierarchy.name = "caption-\(name)-selection-hierarchy"
+        menuHierarchy.lifetime = .keepAlways; add(menuHierarchy)
+        let menuShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuShot.name = "caption-\(name)-selection"; menuShot.lifetime = .keepAlways; add(menuShot)
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), "Requested embedded subtitle track is missing")
+        if name == "ff-pgs-dts.m2ts" {
+            XCTAssertTrue(choice.label.contains("Unknown"), "Untagged PGS must be listed as Unknown")
+        }
+        choice.tap()
+        func seekTextCue() {
+            if !app.sliders.firstMatch.exists {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+            }
+            let slider = app.sliders.firstMatch
+            XCTAssertTrue(slider.waitForExistence(timeout: 5), "Text evidence requires the real playback scrubber")
+            slider.adjust(toNormalizedSliderPosition: CGFloat(fixture["seekFraction"] as? Double ?? 0))
+            setPlaybackPaused(false)
+        }
+        func textEvidence(_ screenshot: XCUIScreenshot) throws -> (visible: Bool, bounds: [CGRect]) {
+            guard let expected = fixture["expectedCue"] as? String, !expected.isEmpty,
+                  let image = screenshot.image.cgImage else { return (false, []) }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            func normalized(_ text: String) -> String {
+                text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+                    .filter { $0.isLetter || $0.isNumber }
+            }
+            let results = request.results ?? []
+            let words = results.compactMap { $0.topCandidates(1).first?.string }
+            let key = normalized(expected)
+            let bounds = results.compactMap { observation -> CGRect? in
+                guard let word = observation.topCandidates(1).first?.string else { return nil }
+                let candidate = normalized(word)
+                guard candidate.count >= 3, key.contains(candidate) || candidate.contains(key) else { return nil }
+                return observation.boundingBox
+            }
+            return (normalized(words.joined(separator: " ")).contains(key), bounds)
+        }
+        func captureTextCue(_ stage: String) throws {
+            seekTextCue()
+            let deadline = Date().addingTimeInterval(15)
+            var screenshot = XCUIScreen.main.screenshot()
+            var evidence = try textEvidence(screenshot)
+            while !evidence.visible, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.15)
+                screenshot = XCUIScreen.main.screenshot()
+                evidence = try textEvidence(screenshot)
+            }
+            let image = XCTAttachment(screenshot: screenshot)
+            image.name = "caption-\(name)-\(stage)"; image.lifetime = .keepAlways; add(image)
+            let geometry = XCTAttachment(string: "Source cue: \(fixture["expectedCue"] ?? ""); normalized OCR bounds: \(evidence.bounds); image orientation: \(screenshot.image.imageOrientation.rawValue)")
+            geometry.name = "caption-\(name)-\(stage)-glyph-bounds"; geometry.lifetime = .keepAlways; add(geometry)
+            XCTAssertTrue(evidence.visible, "Playing subtitle glyphs do not match the source cue")
+            XCTAssertFalse(evidence.bounds.isEmpty, "The captured source glyph has no measured bounds")
+            for bounds in evidence.bounds {
+                XCTAssertTrue(CGRect(x: -0.001, y: -0.001, width: 1.002, height: 1.002).contains(bounds))
+                XCTAssertLessThan(bounds.height, 0.8, "Glyph evidence must not describe the whole player")
+            }
+        }
+        func playbackSeconds() -> Double? {
+            let sliderValue = app.sliders.firstMatch.value as? String
+            let values = [sliderValue].compactMap { $0 } + app.staticTexts.allElementsBoundByIndex.map(\.label)
+            for value in values where value.range(of: #"^\d+:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil {
+                return value.split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
+            }
+            return nil
+        }
+        func captureTextOff() throws {
+            setPlaybackPaused(false)
+            seekTextCue()
+            let start = fixture["cueStart"] as? Double ?? 1
+            let end = fixture["cueEnd"] as? Double ?? 4
+            let deadline = Date().addingTimeInterval(12)
+            var seconds = playbackSeconds()
+            while !(seconds.map { $0 >= start && $0 < end } ?? false), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.15)
+                seconds = playbackSeconds()
+            }
+            let screenshot = XCUIScreen.main.screenshot()
+            let image = XCTAttachment(screenshot: screenshot)
+            image.name = "caption-\(name)-off-again"; image.lifetime = .keepAlways; add(image)
+            let timeline = XCTAttachment(string: "Observed playback: \(String(describing: seconds)); original cue window: \(start)..<\(end)")
+            timeline.name = "caption-\(name)-off-cue-window"; timeline.lifetime = .keepAlways; add(timeline)
+            XCTAssertTrue(seconds.map { $0 >= start && $0 < end } ?? false, "Off evidence was not captured within the source cue window")
+            XCTAssertFalse(try textEvidence(screenshot).visible, "Off left the source subtitle glyph visible")
+        }
+        if cueKind == "text" {
+            setPlaybackPaused(false)
+            try captureTextCue("on")
+        } else {
+            if !cue.waitForExistence(timeout: 2) { setPlaybackPaused(false) }
+            XCTAssertTrue(cue.waitForExistence(timeout: 90), "Captions On never rendered an embedded subtitle")
+            setPlaybackPaused(true)
+            let on = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            on.name = "caption-\(name)-on"; on.lifetime = .keepAlways; add(on)
+        }
+        // This player fills the window. A containing accessibility group
+        // reports its children union, which is not the playback viewport.
+        let viewport = app.windows.firstMatch
+        XCTAssertTrue(viewport.exists, "Fullscreen player window is unavailable")
+        let bounds = viewport.frame.insetBy(dx: -1, dy: -1)
+        if cueKind != "text" {
+            XCTAssertGreaterThan(cue.frame.width, 0)
+            XCTAssertGreaterThan(cue.frame.height, 0)
+            XCTAssertTrue(bounds.contains(cue.frame), "Bitmap caption extends outside the player viewport")
+            XCTAssertLessThan(cue.frame.height, viewport.frame.height * 0.8,
+                              "Accessibility bounds must describe the cue, not the whole overlay")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        Thread.sleep(forTimeInterval: 2)
+        if cueKind == "text" {
+            try captureTextCue("landscape")
+        } else {
+            let rotatedCueVisible = cue.waitForExistence(timeout: 20)
+            let rotated = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            rotated.name = "caption-\(name)-landscape"; rotated.lifetime = .keepAlways; add(rotated)
+            XCTAssertTrue(rotatedCueVisible, "Bitmap caption disappeared during rotation")
+            XCTAssertTrue(viewport.frame.insetBy(dx: -1, dy: -1).contains(cue.frame))
+            XCTAssertLessThan(cue.frame.height, viewport.frame.height * 0.8)
+        }
+        XCUIDevice.shared.orientation = .portrait
+        if cueKind == "text" { setPlaybackPaused(true) }
+        openCaptionMenu()
+        let offChoice = app.buttons["Off"].firstMatch
+        XCTAssertTrue(offChoice.waitForExistence(timeout: 5))
+        offChoice.tap()
+        if cueKind == "text" {
+            try captureTextOff()
+        } else {
+            XCTAssertTrue(cue.waitForNonExistence(timeout: 5), "Captions Off did not clear the rendered cue")
+            let offAgain = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            offAgain.name = "caption-\(name)-off-again"; offAgain.lifetime = .keepAlways; add(offAgain)
+        }
+    }
+
+    func testDVDMenuTestPlayDiscNavigates() throws { try exerciseDVD("menu-test", skip: false) }
+    func testDVDMenuFeaturesPlayDiscNavigates() throws { try exerciseDVD("menu-features", skip: false) }
+    func testDVDMenuTestSkipToMovie() throws { try exerciseDVD("menu-test", skip: true) }
+    func testDVDMenuFeaturesSkipToMovie() throws { try exerciseDVD("menu-features", skip: true) }
+
+    func testSMBMatildaPublishedPlayDisc() throws { try exerciseDVD("smb-matilda-published", skip: false) }
+    func testSMBMatildaPublishedSkipToMovie() throws { try exerciseDVD("smb-matilda-published", skip: true) }
+    func testSMBMatildaStagedPlayDisc() throws { try exerciseDVD("smb-matilda-staged", skip: false) }
+    func testSMBMatildaStagedSkipToMovie() throws { try exerciseDVD("smb-matilda-staged", skip: true) }
+    func testSMBGooniesPublishedPlayDisc() throws { try exerciseDVD("smb-goonies-published", skip: false) }
+    func testSMBGooniesPublishedSkipToMovie() throws { try exerciseDVD("smb-goonies-published", skip: true) }
+    func testSMBGooniesStagedPlayDisc() throws { try exerciseDVD("smb-goonies-staged", skip: false) }
+    func testSMBGooniesStagedSkipToMovie() throws { try exerciseDVD("smb-goonies-staged", skip: true) }
+    func testSMBAvatarStagedPlayDisc() throws { try exerciseDVD("smb-avatar-staged", skip: false) }
+    func testSMBAvatarStagedSkipToMovie() throws { try exerciseDVD("smb-avatar-staged", skip: true) }
+    func testSMBAvatar2IncompletePlayDisc() throws { try exerciseDVD("smb-avatar2-incomplete", skip: false) }
+    func testSMBAvatar2IncompleteSkipToMovie() throws { try exerciseDVD("smb-avatar2-incomplete", skip: true) }
+
+    func testHTTPDiscMatildaPublishedPlayDisc() throws { try exerciseHTTPDisc("matilda-published", skip: false) }
+    func testHTTPDiscMatildaPublishedSkipToMovie() throws { try exerciseHTTPDisc("matilda-published", skip: true) }
+    func testHTTPDiscGooniesPublishedPlayDisc() throws { try exerciseHTTPDisc("goonies-published", skip: false) }
+    func testHTTPDiscGooniesPublishedSkipToMovie() throws { try exerciseHTTPDisc("goonies-published", skip: true) }
+    func testHTTPDiscMatildaStagedPlayDisc() throws { try exerciseHTTPDisc("matilda-staged", skip: false) }
+    func testHTTPDiscMatildaStagedSkipToMovie() throws { try exerciseHTTPDisc("matilda-staged", skip: true) }
+    func testHTTPDiscGooniesStagedPlayDisc() throws { try exerciseHTTPDisc("goonies-staged", skip: false) }
+    func testHTTPDiscGooniesStagedSkipToMovie() throws { try exerciseHTTPDisc("goonies-staged", skip: true) }
+    func testHTTPDiscAvatarStagedPlayDisc() throws { try exerciseHTTPDisc("avatar-staged", skip: false) }
+    func testHTTPDiscAvatarStagedSkipToMovie() throws { try exerciseHTTPDisc("avatar-staged", skip: true) }
+    func testHTTPDiscAvatar2StagedPlayDisc() throws { try exerciseHTTPDisc("avatar2-staged", skip: false) }
+    func testHTTPDiscAvatar2StagedSkipToMovie() throws { try exerciseHTTPDisc("avatar2-staged", skip: true) }
+    func testHTTPDiscJohnWickStagedPlayDisc() throws { try exerciseHTTPDisc("john-wick-staged", skip: false) }
+    func testHTTPDiscJohnWickStagedSkipToMovie() throws { try exerciseHTTPDisc("john-wick-staged", skip: true) }
+    func testHTTPDiscTronStagedPlayDisc() throws { try exerciseHTTPDisc("tron-staged", skip: false) }
+    func testHTTPDiscTronStagedSkipToMovie() throws { try exerciseHTTPDisc("tron-staged", skip: true) }
+
+    func testHTTPDiscJohnWickPublishedPlayDisc() throws { try exerciseHTTPDisc("john-wick-published", skip: false) }
+    func testHTTPDiscJohnWickPublishedSkipToMovie() throws { try exerciseHTTPDisc("john-wick-published", skip: true) }
+
+    func testHTTPDiscTronPublishedPlayDisc() throws { try exerciseHTTPDisc("tron-published", skip: false) }
+    func testHTTPDiscTronPublishedSkipToMovie() throws { try exerciseHTTPDisc("tron-published", skip: true) }
+
+    func testHTTPDiscWildRobotStagedPlayDisc() throws { try exerciseHTTPDisc("wild-robot-staged", skip: false) }
+    func testHTTPDiscWildRobotStagedSkipToMovie() throws { try exerciseHTTPDisc("wild-robot-staged", skip: true) }
+
+    private func visiblePictureFraction(_ screenshot: XCUIScreenshot) throws -> Double {
+        guard let image = screenshot.image.cgImage,
+              let crop = image.cropping(to: CGRect(x: Double(image.width) * 0.1,
+                  y: Double(image.height) * 0.36, width: Double(image.width) * 0.8,
+                  height: Double(image.height) * 0.28)) else { return 0 }
+        var pixels = [UInt8](repeating: 0, count: 64 * 64 * 4)
+        pixels.withUnsafeMutableBytes { storage in
+            guard let context = CGContext(data: storage.baseAddress, width: 64, height: 64,
+                bitsPerComponent: 8, bytesPerRow: 64 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        let bright = stride(from: 0, to: pixels.count, by: 4).filter {
+            max(pixels[$0], max(pixels[$0 + 1], pixels[$0 + 2])) > 30
+        }.count
+        let fraction = Double(bright) / (64 * 64)
+        let evidence = XCTAttachment(string: "Central picture fraction above RGB30: \(fraction); excludes outer chrome")
+        evidence.name = "iso-picture-pixels"; evidence.lifetime = .keepAlways; add(evidence)
+        return fraction
+    }
+
+    private func exerciseHTTPDisc(_ name: String, skip: Bool) throws {
+        guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_HTTP_ISO_FIXTURES"],
+              let data = encoded.data(using: .utf8),
+              let cases = try JSONSerialization.jsonObject(with: data) as? [String: String],
+              let url = cases[name] else { throw XCTSkip("Read-only SSH byte-range HTTP fixture unavailable; SMB remains unverified") }
+        app.launchArguments = ["-OpenStreamVisionScreen", "add-files", "-OpenStreamVisionPlaybackURL", url,
+            "-OpenStreamDiscStart", skip ? "mainTitle" : "menu", "-OpenStreamVisionPlaybackIsLive", "NO",
+            "-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES", "-openstream.playback.engine", "engine",
+            "-openstream.settings.metadata.enabled.v1", "NO"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
+        let reachedPlayback = ready.waitForExistence(timeout: 60)
+        if reachedPlayback {
+            Thread.sleep(forTimeInterval: 20)
+            if !app.sliders.firstMatch.exists {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+            }
+            let slider = app.sliders.firstMatch
+            XCTAssertTrue(slider.waitForExistence(timeout: 5), "Rendered ISO evidence requires a real playback scrubber")
+            slider.adjust(toNormalizedSliderPosition: 0.005)
+            Thread.sleep(forTimeInterval: 5)
+        }
+        var picture = XCUIScreen.main.screenshot()
+        var fraction = reachedPlayback ? try visiblePictureFraction(picture) : 0
+        for sample in 1...2 where reachedPlayback && fraction <= 0.10 {
+            let black = XCTAttachment(screenshot: picture)
+            black.name = "http-iso-\(name)-\(skip ? "mainTitle" : "menu")-sample-\(sample)"
+            black.lifetime = .keepAlways; add(black)
+            Thread.sleep(forTimeInterval: 5)
+            picture = XCUIScreen.main.screenshot()
+            fraction = try visiblePictureFraction(picture)
+        }
+        let shot = XCTAttachment(screenshot: picture)
+        shot.name = "http-iso-\(name)-\(skip ? "mainTitle" : "menu")"; shot.lifetime = .keepAlways; add(shot)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = (shot.name ?? "http-iso") + "-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        XCTAssertTrue(reachedPlayback, "Remote BD ISO did not reach main title playback")
+        if reachedPlayback {
+            XCTAssertTrue(ready.exists, "Player disappeared before rendered-picture evidence")
+            XCTAssertGreaterThan(fraction, 0.10,
+                                 "Central video picture is still mostly black after real playback and seeking")
+        }
+        XCTAssertFalse(app.buttons["player.disc.menu"].firstMatch.exists, "Blu-ray must not offer a DVD menu control")
+        XCTAssertFalse(app.descendants(matching: .any)["player.disc.menu.active"].firstMatch.exists,
+                       "Blu-ray .menu fallback must not pretend to provide DVD navigation")
+    }
+
+    private func exerciseDVD(_ name: String, skip: Bool) throws {
+        if name.hasPrefix("smb-") {
+            guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_REMOTE_ISO_FIXTURES"],
+                  let data = encoded.data(using: .utf8),
+                  let sources = try JSONSerialization.jsonObject(with: data) as? [String: [String: String]],
+                  let source = sources[name] else { throw XCTSkip("Requires OPENSTREAM_REMOTE_ISO_FIXTURES") }
+            let sourceData = try JSONSerialization.data(withJSONObject: source)
+            app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_SMB"] = String(decoding: sourceData, as: UTF8.self)
+        } else {
+            guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_ISO_FIXTURES"],
+                  let data = encoded.data(using: .utf8),
+                  let folders = try JSONSerialization.jsonObject(with: data) as? [String: String],
+                  let folder = folders[name] else { throw XCTSkip("Requires run-e2e.py --iso-fixtures") }
+            app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_PATH"] = folder
+        }
+        app.launchArguments = ["-OpenStreamLibraryTitlesFixture", "-OpenStreamTrace", "YES",
+            "-OpenStreamMuteAudio", "YES", "-openstream.settings.metadata.enabled.v1", "NO",
+            "-openstream.playback.engine", "engine"]
+        app.launch()
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'library.title.'")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 60), "Local ISO scanner did not publish \(name)")
+        tile.tap()
+        let play = app.buttons[skip ? "detail.disc.skipToMovie" : "detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30), "Disc start actions missing")
+        play.tap()
+        func capture(_ stage: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "iso-\(name)-\(skip ? "skip" : "menu")-\(stage)"
+            shot.lifetime = .keepAlways
+            add(shot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = (shot.name ?? "iso") + "-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        capture("opened")
+        if ProcessInfo.processInfo.environment["OPENSTREAM_ISO_REPRO"] == "1" {
+            for step in 1...6 {
+                Thread.sleep(forTimeInterval: 0.5)
+                capture("repro-\(step)")
+            }
+            return
+        }
+        if skip || name.hasPrefix("smb-") {
+            XCTAssertTrue(app.descendants(matching: .any)["player.disc.title.active"].firstMatch.waitForExistence(timeout: 30),
+                          "Skip to Movie did not reach the main title")
+            XCTAssertFalse(app.descendants(matching: .any)["player.disc.menu.active"].firstMatch.exists)
+        } else {
+            let menu = app.descendants(matching: .any)["player.disc.menu.active"].firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 30), "Play Disc bypassed the DVD menu or rendered no menu")
+            capture("menu")
+            let button = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'player.disc.menu.button.'")).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 10), "DVD menu exposes no interactive button")
+            button.tap()
+            if name == "menu-features" {
+                XCTAssertTrue(app.buttons["player.disc.menu.button.6"].firstMatch.waitForExistence(timeout: 5),
+                              "Play did not open the authored chapter menu")
+                capture("chapter-menu")
+                app.buttons["player.disc.menu.button.1"].firstMatch.tap()
+            }
+            XCTAssertTrue(app.descendants(matching: .any)["player.disc.title.active"].firstMatch.waitForExistence(timeout: 30),
+                          "Activating a DVD menu button did not reach title playback")
+            let returnToMenu = app.buttons["player.disc.menu"].firstMatch
+            if returnToMenu.exists {
+                returnToMenu.tap()
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)).tap()
+                let more = app.buttons["player.more"].firstMatch
+                XCTAssertTrue(more.waitForExistence(timeout: 5), "Title playback has no Disc Menu route")
+                more.tap()
+                app.buttons["Disc Menu"].firstMatch.tap()
+            }
+            XCTAssertTrue(menu.waitForExistence(timeout: 15), "Disc Menu did not return from title playback")
+            capture("returned-menu")
+            app.buttons["player.disc.menu.button.1"].firstMatch.tap()
+            let title = app.descendants(matching: .any)["player.disc.title.active"].firstMatch
+            if name == "menu-features" {
+                let chapter = app.buttons["player.disc.menu.button.6"].firstMatch
+                // The authored first button can resume the interrupted title or open chapters.
+                let resumedOrChapters = NSPredicate { _, _ in title.exists || chapter.exists }
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: resumedOrChapters, object: app)], timeout: 5), .completed)
+                if chapter.exists { app.buttons["player.disc.menu.button.1"].firstMatch.tap() }
+            }
+            XCTAssertTrue(title.waitForExistence(timeout: 30))
+            XCTAssertTrue(menu.waitForExistence(timeout: 120), "A completed title dismissed the player instead of returning to the DVD menu")
+            capture("title-ended-menu")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)).tap()
+            let close = app.buttons["player.close"].firstMatch
+            XCTAssertTrue(close.waitForExistence(timeout: 5), "DVD menu has no Close control")
+            close.tap()
+            XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 5),
+                          "Closing the DVD menu did not restore the title page")
+            capture("closed")
+        }
+        app.terminate()
+    }
+
+
     override func setUpWithError() throws {
         // These checks require disposable data, not the owner's content simulators.
         let isolatedTests = [
@@ -2241,7 +2688,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let captions = app.buttons["player.captions"]
         for _ in 0..<4 {
             if captions.exists, captions.isHittable { return true }
-            guard tapIfPossible(app.buttons["player.controls.show"].firstMatch) else { return false }
+            let background = app.buttons["player.controls.show"].firstMatch
+            guard background.exists,
+                  let offset = crawlPlayerBackgroundHitOffset(background.frame, scene: crawlScene()) else { return false }
+            background.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
             if captions.waitForExistence(timeout: 2) { return true }
         }
         return false
@@ -3135,6 +3585,13 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         ].joined(separator: "|")
     }
 
+    private func crawlPlaybackSeconds() -> Double? {
+        let slider = app.sliders.firstMatch
+        guard slider.exists, let value = slider.value as? String,
+              value.range(of: #"^\d+:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil else { return nil }
+        return value.split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
+    }
+
     private func waitForCrawlResponse(from before: String, target: CrawlTarget) -> (Bool, CrawlScene) {
         let deadline = Date().addingTimeInterval(3)
         while true {
@@ -3271,18 +3728,19 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // is past the edge of the screen while a good part of the cell is
             // in plain sight and takes a finger. Press the part that is there.
             var hitOffset: CGVector? = nil
-            if target.identifier == "player.controls.show", reach == .blocked {
+            if target.identifier == "player.controls.show" {
                 // The surface's centre is covered by Play/Pause. A background
                 // touch belongs in a clear part of the video, and must still
                 // change the chrome state to count as a response.
                 hitOffset = crawlPlayerBackgroundHitOffset(element.frame, scene: scene)
+                crawlNote("   background frame=\(element.frame) offset=\(String(describing: hitOffset)) Close=\(app.buttons["player.close"].firstMatch.exists ? app.buttons["player.close"].firstMatch.frame : .zero)")
             }
             if reach == .offScreen, let live = (try? element.snapshot())?.frame,
                let offset = crawlVisibleHitOffset(live) {
                 hitOffset = offset
                 crawlNote("   (\(target.name) hangs off the edge; pressing the part that is on screen)")
             }
-            guard reach == .hittable || hitOffset != nil else {
+            guard (reach == .hittable && target.identifier != "player.controls.show") || hitOffset != nil else {
                 switch reach {
                 case .gone:
                     result.skipped += 1
@@ -3334,10 +3792,111 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 crawlPressesPerCollection[collection] = (crawlPressesPerCollection[collection] ?? 0) + 1
             }
             // Scrolling may move the target after the original scene snapshot.
+            var expectedSkip: Double?
+            var resumeAfterSkip = false
+            if ["player.skip-back", "player.skip-forward"].contains(target.identifier) {
+                let transport = app.buttons["player.play-pause"].firstMatch
+                resumeAfterSkip = transport.label == "Pause"
+                if resumeAfterSkip { transport.tap() }
+                let scrubber = app.sliders.firstMatch
+                XCTAssertTrue(scrubber.exists, "Skip verification requires the real scrubber")
+                // A slider fraction is quantized to its pixel width. Seek
+                // well inside the synthetic 1800s movie, then measure the
+                // actual paused position rather than the requested fraction.
+                scrubber.adjust(toNormalizedSliderPosition: 0.1)
+                let positioned = Date().addingTimeInterval(5)
+                var position = crawlPlaybackSeconds()
+                while Date() < positioned {
+                    Thread.sleep(forTimeInterval: 0.3)
+                    let next = crawlPlaybackSeconds()
+                    if let next, next == position { break }
+                    position = next
+                }
+                let observed = position ?? -100
+                XCTAssertGreaterThan(observed, 10, "Skip test did not reach an interior position")
+                XCTAssertLessThan(observed, 1790)
+                expectedSkip = observed + (target.identifier == "player.skip-back" ? -10 : 10)
+            }
+            var settledPlayPause: XCUIElement?
+            if target.identifier == "player.play-pause" {
+                let transport = resolveCrawlTarget(target)
+                let initial = XCTAttachment(string: app.debugDescription)
+                initial.name = "players-play-pause-before-settle"; initial.lifetime = .keepAlways; add(initial)
+                if transport.label == "Play" {
+                    transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }
+                let start = crawlPlaybackSeconds()
+                var previousLabel = transport.label
+                var settled = false
+                var samples = ["start=\(String(describing: start)), label=\(previousLabel)"]
+                let deadline = Date().addingTimeInterval(10)
+                while Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.3)
+                    let clock = crawlPlaybackSeconds()
+                    let currentLabel = transport.label
+                    samples.append("clock=\(String(describing: clock)), label=\(currentLabel)")
+                    if let start, let clock, clock > start, currentLabel == "Pause", currentLabel == previousLabel {
+                        settled = true
+                        break
+                    }
+                    previousLabel = currentLabel
+                }
+                let timing = XCTAttachment(string: samples.joined(separator: "\n"))
+                timing.name = "players-play-pause-settle-clock"; timing.lifetime = .keepAlways; add(timing)
+                guard settled, revealPlayerControls(),
+                      let current = app.buttons.matching(identifier: "player.play-pause")
+                        .allElementsBoundByIndex.first(where: { $0.isHittable && $0.label == "Pause" }) else {
+                    result.silent += 1
+                    result.defects.append("[\(screen.name)] playback did not settle with an advancing clock before Play/Pause within 10 s")
+                    crawlNote("   ✗ playback clock/transport did not settle before Play/Pause")
+                    let failed = XCTAttachment(string: app.debugDescription)
+                    failed.name = "players-play-pause-unsettled"; failed.lifetime = .keepAlways; add(failed)
+                    attach("players-play-pause-unsettled")
+                    continue
+                }
+                settledPlayPause = current
+                crawlNote("   settled Play/Pause frame=\(current.frame) center=(\(current.frame.midX), \(current.frame.midY))")
+            }
             scene = crawlScene()
             let before = crawlStateString(scene, target: target)
-            pressForCrawl(element, node: node, at: hitOffset)
-            let (answered, _) = waitForCrawlResponse(from: before, target: target)
+            if let settledPlayPause {
+                settledPlayPause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else {
+                pressForCrawl(element, node: node, at: hitOffset)
+            }
+            var answered: Bool
+            if let settledPlayPause {
+                let deadline = Date().addingTimeInterval(3)
+                while settledPlayPause.label != "Play", Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.2)
+                }
+                answered = settledPlayPause.label == "Play"
+                let evidence = XCTAttachment(string: "label=\(settledPlayPause.label), clock=\(String(describing: crawlPlaybackSeconds()))\n" + app.debugDescription)
+                evidence.name = "players-play-pause-after"; evidence.lifetime = .keepAlways; add(evidence)
+            } else {
+                answered = waitForCrawlResponse(from: before, target: target).0
+            }
+            if let expectedSkip {
+                let deadline = Date().addingTimeInterval(5)
+                while abs((crawlPlaybackSeconds() ?? -100) - expectedSkip) > 1, Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.2)
+                }
+                let observed = crawlPlaybackSeconds()
+                answered = observed.map { abs($0 - expectedSkip) <= 1 } ?? false
+                crawlNote("   seek response expected=\(expectedSkip) observed=\(String(describing: observed))")
+                if resumeAfterSkip, app.buttons["player.play-pause"].firstMatch.label == "Play" {
+                    app.buttons["player.play-pause"].firstMatch.tap()
+                }
+            } else if target.identifier == "player.controls.show" {
+                let captions = app.buttons["player.captions"].firstMatch
+                answered = captions.exists && captions.isHittable
+            } else if target.identifier == "player.captions" {
+                let off = app.buttons["Off"].firstMatch
+                let english = app.buttons["English"].firstMatch
+                answered = off.exists && off.isHittable && english.exists && english.isHittable
+                let menu = XCTAttachment(string: app.debugDescription)
+                menu.name = "players-caption-menu-actions"; menu.lifetime = .keepAlways; add(menu)
+            }
             result.pressed += 1
             if answered {
                 crawlNote("   ✓ \(target.name) — responded")
@@ -3366,7 +3925,13 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             Thread.sleep(forTimeInterval: 0.6)
             var after = crawlScene()
             if target.identifier == "player.controls.show", answered {
-                XCTAssertTrue(revealPlayerControls(), "Playback controls did not return after the background touch")
+                let restored = revealPlayerControls()
+                if !restored {
+                    let evidence = XCTAttachment(string: app.debugDescription)
+                    evidence.name = "players-after-background-hierarchy"; evidence.lifetime = .keepAlways; add(evidence)
+                    attach("players-after-background")
+                }
+                XCTAssertTrue(restored, "Playback controls did not return after the background touch")
                 after = crawlScene()
             }
             if crawlMenuRect(after) != nil {
@@ -3544,13 +4109,25 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             return
         }
         guard name.contains("download"), answered else { return }
-        undoCrawlDownload(control: element, screen: screen, result: &result)
+        undoCrawlDownload(control: element, node: node, screen: screen, result: &result)
     }
 
     /// The download control is the one press in the walk that leaves a file on
     /// the simulator. Pressing it again opens its options, where the download
     /// is cancelled — the screen is left as it was found.
-    private func undoCrawlDownload(control: XCUIElement, screen: CrawlScreen, result: inout CrawlResult) {
+    private func undoCrawlDownload(control: XCUIElement, node: CrawlNode, screen: CrawlScreen, result: inout CrawlResult) {
+        func originalRowControl() -> XCUIElement? {
+            guard !node.identifier.isEmpty else { return nil }
+            return app.buttons.matching(identifier: node.identifier).allElementsBoundByIndex
+                .filter { candidate in
+                    candidate.isHittable && candidate.frame.intersects(node.frame.insetBy(dx: -8, dy: -8))
+                        && abs(candidate.frame.midY - node.frame.midY) <= max(44, node.frame.height)
+                }
+                .min {
+                    hypot($0.frame.midX - node.frame.midX, $0.frame.midY - node.frame.midY)
+                        < hypot($1.frame.midX - node.frame.midX, $1.frame.midY - node.frame.midY)
+                }
+        }
         // The options dialog offers to cancel only once the coordinator owns
         // the download, and resolving a stream takes longer than a moment.
         Thread.sleep(forTimeInterval: 3)
@@ -3563,7 +4140,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 // opening the options. That is how the walk once reported a
                 // download it "could not cancel" after restarting eight
                 // attempts that never wrote a byte (ui-smoke 20260923-2209).
-                switch crawlDownloadState(scene, control: control) {
+                switch crawlDownloadState(scene, control: originalRowControl() ?? control) {
                 case .running:
                     break
                 case .finished:
@@ -3579,8 +4156,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 }
                 // The control that started it is the control that offers to
                 // stop it.
-                if !tapIfPossible(control),
-                   !tapIfPossible(app.buttons["detail.episode.download"].firstMatch) {
+                guard let original = originalRowControl(), tapIfPossible(original) else {
+                    crawlNote("   ! the original download row is not hittable; refusing another episode's control")
                     break
                 }
                 Thread.sleep(forTimeInterval: 1.2)

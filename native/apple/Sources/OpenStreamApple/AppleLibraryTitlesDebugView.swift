@@ -9,6 +9,7 @@ public struct AppleLibraryTitlesDebugView: View {
     @State private var index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(
         fileURL: FileManager.default.temporaryDirectory.appending(path: "library-titles-fixture-index.json")))
     @State private var catalogs = AppleCatalogStore()
+    @State private var autoPlayGroup: AppleLibrarySeries?
 
     public init() {
         AppleLocalLibraryStore.persistsScanResults = false
@@ -18,8 +19,15 @@ public struct AppleLibraryTitlesDebugView: View {
             defaults.removeObject(forKey: "openstream.sources.v1")
             defaults.set(path, forKey: "fixture.path")
         }
-        let store = AppleSourceStore(defaults: defaults)
-        if let path {
+        let smbRaw = ProcessInfo.processInfo.environment["OPENSTREAM_LIBRARY_FIXTURE_SMB"]
+        if smbRaw != nil { defaults.removeObject(forKey: "openstream.sources.v1") }
+        let store = AppleSourceStore(defaults: defaults, keychain: AppleLibraryFixtureCredentials())
+        if let smbRaw, let data = smbRaw.data(using: .utf8),
+           let smb = try? JSONDecoder().decode(AppleLibraryFixtureSMB.self, from: data) {
+            _ = try? store.addNetworkShare(name: "Media", host: smb.host, port: smb.port ?? 445,
+                share: smb.share, path: smb.path ?? "", username: smb.username ?? "",
+                password: smb.password ?? "", domain: smb.domain ?? "")
+        } else if let path {
             _ = try? store.addLibraryFolder(name: "Media", url: URL(fileURLWithPath: path), bookmarkData: nil)
         }
         _sources = State(initialValue: store)
@@ -27,11 +35,21 @@ public struct AppleLibraryTitlesDebugView: View {
 
     public var body: some View {
         NavigationStack {
-            AppleLibraryView(catalogStore: catalogs, sourceStore: sources, mediaIndex: index, settings: settings, openSettings: {})
-                .navigationTitle("Library")
+            if let autoPlayGroup {
+                AppleLocalTitleDestination(group: autoPlayGroup, sourceStore: sources, mediaIndex: index,
+                    settings: settings, openSettings: {}, tabToolbar: nil, autoPlay: true)
+            } else {
+                AppleLibraryView(catalogStore: catalogs, sourceStore: sources, mediaIndex: index, settings: settings, openSettings: {})
+                    .navigationTitle("Library")
+            }
         }.preferredColorScheme(.dark).tint(.white)
         // The app's root starts the scan; this fixture replaces the root.
-        .task { await AppleLocalLibraryStore.shared.reload(sourceStore: sources, mediaIndex: index, settings: settings) }
+        .task {
+            await AppleLocalLibraryStore.shared.reload(sourceStore: sources, mediaIndex: index, settings: settings)
+            if ProcessInfo.processInfo.environment["OPENSTREAM_LIBRARY_FIXTURE_AUTOPLAY"] == "1" {
+                autoPlayGroup = AppleLocalLibraryStore.shared.groups.first
+            }
+        }
         #if os(macOS)
         // The window shot hangs off the app's normal root, which this
         // fixture replaces; without it the fixture cannot be reviewed headless.
@@ -41,5 +59,22 @@ public struct AppleLibraryTitlesDebugView: View {
         }
         #endif
     }
+}
+private struct AppleLibraryFixtureSMB: Decodable {
+    let host: String
+    let share: String
+    var port: Int?
+    var path: String?
+    var username: String?
+    var password: String?
+    var domain: String?
+}
+
+/// Fixture credentials live only for this process and never enter Keychain.
+private final class AppleLibraryFixtureCredentials: AppleCredentialStoring {
+    private var values: [String: String] = [:]
+    func string(for account: String) -> String? { values[account] }
+    func set(_ value: String, for account: String) { values[account] = value }
+    func remove(_ account: String) { values.removeValue(forKey: account) }
 }
 #endif

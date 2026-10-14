@@ -84,6 +84,52 @@ struct AppleBitmapSubtitleGeometryTests {
         #expect(frame(sign, container: landscape, video: scope).minY >= 0)
     }
 
+    @Test("4K picture and HD PGS keep authored scale across rotation", arguments: [
+        CGSize(width: 402, height: 874), CGSize(width: 874, height: 402),
+        CGSize(width: 1920, height: 1080),
+    ])
+    func ultraHDPictureWithHDCanvas(container: CGSize) {
+        let video = CGSize(width: 3840, height: 1608)
+        let picture = AppleVideoFitting.fittedRect(container: container, videoSize: video)
+        let result = frame(dialogue, container: container, video: video)
+        #expect(abs(result.width - dialogue.width * picture.width) < 0.01)
+        #expect(abs(result.height - dialogue.height * canvas.height * picture.width / canvas.width) < 0.01)
+        #expect(containerRect(container).contains(result))
+    }
+
+    @Test func anObjectBeyondEitherHorizontalEdgeStaysVisible() {
+        let container = CGSize(width: 402, height: 874)
+        for x in [-0.1, 0.95] {
+            let result = frame(CGRect(x: x, y: 0.8, width: 0.2, height: 0.05),
+                               container: container, video: CGSize(width: 1920, height: 1080))
+            #expect(containerRect(container).contains(result))
+            #expect(abs(result.width - 80.4) < 0.01)
+        }
+    }
+
+    @Test func oversizedObjectsShrinkUniformlyInsteadOfBeingCropped() {
+        let container = CGSize(width: 874, height: 402)
+        let result = frame(CGRect(x: -0.2, y: -0.2, width: 1.4, height: 1.4),
+                           container: container, video: CGSize(width: 1920, height: 800))
+        #expect(containerRect(container).contains(result))
+        #expect(abs(result.height - container.height) < 0.01)
+        #expect(abs(result.width / result.height - canvas.width / canvas.height) < 0.01)
+    }
+
+    @Test func invalidBitmapGeometryDrawsNothing() {
+        let container = CGSize(width: 874, height: 402)
+        for rect in [CGRect(x: CGFloat.nan, y: 0, width: 0.2, height: 0.1),
+                     CGRect(x: 0, y: 0, width: -0.2, height: 0.1),
+                     CGRect(x: 0, y: 0, width: 0.2, height: CGFloat.infinity)] {
+            #expect(frame(rect, container: container, video: nil) == .zero)
+        }
+        #expect(frame(dialogue, container: CGSize(width: CGFloat.infinity, height: 402), video: nil) == .zero)
+    }
+
+    private func containerRect(_ size: CGSize) -> CGRect {
+        CGRect(origin: .zero, size: size)
+    }
+
     @Test func anUnknownCanvasIsThePicture() {
         let tv = CGSize(width: 1920, height: 1080)
         let f = frame(dialogue, canvas: .zero, container: tv, video: nil)

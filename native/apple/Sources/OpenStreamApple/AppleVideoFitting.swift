@@ -19,7 +19,8 @@ public enum AppleVideoFitting: Sendable {
 
     /// The picture's rect inside `container`, fitted and centred.
     public static func fittedRect(container: CGSize, videoSize: CGSize?) -> CGRect {
-        guard container.width > 0, container.height > 0 else { return .zero }
+        guard container.width.isFinite, container.height.isFinite,
+              container.width > 0, container.height > 0 else { return .zero }
         let aspect = aspectRatio(of: videoSize) ?? assumedAspect
         let fittedHeight = container.width / aspect
         if fittedHeight <= container.height {
@@ -60,32 +61,46 @@ public enum AppleVideoFitting: Sendable {
     /// overhangs the picture into the letterbox, exactly where the disc put
     /// the dialogue. An unknown canvas (`.zero`) is the picture itself. An
     /// object the overhang would push past the container's top or bottom edge
-    /// is slid back inside it, never resized.
+    /// is slid back inside it. An object larger than the viewport shrinks
+    /// uniformly to fit, so none of its pixels are cropped.
     public static func bitmapSubtitleFrame(
         rect: CGRect,
         canvasSize: CGSize,
         container: CGSize,
         videoSize: CGSize?
     ) -> CGRect {
+        guard rect.origin.x.isFinite, rect.origin.y.isFinite,
+              rect.size.width.isFinite, rect.size.height.isFinite,
+              rect.size.width > 0, rect.size.height > 0 else { return .zero }
         let video = fittedRect(container: container, videoSize: videoSize)
-        guard video.width > 0 else { return .zero }
+        guard video.width > 0, video.height > 0 else { return .zero }
         var canvas = video
-        if canvasSize.width > 0, canvasSize.height > 0 {
+        if canvasSize.width.isFinite, canvasSize.height.isFinite,
+           canvasSize.width > 0, canvasSize.height > 0 {
             let height = canvasSize.height * video.width / canvasSize.width
             canvas = CGRect(x: video.minX, y: video.midY - height / 2, width: video.width, height: height)
         }
-        let height = rect.height * canvas.height
+        let authoredWidth = rect.width * canvas.width
+        let authoredHeight = rect.height * canvas.height
+        let x = canvas.minX + rect.minX * canvas.width
         let y = canvas.minY + rect.minY * canvas.height
+        guard authoredWidth.isFinite, authoredHeight.isFinite,
+              authoredWidth > 0, authoredHeight > 0,
+              x.isFinite, y.isFinite else { return .zero }
+        let scale = min(1, container.width / authoredWidth, container.height / authoredHeight)
+        let width = authoredWidth * scale
+        let height = authoredHeight * scale
         return CGRect(
-            x: canvas.minX + rect.minX * canvas.width,
+            x: min(max(x, 0), max(0, container.width - width)),
             y: min(max(y, 0), max(0, container.height - height)),
-            width: rect.width * canvas.width,
+            width: width,
             height: height
         )
     }
 
     static func aspectRatio(of size: CGSize?) -> CGFloat? {
-        guard let size, size.width > 0, size.height > 0 else { return nil }
+        guard let size, size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else { return nil }
         return size.width / size.height
     }
 }

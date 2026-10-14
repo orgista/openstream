@@ -13,6 +13,8 @@ import AetherEngine
 public final class AetherPlaybackEngine: ApplePlaybackEngine {
     public let kind: ApplePlaybackEngineKind = .openStream
 
+    public let discMenu = AppleDiscMenuSession()
+
     private let aether: AetherEngine
     private var cancellables = Set<AnyCancellable>()
     private let eventStream = ApplePlaybackEventStream()
@@ -306,7 +308,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // The title page's title, not the file's own tags (`AppleStockPlayerMetadata`).
         if !request.isLive { aether.setExternalMetadata(AppleStockPlayerMetadata.items(title: request.title, subtitle: request.subtitle, year: request.releaseYear)) }
         // A disc image starts from one choice (`AppleDiscPlaybackStart`); the
-        // engine's menu option is the one line in `engineTitleID` once it lands.
+        // engine opens navigation unless an explicit title bypasses it.
         if let disc = request.hints.disc { appleTrace(disc.traceLine) }
         discFileURL = request.hints.disc != nil ? (request.hints.libraryFileURL ?? request.url) : nil
         acceptsChapterUpdates = true
@@ -459,6 +461,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // tracks it, and serves a bounded first window if the origin is strict realtime (AE#195/#208).
         if request.isLive, !request.hints.nativeRemoteHLS { options.liveJoinProfile = .fastZap }
         options.autoplay = request.autoplay
+        options.dvdStartMode = request.hints.disc?.engineStartMode ?? .mainTitle
         // A language the viewer picked wins over one derived from the captions
         // preference: under `.always` the preference contributes no languages
         // at all, so the demuxer used to pick in muxer order at load and get
@@ -539,6 +542,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     public func selectSubtitleTrack(id: Int?) {
+        #if DEBUG
+        appleTrace("subtitle select: track=\(id.map(String.init) ?? "off")")
+        #endif
         subtitleSelectionOverridden = true
         if stockPlayerRendersSubtitles {
             stockPlayerRendersSubtitles = false
@@ -707,8 +713,19 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.$playbackPhase
             .sink { [weak self] phase in self?.applyPhase(phase) }
             .store(in: &cancellables)
+        aether.$dvdMenu
+            .sink { [weak self] state in
+                guard let self else { return }
+                self.discMenu.state = state
+                if state?.isInMenu == true { self.route = .surface }
+                appleTrace("disc menu state: menu=\(state?.isInMenu == true) title=\(state?.isPlayingTitle == true) buttons=\(state?.buttons.count ?? 0)")
+            }
+            .store(in: &cancellables)
         aether.$videoRoute
-            .sink { [weak self] videoRoute in self?.route = Self.mapRoute(videoRoute) }
+            .sink { [weak self] videoRoute in
+                guard let self else { return }
+                self.route = self.discMenu.state?.isInMenu == true ? .surface : Self.mapRoute(videoRoute)
+            }
             .store(in: &cancellables)
         aether.$errorInfo
             .sink { [weak self] info in self?.applyFailure(info) }
@@ -818,7 +835,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // re-applies it, before any sample is rendered.
         if multiviewMuted || AppleTestAudioMute.isActive { aether.volume = 0 }
         applyLiveBuffer()
-        self.phase = Self.mapPhase(phase)
+        if let forwarded = Self.forwardedPhase(phase, hasDiscSession: aether.dvdMenu != nil) {
+            self.phase = forwarded
+        }
         // The pixel aspect is set after the coded size and is not published;
         // the next phase change picks it up.
         refreshVideoSize()
@@ -903,8 +922,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
                   preferredLanguages: preferredSubtitleLanguages,
                   isExplicitChoice: subtitleLanguagesAreExplicit
               ).first else { return }
-        // `visible` is the language rule: a preferred-language track, or an
-        // untagged closed caption when the stream has none.
+        // Only tagged preferred-language tracks qualify for automatic selection.
         applySubtitleSelection(id: first.id)
     }
 
@@ -914,7 +932,18 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     // MARK: - Mapping
 
-    private static func mapPhase(_ phase: PlaybackPhase) -> ApplePlaybackEnginePhase {
+    /// A title's end/stop belongs to the navigator until it tears down the disc session.
+    nonisolated static func forwardedPhase(_ phase: PlaybackPhase, hasDiscSession: Bool) -> ApplePlaybackEnginePhase? {
+        if hasDiscSession {
+            switch phase {
+            case .ended, .idle: return nil
+            default: break
+            }
+        }
+        return mapPhase(phase)
+    }
+
+    nonisolated private static func mapPhase(_ phase: PlaybackPhase) -> ApplePlaybackEnginePhase {
         switch phase {
         case .idle: return .idle
         case .loading: return .loading

@@ -77,13 +77,13 @@ struct AppleCaptionMenuLabelTests {
         #expect(AppleSubtitleTrackFilter.menuChoices(withCC, preferredLanguages: ["en"]).map(\.title) == ["English", "English (CC)"])
     }
 
-    @Test func aTitleNamesTheLanguageWhenTheContainerDoesNot() {
+    @Test func untaggedTitlesRemainUnknownManualChoices() {
         let tracks = [ApplePlaybackTrack(id: 0, title: "English", codec: "subrip"),
                       ApplePlaybackTrack(id: 1, title: "German", codec: "subrip"),
                       ApplePlaybackTrack(id: 2, title: "Subtitle 3", codec: "subrip")]
-        // "Subtitle 3" names no language, so it is not listed (owner 2026-09-28).
+        // A track name is not language metadata (owner 2026-10-14).
         #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["en", "de"]).map(\.title)
-            == ["English", "German"])
+            == ["Unknown 1", "Unknown 2", "Unknown 3"])
     }
 
     /// The app draws the Mac's captions now; a 12 pt cue under a 700 pt

@@ -2,14 +2,8 @@ import Foundation
 
 /// Subtitle auto-selection and the captions menu, under one language policy.
 ///
-/// Language matching tolerates MKV codes such as `eng`, `en`, `en-US`, and
-/// `English`. Every menu and every auto-selection lists only the viewer's
-/// languages: the ones picked in Settings, or the device's primary language
-/// when none were picked (owner 2026-09-28: "Subtitles still shows all
-/// languages instead of default of English"). A stream with no track in
-/// those languages lists none. Untagged tracks are hidden, except untagged
-/// closed captions (CEA-608/708, how US broadcasts carry English) when the
-/// stream has no tagged track in those languages.
+/// Tagged tracks match the viewer's preferred languages. Untagged tracks are
+/// separate manual choices named "Unknown" and never qualify for auto-selection.
 public enum AppleSubtitleTrackFilter: Sendable {
     /// The languages every captions menu works in, as two-letter codes in
     /// preference order: the given list, or the device's primary language
@@ -35,8 +29,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
 
     /// The single auto-select candidate: the best track of the first
     /// effective language the stream has, full subtitles ahead of forced,
-    /// SDH, commentary and CC; else the best untagged closed caption. Empty
-    /// when neither exists.
+    /// SDH, commentary and CC. Untagged tracks never qualify.
     /// `isExplicitChoice` no longer changes the result; a guessed language
     /// is as strict as a picked one.
     public static func visible(
@@ -49,8 +42,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
         // not a forced track: it is never switched on by itself. A flagged
         // one may be, when it is all the language has (V16).
         let eligible = tracks.filter { $0.isForced || !isTitledForced($0) }
-        var candidates = wanted.map { language in eligible.filter { languageKey(of: $0) == language } }
-        candidates.append(eligible.filter(isUntaggedClosedCaption))
+        let candidates = wanted.map { language in eligible.filter { languageKey(of: $0) == language } }
         for matches in candidates {
             if let best = matches.min(by: { a, b in
                 if a.isDefault != b.isDefault { return a.isDefault }
@@ -73,8 +65,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
         /// The track this row selects: the active one when it belongs to the
         /// row, so the check mark stays on what is drawn; otherwise the best.
         public let track: ApplePlaybackTrack
-        /// "English", "English (SDH)", "Spanish" — never a number, a codec or
-        /// a source name.
+        /// "English", "English (SDH)", or numbered "Unknown" manual choices.
         public let title: String
         /// Every track the row stands for, the chosen one included.
         public let memberIDs: [Int]
@@ -107,8 +98,8 @@ public enum AppleSubtitleTrackFilter: Sendable {
     /// track over an add-on file, the container default, then the lower id.
     /// A variant gets its own row, named with its kind — "English (SDH)",
     /// "English (Forced)" — only when a plain track of that language exists
-    /// too; alone, it simply is "English". Only the effective languages are
-    /// listed (`effectiveLanguages`), in preference order.
+    /// too; alone, it simply is "English". Effective languages appear first,
+    /// followed by one separate Unknown choice per untagged track.
     public static func menuChoices(
         _ tracks: [ApplePlaybackTrack],
         preferredLanguages: [String],
@@ -116,8 +107,11 @@ public enum AppleSubtitleTrackFilter: Sendable {
     ) -> [MenuChoice] {
         let wanted = effectiveLanguages(preferredLanguages)
         let tagged = tracks.filter { wanted.contains(languageKey(of: $0)) }
-        return grouped(tagged.isEmpty ? tracks.filter(isUntaggedClosedCaption) : tagged,
-                       wanted: wanted, activeTrackID: activeTrackID)
+        let unknown = tracks.filter { languageKey(of: $0).isEmpty }.sorted { $0.id < $1.id }
+        let manual = unknown.enumerated().map { index, track in
+            MenuChoice(track: track, title: unknown.count == 1 ? "Unknown" : "Unknown \(index + 1)", memberIDs: [track.id])
+        }
+        return grouped(tagged, wanted: wanted, activeTrackID: activeTrackID) + manual
     }
 
     /// The captions menu's "More…": every tagged language the stream has
@@ -211,20 +205,6 @@ public enum AppleSubtitleTrackFilter: Sendable {
         return a.id < b.id
     }
 
-    /// A CEA-608/708 caption with no language tag. US broadcasts carry
-    /// their English captions this way, so it stands in for the viewer's
-    /// language when the stream has no tagged track in it.
-    static func isUntaggedClosedCaption(_ track: ApplePlaybackTrack) -> Bool {
-        guard languageKey(of: track).isEmpty else { return false }
-        // By codec or name, not `kind`: a caption flagged hearing-impaired
-        // (AVKit's CC options are) is still a caption.
-        let codec = track.codec?.lowercased() ?? ""
-        return closedCaptionCodecs.contains(codec)
-            || track.title.lowercased().range(of: #"\b(?:cc\d?|closed captions?)\b"#, options: .regularExpression) != nil
-    }
-
-    private static let closedCaptionCodecs: Set<String> = ["eia_608", "eia_708", "cea608", "cea708", "cea_708", "cc"]
-
     /// Both engines number add-on subtitle files from here.
     static let externalTrackIDBase = 1_000_000
 
@@ -247,16 +227,10 @@ public enum AppleSubtitleTrackFilter: Sendable {
         return .full
     }
 
-    /// The track's language code, or one read off a title that names a
-    /// language ("English", "Français") when the container gave none.
+    /// Only container language metadata qualifies; a muxer's title is not a tag.
     static func languageKey(of track: ApplePlaybackTrack) -> String {
         let code = normalized(track.language ?? "")
-        if isLanguage(code) { return code }
-        for word in track.title.split(whereSeparator: { !$0.isLetter }) {
-            guard word.count > 3 else { continue }
-            if let named = namedLanguages[fold(String(word))] { return named }
-        }
-        return ""
+        return isLanguage(code) ? code : ""
     }
 
     /// "en" → "English". A code the system cannot name stays readable as
@@ -332,6 +306,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
     }
 
     public static func menuLabel(for track: ApplePlaybackTrack) -> String {
+        guard !languageKey(of: track).isEmpty else { return "Unknown" }
         let code = normalized(track.language ?? "")
         if !code.isEmpty, let loc = Locale.current.localizedString(forLanguageCode: code), !loc.isEmpty {
             return loc.capitalized

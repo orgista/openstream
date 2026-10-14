@@ -305,6 +305,9 @@ private struct AppleSubtitleTextCues: View {
                         ForEach(cues) { cue in
                             Text(appearance.text(for: cue, baseSize: textSize(in: proxy.size)))
                                 .multilineTextAlignment(.center)
+                                #if DEBUG
+                                .accessibilityIdentifier("player.caption.text")
+                                #endif
                         }
                     }
                     .padding(.horizontal, 16)
@@ -325,6 +328,10 @@ private struct AppleSubtitleTextCues: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
+        #if DEBUG
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("player.caption.text.viewport")
+        #endif
         .onReceive(NotificationCenter.default.publisher(
             for: Notification.Name(kMACaptionAppearanceSettingsChangedNotification as String))) { _ in
             appearance = .system()
@@ -344,8 +351,8 @@ private struct AppleSubtitleTextCues: View {
 
 /// Bitmap cues, each at its authored rect on the picture
 /// (`AppleVideoFitting.bitmapSubtitleFrame`). No shadow: PGS carries its own
-/// antialiased outline. No size cap: a 1920×1080 canvas on a 1920 pt wide
-/// Apple TV picture draws at 1:1, and smaller on a phone.
+/// antialiased outline. Ordinary objects retain their authored scale; objects
+/// larger than the viewport fit uniformly so no pixels are cropped.
 private struct AppleSubtitleBitmapCues: View {
     let cues: [AppleSubtitleCue]
     let videoSize: CGSize?
@@ -364,10 +371,21 @@ private struct AppleSubtitleBitmapCues: View {
                         .resizable()
                         .interpolation(.high)
                         .frame(width: frame.width, height: frame.height)
+                        #if DEBUG
+                        // UI tests measure the object, before position expands
+                        // its layout wrapper to the whole viewport.
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Subtitle")
+                        .accessibilityIdentifier("player.caption.bitmap")
+                        #endif
                         .position(x: frame.midX, y: frame.midY)
                 }
             }
         }
+        #if DEBUG
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("player.caption.viewport")
+        #endif
     }
 }
 

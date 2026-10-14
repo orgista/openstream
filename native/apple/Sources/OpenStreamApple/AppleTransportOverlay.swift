@@ -91,7 +91,7 @@ struct AppleTransportOverlay: View {
     }
 
     #if os(tvOS)
-    fileprivate enum TVFocus: Hashable { case surface, scrubber, captions, nextEpisode, skipIntro, watchLive }
+    fileprivate enum TVFocus: Hashable { case surface, scrubber, captions, discMenu, nextEpisode, skipIntro, watchLive }
     @FocusState private var tvFocus: TVFocus?
     #endif
 
@@ -808,6 +808,12 @@ struct AppleTransportOverlay: View {
             }
             HStack {
                 if liveTopControls { liveBadge }
+                if (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+                    AppleDiscMenuControl(coordinator: coordinator)
+                        #if os(tvOS)
+                        .focused($tvFocus, equals: .discMenu)
+                        #endif
+                }
                 Spacer()
                 if controls.contains(.captions), !liveTopControls {
                     // One captions control, as in the Apple TV app: the menu
@@ -1010,6 +1016,7 @@ private struct AppleTransportScrubberRow: View {
             // 2026-10-01). Captions stays reachable below Skip Intro.
             .focusable(AppleTVSkipIntroFocusPolicy.scrubberIsFocusable(showsSkipIntro: model.showsSkipIntro))
             .focused(tvFocus, equals: .scrubber)
+            .accessibilityIdentifier("player.scrubber")
             .onMoveCommand { direction in
                 switch direction {
                 case .left: Task { await model.scrub(to: model.progress - 0.05) }

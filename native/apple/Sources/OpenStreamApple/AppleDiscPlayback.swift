@@ -1,33 +1,23 @@
 import Foundation
 import Observation
+import AetherEngine
 
 /// Where a disc item starts: its own menu (Play Disc) or straight into the
 /// main feature (Skip to Movie).
 ///
-/// The engine has no menu API yet, so both play the main title today. Every
-/// disc start still goes through this one value down to
-/// `AetherPlaybackEngine`, so wiring the engine's menu option later is the
-/// single line in `engineTitleID`.
 public enum AppleDiscPlaybackStart: String, Equatable, Sendable {
     case menu
     case mainTitle
 
-    /// The disc title the engine opens: an explicit title (the Titles row)
-    /// wins; otherwise nil, which is the engine's main title. `.menu` maps
-    /// to the main title until the engine's menu option exists.
-    public static func engineTitleID(start: Self?, titleID: Int?) -> Int? {
-        if let titleID { return titleID }
-        switch start {
-        case .menu?: return nil // engine menu API pending: main title
-        case .mainTitle?, nil: return nil
-        }
-    }
+    /// Explicit Titles row choices bypass navigation; nil lets the engine
+    /// choose the main title when starting without menus.
+    public static func engineTitleID(start: Self?, titleID: Int?) -> Int? { titleID }
 
     /// The line traced when a disc load starts.
     public static func traceLine(start: Self, titleID: Int?) -> String {
         if let titleID { return "disc start title \(titleID)" }
         switch start {
-        case .menu: return "disc start menu → main title (engine menu pending)"
+        case .menu: return "disc start menu"
         case .mainTitle: return "disc start main title"
         }
     }
@@ -45,6 +35,7 @@ public struct AppleDiscPlaybackChoice: Equatable, Sendable {
 
     /// The `discTitleID` handed to `AetherEngine.load`.
     public var engineTitleID: Int? { AppleDiscPlaybackStart.engineTitleID(start: start, titleID: titleID) }
+    public var engineStartMode: DVDStartMode { titleID == nil && start == .menu ? .menu : .mainTitle }
     public var traceLine: String { AppleDiscPlaybackStart.traceLine(start: start, titleID: titleID) }
 }
 

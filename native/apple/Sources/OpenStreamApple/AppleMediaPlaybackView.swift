@@ -185,8 +185,13 @@ struct AppleMediaPlayerView: View {
         playbackContent.modifier(ApplePINPresenter())
             #if os(iOS)
             .background(ApplePlayerAccessibilityModal().frame(width: 0, height: 0))
-            .accessibilityAddTraits(.isModal)
+            // UIKit marks the presented host modal. A SwiftUI isModal trait
+            // propagates into caption and scrubber nodes as synthetic alerts.
             #endif
+    }
+
+    private var discMenuIsVisible: Bool {
+        (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state?.isInMenu == true
     }
 
     private var playbackContent: some View {
@@ -203,7 +208,7 @@ struct AppleMediaPlayerView: View {
                                          timing: coordinator.subtitleTiming)
                     .ignoresSafeArea()
             }
-            if coordinator.route == .surface {
+            if coordinator.route == .surface, !discMenuIsVisible {
                 #if os(visionOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
                     otherSources: qualityPickerAction, onClose: closePlayer,
@@ -222,11 +227,46 @@ struct AppleMediaPlayerView: View {
                     otherSources: qualityPickerAction, onPlaybackMenu: { sleepTimerMenu = true }, nextEpisode: nextEpisode)
                 #endif
             }
+            if discMenuIsVisible, let engine = coordinator.engine as? AetherPlaybackEngine {
+                AppleDiscMenuOverlay(engine: engine).ignoresSafeArea()
+            }
+            #if DEBUG
+            if coordinator.route != .none, coordinator.phase == .playing || coordinator.phase == .paused {
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Playback ready")
+                    .accessibilityIdentifier("player.playback.ready")
+                    .allowsHitTesting(false)
+            }
+            if request.hints.disc != nil, !discMenuIsVisible, coordinator.phase == .playing {
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Disc title")
+                    .accessibilityIdentifier("player.disc.title.active")
+                    .allowsHitTesting(false)
+            }
+            #endif
         }
+        #if !os(tvOS)
+        .overlay(alignment: .topTrailing) {
+            if coordinator.route == .avPlayer, (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+                AppleDiscMenuControl(coordinator: coordinator)
+                    .padding(16)
+                    #if os(macOS)
+                    .opacity(macCloseVisible ? 1 : 0)
+                    .allowsHitTesting(macCloseVisible)
+                    #elseif os(iOS) || os(visionOS)
+                    .padding(.trailing, 50)
+                    .opacity(nativeMenuVisible ? 1 : 0)
+                    .allowsHitTesting(nativeMenuVisible)
+                    #endif
+            }
+        }
+        #endif
         #if os(macOS)
         .overlay(alignment: .topLeading) {
             if coordinator.route == .avPlayer, macCloseVisible {
-                AppleMacPlayerCloseButton(action: closePlayer)
+                ApplePlayerCloseButton(action: closePlayer)
                     .transition(.opacity)
             }
         }
@@ -347,14 +387,26 @@ struct AppleMediaPlayerView: View {
             guard !Task.isCancelled else { return }
             nativeMenuVisible = false
         }
+        .onChange(of: discMenuIsVisible) { _, isMenu in
+            guard isMenu else { return }
+            nativeMenuVisible = true
+            nativeMenuActivity &+= 1
+        }
+        #if os(iOS)
+        .overlay(alignment: .topLeading) {
+            if discMenuIsVisible && nativeMenuVisible {
+                ApplePlayerCloseButton(action: closePlayer)
+            }
+        }
+        #endif
         #endif
         #if os(visionOS)
         // AVKit's controls inside a window have no way out (the separate
         // Player window had its own close); it hides with the More button.
         // The transport overlay draws its own on the engine route.
         .overlay(alignment: .topLeading) {
-            if coordinator.route == .avPlayer && nativeMenuVisible {
-                AppleMacPlayerCloseButton(action: closePlayer)
+            if (coordinator.route == .avPlayer || discMenuIsVisible) && nativeMenuVisible {
+                ApplePlayerCloseButton(action: closePlayer)
                     .transition(.opacity)
             }
         }
@@ -639,6 +691,7 @@ struct AppleMediaPlayerView: View {
             }
         }
         .accessibilityLabel(entry.title)
+        .accessibilityIdentifier("player.subtitle.track.\(entry.id)")
         .accessibilityAddTraits(entry.isSelected ? .isSelected : [])
         .onAppear { nativeMenuOpenItems += 1 }
         .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
@@ -703,6 +756,11 @@ struct AppleMediaPlayerView: View {
                     children: children
                 ))
             }
+        }
+        if (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+            items.append(UIAction(title: "Disc Menu", image: UIImage(systemName: "opticaldisc")) { _ in
+                AppleDiscMenuControl.openMenu(coordinator: coordinator)
+            })
         }
         items.append(AppleSleepTimerMenu.uiMenu(coordinator: coordinator))
         host.viewController.transportBarCustomMenuItems = items
@@ -873,11 +931,9 @@ struct AppleMediaPlayerView: View {
     }
 }
 
-#if os(macOS) || os(visionOS)
-/// The Mac and Vision Pro player's way out on the AVKit route, whose controls
-/// have none: the transport overlay's close button (below the traffic lights
-/// on the Mac).
-private struct AppleMacPlayerCloseButton: View {
+#if os(macOS) || os(visionOS) || os(iOS)
+/// Close chrome where AVKit has none or the disc menu replaces transport.
+private struct ApplePlayerCloseButton: View {
     let action: () -> Void
 
     var body: some View {

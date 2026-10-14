@@ -407,13 +407,17 @@ private struct AppleAddFilesView: View {
             if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
                let url = AppleDirectPlaybackInput.url(raw) ?? URL(string: raw).flatMap({ $0.isFileURL ? $0 : nil }) {
                 let mediaID = ApplePlaybackIdentity.digest(for: url.absoluteString)
-                let request: ApplePlaybackRequest
+                var request: ApplePlaybackRequest
                 if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
                     request = AppleIPTVChannel(id: mediaID, sourceID: UUID(), name: "Caption fixture",
                                                streamURL: url).playbackRequest()
                 } else {
                     request = ApplePlaybackRequest(url: url, mediaID: mediaID,
                                                    title: url.lastPathComponent, sourceKind: .files)
+                }
+                if let rawStart = UserDefaults.standard.string(forKey: "OpenStreamDiscStart"),
+                   let start = AppleDiscPlaybackStart(rawValue: rawStart) {
+                    request.hints.disc = AppleDiscPlaybackChoice(start: start)
                 }
                 playback = AppleStremioPlayerPresentation(request: request, settings: settings)
             }
