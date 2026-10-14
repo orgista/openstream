@@ -7,6 +7,19 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Loading, speed and missing metadata (owner 2026-10-14, build 18).** "there is still two loading circles if
+      you click content there is a loading circle on top of a loading circle and also the speed can be improved and the
+      meta data fails often have no meta data we need a better catch/fix for that we need to see how stremio REA, plex
+      REA, jellyfin REA, infuse REA handle meta data art work as they often have the meta data correct". Check the
+      double spinner on the current build; speed up title open; REA metadata/artwork matching in Stremio, Plex,
+      Jellyfin and Infuse; then a better match + fallback chain.
+- [ ] **Make the repos public once the App Store approves the app (owner 2026-10-14).** Before that: the private
+      history holds commercial movie clips (Tests/Fixtures/private, added 6f807d7, removed dd4e101) and owner notes;
+      they must be purged (history rewrite) or the public repo stays the scrubbed export (orgista/openstream-apple).
+- [ ] **First-party agentic coding tools per platform (owner 2026-10-14).** Find Google's official Android/agentic
+      coding skills and Apple's official agentic coding skills/tools for Xcode, install them for every agent, and use
+      them for each platform.
+- [ ] **Max out Codex and agy to 100% (owner 2026-10-14).** Overrides the 85% stop for Codex and agy.
 - [ ] **GitHub synced with every beta, pushes automatic (owner 2026-10-14).** "change never to ask please instead
       automatic I rather know but in general they should be synced with the builds if a new beta goes out github should
       be updated". Done: the `git push` block in the workspace settings is removed; engine fork commit 07afad62 pushed
