@@ -49,9 +49,10 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 ## 3. Never (these end the task — stop and report instead)
 - Never upload to TestFlight/App Store, run `asc publish`, `asc builds upload`, `xcodebuild
   -exportArchive`, or `git push`. Never add a build to a TestFlight group.
-- Never erase, delete, reset, or create simulators. The four persistent sims are: iPhone 16 Pro
-  `6A037503…`, iPad `CC634933…`, Apple TV `B251C620…`, Vision Pro `F598603A…`, and (owner OK 2026-09-29, for the iOS 18 nav-bar crash) iPhone 16 on
-  iOS 18.6 "OpenStream iOS 18" `5CFC965C-D761-44D2-8613-AFB42D58CE90`. Boot ONE at a time.
+- Never erase, delete, reset, or create simulators. The persistent sims on Dev-Mini (owner cleanup 2026-10-14, 24
+  default sims deleted) are: iPhone 18 Pro iOS 27 `73E49263…` (E2E-iOS), iPhone 18 Pro Max iOS 27 `2E61439B…`,
+  iPhone 15 Pro Max iOS 18.6 `7530ECB2…` (owner's imported setup), DUO foldable `CA2CCA73…`, iPad Pro 13" `8939801C…`,
+  Apple TV 4K `F2107E8F…` (E2E-tvOS), Apple Watch Series 12 `4ABCBF60…`, Vision Pro `46B2DEDC…`. Boot ONE at a time.
   Never leave test data on them (a source, a download, a playlist you added — remove it).
 - Never use Computer Use / screen control / osascript UI automation — the owner is using this Mac.
 - Never create LaunchAgents, cron, routines, background workers.
@@ -204,6 +205,7 @@ check your diff against that skill's review list before you report.
 | When the task touches… | Read | Then |
 |---|---|---|
 | any SwiftUI view/modifier change | `swiftui-pro` | check the diff against its review list |
+| SwiftUI, App Intents, UIKit modernization, tests — Apple's own guidance (first-party, exported from Xcode 27 on 2026-10-14) | `apple-swiftui-specialist`, `apple-swiftui-whats-new-27`, `apple-app-intents-specialist`, `apple-app-intents-whats-new-27`, `apple-uikit-app-modernization`, `apple-modernize-tests`, `apple-device-interaction`, `apple-audit-xcode-security-settings` | Apple's word wins over third-party skills where they disagree |
 | a long `body`, inline side effects, view models, `@Observable` | `swiftui-view-refactor` | small dedicated subviews, MV over MVVM |
 | jank, slow scroll, too many view updates | `swiftui-performance-audit` (refs: 8) | audit first, then fix |
 | tvOS focus, `@FocusState`, `focusSection`, remote moves; iOS/visionOS focus | `swift-focusengine-pro` (refs: 31) | this repo's tvOS player/guide bugs were mostly focus |
