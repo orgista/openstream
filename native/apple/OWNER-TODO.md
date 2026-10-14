@@ -12,10 +12,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       autoplay cap, Reduce Motion / Low Power stop auto video, no repeats across rows, faster artwork. Fable review of
       all of 2026-10-12: 15 findings, 14 fixed (15216f9). The 2 serious ones: library artwork/details never saved on a
       real Apple TV, and posters flashed grey after scrolling. Lead change: Apple TV keeps playback history in app
-      settings, not in purgeable files. Gate 3204 tests; simulators tvOS 20/0, iOS 40/1 (AirPlay, known).
+      settings, not in purgeable files. Gate 3248 tests / 402 suites (0170bad); simulators tvOS 20/0, iOS 40/1 (AirPlay, known).
       Apple TV 4/7/8/10 measured on the sim: no gap, nothing changed (verification-artifacts/remaining-polish-2026-10-13.md).
       **Owner decisions 2026-10-13:** Netflix 8 hero = "Mix": slot 1 is the title you're watching; of the other 4, up to 2
-      unseen picks and 1 unseen release from the last 90 days; leftovers keep today's order (building now). Netflix 11
+      unseen picks and 1 unseen release from the last 90 days; leftovers keep today's order (built, 6101d4c). Netflix 11
       badges = "No new labels": posters stay as they are.
 
 - [ ] **Use all Fable usage each week, personal and work (owner 2026-10-12).** Done on personal Fable: REA of the
@@ -264,8 +264,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       **Set Up from iPhone**. A QR code appears. Point the iPhone's Camera at it and tap "Open in oStream", then
       **Send**. The TV asks "Import setup from <your iPhone>?" — press **Import**. Both need to be on the same
       Wi-Fi; the code works once and for 10 minutes. On iPad/Mac the same row is in Settings > Sources, and on
-      an empty iPad/iPhone it is also a button on No Sources. Still to do: the button on the Apple TV's empty
-      No Sources screen (that file was being edited by the trailer work), and the Android TV side (the format
+      an empty iPad/iPhone it is also a button on No Sources. Apple TV's empty No Sources screen has the button too
+      (24517d6). Still to do: the Android TV side (the format
       is written down in HANDOFF-NEXT-SESSION.md).
 - [ ] **iCloud sync still looks broken (owner 2026-10-08):** owner doesn't think it works and doesn't know how
       to test it. Fixed in code, waiting for your test: a phone set up before sync was on by default never sent
@@ -296,7 +296,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       switched and kept playing. If it still flashes on yours: Settings > Share Diagnostics right after.
 
 - [ ] **Vision Pro: audio kept playing after the app window was closed** (reported 2026-10-07, previous TestFlight
-      build). Fixed, uncommitted: the player now stops (and saves the resume point) when the window leaves the
+      build). Fixed in f91da00: the player now stops (and saves the resume point) when the window leaves the
       foreground. The simulator cannot close a window or background the app from a test, so this needs a device check.
 - [ ] **Vision Pro environments** (owner, 2026-10-07). Apple's own environments (Mount Hood, Moon, etc.) can't be bundled,
       but the full-window player docks into them when you pick one with the Digital Crown — verify on the device. Next:
@@ -306,7 +306,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       a9b71b9); instant/correct guide, guide matching, account info + clear login errors, catch-up error, hide/reorder,
       sleep timer, Match Content, reminders (f1276f0); channel up/down + banner, Last Channel, resume last channel
       (8ed357d); Start Over, live buffer, Top Shelf/Siri channels (4abfaac); provider movies & series (189dd18); parental
-      PIN + import progress (8c29e10). Research + gap report: ~/Developer/openstream-build/specs/live-tv/gap-report-2026-10-05.md.
+      PIN + import progress (8c29e10). Research + gap report: ~/Developer/openstream-build/specs/live-tv/gap-report-2026-10-05.md (Mac Studio only, not in git).
       DVR dropped by the owner 2026-10-06; Apple TV PiP built (7165a8e).
 
 - [x] **(2026-10-04) Short app names.** Under the icon: oStream (all platforms, Share, Messages, Watch, widgets);
@@ -362,7 +362,7 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       channel lineup test-only; recent searches; offline UI-test stubs + smoke tests (pass on iPad + Apple TV);
       iCloud restore no longer rewinds Resume; "Forced"-only subtitle tracks never auto-picked. Open: a deleted
       add-on can come back after iCloud sync; search tab position on tvOS (kept first per your 09-14 call).
-- [ ] **Open-source / public repo (2026-10-01) — owner 2026-10-09: do NOT rotate or recreate the AIOMetadata key, keep using it; key part closed. Remaining: publish orgista/openstream-apple (Apache-2.0, already decided).** — specs/oss-public-readiness.md:** history scan (410 commits): no signing
+- [ ] **Open-source / public repo (2026-10-01) — owner 2026-10-09: do NOT rotate or recreate the AIOMetadata key, keep using it; key part closed. Remaining: publish orgista/openstream-apple (Apache-2.0, already decided).** — scan notes (specs/oss-public-readiness.md never existed in the repo; these findings live only here):** history scan (410 commits): no signing
       keys, .env, API keys or IPTV logins anywhere. But: (1) your AIOMetadata config URL (its id is a login token) is
       in the code — being moved out now; RECREATE that config in AIOMetadata. (2) 2.3 GB of movie/TV rips sit in git
       history (Tests/Fixtures/private/) plus build folders, ServerPlus IPs in notes/screenshots, 21 commits under your
