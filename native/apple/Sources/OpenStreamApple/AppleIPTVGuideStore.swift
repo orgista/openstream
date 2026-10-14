@@ -272,7 +272,10 @@ public final class AppleIPTVGuideStore {
                         channelID: id, evidence: evidence, previousProgrammes: caches[id]?.programmes ?? [],
                         previousEvidence: mappingEvidence[id])
                     stagedEvidence[id] = replacement.evidence
-                    stagedCaches[id] = ChannelCache(programmes: replacement.programmes, fetchTime: replacement.evidence.fetchedAt)
+                    // Retained listings keep their data timestamp, but a successful empty response
+                    // still starts the request expiry window. Restore deliberately uses fetchedAt.
+                    stagedCaches[id] = ChannelCache(programmes: replacement.programmes,
+                        fetchTime: replacement.evidence.isStale ? now : replacement.evidence.fetchedAt)
                 }
                 guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
                 // Commit only the completed replacement. A cancelled mapping keeps the old guide.
@@ -298,8 +301,10 @@ public final class AppleIPTVGuideStore {
                 guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
                 let sourceCaches = caches.filter { sourceKey($0.key) == key }.mapValues(\.programmes)
                 let sourceEvidence = mappingEvidence.filter { sourceKey($0.key) == key }
-                await diskCache.storeEvidence(sourceCaches, key: evidenceDiskKey(key, configuration),
-                    evidence: sourceEvidence, now: now)
+                if await diskCache.storeEvidence(sourceCaches, key: evidenceDiskKey(key, configuration),
+                    evidence: sourceEvidence, now: now) {
+                    await diskCache.remove(key: evidenceDiskKey(key, configuration, version: 1))
+                }
                 let filled = ids.filter { !(caches[$0]?.programmes.isEmpty ?? true) }.count
                 appleTrace("guide loaded: \(filled)/\(ids.count) visible channels have programmes")
             } catch {

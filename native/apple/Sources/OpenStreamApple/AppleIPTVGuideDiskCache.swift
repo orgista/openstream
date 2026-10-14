@@ -73,11 +73,12 @@ public actor AppleIPTVGuideDiskCache {
             contentDigest: snapshot.contentDigest, isRawXMLTV: snapshot.isRawXMLTV)
     }
 
+    @discardableResult
     public func store(_ programmes: [AppleIPTVProgramme], key: String, channelNames: [String: String] = [:],
                       mappingEvidence: [String: AppleIPTVGuideMappingEvidence]? = nil,
                       fetchedAt: Date? = nil, eTag: String? = nil, lastModified: String? = nil,
-                      contentDigest: String? = nil, isRawXMLTV: Bool? = nil, now: Date? = nil) {
-        guard let directory, let url = fileURL(key), (!programmes.isEmpty || isRawXMLTV == true || mappingEvidence != nil) else { return }
+                      contentDigest: String? = nil, isRawXMLTV: Bool? = nil, now: Date? = nil) -> Bool {
+        guard let directory, let url = fileURL(key), (!programmes.isEmpty || isRawXMLTV == true || mappingEvidence != nil) else { return false }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let sharded = isRawXMLTV == true || mappingEvidence != nil
         let values = sharded ? Self.retained(programmes, now: now ?? fetchedAt ?? .now)
@@ -123,17 +124,24 @@ public actor AppleIPTVGuideDiskCache {
                 where old.lastPathComponent.hasPrefix(prefix) && !publishedNames.contains(old.lastPathComponent) {
                 try? FileManager.default.removeItem(at: old)
             }
+            return true
         } catch {
             // A failed generation never replaces the previously published one.
             for shard in written { try? FileManager.default.removeItem(at: shard) }
+            return false
         }
     }
 
     /// Flatten and bound projected evidence on the disk actor, never in a view's actor.
     func storeEvidence(_ channelProgrammes: [String: [AppleIPTVProgramme]], key: String,
-                       evidence: [String: AppleIPTVGuideMappingEvidence], now: Date) {
+                       evidence: [String: AppleIPTVGuideMappingEvidence], now: Date) -> Bool {
         store(channelProgrammes.filter { evidence[$0.key] != nil }.values.flatMap { $0 },
               key: key, mappingEvidence: evidence, now: now)
+    }
+
+    func remove(key: String) {
+        guard let url = fileURL(key) else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     private static func retained(_ programmes: [AppleIPTVProgramme], now: Date) -> [AppleIPTVProgramme] {

@@ -87,6 +87,93 @@ struct AppleIPTVGuideMappingEvidenceTests {
         let legacy = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: Data("{\"programmes\":[],\"channelNames\":{}}".utf8))
         #expect(legacy.mappingEvidence == nil)
     }
+    @MainActor @Test func emptyXtreamRefreshThrottlesRequestsButRetriesAfterRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = AppleIPTVGuideDiskCache(directory: directory)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [EmptyXtreamEvidenceProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let loader = AppleIPTVGuideLoader(session: session)
+        let fetchedAt = now.addingTimeInterval(-901)
+        let programme = AppleIPTVProgramme(id: "saved", channelID: "101", title: "Saved guide", subtitle: nil,
+            description: nil, start: now, end: now.addingTimeInterval(3600), category: nil, isLive: false)
+        let evidence = AppleIPTVGuideMappingEvidence(providerID: "202", declaredProviderID: "101", origin: .manual,
+            confidence: 1, defaultOffsetHours: 0, channelShiftHours: 0, correctionHours: 0,
+            fetchedAt: fetchedAt, coverage: AppleIPTVGuideMappingEvidence.coverage(of: [programme]), isStale: false)
+        await disk.store([programme], key: "|evidence-v2|xtream|https://fixture.example|fixture|fixture",
+            mappingEvidence: ["101": evidence], now: now)
+        func makeStore() -> AppleIPTVGuideStore {
+            let store = AppleIPTVGuideStore(loader: loader, diskCache: disk)
+            store.channelProviderIDs = ["101": "101"]
+            store.manualChannelMapping = ["101": "202"]
+            store.configure(xtreamBase: URL(string: "https://fixture.example")!, username: "fixture", password: "fixture")
+            return store
+        }
+        EmptyXtreamEvidenceProtocol.requests.withLock { $0 = [] }
+        let store = makeStore()
+        await store.refreshVisible(channelIDs: ["101"], now: now)
+        await store.refreshVisible(channelIDs: ["101"], now: now.addingTimeInterval(1))
+        #expect(EmptyXtreamEvidenceProtocol.requests.withLock { $0.count } == 1)
+        #expect(store.guide(for: ["101"]).allProgrammes == [programme])
+        #expect(store.mappingEvidence["101"]?.fetchedAt == fetchedAt)
+        #expect(store.mappingEvidence["101"]?.isStale == true)
+        #expect(store.manualChannelMapping == ["101": "202"])
+        await store.refreshVisible(channelIDs: ["101"], now: now.addingTimeInterval(900))
+        #expect(EmptyXtreamEvidenceProtocol.requests.withLock { $0.count } == 2)
+        let restarted = makeStore()
+        await restarted.refreshVisible(channelIDs: ["101"], now: now.addingTimeInterval(901))
+        await restarted.refreshVisible(channelIDs: ["101"], now: now.addingTimeInterval(902))
+        #expect(EmptyXtreamEvidenceProtocol.requests.withLock { $0.count } == 3)
+        #expect(restarted.guide(for: ["101"]).allProgrammes == [programme])
+        #expect(restarted.mappingEvidence["101"]?.fetchedAt == fetchedAt)
+        let requests = EmptyXtreamEvidenceProtocol.requests.withLock { $0 }
+        #expect(requests.allSatisfy { request in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            return items.contains(URLQueryItem(name: "action", value: "get_short_epg"))
+                && items.contains(URLQueryItem(name: "stream_id", value: "202"))
+        })
+    }
+
+    @MainActor @Test(arguments: [false, true])
+    func legacyEvidenceIsRemovedOnlyAfterSuccessfulV2Write(blockV2Write: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = URL(string: "https://fixture.example/evidence.xml")!
+        func manifest(_ version: Int) -> URL {
+            let key = "|evidence-v\(version)|xmltv|" + url.absoluteString
+            return directory.appendingPathComponent(ApplePlaybackIdentity.digest(for: key) + ".json")
+        }
+        let evidence = try #require(resolve(["one": "News"], manual: "one", fetchedAt: now.addingTimeInterval(-901)))
+        let programme = AppleIPTVProgramme(id: "legacy", channelID: "local", title: "Saved guide", subtitle: nil,
+            description: nil, start: now, end: now.addingTimeInterval(3600), category: nil, isLive: false)
+        let legacy = AppleIPTVGuideDiskCache.Snapshot(programmes: [programme], channelNames: [:], mappingEvidence: ["local": evidence])
+        try JSONEncoder().encode(legacy).write(to: manifest(1), options: .atomic)
+        if blockV2Write {
+            try FileManager.default.createDirectory(at: manifest(2), withIntermediateDirectories: false)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MappingEvidenceProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        MappingEvidenceProtocol.state.withLock { $0 = 2 } // The saved manual station has vanished.
+        let disk = AppleIPTVGuideDiskCache(directory: directory)
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: session), diskCache: disk)
+        store.manualChannelMapping = ["local": "one"]
+        store.configure(xmltvURL: url, channelMapping: ["local": "one"])
+        await store.refreshVisible(channelIDs: ["local"], now: now)
+        #expect(store.guide(for: ["local"]).allProgrammes == [programme])
+        #expect(store.manualChannelMapping == ["local": "one"])
+        #expect(FileManager.default.fileExists(atPath: manifest(1).path) == blockV2Write)
+        if blockV2Write == false {
+            let restored = await disk.snapshot(key: "|evidence-v2|xmltv|" + url.absoluteString, now: now)
+            #expect(restored.programmes == [programme])
+            #expect(restored.mappingEvidence?["local"]?.providerID == "one")
+        }
+    }
+
     @Test func emptyRefreshRetainsFetchTimeAndCannotEraseManualGuide() throws {
         var previous = try #require(resolve(["one": "News"], manual: "one"))
         let raw = AppleIPTVProgramme(id: "fixture", channelID: "one", title: "Fixture", subtitle: nil,
@@ -353,6 +440,20 @@ private final class MappingEvidenceProtocol: URLProtocol {
         """
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class EmptyXtreamEvidenceProtocol: URLProtocol {
+    static let requests = Mutex<[URLRequest]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0.append(request) }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
+            httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"epg_listings\":[]}".utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
