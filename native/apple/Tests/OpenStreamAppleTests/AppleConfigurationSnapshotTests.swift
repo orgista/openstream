@@ -227,3 +227,36 @@ private final class ConfigurationTestCredentials: AppleCredentialStoring {
     func set(_ value: String, for account: String) throws { values[account] = value }
     func remove(_ account: String) throws { values.removeValue(forKey: account) }
 }
+
+extension AppleConfigurationSnapshotTests {
+    @MainActor @Test func aliasBlobDoesNotChangeTheSnapshot() throws {
+        try ApplePlaybackAliasFixture.run { fixture in
+            fixture.populate()
+            @MainActor func capture() -> AppleConfigurationSnapshot {
+                AppleConfigurationSnapshot(savedAt: Date(timeIntervalSince1970: 1000),
+                    playbackProgress: fixture.store.configurationProgress(),
+                    watchedHistory: fixture.store.configurationWatchedHistory(),
+                    watchedTombstones: fixture.store.configurationWatchedTombstones(),
+                    continueWatchingRemovals: fixture.store.configurationContinueWatchingRemovals(),
+                    playbackTerminals: fixture.store.configurationPlaybackTerminals(),
+                    playbackActivity: fixture.store.configurationPlaybackActivity())
+            }
+            let beforeBlobs = fixture.rawBlobs()
+            let before = capture()
+            let beforeBytes = try AppleConfigurationSnapshot.encoder.encode(before)
+            fixture.alias(true)
+            let after = capture()
+            let afterBytes = try AppleConfigurationSnapshot.encoder.encode(after)
+            #expect(beforeBytes == afterBytes)
+            #expect(AppleConfigurationSyncPolicy.contentDiffers(before, after) == false)
+            #expect(fixture.rawBlobs() == beforeBlobs)
+            let decodedBefore = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: beforeBytes)
+            let decodedAfter = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: afterBytes)
+            #expect(decodedBefore == decodedAfter)
+            let beforeObject = try #require(JSONSerialization.jsonObject(with: beforeBytes) as? [String: Any])
+            let afterObject = try #require(JSONSerialization.jsonObject(with: afterBytes) as? [String: Any])
+            #expect(Set(beforeObject.keys) == Set(afterObject.keys))
+            #expect(afterObject.keys.contains { $0.localizedCaseInsensitiveContains("alias") } == false)
+        }
+    }
+}

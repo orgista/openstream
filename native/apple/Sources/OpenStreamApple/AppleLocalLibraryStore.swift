@@ -24,6 +24,20 @@ final class AppleLocalLibraryStore {
     private var offlineIDs: [String: String] = [:]
     private var episodesByGroup: [String: [AppleStremioEpisode]] = [:]
 
+    private let metadataResolver: AppleLibraryMetadataResolver
+    private let injectedPlaybackStore: ApplePlaybackStore?
+    private var playbackStore: ApplePlaybackStore { injectedPlaybackStore ?? ApplePlaybackStore() }
+    @ObservationIgnored private var recordedIdentityFileIDs: Set<String> = []
+
+    init(resolver: AppleLibraryMetadataResolver = .shared, playbackStore: ApplePlaybackStore? = nil,
+         groups: [AppleLibrarySeries] = [], sources: [AppleSource] = [], offlineIDs: [String: String] = [:]) {
+        metadataResolver = resolver
+        injectedPlaybackStore = playbackStore
+        self.groups = groups
+        self.sources = sources
+        self.offlineIDs = offlineIDs
+    }
+
     @concurrent nonisolated private static func episodeCandidates(groups: [AppleLibrarySeries], sources: [AppleSource],
         offlineIDs: [String: String]) async -> [String: [AppleStremioEpisode]] {
         let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
@@ -69,6 +83,7 @@ final class AppleLocalLibraryStore {
         errorMessage = nil
         progress = [:]
         offlineIDs = [:]
+        recordedIdentityFileIDs = []
         episodesByGroup = [:]
         lastScan = nil
         staleSourceIDs = []
@@ -261,7 +276,7 @@ final class AppleLocalLibraryStore {
         return value
     }
     var continueWatching: [AppleLibrarySeries] {
-        let store = ApplePlaybackStore()
+        let store = playbackStore
         let eligible = groups.compactMap { group -> (AppleLibrarySeries, Date)? in
             let files = group.items
             let latest = files.compactMap { file -> (AppleLibraryItem, ApplePlaybackProgress)? in
@@ -281,7 +296,7 @@ final class AppleLocalLibraryStore {
         return eligible.sorted { $0.1 > $1.1 }.map(\.0)
     }
     func refreshProgress() {
-        let store = ApplePlaybackStore()
+        let store = playbackStore
         var values: [String: ApplePlaybackProgress] = [:]
         for group in groups {
             for file in group.items {
@@ -297,13 +312,51 @@ final class AppleLocalLibraryStore {
         return AppleMediaIngestion.libraryRecord(source: source, item: file).id
     }
     func resolve(_ group: AppleLibrarySeries, sourceStore: AppleSourceStore, settings: AppleSettingsStore, refresh: Bool = false) async {
-        guard refresh || metadata[group.id] == nil, let file = group.items.first else { return }
-        if let value = try? await AppleLibraryMetadataResolver.shared.resolve(file, sources: sourceStore.sources,
+        if refresh { recordedIdentityFileIDs.subtract(group.items.map(\.id)) }
+        guard refresh || metadata[group.id] == nil, let file = group.items.first else {
+            playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
+            return
+        }
+        if let value = try? await metadataResolver.resolve(file, sources: sourceStore.sources,
             tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey, refresh: refresh), !Task.isCancelled {
             metadata[group.id] = value
+            recordedIdentityFileIDs.subtract(group.items.map(\.id))
             contentDidChange()
         }
+        playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
     }
+
+    private func recordIdentityAliases(for group: AppleLibrarySeries, resolvedMediaID: String?) async
+        -> [(classID: String, mediaIDs: [String])] {
+        let pending = group.items.filter { !recordedIdentityFileIDs.contains($0.id) && offlineIDs[$0.id] == nil }
+        guard let first = pending.first else { return [] }
+        let match = await metadataResolver.strongMatchIDs(for: first)
+        var entries: [(classID: String, mediaIDs: [String])] = []
+        var legacySeen = Set<String>()
+        let rowIDs: Set<String> = group.parsed.kind == .show
+            ? resolvedMediaID.map { id in Set(Self.episodes(group: group, mediaID: id, enriched: []).map(\.id)) } ?? [] : []
+        for (index, file) in group.items.enumerated() {
+            let parsed = AppleLibraryTitleParser.parse(file)
+            let legacy = resolvedMediaID.map { "\($0):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)" }
+            let firstLegacy = legacy.map { legacySeen.insert($0).inserted } ?? false
+            // Recheck after the actor hop; weak/missing evidence is also deduped.
+            guard offlineIDs[file.id] == nil, recordedIdentityFileIDs.insert(file.id).inserted,
+                  parsed.role == .feature, file.sizeBytes > 0 else { continue }
+            if let match,
+               let title = AppleLogicalItemKey.title(kind: match.kind, imdb: match.imdb, tmdb: match.tmdb),
+               let classID = AppleLogicalItemKey.localFileClass(titleKey: title, season: parsed.season,
+                    episode: parsed.episodeNumbers.first, sizeBytes: file.sizeBytes) {
+                entries.append((classID: classID, mediaIDs: [playbackID(file)]))
+            }
+            let current = Self.fileEpisodeID(file)
+            if firstLegacy, let legacy, rowIDs.contains(current) {
+                entries.append((classID: AppleLogicalItemKey.legacyEpisodeClass(fileEpisodeID: current),
+                    mediaIDs: [current, legacy]))
+            }
+        }
+        return entries
+    }
+
     func reload(sourceStore: AppleSourceStore, mediaIndex: AppleMediaIndexStore, settings: AppleSettingsStore) async {
         guard !isLoading else { return }
         isLoading = true
@@ -329,7 +382,7 @@ final class AppleLocalLibraryStore {
                 let scanned = result.retaining(previous)
                 if result.status == .complete { staleSourceIDs.remove(source.id) }
                 else { staleSourceIDs.insert(source.id) }
-                let dated = try await AppleLibraryMetadataResolver.shared.datedItems(scanned, sourceID: source.id)
+                let dated = try await metadataResolver.datedItems(scanned, sourceID: source.id)
                 appleTrace("library scanned \"\(source.name)\": \(scanned.count) files")
                 files += dated
                 sourceStore.recordValidationSuccess(id: source.id, summary: "Connected · \(scanned.count) playable files",
@@ -430,12 +483,18 @@ final class AppleLocalLibraryStore {
         }
         #endif
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
-        let cached = await AppleLibraryMetadataResolver.shared.cachedMetadata(for: groups)
+        let cached = await metadataResolver.cachedMetadata(for: groups)
         metadata.merge(cached) { _, persisted in persisted }
         contentDidChange()
         appleTrace("library cached metadata merged: \(cached.count)")
         refreshProgress()
         appleTrace("library progress refreshed")
+        var identityEntries: [(classID: String, mediaIDs: [String])] = []
+        for group in groups {
+            identityEntries += await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID)
+        }
+        playbackStore.recordIdentityAliases(identityEntries)
+        refreshProgress()
         // Bound eager work. Visible cards resolve the rest on demand.
         for group in sorted(.added).filter({ $0.parsed.kind != .other }).prefix(24) {
             guard !Task.isCancelled else { return }
@@ -477,6 +536,7 @@ final class AppleLocalLibraryStore {
         try await resolver.correctMatch(for: file, candidate: candidate,
             provider: provider, explicitIDs: explicitIDs)
         metadata[group.id] = candidate
+        recordedIdentityFileIDs.subtract(group.items.map(\.id))
         contentDidChange()
     }
 
@@ -515,7 +575,7 @@ final class AppleLocalLibraryStore {
     func resumeEpisode(for item: AppleCatalogItem, group: AppleLibrarySeries?, episodes: [AppleStremioEpisode]) -> AppleStremioEpisode? {
         let matches = matchingGroups(item)
         let candidates = matches.isEmpty ? group.map { [$0] } ?? [] : matches
-        let store = ApplePlaybackStore()
+        let store = playbackStore
         return Self.resumeEpisode(in: candidates, episodes: episodes) { store.progress(for: self.playbackID($0)) }
     }
     static func resumeEpisode(in groups: [AppleLibrarySeries], episodes: [AppleStremioEpisode],
@@ -576,7 +636,8 @@ final class AppleLocalLibraryStore {
             // numbered episode's history for a filename row it had suppressed.
             guard legacySeen.insert(legacy).inserted else { return nil }
             let current = fileEpisodeID(file)
-            return rowIDs.contains(current) ? (current, legacy) : nil
+            guard rowIDs.contains(current), store.canReadLegacyEpisodeAlias(current: current, legacy: legacy) else { return nil }
+            return (current, legacy)
         }
         guard !aliases.isEmpty else { return completed }
         let legacyCompleted = store.completedMediaIDs(among: aliases.map { $0.1 })
@@ -635,7 +696,7 @@ final class AppleLocalLibraryStore {
             resumePosition: resume, mediaID: playbackID(file), title: title, sourceKind: .files, hints: hints), settings: settings, securityScopedURL: root), file: file)
     }
     private func tracked(_ presentation: AppleStremioPlayerPresentation, file: AppleLibraryItem) -> AppleStremioPlayerPresentation {
-        let store = ApplePlaybackStore()
+        let store = playbackStore
         let identity = playbackID(file)
         presentation.coordinator.progressWriter = { position, duration in
             store.save(mediaID: identity, position: position, duration: duration)

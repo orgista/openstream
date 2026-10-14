@@ -141,6 +141,12 @@ actor AppleLibraryMetadataResolver {
         (try? Data(contentsOf: matchURL(item))).flatMap { try? JSONDecoder().decode(MatchRecord.self, from: $0) }
     }
 
+    func strongMatchIDs(for item: AppleLibraryItem) -> (kind: AppleMediaKind, imdb: String?, tmdb: String?)? {
+        guard let record = matchRecord(for: item), record.isManual || record.confidence >= 0.95,
+              let kind = AppleMediaKind(rawValue: record.candidate.type) else { return nil }
+        return (kind, record.explicitIDs["imdb"], record.explicitIDs["tmdb"])
+    }
+
     func correctMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem, provider: String,
                       explicitIDs: [String: String] = [:]) throws {
         try saveMatch(for: item, candidate: candidate, provider: provider, explicitIDs: explicitIDs, isManual: true)

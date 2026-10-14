@@ -169,6 +169,7 @@ public enum AppleDetailResume {
 public final class ApplePlaybackStore {
     private let defaults: UserDefaults
     private let blobs: ApplePlaybackBlobStorage
+    private let aliases: AppleIdentityAliasStore
     private let key: String
 
     /// In-memory copy of the progress map. UserDefaults stays the backing
@@ -203,6 +204,7 @@ public final class ApplePlaybackStore {
     public init(defaults: UserDefaults = .standard, namespace: String = AppleTasteNamespace.local, blobDirectory: URL? = nil) {
         self.defaults = defaults
         blobs = ApplePlaybackBlobStorage.storage(defaults: defaults, directory: blobDirectory)
+        aliases = AppleIdentityAliasStore(defaults: defaults, namespace: namespace, blobDirectory: blobDirectory)
         self.namespace = namespace
         key = AppleTasteNamespace.key("openstream.playback.progress.v1", namespace: namespace)
         watchedKey = AppleTasteNamespace.key("openstream.playback.watched.v1", namespace: namespace)
@@ -245,11 +247,18 @@ public final class ApplePlaybackStore {
 
     public func lastActivity(for mediaID: String) -> ApplePlaybackProgress? {
         guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
-        let saved = entries()[key]
-        let activity = activities()[key].map { value in saved.map { ApplePlaybackConvergence.freshest(value, $0) } ?? value } ?? saved
+        let keys = classKeys(key)
+        let saved = AppleIdentityAliasResolution.progress(keys: keys, in: entries())
+        let activity = AppleIdentityAliasResolution.progress(keys: keys, in: activities()).map { value in saved.map { ApplePlaybackConvergence.freshest(value, $0) } ?? value } ?? saved
         guard let activity else { return nil }
+        let allTerminals = configurationPlaybackTerminals()
+        var terminals: [String: ApplePlaybackTerminalEvents] = [:]
+        for needed in [key] + ApplePlaybackConvergence.eventKeys(key, activity) {
+            terminals[needed] = allTerminals[needed]
+        }
+        terminals[key] = AppleIdentityAliasResolution.terminals(keys: keys, in: allTerminals)
         guard ApplePlaybackConvergence.activityIsCurrent(key: key, value: activity,
-            terminals: configurationPlaybackTerminals()) else { return nil }
+            terminals: terminals) else { return nil }
         return activity
     }
 
@@ -298,7 +307,7 @@ public final class ApplePlaybackStore {
 
     public func progress(for mediaID: String) -> ApplePlaybackProgress? {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
-        return entries()[storageKey]
+        return AppleIdentityAliasResolution.progress(keys: classKeys(storageKey), in: entries())
     }
 
     /// The finished titles among `mediaIDs`, from one read of the watched
@@ -326,13 +335,16 @@ public final class ApplePlaybackStore {
             #if DEBUG
             if AppleWatchedHistoryFixture.isSeeded(mediaID: mediaID, storageKey: storageKey) { return true }
             #endif
-            if tombstones[storageKey] != nil { return false }
-            if let reset = terminals[storageKey]?.resetAt {
-                let completion = [watched[storageKey], all[storageKey].flatMap { $0.isComplete ? $0.updatedAt : nil }]
+            let keys = classKeys(storageKey)
+            if keys.count == 1, tombstones[storageKey] != nil { return false }
+            let history = AppleIdentityAliasResolution.history(keys: keys, watched: watched, tombstones: tombstones)
+            if history.tombstone != nil { return false }
+            if let reset = AppleIdentityAliasResolution.terminals(keys: keys, in: terminals)?.resetAt {
+                let completion = ([history.watched] + keys.map { all[$0].flatMap { $0.isComplete ? $0.updatedAt : nil } })
                     .compactMap { $0 }.max()
                 if completion.map({ $0 <= reset }) ?? true { return false }
             }
-            return watched[storageKey] != nil || all[storageKey]?.isComplete == true
+            return history.watched != nil || keys.contains { all[$0]?.isComplete == true }
         })
     }
 
@@ -398,10 +410,13 @@ public final class ApplePlaybackStore {
     /// played it since.
     public func isRemovedFromContinueWatching(mediaID: String) -> Bool {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
+        let keys = classKeys(storageKey)
+        let terminal = AppleIdentityAliasResolution.terminals(keys: keys, in: configurationPlaybackTerminals())
+        let activity = activities()
+        let progress = entries()
         return AppleContinueWatchingRemovalPolicy.isRemoved(
-            removedAt: configurationPlaybackTerminals()[storageKey]?.removedAt,
-            lastPlayedAt: [activities()[storageKey]?.updatedAt, entries()[storageKey]?.updatedAt,
-                configurationPlaybackTerminals()[storageKey]?.playedAt].compactMap { $0 }.max())
+            removedAt: terminal?.removedAt,
+            lastPlayedAt: (keys.flatMap { [activity[$0]?.updatedAt, progress[$0]?.updatedAt] } + [terminal?.playedAt]).compactMap { $0 }.max())
     }
 
     public func progress(for url: URL) -> ApplePlaybackProgress? {
@@ -439,7 +454,8 @@ public final class ApplePlaybackStore {
         }
         var terminals = configurationPlaybackTerminals()
         let partKey = partID.flatMap(ApplePlaybackIdentity.storageKey(for:))
-        let clocks = [terminals[storageKey], partKey.flatMap { terminals[$0] }].compactMap { $0 }
+        let clockKeys = classKeys(storageKey) + (partKey.map { classKeys($0) } ?? [])
+        let clocks = clockKeys.compactMap { terminals[$0] }
             .flatMap { [$0.playedAt, $0.completedAt, $0.resetAt, $0.removedAt].compactMap { $0 } }
         let previous = (clocks + [current[storageKey]?.updatedAt].compactMap { $0 }).max()
         let updatedAt = max(Date.now, previous?.addingTimeInterval(1) ?? .distantPast)
@@ -759,15 +775,37 @@ public final class ApplePlaybackStore {
     private var filteredActivityCache: [String: ApplePlaybackProgress]?
     private var filteredActivityFingerprint: [Data?]?
 
+    private func classKeys(_ storageKey: String) -> [String] { aliases.members(of: storageKey) }
+
+    func canReadLegacyEpisodeAlias(current: String, legacy: String) -> Bool {
+        guard let currentKey = ApplePlaybackIdentity.storageKey(for: current),
+              let legacyKey = ApplePlaybackIdentity.storageKey(for: legacy) else { return false }
+        let keys = classKeys(legacyKey)
+        return keys.count == 1 || keys.contains(currentKey)
+    }
+
+    func recordIdentityAlias(classID: String, mediaIDs: [String]) {
+        recordIdentityAliases([(classID: classID, mediaIDs: mediaIDs)])
+    }
+
+    func recordIdentityAliases(_ entries: [(classID: String, mediaIDs: [String])]) {
+        aliases.record(entries.map { entry in
+            (classID: entry.classID, members: entry.mediaIDs.compactMap { ApplePlaybackIdentity.storageKey(for: $0) })
+        })
+    }
+
     /// The stored blobs every derived map is built from. Comparing them is a
     /// memcmp; decoding them is what was slow.
     private func derivedStateFingerprint() -> [Data?] {
-        [terminalKey, watchedKey, unwatchedKey, continueWatchingRemovedKey, activityKey, key].map { blobs.data(forKey: $0) }
+        [terminalKey, watchedKey, unwatchedKey, continueWatchingRemovedKey, activityKey, key].map { blobs.data(forKey: $0) } + [aliases.blobData]
     }
 
     func hasLocalPlaybackState(mediaID: String) -> Bool {
         guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return false }
-        return entries()[key] != nil || activities()[key] != nil || configurationPlaybackTerminals()[key] != nil
+        let progress = entries()
+        let activity = activities()
+        let terminals = configurationPlaybackTerminals()
+        return classKeys(key).contains { progress[$0] != nil || activity[$0] != nil || terminals[$0] != nil }
     }
 
     private func recordTerminal(_ key: String, _ event: ApplePlaybackTerminalEvents) {
@@ -791,9 +829,12 @@ public final class ApplePlaybackStore {
 
     func localPlaybackUpdatedAt(mediaID: String) -> Date? {
         guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
-        let event = configurationPlaybackTerminals()[key]
-        return [entries()[key]?.updatedAt, activities()[key]?.updatedAt, event?.playedAt,
-            event?.completedAt, event?.resetAt, event?.removedAt].compactMap { $0 }.max()
+        let keys = classKeys(key)
+        let event = AppleIdentityAliasResolution.terminals(keys: keys, in: configurationPlaybackTerminals())
+        let progress = entries()
+        let activity = activities()
+        return (keys.flatMap { [progress[$0]?.updatedAt, activity[$0]?.updatedAt] } + [event?.playedAt,
+            event?.completedAt, event?.resetAt, event?.removedAt]).compactMap { $0 }.max()
     }
 
     func restoreConfigurationPlaybackTerminals(_ incoming: [String: ApplePlaybackTerminalEvents]) {
