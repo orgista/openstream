@@ -707,11 +707,9 @@ struct AppleLiveTVView: View {
             for await (source, result) in group {
                 switch result {
                 case .success(let receivedChannels):
-                    let sourceChannels = AppleIPTVChannelCache.reconciled(receivedChannels,
-                        previous: cached[source.id] ?? [], sourceID: source.id)
+                    let sourceChannels = await AppleIPTVChannelCache.shared.reconcileAndStore(receivedChannels, for: source.id)
                     load.succeeded(source.id, channels: sourceChannels)
                     sourceCauses[source.id] = nil
-                    await AppleIPTVChannelCache.shared.store(sourceChannels, for: source.id)
                     sourceStore.recordValidationSuccess(
                         id: source.id,
                         summary: "Connected · \(sourceChannels.count) channels",

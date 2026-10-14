@@ -15,7 +15,7 @@ struct AppleIPTVGuideMappingEvidenceTests {
             previous: previous, channelShiftHours: shift, correctionHours: correction, fetchedAt: fetchedAt ?? now)
     }
 
-    @Test func providerGuideIDChangeRetainsManualFavoriteAndRecentKeys() throws {
+    @Test func providerGuideIDChangeRetainsLocalIdentity() throws {
         let source = UUID()
         func playlist(_ guideID: String) throws -> [AppleIPTVChannel] {
             try AppleIPTVClient.parseM3U(Data("""
@@ -27,11 +27,7 @@ struct AppleIPTVGuideMappingEvidenceTests {
         let original = try #require(playlist("old").first)
         let received = try playlist("new")
         let channel = try #require(AppleIPTVChannelCache.reconciled(received, previous: [original], sourceID: source).first)
-        let manual = [original.id: "station"]
-        let favorites: Set<String> = [original.id]
-        let recents = [original.id]
         #expect(channel.id == original.id && channel.guideID == "new")
-        #expect(manual[channel.id] == "station" && favorites.contains(channel.id) && recents.contains(channel.id))
         let decoded = try JSONDecoder().decode(AppleIPTVChannel.self, from: JSONEncoder().encode(channel))
         #expect(decoded.id == original.id && decoded.guideID == "new")
         let duplicate = received[0].withLocalIdentity("different")
@@ -74,10 +70,10 @@ struct AppleIPTVGuideMappingEvidenceTests {
         let corrected = try #require(resolve(["one": "News"], declared: "one", previous: first, shift: -4.5, correction: 2))
         #expect(first.project(raw, channelID: "local").first?.start == programme.start.addingTimeInterval(-3.5 * 3600))
         #expect(corrected.project(raw, channelID: "local").first?.start == programme.start.addingTimeInterval(-2.5 * 3600))
-        #expect(corrected.project(raw, channelID: "local") == corrected.project(raw, channelID: "local"))
+        #expect(corrected.project(raw, channelID: "local").first?.end == programme.end.addingTimeInterval(-2.5 * 3600))
     }
 
-    @Test func coveragePreservesGapsAndEvidenceRoundTripsWithoutChangingLegacySettings() throws {
+    @Test func coveragePreservesGapsAndEvidenceReadsLegacySnapshot() throws {
         var evidence = try #require(resolve(["one": "News"], manual: "one"))
         func programme(_ start: Double, _ end: Double) -> AppleIPTVProgramme {
             AppleIPTVProgramme(id: String(start), channelID: "local", title: "Fixture", subtitle: nil,
@@ -91,16 +87,13 @@ struct AppleIPTVGuideMappingEvidenceTests {
         let legacy = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: Data("{\"programmes\":[],\"channelNames\":{}}".utf8))
         #expect(legacy.mappingEvidence == nil)
     }
-    @Test func failedOrEmptyRefreshCannotClaimNewCoverageOrEraseManualGuide() throws {
+    @Test func emptyRefreshRetainsFetchTimeAndCannotEraseManualGuide() throws {
         var previous = try #require(resolve(["one": "News"], manual: "one"))
         let raw = AppleIPTVProgramme(id: "fixture", channelID: "one", title: "Fixture", subtitle: nil,
             description: nil, start: now, end: now.addingTimeInterval(3600), category: nil, isLive: false)
         let saved = previous.project([raw], channelID: "local")
         previous.coverage = AppleIPTVGuideMappingEvidence.coverage(of: saved)
         let incoming = try #require(resolve(["other": "News"], manual: "one", previous: previous, fetchedAt: now.addingTimeInterval(60)))
-        let failed = AppleIPTVGuideMappingEvidence.replacement(providerProgrammes: nil, channelID: "local",
-            evidence: incoming, previousProgrammes: saved, previousEvidence: previous)
-        #expect(failed.programmes == saved && failed.evidence == previous)
         let empty = AppleIPTVGuideMappingEvidence.replacement(providerProgrammes: [], channelID: "local",
             evidence: incoming, previousProgrammes: saved, previousEvidence: previous)
         #expect(empty.programmes == saved && empty.evidence.isStale)
@@ -133,7 +126,6 @@ struct AppleIPTVGuideMappingEvidenceTests {
         await store.refreshVisible(channelIDs: ["local"], force: true, now: start.addingTimeInterval(60))
         #expect(store.guide(for: ["local"]).allProgrammes == [original])
         #expect(store.mappingEvidence["local"] == evidence)
-        #expect(store.manualChannelMapping == ["local": "one"])
         let restarted = AppleIPTVGuideStore(loader: loader, diskCache: disk)
         restarted.manualChannelMapping = ["local": "one"]
         restarted.configure(xmltvURL: url, channelMapping: ["local": "changed"], defaultOffsetHours: 2)
@@ -142,10 +134,13 @@ struct AppleIPTVGuideMappingEvidenceTests {
         #expect(restarted.mappingEvidence["local"]?.fetchedAt == evidence.fetchedAt)
         MappingEvidenceProtocol.state.withLock { $0 = 2 }
         await restarted.refreshVisible(channelIDs: ["local"], force: true, now: start.addingTimeInterval(180))
-        #expect(restarted.guide(for: ["local"]).allProgrammes == [original])
+        #expect(restarted.guide(for: ["local"]).allProgrammes.first?.start == start)
         #expect(restarted.mappingEvidence["local"]?.isStale == true)
         #expect(restarted.mappingEvidence["local"]?.providerID == "one")
         #expect(restarted.mappingEvidence["local"]?.fetchedAt == evidence.fetchedAt)
+        let revision = restarted.revision
+        await restarted.refreshVisible(channelIDs: ["local"], now: start.addingTimeInterval(240))
+        #expect(restarted.revision == revision)
     }
 
     @MainActor @Test func legacyManualGuideCacheMigratesOfflineWithProviderIdentitySeparate() async throws {
@@ -170,10 +165,9 @@ struct AppleIPTVGuideMappingEvidenceTests {
         #expect(store.mappingEvidence["local"]?.origin == .manual)
         #expect(store.mappingEvidence["local"]?.declaredProviderID == "declared")
         #expect(store.mappingEvidence["local"]?.fetchedAt == start)
-        #expect(store.manualChannelMapping == ["local": "one"])
     }
 
-    @MainActor @Test func offsetChangeProjectsFreshRawCacheOnceWithoutAnotherRequest() async throws {
+    @MainActor @Test func correctionChangeProjectsFreshRawCacheOnceWithoutAnotherRequest() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let configuration = URLSessionConfiguration.ephemeral
@@ -194,6 +188,152 @@ struct AppleIPTVGuideMappingEvidenceTests {
         #expect(store.guide(for: ["local"]).allProgrammes.first?.start == start.addingTimeInterval(7200))
     }
 
+
+    @MainActor @Test func reconciledLineupWritesKeepPersistedSettingsKeys() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "plex12-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { try? FileManager.default.removeItem(at: directory); defaults.removePersistentDomain(forName: suite) }
+        let cache = AppleIPTVChannelCache(directory: directory)
+        let source = UUID()
+        func playlist(_ guideID: String) throws -> [AppleIPTVChannel] {
+            try AppleIPTVClient.parseM3U(Data("#EXTM3U\n#EXTINF:-1 tvg-id=\"\(guideID)\",News\nhttps://fixture.example/live/news.m3u8".utf8),
+                sourceID: source, baseURL: URL(string: "https://fixture.example/list.m3u")!)
+        }
+        let first = try #require(playlist("old").first)
+        await cache.store([first], for: source)
+        let settings = AppleSettingsStore(defaults: defaults)
+        settings.guideChannelAssignments = [first.id: "station"]
+        settings.hiddenLiveChannelIDs = [first.id]
+        settings.favoriteLiveChannelOrder = [first.id]
+        settings.favoriteChannelIDs = [first.id]
+        let manager = await cache.reconcileAndStore(try playlist("new"), for: source)
+        let managed = try #require(manager.first)
+        settings.favoriteChannelIDs.remove(managed.id)
+        let live = await cache.reconcileAndStore(try playlist("newer"), for: source)
+        let liveID = try #require(live.first?.id)
+        #expect(liveID == first.id)
+        let restored = AppleSettingsStore(defaults: defaults)
+        #expect(!restored.favoriteChannelIDs.contains(liveID))
+        #expect(restored.hiddenLiveChannelIDs.contains(liveID))
+        #expect(restored.guideChannelAssignments[liveID] == "station")
+        #expect(restored.favoriteLiveChannelOrder == [liveID])
+        #expect(await cache.snapshot(for: source)?.channels == live)
+    }
+
+    @Test func guideChannelIDsIncludeStationsWithoutDisplayNames() {
+        let programme = AppleIPTVProgramme(id: "one", channelID: "unlabelled", title: "Fixture", subtitle: nil,
+            description: nil, start: now, end: now.addingTimeInterval(60), category: nil, isLive: false)
+        let guide = AppleIPTVGuide(programmes: Array(repeating: programme, count: 10_000), channelNames: ["named": "News"])
+        #expect(guide.channelIDs == ["unlabelled"])
+        #expect(Set(guide.channelNames.keys).union(guide.channelIDs) == ["named", "unlabelled"])
+    }
+
+    @MainActor @Test func defaultOffsetChangeReparsesZonelessDatesAndPreservesExplicitDST() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MappingEvidenceProtocol.self]
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: configuration)),
+            diskCache: AppleIPTVGuideDiskCache(directory: directory))
+        let url = URL(string: "https://fixture.example/evidence.xml")!
+        MappingEvidenceProtocol.state.withLock { $0 = 4 }
+        let start = try #require(AppleIPTVGuideXMLTVParser.parseDate("20261101013000", defaultOffsetHours: 0))
+        store.configure(xmltvURL: url, channelMapping: ["local": "one"])
+        await store.refreshVisible(channelIDs: ["local"], now: start)
+        let old = store.guide(for: ["local"]).allProgrammes
+        #expect(old.count == 2)
+        store.configure(xmltvURL: url, channelMapping: ["local": "one"], defaultOffsetHours: 2)
+        MappingEvidenceProtocol.state.withLock { $0 = 1 }
+        await store.refreshVisible(channelIDs: ["local"], now: start.addingTimeInterval(30))
+        #expect(store.guide(for: ["local"]).allProgrammes == old)
+        MappingEvidenceProtocol.state.withLock { $0 = 4 }
+        await store.refreshVisible(channelIDs: ["local"], now: start.addingTimeInterval(60))
+        let programmes = store.guide(for: ["local"]).allProgrammes
+        #expect(programmes.first { $0.title == "Zoneless" }?.start == start.addingTimeInterval(-7200))
+        #expect(programmes.first { $0.title == "Explicit" }?.start == old.first { $0.title == "Explicit" }?.start)
+        let revision = store.revision
+        await store.refreshVisible(channelIDs: ["local"], now: start.addingTimeInterval(90))
+        #expect(store.revision == revision)
+    }
+
+    @Test func reusedTransportDoesNotTransferIdentityBetweenNamedStations() throws {
+        let source = UUID()
+        func channel(_ name: String, _ guideID: String) throws -> AppleIPTVChannel {
+            try #require(AppleIPTVClient.parseM3U(Data("#EXTM3U\n#EXTINF:-1 tvg-id=\"\(guideID)\",\(name)\nhttps://fixture.example/live/slot.m3u8".utf8),
+                sourceID: source, baseURL: URL(string: "https://fixture.example/list.m3u")!).first)
+        }
+        let old = try channel("CNN", "cnn.us")
+        let new = try channel("ESPN", "espn.us")
+        #expect(AppleIPTVChannelCache.reconciled([new], previous: [old], sourceID: source) == [new])
+        let renamed = try channel("US CNN HD", "new.cnn")
+        #expect(AppleIPTVChannelCache.reconciled([renamed], previous: [old], sourceID: source).first?.id == old.id)
+    }
+
+    @Test func evidenceProgrammesUseBoundedDayShardsAndRoundTrip() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let disk = AppleIPTVGuideDiskCache(directory: directory)
+        var evidence = try #require(resolve(["one": "News"], declared: "one"))
+        func programme(_ day: Double) -> AppleIPTVProgramme {
+            AppleIPTVProgramme(id: String(day), channelID: "local", title: "Fixture", subtitle: nil, description: nil,
+                start: now.addingTimeInterval(day * 86400), end: now.addingTimeInterval(day * 86400 + 3600), category: nil, isLive: false)
+        }
+        evidence.coverage = AppleIPTVGuideMappingEvidence.coverage(of: [programme(0), programme(1)])
+        await disk.store([programme(-4), programme(0), programme(1), programme(8)], key: "evidence",
+            mappingEvidence: ["local": evidence], now: now)
+        let manifest = try Data(contentsOf: directory.appendingPathComponent(ApplePlaybackIdentity.digest(for: "evidence") + ".json"))
+        let decoded = try JSONDecoder().decode(AppleIPTVGuideDiskCache.Snapshot.self, from: manifest)
+        #expect(decoded.programmes.isEmpty)
+        #expect(decoded.shardDays?.count == 2)
+        let restored = await disk.snapshot(key: "evidence", now: now)
+        #expect(restored.programmes.count == 2)
+        #expect(restored.mappingEvidence?["local"]?.coverage == evidence.coverage)
+    }
+
+    @MainActor @Test func removingGuideClearsOnlyItsListingsAndEvidence() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MappingEvidenceProtocol.self]
+        MappingEvidenceProtocol.state.withLock { $0 = 0 }
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: configuration)),
+            diskCache: AppleIPTVGuideDiskCache(directory: directory))
+        let source = UUID(), other = UUID()
+        let id = source.uuidString + ":local", otherID = other.uuidString + ":local"
+        let url = URL(string: "https://fixture.example/evidence.xml")!
+        store.configure(xmltvURL: url, sourceID: source, channelMapping: [id: "one"])
+        store.configure(xmltvURL: url, sourceID: other, channelMapping: [otherID: "one"])
+        await store.refreshVisible(channelIDs: [id, otherID], now: now)
+        #expect(!store.guide(for: [id]).allProgrammes.isEmpty)
+        store.configure(xmltvURL: nil, sourceID: source)
+        #expect(store.guide(for: [id]).allProgrammes.isEmpty)
+        #expect(store.mappingEvidence[id] == nil)
+        #expect(!store.guide(for: [otherID]).allProgrammes.isEmpty)
+        #expect(store.mappingEvidence[otherID] != nil)
+    }
+
+    @MainActor @Test func lineupVariantsShareOneGuideButRefuseConflictingTargets() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MappingEvidenceProtocol.self]
+        MappingEvidenceProtocol.state.withLock { $0 = 0 }
+        let store = AppleIPTVGuideStore(loader: AppleIPTVGuideLoader(session: URLSession(configuration: configuration)),
+            diskCache: AppleIPTVGuideDiskCache(directory: directory))
+        let url = URL(string: "https://fixture.example/evidence.xml")!
+        store.channelDisplayNames = ["sd": "News", "hd": "News HD", "fhd": "News FHD"]
+        store.configure(xmltvURL: url)
+        await store.refreshVisible(channelIDs: ["sd", "hd", "fhd"], now: now)
+        #expect(store.mappingEvidence.values.map(\.providerID) == ["one", "one", "one"])
+        MappingEvidenceProtocol.state.withLock { $0 = 3 }
+        store.configure(xmltvURL: url, channelMapping: ["sd": "one", "hd": "two"])
+        await store.refreshVisible(channelIDs: ["sd", "hd", "fhd"], force: true, now: now)
+        #expect(store.mappingEvidence["sd"]?.providerID == "one")
+        #expect(store.mappingEvidence["hd"]?.providerID == "two")
+        #expect(store.mappingEvidence["fhd"]?.isStale == true)
+    }
+
 }
 
 
@@ -207,7 +347,7 @@ private final class MappingEvidenceProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
         }
-        let body = state == 2 ? "<tv><channel id=\"new\"><display-name>News</display-name></channel></tv>" : """
+        let body = state == 4 ? "<tv><channel id=\"one\"><display-name>News</display-name></channel><programme channel=\"one\" start=\"20261101013000\" stop=\"20261101023000\"><title>Zoneless</title></programme><programme channel=\"one\" start=\"20261101013000 -0400\" stop=\"20261101013000 -0500\"><title>Explicit</title></programme></tv>" : state == 3 ? "<tv><channel id=\"one\"><display-name>News</display-name></channel><channel id=\"two\"><display-name>Sports</display-name></channel></tv>" : state == 2 ? "<tv><channel id=\"new\"><display-name>News</display-name></channel></tv>" : """
         <tv><channel id="one"><display-name>News</display-name></channel>
         <programme channel="one" start="20261101013000 -0400" stop="20261101013000 -0500"><title>Fixture</title></programme></tv>
         """

@@ -53,6 +53,8 @@ public struct AppleIPTVGuide: Sendable {
         }
     }
 
+    var channelIDs: Set<String> { Set(programmesByChannel.keys) }
+
     var allProgrammes: [AppleIPTVProgramme] { programmesByChannel.values.flatMap { $0 } }
 
     public func nowAndNext(channelID: String, at time: Date = Date()) -> (now: AppleIPTVProgramme?, next: AppleIPTVProgramme?) {

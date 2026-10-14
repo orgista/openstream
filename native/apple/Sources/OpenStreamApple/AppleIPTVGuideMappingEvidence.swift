@@ -33,7 +33,7 @@ public struct AppleIPTVGuideMappingEvidence: Codable, Equatable, Sendable {
             target = declaredID ?? id
             origin = .providerID
             confidence = 1
-        } else if let previous, previous.origin != .manual, available.contains(previous.providerID) {
+        } else if let previous, previous.origin != .manual, (uniqueName || previous.origin != .name), available.contains(previous.providerID) {
             target = previous.providerID
             origin = previous.origin
             confidence = previous.confidence
@@ -60,19 +60,24 @@ public struct AppleIPTVGuideMappingEvidence: Codable, Equatable, Sendable {
         }
     }
 
-    /// A failed fetch has no replacement; an empty response for the same station
-    /// retains the last successful coverage without claiming a newer fetch.
-    static func replacement(providerProgrammes: [AppleIPTVProgramme]?, channelID: String,
+    /// An empty response retains the same station with current shifts and the original fetch time.
+    static func replacement(providerProgrammes: [AppleIPTVProgramme], channelID: String,
                             evidence: Self, previousProgrammes: [AppleIPTVProgramme],
                             previousEvidence: Self?) -> (programmes: [AppleIPTVProgramme], evidence: Self) {
-        guard let providerProgrammes else {
-            return (previousProgrammes, previousEvidence ?? evidence)
-        }
         if providerProgrammes.isEmpty, let previousEvidence,
            previousEvidence.providerID == evidence.providerID, !previousProgrammes.isEmpty {
-            var retained = previousEvidence
-            retained.isStale = true
-            return (previousProgrammes, retained)
+            let delta = (evidence.appliedShiftHours - previousEvidence.appliedShiftHours) * 3600
+            let programmes = previousProgrammes.map { programme in
+                AppleIPTVProgramme(id: programme.id, channelID: programme.channelID, title: programme.title,
+                    subtitle: programme.subtitle, description: programme.description,
+                    start: programme.start.addingTimeInterval(delta), end: programme.end.addingTimeInterval(delta),
+                    category: programme.category, isLive: programme.isLive)
+            }
+            let retained = Self(providerID: evidence.providerID, declaredProviderID: evidence.declaredProviderID,
+                origin: evidence.origin, confidence: evidence.confidence, defaultOffsetHours: evidence.defaultOffsetHours,
+                channelShiftHours: evidence.channelShiftHours, correctionHours: evidence.correctionHours,
+                fetchedAt: previousEvidence.fetchedAt, coverage: coverage(of: programmes), isStale: true)
+            return (programmes, retained)
         }
         let programmes = evidence.project(providerProgrammes, channelID: channelID)
         var updated = evidence

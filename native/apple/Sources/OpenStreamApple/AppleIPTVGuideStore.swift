@@ -97,6 +97,11 @@ public final class AppleIPTVGuideStore {
         }
         configurations[key] = value
         restoredKeys.remove(key)
+        if value == nil {
+            caches = caches.filter { sourceKey($0.key) != key }
+            mappingEvidence = mappingEvidence.filter { sourceKey($0.key) != key }
+            changedSources.remove(key)
+        }
         // Keep the last successful projection until a replacement is ready.
         revision &+= 1
     }
@@ -121,12 +126,16 @@ public final class AppleIPTVGuideStore {
         for key in configurations.keys.sorted() {
             guard let configuration = configurations[key], !changedSources.contains(key), restoredKeys.insert(key).inserted else { continue }
             let assignments = manualChannelMapping
-            let mapped = await diskCache.snapshot(key: evidenceDiskKey(key, configuration), now: now)
+            var mapped = await diskCache.snapshot(key: evidenceDiskKey(key, configuration), now: now)
+            if mapped.mappingEvidence == nil {
+                mapped = await diskCache.snapshot(key: evidenceDiskKey(key, configuration, version: 1), now: now)
+            }
             guard configurations[key] == configuration, manualChannelMapping == assignments, !Task.isCancelled else { continue }
             let mappedProgrammes = Dictionary(grouping: mapped.programmes, by: \.channelID)
             for (id, evidence) in mapped.mappingEvidence ?? [:] {
                 guard assignments[id] == nil ? evidence.origin != .manual : assignments[id] == evidence.providerID else { continue }
                 let programmes = mappedProgrammes[id] ?? []
+                guard caches[id] == nil else { continue }
                 caches[id] = ChannelCache(programmes: programmes, fetchTime: evidence.fetchedAt)
                 var retained = evidence
                 retained.coverage = AppleIPTVGuideMappingEvidence.coverage(of: programmes)
@@ -204,23 +213,33 @@ public final class AppleIPTVGuideStore {
                             lastModified: response.lastModified, contentDigest: response.contentDigest)
                     }
                     guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
-                    let available = Set(guide.channelNames.keys).union(guide.allProgrammes.map(\.channelID))
+                    let available = Set(guide.channelNames.keys).union(guide.channelIDs)
                     let names = channelDisplayNames.filter { sourceKey($0.key) == key }
-                    let counts = Dictionary(grouping: names.keys) { AppleIPTVGuideMatching.normalize(names[$0] ?? "") }
+                    let groups = Dictionary(grouping: names.keys) { AppleIPTVGuideMatching.normalize(names[$0] ?? "") }
+                    let conflictingNames = Set(groups.compactMap { name, members -> String? in
+                        let targets = Set(members.compactMap { id in
+                            AppleIPTVGuideMappingEvidence.resolve(id: id, declaredID: mapping[id], manualID: assignments[id],
+                                name: names[id] ?? id, uniqueName: true, index: guide.channelMatchIndex,
+                                available: available, previous: mappingEvidence[id], fetchedAt: now)?.providerID
+                        })
+                        return targets.count > 1 ? name : nil
+                    })
                     for id in ids {
                         let shift = shifts(for: id, configuration: configuration)
                         let evidence = AppleIPTVGuideMappingEvidence.resolve(id: id, declaredID: mapping[id],
                             manualID: assignments[id], name: names[id] ?? id,
-                            uniqueName: (counts[AppleIPTVGuideMatching.normalize(names[id] ?? id)]?.count ?? 1) == 1,
+                            uniqueName: !conflictingNames.contains(AppleIPTVGuideMatching.normalize(names[id] ?? id)),
                             index: guide.channelMatchIndex, available: available, previous: mappingEvidence[id],
                             defaultOffsetHours: offset, channelShiftHours: shift.channel,
                             correctionHours: shift.correction, fetchedAt: updatedXMLTV?.fetchTime ?? previous?.fetchTime ?? now)
                         if let evidence {
                             stagedEvidence[id] = evidence
                             providerIDs[id] = evidence.providerID
-                        } else if var retained = mappingEvidence[id] {
-                            retained.isStale = true
-                            stagedEvidence[id] = retained
+                        } else if let retained = mappingEvidence[id] {
+                            stagedEvidence[id] = AppleIPTVGuideMappingEvidence(providerID: retained.providerID,
+                                declaredProviderID: mapping[id], origin: retained.origin, confidence: retained.confidence,
+                                defaultOffsetHours: offset, channelShiftHours: shift.channel, correctionHours: shift.correction,
+                                fetchedAt: retained.fetchedAt, coverage: retained.coverage, isStale: true)
                             providerIDs[id] = retained.providerID
                         }
                     }
@@ -259,6 +278,7 @@ public final class AppleIPTVGuideStore {
                 // Commit only the completed replacement. A cancelled mapping keeps the old guide.
                 if let updatedXMLTV { xmltvCaches[key] = updatedXMLTV }
                 changedSources.remove(key)
+                restoredKeys.insert(key)
                 caches.merge(stagedCaches) { _, new in new }
                 mappingEvidence.merge(stagedEvidence) { _, new in new }
                 if case .xmltv = configuration { channelNames[key] = guide.channelNames }
@@ -276,10 +296,10 @@ public final class AppleIPTVGuideStore {
                     await diskCache.store(sourceProgrammes, key: diskKey(key, configuration), channelNames: channelNames[key] ?? [:])
                 }
                 guard !Task.isCancelled, configurations[key] == configuration, manualChannelMapping == assignments else { continue }
-                let sourceCaches = caches.filter { sourceKey($0.key) == key }.values.flatMap(\.programmes)
+                let sourceCaches = caches.filter { sourceKey($0.key) == key }.mapValues(\.programmes)
                 let sourceEvidence = mappingEvidence.filter { sourceKey($0.key) == key }
-                await diskCache.store(sourceCaches, key: evidenceDiskKey(key, configuration),
-                    channelNames: channelNames[key] ?? [:], mappingEvidence: sourceEvidence)
+                await diskCache.storeEvidence(sourceCaches, key: evidenceDiskKey(key, configuration),
+                    evidence: sourceEvidence, now: now)
                 let filled = ids.filter { !(caches[$0]?.programmes.isEmpty ?? true) }.count
                 appleTrace("guide loaded: \(filled)/\(ids.count) visible channels have programmes")
             } catch {
@@ -313,10 +333,10 @@ public final class AppleIPTVGuideStore {
         }
     }
 
-    private func evidenceDiskKey(_ source: String, _ configuration: Configuration) -> String {
+    private func evidenceDiskKey(_ source: String, _ configuration: Configuration, version: Int = 2) -> String {
         switch configuration {
-        case .xmltv(let url, _, _, _, _): return source + "|evidence-v1|xmltv|" + url.absoluteString
-        case .xtream(let url, let user, let password, _): return source + "|evidence-v1|xtream|" + url.absoluteString + "|" + user + "|" + password
+        case .xmltv(let url, _, _, _, _): return source + "|evidence-v\(version)|xmltv|" + url.absoluteString
+        case .xtream(let url, let user, let password, _): return source + "|evidence-v\(version)|xtream|" + url.absoluteString + "|" + user + "|" + password
         }
     }
 

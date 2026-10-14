@@ -40,9 +40,19 @@ public actor AppleIPTVChannelCache {
         return channels.map { channel in
             guard channel.sourceID == sourceID, let candidates = old[channel.streamURL], candidates.count == 1,
                   new[channel.streamURL]?.count == 1, let existing = candidates.first,
-                  existing.id == channel.id || !currentIDs.contains(existing.id) else { return channel }
+                  existing.id == channel.id || !currentIDs.contains(existing.id),
+                  existing.guideID == nil || channel.guideID == nil ||
+                    AppleIPTVGuideMatching.normalize(existing.name) == AppleIPTVGuideMatching.normalize(channel.name) else { return channel }
             return channel.withLocalIdentity(existing.id)
         }
+    }
+
+    /// Both Live and My Channels commit lineups through the same identity boundary.
+    public func reconcileAndStore(_ channels: [AppleIPTVChannel], for sourceID: AppleSource.ID,
+                                  now: Date = .now) -> [AppleIPTVChannel] {
+        let reconciled = Self.reconciled(channels, previous: snapshot(for: sourceID)?.channels ?? [], sourceID: sourceID)
+        store(reconciled, for: sourceID, now: now)
+        return reconciled
     }
 
     public func snapshot(for sourceID: AppleSource.ID) -> Snapshot? {

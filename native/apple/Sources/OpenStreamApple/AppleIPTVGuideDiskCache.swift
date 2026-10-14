@@ -37,7 +37,7 @@ public actor AppleIPTVGuideDiskCache {
               let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 96 * 1024 * 1024,
               let data = try? Data(contentsOf: url),
               var snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return empty }
-        if snapshot.isRawXMLTV == true {
+        if snapshot.isRawXMLTV == true || (snapshot.mappingEvidence != nil && snapshot.shardGeneration != nil) {
             if let generation = snapshot.shardGeneration, let days = snapshot.shardDays {
                 guard days.count <= 16 else { return empty }
                 var size = data.count
@@ -53,14 +53,14 @@ public actor AppleIPTVGuideDiskCache {
                     programmes.append(contentsOf: values)
                 }
                 snapshot = Snapshot(programmes: Self.retained(programmes, now: now), channelNames: snapshot.channelNames,
-                    fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
-                    contentDigest: snapshot.contentDigest, isRawXMLTV: true)
+                    mappingEvidence: snapshot.mappingEvidence, fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
+                    contentDigest: snapshot.contentDigest, isRawXMLTV: snapshot.isRawXMLTV)
             } else {
                 snapshot = Snapshot(programmes: Self.retained(snapshot.programmes, now: now), channelNames: snapshot.channelNames,
-                    fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
-                    contentDigest: snapshot.contentDigest, isRawXMLTV: true)
+                    mappingEvidence: snapshot.mappingEvidence, fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
+                    contentDigest: snapshot.contentDigest, isRawXMLTV: snapshot.isRawXMLTV)
                 store(snapshot.programmes, key: key, channelNames: snapshot.channelNames,
-                    fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
+                    mappingEvidence: snapshot.mappingEvidence, fetchedAt: snapshot.fetchedAt, eTag: snapshot.eTag, lastModified: snapshot.lastModified,
                     contentDigest: snapshot.contentDigest, isRawXMLTV: true, now: now)
             }
             return snapshot
@@ -79,7 +79,8 @@ public actor AppleIPTVGuideDiskCache {
                       contentDigest: String? = nil, isRawXMLTV: Bool? = nil, now: Date? = nil) {
         guard let directory, let url = fileURL(key), (!programmes.isEmpty || isRawXMLTV == true || mappingEvidence != nil) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let values = isRawXMLTV == true ? Self.retained(programmes, now: now ?? fetchedAt ?? .now)
+        let sharded = isRawXMLTV == true || mappingEvidence != nil
+        let values = sharded ? Self.retained(programmes, now: now ?? fetchedAt ?? .now)
             : Array(programmes.prefix(Self.maximumProgrammes))
         let grouped = mappingEvidence == nil ? [:] : Dictionary(grouping: values, by: \.channelID)
         var retainedEvidence = mappingEvidence
@@ -88,14 +89,14 @@ public actor AppleIPTVGuideDiskCache {
             evidence.coverage = AppleIPTVGuideMappingEvidence.coverage(of: grouped[id] ?? [])
             retainedEvidence?[id] = evidence
         }
-        var snapshot = Snapshot(programmes: isRawXMLTV == true ? [] : values, channelNames: channelNames,
+        var snapshot = Snapshot(programmes: sharded ? [] : values, channelNames: channelNames,
             mappingEvidence: retainedEvidence,
             fetchedAt: fetchedAt, eTag: eTag, lastModified: lastModified,
             contentDigest: contentDigest, isRawXMLTV: isRawXMLTV)
         var written: [URL] = []
         do {
             var total = 0
-            if isRawXMLTV == true {
+            if sharded {
                 let generation = UUID()
                 let firstDay = Int(floor((now ?? fetchedAt ?? .now).addingTimeInterval(-3 * 86_400).timeIntervalSince1970 / 86_400))
                 let groups = Dictionary(grouping: values) { max(firstDay, Int(floor($0.start.timeIntervalSince1970 / 86_400))) }
@@ -126,6 +127,13 @@ public actor AppleIPTVGuideDiskCache {
             // A failed generation never replaces the previously published one.
             for shard in written { try? FileManager.default.removeItem(at: shard) }
         }
+    }
+
+    /// Flatten and bound projected evidence on the disk actor, never in a view's actor.
+    func storeEvidence(_ channelProgrammes: [String: [AppleIPTVProgramme]], key: String,
+                       evidence: [String: AppleIPTVGuideMappingEvidence], now: Date) {
+        store(channelProgrammes.filter { evidence[$0.key] != nil }.values.flatMap { $0 },
+              key: key, mappingEvidence: evidence, now: now)
     }
 
     private static func retained(_ programmes: [AppleIPTVProgramme], now: Date) -> [AppleIPTVProgramme] {
