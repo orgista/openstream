@@ -1,9 +1,16 @@
 # Deliveries
 
+> **History rewrite 2026-10-14 (owner OK):** movie clips committed under `Tests/Fixtures/private` (6f807d7, removed in
+> dd4e101) were purged from git history so main could go to GitHub. Every commit since 2026-10-01 has a new ID; the
+> build "Source" IDs below are already updated. Old→new map and a full pre-purge bundle:
+> ServerPlus `/mnt/galatic/backups/openstream-pre-purge-20261014.{bundle,commit-map.txt}`. Older IDs quoted in other
+> notes (OWNER-TODO, FEEDBACK, specs) are pre-purge; look them up in the map.
+
+
 ## OpenStream build 18 TestFlight delivery — October 11, 2026 (iOS, tvOS, visionOS, macOS)
 
 Owner: "Ship 18" (ASC max was 17 on IOS/TV_OS/VISION_OS/MAC_OS). Source `main`
-`dc5e24e2b8d0704f4d8b4cad5838a57523a52b0c`, `git archive` into Dev-Mini `/Volumes/DevExt/dev/openstream-build/wt-b18`
+`a096fb0403d3e16aa54f39fb0f5888eb91c76821`, `git archive` into Dev-Mini `/Volumes/DevExt/dev/openstream-build/wt-b18`
 (external NVMe, the mini's project disk since 2026-10-10). TestFlight flavour: all four archives used
 `CURRENT_PROJECT_VERSION=18` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
 Uploaded with `asc publish testflight … --group "Internal,Reddit" --submit --confirm --test-notes … --locale en-US --wait`.
@@ -41,7 +48,7 @@ No App Store (no-add-on) archive was built; no App Store version, review notes o
 - [ ] Not exercised: play/resume and the title trailer on a real Apple TV (none paired with the mini).
 - [x] 7 Uploads VALID on all four (readback above); What to Test notes set per platform and read back word for word (en-US).
 - [x] 8 GitHub release published 2026-10-12 (owner: "yes for all releases"): https://github.com/orgista/openstream-apple/releases/tag/v1.0-18
-      Public source commit c39907c (from abd81e6 + release-only fixes: UI-test LAN default removed, gitleaks allow
+      Public source commit c39907c (from 8f8731c + release-only fixes: UI-test LAN default removed, gitleaks allow
       comment, release-script fixes; app code identical). Assets: iOS/tvOS/visionOS unsigned IPAs + Mac ad-hoc zip +
       SHA256SUMS (verified on the Studio). Gates: scrub, gitleaks (export + public tree), zero-byte, add-on markers,
       SDK floors, source fingerprint unchanged. First CHANGELOG.md and altstore-source.json added to the public repo.
@@ -59,7 +66,7 @@ and its DerivedData were removed from the mini.
 ## OpenStream build 17 TestFlight delivery — October 9, 2026 (iOS, tvOS, visionOS, macOS)
 
 Owner: "lets push the next build to test flight" (ASC max was 16 on IOS/TV_OS/VISION_OS/MAC_OS → ship 17).
-Source `main` `08f57a5c6ed92e884d68f581c8496f87c0c3214b` (includes the RC fixes e855f12), `git archive` into
+Source `main` `62d9abd4a55a0b02f0478c0a3c6b416ede4d29c5` (includes the RC fixes 10911ea), `git archive` into
 Dev-Mini `~/Developer/openstream-build/wt-b17` (local disk). TestFlight flavour: all four archives used
 `CURRENT_PROJECT_VERSION=17` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
 Uploaded with `asc publish testflight … --group "Internal,Reddit" --submit --confirm --test-notes … --locale en-US --wait`.
@@ -167,7 +174,7 @@ breaks Xcode's IPA packaging ("Copy failed"). Artifacts: `/Volumes/DevExt/openst
 
 ## OpenStream build 14 TestFlight delivery — September 28, 2026 (iOS, tvOS, visionOS, macOS)
 
-Owner said "ship 14" for all platforms with tracing. Source a6298a7, built in local worktree
+Owner said "ship 14" for all platforms with tracing. Source 348c0f0, built in local worktree
 `~/Developer/openstream-build/wt-b14` (Release signing pins uncommitted). Gate: 2247 tests / 263 suites.
 Uploaded with `asc publish testflight … --group "Internal,TraceEnabled" --submit --confirm`; all three
 processed VALID and were submitted for beta app review. Tracing is on by default for TestFlight installs
@@ -189,7 +196,7 @@ iMessage extension, which still has a placeholder icon) and `OpenStream tvOS Top
 ## Apple build 12 source publication — September 17, 2026
 
 Published to https://github.com/orgista/openstream-apple, branch main and tag build-12, commit
-4a7c402. Verified the remote references and project path. Source baseline bf6988e plus accepted
+4a7c402. Verified the remote references and project path. Source baseline e2831db plus accepted
 Watch icon packaging, with documented publication/configuration adjustments. Local source copy:
 `~/Developer/openstream-build/publish-apple-b12`. Tests 986/96 pass; unsigned iOS Release build passes.
 Cloud repair completed September 17: `orgista/openstream-apple` is connected and Apple Build
@@ -209,8 +216,8 @@ internal and external testers, verified through live App Store Connect reads aft
 
 | Build | App Store Connect build ID | Tester groups | Source snapshot |
 |---|---|---|---|
-| 11 | ec6ec0bc-db74-4005-bbe1-b3c3d163f7c1 | Reddit, Internal, TraceEnabled | 3055de2 + signing/Watch icon packaging |
-| 12 | a173faf4-49ce-42f3-9de2-c07ff664e0d6 | Internal, TraceEnabled | bf6988e + signing/Watch icon packaging |
+| 11 | ec6ec0bc-db74-4005-bbe1-b3c3d163f7c1 | Reddit, Internal, TraceEnabled | da43f86 + signing/Watch icon packaging |
+| 12 | a173faf4-49ce-42f3-9de2-c07ff664e0d6 | Internal, TraceEnabled | e2831db + signing/Watch icon packaging |
 
 Internal receives all builds automatically; external group assignments and testing states were
 read back. Both apps support iPhone and iPad on iOS 18 or later. Installation on the owner's
@@ -271,7 +278,7 @@ Export rule: use the App Store profile with Group Activities (`75afc0e9-11e3-423
 
 ## OpenStream build 15 TestFlight delivery — October 3, 2026 (iOS, tvOS, visionOS, macOS)
 
-Owner authorized "ship 15", Internal only. Source `47383ca98a4da1eb0d944a7e7d78d660bfb87eff`
+Owner authorized "ship 15", Internal only. Source `ad6677405f1952d5e81863916e85f8b58eef6d7c`
 (main snapshot), reused local worktree `~/Developer/openstream-build/wt-b15`. Fresh pre-upload gate:
 **2733 tests / 345 suites passed**. All four archives used `CURRENT_PROJECT_VERSION=15` and
 `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
