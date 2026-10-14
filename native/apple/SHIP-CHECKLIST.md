@@ -77,3 +77,9 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Before running it: add a `## [<version> (<build>)] - <date>` section to the public checkout's CHANGELOG.md (the
       notes come from it; use the What to Test lines). Publish from the Studio: bundle the new public commit from the mini,
       fetch it into a fresh clone, `git push`, then `gh release create` with the assets (verify SHA256SUMS first).
+- [ ] **GitHub in step with every beta (owner 2026-10-14: "if a new beta goes out github should be updated"; pushes are
+      automatic, tell the owner after).** Before archiving: the AetherEngine pin in `Package.swift`, `Package.resolved` and
+      the Xcode project's `Package.resolved` names a commit that is already pushed to `cyberbanksy/AetherEngine`
+      (`git ls-remote origin <branch>` contains it); push any local fork commit first (bundle from Dev-Mini, push from
+      the Studio). After TestFlight: the public repo commit + GitHub release above, and the OpenStream main branch
+      pushed to its remote. No ship leaves a commit that exists only on the mini or the Studio.

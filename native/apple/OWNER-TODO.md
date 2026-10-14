@@ -7,6 +7,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **GitHub synced with every beta, pushes automatic (owner 2026-10-14).** "change never to ask please instead
+      automatic I rather know but in general they should be synced with the builds if a new beta goes out github should
+      be updated". Done: the `git push` block in the workspace settings is removed; engine fork commit 07afad62 pushed
+      (DVD menu fixes). SHIP-CHECKLIST §8 now requires the engine pin to be a pushed commit and every repo pushed on each
+      ship. Pushes happen without asking; the owner is told after.
 - [ ] **PRIORITY (owner 2026-10-14): iPhone hero lost its trailers and its full-screen look in build 18.** "heros in
       build 18 changed no more trailers and it nots full screen like it was before on iOS can we fix that look into
       how netflix and apple tv handle trailers and fix that please that was my fave feature". Find the commit that
