@@ -14,7 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/amosavian/AMSMB2", exact: "4.0.3"),
-        .package(url: "https://github.com/cyberbanksy/AetherEngine", revision: "45d64e8a9b2ac422bcdb7f467f8327c214eab2ed"),
+        .package(url: "https://github.com/cyberbanksy/AetherEngine", revision: "07afad6229954dc90638dbe08ab26e16cb00d889"),
     ],
     targets: [
         .target(
