@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **PRIORITY (owner 2026-10-14): iPhone hero lost its trailers and its full-screen look in build 18.** "heros in
+      build 18 changed no more trailers and it nots full screen like it was before on iOS can we fix that look into
+      how netflix and apple tv handle trailers and fix that please that was my fave feature". Find the commit that
+      changed it, check Netflix and Apple TV app hero trailers (REA notes), bring back full-bleed hero + trailer
+      autoplay on iOS, show screenshots of the current unpublished build next to build 18.
+      Also: Codex is past 85% this week; route work to agy first, then work Claude (owner 2026-10-14).
 - [ ] **PRIORITY (owner 2026-10-13): ISO playback with real disc menus doesn't work on iOS; test all ISOs; Matilda
       captions wrong.** Found: the engine already has DVD menus, the app never turned them on (Play Disc still plays
       the main title). Spec specs/iso-menus-captions-2026-10-13.md: wire Play Disc / Skip to Movie / Disc Menu on every
