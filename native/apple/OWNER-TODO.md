@@ -7,6 +7,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Second build Mac (owner 2026-10-14): owner ordered a new Mac Studio; the current Mac Studio (32 GB, 512 GB)
+      becomes a build machine instead of being sold.** When the new Studio is set up as the owner's daily Mac: wipe or
+      clean-user the old Studio, install Xcode 27 + simulators, build keychain/signing copy, buildlock.sh, disk-guard,
+      tidy-gui, mobile/rea MCP, external NVMe for project files, SSH alias. Split: Dev-Mini = OpenStream iPhone e2e;
+      old Studio = OpenStream Apple TV e2e + other projects. Also pending: `sudo diskutil enableOwnership
+      /Volumes/DevExt` on Dev-Mini (owner password) so simulators can live on the external drive.
 - [ ] **Loading, speed and missing metadata (owner 2026-10-14, build 18).** "there is still two loading circles if
       you click content there is a loading circle on top of a loading circle and also the speed can be improved and the
       meta data fails often have no meta data we need a better catch/fix for that we need to see how stremio REA, plex
