@@ -125,6 +125,9 @@ skill; the server runs on Dev-Mini (`ssh -T dev-mini ~/Developer/bin/rea-mcp.sh`
   For the developer sweep or SwiftPM Release, use `-Xswiftc -DOPENSTREAM_ADDONS`.
   Never pass either override to an App Store submission archive. Run
   `bash scripts/check-no-addons-in-release.sh` before shipping (SHIP-CHECKLIST.md §4).
+  **Gate for any change that touches code under `#if OPENSTREAM_ADDONS` or its `#else`:** build
+  `-configuration Release CODE_SIGNING_ALLOWED=NO` for iOS, tvOS, visionOS and macOS. Debug, SwiftPM and E2E all
+  define the flag, so they cannot see a no-add-ons break (two shipped unseen in 947fdc1/e4409ca, fixed 6e92441).
 
 - The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
   are picked up automatically — but `#if os(tvOS)` files never compile in the SPM gate (macOS),
