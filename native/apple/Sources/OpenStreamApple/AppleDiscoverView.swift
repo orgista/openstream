@@ -3684,6 +3684,7 @@ struct AppleCatalogItemDetailView: View {
             await prepare()
             if !Task.isCancelled {
                 pageMetadata.detailsAnswered = true
+                pageMetadata.detailsSettled = true
                 fillTimeline.mark(.done)
             }
             await refreshOfflineState()
@@ -4845,7 +4846,8 @@ struct AppleCatalogItemDetailView: View {
 
     private var optionalDetailTasks: some View {
         AppleTitlePageOptionalTasks(enabled: usesCatalogDetailEnrichment, itemID: item.id, generation: preparationGeneration,
-            resolvedMediaID: pageMetadata.resolvedMediaID, detailsAnswered: pageMetadata.detailsAnswered,
+            resolvedMediaID: pageMetadata.resolvedMediaID, detailsSettled: pageMetadata.detailsSettled,
+            episodesLoadFinished: episodeList.loadFinished,
             episodeCount: episodeList.episodes.count, loadPreview: loadDetailPreviewAssets,
             loadWatchProviders: loadWatchProviders, loadArtwork: loadOptionalDetailArtwork,
             recordEpisodes: recordDetailEpisodeProgress)
@@ -4862,8 +4864,9 @@ struct AppleCatalogItemDetailView: View {
 
     private func loadOptionalDetailArtwork() async {
         let generation = preparationGeneration
-        guard !Task.isCancelled, pageMetadata.detailsAnswered, item.posterURL == nil,
-              pageMetadata.details?.backdropURL == nil, pageMetadata.details?.posterURL == nil else { return }
+        guard !Task.isCancelled, AppleTitlePageOptionalTaskPolicy.resolvesFallbackArtwork(
+            detailsSettled: pageMetadata.detailsSettled, hasItemPoster: item.posterURL != nil,
+            hasDetailsArt: pageMetadata.details?.backdropURL != nil || pageMetadata.details?.posterURL != nil) else { return }
         let artwork = await AppleArtworkResolver.shared.resolve(
             mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, type: item.type,
             existingPosterURL: item.posterURL, existingBackgroundURL: item.backgroundURL,
@@ -7077,6 +7080,7 @@ struct AppleCatalogItemDetailView: View {
         preparationGeneration = generation
         pageMetadata.details = nil
         pageMetadata.detailsAnswered = false
+        pageMetadata.detailsSettled = false
         pageMetadata.previewAssets = nil
         pageMetadata.fallbackArtwork = nil
         episodeList.episodes = []
@@ -7233,6 +7237,7 @@ struct AppleCatalogItemDetailView: View {
                     applyEpisodes(fetched)
                 case .details(let details):
                     pageMetadata.detailsAnswered = true
+                    pageMetadata.detailsSettled = true
                     pageMetadata.details = details
                     if details != nil { markMetadataArrived() }
                 }
@@ -8635,7 +8640,10 @@ private struct AppleTitlePagePlaybackState {
 
 private struct AppleTitlePageMetadataState {
     var details: AppleTMDBDetails?
+    /// The first provider answered (a partial update counts).
     var detailsAnswered = false
+    /// Every provider answered: the resolver's final value is in.
+    var detailsSettled = false
     var fallbackArtwork: AppleArtworkResolver.Artwork?
     var previewAssets: AppleStremioPreviewAssets?
     var isPreparing = true

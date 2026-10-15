@@ -1749,8 +1749,10 @@ public final class AppleSourceStore {
         preferred: String? = nil
     ) throws -> String {
         for source in sources where source.id != id && AppleNetworkSharePolicy.sameServer(source, as: server) {
+            // One unreadable sibling entry must not block this folder: it
+            // just isn't a key to share.
             guard let reference = source.credentialReference,
-                  let saved = try networkCredentials(for: source),
+                  let saved = try? networkCredentials(for: source),
                   saved.username == credentials.username, saved.domain == credentials.domain else { continue }
             return reference
         }

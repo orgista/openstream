@@ -242,13 +242,15 @@ actor AppleLibraryMetadataResolver {
             default: return .providerUnreachable
             }
         }
-        if let error = error as? AppleStremioCatalogError {
+#if OPENSTREAM_ADDONS
+        if let error = error as? AppleMediaCatalogError {
             switch error {
             case .requestFailed(401), .requestFailed(403): return .configMissing
             case .requestFailed(404): return .noMatch
             default: return .providerUnreachable
             }
         }
+#endif
         if let error = error as? AppleStremioPlaybackError {
             switch error {
             case .requestFailed(401), .requestFailed(403): return .configMissing
@@ -437,9 +439,38 @@ actor AppleLibraryMetadataResolver {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= 300 else { return [] }
         let title = correctionTitle(query: text, year: year, kind: kind)
-        if !title.explicitIDs.isEmpty {
+        guard !title.explicitIDs.isEmpty else {
+            return try await correctionNameCandidates(title, kind: kind, sources: sources, tmdbKey: tmdbKey, omdbKey: omdbKey)
+        }
+        guard text.allSatisfy(\.isNumber) else {
             return try await liveLookup(title, sources, tmdbKey, omdbKey).map { [$0] } ?? []
         }
+        // An all-digit query ("1917", "2012") is a TMDB id and a name, so both
+        // run. A year-like query is almost always the name: its results lead.
+        let direct: AppleCatalogItem?
+        var directError: Error?
+        do { direct = try await liveLookup(title, sources, tmdbKey, omdbKey) }
+        catch { try Task.checkCancellation(); direct = nil; directError = error }
+        let named: [AppleCatalogItem]
+        do {
+            named = try await correctionNameCandidates(
+                AppleLibraryTitle(title: text, year: year, season: nil, episode: nil, kind: kind),
+                kind: kind, sources: sources, tmdbKey: tmdbKey, omdbKey: omdbKey)
+        } catch {
+            try Task.checkCancellation()
+            guard let direct else { throw error }
+            return [direct]
+        }
+        if named.isEmpty, direct == nil, let directError { throw directError }
+        let looksLikeYear = text.count == 4 && (1880...2100).contains(Int(text) ?? 0)
+        let ordered = looksLikeYear ? named + [direct].compactMap { $0 } : [direct].compactMap { $0 } + named
+        var seen = Set<String>()
+        return ordered.filter { seen.insert($0.mediaID).inserted }
+    }
+
+    private static func correctionNameCandidates(_ title: AppleLibraryTitle, kind: AppleLibraryTitle.Kind,
+                                                 sources: [AppleSource], tmdbKey: String,
+                                                 omdbKey: String) async throws -> [AppleCatalogItem] {
         var items: [AppleCatalogItem] = []
         var lastError: Error?
         if !tmdbKey.isEmpty {
@@ -473,8 +504,8 @@ actor AppleLibraryMetadataResolver {
         }
     }
 
-    /// What the Fix Match field means: a bare number or a TMDB page link is a
-    /// TMDB id, `tt…` (or an IMDb link) an IMDb id, `tvdb-123` / `tvdbid=123` a
+    /// What the Fix Match field means: a bare number (also searched as a name)
+    /// or a TMDB page link is a TMDB id, `tt…` (or an IMDb link) an IMDb id, `tvdb-123` / `tvdbid=123` a
     /// TVDB id, anything else a name (with an optional year).
     static func correctionTitle(query text: String, year: Int?, kind: AppleLibraryTitle.Kind) -> AppleLibraryTitle {
         var parsed = AppleLibraryTitleParser.parse(name: text)

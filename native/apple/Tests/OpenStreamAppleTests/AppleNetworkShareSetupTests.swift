@@ -542,12 +542,31 @@ struct AppleNetworkShareSetupTests {
         #expect(try store.networkCredentials(for: second)?.password == "fixture-password")
     }
 
+    @Test func anUnreadableSiblingCredentialDoesNotBlockAddingAFolder() async throws {
+        let (store, keychain, cleanup) = try makeStore()
+        defer { cleanup() }
+        let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient())
+        #expect(await setup.connect())
+        // Read 1 is the first folder's own entry; read 2 is the sibling lookup for the second.
+        keychain.failOnRead = 2
+        let added = try setup.saveFolders([
+            .init(location: .init(share: "Media", path: "Movies"), name: "Movies"),
+            .init(location: .init(share: "Media", path: "TV"), name: "TV"),
+        ], to: store)
+        #expect(added.count == 2)
+        #expect(store.sources.count == 2)
+        // The unreadable sibling isn't a key to share, so the second folder keeps its own.
+        #expect(added[0].credentialReference != added[1].credentialReference)
+        #expect(keychain.values.count == 2)
+    }
+
     @Test func aKeychainFailureRollsBackTheWholeFolderBatch() async throws {
         let (store, keychain, cleanup) = try makeStore()
         defer { cleanup() }
         let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient())
         #expect(await setup.connect())
-        keychain.failOnRead = 2
+        // Read 3 is the second folder's own entry (the sibling lookup at read 2 may fail quietly).
+        keychain.failOnRead = 3
         #expect(throws: AppleKeychainStoreError.self) {
             try setup.saveFolders([
                 .init(location: .init(share: "Media", path: "Movies"), name: "Movies"),

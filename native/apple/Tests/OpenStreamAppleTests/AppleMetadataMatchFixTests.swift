@@ -171,7 +171,7 @@ struct AppleMetadataMatchFixTests {
     /// D4: the Fix Match field accepts a name, a TMDB number or page link, an IMDb id or link, and a TVDB tag.
     @Test(arguments: [("603", "tmdb", "603"), ("https://www.themoviedb.org/movie/603-the-matrix", "tmdb", "603"),
                       ("tt0133093", "imdb", "tt0133093"), ("https://www.imdb.com/title/tt0133093/", "imdb", "tt0133093"),
-                      ("tvdb-81189", "tvdb", "81189"), ("tvdbid=81189", "tvdb", "81189")])
+                      ("tvdb-81189", "tvdb", "81189"), ("tvdbid=81189", "tvdb", "81189"), ("tmdb-603", "tmdb", "603")])
     func fixMatchAcceptsPastedIDs(_ value: (String, String, String)) {
         let title = AppleLibraryMetadataResolver.correctionTitle(query: value.0, year: nil, kind: .movie)
         #expect(title.explicitIDs[value.1] == value.2)
@@ -182,6 +182,51 @@ struct AppleMetadataMatchFixTests {
         #expect(title.title == "The Matrix")
         #expect(title.year == 1999)
         #expect(title.explicitIDs.isEmpty)
+    }
+
+    /// Fixture TMDB answers: `/movie/<id>` is "Unrelated Film", `/search/movie` finds "1917" (2019).
+    private func digitQueryStubs() throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let tmdb = root.appendingPathComponent("api.themoviedb.org/3")
+        try FileManager.default.createDirectory(at: tmdb.appendingPathComponent("movie"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tmdb.appendingPathComponent("search"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tmdb.appendingPathComponent("find"), withIntermediateDirectories: true)
+        for id in ["1917", "603"] {
+            try Data(#"{"id":\#(id),"title":"Unrelated Film","release_date":"1990-01-01"}"#.utf8)
+                .write(to: tmdb.appendingPathComponent("movie/\(id).json"))
+        }
+        try Data(#"{"id":278,"title":"The Shawshank Redemption","release_date":"1994-09-23","external_ids":{"imdb_id":"tt0111161"}}"#.utf8)
+            .write(to: tmdb.appendingPathComponent("movie/278.json"))
+        try Data(#"{"movie_results":[{"id":278}],"tv_results":[]}"#.utf8)
+            .write(to: tmdb.appendingPathComponent("find/tt0111161.json"))
+        try Data(#"{"results":[{"id":530915,"title":"1917","release_date":"2019-12-25"}]}"#.utf8)
+            .write(to: tmdb.appendingPathComponent("search/movie.json"))
+        return root
+    }
+
+    /// An all-digit Fix Match query is a TMDB id and also a name: "1917" finds the 2019 film.
+    @Test func fixMatchDigitQueryAlsoSearchesTheName() async throws {
+        let root = try digitQueryStubs()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let results = try await AppleNetworkStub.$testRoot.withValue(root) {
+            try await AppleLibraryMetadataResolver.correctionCandidates(query: "1917", year: nil,
+                kind: .movie, sources: [], tmdbKey: "fixture", omdbKey: "")
+        }
+        #expect(results.contains { $0.name == "Unrelated Film" })
+        #expect(results.contains { $0.name == "1917" && $0.releaseInfo?.hasPrefix("2019") == true })
+        #expect(results.first?.name == "1917", "a year-like query lists the name match first")
+    }
+
+    /// Typed ids stay on the id path: no name search runs (the search fixture would add "1917").
+    @Test(arguments: [("tt0111161", "The Shawshank Redemption"), ("tmdb-603", "Unrelated Film")])
+    func fixMatchTypedIDSkipsTheNameSearch(_ value: (String, String)) async throws {
+        let root = try digitQueryStubs()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let results = try await AppleNetworkStub.$testRoot.withValue(root) {
+            try await AppleLibraryMetadataResolver.correctionCandidates(query: value.0, year: nil,
+                kind: .movie, sources: [], tmdbKey: "fixture", omdbKey: "")
+        }
+        #expect(results.map(\.name) == [value.1])
     }
 
     /// D7: OMDb's quota answer is an unavailable provider (backoff), not "no such film".

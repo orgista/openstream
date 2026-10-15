@@ -768,6 +768,11 @@ struct AppleNetworkShareConfirmView: View {
         let metrics = AppleTVSettingsMetrics.standard
         return ScrollView {
             VStack(alignment: .leading, spacing: metrics.groupSpacing) {
+                AppleTVFormGroup("Server") {
+                    Text(setup.server?.name ?? "")
+                        .accessibilityIdentifier("sources.smb.confirm.server")
+                }
+                .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
                 ForEach($folders) { $folder in
                     AppleTVFormGroup(folderLabel(folder.location)) {
                         nameField($folder)
@@ -795,6 +800,7 @@ struct AppleNetworkShareConfirmView: View {
             ForEach($folders) { $folder in
                 Section(folderLabel(folder.location)) {
                     nameField($folder)
+                        .onSubmit(save)
                         #if os(macOS)
                         .labelsHidden()
                         #endif

@@ -2076,7 +2076,7 @@ private struct AppleNetworkShareSourcesSection: View {
     let group: AppleNetworkShareGroup
 
     var body: some View {
-        Section(group.title) {
+        Section {
             ForEach(group.sources) { source in
                 NavigationLink(value: AppleSourceRoute.detail(source.id)) { AppleSourceRow(source: source) }
                     .appleTVReadableFocus()
@@ -2089,6 +2089,12 @@ private struct AppleNetworkShareSourcesSection: View {
                 .appleTVReadableFocus()
                 .accessibilityIdentifier("sources.smb.addToShare.\(group.id)")
             }
+        } header: {
+            // Same tvOS uppercase as "Your Sources" (header only, never the rows).
+            Text(group.title)
+                #if os(tvOS)
+                .textCase(.uppercase)
+                #endif
         }
     }
 }

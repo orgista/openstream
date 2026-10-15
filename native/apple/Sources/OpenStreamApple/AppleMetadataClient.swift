@@ -1087,7 +1087,7 @@ public struct AppleMetadataResolver: Sendable {
         guard AppleStremioMetadataClient.isIMDBIdentifier(id) else { return nil }
         let details = try await tmdbClient.details(imdbID: id, kind: type == "series" ? .series : .movie, configuration: configuration)
         try Task.checkCancellation()
-        if let details, let onUpdate { await onUpdate(details) }
+        if let onUpdate { await onUpdate(details) }
         return details
     }
 }
