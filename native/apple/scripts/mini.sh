@@ -7,7 +7,9 @@
 # The command runs in zsh with DEVELOPER_DIR set; quote it if it has pipes:  scripts/mini.sh 'swift test 2>&1 | tail -5'
 set -euo pipefail
 HOST=${OPENSTREAM_MINI:-dev-mini}
-DEST='~/Developer/openstream-build/src/native/apple'
+# OPENSTREAM_MINI_DEST: a separate folder for a second tree (a branch worktree), so two trees never sync over
+# each other's running build.
+DEST=${OPENSTREAM_MINI_DEST:-'~/Developer/openstream-build/src/native/apple'}
 HERE=${0:A:h:h}
 ssh $HOST "mkdir -p $DEST"
 rsync -a --delete \
@@ -18,7 +20,7 @@ rsync -a --delete \
   --exclude '.build/' --exclude 'Apps/build/' --exclude '*.xcresult' --exclude 'DerivedData*/' \
   --exclude 'Tests/Fixtures/private/' --exclude 'Tests/Fixtures/out/tmp/' --exclude '__pycache__/' \
   --exclude 'verification-artifacts/' --exclude 'design/' --exclude '.git/' \
-  "$HERE/" "$HOST:Developer/openstream-build/src/native/apple/"
+  "$HERE/" "$HOST:${DEST#\~/}/"
 [[ ${1:-} == --sync-only ]] && exit 0
 (( $# )) || { print -u2 "usage: scripts/mini.sh <command…>"; exit 2; }
 CMD="$*"
