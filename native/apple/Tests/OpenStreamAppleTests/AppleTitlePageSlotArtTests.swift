@@ -22,10 +22,31 @@ import Testing
                 == .posterCard(poster))
     }
 
-    @Test func theChoiceWaitsForTheDetailsOrTheDeadline() {
-        #expect(!AppleTitlePageSlotArt.isReady(detailsAnswered: false, deadlinePassed: false))
-        #expect(AppleTitlePageSlotArt.isReady(detailsAnswered: true, deadlinePassed: false))
-        #expect(AppleTitlePageSlotArt.isReady(detailsAnswered: false, deadlinePassed: true))
+    @Test func knownCatalogArtIsReadyBeforeAnyMetadataAnswer() {
+        let art = AppleTitlePageSlotArt.backdrop(backdrop)
+        #expect(AppleTitlePageSlotArt.isReady(knownArt: art, detailsAnswered: false))
+        #expect(!AppleTitlePageSlotArt.isReady(knownArt: nil, detailsAnswered: false))
+    }
+
+    @Test func answeredEmptyIsAnExplicitStablePlaceholder() {
+        #expect(AppleTitlePageSlotArt.isReady(knownArt: nil, detailsAnswered: true))
+        #expect(AppleTitlePageSlotArt.updating(nil, with: nil) == nil)
+    }
+
+    @Test func lateBackdropUpgradesPosterAndEmptyAnswersNeverEraseKnownArt() {
+        let posterArt = AppleTitlePageSlotArt.posterCard(poster)
+        let backdropArt = AppleTitlePageSlotArt.backdrop(backdrop)
+        #expect(AppleTitlePageSlotArt.updating(posterArt, with: backdropArt) == backdropArt)
+        #expect(AppleTitlePageSlotArt.updating(backdropArt, with: posterArt) == backdropArt)
+        #expect(AppleTitlePageSlotArt.updating(backdropArt, with: nil) == backdropArt)
+    }
+
+    @Test func aPendingUpgradeKeepsTheFirstImageAndRejectsObsoleteCompletions() {
+        let first = AppleTitlePageSlotArt.posterCard(poster)
+        let better = AppleTitlePageSlotArt.backdrop(backdrop)
+        #expect(AppleTitlePageSlotArt.acceptsLoadedArt(first, requested: better, displayed: nil))
+        #expect(!AppleTitlePageSlotArt.acceptsLoadedArt(first, requested: better, displayed: better))
+        #expect(AppleTitlePageSlotArt.acceptsLoadedArt(better, requested: better, displayed: first))
     }
 
     @Test func theSlotIsSixteenByNine() {

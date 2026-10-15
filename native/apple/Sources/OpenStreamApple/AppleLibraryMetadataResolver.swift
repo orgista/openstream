@@ -47,16 +47,8 @@ actor AppleLibraryMetadataResolver {
     private let lookup: Lookup?
     private var active = 0
     enum MissReason: String, Codable, Sendable { case noMatch, providerUnreachable, configMissing }
-    private struct Flight {
-        let task: Task<AppleCatalogItem?, Error>
-        var waiters: Set<UUID>
-    }
-    private var inFlight: [String: Flight] = [:]
-    /// One continuation per waiting card, so a cancelled card can leave a
-    /// shared flight at once while the flight continues for the others.
-    private var waiting: [UUID: CheckedContinuation<AppleCatalogItem?, Error>] = [:]
-    private var cancelledWaiters: Set<UUID> = []
-    var activeLookupWaiterCount: Int { inFlight.values.reduce(0) { $0 + $1.waiters.count } }
+    private let sharedLookups = AppleSharedMetadataLookup<AppleCatalogItem?>()
+    var activeLookupWaiterCount: Int { get async { await sharedLookups.activeWaiterCount } }
 
     static func retryInterval(reason: MissReason, attempts: Int) -> TimeInterval {
         switch reason {
@@ -157,62 +149,12 @@ actor AppleLibraryMetadataResolver {
         try Task.checkCancellation()
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
         let key = item.sourceID.uuidString + Self.cacheKey(item) + Self.configurationDigest(sources, tmdbKey, omdbKey)
-        let waiter = UUID()
-        let task: Task<AppleCatalogItem?, Error>
-        if var flight = inFlight[key] {
-            flight.waiters.insert(waiter)
-            inFlight[key] = flight
-            task = flight.task
-        } else {
-            task = Task { try await self.performResolve(item, sources: sources, tmdbKey: tmdbKey, omdbKey: omdbKey, refresh: refresh) }
-            inFlight[key] = Flight(task: task, waiters: [waiter])
-        }
-        defer {
-            releaseWaiter(key, waiter: waiter)
-            cancelledWaiters.remove(waiter)
-        }
-        // `task.value` ignores the caller's cancellation, so wait on a
-        // per-card continuation that `onCancel` can resume straight away.
-        let value = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AppleCatalogItem?, Error>) in
-                if cancelledWaiters.remove(waiter) != nil {
-                    continuation.resume(throwing: CancellationError())
-                    return
-                }
-                waiting[waiter] = continuation
-                Task.detached {
-                    let result = await task.result
-                    await self.deliver(waiter, result)
-                }
-            }
-        } onCancel: {
-            Task { await self.cancelWaiter(key, waiter: waiter) }
+        let value = try await sharedLookups.value(for: key) { [self] in
+            try await performResolve(item, sources: sources, tmdbKey: tmdbKey, omdbKey: omdbKey, refresh: refresh)
         }
         try Task.checkCancellation()
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
         return value
-    }
-
-    private func deliver(_ waiter: UUID, _ result: Result<AppleCatalogItem?, Error>) {
-        waiting.removeValue(forKey: waiter)?.resume(with: result)
-    }
-
-    private func cancelWaiter(_ key: String, waiter: UUID) {
-        if let continuation = waiting.removeValue(forKey: waiter) {
-            continuation.resume(throwing: CancellationError())
-        } else if inFlight[key]?.waiters.contains(waiter) == true {
-            // Cancelled before its continuation was registered.
-            cancelledWaiters.insert(waiter)
-        }
-        releaseWaiter(key, waiter: waiter)
-    }
-
-    private func releaseWaiter(_ key: String, waiter: UUID) {
-        guard var flight = inFlight[key], flight.waiters.remove(waiter) != nil else { return }
-        if flight.waiters.isEmpty {
-            flight.task.cancel()
-            inFlight[key] = nil
-        } else { inFlight[key] = flight }
     }
 
     private func performResolve(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String, refresh: Bool) async throws -> AppleCatalogItem? {

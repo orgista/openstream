@@ -38,6 +38,11 @@ struct AppleLocalLibraryTile: View {
             }
         }
         .appleCatalogCardButtonStyle()
+        #if os(iOS)
+        .simultaneousGesture(TapGesture().onEnded {
+            AppleDetailFillTimeline.navigationTap(title: item.name)
+        })
+        #endif
         .accessibilityIdentifier("library.title.\(group.parsed.title)")
         .navigationDestination(isPresented: $showsDetails) { destination }
         .task(id: group.id) { await library.resolve(group, sourceStore: sourceStore, settings: settings) }

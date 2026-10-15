@@ -26,9 +26,29 @@ struct AppleDetailFillTimelineTests {
         #expect(timeline.mark(.episodes) == nil)
     }
 
+    @Test func navigationTapPrecedesThePageTask() {
+        let clock = ManualClock()
+        AppleDetailFillTimeline.navigationTap(title: "Fixture", at: clock.now)
+        clock.offset = .milliseconds(120)
+        let timeline = AppleDetailFillTimeline(now: { clock.now })
+        timeline.begin(title: "Fixture")
+        #expect(timeline.mark(.paint) == "detail fill \"Fixture\" paint +120ms")
+    }
+
     @Test func nothingIsRecordedBeforeTheFirstOpening() {
         let timeline = AppleDetailFillTimeline()
         #expect(timeline.mark(.overview) == nil)
+        #expect(timeline.recordArtworkDecoded() == nil)
+    }
+
+    @Test func artworkDecodeIsRecordedOncePerOpening() {
+        let clock = ManualClock()
+        let timeline = AppleDetailFillTimeline(now: { clock.now })
+        timeline.begin(title: "Fixture")
+        clock.offset = .milliseconds(15)
+        #expect(timeline.recordArtworkDecoded() == "detail fill \"Fixture\" artworkDecoded +15ms")
+        clock.offset = .milliseconds(40)
+        #expect(timeline.recordArtworkDecoded() == nil)
     }
 
     @Test func aNewOpeningStartsAFreshTimeline() {

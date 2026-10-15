@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Headless verification enters the production Folder scanner and Library views.
 public struct AppleLibraryTitlesDebugView: View {
+    private static var preparedColdMeasurement = false
     @State private var sources: AppleSourceStore
     @State private var settings = AppleSettingsStore()
     /// Its own index file: fixture records never reach the real media index.
@@ -12,6 +13,7 @@ public struct AppleLibraryTitlesDebugView: View {
     @State private var autoPlayGroup: AppleLibrarySeries?
 
     public init() {
+        Self.prepareColdMeasurementIfRequested()
         AppleLocalLibraryStore.persistsScanResults = false
         let defaults = UserDefaults(suiteName: "openstream.library-titles-fixture")!
         let path = ProcessInfo.processInfo.environment["OPENSTREAM_LIBRARY_FIXTURE_PATH"]
@@ -31,6 +33,22 @@ public struct AppleLibraryTitlesDebugView: View {
             _ = try? store.addLibraryFolder(name: "Media", url: URL(fileURLWithPath: path), bookmarkData: nil)
         }
         _sources = State(initialValue: store)
+    }
+
+    /// The E2E runner snapshots and restores this container. Do this once
+    /// per process: SwiftUI may construct the fixture view more than once.
+    private static func prepareColdMeasurementIfRequested() {
+        guard !preparedColdMeasurement, AppleNetworkStub.isActive,
+              ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_SPEED_COLD"] == "1",
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        preparedColdMeasurement = true
+        let artworkCaches = caches.appendingPathComponent("OpenStream")
+        let directories = [caches.appendingPathComponent("LibraryTitles-v1"),
+            artworkCaches.appendingPathComponent(AppleMetadataDiskCachePolicy.version),
+            artworkCaches.appendingPathComponent(AppleArtworkDiskCachePolicy.version)]
+        for directory in directories {
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     public var body: some View {

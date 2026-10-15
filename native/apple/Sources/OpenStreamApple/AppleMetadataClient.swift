@@ -897,7 +897,8 @@ public struct AppleMetadataResolver: Sendable {
         type: String,
         mediaID: String,
         configuration: AppleTMDBConfiguration? = nil,
-        fallbackName: String? = nil
+        fallbackName: String? = nil,
+        onUpdate: (@Sendable (AppleTMDBDetails) async -> Void)? = nil
     ) async throws -> AppleTMDBDetails? {
         let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -936,7 +937,7 @@ public struct AppleMetadataResolver: Sendable {
             for (index, source) in candidates.enumerated() {
                 group.addTask {
                     do {
-                        return (index, try await bounded(timeout: timeout) {
+                        return (index, try await appleBoundedMetadataLookup(timeout: timeout) {
                             try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID,
                                                            isListingSource: source.id == preferredSourceID,
                                                            fallbackName: fallbackName)
@@ -951,7 +952,7 @@ public struct AppleMetadataResolver: Sendable {
             if let configuration, let tmdbIMDBID {
                 group.addTask {
                     do {
-                        return (candidates.count, try await bounded(timeout: timeout) {
+                        return (candidates.count, try await appleBoundedMetadataLookup(timeout: timeout) {
                             try await tmdbClient.details(
                                 imdbID: tmdbIMDBID,
                                 kind: cleanType == "series" ? .series : .movie,
@@ -968,7 +969,15 @@ public struct AppleMetadataResolver: Sendable {
             }
             var values: [Int: AppleTMDBDetails] = [:]
             for try await result in group {
-                if let value = result.value { values[result.index] = value }
+                try Task.checkCancellation()
+                if let value = result.value {
+                    values[result.index] = value
+                    var partial: AppleTMDBDetails?
+                    for index in values.keys.sorted() {
+                        if let value = values[index] { partial = Self.merge(partial, value) }
+                    }
+                    if let partial, let onUpdate { await onUpdate(partial) }
+                }
             }
             return values
         }
@@ -1058,24 +1067,7 @@ public struct AppleMetadataResolver: Sendable {
         return clean.isEmpty ? nil : clean
     }
 
-    private func bounded<Value: Sendable>(
-        timeout: Duration,
-        operation: @escaping @Sendable () async throws -> Value
-    ) async throws -> Value {
-        try await withThrowingTaskGroup(of: Value.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw ResolutionTimeout.expired
-            }
-            defer { group.cancelAll() }
-            return try await group.next()!
-        }
-    }
 
-    private enum ResolutionTimeout: Error {
-        case expired
-    }
 }
 #else
 public struct AppleMetadataResolver: Sendable {
@@ -1087,12 +1079,16 @@ public struct AppleMetadataResolver: Sendable {
         type: String,
         mediaID: String,
         configuration: AppleTMDBConfiguration? = nil,
-        fallbackName: String? = nil
+        fallbackName: String? = nil,
+        onUpdate: (@Sendable (AppleTMDBDetails) async -> Void)? = nil
     ) async throws -> AppleTMDBDetails? {
         guard let configuration else { return nil }
         let id = mediaID.split(separator: ":").first.map(String.init) ?? mediaID
         guard AppleStremioMetadataClient.isIMDBIdentifier(id) else { return nil }
-        return try await tmdbClient.details(imdbID: id, kind: type == "series" ? .series : .movie, configuration: configuration)
+        let details = try await tmdbClient.details(imdbID: id, kind: type == "series" ? .series : .movie, configuration: configuration)
+        try Task.checkCancellation()
+        if let details, let onUpdate { await onUpdate(details) }
+        return details
     }
 }
 

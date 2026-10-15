@@ -3276,6 +3276,7 @@ struct AppleCatalogItemDetailView: View {
         self.localSourceStore = localSourceStore
         self.mediaServerLibrary = mediaServerLibrary
         self.tabToolbar = tabToolbar
+        _slotArt = State(initialValue: AppleTitlePageSlotArtState(itemID: item.id))
         _pageMetadata = State(initialValue: AppleTitlePageMetadataState(
             isPreparing: ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: item.mediaID)
         ))
@@ -3636,10 +3637,9 @@ struct AppleCatalogItemDetailView: View {
             }
             if !Task.isCancelled { titleWordmark.state = .unavailable }
         }
-        // The iPhone header's art is chosen once the details answer or a
-        // deadline passes (`AppleTitlePageSlotArt`). Kept off this chain,
-        // which is already at the type checker's limit on visionOS.
+        // Keep these tasks off the page's already large modifier chain.
         .background { slotArtWatcher }
+        .background { optionalDetailTasks }
         // Keyed by the item only: a wordmark URL that arrives late must not
         // hide a text title that is already on screen; the text stays until
         // the wordmark has actually loaded.
@@ -3663,6 +3663,10 @@ struct AppleCatalogItemDetailView: View {
             #endif
             fillTimeline.begin(title: item.name)
             fillTimeline.mark(.paint)
+            fillTimeline.observeFirstRefresh()
+            if usesPhoneTitlePage, slotArt.itemID == item.id, heroStill.image != nil {
+                fillTimeline.recordArtworkDecoded()
+            }
             markOverviewIfVisible(source: "catalog")
             // Recording that this title was opened is bookkeeping. Awaiting it
             // cost ~294 ms — a disk write plus a rebuild of the whole record
@@ -3678,7 +3682,10 @@ struct AppleCatalogItemDetailView: View {
             AppleLaunchClock.mark("detail.prepare")
             #endif
             await prepare()
-            if !Task.isCancelled { fillTimeline.mark(.done) }
+            if !Task.isCancelled {
+                pageMetadata.detailsAnswered = true
+                fillTimeline.mark(.done)
+            }
             await refreshOfflineState()
             // A hero's Play opens the page to play — but only what the page
             // itself would offer: a series whose catalog lists no episodes
@@ -3703,6 +3710,7 @@ struct AppleCatalogItemDetailView: View {
             pauseTrailerPreview(reason: "scene \(phase)")
         }
         .onDisappear {
+            fillTimeline.cancelFrameObservation()
             pauseTrailerPreview(reason: "page gone")
             if AppleMediaServerItemReference.parse(item.mediaID) == nil {
                 seasonDownloads.cancel()
@@ -4808,7 +4816,7 @@ struct AppleCatalogItemDetailView: View {
             onLoad: { image in
                 heroStill.image = image
                 heroStill.art = heroStill.art.settling(with: .loaded)
-                fillTimeline.mark(.artwork)
+                fillTimeline.recordArtworkDecoded()
             },
             onFailure: heroArtworkFailed,
             keepsImageWhileReloading: true
@@ -4818,15 +4826,55 @@ struct AppleCatalogItemDetailView: View {
     private var slotArtWatcher: some View {
         Color.clear
             .task(id: item.id) {
-                if slotArt.itemID != item.id { slotArt = AppleTitlePageSlotArtState(itemID: item.id) }
-                lockSlotArtIfReady()
-                try? await Task.sleep(for: AppleTitlePageSlotArt.deadline)
-                guard !Task.isCancelled else { return }
-                slotArt.deadlinePassed = true
-                lockSlotArtIfReady()
+                if slotArt.itemID != item.id {
+                    slotArt = AppleTitlePageSlotArtState(itemID: item.id)
+                    heroStill.image = nil
+                }
+                updateSlotArtIfReady()
             }
-            .onChange(of: pageMetadata.details) { _, _ in lockSlotArtIfReady() }
+            .onChange(of: phoneSlotArtCandidate) { _, _ in updateSlotArtIfReady() }
+            .onChange(of: pageMetadata.detailsAnswered) { _, _ in updateSlotArtIfReady() }
             .accessibilityHidden(true)
+    }
+
+    /// Optional work has the same view lifetime and cancellation ownership,
+    /// but cannot delay metadata, episode publication or the done milestone.
+    private var usesCatalogDetailEnrichment: Bool {
+        AppleXtreamReference.parse(item.mediaID) == nil && AppleMediaServerItemReference.parse(item.mediaID) == nil
+    }
+
+    private var optionalDetailTasks: some View {
+        AppleTitlePageOptionalTasks(enabled: usesCatalogDetailEnrichment, itemID: item.id, generation: preparationGeneration,
+            resolvedMediaID: pageMetadata.resolvedMediaID, detailsAnswered: pageMetadata.detailsAnswered,
+            episodeCount: episodeList.episodes.count, loadPreview: loadDetailPreviewAssets,
+            loadWatchProviders: loadWatchProviders, loadArtwork: loadOptionalDetailArtwork,
+            recordEpisodes: recordDetailEpisodeProgress)
+    }
+
+    private func loadDetailPreviewAssets() async {
+        let generation = preparationGeneration
+        guard !Task.isCancelled else { return }
+        let preview = await metadataClient.previewAssets(sources: playbackSources,
+            preferredSourceID: source.id, type: item.type, mediaID: item.mediaID)
+        guard !Task.isCancelled, preparationGeneration == generation else { return }
+        pageMetadata.previewAssets = preview
+    }
+
+    private func loadOptionalDetailArtwork() async {
+        let generation = preparationGeneration
+        guard !Task.isCancelled, pageMetadata.detailsAnswered, item.posterURL == nil,
+              pageMetadata.details?.backdropURL == nil, pageMetadata.details?.posterURL == nil else { return }
+        let artwork = await AppleArtworkResolver.shared.resolve(
+            mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, type: item.type,
+            existingPosterURL: item.posterURL, existingBackgroundURL: item.backgroundURL,
+            configuration: metadataConfiguration)
+        guard !Task.isCancelled, preparationGeneration == generation else { return }
+        pageMetadata.fallbackArtwork = artwork
+    }
+
+    private func recordDetailEpisodeProgress() async {
+        guard !Task.isCancelled, episodeList.loadFinished else { return }
+        await playbackStore.recordEpisodes(episodeList.episodes, mediaID: progressRecordID)
     }
 
     /// Reruns the wordmark lookup when its candidates change or the page's
@@ -4837,28 +4885,19 @@ struct AppleCatalogItemDetailView: View {
         return "title-logo:\(titleMetadataAnswered):\(candidates)"
     }
 
-    /// The page's details have answered, or the slot-art deadline passed.
-    private var titleMetadataAnswered: Bool {
-        AppleTitlePageSlotArt.isReady(detailsAnswered: pageMetadata.details != nil,
-                                      deadlinePassed: slotArt.itemID == item.id && slotArt.deadlinePassed)
-    }
+    /// Nil metadata is an answer too; it must not restart a loading state.
+    private var titleMetadataAnswered: Bool { pageMetadata.detailsAnswered }
 
-    /// The iPhone header's art, once chosen; nil while the page is still
-    /// finding out (black, then the final art).
     private var phoneSlotArt: AppleTitlePageSlotArt? {
-        slotArt.itemID == item.id ? slotArt.chosen : nil
+        slotArt.itemID == item.id ? slotArt.chosen ?? phoneSlotArtCandidate : phoneSlotArtCandidate
     }
 
-    /// Chooses the iPhone header's art once, when the page knows enough.
-    /// Only a failed load moves it on to the next candidate.
-    private func lockSlotArtIfReady() {
-        guard slotArt.itemID == item.id, slotArt.chosen == nil, titleMetadataAnswered else { return }
-        slotArt.chosen = phoneSlotArtCandidate
-        if let chosen = slotArt.chosen {
-            appleTrace("title slot art \(chosen.isPosterCard ? "poster card" : "backdrop") (\(item.name))")
-        } else {
-            appleTrace("title slot art: none (\(item.name))")
-            if usesPhoneTitlePage { heroStill.art = heroStill.art.settling(with: .failed) }
+    private func updateSlotArtIfReady() {
+        guard slotArt.itemID == item.id,
+              AppleTitlePageSlotArt.isReady(knownArt: phoneSlotArtCandidate, detailsAnswered: titleMetadataAnswered) else { return }
+        slotArt.chosen = AppleTitlePageSlotArt.updating(slotArt.chosen, with: phoneSlotArtCandidate)
+        if slotArt.chosen == nil, titleMetadataAnswered, usesPhoneTitlePage {
+            heroStill.art = heroStill.art.settling(with: .failed)
         }
     }
 
@@ -4870,10 +4909,11 @@ struct AppleCatalogItemDetailView: View {
             failed: slotArt.failed)
     }
 
-    private func phoneSlotArtFailed() {
-        guard let chosen = phoneSlotArt else { return }
-        slotArt.failed.insert(chosen.url)
-        slotArt.chosen = phoneSlotArtCandidate
+    private func phoneSlotArtFailed(_ art: AppleTitlePageSlotArt) {
+        guard slotArt.itemID == item.id else { return }
+        slotArt.failed.insert(art.url)
+        guard phoneSlotArt == art else { return }
+        slotArt.chosen = AppleTitlePageSlotArt.updating(heroStill.image == nil ? nil : slotArt.displayed, with: phoneSlotArtCandidate)
         appleTrace("title slot art failed, \(slotArt.chosen == nil ? "none left" : "trying the next") (\(item.name))")
         if slotArt.chosen == nil {
             heroStill.image = nil
@@ -6952,7 +6992,7 @@ struct AppleCatalogItemDetailView: View {
         return title.isEmpty ? episodeNumber(episode) : "\(episodeNumber(episode)) · \(title)"
     }
 
-    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) async {
+    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) {
         let mediaID = pageMetadata.resolvedMediaID ?? item.mediaID
         episodeList.episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
@@ -6968,7 +7008,6 @@ struct AppleCatalogItemDetailView: View {
         episodeList.isLoading = false
         episodeList.loadFinished = true
         fillTimeline.mark(.episodes, detail: "\(episodeList.episodes.count)")
-        await playbackStore.recordEpisodes(episodeList.episodes, mediaID: progressRecordID)
     }
 
     private func prepareXtream(_ reference: AppleXtreamReference, generation: UUID) async {
@@ -7015,6 +7054,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func markMetadataArrived() {
+        pageMetadata.detailsAnswered = true
+        fillTimeline.mark(.usableMetadata, detail: "provider")
         fillTimeline.mark(.metadata, detail: pageMetadata.details?.overview?.isEmpty == false ? "overview" : "no-overview")
         markOverviewIfVisible(source: "enriched")
     }
@@ -7024,6 +7065,7 @@ struct AppleCatalogItemDetailView: View {
             catalog: item.summary,
             enriched: pageMetadata.details?.overview
         ) != nil else { return }
+        fillTimeline.mark(.usableMetadata, detail: source)
         fillTimeline.mark(.overview, detail: source)
     }
 
@@ -7034,6 +7076,7 @@ struct AppleCatalogItemDetailView: View {
         let generation = UUID()
         preparationGeneration = generation
         pageMetadata.details = nil
+        pageMetadata.detailsAnswered = false
         pageMetadata.previewAssets = nil
         pageMetadata.fallbackArtwork = nil
         episodeList.episodes = []
@@ -7116,6 +7159,12 @@ struct AppleCatalogItemDetailView: View {
         // The episodeList.episodes and details requests go out before this task gets
         // the main actor back: the page is still being built then, and
         // waiting for it cost ~0.4-0.8 s on the Apple TV.
+        let publishDetails: @MainActor @Sendable (AppleTMDBDetails) -> Void = { details in
+            guard !Task.isCancelled, preparationGeneration == generation else { return }
+            pageMetadata.details = details
+            pageMetadata.detailsAnswered = true
+            markMetadataArrived()
+        }
         func addLookups(to group: inout TaskGroup<AppleDetailPrepareOutcome>, mediaID: String) {
             if isSeries {
                 group.addTask {
@@ -7133,32 +7182,25 @@ struct AppleCatalogItemDetailView: View {
                 }
             }
             group.addTask {
-                let details = try? await resolver.resolve(
-                    sources: sources,
-                    preferredSourceID: preferredSourceID,
-                    type: type,
-                    mediaID: mediaID,
-                    configuration: configuration,
-                    fallbackName: itemName
-                )
                 #if DEBUG
                 // `-OpenStreamDebugDetailsDelay <s>`: the enriched details (and
                 // their trailers) land that late, as on a slow phone network.
                 let delay = UserDefaults.standard.double(forKey: "OpenStreamDebugDetailsDelay")
                 if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
                 #endif
+                let details = try? await resolver.resolve(
+                    sources: sources,
+                    preferredSourceID: preferredSourceID,
+                    type: type,
+                    mediaID: mediaID,
+                    configuration: configuration,
+                    fallbackName: itemName,
+                    onUpdate: { details in await publishDetails(details) }
+                )
                 return .details(details)
             }
         }
         await withTaskGroup(of: AppleDetailPrepareOutcome.self) { group in
-            group.addTask {
-                .preview(await client.previewAssets(
-                    sources: sources,
-                    preferredSourceID: preferredSourceID,
-                    type: type,
-                    mediaID: catalogID
-                ))
-            }
             if let canonicalID {
                 addLookups(to: &group, mediaID: canonicalID)
             } else {
@@ -7188,11 +7230,9 @@ struct AppleCatalogItemDetailView: View {
                     addLookups(to: &group, mediaID: mediaID)
                 case .episodes(let fetched):
                     guard let fetched else { continue }
-                    await applyEpisodes(fetched)
-                    await refreshDownloadedEpisodeIDs()
-                case .preview(let preview):
-                    pageMetadata.previewAssets = preview
+                    applyEpisodes(fetched)
                 case .details(let details):
+                    pageMetadata.detailsAnswered = true
                     pageMetadata.details = details
                     if details != nil { markMetadataArrived() }
                 }
@@ -7200,19 +7240,6 @@ struct AppleCatalogItemDetailView: View {
         }
         if isSeries, preparationGeneration == generation { episodeList.isLoading = false }
         guard !Task.isCancelled, preparationGeneration == generation else { return }
-        await loadWatchProviders()
-        guard !Task.isCancelled, preparationGeneration == generation else { return }
-        if item.posterURL == nil, pageMetadata.details?.backdropURL == nil, pageMetadata.details?.posterURL == nil {
-            let artwork = await AppleArtworkResolver.shared.resolve(
-                mediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
-                type: item.type,
-                existingPosterURL: item.posterURL,
-                existingBackgroundURL: item.backgroundURL,
-                configuration: metadataConfiguration
-            )
-            guard !Task.isCancelled, preparationGeneration == generation else { return }
-            pageMetadata.fallbackArtwork = artwork
-        }
     }
 
     /// Where else this title can be watched, filtered to the services the
@@ -7221,6 +7248,8 @@ struct AppleCatalogItemDetailView: View {
     /// The whole call is skipped when they have not opted in — no request goes
     /// out at all, rather than one being made and the answer thrown away.
     private func loadWatchProviders() async {
+        guard !Task.isCancelled else { return }
+        let generation = preparationGeneration
         let enabled = settings.watchProviderIDs
         let imdbID = pageMetadata.resolvedMediaID ?? item.mediaID
         guard !enabled.isEmpty, let configuration = metadataConfiguration, imdbID.hasPrefix("tt") else {
@@ -7241,7 +7270,7 @@ struct AppleCatalogItemDetailView: View {
             appleTrace("watch providers: failed for \(item.name) (\(region)) — \(error.localizedDescription)")
             all = []
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, preparationGeneration == generation else { return }
         let visible = AppleWatchProviderPolicy.visible(all, enabledProviderIDs: enabled)
         appleTrace("watch providers: \(visible.count) for \(item.name) (enabled \(enabled.count), \(all.count) in \(region))")
         pageMetadata.watchProviders = visible
@@ -7249,7 +7278,7 @@ struct AppleCatalogItemDetailView: View {
         // Wikidata — and nothing else does.
         guard watchOnAction != nil, AppleWikidataStreamingQuery.isIMDbID(imdbID) else { return }
         let ids = await AppleWikidataStreamingIDClient.shared.ids(for: imdbID)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, preparationGeneration == generation else { return }
         pageMetadata.streamingIDs = ids
     }
 
@@ -8523,12 +8552,11 @@ private struct AppleTitlePageHeroStill {
     var image: CGImage?
 }
 
-/// The iPhone title page's 16:9 header art, held once chosen
-/// (`AppleTitlePageSlotArt`).
+/// The iPhone title page's requested and displayed 16:9 header art.
 private struct AppleTitlePageSlotArtState {
     var itemID: String?
     var chosen: AppleTitlePageSlotArt?
-    var deadlinePassed = false
+    var displayed: AppleTitlePageSlotArt?
     var failed: Set<URL> = []
 }
 
@@ -8607,6 +8635,7 @@ private struct AppleTitlePagePlaybackState {
 
 private struct AppleTitlePageMetadataState {
     var details: AppleTMDBDetails?
+    var detailsAnswered = false
     var fallbackArtwork: AppleArtworkResolver.Artwork?
     var previewAssets: AppleStremioPreviewAssets?
     var isPreparing = true
@@ -9195,7 +9224,6 @@ private enum AppleDetailPrepareOutcome: Sendable {
     case identity(String?)
     /// A series' episodes; nil when the request was cancelled.
     case episodes([AppleStremioEpisode]?)
-    case preview(AppleStremioPreviewAssets?)
     case details(AppleTMDBDetails?)
 }
 
@@ -9357,8 +9385,16 @@ extension AppleCatalogItemDetailView {
         }
     }
 
-    /// The header's still, chosen once (`AppleTitlePageSlotArt`); black
-    /// until then, so the first art drawn is the final one.
+    private var cachedPhoneSlotArt: (art: AppleTitlePageSlotArt, image: CGImage)? {
+        AppleTitlePageSlotArt.chooseCached(
+            backdrops: [pageMetadata.details?.textlessBackdropURL, pageMetadata.details?.backdropURL,
+                item.backgroundURL, pageMetadata.fallbackArtwork?.backgroundURL],
+            posters: [pageMetadata.details?.posterURL, item.posterURL, pageMetadata.fallbackArtwork?.posterURL],
+            cachedImage: { AppleRemoteImageCache.shared.cachedPlaceholderImage(url: $0) })
+    }
+
+    /// Known art renders immediately. Keep the previous decoded picture
+    /// visible until a replacement has decoded.
     @ViewBuilder
     private var phoneSlotArtwork: some View {
         ZStack {
@@ -9366,30 +9402,42 @@ extension AppleCatalogItemDetailView {
             if let art = phoneSlotArt {
                 switch art {
                 case .backdrop(let url):
-                    AppleRemoteImage(url: url, placeholderSystemImage: "", onLoad: phoneSlotArtLoaded,
-                                     onFailure: phoneSlotArtFailed, loadingFill: .black, fillAlignment: .center)
+                    AppleRemoteImage(url: url, placeholderSystemImage: "", onLoad: { phoneSlotArtLoaded($0, art: art) },
+                                     onFailure: { phoneSlotArtFailed(art) }, loadingFill: .clear, keepsImageWhileReloading: true, fillAlignment: .center)
                 case .posterCard(let url):
-                    AppleRemoteImage(url: url, placeholderSystemImage: "", loadingFill: .black, fillAlignment: .center)
+                    AppleRemoteImage(url: url, placeholderSystemImage: "", loadingFill: .clear, keepsImageWhileReloading: true, fillAlignment: .center)
                         .blur(radius: 30)
                         .overlay(Color.black.opacity(0.35))
                     // Sized to a 2:3 poster: a fitted image in
                     // `AppleRemoteImage` is pinned to its leading edge.
-                    AppleRemoteImage(url: url, contentMode: .fit, placeholderSystemImage: "", onLoad: phoneSlotArtLoaded,
-                                     onFailure: phoneSlotArtFailed, loadingFill: .clear)
+                    AppleRemoteImage(url: url, contentMode: .fit, placeholderSystemImage: "", onLoad: { phoneSlotArtLoaded($0, art: art) },
+                                     onFailure: { phoneSlotArtFailed(art) }, loadingFill: .clear, keepsImageWhileReloading: true)
                         .frame(width: max(0, phoneSlotHeight - 24) * 2 / 3, height: max(0, phoneSlotHeight - 24))
                         .clipShape(.rect(cornerRadius: 8))
                 }
             }
+            if slotArt.itemID == item.id, let image = heroStill.image, let displayed = slotArt.displayed {
+                AppleTitlePageDecodedSlotImage(image: image, art: displayed, slotHeight: phoneSlotHeight)
+            } else if let cached = cachedPhoneSlotArt {
+                AppleTitlePageDecodedSlotImage(image: cached.image, art: cached.art, slotHeight: phoneSlotHeight)
+                    .onAppear { phoneSlotArtLoaded(cached.image, art: cached.art) }
+                    .task(id: "cached-slot:\(item.id):\(slotArt.itemID ?? "")") {
+                        guard heroStill.image == nil else { return }
+                        phoneSlotArtLoaded(cached.image, art: cached.art)
+                    }
+            }
         }
-        .id(phoneSlotArt?.url)
-        .transition(.opacity)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: phoneSlotArt)
+        .id(item.id)
     }
 
-    private func phoneSlotArtLoaded(_ image: CGImage) {
+    private func phoneSlotArtLoaded(_ image: CGImage, art: AppleTitlePageSlotArt) {
+        guard slotArt.itemID == item.id,
+              AppleTitlePageSlotArt.acceptsLoadedArt(art, requested: phoneSlotArt, displayed: slotArt.displayed) else { return }
+        if slotArt.chosen == nil { slotArt.chosen = art }
+        slotArt.displayed = art
         heroStill.image = image
         heroStill.art = heroStill.art.settling(with: .loaded)
-        fillTimeline.mark(.artwork)
+        fillTimeline.recordArtworkDecoded()
     }
 
     /// The wordmark once it has drawn, otherwise the name in black-weight
@@ -10246,7 +10294,7 @@ extension AppleCatalogItemDetailView {
                     onLoad: { image in
                         heroStill.image = image
                         heroStill.art = heroStill.art.settling(with: .loaded)
-                        fillTimeline.mark(.artwork)
+                        fillTimeline.recordArtworkDecoded()
                     },
                     onFailure: heroArtworkFailed,
                     keepsImageWhileReloading: true,

@@ -288,6 +288,12 @@ actor AppleRemoteImageCache {
         init(_ image: CGImage) { self.image = image }
     }
 
+    private final class PlaceholderEntry {
+        weak var entry: Entry?
+        init(_ entry: Entry) { self.entry = entry }
+    }
+
+    nonisolated(unsafe) private let placeholders = NSCache<NSString, PlaceholderEntry>()
     nonisolated(unsafe) private let cache = NSCache<NSString, Entry>()
     private var inFlight: [NSString: Task<CGImage, any Error>] = [:]
     private let loader: Loader
@@ -295,6 +301,7 @@ actor AppleRemoteImageCache {
     init(loader: @escaping Loader = AppleRemoteImageCache.load) {
         self.loader = loader
         cache.countLimit = 300
+        placeholders.countLimit = 300
         cache.totalCostLimit = 160 * 1_024 * 1_024
     }
 
@@ -302,12 +309,23 @@ actor AppleRemoteImageCache {
     /// thread-safe.
     nonisolated func removeAllCached() {
         cache.removeAllObjects()
+        placeholders.removeAllObjects()
     }
 
     /// The decoded image if it is already in memory, without waiting on the
     /// actor. `NSCache` is thread-safe.
     nonisolated func cachedImage(url: URL, maximumPixelDimension: Int) -> CGImage? {
         cache.object(forKey: "\(url.absoluteString)|\(maximumPixelDimension)" as NSString)?.image
+    }
+
+    /// An already decoded bitmap at any size. The weak index adds no image
+    /// retention beyond the existing bounded variant cache.
+    nonisolated func cachedPlaceholderImage(url: URL) -> CGImage? {
+        placeholders.object(forKey: url.absoluteString as NSString)?.entry?.image
+    }
+
+    private func rememberPlaceholder(_ entry: Entry, url: URL) {
+        placeholders.setObject(PlaceholderEntry(entry), forKey: url.absoluteString as NSString)
     }
 
     func image(url: URL, maximumPixelDimension: Int) async throws -> CGImage {
@@ -318,18 +336,23 @@ actor AppleRemoteImageCache {
             throw URLError(.unsupportedURL)
         }
         let key = "\(url.absoluteString)|\(maximumPixelDimension)" as NSString
-        if let cached = cache.object(forKey: key) { return cached.image }
+        if let cached = cache.object(forKey: key) {
+            rememberPlaceholder(cached, url: url)
+            return cached.image
+        }
         if let task = inFlight[key] { return try await task.value }
 
         let task = Task<CGImage, any Error> { try await loader(url, maximumPixelDimension) }
         inFlight[key] = task
         defer { inFlight[key] = nil }
         let decoded = try await task.value
+        let entry = Entry(decoded)
         cache.setObject(
-            Entry(decoded),
+            entry,
             forKey: key,
             cost: decoded.bytesPerRow * decoded.height
         )
+        rememberPlaceholder(entry, url: url)
         return decoded
     }
 

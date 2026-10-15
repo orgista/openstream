@@ -29,3 +29,13 @@ Serial Swift suite (≥ 3363 passing), iOS + tvOS builds with recompile greps, E
 the pre-existing player skip-position assert) and E2E-tvOS 20/0. Simulator builds use
 `-derivedDataPath $HOME/Developer/sim-dd-internal`; everything through `scripts/mini.sh`/buildlock, foreground.
 Proof: before/after distributions of the three milestones. No commits. Report per AGENTS.md §7.
+
+## Handoff 2026-10-15 (Codex hit its weekly limit mid-task; work Claude finishes)
+Codex's partial edits are in the working tree (AppleDiscoverView title-page hunks, AppleDetailFillTimeline,
+AppleDetailFillSpeedTests, AppleLibraryTitlesDebugView, AppleLocalLibraryTile, AppleiOSStubSmokeUITests, and its
+console/run scripts on the mini in /tmp/openstream-title-speed-*). Its full log: /private/tmp/claude-501/-Volumes-Files-Projects/181ad4ad-2f9d-477b-bbf9-4afd7ae766a4/scratchpad/codex-titlespeed.log.
+Review what it did against items 1–4, finish what is missing, and run every gate. The before baseline must come from a
+clean HEAD copy on the mini (it never ran). The hero job is committed (98d4efb); AppleDiscoverView is yours now.
+Also do: the Library hero title swap at ~8 s, see "5 follow-up" in /private/tmp/claude-501/-Volumes-Files-Projects/181ad4ad-2f9d-477b-bbf9-4afd7ae766a4/scratchpad/hero3-report.md (cached metadata merged
+into the groups before contentDidChange() in AppleLocalLibraryStore.publishPersistedIndex); prove with a
+Library+4s/+10s screenshot pair that the first hero page keeps its title.

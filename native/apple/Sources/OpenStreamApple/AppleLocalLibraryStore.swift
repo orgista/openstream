@@ -126,8 +126,13 @@ final class AppleLocalLibraryStore {
         self.sources = activeSources
         self.groups = realGroups
         episodesByGroup = await Self.episodeCandidates(groups: realGroups, sources: activeSources, offlineIDs: [:])
+        // Known matches go out with the groups: published bare, the Library
+        // hero drew one title and then rebuilt with another page first when
+        // the scan merged the same cache ~6 s later.
+        let cached = await metadataResolver.cachedMetadata(for: realGroups)
+        metadata.merge(cached) { _, persisted in persisted }
         contentDidChange()
-        appleTrace("library published from persisted index: \(publishedCount) titles")
+        appleTrace("library published from persisted index: \(publishedCount) titles, \(cached.count) cached matches")
         return true
     }
     /// Bumped whenever `groups` or `metadata` changes, so `sortedCache` knows

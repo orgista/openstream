@@ -2,18 +2,13 @@ import CoreGraphics
 import Foundation
 
 /// The iPhone title page's header art: a 16:9 slot the trailer crossfades
-/// over (Mythos §5). Chosen once the page's metadata has answered (or a
-/// short deadline has passed) and then held, so the first art drawn is the
-/// final art: no poster that turns into a backdrop, no wordmark that
-/// replaces a text title (previous agent's note on Taskmaster/Spider-Man).
+/// over (Mythos §5). Known catalog art draws immediately; better metadata
+/// can replace it after decoding, while the previous image stays visible.
 public enum AppleTitlePageSlotArt: Equatable, Sendable {
     /// Fills the 16:9 slot exactly.
     case backdrop(URL)
     /// No backdrop anywhere: the poster as a card on a blurred copy of itself.
     case posterCard(URL)
-
-    /// How long the page waits for its metadata before choosing from what it has.
-    public static let deadline: Duration = .milliseconds(1_500)
 
     /// Backdrops first (textless first), then posters; failed images skipped.
     public static func choose(backdrops: [URL?], posters: [URL?], failed: Set<URL> = []) -> AppleTitlePageSlotArt? {
@@ -22,10 +17,35 @@ public enum AppleTitlePageSlotArt: Equatable, Sendable {
         return nil
     }
 
-    /// Whether the page knows enough to choose: its details have answered,
-    /// or the deadline has passed.
-    public static func isReady(detailsAnswered: Bool, deadlinePassed: Bool) -> Bool {
-        detailsAnswered || deadlinePassed
+    /// Prefer a decoded backdrop, then a decoded poster, without starting
+    /// any I/O. An uncached better candidate can replace this later.
+    public static func chooseCached(backdrops: [URL?], posters: [URL?],
+        cachedImage: (URL) -> CGImage?) -> (art: AppleTitlePageSlotArt, image: CGImage)? {
+        let candidates = backdrops.compactMap { $0 }.map(Self.backdrop)
+            + posters.compactMap { $0 }.map(Self.posterCard)
+        for art in candidates {
+            if let image = cachedImage(art.url) { return (art, image) }
+        }
+        return nil
+    }
+
+    /// An answer with no art is a stable placeholder; known art never waits
+    /// for a provider or a timer to become eligible.
+    public static func isReady(knownArt: AppleTitlePageSlotArt?, detailsAnswered: Bool) -> Bool {
+        knownArt != nil || detailsAnswered
+    }
+
+    public static func updating(_ current: AppleTitlePageSlotArt?, with candidate: AppleTitlePageSlotArt?) -> AppleTitlePageSlotArt? {
+        guard let candidate else { return current }
+        if let current, case .backdrop = current, case .posterCard = candidate { return current }
+        return candidate
+    }
+
+    /// Keep a first usable picture while a better candidate is still loading;
+    /// after a picture is displayed, obsolete completions cannot replace it.
+    public static func acceptsLoadedArt(_ loaded: AppleTitlePageSlotArt,
+        requested: AppleTitlePageSlotArt?, displayed: AppleTitlePageSlotArt?) -> Bool {
+        loaded == requested || displayed == nil
     }
 
     public var url: URL {

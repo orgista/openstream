@@ -313,6 +313,9 @@ public enum AppleMediaEpisodePolicy {
 #if OPENSTREAM_ADDONS
 public struct AppleMediaMetadataClient: Sendable {
     public typealias Loader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private static let liveIdentityLookups = AppleSharedMetadataLookup<String?>()
+    private let identityLookups: AppleSharedMetadataLookup<String?>
+    var identityLookupWaiterCount: Int { get async { await identityLookups.activeWaiterCount } }
     private let loader: Loader
     private let metadataCache: AppleMetadataDiskCache?
     /// How long the other add-ons may still add episodes once one has answered.
@@ -350,6 +353,7 @@ public struct AppleMediaMetadataClient: Sendable {
     }
 
     public init() {
+        self.identityLookups = Self.liveIdentityLookups
         self.loader = Self.liveMetaLoader
         self.metadataCache = .shared
         self.mergeGrace = .seconds(1)
@@ -357,6 +361,7 @@ public struct AppleMediaMetadataClient: Sendable {
 
     /// Injected transports remain independent of process-wide persisted data.
     public init(loader: @escaping Loader) {
+        self.identityLookups = AppleSharedMetadataLookup()
         self.loader = loader
         self.metadataCache = nil
         self.mergeGrace = .seconds(1)
@@ -367,6 +372,7 @@ public struct AppleMediaMetadataClient: Sendable {
         metadataCache: AppleMetadataDiskCache?,
         mergeGrace: Duration = .seconds(1)
     ) {
+        self.identityLookups = AppleSharedMetadataLookup()
         self.loader = loader
         self.metadataCache = metadataCache
         self.mergeGrace = mergeGrace
@@ -661,13 +667,55 @@ public struct AppleMediaMetadataClient: Sendable {
         }
         let candidates = eligible.filter { $0.id == preferredSourceID }
             + eligible.filter { $0.id != preferredSourceID }
-        for source in candidates {
-            if Task.isCancelled { return nil }
-            if let resolved = try? await metaIMDBID(source: source, type: type, id: id) {
-                return resolved
-            }
+        let key = ApplePlaybackIdentity.digest(for: [type, id, preferredSourceID?.uuidString ?? "",
+            candidates.map { $0.id.uuidString }.joined(separator: ","),
+            AppleLibraryMetadataResolver.configurationDigest(candidates, "", "")].joined(separator: "|"))
+        return try? await identityLookups.value(for: key) {
+            await resolveIdentity(candidates: candidates, type: type, id: id)
         }
-        return nil
+    }
+
+    /// Three sources at a time, with an eight-second request budget and a
+    /// twelve-second overall budget. Preserve source priority when answers
+    /// conflict, while slow sources no longer serialize the whole walk. Play
+    /// needs this id, so the budget is wider than the details' one second:
+    /// add-ons answering in 1.2-2.3 s were seen on the Apple TV, and a cut-off
+    /// add-on leaves Play with no streams, so the caps are generous; the
+    /// walk still returns as soon as the best-ranked answer is in.
+    private func resolveIdentity(candidates: [AppleSource], type: String, id: String) async -> String? {
+        guard !candidates.isEmpty, !Task.isCancelled else { return nil }
+        return await withTaskGroup(of: (Int, String?).self) { group in
+            var next = 0
+            func enqueue(_ index: Int, in group: inout TaskGroup<(Int, String?)>) {
+                let source = candidates[index]
+                group.addTask {
+                    let value = try? await appleBoundedMetadataLookup(timeout: .seconds(8)) {
+                        try await metaIMDBID(source: source, type: type, id: id)
+                    }
+                    return (index, value)
+                }
+            }
+            while next < min(3, candidates.count) { enqueue(next, in: &group); next += 1 }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(12))
+                return (-1, nil)
+            }
+            defer { group.cancelAll() }
+            var completed = Set<Int>()
+            var answers: [Int: String] = [:]
+            while let (index, value) = await group.next() {
+                guard !Task.isCancelled else { return nil }
+                if index == -1 { break }
+                completed.insert(index)
+                if let value { answers[index] = value }
+                if let best = answers.keys.min(), (0..<best).allSatisfy({ completed.contains($0) }) {
+                    return answers[best]
+                }
+                if completed.count == candidates.count { break }
+                if next < candidates.count { enqueue(next, in: &group); next += 1 }
+            }
+            return answers.keys.min().flatMap { answers[$0] }
+        }
     }
 
     public func previewAssets(

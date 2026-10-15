@@ -17,6 +17,40 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         app?.terminate()
     }
 
+    func testTitlePageFillDistribution() throws {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_SPEED_MEASURE"] == "1" else {
+            throw XCTSkip("Opt-in repeated library opening measurement")
+        }
+        app.launchArguments = ["-OpenStreamLibraryTitlesFixture", "-OpenStreamStubNetwork", Self.stubDirectory,
+            "-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES",
+            "-OpenStreamDebugDetailsDelay", "2"]
+        app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_PATH"] = Self.stubDirectory + "/library"
+        for mode in ["cold", "warm"] {
+            for sample in 1...10 {
+                if mode == "cold" {
+                    app.terminate()
+                    app.launchEnvironment["OPENSTREAM_DETAIL_SPEED_COLD"] = mode == "cold" ? "1" : "0"
+                    app.launch()
+                }
+                let tile = app.descendants(matching: .any).matching(identifier: "library.title.Stub Movie One").firstMatch
+                XCTAssertTrue(tile.waitForExistence(timeout: 60))
+                // The same shelf dwell in both builds lets the normal library
+                // matcher publish catalog fields before navigation.
+                Thread.sleep(forTimeInterval: 2)
+                tile.tap()
+                XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 20))
+                Thread.sleep(forTimeInterval: 2)
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "detail-speed-\(mode)-\(sample)"
+                shot.lifetime = .keepAlways
+                add(shot)
+                let back = app.buttons["detail.back"].firstMatch
+                if back.exists { back.tap() } else { app.navigationBars.buttons.firstMatch.tap() }
+                XCTAssertTrue(tile.waitForExistence(timeout: 10))
+            }
+        }
+    }
+
     func testDiscoverRowOpensATitleFromStubsAndComesBack() {
         configureFixtureLaunch(app)
         app.launch()
