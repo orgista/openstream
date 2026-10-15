@@ -25,7 +25,7 @@ private func appleSecondaryFieldPrompt(_ title: String) -> Text {
 enum AppleNetworkShareRoute: Hashable {
     /// Nil is the server itself, listing its shares.
     case browse(AppleNetworkShareLocation?)
-    case confirm(AppleNetworkShareLocation)
+    case confirm([AppleNetworkShareLocation])
 }
 
 enum AppleNetworkShareEditPart: String, Hashable, Sendable {
@@ -38,6 +38,7 @@ enum AppleNetworkShareEditPart: String, Hashable, Sendable {
 enum AppleNetworkShareStart: Hashable {
     /// A new share; a discovered server arrives with its address filled in.
     case add(AppleNetworkShareServer?)
+    case addFolder(AppleSource.ID)
     case edit(AppleSource.ID, AppleNetworkShareEditPart)
 }
 
@@ -58,7 +59,19 @@ extension AppleNetworkShareSetup {
                     try? sourceStore.networkCredentials(for: $0)
                 }
             }
-            return AppleNetworkShareSetup(server: server, savedCredentials: saved, client: client, resolve: resolve)
+            return AppleNetworkShareSetup(server: server, savedCredentials: saved, existingSources: sourceStore.sources, client: client, resolve: resolve)
+        case .addFolder(let id):
+            guard let source = sourceStore.sources.first(where: { $0.id == id && $0.kind == .nas }),
+                  let parts = try? AppleSMBEndpointPolicy.parts(from: source.url) else { return nil }
+            let host = source.networkDisplayHost ?? parts.host
+            let server = AppleNetworkShareServer(name: host, host: parts.host, port: parts.port, displayHost: host)
+            let saved = (try? sourceStore.networkCredentials(for: source))
+                ?? AppleNetworkSharePolicy.savedCredentials(for: server, in: sourceStore.sources) {
+                    try? sourceStore.networkCredentials(for: $0)
+                }
+            return AppleNetworkShareSetup(server: server, savedCredentials: saved,
+                existingSources: sourceStore.sources, initialBrowseLocation: .init(share: parts.share),
+                client: client, resolve: resolve)
         case .edit(let id, let part):
             guard let source = sourceStore.sources.first(where: { $0.id == id && $0.kind == .nas }),
                   let parts = try? AppleSMBEndpointPolicy.parts(from: source.url) else { return nil }
@@ -81,6 +94,7 @@ extension AppleNetworkShareSetup {
                 existingName: source.name,
                 savedCredentials: (try? sourceStore.networkCredentials(for: source))
                     ?? AppleSMBCredentials(username: "", password: ""),
+                existingSources: sourceStore.sources,
                 client: client,
                 resolve: resolve
             )
@@ -114,9 +128,9 @@ struct AppleNetworkShareStepView: View {
         if let setup = flow.setup {
             switch route {
             case .browse(let location):
-                AppleNetworkShareBrowseView(setup: setup, location: location)
-            case .confirm(let location):
-                AppleNetworkShareConfirmView(setup: setup, location: location, sourceStore: sourceStore) {
+                AppleNetworkShareBrowseView(setup: setup, location: location, sourceStore: sourceStore)
+            case .confirm(let locations):
+                AppleNetworkShareConfirmView(setup: setup, locations: locations, sourceStore: sourceStore) {
                     if let navigator, let depth = flow.originDepth { navigator.pop(depth) } else { dismiss() }
                 }
             }
@@ -170,6 +184,7 @@ struct AppleNetworkShareConnectView: View {
     private var title: String {
         switch start {
         case .add(let server): server?.name ?? "Add Network Share"
+        case .addFolder: "Add Folder"
         case .edit(_, .server): "Server"
         case .edit(_, .folder): "Folder"
         case .edit(_, .account): "Account"
@@ -179,7 +194,7 @@ struct AppleNetworkShareConnectView: View {
     private func advance(_ setup: AppleNetworkShareSetup) {
         switch setup.outcome {
         case .browse:
-            navigator?.push(AppleNetworkShareRoute.browse(nil))
+            navigator?.push(AppleNetworkShareRoute.browse(setup.initialBrowseLocation))
         case .saveAccount:
             if setup.saveAccount(to: sourceStore) { finish() }
         }
@@ -199,8 +214,14 @@ struct AppleNetworkShareConnectView: View {
         Task { @MainActor in
             guard await fixture.connect(), let navigator else { return }
             let media = AppleNetworkShareLocation(share: "Media")
-            let steps: [AppleNetworkShareRoute] = step == "add"
-                ? [.browse(nil), .browse(media), .confirm(media.appending("Movies"))]
+            if step.hasPrefix("multi") {
+                fixture.toggleSelection(media.appending("Movies"))
+                fixture.toggleSelection(media.appending("TV Shows"))
+            }
+            let steps: [AppleNetworkShareRoute] = step == "multi-add"
+                ? [.browse(nil), .browse(media), .confirm(fixture.selectedLocations)]
+                : step == "add"
+                ? [.browse(nil), .browse(media), .confirm([media.appending("Movies")])]
                 : [.browse(nil), .browse(media)]
             for route in steps {
                 try? await Task.sleep(for: .milliseconds(700))
@@ -497,6 +518,7 @@ private struct AppleNetworkShareConnectForm: View {
 struct AppleNetworkShareBrowseView: View {
     let setup: AppleNetworkShareSetup
     let location: AppleNetworkShareLocation?
+    let sourceStore: AppleSourceStore
 
     @State private var listing: AppleNetworkShareListing?
     @State private var failure: String?
@@ -505,12 +527,17 @@ struct AppleNetworkShareBrowseView: View {
     var body: some View {
         AppleSettingsCollection {
             #if !os(macOS)
-            if let location {
+            Section { addButton }
+            #endif
+            if let location, setup.allowsMultipleFolders {
                 Section {
-                    addButton(location)
+                    HStack {
+                        Text(location.folderName)
+                        Spacer()
+                        selectionButton(location)
+                    }
                 }
             }
-            #endif
             Section {
                 rows
             } header: {
@@ -525,18 +552,15 @@ struct AppleNetworkShareBrowseView: View {
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         #if os(macOS)
         .safeAreaInset(edge: .bottom) {
-            if let location {
-                AppleFormActionBar {
-                    Button("Add This Folder") { add(location) }
-                        .buttonStyle(.brandPrimary)
-                        .keyboardShortcut(.defaultAction)
-                        .accessibilityIdentifier("sources.smb.addFolder")
-                }
+            AppleFormActionBar { addButton.buttonStyle(.brandPrimary).keyboardShortcut(.defaultAction) }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-            }
         }
         #endif
+        .onAppear { setup.updateExistingSources(sourceStore.sources) }
+        .onChange(of: sourceStore.sources, initial: true) {
+            setup.updateExistingSources(sourceStore.sources)
+        }
         .task(id: attempt) {
             guard let location else { return }
             failure = nil
@@ -599,30 +623,65 @@ struct AppleNetworkShareBrowseView: View {
         destination: AppleNetworkShareLocation,
         systemImage: String
     ) -> some View {
-        NavigationLink(value: AppleNetworkShareRoute.browse(destination)) {
-            AppleNetworkShareFolderRow(
-                name: name,
-                systemImage: systemImage,
-                videoCount: setup.videoCounts[destination]
-            )
+        HStack {
+            NavigationLink(value: AppleNetworkShareRoute.browse(destination)) {
+                AppleNetworkShareFolderRow(name: name, systemImage: systemImage, videoCount: setup.videoCounts[destination])
+            }
+            .appleTVReadableFocus()
+            if setup.allowsMultipleFolders { selectionButton(destination) }
         }
-        .appleTVReadableFocus()
+        #if os(tvOS)
+        .focusSection()
+        #endif
         .task { await setup.loadVideoCount(at: destination) }
     }
 
-    #if !os(macOS)
-    private func addButton(_ location: AppleNetworkShareLocation) -> some View {
-        Button { add(location) } label: {
-            AppleTVNavigationLabel("Add This Folder", systemImage: "plus.circle")
-                .foregroundStyle(AppleDesignTokens.textPrimary)
+    private var foldersToConfirm: [AppleNetworkShareLocation] {
+        if setup.allowsMultipleFolders, !setup.selectedLocations.isEmpty { return setup.selectedLocations }
+        guard let location, setup.selectionState(for: location).canToggle else { return [] }
+        return [location]
+    }
+
+    private var addTitle: String {
+        if !setup.allowsMultipleFolders { return "Save This Folder" }
+        let count = setup.selectedLocations.count
+        return count > 1 ? "Add \(count) Folders" : "Add Folders"
+    }
+
+    private var addButton: some View {
+        Button {
+            let folders = foldersToConfirm
+            guard !folders.isEmpty else { return }
+            navigator?.push(AppleNetworkShareRoute.confirm(folders))
+        } label: {
+            AppleTVNavigationLabel(addTitle, systemImage: "plus.circle")
+                .foregroundStyle(.primary)
         }
         .appleTVReadableFocus()
+        .disabled(foldersToConfirm.isEmpty)
         .accessibilityIdentifier("sources.smb.addFolder")
     }
-    #endif
 
-    private func add(_ location: AppleNetworkShareLocation) {
-        navigator?.push(AppleNetworkShareRoute.confirm(location))
+    private func selectionButton(_ destination: AppleNetworkShareLocation) -> some View {
+        let state = setup.selectionState(for: destination)
+        return Button {
+            guard state.canToggle else { return }
+            setup.toggleSelection(destination)
+        } label: {
+            Image(systemName: state.isChecked ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(.primary)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        #if os(tvOS)
+        .buttonStyle(.borderless)
+        .opacity(state.canToggle ? 1 : 0.5)
+        #else
+        .buttonStyle(.plain)
+        #endif
+        .disabled(!state.canToggle)
+        .accessibilityLabel("Select \(destination.folderName)")
+        .accessibilityValue(state == .added ? "Already added" : state == .overlap ? "Overlapping folder" : state.isChecked ? "Selected" : "Not selected")
+        .accessibilityIdentifier("sources.smb.select.\(destination.share)/\(destination.path)")
     }
 
     private func breadcrumb(_ location: AppleNetworkShareLocation) -> String {
@@ -658,37 +717,50 @@ private struct AppleNetworkShareFolderRow: View {
 @MainActor
 struct AppleNetworkShareConfirmView: View {
     let setup: AppleNetworkShareSetup
-    let location: AppleNetworkShareLocation
+    let locations: [AppleNetworkShareLocation]
     let sourceStore: AppleSourceStore
     let onFinish: () -> Void
 
-    @State private var name = ""
+    @State private var folders: [AppleNetworkShareNamedFolder] = []
     @State private var failure: String?
     @State private var didPrefill = false
+    @State private var isSaving = false
 
     private var actionTitle: String { setup.purpose == .add ? "Add" : "Save" }
+    private var title: String { locations.count == 1 ? locations[0].folderName : "Add Folders" }
 
     var body: some View {
         content
-            .appleSettingsPageTitle(location.folderName)
+            .appleSettingsPageTitle(title)
             .onAppear {
                 guard !didPrefill else { return }
                 didPrefill = true
-                name = setup.proposedName(for: location)
+                folders = locations.map { .init(location: $0, name: setup.proposedName(for: $0)) }
             }
     }
 
     private func save() {
+        guard !isSaving, !folders.isEmpty else { return }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try setup.save(location: location, name: name, to: sourceStore)
+            try setup.saveFolders(folders, to: sourceStore)
             onFinish()
         } catch {
             failure = error.localizedDescription
         }
     }
 
-    private var folderLabel: String {
+    private func folderLabel(_ location: AppleNetworkShareLocation) -> String {
         ([location.share] + location.path.split(separator: "/").map(String.init)).joined(separator: " › ")
+    }
+
+    private func nameField(_ folder: Binding<AppleNetworkShareNamedFolder>) -> some View {
+        TextField("Name", text: folder.name, prompt: appleSecondaryFieldPrompt("Name"))
+            .appleTVFieldOutline()
+            .accessibilityLabel("Name for \(folder.wrappedValue.location.folderName)")
+            .accessibilityIdentifier(folder.wrappedValue.location == locations.first
+                ? "sources.smb.name" : "sources.smb.name.\(folder.wrappedValue.location.path)")
     }
 
     #if os(tvOS)
@@ -696,25 +768,18 @@ struct AppleNetworkShareConfirmView: View {
         let metrics = AppleTVSettingsMetrics.standard
         return ScrollView {
             VStack(alignment: .leading, spacing: metrics.groupSpacing) {
-                AppleTVFormGroup("Name") {
-                    TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
-                        .appleTVFieldOutline()
-                        .accessibilityIdentifier("sources.smb.name")
-                    Text("\(setup.server?.name ?? "") · \(folderLabel)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                ForEach($folders) { $folder in
+                    AppleTVFormGroup(folderLabel(folder.location)) {
+                        nameField($folder)
+                    }
+                    .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
+                    .focusSection()
                 }
-                .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
-                .focusSection()
-
                 Button(actionTitle, action: save)
                     .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                     .accessibilityIdentifier("sources.smb.add")
                     .focusSection()
-
-                if let failure {
-                    AppleTVFormMessage(text: failure, isError: true)
-                }
+                if let failure { AppleTVFormMessage(text: failure, isError: true) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, AppleTVChromeMetrics.verticalSafeInset)
@@ -724,27 +789,21 @@ struct AppleNetworkShareConfirmView: View {
     #else
     private var content: some View {
         Form {
-            Section("Name") {
-                TextField("Name", text: $name, prompt: appleSecondaryFieldPrompt("Name"))
-                    .appleTVFieldOutline()
-                            .onSubmit(save)
-                    #if os(macOS)
-                    .labelsHidden()
-                    #endif
-                    .accessibilityIdentifier("sources.smb.name")
-            }
             Section {
                 LabeledContent("Server", value: setup.server?.name ?? "")
-                LabeledContent("Folder") {
-                    Text(folderLabel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+            }
+            ForEach($folders) { $folder in
+                Section(folderLabel(folder.location)) {
+                    nameField($folder)
+                        #if os(macOS)
+                        .labelsHidden()
+                        #endif
                 }
             }
             if let failure {
                 Section {
                     Label(failure, systemImage: "exclamationmark.circle")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(.secondary)
                 }
             }
             #if os(macOS)
@@ -754,9 +813,7 @@ struct AppleNetworkShareConfirmView: View {
         .appleSettingsContent()
         #if !os(macOS)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                addButton
-            }
+            ToolbarItem(placement: .confirmationAction) { addButton }
         }
         #endif
     }

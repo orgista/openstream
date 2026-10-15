@@ -1518,7 +1518,10 @@ public final class AppleSourceStore {
             .map { String($0.prefix(200)) }
 
         if let index = sources.firstIndex(where: { $0.kind == .nas && $0.url == url }) {
-            let reference = sources[index].credentialReference ?? sources[index].id.uuidString.lowercased()
+            let oldReference = sources[index].credentialReference
+            let reference = try networkCredentialReference(
+                server: .init(name: host, host: host, port: port, displayHost: displayHost), credentials: credentials,
+                excluding: sources[index].id, preferred: sources[index].credentialReference ?? sources[index].id.uuidString.lowercased())
             try updateNetworkCredentials(credentials, reference: reference)
             sources[index].name = displayName
             sources[index].isEnabled = true
@@ -1530,11 +1533,14 @@ public final class AppleSourceStore {
             sources[index].discoveredItemCount = discoveredItemCount.map { min(max($0, 0), 1_000_000) }
             sources[index].capabilities = boundedCapabilities(capabilities)
             persist()
+            retireNetworkCredential(oldReference, keeping: reference)
             return sources[index]
         }
 
         let id = UUID()
-        let reference = id.uuidString.lowercased()
+        let reference = try networkCredentialReference(
+            server: .init(name: host, host: host, port: port, displayHost: displayHost), credentials: credentials,
+            preferred: id.uuidString.lowercased())
         try updateNetworkCredentials(credentials, reference: reference)
         let source = AppleSource(
             id: id,
@@ -1576,12 +1582,15 @@ public final class AppleSourceStore {
             .components(separatedBy: .controlCharacters)
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let reference = sources[index].credentialReference ?? sources[index].id.uuidString.lowercased()
-        try updateNetworkCredentials(AppleSMBCredentials(
+        let oldReference = sources[index].credentialReference
+        let cleanCredentials = AppleSMBCredentials(
             username: String(credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).prefix(512)),
             password: String(credentials.password.prefix(512)),
-            domain: String(credentials.domain.trimmingCharacters(in: .whitespacesAndNewlines).prefix(256))
-        ), reference: reference)
+            domain: String(credentials.domain.trimmingCharacters(in: .whitespacesAndNewlines).prefix(256)))
+        let reference = try networkCredentialReference(
+            server: .init(name: host, host: host, port: port, displayHost: displayHost), credentials: cleanCredentials,
+            excluding: id, preferred: sources[index].credentialReference ?? id.uuidString.lowercased())
+        try updateNetworkCredentials(cleanCredentials, reference: reference)
         sources[index].name = cleanName.isEmpty ? share : cleanName
         sources[index].url = url
         sources[index].isEnabled = true
@@ -1591,6 +1600,7 @@ public final class AppleSourceStore {
         sources[index].lastValidatedAt = .now
         sources[index].validationSummary = validationSummary.flatMap(boundedStatus)
         persist()
+        retireNetworkCredential(oldReference, keeping: reference)
         // Open playback sessions still carry the old address or account.
         Task { await AppleSMBRangeServer.shared.removeAllSessions() }
         return sources[index]
@@ -1730,12 +1740,49 @@ public final class AppleSourceStore {
         credentialError = nil
     }
 
+    /// Folders on one server/account share a key. An account/server edit
+    /// detaches when its old key is still used by another folder.
+    private func networkCredentialReference(
+        server: AppleNetworkShareServer,
+        credentials: AppleSMBCredentials,
+        excluding id: UUID? = nil,
+        preferred: String? = nil
+    ) throws -> String {
+        for source in sources where source.id != id && AppleNetworkSharePolicy.sameServer(source, as: server) {
+            guard let reference = source.credentialReference,
+                  let saved = try networkCredentials(for: source),
+                  saved.username == credentials.username, saved.domain == credentials.domain else { continue }
+            return reference
+        }
+        if let preferred, !sources.contains(where: { $0.id != id && $0.credentialReference == preferred }) {
+            return preferred
+        }
+        return UUID().uuidString.lowercased()
+    }
+
+    private func retireNetworkCredential(_ oldReference: String?, keeping reference: String) {
+        guard let oldReference, oldReference != reference else { return }
+        pendingCredentialCleanupReferences = Array(Set(pendingCredentialCleanupReferences + [oldReference])).sorted()
+        persistPendingCredentialCleanup()
+        retryPendingCredentialCleanup()
+    }
+
     private func updateNetworkCredentials(_ credentials: AppleSMBCredentials, reference: String) throws {
+        let stored = try keychain.string(for: reference)
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(AppleSMBCredentials.self, from: $0) }
+        if stored == credentials {
+            credentialError = nil
+            return
+        }
         let data = try JSONEncoder().encode(credentials)
         guard let value = String(data: data, encoding: .utf8) else {
             throw AppleKeychainStoreError.invalidData
         }
         try keychain.set(value, for: reference)
+        for index in sources.indices where sources[index].kind == .nas && sources[index].credentialReference == reference {
+            sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
+        }
         credentialError = nil
     }
 

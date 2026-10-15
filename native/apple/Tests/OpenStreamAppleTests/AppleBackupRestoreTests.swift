@@ -159,6 +159,46 @@ struct AppleFullBackupTests {
         #expect(try pad.sources.configurationSecrets().sourceCredentials[ids[2]] != nil)
     }
 
+    @Test func twoFoldersFromOneShareRestoreWithTheirAddressesAndCredentials() async throws {
+        let keys = MemoryBackupKeys()
+        let phone = try BackupTestDevice(keys: keys)
+        defer { phone.tearDown() }
+        let movies = try phone.sources.addNetworkShare(name: "Movies", host: "fixture.example", port: 1445,
+            share: "Media", path: "Movies/4K", username: "fixture-user", password: "fixture-password", domain: "FIXTURE")
+        let shows = try phone.sources.addNetworkShare(name: "Shows", host: "fixture.example", port: 1445,
+            share: "Media", path: "TV Shows", username: "fixture-user", password: "fixture-password", domain: "FIXTURE")
+        #expect(movies.credentialReference == shows.credentialReference)
+        let data = try await phone.controller.export(passphrase: "")
+        let pad = try BackupTestDevice(keys: keys)
+        defer { pad.tearDown() }
+        #expect(try pad.controller.inspectBackup(data).snapshot?.sources.count == 2)
+        try await pad.controller.restore(data, passphrase: "")
+        let restored = pad.sources.sources
+        #expect(restored.map(\.id) == [movies.id, shows.id])
+        #expect(restored.map(\.url) == [movies.url, shows.url])
+        #expect(restored.allSatisfy { !$0.needsSignIn && $0.isEnabled })
+        for folder in restored {
+            #expect(try pad.sources.networkCredentials(for: folder) == AppleSMBCredentials(
+                username: "fixture-user", password: "fixture-password", domain: "FIXTURE"))
+        }
+        #expect(pad.sources.remove(id: movies.id))
+        let restoredShows = try #require(restored.first { $0.id == shows.id })
+        #expect(try pad.sources.networkCredentials(for: restoredShows)?.password == "fixture-password")
+
+        // The existing portable cloud shape still carries both folder identities;
+        // full addresses/accounts reconnect through per-ID iCloud Keychain mirrors.
+        try phone.sources.prepareConfigurationKeychain()
+        let cloud = AppleConfigurationSnapshot(sources: phone.sources.sources)
+        let decoded = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: cloud.cloudData())
+        #expect(decoded.sources.map(\.id) == [movies.id, shows.id])
+        #expect(decoded.sources.allSatisfy { $0.credentialReference == nil })
+        #expect(try phone.sources.restoreConfigurationSources(decoded.sources, secrets: nil, merge: false) == 0)
+        #expect(phone.sources.sources.map(\.url) == [movies.url, shows.url])
+        for folder in phone.sources.sources {
+            #expect(try phone.sources.networkCredentials(for: folder)?.domain == "FIXTURE")
+        }
+    }
+
     @Test func anotherAppleAccountCannotOpenTheICloudKeyBackup() async throws {
         let (phone, _) = try seededPhone(keys: MemoryBackupKeys())
         defer { phone.tearDown() }

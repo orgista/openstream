@@ -45,7 +45,13 @@ private actor SetupFakeClient: AppleNetworkShareClient {
 
 private final class SetupCredentialStore: AppleCredentialStoring {
     var values: [String: String] = [:]
-    func string(for account: String) throws -> String? { values[account] }
+    var failOnRead: Int?
+    private var reads = 0
+    func string(for account: String) throws -> String? {
+        reads += 1
+        if reads == failOnRead { throw AppleKeychainStoreError.invalidData }
+        return values[account]
+    }
     func set(_ value: String, for account: String) throws { values[account] = value }
     func remove(_ account: String) throws { values.removeValue(forKey: account) }
 }
@@ -414,4 +420,186 @@ struct AppleNetworkShareSetupTests {
         #expect(throws: AppleSMBError.invalidPort) { try AppleNetworkSharePolicy.server(address: "127.0.0.1", port: "abc") }
         #expect(throws: AppleSMBError.invalidPort) { try AppleNetworkSharePolicy.server(address: "127.0.0.1", port: "0") }
     }
+    @Test func selectionsSurviveBrowsingAndRejectOverlaps() async throws {
+        let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient(
+            shares: [AppleSMBShare(name: "Media")], directories: ["Media": [], "Media/TV": []]))
+        #expect(await setup.connect())
+        let movies = AppleNetworkShareLocation(share: "Media", path: "Movies")
+        let episodeFolder = AppleNetworkShareLocation(share: "Media", path: "TV/Show")
+        setup.toggleSelection(movies)
+        _ = try await setup.listing(at: AppleNetworkShareLocation(share: "Media"))
+        _ = try await setup.listing(at: AppleNetworkShareLocation(share: "Media", path: "TV"))
+        setup.toggleSelection(episodeFolder)
+        #expect(setup.selectedLocations == [movies, episodeFolder])
+        #expect(setup.selectionState(for: movies) == .selected)
+        #expect(setup.selectionState(for: movies.appending("4K")) == .overlap)
+        #expect(setup.selectionState(for: AppleNetworkShareLocation(share: "Media")) == .overlap)
+        #expect(setup.selectionState(for: AppleNetworkShareLocation(share: "Media", path: "Movies2")) == .available)
+        #expect(setup.selectionState(for: AppleNetworkShareLocation(share: "Other", path: "Movies")) == .available)
+        setup.toggleSelection(movies.appending("4K"))
+        #expect(setup.selectedLocations.count == 2)
+        setup.toggleSelection(movies)
+        #expect(setup.selectionState(for: movies.appending("4K")) == .available)
+        #expect(setup.selectedLocations == [episodeFolder])
+    }
+
+    @Test func alreadyAddedFoldersAreCheckedAndBlockParentsAndChildren() async throws {
+        let (store, _, cleanup) = try makeStore()
+        defer { cleanup() }
+        let saved = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies")
+        let setup = AppleNetworkShareSetup(server: fixtureServer, existingSources: store.sources, client: SetupFakeClient())
+        #expect(await setup.connect())
+        #expect(setup.selectionState(for: .init(share: "MEDIA", path: "movies")) == .added)
+        #expect(setup.selectionState(for: .init(share: "Media")) == .overlap)
+        #expect(setup.selectionState(for: .init(share: "Media", path: "Movies/4K")) == .overlap)
+        setup.toggleSelection(.init(share: "Media", path: "Movies"))
+        #expect(setup.selectedLocations.isEmpty)
+        let editing = AppleNetworkShareSetup(purpose: .editFolder(saved.id), server: fixtureServer,
+            existingSources: store.sources, client: SetupFakeClient())
+        #expect(await editing.connect())
+        #expect(editing.selectionState(for: .init(share: "Media")) == .available)
+    }
+
+    @Test func severalFoldersSaveWithOneCredentialAndRemovalKeepsItUntilLastSource() async throws {
+        let (store, keychain, cleanup) = try makeStore()
+        defer { cleanup() }
+        let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient())
+        setup.account = .registered
+        setup.username = "fixture-user"
+        setup.password = "fixture-password"
+        #expect(await setup.connect())
+        let folders = [AppleNetworkShareLocation(share: "Media", path: "Movies"),
+                       AppleNetworkShareLocation(share: "Media", path: "TV/Shows")]
+        let drafts = folders.map { AppleNetworkShareNamedFolder(location: $0, name: setup.defaultName(for: $0)) }
+        let added = try setup.saveFolders(drafts, to: store)
+        try #require(added.count == 2)
+        #expect(added.map(\.name) == ["Movies on Fixture NAS", "Shows on Fixture NAS"])
+        let reference = try #require(added.first?.credentialReference)
+        #expect(added.allSatisfy { $0.credentialReference == reference })
+        #expect(keychain.values.count == 1)
+        #expect(store.remove(id: added[0].id))
+        #expect(try store.networkCredentials(for: added[1])?.password == "fixture-password")
+        #expect(keychain.values[reference] != nil)
+        #expect(store.remove(id: added[1].id))
+        #expect(keychain.values[reference] == nil)
+    }
+
+    @Test func saveRechecksFoldersAddedWhileTheBrowserWasOpen() async throws {
+        let (store, _, cleanup) = try makeStore()
+        defer { cleanup() }
+        let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient())
+        #expect(await setup.connect())
+        setup.toggleSelection(.init(share: "Media", path: "Movies/4K"))
+        _ = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies")
+        #expect(throws: AppleNetworkShareSelectionError.overlap) {
+            try setup.saveFolders([.init(location: .init(share: "Media", path: "Movies/4K"), name: "4K")], to: store)
+        }
+        #expect(store.sources.count == 1)
+        setup.updateExistingSources(store.sources)
+        #expect(setup.selectedLocations.isEmpty)
+        #expect(setup.selectionState(for: .init(share: "Media", path: "Movies/4K")) == .overlap)
+        setup.toggleSelection(.init(share: "Media", path: "Shows"))
+        #expect(setup.selectedLocations == [.init(share: "Media", path: "Shows")])
+    }
+
+    @Test func groupUsesServerPortAndShareAndPreservesFolderRows() throws {
+        let movie = AppleSource(kind: .nas, name: "Movies", url: try #require(URL(string: "smb://fixture.example/Media/Movies")))
+        let tv = AppleSource(kind: .nas, name: "TV", url: try #require(URL(string: "smb://FIXTURE.example/media/TV")))
+        let otherShare = AppleSource(kind: .nas, name: "Archive", url: try #require(URL(string: "smb://fixture.example/Archive")))
+        let otherPort = AppleSource(kind: .nas, name: "Other", url: try #require(URL(string: "smb://fixture.example:1445/Media")))
+        let live = AppleSource(kind: .liveTV, name: "Live", url: try #require(URL(string: "https://fixture.example/")))
+        let groups = AppleNetworkSharePolicy.groups(in: [movie, live, tv, otherShare, otherPort])
+        try #require(groups.count == 3)
+        #expect(groups[0].sources.map(\.id) == [movie.id, tv.id])
+        #expect(groups[0].title == "Media on fixture.example")
+        #expect(groups[1].sources.map(\.id) == [otherShare.id])
+        #expect(groups[2].sources.map(\.id) == [otherPort.id])
+    }
+
+    @Test(arguments: [("127.0.0.1", "other-user"), ("127.0.0.2", "fixture-user")])
+    func changingSharedAccountOrServerDoesNotOverwriteSiblingCredentials(_ host: String, _ username: String) throws {
+        let (store, keychain, cleanup) = try makeStore()
+        defer { cleanup() }
+        let first = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies",
+            username: "fixture-user", password: "fixture-password")
+        let second = try store.addNetworkShare(name: "Shows", host: "127.0.0.1", share: "Media", path: "Shows",
+            username: "fixture-user", password: "fixture-password")
+        #expect(first.credentialReference == second.credentialReference)
+        let edited = try store.updateNetworkShare(id: first.id, name: first.name, host: host, port: 445,
+            share: "Media", path: "Movies", credentials: .init(username: username, password: "other-password"),
+            displayHost: nil, validationSummary: "Connected")
+        #expect(edited.credentialReference != second.credentialReference)
+        #expect(try store.networkCredentials(for: second)?.username == "fixture-user")
+        #expect(try store.networkCredentials(for: second)?.password == "fixture-password")
+        #expect(try store.networkCredentials(for: edited)?.username == username)
+        let detachedReference = try #require(edited.credentialReference)
+        let rejoined = try store.updateNetworkShare(id: first.id, name: first.name, host: "127.0.0.1", port: 445,
+            share: "Media", path: "Movies", credentials: .init(username: "fixture-user", password: "fixture-password"),
+            displayHost: nil, validationSummary: "Connected")
+        #expect(rejoined.credentialReference == second.credentialReference)
+        #expect(keychain.values[detachedReference] == nil)
+        #expect(store.remove(id: rejoined.id))
+        #expect(try store.networkCredentials(for: second)?.password == "fixture-password")
+    }
+
+    @Test func aKeychainFailureRollsBackTheWholeFolderBatch() async throws {
+        let (store, keychain, cleanup) = try makeStore()
+        defer { cleanup() }
+        let setup = AppleNetworkShareSetup(server: fixtureServer, client: SetupFakeClient())
+        #expect(await setup.connect())
+        keychain.failOnRead = 2
+        #expect(throws: AppleKeychainStoreError.self) {
+            try setup.saveFolders([
+                .init(location: .init(share: "Media", path: "Movies"), name: "Movies"),
+                .init(location: .init(share: "Media", path: "TV"), name: "TV"),
+            ], to: store)
+        }
+        #expect(store.sources.isEmpty)
+        #expect(keychain.values.isEmpty)
+        keychain.failOnRead = nil
+        let retry = try setup.saveFolders([
+            .init(location: .init(share: "Media", path: "Movies"), name: "Movies"),
+            .init(location: .init(share: "Media", path: "TV"), name: "TV"),
+        ], to: store)
+        #expect(retry.count == 2)
+        #expect(store.sources.count == 2)
+    }
+
+    @Test func addFolderStartsAtItsShareWithTheSavedAccount() async throws {
+        let (store, keychain, cleanup) = try makeStore()
+        defer { cleanup() }
+        let source = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies",
+            username: "fixture-user", password: "fixture-password")
+        let client = SetupFakeClient(shares: [AppleSMBShare(name: "Media")], acceptedUsername: "fixture-user")
+        let setup = try #require(AppleNetworkShareSetup.make(for: .addFolder(source.id), sourceStore: store, client: client))
+        #expect(setup.shouldConnectAutomatically)
+        #expect(await setup.connectWithSavedCredentials())
+        #expect(setup.initialBrowseLocation == AppleNetworkShareLocation(share: "Media"))
+        #expect(setup.selectionState(for: .init(share: "Media", path: "Movies")) == .added)
+        #expect(setup.selectedLocations.isEmpty)
+        #expect(setup.credentials?.username == "fixture-user")
+        _ = try store.addNetworkShare(name: "Shows", host: "127.0.0.1", share: "Media", path: "Shows",
+            username: "second-user", password: "fixture-password")
+        let reference = try #require(source.credentialReference)
+        keychain.values.removeValue(forKey: reference)
+        let fallback = try #require(AppleNetworkShareSetup.make(for: .addFolder(source.id), sourceStore: store,
+            client: SetupFakeClient(shares: [AppleSMBShare(name: "Media")], acceptedUsername: "second-user")))
+        #expect(fallback.shouldConnectAutomatically)
+        #expect(await fallback.connectWithSavedCredentials())
+        #expect(fallback.credentials?.username == "second-user")
+    }
+
+    @Test func aNewPasswordForTheSameServerAccountReusesItsCredentialAndInvalidatesSiblings() throws {
+        let (store, _, cleanup) = try makeStore()
+        defer { cleanup() }
+        let first = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies",
+            username: "fixture-user", password: "fixture-password")
+        let second = try store.addNetworkShare(name: "Shows", host: "127.0.0.1", share: "Media", path: "Shows",
+            username: "fixture-user", password: "new-fixture-password")
+        #expect(first.credentialReference == second.credentialReference)
+        #expect(try store.networkCredentials(for: first)?.password == "new-fixture-password")
+        let updated = try #require(store.sources.first { $0.id == first.id })
+        #expect(updated.configurationRevision > first.configurationRevision)
+    }
+
 }

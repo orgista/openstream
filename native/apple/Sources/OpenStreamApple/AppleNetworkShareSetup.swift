@@ -219,17 +219,83 @@ enum AppleNetworkSharePolicy {
         in sources: [AppleSource],
         lookup: (AppleSource) -> AppleSMBCredentials?
     ) -> AppleSMBCredentials? {
-        let host = server.host.lowercased()
-        let displayHost = server.displayHost.lowercased()
-        for source in sources where source.kind == .nas {
-            guard let parts = try? AppleSMBEndpointPolicy.parts(from: source.url), parts.port == server.port else {
-                continue
-            }
-            let sameHost = AppleSMBEndpointPolicy.normalizedHost(parts.host).lowercased() == host
-                || source.networkDisplayHost?.lowercased() == displayHost
-            if sameHost, let credentials = lookup(source) { return credentials }
+        for source in sources where sameServer(source, as: server) {
+            if let credentials = lookup(source) { return credentials }
         }
         return nil
+    }
+}
+
+/// A selected folder's editable name. This is setup state, never a stored schema.
+struct AppleNetworkShareNamedFolder: Identifiable, Sendable {
+    let location: AppleNetworkShareLocation
+    var name: String
+    var id: AppleNetworkShareLocation { location }
+}
+
+enum AppleNetworkShareSelectionState: Equatable, Sendable {
+    case available, selected, added, overlap
+
+    var isChecked: Bool { self == .selected || self == .added }
+    var canToggle: Bool { self == .available || self == .selected }
+}
+
+enum AppleNetworkShareSelectionError: LocalizedError, Equatable {
+    case overlap
+    var errorDescription: String? { "These folders overlap a folder already selected or added." }
+}
+
+struct AppleNetworkShareGroup: Identifiable {
+    let server: AppleNetworkShareServer
+    let share: String
+    var sources: [AppleSource]
+    var id: String { "\(server.endpointLabel.lowercased())/\(share.lowercased())" }
+    var title: String { "\(share) on \(server.endpointLabel)" }
+}
+
+extension AppleNetworkSharePolicy {
+    static func sameServer(_ source: AppleSource, as server: AppleNetworkShareServer) -> Bool {
+        guard source.kind == .nas, let parts = try? AppleSMBEndpointPolicy.parts(from: source.url),
+              parts.port == server.port else { return false }
+        let hosts = Set([server.host, server.displayHost].map { AppleSMBEndpointPolicy.normalizedHost($0).lowercased() })
+        return hosts.contains(AppleSMBEndpointPolicy.normalizedHost(parts.host).lowercased())
+            || source.networkDisplayHost.map { hosts.contains(AppleSMBEndpointPolicy.normalizedHost($0).lowercased()) } == true
+    }
+
+    static func overlaps(_ first: AppleNetworkShareLocation, _ second: AppleNetworkShareLocation) -> Bool {
+        guard first.share.lowercased() == second.share.lowercased() else { return false }
+        let a = first.path.lowercased().split(separator: "/")
+        let b = second.path.lowercased().split(separator: "/")
+        return a.starts(with: b) || b.starts(with: a)
+    }
+
+    static func sameLocation(_ first: AppleNetworkShareLocation, _ second: AppleNetworkShareLocation) -> Bool {
+        first.share.lowercased() == second.share.lowercased() && first.path.lowercased() == second.path.lowercased()
+    }
+
+    static func locations(on server: AppleNetworkShareServer, in sources: [AppleSource], excluding id: UUID? = nil) -> [AppleNetworkShareLocation] {
+        sources.compactMap { source in
+            guard source.id != id, sameServer(source, as: server),
+                  let parts = try? AppleSMBEndpointPolicy.parts(from: source.url) else { return nil }
+            return AppleNetworkShareLocation(share: parts.share, path: parts.path)
+        }
+    }
+
+    static func groups(in sources: [AppleSource]) -> [AppleNetworkShareGroup] {
+        var groups: [AppleNetworkShareGroup] = []
+        for source in sources where source.kind == .nas {
+            guard let parts = try? AppleSMBEndpointPolicy.parts(from: source.url) else { continue }
+            if let index = groups.firstIndex(where: {
+                sameServer(source, as: $0.server) && $0.share.lowercased() == parts.share.lowercased()
+            }) {
+                groups[index].sources.append(source)
+            } else {
+                let host = source.networkDisplayHost ?? parts.host
+                groups.append(AppleNetworkShareGroup(server: .init(name: host, host: parts.host, port: parts.port, displayHost: host),
+                    share: parts.share, sources: [source]))
+            }
+        }
+        return groups
     }
 }
 
@@ -282,6 +348,54 @@ final class AppleNetworkShareSetup {
     private(set) var shares: [AppleSMBShare] = []
     private(set) var videoCounts: [AppleNetworkShareLocation: Int] = [:]
 
+    private var existingSources: [AppleSource]
+    let initialBrowseLocation: AppleNetworkShareLocation?
+
+    private(set) var selectedLocations: [AppleNetworkShareLocation] = []
+
+    var allowsMultipleFolders: Bool { purpose == .add }
+
+    func selectionState(for location: AppleNetworkShareLocation) -> AppleNetworkShareSelectionState {
+        let added = server.map { AppleNetworkSharePolicy.locations(on: $0, in: existingSources, excluding: purpose.sourceID) } ?? []
+        if added.contains(where: { AppleNetworkSharePolicy.sameLocation($0, location) }) { return .added }
+        if selectedLocations.contains(where: { AppleNetworkSharePolicy.sameLocation($0, location) }) { return .selected }
+        if (added + selectedLocations).contains(where: { AppleNetworkSharePolicy.overlaps($0, location) }) { return .overlap }
+        return .available
+    }
+
+    func toggleSelection(_ location: AppleNetworkShareLocation) {
+        switch selectionState(for: location) {
+        case .selected: selectedLocations.removeAll { AppleNetworkSharePolicy.sameLocation($0, location) }
+        case .available: selectedLocations.append(location)
+        case .added, .overlap: break
+        }
+    }
+
+    @discardableResult
+    func saveFolders(_ folders: [AppleNetworkShareNamedFolder], to store: AppleSourceStore) throws -> [AppleSource] {
+        guard let server else { throw AppleSMBError.connectionFailed }
+        guard !folders.isEmpty, allowsMultipleFolders || folders.count == 1 else { throw AppleSMBError.invalidShare }
+        var reserved = AppleNetworkSharePolicy.locations(on: server, in: store.sources, excluding: purpose.sourceID)
+        for folder in folders {
+            guard !reserved.contains(where: { AppleNetworkSharePolicy.overlaps($0, folder.location) }) else {
+                throw AppleNetworkShareSelectionError.overlap
+            }
+            reserved.append(folder.location)
+        }
+        var added: [AppleSource] = []
+        do {
+            for folder in folders { added.append(try save(location: folder.location, name: folder.name, to: store)) }
+            return added
+        } catch {
+            // Only add flows create new identities. Undo this batch if Keychain
+            // becomes unavailable partway through, so Retry cannot double-add.
+            if allowsMultipleFolders {
+                for source in added.reversed() { _ = store.remove(id: source.id) }
+            }
+            throw error
+        }
+    }
+
     private let savedCredentials: AppleSMBCredentials?
     private var triedSavedCredentials = false
     private let client: any AppleNetworkShareClient
@@ -293,9 +407,13 @@ final class AppleNetworkShareSetup {
         currentLocation: AppleNetworkShareLocation? = nil,
         existingName: String? = nil,
         savedCredentials: AppleSMBCredentials? = nil,
+        existingSources: [AppleSource] = [],
+        initialBrowseLocation: AppleNetworkShareLocation? = nil,
         client: any AppleNetworkShareClient,
         resolve: @escaping Resolver = { _ in nil }
     ) {
+        self.existingSources = existingSources
+        self.initialBrowseLocation = initialBrowseLocation
         self.purpose = purpose
         self.currentLocation = currentLocation
         self.originalServer = server
@@ -318,6 +436,15 @@ final class AppleNetworkShareSetup {
         username = saved.username
         password = saved.password
         domain = saved.domain
+    }
+
+    func updateExistingSources(_ sources: [AppleSource]) {
+        existingSources = sources
+        guard let server else { return }
+        let added = AppleNetworkSharePolicy.locations(on: server, in: sources, excluding: purpose.sourceID)
+        selectedLocations.removeAll { selected in
+            added.contains { AppleNetworkSharePolicy.overlaps($0, selected) }
+        }
     }
 
     var outcome: ConnectOutcome {
@@ -388,6 +515,7 @@ final class AppleNetworkShareSetup {
                 _ = try await client.listDirectory(url: url, credentials: submitted, recursive: false)
                 try Task.checkCancellation()
             }
+            if server != resolved { selectedLocations = [] }
             server = resolved
             credentials = submitted
             shares = AppleNetworkSharePolicy.visibleShares(listed)

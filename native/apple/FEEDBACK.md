@@ -4682,3 +4682,10 @@ The TV baseline passes 20/0. iOS meets 40/1 cumulatively after focused detail/pl
 DVD titles now return to their menu when they finish. Opening Disc Menu keeps the current DVD session and its resume point; Blu-ray films no longer offer that control. Skip to Movie keeps DVD navigation available, including a saved starting position. Subtitles without a language tag appear as Unknown, with numbers when needed, and require a manual choice.
 
 Both simulators passed all 34 disc/caption cases after correcting the tests for native controls and authored DVD resume behavior. The full baselines were Apple TV 20/0 and iPhone 40/1 (the existing Live AirPlay case). The final Swift suite passed 3,309 tests, and the engine DVD/HTTP suite passed 113. Original data was restored and test services stopped. Authenticated SMB remains untested because the saved Mini Keychain password requires interactive access; no credentials were created or changed. Evidence is under `verification-artifacts/iso-menus-2026-10-13/review-fixes-*`.
+
+
+## 2026-10-14 — Several folders per network share
+
+You can select several folders from a network share, name each one before adding them, and add more folders from its group in Sources. Folders on the same server and account share saved credentials. Removing one source keeps the account available to the other folders. The saved source and backup formats are unchanged.
+
+The package checks passed 3,363 tests in 410 suites, and all three app builds passed (Mac without signing). Apple TV passed 20/0. iPhone remains 39/2 instead of the requested 40/1: the existing Live case and player skip-position check still fail after retries. The same player assertion was present before this change. No real SMB server was configured; the four fixture screenshots are under `verification-artifacts/share-multi-folder-2026-10-13/`. Direct tap verification was unavailable because the simulator control agent is absent. Original data was restored and the simulators closed. No commit or upload.

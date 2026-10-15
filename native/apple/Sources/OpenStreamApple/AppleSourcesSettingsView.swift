@@ -78,6 +78,8 @@ public final class AppleUnavailableWebManagementService: AppleWebManagementServi
 struct AppleSourcesSettingsView: View {
     @State private var showingLibraryImporter = false
     @State private var importError: String?
+    @State private var networkGroups: [AppleNetworkShareGroup] = []
+    @State private var ungroupedSources: [AppleSource] = []
     #if DEBUG
     @State private var debugDetailSourceID: AppleSource.ID?
     #endif
@@ -146,26 +148,31 @@ struct AppleSourcesSettingsView: View {
             // "CONNECTION". Everywhere else the header takes the platform's
             // own case like its neighbours; forcing it read "YOUR SOURCES"
             // among the Mac's title-case headers (N54 #13).
-            Section {
-                if sourceStore.sources.isEmpty {
-                    Text("No sources")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(sourceStore.sources) { source in
-                        NavigationLink(value: AppleSourceRoute.detail(source.id)) {
-                            AppleSourceRow(source: source)
+            if sourceStore.sources.isEmpty || !ungroupedSources.isEmpty {
+                Section {
+                    if sourceStore.sources.isEmpty {
+                        Text("No sources")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(ungroupedSources) { source in
+                            NavigationLink(value: AppleSourceRoute.detail(source.id)) {
+                                AppleSourceRow(source: source)
+                            }
+                            .appleTVReadableFocus()
                         }
-                        .appleTVReadableFocus()
                     }
+                } header: {
+                    // Scoped to the header on purpose: `.textCase` on the Section
+                    // uppercases its *rows* too, which turned every source name
+                    // into "TORRENTIO TB".
+                    Text("Your Sources")
+                        #if os(tvOS)
+                        .textCase(.uppercase)
+                        #endif
                 }
-            } header: {
-                // Scoped to the header on purpose: `.textCase` on the Section
-                // uppercases its *rows* too, which turned every source name
-                // into "TORRENTIO TB".
-                Text("Your Sources")
-                    #if os(tvOS)
-                    .textCase(.uppercase)
-                    #endif
+            }
+            ForEach(networkGroups) { group in
+                AppleNetworkShareSourcesSection(group: group)
             }
             #if os(tvOS)
             Section {
@@ -177,6 +184,11 @@ struct AppleSourcesSettingsView: View {
                 Text("iCloud Sync").textCase(.uppercase)
             }
             #endif
+        }
+        .onChange(of: sourceStore.sources, initial: true) {
+            networkGroups = AppleNetworkSharePolicy.groups(in: sourceStore.sources)
+            let groupedIDs = Set(networkGroups.flatMap { $0.sources.map(\.id) })
+            ungroupedSources = sourceStore.sources.filter { !groupedIDs.contains($0.id) }
         }
         .appleSettingsPane("Sources", embedded: embeddedInSplit)
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
@@ -203,6 +215,8 @@ struct AppleSourcesSettingsView: View {
                 AppleNetworkShareConnectView(start: .add(nil), flow: .shared, sourceStore: sourceStore)
             case .networkShareServer(let server):
                 AppleNetworkShareConnectView(start: .add(server), flow: .shared, sourceStore: sourceStore)
+            case .addNetworkShareFolder(let id):
+                AppleNetworkShareConnectView(start: .addFolder(id), flow: .shared, sourceStore: sourceStore)
             case .editNetworkShare(let id, let part):
                 AppleNetworkShareConnectView(start: .edit(id, part), flow: .shared, sourceStore: sourceStore)
             case .addARR:
@@ -283,6 +297,7 @@ enum AppleSourceRoute: Hashable {
     case addNetworkShare
     /// A server found on the network: Connect with its address filled in.
     case networkShareServer(AppleNetworkShareServer)
+    case addNetworkShareFolder(AppleSource.ID)
     case editNetworkShare(AppleSource.ID, AppleNetworkShareEditPart)
     case addARR
     case webManagement
@@ -2053,5 +2068,27 @@ private extension View {
         #else
         self.textSelection(.enabled)
         #endif
+    }
+}
+
+@MainActor
+private struct AppleNetworkShareSourcesSection: View {
+    let group: AppleNetworkShareGroup
+
+    var body: some View {
+        Section(group.title) {
+            ForEach(group.sources) { source in
+                NavigationLink(value: AppleSourceRoute.detail(source.id)) { AppleSourceRow(source: source) }
+                    .appleTVReadableFocus()
+                    .accessibilityIdentifier("sources.smb.saved.\(source.id)")
+            }
+            if let sourceID = group.sources.first?.id {
+                NavigationLink(value: AppleSourceRoute.addNetworkShareFolder(sourceID)) {
+                    AppleTVNavigationLabel("Add Folder", systemImage: "folder.badge.plus")
+                }
+                .appleTVReadableFocus()
+                .accessibilityIdentifier("sources.smb.addToShare.\(group.id)")
+            }
+        }
     }
 }
