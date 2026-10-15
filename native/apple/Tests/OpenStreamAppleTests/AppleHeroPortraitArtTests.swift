@@ -218,7 +218,7 @@ import Testing
         #expect(layout.topOverlap == layout.topInset + AppleHomePhoneHeroLayout.stackTopPadding)
     }
 
-    @Test func aPosterKeepsItsTopBiasInTheTallerFrame() {
+    @Test func aPosterFillsTheTallFrameCentredAcross() {
         // A 2:3 poster in 430 × 680 (15 Pro Max): it fills the height and
         // loses 23 pt across, centred; nothing is lost top or bottom.
         let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
@@ -227,6 +227,40 @@ import Testing
         #expect(abs(rect.width - 453.3) < 0.5)
         #expect(abs(rect.midX - 215) < 0.5)
         #expect(rect.minY == 0)
+    }
+
+    @Test func aPosterKeepsItsTopBiasInTheShortSEFrame() {
+        // The same poster in 375 × 466 (iPhone SE): it fills the width and
+        // 96.5 pt are cropped, 35 % of them from the top (`focalPoint`).
+        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
+                                                 in: CGSize(width: 375, height: 466))
+        #expect(abs(rect.width - 375) < 0.5)
+        #expect(abs(rect.height - 562.5) < 0.5)
+        #expect(rect.minX == 0)
+        #expect(abs(rect.minY - -(562.5 - 466) * AppleHeroPortraitArt.focalPoint.y) < 0.5)
+    }
+
+    @Test func theTrailerCoverIsDrawnTopEdgeUp() throws {
+        // A 1 × 4 image, three red rows over one blue, drawn four times its
+        // frame's height from the top: only red lands in the frame (the blue
+        // edge is far enough below it that smoothing cannot reach it).
+        let red: [UInt8] = [255, 0, 0, 255], blue: [UInt8] = [0, 0, 255, 255]
+        let pixels = red + red + red + blue // RGBA, top row first
+        let provider = try #require(CGDataProvider(data: Data(pixels) as CFData))
+        let image = try #require(CGImage(width: 1, height: 4, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 4,
+                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                         bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                                         provider: provider, decode: nil, shouldInterpolate: false,
+                                         intent: .defaultIntent))
+        let cover = try #require(AppleHeroPortraitCover.draw(image, in: CGRect(x: 0, y: 0, width: 4, height: 16),
+                                                             frame: CGSize(width: 4, height: 4), scale: 2))
+        #expect(cover.width == 8 && cover.height == 8)
+        let data = try #require(cover.dataProvider?.data as Data?)
+        for row in [0, cover.height - 1] {
+            let pixel = data.subdata(in: (row * cover.bytesPerRow)..<(row * cover.bytesPerRow + 4))
+            // BGRX, little-endian: red is the third byte.
+            #expect(pixel[pixel.startIndex + 2] > 200 && pixel[pixel.startIndex] < 50, "row \(row)")
+        }
     }
 
     @Test(arguments: [

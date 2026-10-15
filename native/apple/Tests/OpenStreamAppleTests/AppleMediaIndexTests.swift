@@ -289,6 +289,23 @@ import Testing
     #expect(AppleMediaIngestion.channelRecord(source: source, channel: channelOne).id != AppleMediaIngestion.channelRecord(source: source, channel: channelTwo).id)
 }
 
+@Test func aRememberedLibraryParseMatchesAFreshOne() {
+    // `libraryRecord` parses each file once per run (`AppleLibraryParseMemo`):
+    // asked twice, it answers what the parser says, per name and path.
+    let source = AppleSource(kind: .library, name: "Library", url: URL(fileURLWithPath: "/tmp"))
+    let movie = AppleLibraryItem(sourceID: source.id, name: "Heat.1995.1080p.mkv", url: URL(fileURLWithPath: "/tmp/heat.mkv"),
+                                 relativePath: "Movies/Heat.1995.1080p.mkv", sizeBytes: 1)
+    let other = AppleLibraryItem(sourceID: source.id, name: "Heat.1995.1080p.mkv", url: URL(fileURLWithPath: "/tmp/b/heat.mkv"),
+                                 relativePath: "Heat (1986)/Heat.1995.1080p.mkv", sizeBytes: 1)
+    for item in [movie, other, movie, other] {
+        let record = AppleMediaIngestion.libraryRecord(source: source, item: item)
+        let fresh = AppleLibraryTitleParser.parse(item)
+        #expect(record.title == AppleMediaRecord(kind: .video, title: fresh.title, availability: []).title)
+        #expect(record.year == fresh.year)
+        #expect(AppleLibraryParseMemo.parse(item) == fresh)
+    }
+}
+
 @Test func topShelfSnapshotIsBoundedAndUsesOnlyOpaqueDeepLinks() async throws {
     let root = FileManager.default.temporaryDirectory
         .appending(path: "openstream-topshelf-test-\(UUID().uuidString)", directoryHint: .isDirectory)

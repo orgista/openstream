@@ -1993,6 +1993,9 @@ struct AppleSearchView: View {
         }
         .modifier(AppleMediaPlayerPresentationModifier(presentation: $sharedPlayer))
         // The hero's trailer stops under the player (`AppleHeroTrailerGate`).
+        // No hero is known to sit under Search, but keep this: without it
+        // testCrawlPlayers' detail→player step failed 6 of 6 runs, with it
+        // 4 of 4 passed (exact A/B on Dev-Mini, 2026-10-14; cause not found).
         .environment(\.appleHeroIsCovered, sharedPlayer != nil)
         #if os(iOS)
         .safeAreaInset(edge: .bottom) {

@@ -18,10 +18,11 @@ struct AppleHomePhonePortraitStage: View {
     /// Called once the art is on screen: the choice, its image (for the
     /// still's luminance reading) and the wordmark the choice brought.
     var onReady: (AppleHeroPortraitDecision, CGImage?) -> Void = { _, _ in }
-    /// Set by a hero whose trailer can play: receives the art exactly as it
-    /// is drawn, at the frame's size, for the trailer's cover, so the still
-    /// under a starting or ending trailer is these pixels and nothing jumps.
-    var onCover: ((CGImage?) -> Void)? = nil
+    /// Set by a hero whose trailer can play: receives what the art is drawn
+    /// from, at the frame's size, so the trailer can draw its cover from the
+    /// same pixels and nothing jumps (`AppleHeroPortraitCover`). Nothing is
+    /// rendered here; the trailer renders it once it has a video to play.
+    var onCover: ((AppleHeroPortraitCover?) -> Void)? = nil
 
     @Environment(\.appleTMDBConfiguration) private var configuration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,24 +59,18 @@ struct AppleHomePhonePortraitStage: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         .accessibilityHidden(true)
         .task(id: item.mediaID) { await settle() }
-        .task(id: CoverRequest(shown: shown, size: size, topInset: topInset)) { renderCover() }
+        .onChange(of: CoverRequest(shown: shown, size: size, topInset: topInset), initial: true) { reportCover() }
     }
 
-    /// Draws the shown art once more, off screen, at the frame's size.
-    private func renderCover() {
+    /// Hands the shown art and the frame's size to the trailer, for its cover.
+    private func reportCover() {
         guard let onCover else { return }
         guard let shown, let image = shown.image, size.width > 0, size.height > 0 else {
             onCover(nil)
             return
         }
-        let renderer = ImageRenderer(content:
-            AppleHeroPortraitArtView(art: shown.decision.art, image: image, size: size, focal: shown.focal,
-                                     topInset: topInset)
-                .frame(width: size.width, height: size.height)
-                .background(Color.black))
-        renderer.scale = displayScale
-        renderer.isOpaque = true
-        onCover(renderer.cgImage)
+        onCover(AppleHeroPortraitCover(art: shown.decision.art, image: image, size: size, focal: shown.focal,
+                                       topInset: topInset, scale: displayScale))
     }
 
     private func settle() async {
@@ -168,6 +163,72 @@ enum AppleHeroPortraitMemory {
     static func decision(for mediaID: String) -> AppleHeroPortraitDecision? { decisions[mediaID] }
     static func remember(_ decision: AppleHeroPortraitDecision, for mediaID: String) {
         if decisions[mediaID] == nil { decisions[mediaID] = decision }
+    }
+}
+
+/// The portrait hero's art as the stage draws it, for the trailer's cover:
+/// the still under a starting or ending trailer is these pixels, at the
+/// frame's size. Rendered only when a trailer is about to play (Fable review
+/// 2026-10-14: rendering it on every settle stalled the main thread inside
+/// the page slide, hero or no trailer).
+struct AppleHeroPortraitCover: Equatable {
+    let art: AppleHeroPortraitArt
+    let image: CGImage
+    let size: CGSize
+    let focal: CGPoint
+    let topInset: CGFloat
+    let scale: CGFloat
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.art == rhs.art && lhs.image === rhs.image && lhs.size == rhs.size && lhs.focal == rhs.focal
+            && lhs.topInset == rhs.topInset && lhs.scale == rhs.scale
+    }
+
+    /// Key art and backdrops are a plain crop, drawn off the main actor; the
+    /// poster card's blur needs SwiftUI, so it goes through `ImageRenderer`.
+    @MainActor
+    func render() async -> CGImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let imageSize = CGSize(width: image.width, height: image.height)
+        let rect: CGRect
+        switch art {
+        case .keyArt:
+            rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size)
+        case .backdrop:
+            rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal,
+                                                 subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+        case .posterCard:
+            let renderer = ImageRenderer(content:
+                AppleHeroPortraitArtView(art: art, image: image, size: size, focal: focal, topInset: topInset)
+                    .frame(width: size.width, height: size.height)
+                    .background(Color.black))
+            renderer.scale = scale
+            renderer.isOpaque = true
+            return renderer.cgImage
+        case .none:
+            return nil
+        }
+        let (image, size, scale) = (image, size, scale)
+        return await Task.detached(priority: .userInitiated) {
+            Self.draw(image, in: rect, frame: size, scale: scale)
+        }.value
+    }
+
+    /// `image` at `rect` (points, top-left origin) in an opaque black frame.
+    nonisolated static func draw(_ image: CGImage, in rect: CGRect, frame: CGSize, scale: CGFloat) -> CGImage? {
+        let width = Int((frame.width * scale).rounded())
+        let height = Int((frame.height * scale).rounded())
+        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+                                          | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.interpolationQuality = .high
+        context.scaleBy(x: scale, y: scale)
+        // Core Graphics counts up from the bottom.
+        context.draw(image, in: CGRect(x: rect.minX, y: frame.height - rect.maxY, width: rect.width, height: rect.height))
+        return context.makeImage()
     }
 }
 

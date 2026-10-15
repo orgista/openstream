@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Synchronization
 
 public enum AppleMediaKind: String, Codable, CaseIterable, Sendable {
     case movie
@@ -44,6 +45,35 @@ public struct AppleMediaAvailability: Codable, Equatable, Sendable {
         self.capability = capability
         self.itemReference = ApplePlaybackIdentity.digest(for: itemReference)
         self.lastVerified = lastVerified
+    }
+}
+
+/// `AppleLibraryTitleParser.parse` per file, remembered for the run. Library's
+/// body asks for every file's record id on each pass
+/// (`AppleLocalLibraryStore.playbackID` → `libraryRecord`), and each parse runs
+/// a dozen regular expressions: 2.4 s of main thread per pass for a
+/// 1,472-file library on the iOS 18.6 sim, which held the Library hero's art
+/// back by several seconds (sampled 2026-10-14). The parse depends only on
+/// the name, the path and the parser's version.
+enum AppleLibraryParseMemo {
+    private struct Key: Hashable {
+        let version: Int
+        let name: String
+        let relativePath: String
+    }
+
+    private static let memo = Mutex<[Key: AppleLibraryTitle]>([:])
+    private static let capacity = 20_000
+
+    static func parse(_ item: AppleLibraryItem) -> AppleLibraryTitle {
+        let key = Key(version: AppleLibraryTitleParser.version, name: item.name, relativePath: item.relativePath)
+        if let known = memo.withLock({ $0[key] }) { return known }
+        let parsed = AppleLibraryTitleParser.parse(item)
+        memo.withLock { titles in
+            if titles.count >= capacity { titles.removeAll(keepingCapacity: true) }
+            titles[key] = parsed
+        }
+        return parsed
     }
 }
 
@@ -524,13 +554,14 @@ public enum AppleMediaIngestion {
         item: AppleLibraryItem,
         verifiedAt: Date = .now
     ) -> AppleMediaRecord {
-        AppleMediaRecord(
+        let parsed = AppleLibraryParseMemo.parse(item)
+        return AppleMediaRecord(
             canonicalID: ApplePlaybackIdentity.digest(
                 for: "library|\(source.id.uuidString)|\(item.relativePath)"
             ),
             kind: .video,
-            title: AppleLibraryTitleParser.parse(item).title,
-            year: AppleLibraryTitleParser.parse(item).year,
+            title: parsed.title,
+            year: parsed.year,
             availability: [.init(
                 instanceID: source.id,
                 capability: item.url.pathExtension.lowercased() == "mkv" ? .gateway : .direct,

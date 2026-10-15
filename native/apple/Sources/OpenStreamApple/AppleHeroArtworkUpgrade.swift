@@ -58,19 +58,23 @@ actor AppleHeroArtworkUpgrade {
     /// hero picks its art before it draws and will not wait longer than
     /// this for TMDB. The lookup carries on, so its answer is cached for
     /// the next visit.
-    func artwork(
+    ///
+    /// Nonisolated, with the timer in a detached task: nothing on the way to
+    /// the deadline waits for this actor (a Library launch traced the iPhone
+    /// hero's 1.5 s answer at 8.6 s, 2026-10-14).
+    nonisolated func artwork(
         imdbID: String,
         kind: AppleMediaKind,
         configuration: AppleTMDBConfiguration,
         deadline: Duration
     ) async -> Artwork? {
-        let lookup = Task { await self.artwork(imdbID: imdbID, kind: kind, configuration: configuration) }
+        let lookup = Task.detached { await self.artwork(imdbID: imdbID, kind: kind, configuration: configuration) }
         // A race, not a task group: a group would wait for the lookup it
         // lost to before returning, which is the wait this exists to cap.
         return await withCheckedContinuation { (continuation: CheckedContinuation<Artwork?, Never>) in
             let once = ResumeOnce(continuation)
-            Task { once.resume(await lookup.value) }
-            Task {
+            Task.detached { once.resume(await lookup.value) }
+            Task.detached(priority: .userInitiated) {
                 try? await Task.sleep(for: deadline)
                 once.resume(nil)
             }

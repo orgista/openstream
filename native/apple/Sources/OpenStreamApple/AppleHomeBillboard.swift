@@ -233,8 +233,9 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     /// The iPhone portrait hero's settled art (`AppleHomePhonePortraitStage`).
     @State private var portraitDecision: AppleHeroPortraitDecision?
-    /// That art as drawn, at the hero's size: the iPhone trailer's cover.
-    @State private var portraitCover: CGImage?
+    /// What that art is drawn from, at the hero's size: the iPhone trailer
+    /// renders its cover from it once it has a video to play.
+    @State private var portraitCover: AppleHeroPortraitCover?
 
     private var stillURL: URL? {
         if phone != nil { return portraitDecision?.art.imageURL }
@@ -386,7 +387,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                     }, onCover: { portraitCover = $0 })
                     AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
                                          trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
-                                         art: phoneStillArt, artworkImage: portraitCover, drawsArtworkURL: false,
+                                         art: phoneStillArt, portraitCover: portraitCover, drawsArtworkURL: false,
                                          // Under the top bar: the bottom of the art is under the copy.
                                          controlTopInset: phone.copyFadeLine + 8,
                                          onTrailerOnScreen: { trailerIsOnScreen = $0 })
@@ -500,8 +501,12 @@ private struct AppleHomeHeroPreview: View {
     /// The still under it: the trailer is not asked for until it is up.
     var art: AppleTrailerArtFirstPolicy.Art = .loading
     var artworkImage: CGImage? = nil
-    /// False on the iPhone, whose cover is `artworkImage` alone, cropped as
-    /// its portrait art is: the item's backdrop URL would cover it.
+    /// The iPhone's art, from which the cover is rendered just before its
+    /// trailer starts (`AppleHeroPortraitCover`); it then stands in for
+    /// `artworkImage`.
+    var portraitCover: AppleHeroPortraitCover? = nil
+    /// False on the iPhone, whose cover is its rendered portrait art alone,
+    /// cropped as that art is: the item's backdrop URL would cover it.
     var drawsArtworkURL = true
     /// The Mac hero's round mute button sits this far from the top of the
     /// art (below the toolbar); nil on every other hero.
@@ -544,6 +549,15 @@ private struct AppleHomeHeroPreview: View {
     #endif
 
     @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// `portraitCover` as it is now (a running task sees the value it began
+    /// with), and the cover last rendered from it.
+    @State private var liveCover: AppleHeroPortraitCover?
+    @State private var renderedCover: RenderedCover?
+
+    private struct RenderedCover {
+        let source: AppleHeroPortraitCover
+        let image: CGImage?
+    }
 
     private var shouldPreview: Bool {
         #if os(iOS) || os(visionOS)
@@ -587,7 +601,7 @@ private struct AppleHomeHeroPreview: View {
             if shouldPreview, let embedURL {
                 AppleYouTubeAutoPreview(
                     url: embedURL, artworkURL: drawsArtworkURL ? item.backgroundURL ?? item.posterURL : nil,
-                    artworkImage: artworkImage,
+                    artworkImage: renderedCover?.image ?? artworkImage,
                     isLandscape: true, isPlaying: $isPlaying, isMuted: $isMuted,
                     allowsSound: trailerRequest != nil || soundUnlocked,
                     replayGeneration: $replayGeneration, showsReplay: !isPlaying,
@@ -662,6 +676,11 @@ private struct AppleHomeHeroPreview: View {
                                  isOnScreen: shouldPreview && isPlaying && isRevealed, isMuted: isMuted,
                                  isRequested: trailerRequest != nil, lastEnd: lastEnd))
         .onChange(of: settings.autoMuteTrailer) { _, muted in isMuted = muted }
+        .onChange(of: portraitCover, initial: true) { _, cover in liveCover = cover }
+        // The frame changed under a playing trailer: draw its cover again.
+        .task(id: liveCover) {
+            if embedURL != nil { await renderCover() }
+        }
         #if os(iOS) || os(visionOS)
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.videoAutoplayStatusDidChangeNotification)) { _ in
             systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
@@ -714,6 +733,9 @@ private struct AppleHomeHeroPreview: View {
             preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
         guard !Task.isCancelled, shouldPreview, trailerRequest == nil || requestedTrailerKey != nil, let key = keys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
+        // The cover is drawn only now, with a video to play (Fable review 2026-10-14).
+        await renderCover()
+        guard !Task.isCancelled, shouldPreview else { return }
         trailerKeys = keys
         trailerKeyIndex = 0
         trailerQuality = nil
@@ -726,6 +748,15 @@ private struct AppleHomeHeroPreview: View {
         embedURL = url
         isPlaying = true
         #endif
+    }
+
+    /// Renders the iPhone cover from the art now shown, unless it already was.
+    private func renderCover() async {
+        while let source = liveCover, renderedCover?.source != source {
+            let image = await source.render()
+            guard !Task.isCancelled else { return }
+            renderedCover = RenderedCover(source: source, image: image)
+        }
     }
 
     #if os(iOS) || os(visionOS)

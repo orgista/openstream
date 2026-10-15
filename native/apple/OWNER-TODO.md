@@ -7,6 +7,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **Owner choice (2026-10-15): iPhone on iOS 18, should the top bar be see-through over the hero?** It is solid on
+      purpose since owner fix #52 (title and icons unreadable over bright art). See-through = full-bleed hero like iOS 26,
+      but text over bright posters can be hard to read. Left solid until the owner picks.
+
 - [ ] **Second build Mac (owner 2026-10-14): owner ordered a new Mac Studio; the current Mac Studio (32 GB, 512 GB)
       becomes a build machine instead of being sold.** When the new Studio is set up as the owner's daily Mac: wipe or
       clean-user the old Studio, install Xcode 27 + simulators, build keychain/signing copy, buildlock.sh, disk-guard,

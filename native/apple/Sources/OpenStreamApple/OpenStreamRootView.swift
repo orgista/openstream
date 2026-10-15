@@ -582,6 +582,7 @@ public struct OpenStreamRootView: View {
             selectedTab = .home
         })
         .environment(\.appleSettingsNavigator, settingsNavigator)
+        .modifier(AppleRootHeroCover(router: router))
         .preferredColorScheme(.dark)
         #if !os(tvOS)
         // On Apple TV the global white tint made every tinted control a trap
@@ -892,6 +893,21 @@ private struct AppleFirstRunGuidanceContainer<Content: View>: View {
         #else
         NavigationStack { content }
         #endif
+    }
+}
+
+/// Discover's and Library's hero trailers stop under what the root presents
+/// over whichever tab is up: the PIN prompt and either end of a setup
+/// transfer (`AppleHeroTrailerGate`). The first-run card needs no entry: it
+/// only shows with no sources, so with no hero. Its own modifier, so these
+/// reads never invalidate the root's body (that re-rendered the whole app,
+/// the playing landscape player included: testCrawlPlayers, 2026-10-14).
+private struct AppleRootHeroCover: ViewModifier {
+    let router: AppleAppRouter
+
+    func body(content: Content) -> some View {
+        content.environment(\.appleHeroIsCovered, AppleRestrictionStore.shared.prompt != nil
+            || AppleSetupTransferCenter.shared.showsReceiver || router.setupSendLink != nil)
     }
 }
 
