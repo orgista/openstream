@@ -19,6 +19,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       REA, jellyfin REA, infuse REA handle meta data art work as they often have the meta data correct". Check the
       double spinner on the current build; speed up title open; REA metadata/artwork matching in Stremio, Plex,
       Jellyfin and Infuse; then a better match + fallback chain.
+      Done 2026-10-14: research `design/reference-apps/2026-10-14-metadata-artwork.md`; metadata fixes 947fdc1
+      (ID-first lookup, cleaned search names, year filter + retry, reasoned negative cache with backoff, old matches
+      shown instantly, Fix Match on every platform). Open: the double spinner (owner: which device/tap?), title-page
+      slow fill (research Part B ranks 6-8), Fix Match "1917"-style all-digit names also searched as names,
+      iOS e2e testCrawlPlayers "playback did not settle in 10 s" (new since 16:32 in the shared tree).
 - [ ] **Make the repos public once the App Store approves the app (owner 2026-10-14).** Before that: the private
       history holds commercial movie clips (Tests/Fixtures/private, added 6f807d7, removed dd4e101) and owner notes;
       they must be purged (history rewrite) or the public repo stays the scrubbed export (orgista/openstream-apple).
