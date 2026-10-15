@@ -412,7 +412,8 @@ public struct AppleTMDBClient: Sendable {
                                   configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem {
         guard id > 0 else { throw AppleTMDBError.invalidIdentifier }
         let value = try await load(path: "/3/\(kind == .movie ? "movie" : "tv")/\(id)",
-                                   queryItems: [.init(name: "append_to_response", value: "external_ids")],
+                                   queryItems: [.init(name: "append_to_response", value: "external_ids,images"),
+                                                .init(name: "include_image_language", value: "en,null")],
                                    configuration: configuration, as: SharedTitleEnvelope.self)
         guard let item = value.item(kind: kind) else { throw AppleTMDBError.titleNotFound }
         return item
@@ -433,6 +434,54 @@ public struct AppleTMDBClient: Sendable {
         throw AppleTMDBError.titleNotFound
     }
 
+    /// Resolve the declared media kind; never take a movie result for a series ID.
+    func libraryDetails(provider: String, id: String, kind: AppleLibraryTitle.Kind,
+                        configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem {
+        let mediaKind: SharedLink.Kind = kind == .show ? .show : .movie
+        if provider == "tmdb" {
+            guard let number = Int(id), number > 0 else { throw AppleTMDBError.invalidIdentifier }
+            return try await sharedLinkDetails(id: number, kind: mediaKind, configuration: configuration)
+        }
+        guard provider == "imdb" || provider == "tvdb",
+              provider == "imdb" ? AppleStremioMetadataClient.isIMDBIdentifier(id) : (Int(id) ?? 0) > 0 else {
+            throw AppleTMDBError.invalidIdentifier
+        }
+        let find = try await load(path: "/3/find/\(id)",
+                                  queryItems: [.init(name: "external_source", value: provider + "_id")],
+                                  configuration: configuration, as: FindEnvelope.self)
+        let results = kind == .show ? find.tvResults : find.movieResults
+        guard results.count == 1, let match = results.first else { throw AppleTMDBError.titleNotFound }
+        return try await sharedLinkDetails(id: match.id, kind: mediaKind, configuration: configuration)
+    }
+
+    /// A dated title searches with TMDB's year filter first (a generic name
+    /// such as "Home" or "Heat" may not reach page one without it), then once
+    /// without it for release years that are off by one.
+    func librarySearch(_ parsed: AppleLibraryTitle, configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem? {
+        let kind: SharedLink.Kind = parsed.kind == .show ? .show : .movie
+        let years: [Int?] = parsed.year.map { [$0, nil] } ?? [nil]
+        for year in years {
+            var queryItems = [URLQueryItem(name: "query", value: parsed.title)]
+            if let year {
+                queryItems.append(.init(name: kind == .show ? "first_air_date_year" : "year", value: String(year)))
+            }
+            let result = try await load(path: "/3/search/\(kind == .show ? "tv" : "movie")",
+                                        queryItems: queryItems,
+                                        configuration: configuration, as: SharedSearchEnvelope.self)
+            let items = result.results.compactMap { $0.item(kind: kind) }
+            var aliases: [String: [String]] = [:]
+            for value in result.results {
+                if let item = value.item(kind: kind) {
+                    aliases[item.mediaID] = [value.originalTitle, value.originalName].compactMap { $0 }
+                }
+            }
+            guard let match = AppleLibraryMetadataResolver.bestMatch(items, parsed: parsed, aliases: aliases),
+                  let record = result.results.first(where: { $0.item(kind: kind)?.mediaID == match.mediaID }) else { continue }
+            return try await sharedLinkDetails(id: record.id, kind: kind, configuration: configuration)
+        }
+        return nil
+    }
+
     private struct SharedSearchEnvelope: Decodable, Sendable { let results: [SharedTitleEnvelope] }
     private struct SharedTitleEnvelope: Decodable, Sendable {
         let id: Int
@@ -445,23 +494,32 @@ public struct AppleTMDBClient: Sendable {
         let overview: String?
         let imdbID: String?
         let externalIDs: ExternalIDs?
+        let originalTitle: String?
+        let originalName: String?
+        let images: Images?
         struct ExternalIDs: Decodable, Sendable {
             let imdbID: String?
             enum CodingKeys: String, CodingKey { case imdbID = "imdb_id" }
         }
         enum CodingKeys: String, CodingKey {
-            case id, title, name, overview
+            case id, title, name, overview, images
             case releaseDate = "release_date", firstAirDate = "first_air_date"
             case posterPath = "poster_path", backdropPath = "backdrop_path"
             case imdbID = "imdb_id", externalIDs = "external_ids"
+            case originalTitle = "original_title", originalName = "original_name"
         }
         func item(kind: SharedLink.Kind) -> AppleCatalogItem? {
             guard id > 0, let title = title ?? name, !title.isEmpty else { return nil }
             let imdb = imdbID ?? externalIDs?.imdbID
+            let artwork = AppleTextlessBackdropPolicy.choose(backdrops: images?.backdrops.map(\.artworkImage) ?? [],
+                backdropPath: backdropPath, posterPath: nil)
+            let background: String?
+            if case .textlessBackdrop(let path)? = artwork { background = path }
+            else { background = backdropPath }
             return AppleCatalogItem(mediaID: imdb ?? "tmdb:\(kind == .movie ? "movie" : "tv"):\(id)",
                                     type: kind == .movie ? "movie" : "series", name: title,
                                     posterURL: AppleTMDBClient.imageURL(path: posterPath, width: "w500"),
-                                    backgroundURL: AppleTMDBClient.imageURL(path: backdropPath, width: "w1280"),
+                                    backgroundURL: AppleTMDBClient.imageURL(path: background, width: "w1280"),
                                     summary: overview,
                                     releaseInfo: releaseDate ?? firstAirDate,
                                     year: (releaseDate ?? firstAirDate).flatMap { Int($0.prefix(4)) })

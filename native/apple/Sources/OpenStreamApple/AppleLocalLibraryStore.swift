@@ -313,15 +313,24 @@ final class AppleLocalLibraryStore {
     }
     func resolve(_ group: AppleLibrarySeries, sourceStore: AppleSourceStore, settings: AppleSettingsStore, refresh: Bool = false) async {
         if refresh { recordedIdentityFileIDs.subtract(group.items.map(\.id)) }
-        guard refresh || metadata[group.id] == nil, let file = group.items.first else {
+        guard let file = group.items.first else { return }
+        if !refresh, metadata[group.id] != nil,
+           !(await metadataResolver.needsRevalidation(file, sources: sourceStore.sources,
+                tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey)) {
             playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
             return
         }
-        if let value = try? await metadataResolver.resolve(file, sources: sourceStore.sources,
-            tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey, refresh: refresh), !Task.isCancelled {
-            metadata[group.id] = value
-            recordedIdentityFileIDs.subtract(group.items.map(\.id))
-            contentDidChange()
+        do {
+            let value = try await metadataResolver.resolve(file, sources: sourceStore.sources,
+                tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey, refresh: refresh)
+            guard !Task.isCancelled else { return }
+            if metadata[group.id] != value {
+                metadata[group.id] = value
+                recordedIdentityFileIDs.subtract(group.items.map(\.id))
+                contentDidChange()
+            }
+        } catch {
+            // A cancelled or failed lookup leaves the currently published metadata intact.
         }
         playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
     }
@@ -529,7 +538,7 @@ final class AppleLocalLibraryStore {
             AppleLaunchWorkPolicy.recordScan(sourceDigest: sourceDigest, date: lastScan ?? Date())
         }
     }
-    /// No correction UI exists yet. Persist before publishing; playback keys are untouched.
+    /// Persist before publishing; playback keys are untouched.
     func correctMatch(_ group: AppleLibrarySeries, candidate: AppleCatalogItem, provider: String,
                       explicitIDs: [String: String] = [:], resolver: AppleLibraryMetadataResolver = .shared) async throws {
         guard let file = group.items.first else { return }
@@ -777,6 +786,7 @@ struct AppleLocalTitleDestination: View {
     let tabToolbar: AppleTabToolbarContext?
     var autoPlay = false
     @State private var library = AppleLocalLibraryStore.shared
+    @State private var showsFixMatch = false
     var body: some View {
         if let source = library.sources.first(where: { $0.id == group.items.first?.sourceID }) {
             AppleCatalogItemDetailView(item: library.catalogItem(for: group), source: source, mediaIndex: mediaIndex,
@@ -786,6 +796,10 @@ struct AppleLocalTitleDestination: View {
                 playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
                 openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
                 tabToolbar: tabToolbar)
+                .environment(\.appleLibraryFixMatch, { showsFixMatch = true })
+                .sheet(isPresented: $showsFixMatch) {
+                    AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
+                }
         }
     }
 }

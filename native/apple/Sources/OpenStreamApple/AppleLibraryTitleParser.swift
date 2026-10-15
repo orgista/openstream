@@ -16,6 +16,13 @@ public struct AppleLibraryTitle: Equatable, Sendable {
     public var version: String? = nil
     public var confidence: Double = 0
     public var explicitIDs: [String: String] = [:]
+    public struct Alternative: Equatable, Sendable {
+        public enum Provenance: String, Sendable { case filename, parentFolder }
+        public let title: String
+        public let year: Int?
+        public let provenance: Provenance
+    }
+    public var alternatives: [Alternative] = []
     public var episodeNumbers: [Int] {
         guard role == .feature, let episode else { return [] }
         let end = episodeEnd ?? episode
@@ -25,6 +32,7 @@ public struct AppleLibraryTitle: Equatable, Sendable {
 }
 
 public enum AppleLibraryTitleParser {
+    static let version = 2
     public static func parse(name: String, parentPath: String = "") -> AppleLibraryTitle {
         let parents = parentPath.split(separator: "/").map(String.init)
         let stem = removingExtension(name)
@@ -48,24 +56,58 @@ public enum AppleLibraryTitleParser {
         let isShow = airDate != nil || season != nil || episode != nil || parents.contains { $0.lowercased() == "shows" }
         let part = isShow ? nil : multipartMarker(stem)?.number
         var parsed = clean(stem)
-        if prefersParent(stem) || (role != .feature && parents.contains { fileRole($0) != .feature }) { parsed = ("", nil) }
+        var selectedFromParent = false
+        // A bare 2–4 digit stem (`0001.mkv`, `1917.mkv`) is a disc playlist only
+        // when a title folder exists to defer to; with no folder it is the title.
+        let stemPrefersParent = prefersParent(stem) && (!isShortNumber(stem) || parents.contains {
+            !["movies", "shows", "tv", "media"].contains($0.lowercased()) && !prefersParent($0)
+                && !isDiscFolder($0) && fileRole($0) == .feature && !clean($0).0.isEmpty
+        })
+        if stemPrefersParent || (role != .feature && parents.contains { fileRole($0) != .feature }) { parsed = ("", nil) }
         if isShow {
             // Episode filenames may be “Pilot” or “Episode 2”; the series folder
             // keeps every local season on the same card.
             for parent in parents.reversed() {
                 guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()), !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
                 let candidate = clean(parent)
-                if !candidate.0.isEmpty { parsed = candidate; break }
+                if !candidate.0.isEmpty { parsed = candidate; selectedFromParent = true; break }
             }
         }
-        if parsed.0.isEmpty || (prefersParent(stem) && !isShow) {
+        if parsed.0.isEmpty || (stemPrefersParent && !isShow) {
             parsed = ("", nil)
             for parent in parents.reversed() {
                 guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()), !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
                 let candidate = clean(parent)
-                if !candidate.0.isEmpty { parsed = candidate; break }
+                if !candidate.0.isEmpty { parsed = candidate; selectedFromParent = true; break }
             }
         }
+        // `parsed` is the stored identity (group id, match record, `local-…`
+        // id) and must not move between versions. Search-only normalisation
+        // (release prefixes, edition words, hyphens, the folder's year) lives
+        // in the alternatives, which only ever feed lookups.
+        var alternatives: [AppleLibraryTitle.Alternative] = []
+        var filenameSearch: (String, Int?)?
+        if !parsed.0.isEmpty, !selectedFromParent {
+            let search = clean(stem, forSearch: true)
+            filenameSearch = search.0.isEmpty ? parsed : search
+        }
+        var folderSearch: (String, Int?)?
+        for parent in parents.reversed() {
+            guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()),
+                  !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
+            let candidate = clean(parent, forSearch: true)
+            guard !candidate.0.isEmpty else { continue }
+            folderSearch = candidate
+            // Only the nearest meaningful title folder is evidence.
+            break
+        }
+        if var search = filenameSearch {
+            if search.1 == nil, let folder = folderSearch, folder.0.caseInsensitiveCompare(search.0) == .orderedSame {
+                search.1 = folder.1
+            }
+            alternatives.append(.init(title: search.0, year: search.1, provenance: .filename))
+        }
+        if let folder = folderSearch { alternatives.append(.init(title: folder.0, year: folder.1, provenance: .parentFolder)) }
         let success = !parsed.0.isEmpty
         var result = AppleLibraryTitle(title: success ? parsed.0 : String(name.prefix(24)) + (name.count > 24 ? "…" : ""),
             year: airDate == nil ? parsed.1 : nil, season: season, episode: episode, kind: success ? (isShow ? .show : .movie) : .other)
@@ -76,7 +118,11 @@ public enum AppleLibraryTitleParser {
         result.version = captures(#"(?i)\b(\d{3,4}p|[48]K|(?:[a-z]+[ ._-]+)?edition)\b"#, stem)?.first?.lowercased()
         result.confidence = rangeEnd.map { $0 < (episode ?? 0) || $0 - (episode ?? 0) >= 100 } == true ? 0 : !success ? 0 : (episode != nil || airDate != nil ? 1 : (isShow ? 0.4 : (parsed.1 != nil ? 0.9 : 0.5)))
         if let id = captures(#"(?i)\b(tt\d{7,10})\b"#, full)?.first { result.explicitIDs["imdb"] = id.lowercased() }
-        if let id = captures(#"(?i)\btmdb[ -](\d+)\b"#, full)?.first { result.explicitIDs["tmdb"] = id }
+        for provider in ["tmdb", "tvdb"] {
+            if let id = captures("(?i)\\b" + provider + "(?:id)?[ :=_-]+([0-9]+)\\b", full)?.first,
+               let number = Int(id), number > 0 { result.explicitIDs[provider] = String(number) }
+        }
+        result.alternatives = alternatives
         return result
     }
 
@@ -119,6 +165,11 @@ public enum AppleLibraryTitleParser {
                            options: .regularExpression) != nil
     }
 
+    private static func isShortNumber(_ name: String) -> Bool {
+        let value = name.replacingOccurrences(of: #"\.[A-Za-z0-9]{2,4}$"#, with: "", options: .regularExpression)
+        return value.count < 5 && value.allSatisfy(\.isNumber)
+    }
+
     private static func prefersParent(_ name: String) -> Bool {
         isHash(name) || isDiscPlaylist(name)
     }
@@ -148,11 +199,20 @@ public enum AppleLibraryTitleParser {
         return nil
     }
 
-    private static func clean(_ raw: String) -> (String, Int?) {
+    /// `forSearch: false` is the identity form and must stay byte-for-byte
+    /// what earlier versions produced; new normalisation goes behind `forSearch`.
+    private static func clean(_ raw: String, forSearch: Bool = false) -> (String, Int?) {
         let titleStem: String
         if let marker = multipartMarker(raw) { titleStem = raw.replacingCharacters(in: marker.range, with: " ") }
         else { titleStem = raw }
         var value = titleStem.replacingOccurrences(of: #"^(?:\s*\[[^\]]*\]\s*)+"#, with: "", options: .regularExpression)
+        if forSearch {
+            // Recognized staging and release labels only; never strip arbitrary numbers/groups.
+            value = value.replacingOccurrences(of: #"(?i)^ISO-STAGE-\d+-|^sharphd-"#, with: "", options: .regularExpression)
+            value = value.replacingOccurrences(of: #"(?i)^(?:A[ ._]Marvel[ ._]Television[ ._]Special[ ._]Presentation)[ ._]*--[ ._]*"#, with: "", options: .regularExpression)
+            value = value.replacingOccurrences(of: #"(?i)[{\[]?(?:imdb(?:id)?[ :=_-]+tt\d{7,10}|tmdb(?:id)?[ :=_-]+\d+|tvdb(?:id)?[ :=_-]+\d+)[}\]]?"#, with: " ", options: .regularExpression)
+            value = value.replacingOccurrences(of: #"(?i)\b(?:director'?s[ ._-]+cut|extended[ ._-]+(?:cut|edition)|theatrical[ ._-]+cut|unrated|remastered)\b"#, with: " ", options: .regularExpression)
+        }
         // Tracker stamps: "www.UIndex.org    -    Hey Arnold The Movie 2002…".
         // The mandatory " - " after the domain is what keeps this off real
         // titles — "W.A.R - The Movie" and "Dr.No.1962" do not match.
@@ -174,6 +234,7 @@ public enum AppleLibraryTitleParser {
                 }
             }
         }
+        if forSearch { value = value.replacingOccurrences(of: "-", with: " ") }
         value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-()[]")))
         return (value, year == Int(value) ? nil : year)

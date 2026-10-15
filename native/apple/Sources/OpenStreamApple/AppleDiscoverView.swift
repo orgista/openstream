@@ -4522,6 +4522,7 @@ struct AppleCatalogItemDetailView: View {
         .task(id: regularPlayTitle) { traceTitleProgress() }
         .accessibilityIdentifier("detail.play")
         .contextMenu {
+            AppleLibraryFixMatchMenuAction()
             Button("Quality", systemImage: "slider.horizontal.3") {
                 Task { await chooseStreams() }
             }
@@ -9601,6 +9602,7 @@ extension AppleCatalogItemDetailView {
     /// iPad, Mac and Vision Pro, beside Quality.
     @ViewBuilder
     private var playButtonMenuItems: some View {
+        AppleLibraryFixMatchMenuAction()
         if isDiscTitle {
             Button("Skip to Movie", systemImage: "forward.end.fill") { startDisc(.mainTitle) }
         }

@@ -12,6 +12,10 @@ actor AppleLibraryMetadataResolver {
         /// Absent in everything written before `schema` existed, which reads
         /// back as `0` — see `currentSchema`.
         var schema: Int?
+        var reason: MissReason?
+        var parserVersion: Int?
+        var configuration: String?
+        var attempts: Int?
     }
 
     /// Bumped when a new field means a cached entry is *missing* something
@@ -42,6 +46,52 @@ actor AppleLibraryMetadataResolver {
     }
     private let lookup: Lookup?
     private var active = 0
+    enum MissReason: String, Codable, Sendable { case noMatch, providerUnreachable, configMissing }
+    private struct Flight {
+        let task: Task<AppleCatalogItem?, Error>
+        var waiters: Set<UUID>
+    }
+    private var inFlight: [String: Flight] = [:]
+    /// One continuation per waiting card, so a cancelled card can leave a
+    /// shared flight at once while the flight continues for the others.
+    private var waiting: [UUID: CheckedContinuation<AppleCatalogItem?, Error>] = [:]
+    private var cancelledWaiters: Set<UUID> = []
+    var activeLookupWaiterCount: Int { inFlight.values.reduce(0) { $0 + $1.waiters.count } }
+
+    static func retryInterval(reason: MissReason, attempts: Int) -> TimeInterval {
+        switch reason {
+        case .noMatch: 3600
+        case .configMissing: 3600
+        case .providerUnreachable: min(900, 30 * pow(2, Double(min(5, max(0, attempts - 1)))))
+        }
+    }
+
+    /// Seven days plus a stable per-entry spread of up to two days, so a
+    /// library scanned in one sitting does not come due on the same day.
+    static func revalidationAge(for cacheKey: String) -> TimeInterval {
+        let hash = cacheKey.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        return 604800 + TimeInterval(hash % 172800)
+    }
+
+    static func cacheIsFresh(value: AppleCatalogItem?, reason: MissReason?, checkedAt: Date,
+                             attempts: Int, parserVersion: Int?, configuration: String?,
+                             currentConfiguration: String, now: Date, revalidateAfter: TimeInterval = 604800) -> Bool {
+        if value == nil || reason != nil {
+            guard parserVersion == AppleLibraryTitleParser.version, configuration == currentConfiguration,
+                  let reason else { return false }
+            return now.timeIntervalSince(checkedAt) < retryInterval(reason: reason, attempts: attempts)
+        }
+        return now.timeIntervalSince(checkedAt) < revalidateAfter
+            && (configuration == nil || configuration == currentConfiguration)
+    }
+
+    static func configurationDigest(_ sources: [AppleSource], _ tmdb: String, _ omdb: String) -> String {
+        // Hash the entire configuration; never persist URLs or credentials.
+        let identities = sources.filter { $0.isEnabled && $0.isAddon }.map {
+            $0.id.uuidString + "|" + $0.url.absoluteString + "|" + String(describing: $0.catalogs) + "|" + $0.resources.sorted().joined(separator: ",")
+        }.sorted()
+        return ApplePlaybackIdentity.digest(for: ([tmdb, omdb] + identities).joined(separator: "\n"))
+    }
 
     init(directory: URL? = nil, matchDirectory: URL? = nil, lookup: Lookup? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -78,14 +128,25 @@ actor AppleLibraryMetadataResolver {
                 continue
             }
             let file = directory.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(Self.cacheKey(item) + ".json")
-            // Same schema gate as `resolve`. Without it a stale entry
-            // published here would stick: the store only resolves a group
-            // whose metadata is still nil, so the old shape would never be
-            // asked to refresh.
+            // Same schema gate as `resolve`: an old shape is missing fields and
+            // must re-resolve. Age is not a gate: a known match is shown at
+            // once, and the store revalidates stale ones in the background
+            // (`needsRevalidation`), publishing only when the answer changes.
             if let data = try? Data(contentsOf: file), let entry = try? JSONDecoder().decode(Entry.self, from: data),
                (entry.schema ?? 0) == Self.currentSchema, let value = entry.value { result[group.id] = value }
         }
         return result
+    }
+
+    func needsRevalidation(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String) -> Bool {
+        if let record = matchRecord(for: item), record.isManual { return false }
+        let file = directory.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(Self.cacheKey(item) + ".json")
+        guard let data = try? Data(contentsOf: file), let entry = try? JSONDecoder().decode(Entry.self, from: data),
+              (entry.schema ?? 0) == Self.currentSchema else { return true }
+        return !Self.cacheIsFresh(value: entry.value, reason: entry.reason, checkedAt: entry.checkedAt,
+            attempts: entry.attempts ?? 1, parserVersion: entry.parserVersion, configuration: entry.configuration,
+            currentConfiguration: Self.configurationDigest(sources, tmdbKey, omdbKey), now: .now,
+            revalidateAfter: Self.revalidationAge(for: Self.cacheKey(item)))
     }
 
     static func cacheKey(_ item: AppleLibraryItem) -> String {
@@ -95,41 +156,165 @@ actor AppleLibraryMetadataResolver {
     func resolve(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String, refresh: Bool = false) async throws -> AppleCatalogItem? {
         try Task.checkCancellation()
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
+        let key = item.sourceID.uuidString + Self.cacheKey(item) + Self.configurationDigest(sources, tmdbKey, omdbKey)
+        let waiter = UUID()
+        let task: Task<AppleCatalogItem?, Error>
+        if var flight = inFlight[key] {
+            flight.waiters.insert(waiter)
+            inFlight[key] = flight
+            task = flight.task
+        } else {
+            task = Task { try await self.performResolve(item, sources: sources, tmdbKey: tmdbKey, omdbKey: omdbKey, refresh: refresh) }
+            inFlight[key] = Flight(task: task, waiters: [waiter])
+        }
+        defer {
+            releaseWaiter(key, waiter: waiter)
+            cancelledWaiters.remove(waiter)
+        }
+        // `task.value` ignores the caller's cancellation, so wait on a
+        // per-card continuation that `onCancel` can resume straight away.
+        let value = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AppleCatalogItem?, Error>) in
+                if cancelledWaiters.remove(waiter) != nil {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                waiting[waiter] = continuation
+                Task.detached {
+                    let result = await task.result
+                    await self.deliver(waiter, result)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(key, waiter: waiter) }
+        }
+        try Task.checkCancellation()
+        if let record = matchRecord(for: item), record.isManual { return record.candidate }
+        return value
+    }
+
+    private func deliver(_ waiter: UUID, _ result: Result<AppleCatalogItem?, Error>) {
+        waiting.removeValue(forKey: waiter)?.resume(with: result)
+    }
+
+    private func cancelWaiter(_ key: String, waiter: UUID) {
+        if let continuation = waiting.removeValue(forKey: waiter) {
+            continuation.resume(throwing: CancellationError())
+        } else if inFlight[key]?.waiters.contains(waiter) == true {
+            // Cancelled before its continuation was registered.
+            cancelledWaiters.insert(waiter)
+        }
+        releaseWaiter(key, waiter: waiter)
+    }
+
+    private func releaseWaiter(_ key: String, waiter: UUID) {
+        guard var flight = inFlight[key], flight.waiters.remove(waiter) != nil else { return }
+        if flight.waiters.isEmpty {
+            flight.task.cancel()
+            inFlight[key] = nil
+        } else { inFlight[key] = flight }
+    }
+
+    private func performResolve(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String, refresh: Bool) async throws -> AppleCatalogItem? {
+        try Task.checkCancellation()
+        if let record = matchRecord(for: item), record.isManual { return record.candidate }
         let file = directory.appendingPathComponent(item.sourceID.uuidString)
             .appendingPathComponent(Self.cacheKey(item) + ".json")
         let cached = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Entry.self, from: $0) }
+        let configuration = Self.configurationDigest(sources, tmdbKey, omdbKey)
         if !refresh, let cached, (cached.schema ?? 0) == Self.currentSchema,
-           Date().timeIntervalSince(cached.checkedAt) < (cached.value == nil ? 3600 : 604800) {
+           Self.cacheIsFresh(value: cached.value, reason: cached.reason, checkedAt: cached.checkedAt,
+                             attempts: cached.attempts ?? 1, parserVersion: cached.parserVersion,
+                             configuration: cached.configuration, currentConfiguration: configuration, now: .now,
+                             revalidateAfter: Self.revalidationAge(for: Self.cacheKey(item))) {
             if let value = cached.value, matchRecord(for: item) == nil {
                 saveAutomaticMatch(for: item, candidate: value, provider: "legacyCache", explicitIDs: AppleLibraryTitleParser.parse(item).explicitIDs)
             }
             return cached.value
         }
-        // Waiting belongs to the card's task: disappearing cards cancel immediately.
         while active >= 4 { try await Task.sleep(for: .milliseconds(30)) }
         try Task.checkCancellation()
         active += 1
         defer { active -= 1 }
         let parsed = AppleLibraryTitleParser.parse(item)
         guard parsed.role == .feature, parsed.kind != .other else { return nil }
-        let evidence: LookupEvidence?
-        if let lookup {
-            evidence = try await lookup(parsed, sources, tmdbKey, omdbKey).map { LookupEvidence(candidate: $0, provider: "injectedLookup") }
-        } else {
-            evidence = try await Self.liveLookupEvidence(parsed, sources, tmdbKey, omdbKey)
+        var evidence: LookupEvidence?
+        var reason: MissReason = .noMatch
+        do {
+            for query in Self.searchQueries(parsed) {
+                try Task.checkCancellation()
+                if let lookup {
+                    evidence = try await lookup(query, sources, tmdbKey, omdbKey).map { LookupEvidence(candidate: $0, provider: "injectedLookup") }
+                } else {
+                    evidence = try await Self.liveLookupEvidence(query, sources, tmdbKey, omdbKey)
+                }
+                if evidence != nil { break }
+            }
+        } catch {
+            try Task.checkCancellation()
+            reason = Self.missReason(error)
         }
+        // A transient provider/configuration failure retains known artwork and identity,
+        // but its retry reason still gets the short negative-cache backoff.
+        // A background revalidation that finds nothing keeps the match it had
+        // as a positive for another cycle; only Fix Match or a refresh drops it.
+        let keepsPositive = evidence == nil && !refresh && reason == .noMatch && cached?.value != nil
+            && cached?.reason == nil && (cached?.schema ?? 0) == Self.currentSchema
         let value = evidence?.candidate
+            ?? ((reason == .providerUnreachable || reason == .configMissing || keepsPositive) ? cached?.value : nil)
         try Task.checkCancellation()
-        // A correction can arrive while the lookup is suspended. It always wins.
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
-        if let value {
-            saveAutomaticMatch(for: item, candidate: value, provider: evidence?.provider ?? "unknown", explicitIDs: parsed.explicitIDs)
+        if let evidence {
+            saveAutomaticMatch(for: item, candidate: evidence.candidate, provider: evidence.provider, explicitIDs: parsed.explicitIDs)
         }
-        let entry = Entry(value: value, checkedAt: Date(), addedAt: cached?.addedAt ?? Date(),
-                          schema: Self.currentSchema)
+        let attempts = cached?.configuration == configuration && cached?.reason == reason ? (cached?.attempts ?? 0) + 1 : 1
+        let entry = Entry(value: value, checkedAt: Date(), addedAt: cached?.addedAt ?? Date(), schema: Self.currentSchema,
+                          reason: evidence == nil && !keepsPositive ? reason : nil, parserVersion: AppleLibraryTitleParser.version,
+                          configuration: configuration, attempts: attempts)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(entry).write(to: file, options: .atomic)
         return value
+    }
+
+    /// Lookup forms, most specific first: the search-normalised filename (with
+    /// the folder's year when the names agree), the nearest title folder, then
+    /// the stored identity title. A form adds nothing when an earlier one has
+    /// the same name and its year is the same or absent.
+    static func searchQueries(_ parsed: AppleLibraryTitle) -> [AppleLibraryTitle] {
+        var queries: [AppleLibraryTitle] = []
+        for (title, year) in parsed.alternatives.map({ ($0.title, $0.year) }) + [(parsed.title, parsed.year)] {
+            guard !queries.contains(where: { normalized($0.title) == normalized(title) && (year == nil || $0.year == year) })
+            else { continue }
+            var query = AppleLibraryTitle(title: title, year: year, season: parsed.season, episode: parsed.episode, kind: parsed.kind)
+            query.explicitIDs = parsed.explicitIDs
+            queries.append(query)
+        }
+        return queries
+    }
+
+    static func missReason(_ error: Error) -> MissReason {
+        if let error = error as? AppleTMDBError {
+            switch error {
+            case .invalidCredential, .requestFailed(401), .requestFailed(403): return .configMissing
+            case .titleNotFound, .requestFailed(404): return .noMatch
+            default: return .providerUnreachable
+            }
+        }
+        if let error = error as? AppleStremioCatalogError {
+            switch error {
+            case .requestFailed(401), .requestFailed(403): return .configMissing
+            case .requestFailed(404): return .noMatch
+            default: return .providerUnreachable
+            }
+        }
+        if let error = error as? AppleStremioPlaybackError {
+            switch error {
+            case .requestFailed(401), .requestFailed(403): return .configMissing
+            case .requestFailed(404): return .noMatch
+            default: return .providerUnreachable
+            }
+        }
+        return .providerUnreachable
     }
 
     private func matchURL(_ item: AppleLibraryItem) -> URL {
@@ -166,14 +351,15 @@ actor AppleLibraryMetadataResolver {
 
     private func saveMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem, provider: String,
                            explicitIDs: [String: String], isManual: Bool) throws {
-        var ids = explicitIDs
+        // Automatic aliases come from the resolved record, not unverified filename tags.
+        var ids = isManual ? explicitIDs : [:]
         if candidate.mediaID.hasPrefix("tt") { ids["imdb"] = candidate.mediaID }
-        if candidate.mediaID.hasPrefix("tmdb:") { ids["tmdb"] = String(candidate.mediaID.dropFirst(5)) }
+        if candidate.mediaID.hasPrefix("tmdb:") { ids["tmdb"] = candidate.mediaID.split(separator: ":").last.map(String.init) }
         if let imdb = candidate.imdbID { ids["imdb"] = imdb }
         let parsed = AppleLibraryTitleParser.parse(item)
         let exactYear = parsed.year != nil && parsed.year == Self.releaseYear(candidate)
         let record = MatchRecord(candidate: candidate, explicitIDs: ids, provider: provider,
-            confidence: isManual ? 1 : (exactYear ? 0.95 : 0.6), isManual: isManual, matchedAt: .now)
+            confidence: isManual || provider.contains("explicitID") ? 1 : (exactYear ? 0.95 : 0.6), isManual: isManual, matchedAt: .now)
         try FileManager.default.createDirectory(at: matchDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(record).write(to: matchURL(item), options: .atomic)
     }
@@ -192,25 +378,30 @@ actor AppleLibraryMetadataResolver {
     ///
     /// So: an exact year wins, and when nothing matches exactly the year only
     /// chooses *between* same-named candidates. A single same-named candidate
-    /// is accepted — its poster is a far better answer than a blank tile.
-    static func bestMatch(_ items: [AppleCatalogItem], parsed: AppleLibraryTitle) -> AppleCatalogItem? {
+    /// is accepted; multiple same-named candidates need a clear year margin.
+    static func bestMatch(_ items: [AppleCatalogItem], parsed: AppleLibraryTitle,
+                          aliases: [String: [String]] = [:]) -> AppleCatalogItem? {
         let type = parsed.kind == .show ? "series" : "movie"
+        let candidates = items.filter { $0.type == type }
         if let imdb = parsed.explicitIDs["imdb"],
-           let explicit = items.first(where: { $0.type == type && ($0.mediaID == imdb || $0.imdbID == imdb) }) { return explicit }
+           let explicit = candidates.first(where: { $0.mediaID == imdb || $0.imdbID == imdb }) { return explicit }
         if let tmdb = parsed.explicitIDs["tmdb"],
-           let explicit = items.first(where: { $0.type == type && $0.mediaID == "tmdb:" + tmdb }) { return explicit }
-        let sameName = items.filter {
-            $0.type == type && normalized($0.name) == normalized(parsed.title)
+           let explicit = candidates.first(where: { $0.mediaID == "tmdb:" + tmdb || $0.mediaID == "tmdb:" + (type == "series" ? "tv:" : "movie:") + tmdb }) { return explicit }
+        var seen = Set<String>()
+        let sameName = candidates.filter {
+            ([ $0.name ] + (aliases[$0.mediaID] ?? [])).contains { normalized($0) == normalized(parsed.title) }
+                && seen.insert($0.mediaID).inserted
         }
         guard let first = sameName.first else { return nil }
-        guard let year = parsed.year else { return first }
-        if let exact = sameName.first(where: { releaseYear($0) == year }) { return exact }
         guard sameName.count > 1 else { return first }
-        // Several films of the same name and none from the right year: the
-        // nearest is the best available guess, and ties keep search order.
-        return sameName.min {
-            distance(releaseYear($0), from: year) < distance(releaseYear($1), from: year)
-        } ?? first
+        guard let year = parsed.year else { return nil }
+        let ranked = sameName.sorted { distance(releaseYear($0), from: year) < distance(releaseYear($1), from: year) }
+        let bestDistance = distance(releaseYear(ranked[0]), from: year)
+        let nextDistance = distance(releaseYear(ranked[1]), from: year)
+        // Exact years outrank inexact years; inexact candidates need a two-year margin.
+        guard bestDistance != .max, nextDistance > bestDistance,
+              bestDistance == 0 || nextDistance == .max || nextDistance - bestDistance >= 2 else { return nil }
+        return ranked[0]
     }
 
     private static func releaseYear(_ item: AppleCatalogItem) -> Int? {
@@ -234,7 +425,30 @@ actor AppleLibraryMetadataResolver {
 
     private static func liveLookupEvidence(_ parsed: AppleLibraryTitle, _ sources: [AppleSource], _ tmdbKey: String, _ omdbKey: String) async throws -> LookupEvidence? {
         let type = parsed.kind == .show ? "series" : "movie"
+        var failures: [MissReason] = []
+        if !parsed.explicitIDs.isEmpty, !tmdbKey.isEmpty {
+            do {
+                if let candidate = try await directLookup(parsed, client: AppleTMDBClient(), configuration: .init(credential: tmdbKey)) {
+                    return LookupEvidence(candidate: candidate, provider: "tmdb:explicitID")
+                }
+            } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
+        }
+        if parsed.explicitIDs["imdb"] != nil, !omdbKey.isEmpty {
+            do {
+                if let candidate = try await credentialLookup(parsed, key: omdbKey, tmdb: false) {
+                    return LookupEvidence(candidate: candidate, provider: "omdb:explicitID")
+                }
+            } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
+        }
 #if OPENSTREAM_ADDONS
+        if let imdb = parsed.explicitIDs["imdb"] {
+            do {
+                let detail = try await AppleStremioMetadataClient().details(source: AppleStremioMetadataClient.defaultMetadataSource, type: type, mediaID: imdb)
+                return LookupEvidence(candidate: AppleCatalogItem(mediaID: imdb, type: type,
+                    name: detail.title ?? parsed.title, posterURL: detail.posterURL, backgroundURL: detail.backdropURL,
+                    summary: detail.overview, releaseInfo: detail.releaseInfo, logoURL: detail.logoURL), provider: "cinemeta:explicitID")
+            } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
+        }
         var cinemeta = AppleStremioMetadataClient.defaultMetadataSource
         cinemeta.resources = ["catalog", "meta"]
         cinemeta.catalogs = [.init(type: type, id: "top", supportsSearch: true)]
@@ -257,88 +471,123 @@ actor AppleLibraryMetadataResolver {
                             logoURL: detail?.logoURL ?? match.logoURL, imdbID: match.imdbID)
                         return LookupEvidence(candidate: candidate, provider: "addon:" + source.id.uuidString)
                     }
-                } catch { try Task.checkCancellation() }
+                } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
             }
         }
 #endif
-        if !tmdbKey.isEmpty, let result = try? await credentialLookup(parsed, key: tmdbKey, tmdb: true) { return LookupEvidence(candidate: result, provider: "tmdb") }
-        try Task.checkCancellation()
-        if !omdbKey.isEmpty { return try await credentialLookup(parsed, key: omdbKey, tmdb: false).map { LookupEvidence(candidate: $0, provider: "omdb") } }
+        for (key, isTMDB) in [(tmdbKey, true), (omdbKey, false)] where !key.isEmpty {
+            do {
+                if let result = try await credentialLookup(parsed, key: key, tmdb: isTMDB) {
+                    return LookupEvidence(candidate: result, provider: isTMDB ? "tmdb" : "omdb")
+                }
+            } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
+        }
+        if failures.contains(.providerUnreachable) { throw URLError(.cannotConnectToHost) }
+        if failures.contains(.configMissing) { throw AppleTMDBError.invalidCredential }
+#if !OPENSTREAM_ADDONS
+        if tmdbKey.isEmpty && omdbKey.isEmpty { throw AppleTMDBError.invalidCredential }
+#endif
         return nil
     }
 
-    private static func credentialLookup(_ parsed: AppleLibraryTitle, key: String, tmdb: Bool) async throws -> AppleCatalogItem? {
-        let show = parsed.kind == .show
-        var components = URLComponents(string: tmdb ? "https://api.themoviedb.org/3/search/\(show ? "tv" : "movie")" : "https://www.omdbapi.com/")!
-        components.queryItems = tmdb ? [.init(name: "query", value: parsed.title)] : [.init(name: "t", value: parsed.title), .init(name: "type", value: show ? "series" : "movie")]
-        if let year = parsed.year { components.queryItems?.append(.init(name: tmdb ? (show ? "first_air_date_year" : "year") : "y", value: String(year))) }
-        let bearer = tmdb && key.hasPrefix("eyJ")
-        if !bearer { components.queryItems?.append(.init(name: tmdb ? "api_key" : "apikey", value: key)) }
-        var request = URLRequest(url: components.url!)
-        request.timeoutInterval = 10
-        if bearer { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        let (data, response) = try await AppleTMDBClient.liveLoader(request)
-        guard data.count < 2_000_000, let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        let values = tmdb ? (object["results"] as? [[String: Any]] ?? []) : [object]
-        let items = values.compactMap { value -> AppleCatalogItem? in
-            guard let title = value[tmdb ? (show ? "name" : "title") : "Title"] as? String else { return nil }
-            let id = tmdb ? (value["id"] as? Int).map { "tmdb:\($0)" } : value["imdbID"] as? String
-            guard let id else { return nil }
-            func artwork(_ field: String, size: String) -> URL? {
-                guard let path = value[field] as? String, path != "N/A" else { return nil }
-                return URL(string: tmdb ? "https://image.tmdb.org/t/p/\(size)\(path)" : path)
+    static func correctionCandidates(query: String, year: Int?, kind: AppleLibraryTitle.Kind,
+                                     sources: [AppleSource], tmdbKey: String, omdbKey: String) async throws -> [AppleCatalogItem] {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 300 else { return [] }
+        let title = correctionTitle(query: text, year: year, kind: kind)
+        if !title.explicitIDs.isEmpty {
+            return try await liveLookup(title, sources, tmdbKey, omdbKey).map { [$0] } ?? []
+        }
+        var items: [AppleCatalogItem] = []
+        var lastError: Error?
+        if !tmdbKey.isEmpty {
+            do {
+                items += try await AppleTMDBClient().sharedLinkSearch(title: .init(name: title.title, year: title.year,
+                    kind: kind == .show ? .show : .movie), configuration: .init(credential: tmdbKey))
+            } catch { try Task.checkCancellation(); lastError = error }
+        }
+        if !omdbKey.isEmpty {
+            do {
+                if let item = try await credentialLookup(title, key: omdbKey, tmdb: false) { items.append(item) }
+            } catch { try Task.checkCancellation(); lastError = error }
+        }
+#if OPENSTREAM_ADDONS
+        var cinemeta = AppleStremioMetadataClient.defaultMetadataSource
+        let type = kind == .show ? "series" : "movie"
+        cinemeta.resources = ["catalog", "meta"]
+        cinemeta.catalogs = [.init(type: type, id: "top", supportsSearch: true)]
+        for source in [cinemeta] + sources.filter({ $0.isEnabled && $0.isAddon && $0.manifestID != cinemeta.manifestID }) {
+            for catalog in source.catalogs.filter({ $0.type == type && $0.supportsSearch }).prefix(1) {
+                do { items += try await AppleStremioCatalogClient().search(source: source, catalog: catalog, query: title.title) }
+                catch { try Task.checkCancellation(); lastError = error }
             }
-            return AppleCatalogItem(mediaID: id, type: show ? "series" : "movie", name: title,
-                posterURL: artwork(tmdb ? "poster_path" : "Poster", size: "w500"),
-                backgroundURL: tmdb ? artwork("backdrop_path", size: "w1280") : nil,
-                summary: value[tmdb ? "overview" : "Plot"] as? String,
-                releaseInfo: (value[tmdb ? (show ? "first_air_date" : "release_date") : "Year"] as? String).map { String($0.prefix(4)) })
         }
-        guard let match = bestMatch(items, parsed: parsed) else { return nil }
-        guard tmdb else { return match }
-        // Still one follow-up request, not two: the external ids this match
-        // needs and the textless backdrop the hero wants both hang off the
-        // record, so they are appended to the same call that used to fetch
-        // `/external_ids` on its own.
-        var record = URLComponents(string: "https://api.themoviedb.org/3/\(show ? "tv" : "movie")/\(match.mediaID.dropFirst(5))")!
-        record.queryItems = [
-            .init(name: "append_to_response", value: "external_ids,images"),
-            .init(name: "include_image_language", value: "null"),
-        ]
-        if !bearer { record.queryItems?.append(.init(name: "api_key", value: key)) }
-        request.url = record.url
-        guard let (data, _) = try? await AppleTMDBClient.liveLoader(request), data.count < 2_000_000,
-              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return match }
-        var result = match
-        if let path = textlessBackdropPath(in: value) {
-            result = result.withHeroArtwork(
-                backgroundURL: URL(string: "https://image.tmdb.org/t/p/w1280\(path)"), logoURL: nil
-            )
+#endif
+        if items.isEmpty, let lastError { throw lastError }
+        var seen = Set<String>()
+        return items.filter {
+            $0.type == (kind == .show ? "series" : "movie") && (title.year == nil || releaseYear($0) == title.year)
+                && seen.insert($0.mediaID).inserted
         }
-        if let imdb = (value["external_ids"] as? [String: Any])?["imdb_id"] as? String,
-           AppleStremioMetadataClient.isIMDBIdentifier(imdb) {
-            result = result.withMediaID(imdb)
-        }
-        return result
     }
 
-    /// The best textless backdrop in an appended `images` block, or nothing —
-    /// in which case the search result's own `backdrop_path` stands.
-    private static func textlessBackdropPath(in value: [String: Any]) -> String? {
-        let backdrops = ((value["images"] as? [String: Any])?["backdrops"] as? [[String: Any]] ?? [])
-            .map {
-                AppleArtworkImage(
-                    filePath: $0["file_path"] as? String,
-                    // A JSON null arrives as NSNull and casts to nil, which is
-                    // precisely what "textless" means here.
-                    languageCode: $0["iso_639_1"] as? String,
-                    voteAverage: $0["vote_average"] as? Double
-                )
-            }
-        guard case .textlessBackdrop(let path)? = AppleTextlessBackdropPolicy.choose(
-            backdrops: backdrops, backdropPath: nil, posterPath: nil
-        ) else { return nil }
-        return path
+    /// What the Fix Match field means: a bare number or a TMDB page link is a
+    /// TMDB id, `tt…` (or an IMDb link) an IMDb id, `tvdb-123` / `tvdbid=123` a
+    /// TVDB id, anything else a name (with an optional year).
+    static func correctionTitle(query text: String, year: Int?, kind: AppleLibraryTitle.Kind) -> AppleLibraryTitle {
+        var parsed = AppleLibraryTitleParser.parse(name: text)
+        if text.allSatisfy(\.isNumber), let number = Int(text), number > 0 { parsed.explicitIDs["tmdb"] = String(number) }
+        if let range = text.range(of: #"(?i)themoviedb\.org/(?:movie|tv)/\d+"#, options: .regularExpression),
+           let number = text[range].split(separator: "/").last.flatMap({ Int($0) }), number > 0 {
+            parsed.explicitIDs["tmdb"] = String(number)
+        }
+        var title = AppleLibraryTitle(title: parsed.title, year: year ?? parsed.year, season: nil, episode: nil, kind: kind)
+        title.explicitIDs = parsed.explicitIDs
+        return title
+    }
+
+    static func directLookup(_ parsed: AppleLibraryTitle, client: AppleTMDBClient,
+                             configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem? {
+        for provider in ["tmdb", "imdb", "tvdb"] {
+            guard let id = parsed.explicitIDs[provider] else { continue }
+            do { return try await client.libraryDetails(provider: provider, id: id, kind: parsed.kind, configuration: configuration) }
+            catch AppleTMDBError.titleNotFound { continue }
+            catch AppleTMDBError.requestFailed(404) { continue }
+        }
+        return nil
+    }
+
+    static func credentialLookup(_ parsed: AppleLibraryTitle, key: String, tmdb: Bool) async throws -> AppleCatalogItem? {
+        if tmdb {
+            return try await AppleTMDBClient().librarySearch(parsed, configuration: .init(credential: key))
+        }
+        let show = parsed.kind == .show
+        var components = URLComponents(string: "https://www.omdbapi.com/")!
+        let explicit = parsed.explicitIDs["imdb"]
+        components.queryItems = [.init(name: explicit == nil ? "t" : "i", value: explicit ?? parsed.title),
+                                 .init(name: "type", value: show ? "series" : "movie"), .init(name: "apikey", value: key)]
+        if let year = parsed.year, explicit == nil { components.queryItems?.append(.init(name: "y", value: String(year))) }
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 10
+        let (data, response) = try await AppleTMDBClient.liveLoader(request)
+        guard data.count < 2_000_000, let http = response as? HTTPURLResponse,
+              http.url?.scheme == "https", http.url?.host == "www.omdbapi.com" else { throw AppleTMDBError.invalidResponse }
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let message = (object?["Error"] as? String)?.lowercased() ?? ""
+        // OMDb answers a used-up daily quota (sometimes with HTTP 401) as
+        // "Request limit reached!": the provider is unavailable, not the film.
+        if object?["Response"] as? String == "False", message.contains("limit") { throw AppleTMDBError.requestFailed(429) }
+        guard http.statusCode == 200 else { throw AppleTMDBError.requestFailed(http.statusCode) }
+        guard let object else { throw AppleTMDBError.invalidResponse }
+        if object["Response"] as? String == "False" {
+            if message.contains("api key") { throw AppleTMDBError.invalidCredential }
+            return nil
+        }
+        guard let name = object["Title"] as? String, let id = object["imdbID"] as? String,
+              AppleStremioMetadataClient.isIMDBIdentifier(id) else { throw AppleTMDBError.invalidResponse }
+        let poster = (object["Poster"] as? String).flatMap { $0 == "N/A" ? nil : URL(string: $0) }
+        let candidate = AppleCatalogItem(mediaID: id, type: show ? "series" : "movie", name: name,
+            posterURL: poster, summary: object["Plot"] as? String, releaseInfo: object["Year"] as? String)
+        return explicit == id ? candidate : bestMatch([candidate], parsed: parsed)
     }
 }
