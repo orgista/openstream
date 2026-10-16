@@ -24,6 +24,32 @@ struct AppleLibrarySeries: Identifiable, Sendable {
         return matches.count == 1 ? matches.first : nil
     }
 
+    func mediaVersions(itemID: String, playbackID: (AppleLibraryItem) -> String,
+                       durations: [String: Double] = [:]) -> [AppleMediaVersion] {
+        let features = items.filter { AppleLibraryTitleParser.parse($0).role == .feature }
+        let successors = Set(features.compactMap { nextPart(after: $0)?.id })
+        return features.filter { !successors.contains($0.id) }.map { first in
+            var chain = [first]
+            while let last = chain.last, let next = nextPart(after: last), !chain.contains(where: { $0.id == next.id }) {
+                chain.append(next)
+            }
+            let id = playbackID(first)
+            var version = AppleMediaVersion(id: id, itemID: itemID, sourceID: first.sourceID,
+                label: [AppleLibraryTitleParser.parse(first).version,
+                    AppleStremioCandidateRanking.resolution(first.name) > 0 ? AppleLocalLibraryStore.format(first) : first.url.deletingPathExtension().lastPathComponent]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                parts: chain.enumerated().map { offset, file in
+                    AppleMediaPart(id: "mp:" + ApplePlaybackIdentity.digest(for: id + ":" + String(offset + 1)),
+                        ordinal: offset + 1, duration: durations[file.id], reference: file.id)
+                })
+            version.formatBadges = AppleStreamFormatBadge.parse(first.name)
+            return version
+        }.sorted {
+            let a = $0.quality, b = $1.quality
+            return a == b ? $0.id < $1.id : a > b
+        }
+    }
+
     static func groups(_ items: [AppleLibraryItem]) -> [Self] {
         var groups: [String: Self] = [:]
         for item in items {

@@ -8,12 +8,14 @@ import Foundation
 /// movie, a live channel, or the last episode of a show.
 public struct AppleNextEpisodeContext {
     public let title: String
+    public let isPartBoundary: Bool
     /// Starts the next episode, carrying the audio and subtitle choices of the
     /// one that is ending.
     public let start: (AppleTrackCarryOver) -> Void
 
-    public init(title: String, start: @escaping (AppleTrackCarryOver) -> Void) {
+    public init(title: String, isPartBoundary: Bool = false, start: @escaping (AppleTrackCarryOver) -> Void) {
         self.title = title
+        self.isPartBoundary = isPartBoundary
         self.start = start
     }
 }

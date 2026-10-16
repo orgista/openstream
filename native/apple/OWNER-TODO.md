@@ -7,6 +7,62 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **PRIORITY (owner 2026-10-15): fix everything, verified end to end, THEN submit.** 17:20 "app store submission
+      today ... use skill anti slop for the code"; 17:30 "lets fix and test e2e before just stagger each step let set
+      a max agent fixes at a time verify them e2e then move on we need to fix before submissions there is still work
+      to be done on all plats atv has general slowness". **Process: at most 2 fix jobs at once; each one: anti-slop →
+      unit gate → E2E-iOS + E2E-tvOS (+ E2E-visionOS when it touches visionOS) → real device (DevPlus / OfficePlus /
+      DevTV) → Fable review → commit + push; only then the next job.** Stopped 17:30 to make room (work kept): Vision
+      Pro pass, device sweep, engine 7.36 (rebased locally on the mini: 17 of 22 re-applied, 4 already upstream),
+      flaky-e2e harness. Queue:
+      1. Stage B review fixes + Apple TV Blu-ray/Titles/Top Shelf (running).
+      2. **Apple TV general slowness** (owner): profile on DevTV + OfficePlus (time profiler, trace timings: launch,
+         tab switch, focus moves, title open, Play), fix the top causes, before/after numbers; + the device-sweep checks.
+      3. Vision Pro on the iPad screens (P1s from the Fable review first).
+      4. Plex/Jellyfin/Emby trailers; Unmatched section.
+      5. Flaky-e2e harness; engine 7.36.
+      Then the release-candidate run (App Store flavour, all four platforms, clean installs) and "ship 19".
+      **YOU today:** (a) ASC → App Privacy → "Data Not Collected" → Publish (API can't confirm); (b) release type: ASC
+      has all four on automatic release after approval; say if you want manual; (c) "Radarr & Sonarr" visible in the
+      App Store build, yes/no; (d) paste the review notes from verification-artifacts/rc-2026-10-09/RC-REPORT.md (I'll
+      refresh them at RC time); (e) permanent SSH fix on Dev-Mini (Screen Sharing → Terminal):
+      `sudo sh -c 'printf "PerSourcePenaltyExemptList 192.168.1.0/24\nMaxStartups 100:30:200\nMaxSessions 64\n" > /etc/ssh/sshd_config.d/200-lan.conf'`
+      (17:20 the mini's OpenSSH 10 locked the Studio out for opening too many connections; worked around with one
+      shared connection via ServerPlus).
+- [ ] **Server trailers on Apple TV (owner 2026-10-15: "for apple tv we can do plex/jellyfin then and emby trailer
+      support").** Spec `specs/server-trailers-2026-10-15.md`: Plex extras + Jellyfin/Emby local trailers as the first
+      trailer source everywhere and the only one on Apple TV (hero, title page, Top Shelf preview); YouTube stays the
+      fallback on iPhone/iPad/Mac/Vision Pro. Starts after Stage B is committed.
+- [ ] **Trailer source without YouTube? (owner 2026-10-15: "is there a trailer addon ... or a trailer api ... we
+      would just need to fit it and crop onto the screen").** Checked: TMDB, KinoCheck, Stremio addons and Jellyfin
+      remote trailers all return YouTube IDs. Direct files: iTunes Search API `previewUrl` (works, no key, but SD
+      640×356–480 and meant to promote iTunes purchases), Plex extras and Jellyfin/Emby local trailers (HD, only for
+      titles on those servers), Video Detective (ex-IVA, what Plex licenses; paid, HD). Proposed chain: server trailer
+      file → iTunes preview for small tiles → YouTube embed last (iOS/Mac only). **Owner: want a Video Detective price?**
+- [ ] **Apple TV, OfficePlus dev build (owner 2026-10-15): Matilda UHD Blu-ray ISO "detects its a disc but no menu";
+      the Titles list is endless; Top Shelf should be full screen like the Apple TV app, no progress bars, swipe up for
+      full screen.** Cause: Blu-ray/UHD menus (BD-J) aren't supported (Infuse doesn't either); engine saw 28 titles.
+      Spec `specs/tv-disc-shelf-2026-10-15.md` (branch tv-disc-shelf, work Claude): no menu promise on Blu-ray, Infuse-
+      style Titles list (main feature first, duplicates merged, short clips hidden), full-screen carousel Top Shelf;
+      trailers there only from direct trailer files (Plex/Jellyfin), not YouTube.
+- [ ] **PRIORITY (owner 2026-10-15): Vision Pro needs real e2e testing; "its probably the worse out all".** Spec
+      `specs/visionos-e2e-2026-10-15.md`: full E2E-visionOS crawl on the simulator (3 green runs) + fixing what it
+      finds. **Owner 2026-10-15: "ipad it is!"**: Vision Pro uses the iPad screens, kept native (glass, hover, ornaments, 60 pt targets), and a 5-minute worn device pass (build prepared BEFORE the headset goes on). VP registered and a Debug
+      build (dd8d32d) installed 2026-10-15; the first pass didn't happen (build took too long while the owner wore it).
+- [ ] **TrueHD Atmos / DTS:X on Apple TV via APAC (owner 2026-10-15: "make sure to account for" r/appletv post
+      1x6e633).** Our engine fork is based on upstream 6.66.0 (Sept 2), ~1,190 commits behind; upstream 7.34–7.36 has
+      TrueHD Atmos and DTS:X heights rendered to APAC, BDMV over HTTP, a teardown crash fix. Plan: licence check of
+      LibTrueHD/LibDTSX first (owner decides if unclear), then rebase our 22 fork commits (DVD menus etc.) and re-pin.
+      Spec: specs/engine-rebase-7.36-2026-10-15.md.
+
+- [ ] **Unmatched section with manual matching (owner 2026-10-15: "We should have an unmatched section where users can
+      match manually see infuse (change metadata)").** Library gets an Unmatched shelf/section listing files with no
+      metadata match; each opens the existing Fix Match flow (search by name/year or paste an ID). REA Infuse's
+      Change Metadata first. Spec: specs/unmatched-section-2026-10-15.md.
+- [x] **Resume copy = most recently played (owner 2026-10-15).** "Make the most recent played as the resume copy
+      unless it was replaced and no longer available then next best or next available." In the Stage B review fixes
+      (specs/plex-7-8-stageB-2026-10-15.md, fix 1); replaces the earlier "sticky only on an explicit pick" answer.
+
 - [ ] **Owner choice (2026-10-15): iPhone on iOS 18, should the top bar be see-through over the hero?** It is solid on
       purpose since owner fix #52 (title and icons unreadable over bright art). See-through = full-bleed hero like iOS 26,
       but text over bright posters can be hard to read. Left solid until the owner picks.

@@ -154,6 +154,7 @@ struct AppleTransportOverlay: View {
                 carry.autoPlayChain = coordinator.autoPlayChain
                 nextEpisode.start(carry)
             }
+            model.isPartBoundary = nextEpisode.isPartBoundary
             model.nextEpisodeTitle = nextEpisode.title
             model.autoPlayNextEpisode = UserDefaults.standard.object(
                 forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true

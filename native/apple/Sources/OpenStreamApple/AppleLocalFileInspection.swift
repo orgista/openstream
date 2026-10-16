@@ -4,6 +4,8 @@ import AetherEngine
 /// What the engine reads from a file on this device without playing it: the
 /// format badges its probe proves, and for a disc image the titles on it.
 struct AppleLocalFileInspection: Equatable, Sendable {
+    var duration: Double? = nil
+    var descriptors: AppleStreamDescriptors = .init()
     var badges: [AppleStreamFormatBadge]
     var discTitles: [AppleDiscTitle]
     /// Blu-ray or DVD, when the engine recognised the image.
@@ -22,8 +24,14 @@ struct AppleLocalFileInspection: Equatable, Sendable {
                 AppleDiscTitle(id: $0.id, durationSeconds: $0.durationSeconds, chapterCount: $0.chapterStartsSeconds.count)
             }
         }
-        let probed = (try? AetherEngine.probe(url: url)).map { AppleStreamFormatBadge.badges(for: Self.format(of: $0)) }
-        return Self(badges: AppleStreamFormatBadge.merged(probed: probed, named: named), discTitles: titles, discFormat: format)
+        let probe = try? AetherEngine.probe(url: url)
+        let probed = probe.map { AppleStreamFormatBadge.badges(for: Self.format(of: $0)) }
+        return Self(duration: probe.flatMap { $0.durationSeconds > 0 ? $0.durationSeconds : nil },
+            descriptors: .init(container: url.pathExtension, videoCodec: probe?.videoCodecName,
+                dolbyVisionProfile: probe?.dvProfile,
+                audioCodec: probe?.audioTracks.first?.codec,
+                subtitleCodec: probe?.subtitleTracks.first?.codec,
+                duration: probe?.durationSeconds, width: probe.map { Int($0.videoWidth) }, height: probe.map { Int($0.videoHeight) }), badges: AppleStreamFormatBadge.merged(probed: probed, named: named), discTitles: titles, discFormat: format)
     }
 
     static func format(of probe: SourceProbe) -> AppleStreamFormatBadge.ProbedFormat {

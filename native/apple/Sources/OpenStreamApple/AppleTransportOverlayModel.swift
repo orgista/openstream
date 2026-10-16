@@ -48,6 +48,7 @@ public final class AppleTransportOverlayModel {
     public var nextEpisode: (() -> Void)? = nil { didSet { syncEndHandOff() } }
     /// The next episode's `displayTitle`, for the card to name it. Set
     /// alongside `nextEpisode`; one without the other offers nothing.
+    public var isPartBoundary = false { didSet { syncEndHandOff() } }
     public var nextEpisodeTitle: String? = nil { didSet { syncEndHandOff() } }
     /// The viewer's "Auto Play Next Episode" setting. With it off the card
     /// still appears and still works — only the unattended start stops.
@@ -158,7 +159,7 @@ public final class AppleTransportOverlayModel {
     /// The end-of-episode card, or nil when there is nothing to offer yet.
     public var nextEpisodePrompt: AppleNextEpisodePrompt? {
         // A provider's error clip is not the episode ending.
-        guard nextEpisode != nil, !coordinator.isPlaceholderPlayback else { return nil }
+        guard !isPartBoundary, nextEpisode != nil, !coordinator.isPlaceholderPlayback else { return nil }
         let prompt = AppleNextEpisodePolicy.prompt(
             position: position,
             duration: duration,
@@ -185,7 +186,7 @@ public final class AppleTransportOverlayModel {
         // The cap limits the next request, not the request already in flight.
         coordinator.handsOffAtEnd = hasAdvancedToNextEpisode || AppleNextEpisodePolicy.handsOffAtEnd(
             hasNext: nextEpisode != nil && nextEpisodeTitle != nil, isLive: isLive,
-            isDismissed: nextEpisodeDismissed, isEnabled: autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance())
+            isDismissed: nextEpisodeDismissed, isEnabled: isPartBoundary || (autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance()))
     }
 
     /// Starts the next episode now, from the card.
@@ -519,22 +520,22 @@ public final class AppleTransportOverlayModel {
     }
 
     /// `true` when a "Next Episode" action is wired.
-    public var showsNextEpisode: Bool { nextEpisode != nil }
+    public var showsNextEpisode: Bool { !isPartBoundary && nextEpisode != nil }
 
     /// Starts the next episode once this one has run out, unless the viewer
     /// turned auto-play off or dismissed the card.
     private func advanceToNextEpisodeIfDue(hasEnded: Bool = false) {
         guard !hasAdvancedToNextEpisode, let nextEpisode, !coordinator.isPlaceholderPlayback else { return }
-        guard AppleNextEpisodePolicy.shouldAutoAdvance(
+        guard (isPartBoundary && hasEnded) || (!isPartBoundary && AppleNextEpisodePolicy.shouldAutoAdvance(
             position: position,
             duration: duration ?? coordinator.engine.duration,
             nextTitle: nextEpisodeTitle,
             isLive: isLive,
             isDismissed: nextEpisodeDismissed,
-            isEnabled: autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance(),
+            isEnabled: isPartBoundary || (autoPlayNextEpisode && coordinator.autoPlayChain.canAdvance()),
             hasEnded: hasEnded
-        ) else { return }
-        coordinator.autoPlayChain.didAdvance()
+        )) else { return }
+        if !isPartBoundary { coordinator.autoPlayChain.didAdvance() }
         hasAdvancedToNextEpisode = true
         appleTrace("next episode auto-advance → \(nextEpisodeTitle ?? "?")")
         nextEpisode()

@@ -303,7 +303,7 @@ struct AppleMediaPlayerView: View {
             }
         }
         .background {
-            if coordinator.route == .avPlayer, let nextEpisode {
+            if coordinator.route == .avPlayer, let nextEpisode, !nextEpisode.isPartBoundary {
                 AppleTVStockNextEpisodeAction(
                     engine: coordinator.engine, controller: host.viewController,
                     nextTitle: nextEpisode.title, isLive: request.isLive,
@@ -649,8 +649,7 @@ struct AppleMediaPlayerView: View {
         if let writer = coordinator.progressWriter {
             writer(position, duration)
         } else {
-            ApplePlaybackStore().save(mediaID: request.mediaID, position: position, duration: duration,
-                partID: request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID))
+            ApplePlaybackStore().save(request: request, position: position, duration: duration)
         }
     }
 
@@ -842,9 +841,11 @@ struct AppleMediaPlayerView: View {
             || UserDefaults.standard.object(forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
         guard let nextEpisode, !stockRouteHandedOff, !coordinator.isPlaceholderPlayback,
               AppleNextEpisodePolicy.handsOffAtEnd(hasNext: true, isLive: request.isLive,
-                                                   isDismissed: false, isEnabled: autoPlay) else { return false }
-        guard manual || coordinator.autoPlayChain.canAdvance() else { return false }
-        if manual { coordinator.autoPlayChain.interacted() } else { coordinator.autoPlayChain.didAdvance() }
+                                                   isDismissed: false, isEnabled: nextEpisode.isPartBoundary || autoPlay) else { return false }
+        guard nextEpisode.isPartBoundary || manual || coordinator.autoPlayChain.canAdvance() else { return false }
+        if !nextEpisode.isPartBoundary {
+            if manual { coordinator.autoPlayChain.interacted() } else { coordinator.autoPlayChain.didAdvance() }
+        }
         stockRouteHandedOff = true
         appleTrace("next episode (stock route) → \(nextEpisode.title)")
         let engine = coordinator.engine

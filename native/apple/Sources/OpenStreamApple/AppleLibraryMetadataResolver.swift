@@ -267,7 +267,18 @@ actor AppleLibraryMetadataResolver {
     }
 
     func matchRecord(for item: AppleLibraryItem) -> MatchRecord? {
-        (try? Data(contentsOf: matchURL(item))).flatMap { try? JSONDecoder().decode(MatchRecord.self, from: $0) }
+        if let data = try? Data(contentsOf: matchURL(item)), let record = try? JSONDecoder().decode(MatchRecord.self, from: data) { return record }
+        let parsed = AppleLibraryTitleParser.parse(item)
+        let kind: AppleMediaKind = parsed.kind == .show ? .series : .movie
+        guard let logicalID = AppleLogicalItemKey.title(kind: kind, imdb: parsed.explicitIDs["imdb"], tmdb: parsed.explicitIDs["tmdb"]) else { return nil }
+        return matchRecord(logicalID: logicalID)
+    }
+
+    func matchRecord(logicalID: String) -> MatchRecord? {
+        let url = matchDirectory.appendingPathComponent("logical-" + ApplePlaybackIdentity.digest(for: logicalID) + ".json")
+        guard let data = try? Data(contentsOf: url), let record = try? JSONDecoder().decode(MatchRecord.self, from: data),
+              record.isManual || record.confidence >= 0.95 else { return nil }
+        return record
     }
 
     func strongMatchIDs(for item: AppleLibraryItem) -> (kind: AppleMediaKind, imdb: String?, tmdb: String?)? {
@@ -305,7 +316,13 @@ actor AppleLibraryMetadataResolver {
         let record = MatchRecord(candidate: candidate, explicitIDs: ids, provider: provider,
             confidence: isManual || provider.contains("explicitID") ? 1 : (exactYear ? 0.95 : 0.6), isManual: isManual, matchedAt: .now)
         try FileManager.default.createDirectory(at: matchDirectory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(record).write(to: matchURL(item), options: .atomic)
+        let encoded = try JSONEncoder().encode(record)
+        try encoded.write(to: matchURL(item), options: .atomic)
+        if record.isManual || record.confidence >= 0.95,
+           let kind = AppleMediaKind(rawValue: candidate.type),
+           let logicalID = AppleLogicalItemKey.title(kind: kind, imdb: ids["imdb"], tmdb: ids["tmdb"]) {
+            try encoded.write(to: matchDirectory.appendingPathComponent("logical-" + ApplePlaybackIdentity.digest(for: logicalID) + ".json"), options: .atomic)
+        }
     }
 
     /// The year disambiguates between films sharing a name; it does not decide

@@ -328,6 +328,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             throw error
         }
         print("[OpenStream] route title=\(request.title ?? "Untitled") container=\(request.hints.filename.map { URL(fileURLWithPath: $0).pathExtension } ?? request.url.pathExtension) route=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") audio=\(audioTracks.map(\.codec))")
+        if let decision = request.hints.playbackDecision {
+            let software = Self.mapRoute(aether.videoRoute) == .surface
+            appleTrace("playback decision video=\(decision.video) audio=\(decision.audio) observed=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") range=\(outputInfo.dynamicRange)\(decision.mismatch(observedSoftwareDecode: software) ? " decisionMismatch" : "")")
+        }
         guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
         performCaptionHandoff(captionHandoff.reloadFinished(succeeded: true))
         applyLiveBuffer()

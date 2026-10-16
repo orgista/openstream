@@ -3127,6 +3127,15 @@ struct AppleCatalogItemDetailView: View {
     @State private var library = AppleLocalLibraryStore.shared
 
     @State private var localFiles: [AppleLibraryItem] = []
+    @State private var titleMediaVersions: [AppleMediaVersion] = []
+    @State private var selectedServerVersion: String?
+    @State private var serverFailedVersions: Set<String> = []
+    @State private var serverConversionAttempted = false
+    @State private var serverRetrying = false
+    @State private var automaticLocalVersionFallback = false
+    @State private var versionResume: AppleVersionResumeConfirmation?
+    @State private var confirmsVersionResume = false
+    @State private var confirmedVersionID: String?
     @State private var discFile: AppleLibraryItem?
     @State private var hasMatchingLocalGroup = false
     @State private var titlePageStreamBadges: [AppleStreamFormatBadge] = []
@@ -3415,6 +3424,9 @@ struct AppleCatalogItemDetailView: View {
         }
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         .coordinateSpace(name: "detail-scroll")
+        .alert(versionResumeTitle, isPresented: $confirmsVersionResume) {
+            versionResumeButtons
+        }
         #if os(iOS)
         // The hero extends into the top safe area in both orientations; the
         // status-bar shield above protects text once the page scrolls.
@@ -3554,12 +3566,25 @@ struct AppleCatalogItemDetailView: View {
         .onChange(of: playbackUI.streamChoices) { _, _ in refreshTitleStreamBadges() }
         // The local file's format and, for a disc image, its titles: read by
         // the engine from the file itself, once per page.
-        .task(id: localFiles.first?.id) {
-            guard let file = discFile ?? localFiles.first else { return }
+        .task(id: localFiles.map(\.id)) {
+            guard let file = discFile ?? localFiles.first else { titleMediaVersions = []; return }
             let inspection = await library.inspection(for: file)
             guard !Task.isCancelled else { return }
             playbackUI.localInspection = inspection
+            let references = Set(localFiles.map(\.id))
+            titleMediaVersions = library.mediaVersions(for: file).filter { $0.isAvailable(references: references) }
             refreshTitleStreamBadges()
+        }
+        .task(id: "versions:\(item.id):\(episodeList.selectedEpisodeID ?? "")") {
+            guard localFiles.isEmpty, let msLibrary = mediaServerLibrary,
+                  let reference = AppleMediaServerItemReference.parse(item.mediaID) else { return }
+            do {
+                let detail = try await msLibrary.detail(for: reference)
+                let selected = detail.episodesBySeason.values.flatMap { $0 }.first { $0.id == episodeList.selectedEpisodeID } ?? detail.item
+                let versions = try await msLibrary.mediaVersions(for: selected, in: detail)
+                guard !Task.isCancelled else { return }
+                titleMediaVersions = versions
+            } catch { }
         }
         .task(id: "trailer-reset:\(item.id):\(allowsTrailerAutoplay)") {
             heroTrailer.isActive = false
@@ -4544,6 +4569,7 @@ struct AppleCatalogItemDetailView: View {
         .task(id: regularPlayTitle) { traceTitleProgress() }
         .accessibilityIdentifier("detail.play")
         .contextMenu {
+            versionMenu
             AppleLibraryFixMatchMenuAction()
             Button("Quality", systemImage: "slider.horizontal.3") {
                 Task { await chooseStreams() }
@@ -6516,10 +6542,10 @@ struct AppleCatalogItemDetailView: View {
 
     private func configuredSources(_ presentation: AppleStremioPlayerPresentation, selectedID: URL? = nil) -> AppleStremioPlayerPresentation {
         var result = presentation
-        result.sourceID = selectedID ?? presentation.request.url
+        result.sourceID = presentation.request.hints.libraryFileURL ?? selectedID ?? presentation.request.url
         // Every path that opens the player from this page comes through here,
         // so wiring the next episode once covers all of them.
-        result.nextEpisode = nextLocalPartContext(selectedID: selectedID) ?? nextEpisodeContext()
+        result.nextEpisode = nextLocalPartContext(selectedID: result.sourceID) ?? nextEpisodeContext()
         result.coordinator.trackCarryOver = playbackUI.trackCarryOver
         playbackUI.trackCarryOver = nil
         // Every stream failed before anything played: close the player, then
@@ -6528,9 +6554,47 @@ struct AppleCatalogItemDetailView: View {
         let fellBack = presentation.engineOverride != nil
         let fromBeginning = playbackUI.pressFromBeginning
         result.onUnplayable = { unplayable in
+            if presentation.request.sourceKind == .mediaServer, let version = presentation.request.hints.versionID {
+                presentation.coordinator.stop()
+                playbackUI.presentation = nil
+                // The retry itself checks for a real TranscodingUrl and moves to
+                // the next version when the server offers no conversion.
+                let nextStep = ApplePlaybackFallbackPolicy.next(triedConversion: serverConversionAttempted,
+                    nextVersionAvailable: titleMediaVersions.contains { $0.id != version && !serverFailedVersions.contains($0.id) })
+                if nextStep == .conversion {
+                    selectedServerVersion = version
+                    serverConversionAttempted = true
+                    serverRetrying = true
+                    playbackUI.request = UUID()
+                    return
+                }
+                serverFailedVersions.insert(version)
+                if nextStep == .nextVersion, retryNextServerVersion(after: version) { return }
+            }
+            let engineStep = ApplePlaybackEngineFallback.afterEveryStreamFailed(unplayable.failure,
+                engine: unplayable.engine, alreadyFellBack: fellBack)
+            // The engine fallback runs first (design §4.2 rule 7): the same
+            // version again on the OpenStream engine, then the next version.
+            if let version = presentation.request.hints.versionID,
+               presentation.request.hints.libraryFileURL != nil {
+                presentation.coordinator.stop()
+                if engineStep == .openStream {
+                    // The same version again, past the prompt it already answered.
+                    confirmedVersionID = version
+                } else if let next = titleMediaVersions.first(where: { $0.id != version && !serverFailedVersions.contains($0.id) }),
+                          let reference = next.parts.first?.reference,
+                          let file = localFiles.first(where: { $0.id == reference }) {
+                    serverFailedVersions.insert(version)
+                    playbackUI.presentation = nil
+                    playbackUI.selectedLocalFile = file
+                    automaticLocalVersionFallback = true
+                    serverRetrying = true
+                    playbackUI.request = UUID()
+                    return
+                }
+            }
             playbackUI.presentation = nil
-            switch ApplePlaybackEngineFallback.afterEveryStreamFailed(unplayable.failure,
-                engine: unplayable.engine, alreadyFellBack: fellBack) {
+            switch engineStep {
             case .openStream:
                 appleTrace("native fallback → openStream after \(unplayable.triedSourceURLs.count) failures")
                 playbackUI.engineOverride = .openStream
@@ -6543,6 +6607,10 @@ struct AppleCatalogItemDetailView: View {
             case nil:
                 playbackCoordinator.reset()
             }
+        }
+        if presentation.request.hints.versionID != nil {
+            result.sourceOptionsLoader = nil
+            return result
         }
         let engineOverride = presentation.engineOverride
         let files = localFiles
@@ -6622,13 +6690,14 @@ struct AppleCatalogItemDetailView: View {
                   $0.items.contains { $0.url == selectedID }
               }), let current = group.items.first(where: { $0.url == selectedID }),
               let next = group.nextPart(after: current) else { return nil }
-        return AppleNextEpisodeContext(title: next.name) { carryOver in
+        return AppleNextEpisodeContext(title: next.name, isPartBoundary: true) { carryOver in
             Task { @MainActor in
                 guard self.playbackUI.presentation?.sourceID == selectedID else { return }
                 let ending = self.playbackUI.presentation?.id
+                let engineOverride = self.playbackUI.presentation?.engineOverride
                 do {
                     let presentation = try await self.library.presentation(for: next,
-                        sourceStore: self.localSourceStore ?? AppleSourceStore(), settings: self.settings)
+                        sourceStore: self.localSourceStore ?? AppleSourceStore(), settings: self.settings, continuingPart: true, engineOverride: engineOverride)
                     guard !Task.isCancelled, self.playbackUI.presentation?.id == ending else { return }
                     self.playbackUI.trackCarryOver = carryOver.isEmpty ? nil : carryOver
                     self.playbackCoordinator = presentation.coordinator
@@ -6690,7 +6759,23 @@ struct AppleCatalogItemDetailView: View {
         if let openSourcesSettings { openSourcesSettings() } else { openSettings() }
     }
 
+    private func retryNextServerVersion(after version: String) -> Bool {
+        serverFailedVersions.insert(version)
+        guard titleMediaVersions.contains(where: { !serverFailedVersions.contains($0.id) }) else { return false }
+        selectedServerVersion = nil
+        serverConversionAttempted = false
+        serverRetrying = true
+        playbackUI.request = UUID()
+        return true
+    }
+
     private func resolvePlayback() async {
+        let resolvingRequest = playbackUI.request
+        if !serverRetrying {
+            serverFailedVersions = []
+            serverConversionAttempted = false
+        }
+        serverRetrying = false
         let retryStartedAt = playbackUI.retryStartedAt
         playbackUI.retryStartedAt = nil
         let engineOverride = playbackUI.engineOverride
@@ -6747,26 +6832,50 @@ struct AppleCatalogItemDetailView: View {
                     episodeToPlay = msDetail.item
                 }
 
-                let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: !fromBeginning)
-                let presentation = AppleStremioPlayerPresentation(request: req, settings: settings)
+                let confirmed = confirmedVersionID
+                confirmedVersionID = nil
+                let req = try await msLibrary.playbackRequest(for: episodeToPlay, in: msDetail, resume: !fromBeginning,
+                    versionID: selectedServerVersion, afterFailure: serverConversionAttempted,
+                    failedVersions: serverFailedVersions, confirmedVersionID: confirmed)
+                guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+                selectedServerVersion = nil
+                let presentation = AppleStremioPlayerPresentation(request: req, settings: settings, engineOverride: engineOverride)
+                msLibrary.attach(to: presentation.coordinator)
                 playbackCoordinator = presentation.coordinator
                 playbackUI.presentation = configuredSources(presentation, selectedID: req.url)
                 return
             }
 
             if playbackUI.selectedQuality == nil {
-                let files = playbackUI.selectedLocalFile.map { [$0] } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
+                let automaticFallback = automaticLocalVersionFallback
+                automaticLocalVersionFallback = false
+                let explicitlySelected = playbackUI.selectedLocalFile != nil && !automaticFallback
+                let confirmed = confirmedVersionID
+                confirmedVersionID = nil
+                let files = playbackUI.selectedLocalFile.map { selected in
+                    [selected] + localFiles.filter { $0.id != selected.id && !ApplePlaybackFailureHistory.shared.contains($0.url) }
+                } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
                 playbackUI.selectedLocalFile = nil
-                for file in files {
+                for (fileIndex, file) in files.enumerated() {
+                    var attempted = file
                     do {
-                        let presentation = try await library.presentation(for: file,
+                        let presentation = try await library.presentation(attempting: &attempted,
                             sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings,
-                            fromBeginning: fromBeginning, disc: discChoice)
+                            fromBeginning: fromBeginning, disc: discChoice,
+                            explicitVersion: explicitlySelected && fileIndex == 0, confirmedVersionID: fileIndex == 0 ? confirmed : nil,
+                            automaticFallback: automaticFallback || fileIndex > 0, engineOverride: engineOverride)
+                        guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
                         playbackCoordinator = presentation.coordinator
                         playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
                         return
+                    } catch let confirmation as AppleVersionResumeConfirmation {
+                        guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+                        versionResume = confirmation
+                        confirmsVersionResume = true
+                        playbackCoordinator.reset()
+                        return
                     } catch is CancellationError { throw CancellationError() }
-                    catch { ApplePlaybackFailureHistory.shared.record(file.url) }
+                    catch { ApplePlaybackFailureHistory.shared.record(attempted.url) }
                 }
             }
             if playbackUI.selectedQuality == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
@@ -6862,9 +6971,17 @@ struct AppleCatalogItemDetailView: View {
             )
             playbackCoordinator = presentation.coordinator
             playbackUI.presentation = configuredSources(presentation)
-        } catch is CancellationError {
+        } catch let confirmation as AppleVersionResumeConfirmation {
+            guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+            versionResume = confirmation
+            confirmsVersionResume = true
             playbackCoordinator.reset()
+        } catch is CancellationError {
+            if playbackUI.request == resolvingRequest { playbackCoordinator.reset() }
         } catch {
+            guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+            if serverConversionAttempted, let version = selectedServerVersion,
+               retryNextServerVersion(after: version) { return }
             if let retryStartedAt {
                 let hold = ApplePlaybackFailureRecovery.remainingRetryFeedback(elapsed: .now - retryStartedAt)
                 if hold > .zero { try? await Task.sleep(for: hold) }
@@ -9668,10 +9785,44 @@ extension AppleCatalogItemDetailView {
         playbackUI.request = UUID()
     }
 
+    private var versionResumeTitle: String {
+        "Resume from \(AppleTransportOverlayModel.timeText(versionResume?.position ?? 0))?"
+    }
+
+    @ViewBuilder private var versionResumeButtons: some View {
+        Button("Resume") {
+            confirmedVersionID = versionResume?.versionID
+            playbackUI.request = UUID()
+        }
+        Button("Start from Beginning") {
+            confirmedVersionID = versionResume?.versionID
+            playbackUI.startsFromBeginning = true
+            playbackUI.request = UUID()
+        }
+        Button("Cancel", role: .cancel) { selectedServerVersion = nil }
+    }
+
+    @ViewBuilder private var versionMenu: some View {
+        if titleMediaVersions.count > 1 {
+            Menu("Play version…") {
+                ForEach(titleMediaVersions) { version in
+                    Button(version.menuLabel) {
+                        if let reference = version.parts.first?.reference,
+                           let file = localFiles.first(where: { $0.id == reference }) {
+                            playbackUI.selectedLocalFile = file
+                        } else { selectedServerVersion = version.id }
+                        playbackUI.request = UUID()
+                    }
+                }
+            }
+        }
+    }
+
     /// "Start from Beginning" in the one button's context menu on the iPhone,
     /// iPad, Mac and Vision Pro, beside Quality.
     @ViewBuilder
     private var playButtonMenuItems: some View {
+        versionMenu
         AppleLibraryFixMatchMenuAction()
         if discOffersMenu {
             Button("Skip to Movie", systemImage: "forward.end.fill") { startDisc(.mainTitle) }

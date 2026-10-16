@@ -307,7 +307,14 @@ public final class ApplePlaybackStore {
 
     public func progress(for mediaID: String) -> ApplePlaybackProgress? {
         guard let storageKey = ApplePlaybackIdentity.storageKey(for: mediaID) else { return nil }
-        return AppleIdentityAliasResolution.progress(keys: classKeys(storageKey), in: entries())
+        let keys = classKeys(storageKey)
+        guard let progress = AppleIdentityAliasResolution.progress(keys: keys, in: entries()) else { return nil }
+        if keys.count > 1 {
+            let terminal = AppleIdentityAliasResolution.terminals(keys: keys, in: configurationPlaybackTerminals())
+            if let completion = terminal?.completedAt, completion >= (terminal?.resetAt ?? .distantPast), progress.updatedAt <= completion { return nil }
+            if progress.isComplete, let reset = terminal?.resetAt, progress.updatedAt <= reset { return nil }
+        }
+        return progress
     }
 
     /// The finished titles among `mediaIDs`, from one read of the watched
@@ -428,6 +435,126 @@ public final class ApplePlaybackStore {
         AppleInteractionTrace.record(.playback,
             "progress save key=\(storageKey) pos=\(Int(position.isFinite ? position : -1)) dur=\(Int(duration.isFinite ? duration : -1)) part=\(partID ?? "-")")
         save(storageKey: storageKey, position: position, duration: duration, partID: partID)
+    }
+
+    /// One file's own position, outside its alias class: a stack part played
+    /// without a measured timeline must not read the title's cumulative position.
+    func fileProgress(for mediaID: String) -> ApplePlaybackProgress? {
+        ApplePlaybackIdentity.storageKey(for: mediaID).flatMap { entries()[$0] }
+    }
+
+    private var versionProgressKey: String { AppleTasteNamespace.key("openstream.playback.versionProgress.v1", namespace: namespace) }
+    private var preferredVersionKey: String { AppleTasteNamespace.key("openstream.playback.preferredVersion.v1", namespace: namespace) }
+
+    private var versionData: Data?
+    private var versionCache: [String: [String: ApplePlaybackProgress]]?
+
+    private func versionEntries() -> [String: [String: ApplePlaybackProgress]] {
+        let data = blobs.data(forKey: versionProgressKey)
+        if let versionCache, data == versionData { return versionCache }
+        let values = data.flatMap { try? JSONDecoder().decode([String: [String: ApplePlaybackProgress]].self, from: $0) } ?? [:]
+        versionData = data
+        versionCache = values
+        return values
+    }
+
+    private func persistVersionEntries(_ values: [String: [String: ApplePlaybackProgress]]) {
+        versionCache = values
+        versionData = try? JSONEncoder().encode(values)
+        blobs.set(versionData, forKey: versionProgressKey)
+    }
+
+    public func versionProgress(itemID: String, versionID: String) -> ApplePlaybackProgress? {
+        guard let key = ApplePlaybackIdentity.storageKey(for: itemID) else { return nil }
+        guard let progress = versionEntries()[key]?[versionID] else { return nil }
+        let terminal = AppleIdentityAliasResolution.terminals(keys: classKeys(key), in: configurationPlaybackTerminals())
+        if !progress.isComplete, let completion = terminal?.completedAt, completion >= (terminal?.resetAt ?? .distantPast), progress.updatedAt <= completion { return nil }
+        if progress.isComplete, let reset = terminal?.resetAt, progress.updatedAt <= reset { return nil }
+        return progress
+    }
+
+    /// Read raw Stage-A keys before joining their alias classes. Never rewrite or delete them.
+    public func migrateVersionProgress(itemID: String, versions: [String: [String]], timelines: [String: AppleMediaVersion] = [:], recordAliases: Bool = true) {
+        guard let itemKey = ApplePlaybackIdentity.storageKey(for: itemID) else { return }
+        var scopes = versionEntries()
+        let raw = entries().merging(rawActivities(), uniquingKeysWith: ApplePlaybackConvergence.freshest)
+        var item = raw[itemKey]
+        for (versionID, legacyIDs) in versions {
+            let timeline = timelines[versionID]
+            let candidates = legacyIDs.enumerated().compactMap { index, legacyID -> ApplePlaybackProgress? in
+                guard let key = ApplePlaybackIdentity.storageKey(for: legacyID), let old = raw[key] else { return nil }
+                guard let timeline, timeline.parts.count > 1 else { return old }
+                guard index < timeline.parts.count, let duration = timeline.duration,
+                      let position = timeline.cumulativePosition(ordinal: timeline.parts[index].ordinal, offset: old.position) else { return nil }
+                return ApplePlaybackProgress(position: position, duration: duration, updatedAt: old.updatedAt, partID: old.partID)
+            }
+            if let old = candidates.reduce(nil as ApplePlaybackProgress?, { result, value in
+                result.map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+            }) {
+                let existing = scopes[itemKey]?[versionID]
+                scopes[itemKey, default: [:]][versionID] = existing.map { ApplePlaybackConvergence.freshest($0, old) } ?? old
+            }
+            if let value = scopes[itemKey]?[versionID] {
+                item = item.map { ApplePlaybackConvergence.freshest($0, value) } ?? value
+            }
+        }
+        if scopes != versionEntries() { persistVersionEntries(scopes) }
+        if let item, !item.isComplete, entries()[itemKey] != item {
+            var values = entries()
+            values[itemKey] = item
+            persist(values)
+        }
+        // A lone file is its own item: there is nothing to join.
+        let members = Set([itemID] + versions.values.flatMap { $0 }.filter { !$0.isEmpty })
+        if recordAliases, members.count > 1 { recordIdentityAlias(classID: itemID, mediaIDs: Array(members).sorted()) }
+    }
+
+    public func save(request: ApplePlaybackRequest, position: Double, duration: Double) {
+        let partID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID)
+        if let version = request.hints.versionID {
+            saveVersion(itemID: request.mediaID, versionID: version,
+                position: request.hints.versionOffset + position,
+                duration: request.hints.versionDuration ?? duration, partID: partID)
+        } else {
+            save(mediaID: request.mediaID, position: position, duration: duration, partID: partID)
+        }
+    }
+
+    public func saveVersion(itemID: String, versionID: String, position: Double, duration: Double, partID: String? = nil) {
+        guard let key = ApplePlaybackIdentity.storageKey(for: itemID), position.isFinite, position >= 0,
+              duration.isFinite, duration > 0 else { return }
+        save(mediaID: itemID, position: position, duration: duration, partID: partID)
+        // Completion removes ordinary resume state, but the version retains its own timeline.
+        guard let value = rawActivities()[key] else { return }
+        var scopes = versionEntries()
+        scopes[key, default: [:]][versionID] = value
+        persistVersionEntries(scopes)
+    }
+
+    /// The last played version of an item (owner rule 2026-10-15), stored in
+    /// `preferredVersion.v1`: written when a version really starts playing.
+    public func preferVersion(_ versionID: String, itemID: String) {
+        guard let key = ApplePlaybackIdentity.storageKey(for: itemID) else { return }
+        var values = preferredVersions()
+        guard values[key] != versionID else { return }
+        values[key] = versionID
+        blobs.set(try? JSONEncoder().encode(values), forKey: preferredVersionKey)
+    }
+
+    /// First frame of a versioned request: that copy becomes the resume copy.
+    public func notePlaybackStarted(_ request: ApplePlaybackRequest) {
+        guard let versionID = request.hints.versionID else { return }
+        preferVersion(versionID, itemID: request.mediaID)
+    }
+
+    private func preferredVersions() -> [String: String] {
+        blobs.data(forKey: preferredVersionKey).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+    }
+
+    /// The recorded last played version, even while its file is unavailable
+    /// (an unmounted share must not erase it); callers fall back per play.
+    public func preferredVersion(itemID: String) -> String? {
+        ApplePlaybackIdentity.storageKey(for: itemID).flatMap { preferredVersions()[$0] }
     }
 
     public func save(url: URL, position: Double, duration: Double, partID: String? = nil) {

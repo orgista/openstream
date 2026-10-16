@@ -11,6 +11,7 @@ public final class ApplePlaybackProgressCoordinator {
     public let partID: String?
 
     private let store: ApplePlaybackStore
+    public var writer: (@MainActor (Double, Double) -> Void)?
     private let saveInterval: Double
     private weak var player: AVPlayer?
     private var periodicTimeObserver: Any?
@@ -51,7 +52,8 @@ public final class ApplePlaybackProgressCoordinator {
     }
 
     public func record(position: Double, duration: Double) {
-        store.save(mediaID: mediaIdentity, position: position, duration: duration, partID: partID)
+        if let writer { writer(position, duration) }
+        else { store.save(mediaID: mediaIdentity, position: position, duration: duration, partID: partID) }
     }
 
     public func markComplete() {

@@ -386,6 +386,11 @@ struct AppleMediaServerLibraryStoreTests {
         let client = AppleMediaServerClient(loader: { req in
             let path = req.url!.path
             let json = "{}"
+            if path.hasSuffix("Playing") || path.hasSuffix("Progress") || path.hasSuffix("Stopped") {
+                let body = try #require(req.httpBody)
+                let report = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(report["MediaSourceId"] as? String == "src1")
+            }
             if path.hasSuffix("m1") {
                 return ("""
                 { "Id": "m1", "Name": "Movie", "Type": "Movie", "RunTimeTicks": 1000000000 }
@@ -419,7 +424,8 @@ struct AppleMediaServerLibraryStoreTests {
         let detail = try await store.detail(for: ref)
         let req = try await store.playbackRequest(for: detail.item, in: detail, resume: false)
         let mediaID = req.mediaID
-        
+        #expect(req.hints.versionID == "src1")
+
         // Emulate coordinator sink
         store.handleRemoteProgress(mediaID: mediaID, position: 10, duration: 100, event: .started)
         

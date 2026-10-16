@@ -40,7 +40,8 @@ private struct AliasCredentialStub: AppleCredentialStoring {
     }
     func store(_ files: [AppleLibraryItem], offlineIDs: [String: String] = [:]) -> AppleLocalLibraryStore {
         AppleLocalLibraryStore(resolver: resolver, playbackStore: playback,
-            groups: AppleLibrarySeries.groups(files), sources: [source], offlineIDs: offlineIDs)
+            groups: AppleLibrarySeries.groups(files), sources: [source], offlineIDs: offlineIDs,
+            versionCacheURL: root.appendingPathComponent("MediaVersions-v1.json"))
     }
     func table() throws -> AppleIdentityAliasTable {
         let data = AppleIdentityAliasStore(defaults: defaults, blobDirectory: blobDirectory).blobData
@@ -63,7 +64,8 @@ private struct AliasCredentialStub: AppleCredentialStoring {
             let store = f.store([file])
             await f.resolveAll(store)
             let key = try #require(ApplePlaybackIdentity.storageKey(for: store.playbackID(file)))
-            #expect(try f.table().classes == ["li:series:tt0903747:1:1:734003200": [key]])
+            #expect(try f.table().classes["li:series:tt0903747:1:1:734003200"] == [key])
+            #expect(try f.table().classes["li:series:tt0903747:1:1"]?.contains(key) == true)
             let storage = ApplePlaybackBlobStorage.storage(defaults: f.defaults, directory: f.blobDirectory)
             let url = storage.fileURL(forKey: "openstream.identity.aliases.v1")
             let sentinel = Date(timeIntervalSince1970: 1234)
@@ -105,7 +107,7 @@ private struct AliasCredentialStub: AppleCredentialStoring {
             for group in store.groups {
                 await store.resolve(group, sourceStore: f.sources, settings: f.settings, refresh: true)
             }
-            #expect(try f.table().classes.count == 1)
+            #expect(try f.table().classes["li:movie:tt0903747"] != nil)
         }
     }
     @Test func noMatchRecordsNothing() async throws {
@@ -117,10 +119,10 @@ private struct AliasCredentialStub: AppleCredentialStoring {
             // A newly resolved match must still record after an earlier miss.
             try await f.manual(store.groups[0].items[0], kind: "movie")
             await f.resolveAll(store)
-            #expect(try f.table().classes.count == 1)
+            #expect(try f.table().classes["li:movie:tt0903747"] != nil)
         }
     }
-    @Test func twoCopiesStaySeparate() async throws {
+    @Test func twoCopiesShareTitleAndKeepVersionScopes() async throws {
         try await LocalAliasFixture.run { f in
             let first = f.file("Film.2020.1080p.mkv", size: 1000)
             let second = f.file("Film.2020.2160p.mkv", size: 2000)
@@ -128,12 +130,231 @@ private struct AliasCredentialStub: AppleCredentialStoring {
             let store = f.store([first, second])
             await f.resolveAll(store)
             let table = try f.table()
-            #expect(Set(table.classes.keys) == ["li:movie:tt0903747:1000", "li:movie:tt0903747:2000"])
-            #expect(table.classes.values.allSatisfy { $0.count == 1 })
+            #expect(table.classes["li:movie:tt0903747:1000"]?.count == 1)
+            #expect(table.classes["li:movie:tt0903747:2000"]?.count == 1)
+            #expect(table.classes["li:movie:tt0903747"] != nil)
+            f.playback.save(mediaID: store.playbackID(first), position: 600, duration: 3600)
+            #expect(f.playback.progress(for: store.playbackID(second))?.position == 600)
+            _ = store.mediaVersions(for: first)
+            #expect(f.playback.versionProgress(itemID: "li:movie:tt0903747", versionID: store.playbackID(first))?.position == 600)
+            #expect(f.playback.versionProgress(itemID: "li:movie:tt0903747", versionID: store.playbackID(second)) == nil)
+        }
+    }
+    @Test func unmatchedSameTitleCopiesAreNeitherMergedNorAliased() async throws {
+        try await LocalAliasFixture.run { f in
+            let first = f.file("Film.2020.1080p.mkv", size: 1000)
+            let second = f.file("Film.2020.2160p.mkv", size: 2000)
+            let store = f.store([first, second])
+            await f.resolveAll(store)
+            let one = store.mediaVersions(for: first)
+            let two = store.mediaVersions(for: second)
+            #expect(one.count == 1 && two.count == 1)
+            #expect(one.first?.itemID == store.playbackID(first))
+            #expect(two.first?.itemID == store.playbackID(second))
+            let table = try f.table()
+            #expect(table.classes.isEmpty)
             f.playback.save(mediaID: store.playbackID(first), position: 600, duration: 3600)
             #expect(f.playback.progress(for: store.playbackID(second)) == nil)
         }
     }
+
+    @Test func anUnmatchedStackSharesOneTimeline() async throws {
+        try await LocalAliasFixture.run { f in
+            let parts = [f.file("Film.2020.cd1.mkv", size: 1000), f.file("Film.2020.cd2.mkv", size: 1000)]
+            let store = f.store(parts)
+            await f.resolveAll(store)
+            let one = try #require(store.mediaVersions(for: parts[0]).first)
+            let two = try #require(store.mediaVersions(for: parts[1]).first)
+            #expect(one.parts.map(\.reference) == parts.map(\.id))
+            #expect(one.itemID == two.itemID && one.id == two.id)
+            #expect(one.itemID != store.playbackID(parts[0]))
+        }
+    }
+
+    /// A stack whose probe fails plays part by part on each file's own
+    /// position, learns each part's length from playback, and then resumes
+    /// through the whole cumulative timeline.
+    @Test func aStackWithAFailingProbePlaysPartByPartAndLearnsItsTimeline() async throws {
+        try await LocalAliasFixture.run { f in
+            let folder = f.root.appendingPathComponent("Downloads")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let downloads = AppleSource(id: AppleLocalLibraryStore.downloadsID, kind: .library, name: "Downloads", url: folder)
+            let parts = ["Film.2020.cd1.mkv", "Film.2020.cd2.mkv"].map { name in
+                AppleLibraryItem(sourceID: downloads.id, name: name, url: folder.appendingPathComponent(name),
+                    relativePath: name, sizeBytes: 16)
+            }
+            // Not media: the probe fails and reports no duration.
+            for part in parts { try Data(repeating: 7, count: 16).write(to: part.url) }
+            let store = AppleLocalLibraryStore(resolver: f.resolver, playbackStore: f.playback,
+                groups: AppleLibrarySeries.groups(parts), sources: [downloads],
+                versionCacheURL: f.root.appendingPathComponent("MediaVersions-v1.json"))
+            await f.resolveAll(store)
+
+            let first = try await store.presentation(for: parts[0], sourceStore: f.sources, settings: f.settings, engineOverride: .openStream)
+            #expect(first.request.url == parts[0].url)
+            #expect(first.request.hints.versionID == nil)
+            #expect(first.request.mediaID == store.playbackID(parts[0]))
+            first.coordinator.progressWriter?(900, 1800)
+            #expect(f.playback.fileProgress(for: store.playbackID(parts[0]))?.position == 900)
+
+            let second = try await store.presentation(for: parts[1], sourceStore: f.sources, settings: f.settings,
+                continuingPart: true, engineOverride: .openStream)
+            #expect(second.request.url == parts[1].url)
+            #expect(second.request.hints.versionID == nil)
+            second.coordinator.progressWriter?(300, 2400)
+
+            let resumed = try await store.presentation(for: parts[0], sourceStore: f.sources, settings: f.settings, engineOverride: .openStream)
+            #expect(resumed.request.hints.versionDuration == 4200)
+            #expect(resumed.request.url == parts[1].url)
+            #expect(resumed.request.resumePosition == 300)
+            #expect(resumed.request.hints.versionOffset == 1800)
+        }
+    }
+
+    @Test func playAndItsPromptUseTheLastPlayedCopy() async throws {
+        try await LocalAliasFixture.run { f in
+            let low = f.file("Film.2020.1080p.mkv", size: 1000)
+            let high = f.file("Film.2020.2160p.mkv", size: 2000)
+            try await f.manual(low, kind: "movie")
+            let cacheURL = f.root.appendingPathComponent("MediaVersions-v1.json")
+            let probe = f.store([low, high])
+            await f.resolveAll(probe)
+            var versions = probe.mediaVersions(for: low)
+            try #require(versions.count == 2)
+            for index in versions.indices {
+                versions[index].parts[0].duration = versions[index].parts[0].reference == high.id ? 7200 : 6000
+            }
+            AppleMediaVersionCache(url: cacheURL).record(versions)
+            let store = f.store([low, high])
+            await f.resolveAll(store)
+            let itemID = versions[0].itemID
+            let highID = try #require(versions.first { $0.parts[0].reference == high.id }?.id)
+            let lowID = try #require(versions.first { $0.parts[0].reference == low.id }?.id)
+            f.playback.saveVersion(itemID: itemID, versionID: highID, position: 600, duration: 7200)
+            f.playback.preferVersion(lowID, itemID: itemID)
+            // Play on the 4K file still resumes the 1080p copy played last, and
+            // the runtime differs, so it asks about exactly that copy.
+            await #expect(throws: AppleVersionResumeConfirmation(position: 600, versionID: lowID)) {
+                _ = try await store.presentation(for: high, sourceStore: f.sources, settings: f.settings, engineOverride: .openStream)
+            }
+            #expect(f.playback.preferredVersion(itemID: itemID) == lowID)
+        }
+    }
+
+    @Test func playNamesTheCopyItActuallyTried() async throws {
+        try await LocalAliasFixture.run { f in
+            let low = f.file("Film.2020.1080p.mkv", size: 1000)
+            let high = f.file("Film.2020.2160p.mkv", size: 2000)
+            try await f.manual(low, kind: "movie")
+            let store = f.store([low, high])
+            await f.resolveAll(store)
+            let versions = store.mediaVersions(for: low)
+            try #require(versions.count == 2)
+            let lowID = try #require(versions.first { $0.parts[0].reference == low.id }?.id)
+            f.playback.preferVersion(lowID, itemID: versions[0].itemID)
+            // Play on the 4K file selects the 1080p copy played last; a failure
+            // blacklists the file `attempting` ends on.
+            var attempted = high
+            let presentation = try await store.presentation(attempting: &attempted, sourceStore: f.sources,
+                settings: f.settings, engineOverride: .openStream)
+            #expect(attempted.id == low.id)
+            #expect(presentation.request.hints.libraryFileURL == low.url)
+        }
+    }
+    @Test func oneLibraryPublishWritesTheVersionCacheOnce() async throws {
+        try await LocalAliasFixture.run { f in
+            let files = [f.file("Alpha.2020.mkv"), f.file("Beta.2021.mkv"), f.file("Gamma.2022.mkv")]
+            for (index, file) in files.enumerated() {
+                try await f.resolver.correctMatch(for: file, candidate: AppleCatalogItem(mediaID: "tt000000\(index + 1)",
+                    type: "movie", name: file.name, releaseInfo: "2020"), provider: "fixture")
+            }
+            let store = f.store(files)
+            #expect(store.groups.count == 3)
+            await store.recordAllIdentityAliases()
+            #expect(store.mediaVersionCache.versions.count == 3)
+            #expect(store.mediaVersionCache.diskWrites == 1)
+            // The next launch rebuilds the same versions with a newer timestamp: no write.
+            let relaunched = f.store(files)
+            await relaunched.recordAllIdentityAliases()
+            #expect(relaunched.mediaVersionCache.versions.count == 3)
+            #expect(relaunched.mediaVersionCache.diskWrites == 0)
+        }
+    }
+
+    @Test(arguments: [
+        ["Shows/Show/Show.2020-01-01.mkv", "Shows/Show/Show.2020-01-02.mkv"],
+        ["Shows/Show/Pilot.mkv", "Shows/Show/Arrival.mkv"]
+    ]) func dailyAndUnnumberedEpisodesKeepSeparateTimelines(paths: [String]) async throws {
+        try await LocalAliasFixture.run { f in
+            let files = paths.map { f.file($0, size: 1000) }
+            try await f.manual(files[0])
+            let library = f.store(files)
+            await f.resolveAll(library)
+            let first = try #require(library.mediaVersions(for: files[0]).first)
+            let second = try #require(library.mediaVersions(for: files[1]).first)
+            #expect(first.itemID != second.itemID)
+            f.playback.saveVersion(itemID: first.itemID, versionID: first.id, position: 600, duration: 3600)
+            #expect(f.playback.progress(for: second.itemID) == nil)
+        }
+    }
+
+    @Test func aCancelledVersionPressDoesNotPrepareOrMigratePlayback() async throws {
+        try await LocalAliasFixture.run { f in
+            let file = f.file("Film.2020.2160p.mkv")
+            let library = f.store([file])
+            let task = Task { @MainActor in
+                _ = try await library.presentation(for: file, sourceStore: f.sources, settings: f.settings, explicitVersion: true)
+            }
+            task.cancel()
+            await #expect(throws: CancellationError.self) { try await task.value }
+            #expect(f.playback.configurationProgress().isEmpty)
+            #expect(FileManager.default.fileExists(atPath: f.root.appendingPathComponent("MediaVersions-v1.json").path) == false)
+        }
+    }
+
+    @Test func copiesAcrossLocalSourcesProduceOneContinueWatchingCard() async throws {
+        try await LocalAliasFixture.run { f in
+            let first = f.file("Film.2020.1080p.mkv", size: 1000)
+            let other = AppleSource(kind: .library, name: "Other", url: f.root.appendingPathComponent("Other"))
+            let second = AppleLibraryItem(sourceID: other.id, name: "Film.2020.2160p.mkv",
+                url: other.url.appendingPathComponent("Film.2020.2160p.mkv"), relativePath: "Film.2020.2160p.mkv", sizeBytes: 2000)
+            try await f.manual(first, kind: "movie")
+            try await f.manual(second, kind: "movie")
+            let library = AppleLocalLibraryStore(resolver: f.resolver, playbackStore: f.playback,
+                groups: AppleLibrarySeries.groups([first, second]), sources: [f.source, other],
+                versionCacheURL: f.root.appendingPathComponent("MediaVersions-v1.json"))
+            await f.resolveAll(library)
+            let versions = library.mediaVersions(for: first)
+            #expect(versions.count == 2)
+            let version = try #require(versions.first)
+            f.playback.saveVersion(itemID: version.itemID, versionID: version.id, position: 600, duration: 3600)
+            #expect(library.continueWatching.count == 1)
+        }
+    }
+
+    @Test func saveCompletionIndexSyncAndRowResolutionWithTwoVersions() async throws {
+        try await LocalAliasFixture.run { f in
+            let first = f.file("Film.2020.1080p.mkv", size: 1000)
+            let second = f.file("Film.2020.2160p.mkv", size: 2000)
+            try await f.manual(first, kind: "movie")
+            let library = f.store([first, second])
+            await f.resolveAll(library)
+            let versions = library.mediaVersions(for: first)
+            #expect(versions.count == 2)
+            let itemID = try #require(versions.first?.itemID)
+            f.playback.saveVersion(itemID: itemID, versionID: library.playbackID(first), position: 600, duration: 3600)
+            library.refreshProgress()
+            #expect(library.continueWatching.count == 1)
+            f.playback.saveVersion(itemID: itemID, versionID: library.playbackID(first), position: 3600, duration: 3600)
+            let repository = AppleMediaIndexRepository(fileURL: f.root.appendingPathComponent("index.json"))
+            try await repository.replace(instanceID: f.source.id, with: [first, second].map { AppleMediaIngestion.libraryRecord(source: f.source, item: $0) })
+            library.refreshProgress()
+            #expect(library.continueWatching.isEmpty)
+            #expect(f.playback.completedMediaIDs(among: [library.playbackID(first), library.playbackID(second)]).count == 2)
+            #expect(library.sorted(.added).count == 1)
+        }
+    }
+
     @Test func extrasDownloadsAndZeroSizeRecordNothing() async throws {
         try await LocalAliasFixture.run { f in
             let extra = f.file("Film.2020-trailer.mkv")

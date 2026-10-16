@@ -384,6 +384,26 @@ import Testing
         coordinator.stop()
     }
 
+    @Test func physicalPartHasNoEpisodePromptAndIgnoresEpisodeAutoplaySetting() {
+        let engine = FakePlaybackEngine()
+        engine.duration = 100
+        engine.position = 90
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest())
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        var starts = 0
+        model.nextEpisode = { starts += 1 }
+        model.nextEpisodeTitle = "Part 2"
+        model.isPartBoundary = true
+        model.autoPlayNextEpisode = false
+        #expect(model.nextEpisodePrompt == nil)
+        #expect(model.showsNextEpisode == false)
+        #expect(coordinator.handsOffAtEnd)
+        model.apply(.phase(.ended))
+        model.apply(.phase(.ended))
+        #expect(starts == 1)
+        coordinator.stop()
+    }
+
     // MARK: - Skip
 
     @Test func skipForwardsSeeksClamped() async {
