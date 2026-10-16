@@ -1128,6 +1128,7 @@ struct AppleDiscoverView: View {
 
     private func displayedRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DisplayedRail] {
         let rails = discoverRails(continueWatching: continueWatching, picks: picks)
+        let sections = visibleSections
         let keys = rails.map { rail -> [String] in
             switch rail {
             case .continueWatching: return AppleContinueWatchingResolver.rail(continueWatching).map { rowIdentity($0.item, source: $0.source) }
@@ -1137,7 +1138,7 @@ struct AppleDiscoverView: View {
             case .becauseWatched: return recommendations.seedItems.map { rowIdentity($0.item, source: $0.source) }
             case .top10(let type): return (type == "movie" ? top10Week?.films ?? [] : top10Week?.tv ?? []).map { top10Identity($0, type: type) }
             case .catalog(let id):
-                guard let section = visibleSections.first(where: { $0.id == id }) else { return [] }
+                guard let section = sections.first(where: { $0.id == id }) else { return [] }
                 let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked ? Array(section.items.prefix(10)) : section.items
                 let source = sourceStore.sources.first { $0.id == section.sourceID }
                 return items.map { rowIdentity($0, source: source) }
@@ -1865,12 +1866,12 @@ struct AppleDiscoverView: View {
     }
 
     private func indexCatalogs() async {
-        for source in sourceStore.sources where source.isAddon && source.isEnabled {
-            let records = catalogStore.sections
+        let catalogs = sourceStore.sources.filter { $0.isAddon && $0.isEnabled }.map { source in
+            (instanceID: source.id, records: catalogStore.sections
                 .filter { $0.sourceID == source.id }
-                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
-            try? await mediaIndex.replaceCatalog(instanceID: source.id, with: records)
+                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) })
         }
+        try? await mediaIndex.replaceCatalogs(catalogs)
     }
 }
 
@@ -2296,12 +2297,12 @@ struct AppleSearchView: View {
     }
 
     private func indexCatalogs() async {
-        for source in sourceStore.sources where source.isAddon && source.isEnabled {
-            let records = catalogStore.sections
+        let catalogs = sourceStore.sources.filter { $0.isAddon && $0.isEnabled }.map { source in
+            (instanceID: source.id, records: catalogStore.sections
                 .filter { $0.sourceID == source.id }
-                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) }
-            try? await mediaIndex.replaceCatalog(instanceID: source.id, with: records)
+                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) })
         }
+        try? await mediaIndex.replaceCatalogs(catalogs)
     }
 
     private var catalogLookupIdentity: String {

@@ -35,11 +35,12 @@ struct AppleMacResponsivenessTests {
               ("The Perfect Family", "movie", nil), ("perfect family", "movie", nil), ("Perfect Family", "series", nil),
               ("Amélie", "movie", nil), ("AMELIE!", "movie", nil), ("The Office", "series", "The Office (US)"),
               ("Office", "series", nil), ("A Quiet Place", "movie", nil), ("Quiet Place", "movie", nil), ("Missing", "movie", nil),
+              ("perfect family", "MOVIE", nil), ("Office", "Series", "The Office"),
           ] as [(String, String, String?)])
     func indexedTitleMatchingIsUnchanged(title: String, type: String, seasonTitle: String?) {
         let titles = [("tt1", "movie", "The Perfect Family"), ("tt2", "movie", "Perfect Family"), ("tt3", "movie", "Amélie"),
                       ("tt4", "series", "The Office"), ("tt5", "series", "Office"), ("tt6", "movie", "A Quiet Place"),
-                      ("tt7", "movie", "The Quiet Place")]
+                      ("tt7", "movie", "The Quiet Place"), ("tt8", "movie", "Perfect Family"), ("tt9", "series", "The Office")]
         let source = Self.source
         let plain = Self.lookup(titles, source: source, indexesTitles: false)
         let indexed = Self.lookup(titles, source: source, indexesTitles: true)

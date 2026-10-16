@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Playback JSON retains its existing schema. Defaults are retired only after
 /// both file copies have been written atomically and read back byte-for-byte.
@@ -9,6 +10,15 @@ final class ApplePlaybackBlobStorage {
     private let directory: URL?
     private var cached: [String: Data] = [:]
     private var readKeys: Set<String> = []
+    /// Defaults-backed reads (Apple TV), kept until any default changes.
+    private var defaultsCache: [String: Data?] = [:]
+    private var defaultsCacheGeneration = -1
+    private var writes = 0
+
+    /// Changes whenever a value read through this storage may have: on Apple
+    /// TV with any change to the defaults, elsewhere with this storage's own
+    /// writes (its file reads are cached the same way).
+    var revision: Int { directory == nil ? AppleDefaultsChangeCount.current : writes }
 
     static func storage(defaults: UserDefaults, directory: URL? = nil) -> ApplePlaybackBlobStorage {
         if let directory { return .init(defaults: defaults, directory: directory) }
@@ -38,11 +48,14 @@ final class ApplePlaybackBlobStorage {
         // Invalidate it in place so old and newly created stores stay coherent.
         standardStorage?.cached.removeAll()
         standardStorage?.readKeys.removeAll()
+        standardStorage?.defaultsCache.removeAll()
+        standardStorage?.writes += 1
     }
 
     init(defaults: UserDefaults, directory: URL?) {
         self.defaults = defaults
         self.directory = directory
+        if directory == nil { _ = AppleDefaultsChangeCount.current }
     }
 
     func fileURL(forKey key: String) -> URL {
@@ -56,7 +69,7 @@ final class ApplePlaybackBlobStorage {
     }
 
     func data(forKey key: String) -> Data? {
-        guard directory != nil else { return defaults.data(forKey: key) }
+        guard directory != nil else { return defaultsData(forKey: key) }
         // Cache first: removing defaults can synchronously invalidate SwiftUI,
         // and argument/registration values cannot be removed at all.
         if readKeys.contains(key) { return cached[key] }
@@ -84,11 +97,28 @@ final class ApplePlaybackBlobStorage {
         return data
     }
 
+    /// Each playback query compares every stored map against its decoded
+    /// copy, and on the Apple TV each of those reads went to the defaults
+    /// database and copied the blob out (~120 ms of main thread over a launch
+    /// on an Apple TV 4K, 2026-10-15). Any change to any default drops the copies.
+    private func defaultsData(forKey key: String) -> Data? {
+        let generation = AppleDefaultsChangeCount.current
+        if generation != defaultsCacheGeneration {
+            defaultsCache.removeAll(keepingCapacity: true)
+            defaultsCacheGeneration = generation
+        }
+        if let known = defaultsCache[key] { return known }
+        let data = defaults.data(forKey: key)
+        defaultsCache[key] = data
+        return data
+    }
+
     func set(_ data: Data?, forKey key: String) {
         guard let data else { removeObject(forKey: key); return }
         guard directory != nil else { defaults.set(data, forKey: key); return }
         if cached[key] == data && readKeys.contains(key),
            !defaults.bool(forKey: fallbackKey(key)) { return }
+        writes += 1
         if persist(data, forKey: key) {
             retireDefaults(forKey: key)
             NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
@@ -142,5 +172,22 @@ final class ApplePlaybackBlobStorage {
             AppleInteractionTrace.record(.failure, "Playback file write failed: \(failure.domain) code=\(failure.code)")
             return false
         }
+    }
+}
+
+/// How many times this process's defaults have changed, counted from
+/// `UserDefaults.didChangeNotification`, which is posted on the writing thread
+/// before the write returns.
+enum AppleDefaultsChangeCount {
+    private static let count = Atomic<Int>(0)
+    // The token is not Sendable; it is created once (a static let is lazy and
+    // thread-safe) and only kept alive, never read.
+    nonisolated(unsafe) private static let observer = NotificationCenter.default.addObserver(
+        forName: UserDefaults.didChangeNotification, object: nil, queue: nil
+    ) { _ in count.add(1, ordering: .relaxed) }
+
+    static var current: Int {
+        _ = observer
+        return count.load(ordering: .relaxed)
     }
 }

@@ -12,7 +12,7 @@ xcodebuild DerivedData on the mini: `~/Developer/openstream-build/dd-<platform>`
 (UDID 00008140-000809A82E89801C) on the mini — prefer it over creating simulators. Also paired with the mini
 (2026-10-15): Apple TV 4K 2nd gen **DevTV** (`18139e8e65153ff7c3d6f1284646cd12d82a6173`, low-end tvOS target), Apple TV
 4K 3rd gen **OfficePlus** (`00008110-0001486E2189A01E`) and Vision Pro **VP** (`00008112-001150E40C41A01E`; it sleeps
-when not worn, so VP runs need the owner to wear it). Read
+when not worn, so VP runs need the owner to wear it). **OfficePlus is the owner's Apple TV (owner 2026-10-16 00:05): agents only INSTALL there, only 09:00-17:00 local, never test, profile, launch-loop or UI-drive it. All agent Apple TV testing runs on DevTV (`18139e8e65153ff7c3d6f1284646cd12d82a6173`).** Read
 /Volumes/Files/Projects/AGENTS.md "Apple builds and tests run on the Mac mini" and its concurrency gate.
 
 ## 1. The three commands (verbatim — no substitutions)

@@ -1,7 +1,19 @@
-#if DEBUG
 import Darwin
 import Foundation
 
+/// When the kernel started this process.
+enum AppleProcessStart {
+    static let date: Date? = {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, u_int(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
+    }()
+}
+
+#if DEBUG
 /// Milestone timing for the simulator, so "how long does this take" is a
 /// number rather than an impression (owner 2026-09-14: "make note of loading
 /// times"). Prints `[OpenStream] timing <label> <ms>` and nothing else; only
@@ -16,7 +28,7 @@ public enum AppleLaunchClock {
     nonisolated(unsafe) private static var seen = Set<String>()
     nonisolated(unsafe) private static var counts: [String: Int] = [:]
     private static let lock = NSLock()
-    private static let origin: Date = processStartDate() ?? Date()
+    private static let origin: Date = AppleProcessStart.date ?? Date()
 
     private static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: "OpenStreamTiming")
@@ -52,15 +64,6 @@ public enum AppleLaunchClock {
         counts[label] = count
         lock.unlock()
         if thresholds.contains(count) { mark("\(label).\(count)") }
-    }
-
-    private static func processStartDate() -> Date? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&name, u_int(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        let start = info.kp_proc.p_un.__p_starttime
-        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
     }
 }
 #endif

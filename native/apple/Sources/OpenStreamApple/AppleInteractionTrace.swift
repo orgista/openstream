@@ -169,7 +169,10 @@ public enum AppleInteractionTrace {
         guard let fileURL else { return }
         trimIfNeeded(fileURL)
         let stamp = ISO8601DateFormatter().string(from: Date())
-        let banner = "\n=== session \(stamp) \(buildDescription) ===\n"
+        // The process's age when the timeline's clock started, so the first
+        // lines of a session read as launch times.
+        let launch = AppleProcessStart.date.map { " launch+\(Int((origin.timeIntervalSince($0) * 1000).rounded()))ms" } ?? ""
+        let banner = "\n=== session \(stamp) \(buildDescription)\(launch) ===\n"
         guard let data = banner.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: fileURL) {
             defer { try? handle.close() }

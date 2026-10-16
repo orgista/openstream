@@ -244,6 +244,7 @@ import Testing
     try Data("not-json".utf8).write(to: url)
 
     let repository = AppleMediaIndexRepository(fileURL: url)
+    #expect(await repository.records().isEmpty)
     let quarantined = try FileManager.default.contentsOfDirectory(atPath: root.path)
         .filter { $0.hasPrefix("index.json.corrupt-") }
     #expect(quarantined.count == 1)
@@ -600,4 +601,61 @@ private final class RecordLookupChangeFlag {
     #expect(store.revision > loaded)
     #expect(store.records.count == 1)
     #expect(store.record(id: record.id)?.isFavorite == true)
+}
+
+/// Every launch's library rescan writes the same records back. Writing an
+/// unchanged set must not count as a change, or every view reading the index
+/// redraws for nothing (Apple TV slowness, 2026-10-16).
+@MainActor
+@Test func replacingWithTheSameRecordsIsNotAChange() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "record-same-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    let instance = UUID()
+    let record = AppleMediaRecord(canonicalID: "tt7654321", kind: .movie, title: "A Movie",
+        availability: [.init(instanceID: instance, capability: .resolvable, itemReference: "movie|tt7654321")])
+    try await store.replace(instanceID: instance, with: [record])
+    let revision = store.revision
+    try await store.replace(instanceID: instance, with: [record])
+    #expect(store.revision == revision)
+
+    var renamed = record
+    renamed.title = "A Movie (Director's Cut)"
+    try await store.replace(instanceID: instance, with: [renamed])
+    #expect(store.revision != revision)
+    #expect(store.records.map(\.title) == ["A Movie (Director's Cut)"])
+}
+
+/// Discover indexes every add-on in one write; the result must be what one
+/// write per add-on gave, retained favourites and overlapping titles included.
+@Test func indexingSeveralCatalogsAtOnceMatchesOneAtATime() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = UUID(), second = UUID()
+    let verified = Date(timeIntervalSince1970: 1_000)
+    func record(_ id: String, _ title: String, _ source: UUID) -> AppleMediaRecord {
+        AppleMediaRecord(canonicalID: id, kind: .movie, title: title,
+            availability: [.init(instanceID: source, capability: .resolvable, itemReference: "movie|\(id)")],
+            lastVerified: verified)
+    }
+    let favourite = record("tt0000009", "Kept favourite", first)
+    let catalogs: [(instanceID: UUID, records: [AppleMediaRecord])] = [
+        (first, [record("tt0000001", "Shared", first), record("tt0000002", "Only first", first)]),
+        (second, [record("tt0000001", "Shared", second), record("tt0000003", "Only second", second)]),
+    ]
+    func seeded(_ name: String) async throws -> AppleMediaIndexRepository {
+        let repository = AppleMediaIndexRepository(fileURL: root.appendingPathComponent(name))
+        try await repository.upsert(favourite)
+        try await repository.setFavorite(true, recordID: favourite.id)
+        return repository
+    }
+    let oneByOne = try await seeded("one.json")
+    for catalog in catalogs { try await oneByOne.replaceCatalog(instanceID: catalog.instanceID, with: catalog.records) }
+    let batched = try await seeded("batch.json")
+    try await batched.replaceCatalogs(catalogs)
+
+    #expect(await batched.records() == oneByOne.records())
+    #expect(await batched.records().count == 4)
+    #expect(await batched.lastSuccessfulScan(for: second) != nil)
+    #expect(await AppleMediaIndexRepository(fileURL: root.appendingPathComponent("batch.json")).records() == batched.records())
 }

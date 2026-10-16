@@ -172,11 +172,10 @@ public final class ApplePlaybackStore {
     private let aliases: AppleIdentityAliasStore
     private let key: String
 
-    /// In-memory copy of the progress map. UserDefaults stays the backing
-    /// store (write-through), but reads and each per-tick save no longer
-    /// decode + re-encode the whole dictionary. `nil` means not yet loaded.
-    private var cache: [String: ApplePlaybackProgress]?
-    private var cachedData: Data?
+    /// Decoded copies of the stored maps, each kept with the bytes it came
+    /// from. Shared by every store on the standard storage, so a view that
+    /// makes a store per redraw no longer decodes everything again.
+    private let decoded: DecodedState
 
     /// What has been finished, keyed like the progress map, valued by when.
     /// A finished title leaves the progress map (that is how it leaves
@@ -185,17 +184,11 @@ public final class ApplePlaybackStore {
     /// Watching a finished episode again does not take it off this list.
     private let watchedKey: String
     private let unwatchedKey: String
-    private var watchedCache: [String: Date]?
-    private var watchedCachedData: Data?
-    private var unwatchedCache: [String: Date]?
-    private var unwatchedCachedData: Data?
     /// The newest this many finished titles are kept.
     nonisolated public static let watchedHistoryLimit = 5_000
     /// Titles the viewer took off Continue Watching, and when. The progress
     /// stays; the row leaves the title out until it is played again.
     private let continueWatchingRemovedKey: String
-    private var removedCache: [String: Date]?
-    private var removedCachedData: Data?
     /// The newest this many removals are kept.
     nonisolated public static let continueWatchingRemovalLimit = 500
 
@@ -206,6 +199,7 @@ public final class ApplePlaybackStore {
         blobs = ApplePlaybackBlobStorage.storage(defaults: defaults, directory: blobDirectory)
         aliases = AppleIdentityAliasStore(defaults: defaults, namespace: namespace, blobDirectory: blobDirectory)
         self.namespace = namespace
+        decoded = blobDirectory == nil && defaults === UserDefaults.standard ? .shared(namespace: namespace) : DecodedState()
         key = AppleTasteNamespace.key("openstream.playback.progress.v1", namespace: namespace)
         watchedKey = AppleTasteNamespace.key("openstream.playback.watched.v1", namespace: namespace)
         unwatchedKey = AppleTasteNamespace.key("openstream.playback.unwatched.v1", namespace: namespace)
@@ -221,27 +215,24 @@ public final class ApplePlaybackStore {
     private let activityKey: String
     private let episodesKey: String
 
-    private var activityData: Data?
-    private var activityCache: [String: ApplePlaybackProgress]?
-
     private func rawActivities() -> [String: ApplePlaybackProgress] {
         let data = blobs.data(forKey: activityKey)
-        if let activityCache, data == activityData { return activityCache }
+        if let activityCache = decoded.activityCache, data == decoded.activityData { return activityCache }
         let values = data.flatMap { try? JSONDecoder().decode([String: ApplePlaybackProgress].self, from: $0) } ?? [:]
-        activityData = data
-        activityCache = values
+        decoded.activityData = data
+        decoded.activityCache = values
         return values
     }
 
     func activities() -> [String: ApplePlaybackProgress] {
         let fingerprint = derivedStateFingerprint()
-        if let filteredActivityCache, filteredActivityFingerprint == fingerprint { return filteredActivityCache }
+        if let filteredActivityCache = decoded.filteredActivityCache, decoded.filteredActivityFingerprint == fingerprint { return filteredActivityCache }
         let terminals = configurationPlaybackTerminals()
         let values = rawActivities().filter { key, value in
             ApplePlaybackConvergence.activityIsCurrent(key: key, value: value, terminals: terminals)
         }
-        filteredActivityCache = values
-        filteredActivityFingerprint = derivedStateFingerprint()
+        decoded.filteredActivityCache = values
+        decoded.filteredActivityFingerprint = derivedStateFingerprint()
         return values
     }
 
@@ -446,22 +437,19 @@ public final class ApplePlaybackStore {
     private var versionProgressKey: String { AppleTasteNamespace.key("openstream.playback.versionProgress.v1", namespace: namespace) }
     private var preferredVersionKey: String { AppleTasteNamespace.key("openstream.playback.preferredVersion.v1", namespace: namespace) }
 
-    private var versionData: Data?
-    private var versionCache: [String: [String: ApplePlaybackProgress]]?
-
     private func versionEntries() -> [String: [String: ApplePlaybackProgress]] {
         let data = blobs.data(forKey: versionProgressKey)
-        if let versionCache, data == versionData { return versionCache }
+        if let versionCache = decoded.versionCache, data == decoded.versionData { return versionCache }
         let values = data.flatMap { try? JSONDecoder().decode([String: [String: ApplePlaybackProgress]].self, from: $0) } ?? [:]
-        versionData = data
-        versionCache = values
+        decoded.versionData = data
+        decoded.versionCache = values
         return values
     }
 
     private func persistVersionEntries(_ values: [String: [String: ApplePlaybackProgress]]) {
-        versionCache = values
-        versionData = try? JSONEncoder().encode(values)
-        blobs.set(versionData, forKey: versionProgressKey)
+        decoded.versionCache = values
+        decoded.versionData = try? JSONEncoder().encode(values)
+        blobs.set(decoded.versionData, forKey: versionProgressKey)
     }
 
     public func versionProgress(itemID: String, versionID: String) -> ApplePlaybackProgress? {
@@ -596,9 +584,9 @@ public final class ApplePlaybackStore {
             activity = Dictionary(uniqueKeysWithValues: activity.sorted { $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt }
                 .prefix(Self.watchedHistoryLimit).map { ($0.key, $0.value) })
         }
-        activityCache = activity
-        activityData = try? JSONEncoder().encode(activity)
-        blobs.set(activityData, forKey: activityKey)
+        decoded.activityCache = activity
+        decoded.activityData = try? JSONEncoder().encode(activity)
+        blobs.set(decoded.activityData, forKey: activityKey)
         terminals[storageKey] = (terminals[storageKey] ?? .init()).merging(.init(playedAt: progress.updatedAt))
         let finishedKey = partKey ?? storageKey
         terminals[finishedKey] = (terminals[finishedKey] ?? .init()).merging(.init(
@@ -623,7 +611,7 @@ public final class ApplePlaybackStore {
         if removed.removeValue(forKey: storageKey) != nil { persistRemovals(removed, notify: false) }
         persist(current)
         // This save already materialized its new clocks before writing progress.
-        terminalsFingerprint = derivedStateFingerprint()
+        decoded.terminalsFingerprint = derivedStateFingerprint()
     }
 
     private func clear(storageKey: String) {
@@ -635,9 +623,9 @@ public final class ApplePlaybackStore {
         recordTerminal(storageKey, .init(resetAt: date, playedAt: date))
         var activity = activities()
         activity.removeValue(forKey: storageKey)
-        activityCache = activity
-        activityData = try? JSONEncoder().encode(activity)
-        blobs.set(activityData, forKey: activityKey)
+        decoded.activityCache = activity
+        decoded.activityData = try? JSONEncoder().encode(activity)
+        blobs.set(decoded.activityData, forKey: activityKey)
         var current = entries()
         current.removeValue(forKey: storageKey)
         persist(current)
@@ -647,7 +635,7 @@ public final class ApplePlaybackStore {
         // One read of the stored blob: it is compared, decoded and kept from
         // the same value (it was read three times on a miss, N47).
         let storedData = blobs.data(forKey: key)
-        if let cache, cachedData == storedData { return cache }
+        if let cache = decoded.cache, decoded.cachedData == storedData { return cache }
         let loaded: [String: ApplePlaybackProgress]
         var keptData = storedData
         if let data = storedData {
@@ -667,8 +655,8 @@ public final class ApplePlaybackStore {
         } else {
             loaded = [:]
         }
-        cache = loaded
-        cachedData = keptData
+        decoded.cache = loaded
+        decoded.cachedData = keptData
         return loaded
     }
 
@@ -692,20 +680,20 @@ public final class ApplePlaybackStore {
 
     private func storedWatchedEntries() -> [String: Date] {
         let storedData = blobs.data(forKey: watchedKey)
-        if let watchedCache, watchedCachedData == storedData { return watchedCache }
-        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
-        watchedCache = decoded
-        watchedCachedData = storedData
-        return decoded
+        if let watchedCache = decoded.watchedCache, decoded.watchedCachedData == storedData { return watchedCache }
+        let values = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        decoded.watchedCache = values
+        decoded.watchedCachedData = storedData
+        return values
     }
 
     private func storedWatchedTombstones() -> [String: Date] {
         let storedData = blobs.data(forKey: unwatchedKey)
-        if let unwatchedCache, unwatchedCachedData == storedData { return unwatchedCache }
-        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
-        unwatchedCache = decoded
-        unwatchedCachedData = storedData
-        return decoded
+        if let unwatchedCache = decoded.unwatchedCache, decoded.unwatchedCachedData == storedData { return unwatchedCache }
+        let values = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        decoded.unwatchedCache = values
+        decoded.unwatchedCachedData = storedData
+        return values
     }
 
     private func storedWatchedHistory() -> AppleWatchedHistory {
@@ -717,13 +705,13 @@ public final class ApplePlaybackStore {
             unwatched: history.tombstones, removals: [:], activity: [:])
         persistTerminals(barriers)
         let bounded = ApplePlaybackConvergence.history(history, terminals: barriers).newest(Self.watchedHistoryLimit)
-        watchedCache = bounded.watched
-        watchedCachedData = try? JSONEncoder().encode(bounded.watched)
-        unwatchedCache = bounded.tombstones
-        unwatchedCachedData = try? JSONEncoder().encode(bounded.tombstones)
-        blobs.set(watchedCachedData, forKey: watchedKey)
-        blobs.set(unwatchedCachedData, forKey: unwatchedKey)
-        terminalsFingerprint = derivedStateFingerprint()
+        decoded.watchedCache = bounded.watched
+        decoded.watchedCachedData = try? JSONEncoder().encode(bounded.watched)
+        decoded.unwatchedCache = bounded.tombstones
+        decoded.unwatchedCachedData = try? JSONEncoder().encode(bounded.tombstones)
+        blobs.set(decoded.watchedCachedData, forKey: watchedKey)
+        blobs.set(decoded.unwatchedCachedData, forKey: unwatchedKey)
+        decoded.terminalsFingerprint = derivedStateFingerprint()
         if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
     }
 
@@ -764,11 +752,11 @@ public final class ApplePlaybackStore {
 
     private func continueWatchingRemovals() -> [String: Date] {
         let storedData = blobs.data(forKey: continueWatchingRemovedKey)
-        if let removedCache, removedCachedData == storedData { return removedCache }
-        let decoded = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
-        removedCache = decoded
-        removedCachedData = storedData
-        return decoded
+        if let removedCache = decoded.removedCache, decoded.removedCachedData == storedData { return removedCache }
+        let values = storedData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        decoded.removedCache = values
+        decoded.removedCachedData = storedData
+        return values
     }
 
     private func persistRemovals(_ removals: [String: Date], notify: Bool = true) {
@@ -776,11 +764,11 @@ public final class ApplePlaybackStore {
             removals: removals, activity: [:])
         persistTerminals(terminals)
         let bounded = Self.boundedWatchedHistory(removals, limit: Self.continueWatchingRemovalLimit)
-        removedCache = bounded
-        removedCachedData = bounded.isEmpty ? nil : try? JSONEncoder().encode(bounded)
-        if let removedCachedData { blobs.set(removedCachedData, forKey: continueWatchingRemovedKey) }
+        decoded.removedCache = bounded
+        decoded.removedCachedData = bounded.isEmpty ? nil : try? JSONEncoder().encode(bounded)
+        if let removedCachedData = decoded.removedCachedData { blobs.set(removedCachedData, forKey: continueWatchingRemovedKey) }
         else { blobs.removeObject(forKey: continueWatchingRemovedKey) }
-        terminalsFingerprint = derivedStateFingerprint()
+        decoded.terminalsFingerprint = derivedStateFingerprint()
         if notify { ApplePlaybackProgressFeed.shared.storeDidChange() }
     }
 
@@ -867,14 +855,14 @@ public final class ApplePlaybackStore {
         blobs.set(try? JSONEncoder().encode(terminals), forKey: terminalKey)
         // Fresh installs need only the marker; leave absent legacy blobs absent.
         guard !progress.isEmpty || !activity.isEmpty || !history.watched.isEmpty || !history.tombstones.isEmpty else { return }
-        activityCache = activity
-        activityData = try? JSONEncoder().encode(activity)
-        blobs.set(activityData, forKey: activityKey)
+        decoded.activityCache = activity
+        decoded.activityData = try? JSONEncoder().encode(activity)
+        blobs.set(decoded.activityData, forKey: activityKey)
         persistStoredWatched(history, notify: false)
         let reconciled = ApplePlaybackConvergence.reconciled(progress, terminals: terminals)
-        cache = reconciled
-        cachedData = try? JSONEncoder().encode(reconciled)
-        blobs.set(cachedData, forKey: key)
+        decoded.cache = reconciled
+        decoded.cachedData = try? JSONEncoder().encode(reconciled)
+        blobs.set(decoded.cachedData, forKey: key)
     }
 
     func configurationPlaybackActivity() -> [String: ApplePlaybackProgress] { activities() }
@@ -884,7 +872,7 @@ public final class ApplePlaybackStore {
         // callers (Top Shelf, Continue Watching) ran it several times per
         // record and pinned the CPU on large libraries (e2e 2026-10-12).
         let fingerprint = derivedStateFingerprint()
-        if let terminalsCache, terminalsFingerprint == fingerprint { return terminalsCache }
+        if let terminalsCache = decoded.terminalsCache, decoded.terminalsFingerprint == fingerprint { return terminalsCache }
         let explicit = blobs.data(forKey: terminalKey).flatMap {
             try? JSONDecoder().decode([String: ApplePlaybackTerminalEvents].self, from: $0)
         } ?? [:]
@@ -892,15 +880,10 @@ public final class ApplePlaybackStore {
             unwatched: storedWatchedTombstones(), removals: continueWatchingRemovals(),
             activity: rawActivities().merging(entries(), uniquingKeysWith: ApplePlaybackConvergence.freshest))
         // `entries()` may normalize and rewrite its blob, so fingerprint after.
-        terminalsCache = values
-        terminalsFingerprint = derivedStateFingerprint()
+        decoded.terminalsCache = values
+        decoded.terminalsFingerprint = derivedStateFingerprint()
         return values
     }
-
-    private var terminalsCache: [String: ApplePlaybackTerminalEvents]?
-    private var terminalsFingerprint: [Data?]?
-    private var filteredActivityCache: [String: ApplePlaybackProgress]?
-    private var filteredActivityFingerprint: [Data?]?
 
     private func classKeys(_ storageKey: String) -> [String] { aliases.members(of: storageKey) }
 
@@ -921,10 +904,11 @@ public final class ApplePlaybackStore {
         })
     }
 
-    /// The stored blobs every derived map is built from. Comparing them is a
-    /// memcmp; decoding them is what was slow.
-    private func derivedStateFingerprint() -> [Data?] {
-        [terminalKey, watchedKey, unwatchedKey, continueWatchingRemovedKey, activityKey, key].map { blobs.data(forKey: $0) } + [aliases.blobData]
+    /// Changes whenever a stored blob every derived map is built from may
+    /// have. Comparing the blobs themselves was most of a Top Shelf publish
+    /// on an Apple TV 4K (copying and comparing seven maps per query, 2026-10-16).
+    private func derivedStateFingerprint() -> [Int] {
+        [blobs.revision, aliases.storageRevision]
     }
 
     func hasLocalPlaybackState(mediaID: String) -> Bool {
@@ -944,8 +928,8 @@ public final class ApplePlaybackStore {
     private func persistTerminals(_ values: [String: ApplePlaybackTerminalEvents]) {
         guard let data = try? JSONEncoder().encode(values) else { return }
         blobs.set(data, forKey: terminalKey)
-        terminalsCache = values
-        terminalsFingerprint = derivedStateFingerprint()
+        decoded.terminalsCache = values
+        decoded.terminalsFingerprint = derivedStateFingerprint()
     }
 
     /// Local user actions must follow a playback stamp advanced to survive
@@ -985,9 +969,9 @@ public final class ApplePlaybackStore {
         values = Dictionary(uniqueKeysWithValues: values.sorted {
             $0.value.updatedAt == $1.value.updatedAt ? $0.key < $1.key : $0.value.updatedAt > $1.value.updatedAt
         }.prefix(Self.watchedHistoryLimit).map { ($0.key, $0.value) })
-        activityCache = values
-        activityData = try? JSONEncoder().encode(values)
-        blobs.set(activityData, forKey: activityKey)
+        decoded.activityCache = values
+        decoded.activityData = try? JSONEncoder().encode(values)
+        blobs.set(decoded.activityData, forKey: activityKey)
     }
 
     private func reconcileStoredProgress() {
@@ -997,10 +981,42 @@ public final class ApplePlaybackStore {
     }
 
     private func persist(_ entries: [String: ApplePlaybackProgress]) {
-        cache = entries
-        cachedData = try? JSONEncoder().encode(entries)
-        blobs.set(cachedData, forKey: key)
+        decoded.cache = entries
+        decoded.cachedData = try? JSONEncoder().encode(entries)
+        blobs.set(decoded.cachedData, forKey: key)
         ApplePlaybackProgressFeed.shared.storeDidChange()
+    }
+
+    /// Every cache is checked against the stored bytes before use, so one copy
+    /// can serve any number of stores on the same storage.
+    @MainActor final class DecodedState {
+        private static var byNamespace: [String: DecodedState] = [:]
+
+        static func shared(namespace: String) -> DecodedState {
+            if let state = byNamespace[namespace] { return state }
+            let state = DecodedState()
+            byNamespace[namespace] = state
+            return state
+        }
+
+        /// The progress map. The storage stays the backing store (write-through);
+        /// reads and per-tick saves do not decode and re-encode the dictionary.
+        var cache: [String: ApplePlaybackProgress]?
+        var cachedData: Data?
+        var watchedCache: [String: Date]?
+        var watchedCachedData: Data?
+        var unwatchedCache: [String: Date]?
+        var unwatchedCachedData: Data?
+        var removedCache: [String: Date]?
+        var removedCachedData: Data?
+        var activityData: Data?
+        var activityCache: [String: ApplePlaybackProgress]?
+        var versionData: Data?
+        var versionCache: [String: [String: ApplePlaybackProgress]]?
+        var terminalsCache: [String: ApplePlaybackTerminalEvents]?
+        var terminalsFingerprint: [Int]?
+        var filteredActivityCache: [String: ApplePlaybackProgress]?
+        var filteredActivityFingerprint: [Int]?
     }
 }
 

@@ -4,6 +4,29 @@ import Testing
 
 @MainActor
 struct ApplePlaybackBlobStorageTests {
+    /// Apple TV keeps playback maps in defaults and reads them from a copy;
+    /// a write by any path must show on the next read.
+    @Test func defaultsBackedReadsSeeEveryWriteAtOnce() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "openstream.playback.progress.v1"
+        let storage = ApplePlaybackBlobStorage(defaults: defaults, directory: nil)
+        #expect(storage.data(forKey: key) == nil)
+
+        let first = Data("{\"a\":1}".utf8)
+        storage.set(first, forKey: key)
+        #expect(storage.data(forKey: key) == first)
+
+        let direct = Data("{\"a\":2}".utf8)
+        defaults.set(direct, forKey: key)
+        #expect(storage.data(forKey: key) == direct)
+
+        let other = ApplePlaybackBlobStorage(defaults: defaults, directory: nil)
+        other.removeObject(forKey: key)
+        #expect(storage.data(forKey: key) == nil)
+    }
+
     @Test func verifiedMigrationRetainsExactLegacyDataAndSurvivesReopen() throws {
         let suite = UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))

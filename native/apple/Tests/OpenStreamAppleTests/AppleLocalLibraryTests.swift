@@ -12,6 +12,27 @@ import Testing
     #expect(!AppleLocalLibraryStore.matches(movie, .init(mediaID: "local-file", type: "series", name: "Dune", releaseInfo: "2021")))
 }
 
+@MainActor @Test func indexedGroupMatchingAnswersLikeMatchingEveryGroup() {
+    let source = UUID()
+    let files = ["Dune.2021.2160p.mkv", "Dune (1984).mkv", "DÚNE 2021 1080p.mkv", "Show.S01E01.mkv", "Arrival.2016.mkv"].map {
+        AppleLibraryItem(sourceID: source, name: $0, url: URL(fileURLWithPath: "/" + $0), relativePath: $0, sizeBytes: 1)
+    }
+    let store = AppleLocalLibraryStore(groups: AppleLibrarySeries.groups(files), sources: [])
+    let queries: [AppleCatalogItem] = [
+        .init(mediaID: "tt1160419", type: "movie", name: "Dune", releaseInfo: "2021"),
+        .init(mediaID: "local-x", type: "movie", name: "dune", releaseInfo: "1984"),
+        .init(mediaID: "tt0087182", type: "series", name: "Dune", releaseInfo: "1984"),
+        .init(mediaID: "tt123", type: "series", name: "Show"),
+        .init(mediaID: "tt2543164", type: "movie", name: "Arrival", releaseInfo: "2016–"),
+        .init(mediaID: "tt0000000", type: "movie", name: "Nothing Here", releaseInfo: "2001"),
+    ]
+    for query in queries {
+        let expected = store.groups.filter { AppleLocalLibraryStore.matches(store.catalogItem(for: $0), query) }
+        #expect(store.matchingGroups(query).map(\.id) == expected.map(\.id), "\(query.name) \(query.releaseInfo ?? "")")
+    }
+    #expect(!store.matchingGroups(queries[0]).isEmpty)
+}
+
 @MainActor @Test func localSeasonRowsKeepUncatalogedEpisodesAndDeduplicateCopies() {
     let source = UUID()
     let files = ["Show.S01E01.1080p.mkv", "Show.S01E01.2160p.mkv", "Show.S02E03.1080p.mkv"].map {

@@ -265,7 +265,10 @@ public struct OpenStreamRootView: View {
                 // Remounted only by the watchdog, when the tab was selected
                 // and its stack never came on screen.
                 .id(tabMountGeneration[tab] ?? 0)
-                .onAppear { mountedTabs.insert(tab) }
+                .onAppear {
+                    mountedTabs.insert(tab)
+                    appleTrace("tab \(tab) on screen")
+                }
                 .onDisappear { mountedTabs.remove(tab) }
                 .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem {
@@ -1053,32 +1056,20 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let settingsStore: AppleSettingsStore
+    @State private var pendingPublish: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         #if os(tvOS) || os(iOS) || os(visionOS)
         content
             .task {
                 await mediaIndex.load()
-                await publish(records: mediaIndex.records, sections: catalogStore.sections)
+                schedulePublish()
             }
-            .onChange(of: mediaIndex.records) { _, records in
-                Task { await publish(records: records, sections: catalogStore.sections) }
-            }
-            .onChange(of: catalogStore.sections) { _, sections in
-                Task { await publish(records: mediaIndex.records, sections: sections) }
-            }
-            .onChange(of: sourceStore.sources) {
-                Task { await publish(records: mediaIndex.records, sections: catalogStore.sections) }
-            }
-            .onChange(of: AppleLiveSystemChannels.shared.revision) {
-                Task { await publish(records: mediaIndex.records, sections: catalogStore.sections) }
-            }
-            .onChange(of: settingsStore.topShelfEnabled) { _, enabled in
-                Task {
-                    await publish(records: mediaIndex.records,
-                                  sections: catalogStore.sections, enabled: enabled)
-                }
-            }
+            .onChange(of: mediaIndex.records) { schedulePublish() }
+            .onChange(of: catalogStore.sections) { schedulePublish() }
+            .onChange(of: sourceStore.sources) { schedulePublish() }
+            .onChange(of: AppleLiveSystemChannels.shared.revision) { schedulePublish() }
+            .onChange(of: settingsStore.topShelfEnabled) { schedulePublish() }
         #else
         // macOS. The shared app group container works here now (the
         // entitlement was added and `AppleTopShelfSnapshotWriter.appGroup`
@@ -1091,17 +1082,22 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
         #endif
     }
 
-    private func publish(
-        records: [AppleMediaRecord],
-        sections: [AppleCatalogSection],
-        enabled: Bool? = nil
-    ) async {
-        await AppleTopShelfPublisher.shared.publish(
-            records: records,
-            sections: sections,
-            sources: sourceStore.sources,
-            enabled: enabled ?? settingsStore.topShelfEnabled
-        )
+    /// One publish for a burst of changes, from the state at the end of it:
+    /// at launch the catalog's sections arrive one after another, and each
+    /// publish reads every record's playback state on the main actor
+    /// (five publishes in 1.5 s, ~200 ms on an Apple TV 4K, 2026-10-15).
+    private func schedulePublish() {
+        pendingPublish?.cancel()
+        pendingPublish = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await AppleTopShelfPublisher.shared.publish(
+                records: mediaIndex.records,
+                sections: catalogStore.sections,
+                sources: sourceStore.sources,
+                enabled: settingsStore.topShelfEnabled
+            )
+        }
     }
 }
 

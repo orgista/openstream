@@ -576,6 +576,9 @@ struct AppleConfigurationSync: ViewModifier {
                 if controller == nil {
                     controller = AppleConfigurationController(sources: sources, settings: settings, mediaIndex: mediaIndex)
                 }
+                #if DEBUG
+                if let controller { await AppleDebugBackupRestore.restorePendingIfNeeded(controller: controller) }
+                #endif
                 await controller?.start()
             }
             .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in

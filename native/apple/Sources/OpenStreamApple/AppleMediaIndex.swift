@@ -75,6 +75,13 @@ enum AppleLibraryParseMemo {
         }
         return parsed
     }
+
+    /// Parses `items` off the main actor, so the main-actor callers that
+    /// follow find every answer remembered: the first pass after launch
+    /// parsed ~400 files on the main thread (~240 ms on an Apple TV 4K, 2026-10-15).
+    @concurrent static func warm(_ items: [AppleLibraryItem]) async {
+        for item in items { _ = parse(item) }
+    }
 }
 
 public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
@@ -177,40 +184,42 @@ public actor AppleMediaIndexRepository {
 
     private var successfulScans: [String: Date] = [:]
 
-    public func lastSuccessfulScan(for sourceID: AppleSource.ID) -> Date? { successfulScans[sourceID.uuidString] }
+    public func lastSuccessfulScan(for sourceID: AppleSource.ID) -> Date? {
+        loadIfNeeded()
+        return successfulScans[sourceID.uuidString]
+    }
 
-    private var recordsByID: [String: AppleMediaRecord]
-    private var searchTextByID: [String: String]
-    private var orderedRecordIDs: [String]
+    private var recordsByID: [String: AppleMediaRecord] = [:]
+    private var searchTextByID: [String: String] = [:]
+    private var orderedRecordIDs: [String] = []
     private let fileURL: URL
-    private let blockedVersion: Int?
+    private var blockedVersion: Int?
+    private var isLoaded = false
 
+    /// Reads nothing: the file is read on the first call, on the actor. The
+    /// app makes its index in the root view's state, and reading and scrubbing
+    /// it there held the main thread ~250 ms at launch on an Apple TV 4K (2026-10-16).
     public init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL
-        guard FileManager.default.fileExists(atPath: self.fileURL.path) else {
-            recordsByID = [:]
-            searchTextByID = [:]
-            orderedRecordIDs = []
-            blockedVersion = nil
-            return
-        }
+    }
 
+    private func loadIfNeeded() {
+        guard !isLoaded else { return }
+        isLoaded = true
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
-            let data = try Data(contentsOf: self.fileURL)
+            let data = try Data(contentsOf: fileURL)
             let clean = try AppleCachedCredentialPolicy.metadata(data)
             let envelope = try JSONDecoder().decode(Envelope.self, from: clean)
             guard envelope.version == 1 else {
-                recordsByID = [:]
-                searchTextByID = [:]
-                orderedRecordIDs = []
                 blockedVersion = envelope.version
                 return
             }
             if clean != data {
                 #if os(iOS) || os(tvOS) || os(visionOS)
-                try clean.write(to: self.fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+                try clean.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
                 #else
-                try clean.write(to: self.fileURL, options: .atomic)
+                try clean.write(to: fileURL, options: .atomic)
                 #endif
             }
             successfulScans = envelope.successfulScans ?? [:]
@@ -218,24 +227,20 @@ public actor AppleMediaIndexRepository {
             recordsByID = records
             searchTextByID = Self.makeSearchTextByID(records)
             orderedRecordIDs = Self.makeOrderedRecordIDs(records)
-            blockedVersion = nil
         } catch {
-            recordsByID = [:]
-            searchTextByID = [:]
-            orderedRecordIDs = []
-            blockedVersion = nil
-            let quarantineURL = self.fileURL
-                .appendingPathExtension("corrupt-\(UUID().uuidString)")
-            try? FileManager.default.moveItem(at: self.fileURL, to: quarantineURL)
+            let quarantineURL = fileURL.appendingPathExtension("corrupt-\(UUID().uuidString)")
+            try? FileManager.default.moveItem(at: fileURL, to: quarantineURL)
         }
     }
 
     public func records() -> [AppleMediaRecord] {
-        orderedRecordIDs.compactMap { recordsByID[$0] }
+        loadIfNeeded()
+        return orderedRecordIDs.compactMap { recordsByID[$0] }
     }
 
     /// A visited search result may not occur in a provider's bounded shelves.
     public func upsert(_ record: AppleMediaRecord) throws {
+        loadIfNeeded()
         var next = recordsByID
         next[record.id] = next[record.id].map { AppleMediaRecord.merged($0, record) } ?? record
         try persist(next)
@@ -246,8 +251,28 @@ public actor AppleMediaIndexRepository {
 
     /// Catalog shelves are a partial listing, unlike complete local-file scans.
     public func replaceCatalog(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord]) throws {
+        try replaceCatalogs([(instanceID, incoming)])
+    }
+
+    /// Several catalog sources in one write. Discover indexes every add-on
+    /// at launch, and encoding, scrubbing and writing the whole index once
+    /// per add-on was ~1.4 s of CPU on an Apple TV 4K (2026-10-16).
+    public func replaceCatalogs(_ catalogs: [(instanceID: AppleSource.ID, records: [AppleMediaRecord])]) throws {
+        guard !catalogs.isEmpty else { return }
+        loadIfNeeded()
+        var next = recordsByID
+        for (instanceID, incoming) in catalogs {
+            next = Self.projected(next, instanceID: instanceID,
+                                  incoming: Self.catalogIncoming(instanceID: instanceID, incoming: incoming, in: next),
+                                  scanStatus: .complete)
+        }
+        try commit(next, completedScans: catalogs.map(\.instanceID))
+    }
+
+    private static func catalogIncoming(instanceID: AppleSource.ID, incoming: [AppleMediaRecord],
+                                        in records: [String: AppleMediaRecord]) -> [AppleMediaRecord] {
         let incomingIDs = Set(incoming.map(\.id))
-        let missing = recordsByID.values.filter { record in
+        let missing = records.values.filter { record in
             !incomingIDs.contains(record.id) && record.availability.contains {
                 $0.instanceID == instanceID && $0.capability == .resolvable
             }
@@ -257,14 +282,20 @@ public actor AppleMediaIndexRepository {
         let recent = missing.filter { !$0.isFavorite && ($0.progress ?? 0) == 0 }
             .sorted { $0.lastVerified > $1.lastVerified }.prefix(200)
         let retained = Array(saved) + recent
-        try replace(instanceID: instanceID, with: Array(incoming.prefix(10_000 - retained.count)) + retained)
+        return Array(incoming.prefix(10_000 - retained.count)) + retained
     }
 
     /// Replaces one instance's projection only after its adapter produced a
     /// complete bounded snapshot. Other instances and user state are kept.
     public func replace(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord], scanStatus: AppleLibraryScanStatus = .complete) throws {
-        let previous = recordsByID
-        var next = recordsByID
+        loadIfNeeded()
+        try commit(Self.projected(recordsByID, instanceID: instanceID, incoming: incoming, scanStatus: scanStatus),
+                   completedScans: scanStatus == .complete ? [instanceID] : [])
+    }
+
+    private static func projected(_ previous: [String: AppleMediaRecord], instanceID: AppleSource.ID,
+                                  incoming: [AppleMediaRecord], scanStatus: AppleLibraryScanStatus) -> [String: AppleMediaRecord] {
+        var next = previous
         for (id, record) in next {
             var updated = record
             if scanStatus == .complete {
@@ -293,8 +324,12 @@ public actor AppleMediaIndexRepository {
                 next[record.id] = refreshed
             }
         }
+        return next
+    }
+
+    private func commit(_ next: [String: AppleMediaRecord], completedScans: [AppleSource.ID]) throws {
         let oldScans = successfulScans
-        if scanStatus == .complete { successfulScans[instanceID.uuidString] = .now }
+        for instanceID in completedScans { successfulScans[instanceID.uuidString] = .now }
         do { try persist(next) } catch { successfulScans = oldScans; throw error }
         recordsByID = next
         searchTextByID = Self.makeSearchTextByID(next)
@@ -302,6 +337,7 @@ public actor AppleMediaIndexRepository {
     }
 
     public func remove(instanceID: AppleSource.ID) throws {
+        loadIfNeeded()
         try replace(instanceID: instanceID, with: [])
     }
 
@@ -309,6 +345,7 @@ public actor AppleMediaIndexRepository {
     /// This is intentionally repository-wide so a disabled or deleted source
     /// cannot leave stale Search, Siri, Spotlight, or Top Shelf results behind.
     public func retainAvailability(for activeInstanceIDs: Set<AppleSource.ID>) throws {
+        loadIfNeeded()
         var next: [String: AppleMediaRecord] = [:]
         for (id, record) in recordsByID {
             var updated = record
@@ -323,6 +360,7 @@ public actor AppleMediaIndexRepository {
     }
 
     public func updateProgress(_ progressByID: [String: Double]) throws {
+        loadIfNeeded()
         var next = recordsByID
         for (id, record) in next {
             var updated = record
@@ -335,6 +373,7 @@ public actor AppleMediaIndexRepository {
     }
 
     func restoreConfigurationWatchlist(_ watchlist: [AppleMediaRecord]) throws {
+        loadIfNeeded()
         var next = recordsByID
         for id in next.keys { next[id]?.isFavorite = false }
         for record in watchlist {
@@ -349,6 +388,7 @@ public actor AppleMediaIndexRepository {
     }
 
     public func setFavorite(_ isFavorite: Bool, recordID: String) throws {
+        loadIfNeeded()
         guard var record = recordsByID[recordID], record.isFavorite != isFavorite else { return }
         record.isFavorite = isFavorite
         var next = recordsByID
@@ -372,6 +412,7 @@ public actor AppleMediaIndexRepository {
     }
 
     public func search(_ query: String, limit: Int = 100, eligibility: SearchEligibility = .all) -> [AppleMediaRecord] {
+        loadIfNeeded()
         let tokens = Self.normalizedSearchText(query)
             .split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard !tokens.isEmpty else { return [] }
@@ -676,6 +717,9 @@ public final class AppleMediaIndexStore {
     }
 
     private func setRecords(_ values: [AppleMediaRecord]) {
+        // Every launch's rescan writes the same records back; an unchanged
+        // set must not redraw every view that reads them.
+        guard values != records else { return }
         revision &+= 1
         records = values
         recordsByID = Dictionary(values.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
@@ -687,8 +731,9 @@ public final class AppleMediaIndexStore {
         setRecords(await repository.records())
     }
 
-    public func replaceCatalog(instanceID: AppleSource.ID, with values: [AppleMediaRecord]) async throws {
-        try await repository.replaceCatalog(instanceID: instanceID, with: values)
+    public func replaceCatalogs(_ catalogs: [(instanceID: AppleSource.ID, records: [AppleMediaRecord])]) async throws {
+        guard !catalogs.isEmpty else { return }
+        try await repository.replaceCatalogs(catalogs)
         setRecords(await repository.records())
     }
 

@@ -33,6 +33,14 @@ struct AppleCatalogSearchLookup: Sendable {
     /// scrolling (N34 trace).
     private let normalizedTitles: [String]
     private let articleFreeTitles: [String]
+    /// `titleMatches` positions, ascending, by lowercased type and by
+    /// "type|title" for both title forms (built with `indexesTitles`).
+    /// Picking the typed titles out of every catalog title per Top 10
+    /// entry was still Discover's heaviest redraw work on an Apple TV 4K
+    /// (2026-10-16).
+    private let positionsByType: [String: [Int]]
+    private let positionsByTitle: [String: [Int]]
+    private let positionsByArticleFreeTitle: [String: [Int]]
 
     init(sections: [AppleCatalogSection] = [], sources: [AppleSource] = [], indexesTitles: Bool = false) {
         let allSourcesByID = sources.reduce(into: [AppleSource.ID: AppleSource]()) {
@@ -72,9 +80,22 @@ struct AppleCatalogSearchLookup: Sendable {
         if indexesTitles {
             normalizedTitles = titled.map { Self.normalized($0.item.name) }
             articleFreeTitles = normalizedTitles.map(Self.removingLeadingArticle)
+            var byType: [String: [Int]] = [:], byTitle: [String: [Int]] = [:], byArticleFree: [String: [Int]] = [:]
+            for (index, match) in titled.enumerated() {
+                let type = match.item.type.lowercased()
+                byType[type, default: []].append(index)
+                byTitle["\(type)|\(normalizedTitles[index])", default: []].append(index)
+                byArticleFree["\(type)|\(articleFreeTitles[index])", default: []].append(index)
+            }
+            positionsByType = byType
+            positionsByTitle = byTitle
+            positionsByArticleFreeTitle = byArticleFree
         } else {
             normalizedTitles = []
             articleFreeTitles = []
+            positionsByType = [:]
+            positionsByTitle = [:]
+            positionsByArticleFreeTitle = [:]
         }
     }
 
@@ -178,17 +199,23 @@ struct AppleCatalogSearchLookup: Sendable {
     func match(title: String, type: String, seasonTitle: String? = nil,
                ignoringLeadingArticle: Bool = false) -> AppleCatalogSearchMatch? {
         let wanted = Set([title, seasonTitle ?? ""].map(Self.normalized).filter { !$0.isEmpty })
-        let typed = titleMatches.indices.filter {
+        let indexed = !normalizedTitles.isEmpty
+        let typeKey = type.lowercased()
+        let typed = indexed ? positionsByType[typeKey] ?? [] : titleMatches.indices.filter {
             titleMatches[$0].item.type.caseInsensitiveCompare(type) == .orderedSame
         }
-        if let exact = typed.first(where: { wanted.contains(normalizedTitle(at: $0)) }) {
-            return withArtwork(titleMatches[exact], among: typed)
-        }
+        let exact = indexed
+            ? wanted.compactMap { positionsByTitle["\(typeKey)|\($0)"]?.first }.min()
+            : typed.first(where: { wanted.contains(normalizedTitle(at: $0)) })
+        if let exact { return withArtwork(titleMatches[exact], among: typed) }
         guard ignoringLeadingArticle else { return nil }
         // Ranking feeds and metadata catalogs sometimes differ only by "The".
         // Keep exact matches first, and never guess between distinct title IDs.
         let withoutArticles = Set(wanted.map(Self.removingLeadingArticle).filter { !$0.isEmpty })
-        let candidates = typed.filter { withoutArticles.contains(articleFreeTitle(at: $0)) }.map { titleMatches[$0] }
+        let positions = indexed
+            ? Set(withoutArticles.flatMap { positionsByArticleFreeTitle["\(typeKey)|\($0)"] ?? [] }).sorted()
+            : typed.filter { withoutArticles.contains(articleFreeTitle(at: $0)) }
+        let candidates = positions.map { titleMatches[$0] }
         guard let first = candidates.first,
               candidates.allSatisfy({ Self.titleIdentity($0.item) == Self.titleIdentity(first.item) }) else { return nil }
         return withArtwork(first, among: typed)

@@ -27,6 +27,7 @@
 		7A1000000000000000000053 /* AppleUXCaptureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000052 /* AppleUXCaptureUITests.swift */; };
 		7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000014 /* OpenStreamUITestCase.swift */; };
 		7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */; };
+		7A1000000000000000000061 /* AppleTVPerfWalkUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000060 /* AppleTVPerfWalkUITests.swift */; };
 		7A1000000000000000000019 /* OpenStreamUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1000000000000000000018 /* OpenStreamUITestCase.swift */; };
 		A5B100000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
 		A5B100000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5B000000000000000000001 /* PrivacyInfo.xcprivacy */; };
@@ -219,6 +220,7 @@
 		7A1000000000000000000052 /* AppleUXCaptureUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleUXCaptureUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000014 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 		7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVStubSmokeUITests.swift; sourceTree = "<group>"; };
+		7A1000000000000000000060 /* AppleTVPerfWalkUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVPerfWalkUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000018 /* OpenStreamUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenStreamUITestCase.swift; sourceTree = "<group>"; };
 		99D9BC94256B56EF50B40F8D /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9FFCCEE5468C8AFD791C6212 /* OpenStreamVisionUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenStreamVisionUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -372,6 +374,7 @@
 			children = (
 				791687CEE8616CBB3C5CCAE0 /* AppleTVFocusUITests.swift */,
 				7A1000000000000000000016 /* AppleTVStubSmokeUITests.swift */,
+				7A1000000000000000000060 /* AppleTVPerfWalkUITests.swift */,
 				7A1000000000000000000014 /* OpenStreamUITestCase.swift */,
 				7A1000000000000000000001 /* AppleTVTopShelfUITests.swift */,
 			);
@@ -1006,6 +1009,7 @@
 			files = (
 				ACE25E4B2EFB78058040C93F /* AppleTVFocusUITests.swift in Sources */,
 				7A1000000000000000000017 /* AppleTVStubSmokeUITests.swift in Sources */,
+				7A1000000000000000000061 /* AppleTVPerfWalkUITests.swift in Sources */,
 				7A1000000000000000000015 /* OpenStreamUITestCase.swift in Sources */,
 				7A1000000000000000000002 /* AppleTVTopShelfUITests.swift in Sources */,
 				084BDE91F37ABFC62DD16953 /* AppStoreScreenshotUITests.swift in Sources */,
