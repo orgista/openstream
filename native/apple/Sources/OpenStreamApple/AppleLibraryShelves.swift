@@ -1,7 +1,7 @@
 import AVFoundation
 import SwiftUI
 
-struct AppleLibrarySeries: Identifiable, Sendable {
+struct AppleLibrarySeries: Identifiable, Equatable, Sendable {
     let id: String
     let parsed: AppleLibraryTitle
     var items: [AppleLibraryItem]

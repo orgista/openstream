@@ -30,3 +30,7 @@ AGENTS.md §7 with the numbers table. No commits.
 Lead note 20:05: Fable's Stage B re-review found the launch path rewrote `MediaVersions-v1.json` once per title on the
 main actor (AppleLocalLibraryStore.swift:136, AppleMediaVersion.swift:176); being fixed before Stage B commits.
 Re-measure with that fix in place before blaming anything else.
+
+## Owner rule 2026-10-16 00:05 (overrides the device list above)
+OfficePlus is the owner's TV: install only, 09:00-17:00, never measure/profile/launch-loop/UI-drive it. All device
+measurement from now on runs on **DevTV only**. Keep the OfficePlus numbers already taken as reference, don't take more.

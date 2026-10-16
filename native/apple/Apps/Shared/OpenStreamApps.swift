@@ -23,6 +23,7 @@ struct OpenStreamPlatformApp: App {
         // `-OpenStreamDevSources <path>`: read and delete the file first, so
         // the reset below cannot empty it out from under the import.
         AppleDevSourcesImport.captureIfRequested()
+        AppleDebugBackupRestore.captureIfRequested()
         // `-OpenStreamResetOnLaunch YES`: Reset OpenStream before any store loads.
         AppleDeviceReset.performIfRequestedAtLaunch()
         #if os(macOS)

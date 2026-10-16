@@ -101,11 +101,8 @@ enum AppleIdentityAliasResolution {
     private let defaults: UserDefaults
     private let blobs: ApplePlaybackBlobStorage
     private let key: String
-    private var decodedData: Data?
-    private var hasDecoded = false
-    private var table = AppleIdentityAliasTable()
-    private var classByMember: [String: String] = [:]
-    private var membersByClass: [String: [String]] = [:]
+    /// The decoded table, shared like `ApplePlaybackStore.DecodedState`.
+    private let decoded: DecodedState
     private var didTraceInvalidMember = false
     private var didTracePositionalConflict = false
 
@@ -113,34 +110,39 @@ enum AppleIdentityAliasResolution {
         self.defaults = defaults
         blobs = ApplePlaybackBlobStorage.storage(defaults: defaults, directory: blobDirectory)
         key = AppleTasteNamespace.key("openstream.identity.aliases.v1", namespace: namespace)
+        decoded = blobDirectory == nil && defaults === UserDefaults.standard ? .shared(key: key) : DecodedState()
     }
 
     var isEnabled: Bool { defaults.object(forKey: Self.enabledKey) as? Bool ?? true }
     var blobData: Data? { blobs.data(forKey: key) }
+    var storageRevision: Int { blobs.revision }
 
     private func load() {
+        let revision = blobs.revision
+        if decoded.hasDecoded, decoded.revision == revision { return }
+        decoded.revision = revision
         let data = blobData
-        guard !hasDecoded || data != decodedData else { return }
-        hasDecoded = true
-        decodedData = data
-        table = data.flatMap { try? JSONDecoder().decode(AppleIdentityAliasTable.self, from: $0) } ?? .init()
-        if table.classes.values.joined().contains(where: { !ApplePlaybackIdentity.isStorageKey($0) }) {
+        guard !decoded.hasDecoded || data != decoded.decodedData else { return }
+        decoded.hasDecoded = true
+        decoded.decodedData = data
+        decoded.table = data.flatMap { try? JSONDecoder().decode(AppleIdentityAliasTable.self, from: $0) } ?? .init()
+        if decoded.table.classes.values.joined().contains(where: { !ApplePlaybackIdentity.isStorageKey($0) }) {
             traceInvalidMember()
-            table.classes = table.classes.compactMapValues { members in
+            decoded.table.classes = decoded.table.classes.compactMapValues { members in
                 let valid = members.filter { ApplePlaybackIdentity.isStorageKey($0) }
                 return valid.isEmpty ? nil : valid
             }
         }
-        let index = table.connectedIndex()
-        classByMember = index.classByMember
-        membersByClass = index.membersByClass
+        let index = decoded.table.connectedIndex()
+        decoded.classByMember = index.classByMember
+        decoded.membersByClass = index.membersByClass
     }
 
     func members(of storageKey: String) -> [String] {
         guard isEnabled else { return [storageKey] }
         load()
-        guard let id = classByMember[storageKey] else { return [storageKey] }
-        return [storageKey] + (membersByClass[id] ?? []).filter { $0 != storageKey }
+        guard let id = decoded.classByMember[storageKey] else { return [storageKey] }
+        return [storageKey] + (decoded.membersByClass[id] ?? []).filter { $0 != storageKey }
     }
 
     func record(classID: String, members: [String]) {
@@ -154,9 +156,9 @@ enum AppleIdentityAliasResolution {
         // Index direct le: ownership once. A connected component's representative
         // can be a li: label after a rename; it must not hide positional ownership.
         var positionalOwners: [String: String] = [:]
-        for id in table.classes.keys.sorted() where id.hasPrefix("le:") {
+        for id in decoded.table.classes.keys.sorted() where id.hasPrefix("le:") {
             let fileKey = ApplePlaybackIdentity.storageKey(for: String(id.dropFirst(3)))
-            for member in table.classes[id] ?? [] where member != fileKey {
+            for member in decoded.table.classes[id] ?? [] where member != fileKey {
                 positionalOwners[member] = positionalOwners[member] ?? id
             }
         }
@@ -181,20 +183,39 @@ enum AppleIdentityAliasResolution {
                 }
                 return true
             }
-            if table.record(classID: entry.classID, members: valid) { changed = true }
+            if decoded.table.record(classID: entry.classID, members: valid) { changed = true }
         }
         guard changed else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        guard let data = try? encoder.encode(table) else { return }
+        guard let data = try? encoder.encode(decoded.table) else { return }
         blobs.set(data, forKey: key)
         // Rebuild the reverse map on the next lookup, once per distinct blob.
-        hasDecoded = false
+        decoded.hasDecoded = false
     }
 
     private func traceInvalidMember() {
         guard !didTraceInvalidMember else { return }
         didTraceInvalidMember = true
         AppleInteractionTrace.record(.failure, "Identity alias rejected invalid storage key")
+    }
+
+    @MainActor final class DecodedState {
+        private static var byKey: [String: DecodedState] = [:]
+
+        static func shared(key: String) -> DecodedState {
+            if let state = byKey[key] { return state }
+            let state = DecodedState()
+            byKey[key] = state
+            return state
+        }
+
+        var decodedData: Data?
+        /// The storage revision `decodedData` was last checked at.
+        var revision: Int?
+        var hasDecoded = false
+        var table = AppleIdentityAliasTable()
+        var classByMember: [String: String] = [:]
+        var membersByClass: [String: [String]] = [:]
     }
 }

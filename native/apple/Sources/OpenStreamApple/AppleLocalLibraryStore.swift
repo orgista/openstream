@@ -43,8 +43,8 @@ final class AppleLocalLibraryStore {
         offlineIDs: [String: String]) async -> [String: [AppleStremioEpisode]] {
         let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return Dictionary(uniqueKeysWithValues: groups.filter { $0.parsed.kind == .show }.map { group in
-            let episodes = group.items.filter { AppleLibraryTitleParser.parse($0).role == .feature }.map { file in
-                let parsed = AppleLibraryTitleParser.parse(file)
+            let episodes = group.items.filter { AppleLibraryParseMemo.parse($0).role == .feature }.map { file in
+                let parsed = AppleLibraryParseMemo.parse(file)
                 let id = offlineIDs[file.id] ?? sourcesByID[file.sourceID].map {
                     AppleMediaIngestion.libraryRecord(source: $0, item: file).id
                 } ?? file.id
@@ -58,6 +58,22 @@ final class AppleLocalLibraryStore {
     private(set) var lastSuccessfulScanBySource: [UUID: Date] = [:]
     private(set) var lastScan: Date?
     
+    /// The last scan's groups, kept to the active sources; nil without a
+    /// readable snapshot. Off the main actor: reading and decoding ~1,500
+    /// files held Home's first second on an Apple TV 4K (2026-10-16).
+    @concurrent nonisolated private static func persistedGroups(activeSourceIDs: Set<UUID>) async -> [AppleLibrarySeries]? {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("OpenStream")
+        guard let data = try? Data(contentsOf: caches.appendingPathComponent("LibraryGroups-v1.json")),
+              let snapshots = try? JSONDecoder().decode([AppleLibraryGroupSnapshot].self, from: data) else { return nil }
+        return snapshots.compactMap { snapshot in
+            let activeItems = snapshot.items.filter { activeSourceIDs.contains($0.sourceID) }
+            guard !activeItems.isEmpty else { return nil }
+            let parsed = AppleLibraryTitle(title: snapshot.title, year: snapshot.year, season: nil, episode: nil, kind: snapshot.kind)
+            let items = activeItems.map { AppleLibraryItem(sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
+            return AppleLibrarySeries(id: snapshot.id, parsed: parsed, items: items)
+        }
+    }
+
     struct AppleLibraryGroupSnapshot: Codable {
         let id: String
         let title: String
@@ -94,47 +110,31 @@ final class AppleLocalLibraryStore {
     }
 
     func publishPersistedIndex(activeSources: [AppleSource]) async -> Bool {
-        let activeSourceIDs = Set(activeSources.map(\.id))
-        
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("OpenStream")
-        let snapshotURL = caches.appendingPathComponent("LibraryGroups-v1.json")
-        
-        guard let data = try? Data(contentsOf: snapshotURL),
-              let snapshots = try? JSONDecoder().decode([AppleLibraryGroupSnapshot].self, from: data) else {
+        guard let realGroups = await Self.persistedGroups(activeSourceIDs: Set(activeSources.map(\.id))) else {
             appleTrace("library persisted index unusable: no snapshot found")
             return false
         }
-        
-        var realGroups: [AppleLibrarySeries] = []
-        var publishedCount = 0
-        
-        for snapshot in snapshots {
-            let activeItems = snapshot.items.filter { activeSourceIDs.contains($0.sourceID) }
-            guard !activeItems.isEmpty else { continue }
-            
-            let parsed = AppleLibraryTitle(title: snapshot.title, year: snapshot.year, season: nil, episode: nil, kind: snapshot.kind)
-            let items = activeItems.map { AppleLibraryItem(sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
-            
-            let group = AppleLibrarySeries(id: snapshot.id, parsed: parsed, items: items)
-            realGroups.append(group)
-            publishedCount += 1
-        }
-        
-        guard publishedCount > 0 else {
+        guard !realGroups.isEmpty else {
             appleTrace("library persisted index unusable: empty after filtering")
             return false
         }
+        let publishedCount = realGroups.count
         
-        self.sources = activeSources
-        self.groups = realGroups
-        episodesByGroup = await Self.episodeCandidates(groups: realGroups, sources: activeSources, offlineIDs: [:])
         // Known matches go out with the groups: published bare, the Library
         // hero drew one title and then rebuilt with another page first when
         // the scan merged the same cache ~6 s later.
         let cached = await metadataResolver.cachedMetadata(for: realGroups)
+        self.sources = activeSources
+        self.groups = realGroups
         metadata.merge(cached) { _, persisted in persisted }
         contentDidChange()
         appleTrace("library published from persisted index: \(publishedCount) titles, \(cached.count) cached matches")
+        // Episode lists and Continue Watching's next-episode check redraw
+        // when these land; parsing every show file first held all the titles
+        // back ~1.5 s on an Apple TV 4K (2026-10-16).
+        let episodes = await Self.episodeCandidates(groups: realGroups, sources: activeSources, offlineIDs: [:])
+        guard !Task.isCancelled else { return true }
+        episodesByGroup = episodes
         await recordAllIdentityAliases()
         return true
     }
@@ -217,17 +217,62 @@ final class AppleLocalLibraryStore {
             type: group.parsed.kind == .show ? "series" : "movie", name: group.parsed.title,
             releaseInfo: group.parsed.year.map(String.init))
     }
+    /// `matches(_:_:)` against every group, answered from `matchIndex()`.
     func matchingGroups(_ item: AppleCatalogItem) -> [AppleLibrarySeries] {
-        groups.filter { Self.matches(catalogItem(for: $0), item) }
+        let index = matchIndex()
+        let byName = index.byName[Self.nameKey(item)] ?? []
+        guard item.mediaID.hasPrefix("tt") else { return byName.map { groups[$0] } }
+        // An IMDb id on both sides decides alone; a group without one still matches by name.
+        let positions = Set(index.byIMDb["\(item.type):\(item.mediaID)"] ?? [])
+            .union(byName.filter { !index.hasIMDb[$0] })
+        return positions.sorted().map { groups[$0] }
     }
+
+    private struct MatchIndex {
+        let revision: Int
+        var byIMDb: [String: [Int]] = [:]
+        var byName: [String: [Int]] = [:]
+        var hasIMDb: [Bool] = []
+    }
+    @ObservationIgnored private var matchIndexCache: MatchIndex?
+
+    /// Group positions by IMDb id and by folded name and year, once per
+    /// content change. The billboard asks on every redraw, and folding every
+    /// title's name there took ~200 ms per pass on an Apple TV 4K (2026-10-15).
+    private func matchIndex() -> MatchIndex {
+        // Read so the caller's view observes both; the cache key alone is not enough.
+        _ = groups
+        _ = metadata
+        if let matchIndexCache, matchIndexCache.revision == contentRevision { return matchIndexCache }
+        var index = MatchIndex(revision: contentRevision)
+        for (position, group) in groups.enumerated() {
+            let item = catalogItem(for: group)
+            let hasIMDb = item.mediaID.hasPrefix("tt")
+            index.hasIMDb.append(hasIMDb)
+            if hasIMDb { index.byIMDb["\(item.type):\(item.mediaID)", default: []].append(position) }
+            index.byName[Self.nameKey(item), default: []].append(position)
+        }
+        matchIndexCache = index
+        return index
+    }
+
+    private static func nameKey(_ item: AppleCatalogItem) -> String {
+        "\(item.type):\(normalized(item.name)):\((item.releaseInfo ?? "").prefix(4))"
+    }
+    /// Discover reads this several times per redraw; kept until the content changes, like `sorted(_:)`.
     var resolvedGroups: [AppleLibrarySeries] {
+        let ordered = sorted(.added)
+        if let resolvedCache, resolvedCache.revision == contentRevision { return resolvedCache.value }
         var seen = Set<String>()
-        return sorted(.added).filter {
+        let value = ordered.filter {
             guard let item = metadata[$0.id] else { return false }
             let key = item.mediaID.hasPrefix("tt") ? item.mediaID : "\(item.type):\(Self.normalized(item.name)):\(item.releaseInfo ?? "")"
             return seen.insert(key).inserted
         }
+        resolvedCache = (contentRevision, value)
+        return value
     }
+    @ObservationIgnored private var resolvedCache: (revision: Int, value: [AppleLibrarySeries])?
     var featured: AppleLibrarySeries? { featuredCandidates.first }
 
     /// The billboard rotates through these rather than pinning the newest
@@ -320,7 +365,7 @@ final class AppleLocalLibraryStore {
                    value.updatedAt > (values[group.id]?.updatedAt ?? .distantPast) { values[group.id] = value }
             }
         }
-        progress = values
+        if values != progress { progress = values }
     }
     func playbackID(_ file: AppleLibraryItem) -> String {
         if let id = offlineIDs[file.id] { return id }
@@ -353,6 +398,7 @@ final class AppleLocalLibraryStore {
 
     /// Every title's aliases in one alias-table write and one version-cache write.
     func recordAllIdentityAliases() async {
+        await AppleLibraryParseMemo.warm(groups.flatMap(\.items))
         var entries: [(classID: String, mediaIDs: [String])] = []
         await mediaVersionCache.recordInOneWrite {
             for group in groups {
@@ -372,7 +418,7 @@ final class AppleLocalLibraryStore {
         let rowIDs: Set<String> = group.parsed.kind == .show
             ? resolvedMediaID.map { id in Set(Self.episodes(group: group, mediaID: id, enriched: []).map(\.id)) } ?? [] : []
         for (index, file) in group.items.enumerated() {
-            let parsed = AppleLibraryTitleParser.parse(file)
+            let parsed = AppleLibraryParseMemo.parse(file)
             let legacy = resolvedMediaID.map { "\($0):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)" }
             let firstLegacy = legacy.map { legacySeen.insert($0).inserted } ?? false
             // Recheck after the actor hop; weak/missing evidence is also deduped.
@@ -483,12 +529,20 @@ final class AppleLocalLibraryStore {
             }
         }
         let snapshot = files
-        groups = await Task.detached { AppleLibrarySeries.groups(snapshot) }.value
-        offlineIDs = newOfflineIDs
-        episodesByGroup = await Self.episodeCandidates(groups: groups, sources: sources, offlineIDs: newOfflineIDs)
-        metadata.merge(newMetadata) { current, _ in current }
-        contentDidChange()
-        appleTrace("library grouped: \(groups.count) titles")
+        let regrouped = await Task.detached { AppleLibrarySeries.groups(snapshot) }.value
+        // A rescan that finds the titles already published must not redraw
+        // Library and Discover. (Groups from the persisted index carry fewer
+        // parse fields, so the first scan after it still publishes.)
+        let unchanged = regrouped == groups && newOfflineIDs == offlineIDs
+            && newMetadata.allSatisfy { metadata[$0.key] != nil }
+        if !unchanged {
+            groups = regrouped
+            offlineIDs = newOfflineIDs
+            episodesByGroup = await Self.episodeCandidates(groups: groups, sources: sources, offlineIDs: newOfflineIDs)
+            metadata.merge(newMetadata) { current, _ in current }
+            contentDidChange()
+        }
+        appleTrace("library grouped: \(groups.count) titles\(unchanged ? ", unchanged" : "")")
         // Everything the shelves need is in `groups` now, so the tab can draw.
         //
         // The media index feeds search and Discover matching, not the
@@ -542,8 +596,11 @@ final class AppleLocalLibraryStore {
         #endif
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
         let cached = await metadataResolver.cachedMetadata(for: groups)
-        metadata.merge(cached) { _, persisted in persisted }
-        contentDidChange()
+        let merged = metadata.merging(cached) { _, persisted in persisted }
+        if merged != metadata {
+            metadata = merged
+            contentDidChange()
+        }
         appleTrace("library cached metadata merged: \(cached.count)")
         refreshProgress()
         appleTrace("library progress refreshed")
@@ -599,7 +656,7 @@ final class AppleLocalLibraryStore {
     }
 
     nonisolated static func matchesEpisode(_ file: AppleLibraryItem, episode: AppleStremioEpisode) -> Bool {
-        let parsed = AppleLibraryTitleParser.parse(file)
+        let parsed = AppleLibraryParseMemo.parse(file)
         if episode.id == fileEpisodeID(file) { return true }
         guard parsed.role == .feature else { return false }
         if let date = parsed.airDate { return episode.releaseInfo.map { String($0.prefix(10)) } == date }
@@ -617,8 +674,8 @@ final class AppleLocalLibraryStore {
                 return Self.matchesEpisode(file, episode: episode) ? file : nil
             }
         }.sorted {
-            let firstPart = AppleLibraryTitleParser.parse($0).part ?? 1
-            let secondPart = AppleLibraryTitleParser.parse($1).part ?? 1
+            let firstPart = AppleLibraryParseMemo.parse($0).part ?? 1
+            let secondPart = AppleLibraryParseMemo.parse($1).part ?? 1
             if firstPart != secondPart { return firstPart < secondPart }
             let lhs = AppleStremioCandidateRanking.resolution($0.name)
             let rhs = AppleStremioCandidateRanking.resolution($1.name)
@@ -655,7 +712,7 @@ final class AppleLocalLibraryStore {
     static func episodes(group: AppleLibrarySeries, mediaID: String, enriched: [AppleStremioEpisode]) -> [AppleStremioEpisode] {
         var seen = Set<String>()
         return group.items.flatMap { file -> [AppleStremioEpisode] in
-            let parsed = AppleLibraryTitleParser.parse(file)
+            let parsed = AppleLibraryParseMemo.parse(file)
             if parsed.role == .feature, let season = parsed.season, !parsed.episodeNumbers.isEmpty {
                 return parsed.episodeNumbers.compactMap { number in
                     let id = "\(mediaID):\(season):\(number)"
@@ -684,7 +741,7 @@ final class AppleLocalLibraryStore {
         let rowIDs = Set(episodes.map(\.id))
         var legacySeen = Set<String>()
         let aliases = group.items.enumerated().compactMap { index, file -> (String, String)? in
-            let parsed = AppleLibraryTitleParser.parse(file)
+            let parsed = AppleLibraryParseMemo.parse(file)
             let legacy = "\(mediaID):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)"
             // The old row builder deduplicated these keys. Do not borrow a
             // numbered episode's history for a filename row it had suppressed.
@@ -723,7 +780,7 @@ final class AppleLocalLibraryStore {
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
     func mediaVersions(for file: AppleLibraryItem, recordAliases: Bool = true) -> [AppleMediaVersion] {
-        let parsed = AppleLibraryTitleParser.parse(file)
+        let parsed = AppleLibraryParseMemo.parse(file)
         guard let group = groups.first(where: { $0.items.contains(where: { $0.id == file.id }) }),
               parsed.role == .feature, offlineIDs[file.id] == nil else { return [] }
         // Episodes share a title page but never a playback timeline.
@@ -733,7 +790,7 @@ final class AppleLocalLibraryStore {
         let fallback: String
         if canonical != nil {
             candidates = matching.flatMap(\.items).filter {
-                let other = AppleLibraryTitleParser.parse($0)
+                let other = AppleLibraryParseMemo.parse($0)
                 guard versionItemIDs[$0.id] == canonical else { return false }
                 if parsed.kind == .show, parsed.episodeNumbers.isEmpty, parsed.airDate == nil { return $0.id == file.id }
                 if let date = parsed.airDate { return other.airDate == date }
@@ -899,7 +956,7 @@ final class AppleLocalLibraryStore {
         hints.playbackDecision = ApplePlaybackDecision.decide(inspections[file.id]?.descriptors ?? .init(container: file.url.pathExtension))
         hints.versionOffset = part.flatMap { version?.cumulativePosition(ordinal: $0.ordinal, offset: 0) } ?? 0
         hints.versionDuration = version?.duration
-        let title = AppleLibraryTitleParser.parse(file).title
+        let title = AppleLibraryParseMemo.parse(file).title
         let presentation: AppleStremioPlayerPresentation
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")

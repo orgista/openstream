@@ -69,6 +69,8 @@ struct AppleDiscPlaybackTests {
         #expect(AppleDiscImagePolicy.isDiscImage(path: "Movies/Heat/BDMV/STREAM/00001.m2ts"))
         #expect(!AppleDiscImagePolicy.isDiscImage(path: "Movies/Heat (1995).mkv"))
         #expect(!AppleDiscImagePolicy.isDiscImage(path: "Movies/BDMV.mkv"))
+        #expect(AppleDiscImagePolicy.isDiscImage(path: "/Volumes/Share/Movies/Heat.udf"))
+        #expect(!AppleDiscImagePolicy.isDiscImage(path: "/Volumes/Share/Movies/iso"))
         #expect(AppleLibraryScanner.supportedExtensions.contains("iso"))
     }
 
