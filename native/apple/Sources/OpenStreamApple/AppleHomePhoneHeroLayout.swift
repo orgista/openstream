@@ -52,6 +52,25 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
         return max(min(target, peekLimit), Self.minimumArtHeight)
     }
 
+    /// iOS 18's inline-large bar changes height as Discover appears and
+    /// scrolls (115 and 97 pt on an iPhone 15 Pro Max), and the scroll view
+    /// reports its insets a frame before or after its size (heights of 965,
+    /// 949 and 913 pt for a 932 pt screen). Drawn as read, the art moved and
+    /// resized with each reading. A reading at the screen height already
+    /// drawn keeps the tallest top inset, the bar with its title expanded;
+    /// another height is only drawn once it has held for `settleDelay`.
+    public static func settled(drawn: Self, measured: Self) -> Self {
+        guard measured.topInset > 0 else { return drawn }
+        guard drawn.topInset > 0 else { return measured }
+        guard abs(measured.containerHeight - drawn.containerHeight) < 1 else { return drawn }
+        var next = drawn
+        next.topInset = max(drawn.topInset, measured.topInset)
+        next.bottomInset = measured.bottomInset
+        return next
+    }
+
+    public static let settleDelay: Duration = .milliseconds(750)
+
     /// How far the hero is pulled up so its art starts at the top edge.
     public var topOverlap: CGFloat { topInset + Self.stackTopPadding }
 

@@ -58,6 +58,11 @@ struct AppleDiscoverView: View {
     /// The scroll view's height and bar insets, which size the iPhone
     /// portrait hero and pull it up under the navigation bar.
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
+    /// The last reading, drawn once it has held (`AppleHomePhoneHeroLayout.settled`).
+    @State private var measuredPhoneHeroLayout = AppleHomePhoneHeroLayout()
+    /// Until the first layout has held, readings are drawn as they come: the
+    /// launch passes (965 then 931 pt) land in the same frame.
+    @State private var phoneHeroLayoutHeld = false
     /// The Mac hero's size, off the window and the toolbar's inset.
     @State private var macHeroLayout = AppleMacHeroLayout()
     /// The iPad's: the same hero, off the screen and the bars' insets.
@@ -321,8 +326,21 @@ struct AppleDiscoverView: View {
                                              topInset: geometry.contentInsets.top,
                                              bottomInset: geometry.contentInsets.bottom)
                 } action: { _, layout in
-                    phoneHeroLayout = layout
+                    measuredPhoneHeroLayout = layout
                     appleTrace("discover phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
+                    if phoneHeroLayoutHeld {
+                        drawPhoneHeroLayout(AppleHomePhoneHeroLayout.settled(drawn: phoneHeroLayout, measured: layout))
+                    } else if layout.topInset > 0 {
+                        drawPhoneHeroLayout(layout)
+                    }
+                }
+                .task(id: measuredPhoneHeroLayout) {
+                    try? await Task.sleep(for: AppleHomePhoneHeroLayout.settleDelay)
+                    guard !Task.isCancelled, measuredPhoneHeroLayout.topInset > 0 else { return }
+                    if measuredPhoneHeroLayout.containerHeight != phoneHeroLayout.containerHeight {
+                        drawPhoneHeroLayout(measuredPhoneHeroLayout)
+                    }
+                    phoneHeroLayoutHeld = true
                 }
                 .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
                     AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
@@ -614,6 +632,12 @@ struct AppleDiscoverView: View {
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
+    }
+
+    private func drawPhoneHeroLayout(_ layout: AppleHomePhoneHeroLayout) {
+        guard layout != phoneHeroLayout else { return }
+        phoneHeroLayout = layout
+        appleTrace("discover phone hero drawn h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) art=\(Int(layout.artHeight))")
     }
 
     private func rebuildRecommendations(for revision: String) async {
@@ -3549,6 +3573,7 @@ struct AppleCatalogItemDetailView: View {
         // (`ApplePlayRequestLedger`).
         .task(id: playbackUI.request) {
             guard playbackUI.ledger.consume(playbackUI.request) else { return }
+            pauseTrailerPreview(reason: "play pressed")
             await resolvePlayback()
         }
         .onChange(of: library.contentRevision, initial: true) { _, _ in
@@ -3609,8 +3634,10 @@ struct AppleCatalogItemDetailView: View {
             // A pressed Play Trailer got there first.
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
             guard let playableKey = await resolvePlayableTrailerKey(startingAt: 0) else { return }
-            // …or while its first candidate was being probed.
-            guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
+            // …or while its first candidate was being probed. Nor under or
+            // after a Play that is still loading (a disc reads for 14 s).
+            guard !Task.isCancelled, !heroTrailer.hasStarted, !titlePageIsCovered,
+                  !playbackCoordinator.phase.isBusy else { return }
             heroTrailer.pinnedKey = playableKey
             heroTrailer.muted = true
             guard prepareTrailerAudio() else { return }

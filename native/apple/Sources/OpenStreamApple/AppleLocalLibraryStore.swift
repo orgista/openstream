@@ -844,7 +844,10 @@ final class AppleLocalLibraryStore {
         if let version = versions.first(where: { $0.parts.contains(where: { $0.reference == file.id }) }) {
             guard version.isAvailable(references: Set(filesByID.keys)) else { throw AppleLibrarySourceError.unavailable }
             for part in version.parts where part.duration == nil {
-                guard let member = filesByID[part.reference], inspections[member.id]?.duration == nil else { continue }
+                // Not a disc image: its probe is a whole UDF/BDMV read (12-14 s over SMB on
+                // an iPhone) before the player is even on screen, and the engine reads it again.
+                guard let member = filesByID[part.reference], inspections[member.id]?.duration == nil,
+                      !AppleDiscImagePolicy.isDiscImage(member) else { continue }
                 if source.kind == .nas {
                     // A probe that cannot even start is a failed probe, never a failed play.
                     let credentials = (try? sourceStore.networkCredentials(for: source)) ?? AppleSMBCredentials(username: "", password: "")

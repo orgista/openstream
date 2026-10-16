@@ -540,7 +540,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         attach("fullscreen-player-accessibility-isolation")
         XCTAssertEqual(XCTWaiter.wait(for: [isolated], timeout: 10), .completed,
                        "The presenting page must be absent from the fullscreen accessibility tree")
-        if failure.exists {
+        // The pre-route spinner shows first; the unreachable URL fails after it.
+        if failure.waitForExistence(timeout: 30) {
             let close = failure.buttons["Close"]
             if close.exists { close.tap() }
         }
@@ -1904,10 +1905,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let any = app.descendants(matching: .any)
         let close = any.matching(identifier: "player.close").firstMatch
         let controls = any.matching(identifier: "player.controls.show").firstMatch
-        let connecting = any.matching(identifier: "player.connecting").firstMatch
+        // Not `player.connecting`: that spinner shows before the alert or controls exist.
         let exit = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                failed.exists || close.exists || controls.exists || connecting.exists
+                failed.exists || close.exists || controls.exists
             }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [exit], timeout: 60), .completed,
                        "neither the failure alert nor the player appeared")

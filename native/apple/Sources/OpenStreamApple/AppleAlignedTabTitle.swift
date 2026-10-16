@@ -17,6 +17,9 @@ enum AppleTabTitleStyle: Equatable, Sendable {
 struct AppleAlignedTabTitle: ViewModifier {
     let title: String
     let isLive: Bool
+    /// Discover's hero runs up under the bar, so the bar stays the stock
+    /// transparent one there on iOS 18 too.
+    let overArtwork: Bool
 
     static func style(for platform: AppleUIPlatform, isLive: Bool = false) -> AppleTabTitleStyle {
         switch platform {
@@ -54,6 +57,8 @@ struct AppleAlignedTabTitle: ViewModifier {
     private func legacyNavigationBackground(_ content: Content) -> some View {
         if #available(iOS 26, *) {
             content
+        } else if overArtwork {
+            content
         } else {
             content
                 .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
@@ -64,5 +69,7 @@ struct AppleAlignedTabTitle: ViewModifier {
 }
 
 extension View {
-    func appleAlignedTabTitle(_ title: String, isLive: Bool = false) -> some View { modifier(AppleAlignedTabTitle(title: title, isLive: isLive)) }
+    func appleAlignedTabTitle(_ title: String, isLive: Bool = false, overArtwork: Bool = false) -> some View {
+        modifier(AppleAlignedTabTitle(title: title, isLive: isLive, overArtwork: overArtwork))
+    }
 }

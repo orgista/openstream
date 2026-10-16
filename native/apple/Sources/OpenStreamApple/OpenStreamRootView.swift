@@ -748,7 +748,7 @@ public struct OpenStreamRootView: View {
                 openSettings: { selectedTab = .settings },
                 backupController: backupController
             )
-            .appleAlignedTabTitle(tab.title)
+            .appleAlignedTabTitle(tab.title, overArtwork: true)
         case .library:
             AppleLibraryView(
                 catalogStore: catalogStore,

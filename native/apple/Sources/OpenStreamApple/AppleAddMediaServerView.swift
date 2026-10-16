@@ -30,6 +30,15 @@ public struct AppleMediaServerFormPolicy {
         return url
     }
 
+    /// The addresses to try, in order. Without a scheme, https first and
+    /// http after it for LAN servers and bare IPs; a typed scheme is used as is.
+    public static func candidateBaseURLs(_ text: String) -> [URL] {
+        guard let url = normalizedBaseURL(text) else { return [] }
+        guard !text.contains("://"), var secure = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return [url] }
+        secure.scheme = "https"
+        return [secure.url, url].compactMap { $0 }
+    }
+
     public static func canTest(urlText: String) -> Bool {
         return normalizedBaseURL(urlText) != nil
     }
@@ -786,9 +795,8 @@ struct AppleAddMediaServerView: View {
         
         switch action {
         case .test(_):
-            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
             do {
-                let info = try await client.publicInfo(baseURL: baseURL)
+                let info = try await client.resolveBaseURL(url).info
                 isError = false
                 if let serverName = info.serverName, let version = info.version {
                     message = "Connected to \(serverName) (\(version))"
@@ -804,10 +812,9 @@ struct AppleAddMediaServerView: View {
             }
             
         case .save(_):
-            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
             do {
+                let (baseURL, info) = try await client.resolveBaseURL(url)
                 let session = try await client.authenticate(baseURL: baseURL, kind: kind, username: username, password: password)
-                let info = try? await client.publicInfo(baseURL: baseURL)
                 let finalName = AppleMediaServerFormPolicy.defaultName(kind: kind, typedName: name, publicInfo: info, host: baseURL.host)
                 _ = try sourceStore.addMediaServer(kind: kind, name: finalName, session: session)
                 dismiss()
@@ -843,8 +850,9 @@ struct AppleAddMediaServerView: View {
             
         case .connect(_):
             cancelQuickConnect()
-            guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(url) else { return }
+            let typedURL = url
             do {
+                let (baseURL, info) = try await client.resolveBaseURL(typedURL)
                 let enabled = try await client.quickConnectEnabled(baseURL: baseURL)
                 if !enabled {
                     isError = true
@@ -853,16 +861,15 @@ struct AppleAddMediaServerView: View {
                 }
                 let newTicket = try await client.quickConnectInitiate(baseURL: baseURL)
                 try Task.checkCancellation()
-                guard kind == .jellyfin, AppleMediaServerFormPolicy.normalizedBaseURL(url) == baseURL else { return }
+                guard kind == .jellyfin, url == typedURL else { return }
                 self.ticket = newTicket
                 
                 quickConnectTask?.cancel()
                 quickConnectTask = Task {
                     do {
                         let session = try await client.waitForQuickConnect(baseURL: baseURL, ticket: newTicket)
-                        let info = try? await client.publicInfo(baseURL: baseURL)
                         try Task.checkCancellation()
-                        guard kind == .jellyfin, AppleMediaServerFormPolicy.normalizedBaseURL(url) == baseURL else { return }
+                        guard kind == .jellyfin, url == typedURL else { return }
                         let finalName = AppleMediaServerFormPolicy.defaultName(kind: .jellyfin, typedName: name, publicInfo: info, host: baseURL.host)
                         _ = try sourceStore.addMediaServer(kind: .jellyfin, name: finalName, session: session)
                         dismiss()

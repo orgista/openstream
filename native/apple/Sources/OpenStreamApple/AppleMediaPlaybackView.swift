@@ -120,7 +120,7 @@ struct AppleMediaPlayerView: View {
     @State private var sourceIdentities: [URL: URL] = [:]
     @State private var triedSources = Set<URL>()
     /// Set once the engine has picked a route. From then on the route's own
-    /// player owns the waiting indicator — see `showsTVLoadingSpinner`.
+    /// player owns the waiting indicator — see `showsRouteSpinner`.
     @State private var hasRouted = false
     @State private var showsFallbackNotice = false
     @State private var securityAccess: AppleSecurityScopedAccess?
@@ -283,25 +283,32 @@ struct AppleMediaPlayerView: View {
             withAnimation(.easeOut(duration: 0.3)) { macCloseVisible = false }
         }
         #endif
-        #if os(tvOS)
+        #if os(tvOS) || os(iOS)
         // Task 9: black with a centred spinner and nothing else until the
         // engine reports a route. After that the stock player and the surface
-        // overlay each draw their own waiting indicator.
+        // overlay each draw their own waiting indicator. On iOS this covers
+        // a disc image's read (12-14 s over SMB), where the empty stock
+        // player drew nothing.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
         .overlay {
-            if showsTVLoadingSpinner, request.hints.disc != nil {
-                AppleDiscSpinner(size: 60)
-                    .accessibilityIdentifier("player.connecting")
-            } else if showsTVLoadingSpinner {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                    .controlSize(.large)
-                    .accessibilityLabel("Loading stream")
-                    .accessibilityIdentifier("player.connecting")
+            Group {
+                if showsRouteSpinner, request.hints.disc != nil {
+                    AppleDiscSpinner(size: 60)
+                        .accessibilityIdentifier("player.connecting")
+                } else if showsRouteSpinner {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .controlSize(.large)
+                        .accessibilityLabel("Loading stream")
+                        .accessibilityIdentifier("player.connecting")
+                }
             }
+            .allowsHitTesting(false)
         }
+        #endif
+        #if os(tvOS)
         .background {
             if coordinator.route == .avPlayer, let nextEpisode, !nextEpisode.isPartBoundary {
                 AppleTVStockNextEpisodeAction(
@@ -328,6 +335,9 @@ struct AppleMediaPlayerView: View {
         #endif
         #if os(iOS)
         .statusBarHidden()
+        .onChange(of: coordinator.route) { _, route in
+            if route != .none { hasRouted = true }
+        }
         #endif
         #if os(iOS) || os(visionOS)
         .overlay(alignment: .topTrailing) {
@@ -593,17 +603,19 @@ struct AppleMediaPlayerView: View {
         #endif
     }
 
-    #if os(tvOS)
+    #if os(tvOS) || os(iOS)
     /// `true` while the request is resolving or loading and the engine has
     /// not yet chosen a route, so neither player is on screen.
-    private var showsTVLoadingSpinner: Bool {
+    private var showsRouteSpinner: Bool {
         ApplePlaybackSpinnerPolicy.showsScreenSpinner(
             route: coordinator.route,
             isBusy: coordinator.phase.isBusy,
             hasRouted: hasRouted
         )
     }
+    #endif
 
+    #if os(tvOS)
     /// Menu on the Siri Remote: save where the owner was, then leave.
     private func closeFromRemote() {
         saveProgressOnClose()

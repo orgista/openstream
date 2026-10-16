@@ -286,6 +286,33 @@ import Testing
         #expect(abs(card.width / card.height - 16.0 / 9.0) < 0.001)
     }
 
+    /// The owner's iPhone 15 Pro Max on iOS 18 going back to Discover
+    /// (trace 2026-10-15 23:50): the bar settles from 115 to 97 pt and back,
+    /// with one-frame heights either side of the 931 pt screen.
+    @Test func theIOS18BarDoesNotMoveOrResizeTheArt() {
+        let readings: [(CGFloat, CGFloat)] = [(945, 115), (936, 102), (931, 97), (932, 98), (924, 98), (924, 105), (929, 113), (931, 115)]
+        var drawn = AppleHomePhoneHeroLayout(containerHeight: 931, topInset: 115, bottomInset: 83)
+        let resting = drawn
+        for (height, top) in readings {
+            drawn = AppleHomePhoneHeroLayout.settled(drawn: drawn,
+                measured: AppleHomePhoneHeroLayout(containerHeight: height, topInset: top, bottomInset: 83))
+        }
+        #expect(drawn == resting)
+    }
+
+    @Test func theFirstMeasuredReadingIsDrawnAndUnmeasuredOnesAreNot() {
+        let unmeasured = AppleHomePhoneHeroLayout(containerHeight: 699)
+        let measured = AppleHomePhoneHeroLayout(containerHeight: 965, topInset: 149, bottomInset: 83)
+        #expect(AppleHomePhoneHeroLayout.settled(drawn: AppleHomePhoneHeroLayout(), measured: unmeasured) == AppleHomePhoneHeroLayout())
+        #expect(AppleHomePhoneHeroLayout.settled(drawn: AppleHomePhoneHeroLayout(), measured: measured) == measured)
+    }
+
+    @Test func aTallerBarAtTheSameHeightIsKept() {
+        let drawn = AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 101, bottomInset: 83)
+        let taller = AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83)
+        #expect(AppleHomePhoneHeroLayout.settled(drawn: drawn, measured: taller).topInset == 143)
+    }
+
     @Test func aPosterCardInAnUnmeasuredFrameIsEmpty() {
         #expect(AppleHeroPortraitArt.posterCardRect(posterAspect: 2.0 / 3.0, in: .zero, topInset: 100) == .zero)
     }

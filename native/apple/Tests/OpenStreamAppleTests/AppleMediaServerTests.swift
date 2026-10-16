@@ -270,3 +270,112 @@ struct AppleSourceStoreMediaServerTests {
         #expect(source.serverKind == nil)
     }
 }
+
+/// Answers `http://fixture.example/…` with a 301 to the same path on https,
+/// and the https `System/Info/Public` with Jellyfin's public info, so the
+/// real URLSession redirect handling runs.
+private final class AppleMediaServerRedirectStub: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "fixture.example" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        if components.scheme == "http" {
+            components.scheme = "https"
+            let target = components.url!
+            let redirect = HTTPURLResponse(url: url, statusCode: 301, httpVersion: "HTTP/1.1",
+                                           headerFields: ["Location": target.absoluteString])!
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: target), redirectResponse: redirect)
+            return
+        }
+        let body = Data(#"{"ServerName":"Rill","Version":"10.10.0","Id":"fixture","ProductName":"Jellyfin Server"}"#.utf8)
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+@Suite("Media server address: scheme and redirects")
+struct AppleMediaServerAddressTests {
+    @Test("No scheme tries https first, then http; a typed scheme is kept")
+    func candidateOrder() {
+        #expect(AppleMediaServerFormPolicy.candidateBaseURLs("fixture.example").map(\.absoluteString)
+            == ["https://fixture.example", "http://fixture.example"])
+        #expect(AppleMediaServerFormPolicy.candidateBaseURLs("10.0.0.20:8096").map(\.absoluteString)
+            == ["https://10.0.0.20:8096", "http://10.0.0.20:8096"])
+        #expect(AppleMediaServerFormPolicy.candidateBaseURLs("http://fixture.example:8096").map(\.absoluteString)
+            == ["http://fixture.example:8096"])
+        #expect(AppleMediaServerFormPolicy.candidateBaseURLs("not a url").isEmpty)
+    }
+
+    @Test("https that cannot connect falls back to http")
+    func fallsBackToHTTP() async throws {
+        let client = AppleMediaServerClient(loader: { request in
+            guard request.url?.scheme == "http" else { throw URLError(.cannotConnectToHost) }
+            let body = Data(#"{"ServerName":"LAN"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, deviceID: "fixture")
+        let resolved = try await client.resolveBaseURL("10.0.0.20:8096")
+        #expect(resolved.baseURL.absoluteString == "http://10.0.0.20:8096/")
+        #expect(resolved.info.serverName == "LAN")
+    }
+
+    @Test("https that answers with an error does not fall back to http")
+    func keepsHTTPSServerError() async {
+        let client = AppleMediaServerClient(loader: { request in
+            (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+        }, deviceID: "fixture")
+        await #expect(throws: AppleMediaServerError.server(status: 503)) {
+            try await client.resolveBaseURL("fixture.example")
+        }
+    }
+
+    @Test("The base is the address the server redirected to")
+    func adoptsRedirect() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AppleMediaServerRedirectStub.self]
+        let session = URLSession(configuration: configuration)
+        let client = AppleMediaServerClient(loader: { try await session.data(for: $0) }, deviceID: "fixture")
+        let resolved = try await client.resolveBaseURL("http://fixture.example/jellyfin")
+        #expect(resolved.baseURL.absoluteString == "https://fixture.example/jellyfin/")
+        #expect(resolved.info.serverName == "Rill")
+    }
+
+    @Test("Base URL from the reached address keeps the path prefix and drops the query")
+    func baseFromReachedURL() {
+        let requested = URL(string: "http://fixture.example")!
+        #expect(AppleMediaServerClient.baseURL(reached: URL(string: "https://fixture.example/jf/System/Info/Public?x=1"),
+                                               requested: requested).absoluteString == "https://fixture.example/jf/")
+        #expect(AppleMediaServerClient.baseURL(reached: URL(string: "https://fixture.example/login"),
+                                               requested: requested) == requested)
+        #expect(AppleMediaServerClient.baseURL(reached: nil, requested: requested) == requested)
+    }
+
+    @Test("An unreadable reply traces method, path, status and type, never the query")
+    func malformedTraceLine() {
+        var request = URLRequest(url: URL(string: "http://fixture.example/Users/AuthenticateByName?api_key=secret")!)
+        request.httpMethod = "POST"
+        let response = HTTPURLResponse(url: URL(string: "https://fixture.example/Users/AuthenticateByName")!,
+                                       statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html"])
+        let line = AppleMediaServerClient.malformedTraceLine(request: request, response: response)
+        #expect(line == "media server reply made no sense: POST /Users/AuthenticateByName status=200 type=text/html landed=https://…/Users/AuthenticateByName")
+        #expect(!line.contains("secret"))
+        #expect(AppleMediaServerClient.malformedTraceLine(request: request, response: nil)
+            == "media server reply made no sense: POST /Users/AuthenticateByName no HTTP response")
+    }
+
+    @Test("A sign-in reply without a session is malformed")
+    func authenticateMalformed() async {
+        let client = AppleMediaServerClient(loader: { request in
+            (Data("<html></html>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                                         headerFields: ["Content-Type": "text/html"])!)
+        }, deviceID: "fixture")
+        await #expect(throws: AppleMediaServerError.malformedResponse) {
+            try await client.authenticate(baseURL: URL(string: "https://fixture.example/")!, kind: .jellyfin,
+                                          username: "fixture", password: "fixture")
+        }
+    }
+}

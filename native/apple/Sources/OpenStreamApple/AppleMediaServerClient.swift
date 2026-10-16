@@ -195,6 +195,12 @@ public struct AppleMediaServerClient: Sendable {
     }
 
     func perform(_ request: URLRequest) async throws -> Data {
+        try await performResponse(request).data
+    }
+
+    /// The reply and the response it came with; `response.url` is where the
+    /// request ended up after any redirect.
+    func performResponse(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
         let data: Data
         let response: URLResponse
         do {
@@ -203,7 +209,7 @@ public struct AppleMediaServerClient: Sendable {
             throw AppleMediaServerError.unreachable
         }
         guard let http = response as? HTTPURLResponse else {
-            throw AppleMediaServerError.malformedResponse
+            throw malformed(request, response: nil)
         }
         if http.statusCode == 401 {
             throw AppleMediaServerError.invalidCredentials
@@ -211,7 +217,23 @@ public struct AppleMediaServerClient: Sendable {
         guard (200...299).contains(http.statusCode) else {
             throw AppleMediaServerError.server(status: http.statusCode)
         }
-        return data
+        return (data, http)
+    }
+
+    /// Traces what came back (path, status, content type; no query, token or
+    /// body) and returns `.malformedResponse` to throw.
+    func malformed(_ request: URLRequest, response: HTTPURLResponse?) -> AppleMediaServerError {
+        appleTrace(Self.malformedTraceLine(request: request, response: response))
+        return .malformedResponse
+    }
+
+    static func malformedTraceLine(request: URLRequest, response: HTTPURLResponse?) -> String {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? "-"
+        guard let response else { return "media server reply made no sense: \(method) \(path) no HTTP response" }
+        let type = response.value(forHTTPHeaderField: "Content-Type") ?? "-"
+        let landed = response.url.map { $0.path == path && $0.scheme == request.url?.scheme ? "" : " landed=\($0.scheme ?? "-")://…\($0.path)" } ?? ""
+        return "media server reply made no sense: \(method) \(path) status=\(response.statusCode) type=\(type)\(landed)"
     }
 
     func authorizationHeaderValue(token: String?) -> String {
@@ -226,14 +248,48 @@ public struct AppleMediaServerClient: Sendable {
     }
 
     public func publicInfo(baseURL: URL) async throws -> AppleMediaServerPublicInfo {
-        let url = try normalizedURL(base: baseURL, path: "System/Info/Public")
+        try await reachedPublicInfo(baseURL: baseURL).info
+    }
+
+    static let publicInfoPath = "System/Info/Public"
+
+    /// The public info and the base URL the server really answers on: the
+    /// one the request was redirected to (http → https behind Cloudflare),
+    /// so a later POST never goes to an address that redirects it. A
+    /// redirected POST comes back as a GET without its body.
+    func reachedPublicInfo(baseURL: URL) async throws -> (baseURL: URL, info: AppleMediaServerPublicInfo) {
+        let url = try normalizedURL(base: baseURL, path: Self.publicInfoPath)
         let req = request(url: url)
-        let data = try await perform(req)
-        do {
-            return try JSONDecoder().decode(AppleMediaServerPublicInfo.self, from: data)
-        } catch {
-            throw AppleMediaServerError.malformedResponse
+        let (data, response) = try await performResponse(req)
+        guard let info = try? JSONDecoder().decode(AppleMediaServerPublicInfo.self, from: data) else {
+            throw malformed(req, response: response)
         }
+        return (Self.baseURL(reached: response.url, requested: baseURL), info)
+    }
+
+    /// The base under which `System/Info/Public` was answered; `requested`
+    /// when the final URL does not end in that path.
+    static func baseURL(reached: URL?, requested: URL) -> URL {
+        guard let reached, var components = URLComponents(url: reached, resolvingAgainstBaseURL: false),
+              components.path.hasSuffix("/" + publicInfoPath) else { return requested }
+        components.path.removeLast(publicInfoPath.count)
+        components.query = nil
+        components.fragment = nil
+        return components.url ?? requested
+    }
+
+    /// The first address that answers, in `AppleMediaServerFormPolicy.candidateBaseURLs`
+    /// order (https before http when the scheme was left out), as reached
+    /// after redirects. Only a failure to connect moves on to the next one.
+    public func resolveBaseURL(_ text: String) async throws -> (baseURL: URL, info: AppleMediaServerPublicInfo) {
+        for candidate in AppleMediaServerFormPolicy.candidateBaseURLs(text) {
+            do {
+                return try await reachedPublicInfo(baseURL: candidate)
+            } catch AppleMediaServerError.unreachable {
+                continue
+            }
+        }
+        throw AppleMediaServerError.unreachable
     }
 
     public func authenticate(baseURL: URL, kind: AppleMediaServerKind, username: String, password: String) async throws -> AppleMediaServerSession {
@@ -246,16 +302,19 @@ public struct AppleMediaServerClient: Sendable {
         } catch {
             throw AppleMediaServerError.malformedResponse
         }
-        let data = try await perform(req)
-        return try decodeSession(from: data, baseURL: baseURL, kind: kind)
+        let (data, response) = try await performResponse(req)
+        guard let session = decodeSession(from: data, baseURL: baseURL, kind: kind) else {
+            throw malformed(req, response: response)
+        }
+        return session
     }
 
-    private func decodeSession(from data: Data, baseURL: URL, kind: AppleMediaServerKind) throws -> AppleMediaServerSession {
+    private func decodeSession(from data: Data, baseURL: URL, kind: AppleMediaServerKind) -> AppleMediaServerSession? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let user = json["User"] as? [String: Any],
               let userID = user["Id"] as? String,
               let accessToken = json["AccessToken"] as? String else {
-            throw AppleMediaServerError.malformedResponse
+            return nil
         }
         let userName = user["Name"] as? String
         let serverID = json["ServerId"] as? String
@@ -341,8 +400,11 @@ public struct AppleMediaServerClient: Sendable {
         } catch {
             throw AppleMediaServerError.malformedResponse
         }
-        let data = try await perform(req)
-        return try decodeSession(from: data, baseURL: baseURL, kind: .jellyfin)
+        let (data, response) = try await performResponse(req)
+        guard let session = decodeSession(from: data, baseURL: baseURL, kind: .jellyfin) else {
+            throw malformed(req, response: response)
+        }
+        return session
     }
 
     // MARK: Emby Connect

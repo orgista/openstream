@@ -102,11 +102,12 @@ public enum AppleDevSourcesImport {
                 try store.addNetworkShare(name: name, host: host, port: port, share: share, path: path,
                                           username: username, password: password, domain: domain)
             case .mediaServer(let kind, let name, let urlText, let credential):
-                guard let baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(urlText) else {
+                guard var baseURL = AppleMediaServerFormPolicy.normalizedBaseURL(urlText) else {
                     return .failed("the server address is not valid")
                 }
+                var info: AppleMediaServerPublicInfo?
+                if kind != .plex { (baseURL, info) = try await AppleMediaServerClient().resolveBaseURL(urlText) }
                 let session = try await mediaServerSession(kind: kind, name: name, baseURL: baseURL, credential: credential)
-                let info = kind == .plex ? nil : try? await AppleMediaServerClient().publicInfo(baseURL: baseURL)
                 let finalName = AppleMediaServerFormPolicy.defaultName(kind: kind, typedName: name,
                                                                        publicInfo: info, host: baseURL.host)
                 _ = try store.addMediaServer(kind: kind, name: finalName, session: session)
