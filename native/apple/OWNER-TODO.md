@@ -15,20 +15,52 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       DevTV) → Fable review → commit + push; only then the next job.** Stopped 17:30 to make room (work kept): Vision
       Pro pass, device sweep, engine 7.36 (rebased locally on the mini: 17 of 22 re-applied, 4 already upstream),
       flaky-e2e harness. Queue:
-      1. Stage B review fixes + Apple TV Blu-ray/Titles/Top Shelf (running).
+      1. ~~Stage B~~ **committed 71e2f97 (21:05)** after 2 Fable reviews (fixed: launch rewrote the version cache once
+         per title). Apple TV Blu-ray/Titles/Top Shelf: **merged to main 031ecc2 (00:00 10-16)** after Fable fixes; swift 3429/425,
+         E2E-tvOS 20/0 + 4 DVD menu tests, E2E-iOS 39/2 (the 2 known flaky). PENDING: install + look on OfficePlus/DevTV once
+         the slowness job's measurements end (`ssh dev-mini '~/Developer/bin/buildlock.sh /tmp/tvdisc/install.sh'`).
+      2a. **Apple TV speed: merged to main 4a615b9 (08:05 10-16).** DevTV with the owner's 472 titles: Home 441→197 ms,
+          library on screen 5.9→2.3 s, slowest tab switch 433→67 ms; Fable FIX 3 items done; swift 3436/426, E2E-tvOS
+          20/0, E2E-iOS 39/2 (known flaky); Release builds carry no debug restore hook.
+      2b. **iPhone iOS 18: discs don't play + "a ton of issues"** (owner 22:50) → specs/iphone-ios18-discs-2026-10-15.md;
+          **03:30 10-16: fixed on the branch** — John Wick 4 UHD plays on DevPlus (player up in 94 ms with a disc spinner,
+          first frame 10.6 s, disc read once instead of twice, trailer pauses on Play); Rill https-first + redirects;
+          iOS 18 hero no longer jumps (Discover bar now see-through on iOS 18: owner to judge on the phone). Gates +
+          Fable review running. Engine follow-up (queue 5): cache the parsed disc per file inside AetherEngine. Owner feedback: short notes per issue / screen recordings AirDropped to the Mac.
       2. **Apple TV general slowness** (owner): profile on DevTV + OfficePlus (time profiler, trace timings: launch,
          tab switch, focus moves, title open, Play), fix the top causes, before/after numbers; + the device-sweep checks.
-      3. Vision Pro on the iPad screens (P1s from the Fable review first).
+      2c. **iOS 18.6: 6 E2E tests fail on main already** (found 10-16 by the iPhone job, same failures on 031ecc2):
+          config export Save button, widget placement focus, episode download tap, stub Discover row never drew,
+          landscape tab bar, player options/captions refusing touches. Likely part of "iOS 18 build is worse". Next
+          iPhone job; also give the https attempt in Add Media Server a short timeout (Fable note: LAN host dropping 443
+          waits 60 s).
+      2d. **Owner screen recording 10-15 22:54 (old build):** specs/iphone-recording-1015-2026-10-16.md — launch 4 s black,
+          Top 10 cards without art, "Open Season 3" parsed as show "Open", Live 0-channel import toast + panel
+          timeouts, Blu-ray ISO still offering Play Disc, YouTube overlays on trailers, an "oStream 540 ms" capsule.
+          Next iPhone job after 2c.
+      3. Vision Pro on the iPad screens (P1s from the Fable review first): **Codex running since 08:05** (branch avp-ipad).
       4. Plex/Jellyfin/Emby trailers; Unmatched section.
       5. Flaky-e2e harness; engine 7.36.
       Then the release-candidate run (App Store flavour, all four platforms, clean installs) and "ship 19".
       **YOU today:** (a) ASC → App Privacy → "Data Not Collected" → Publish (API can't confirm); (b) release type: ASC
-      has all four on automatic release after approval; say if you want manual; (c) "Radarr & Sonarr" visible in the
-      App Store build, yes/no; (d) paste the review notes from verification-artifacts/rc-2026-10-09/RC-REPORT.md (I'll
-      refresh them at RC time); (e) permanent SSH fix on Dev-Mini (Screen Sharing → Terminal):
+      has all four on automatic release after approval; say if you want manual; (c) ~~"Radarr & Sonarr" visible~~ **owner 22:35: keep them visible ("look at Ruddarr ... I don't think having the arrs
+      viable is an issue"; Ruddarr 2.0.1 and Helmarr are live on the App Store)**; (d) review notes: the lead writes them into ASC's App Review Information at "ship 19" (owner didn't know what
+      they were); (e) permanent SSH fix on Dev-Mini (Screen Sharing → Terminal):
       `sudo sh -c 'printf "PerSourcePenaltyExemptList 192.168.1.0/24\nMaxStartups 100:30:200\nMaxSessions 64\n" > /etc/ssh/sshd_config.d/200-lan.conf'`
       (17:20 the mini's OpenSSH 10 locked the Studio out for opening too many connections; worked around with one
       shared connection via ServerPlus).
+- [ ] **REA round 2: speed vs Plex + metadata (owner 2026-10-16: "I think we might be the slowest Plex is pretty
+      fast").** **Done 12:18:** design/reference-apps/2026-10-16-speed-and-metadata-rea.md — 12 ranked actions (Top 10 art via
+      TMDB + disk cache, parser "Season N"+year = movie, saved rows before index load, any-size image first, colour
+      placeholders/BlurHash, server-sized images, decoded thumbnail cache, prefetch, parallel matching, Plex request
+      shapes). Items 1-4 folded into the recording job; 5-12 → a speed job after the Plex-vs-us DevTV numbers.
+      Side-by-side timing needs Plex installed on DevTV + DevPlus (App Store, owner's Apple ID): **owner OK/install?**
+- [ ] **Apple TV Top Shelf follow-up (owner feedback window 10-16 12:05, OfficePlus build 2f8604f):** "full screen on
+      apple tv working but no wordmark and swipe for full screen not working, no trailers or sync through heros".
+      Plan: bake the title wordmark into the 1920×1080 carousel artwork (tvOS gives no logo field; Netflix-style
+      composite saved in the shared Caches folder), fix the swipe-up-to-full-screen (reproduce on DevTV), Top Shelf
+      items = the Home hero carousel titles in the same order, previewVideoURL from server trailers (queue 4).
+      Owner can record the TV via QuickTime on Dev-Mini (New Movie Recording → camera: OfficePlus).
 - [ ] **Server trailers on Apple TV (owner 2026-10-15: "for apple tv we can do plex/jellyfin then and emby trailer
       support").** Spec `specs/server-trailers-2026-10-15.md`: Plex extras + Jellyfin/Emby local trailers as the first
       trailer source everywhere and the only one on Apple TV (hero, title page, Top Shelf preview); YouTube stays the
@@ -63,7 +95,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       unless it was replaced and no longer available then next best or next available." In the Stage B review fixes
       (specs/plex-7-8-stageB-2026-10-15.md, fix 1); replaces the earlier "sticky only on an explicit pick" answer.
 
-- [ ] **Owner choice (2026-10-15): iPhone on iOS 18, should the top bar be see-through over the hero?** It is solid on
+- [ ] **Owner choice (2026-10-15): iPhone on iOS 18, should the top bar be see-through over the hero?** Owner 22:35:
+      "I'd have to see it" → lead sends side-by-side screenshots (iOS 18.6 sim, solid vs see-through). It is solid on
       purpose since owner fix #52 (title and icons unreadable over bright art). See-through = full-bleed hero like iOS 26,
       but text over bright posters can be hard to read. Left solid until the owner picks.
 
@@ -222,6 +255,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       branch `hardening-fix` (91588d0) in /mnt/user/backups/studio-openstream-build-2026-10-06/bridge/rill on ServerPlus;
       public hardened copy github.com/cyberbanksy/rill-hardened. **YOU:** re-test adding add-ons in Rill, then playback in
       OpenStream (Add Media Server › Jellyfin). The Reddit setup DM can now point to rill-hardened.
+      **2026-10-15 23:10 (owner: "move rill to gallardo.dev domain im deprecating ourzephyr"):** Rill also answers at
+      **https://stream.gallardo.dev** (custom domain on the same `rill` Worker, no redeploy; wrangler.jsonc routes list
+      both). **Live 23:45: DNS published; System/Info/Public 200 with LocalAddress https://stream.gallardo.dev, sign-in
+      endpoint answers.** stream.ourzephyr.com stays attached until you say to drop it; then remove it from the Worker and routes.
+      Owner's iPhone: Add Media Server › Jellyfin works with `https://` (the no-scheme bug is in the iPhone job).
 - [ ] **Apple TV "Set Up from iPhone" fails: "Couldn't import this setup." (owner 2026-10-09, build 17, real Apple TV +
       real iPhone).** Scanned the QR with the iPhone; the TV showed that error with Show New Code / Close. Investigating.
       **Same TV, Library:** a warning row reads "ServerPlus: You don't have permission to save the file 'OpenStream' in
@@ -434,6 +472,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       2. Remove from Continue Watching keeps Resume (already so). Add a "Start from Beginning" choice next to
          Resume on the title page. (in progress)
 - [ ] **CarPlay (owner ask 2026-10-03) — not in build 15:** YOU request at developer.apple.com/contact/carplay/ for
+      **Owner 2026-10-15: entitlement requested from Apple, approval pending.** Nothing ships until it is granted; then
+      add the CarPlay audio template (Continue Watching audio-only / Live radio channels) + a new profile.
       com.orgista.openstream: Video (`com.apple.developer.carplay-video`, iOS 27+) AND Audio (so it appears in every
       CarPlay car; video-only shows only in cars with parked video). After Apple grants it: CarPlay scene + icon,
       parked video, Live TV/audio while driving, gate video behind a capability check (iOS 27 beta blank-screen bug
