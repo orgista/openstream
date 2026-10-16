@@ -30,12 +30,13 @@ final class AppleLocalLibraryStore {
     @ObservationIgnored private var recordedIdentityFileIDs: Set<String> = []
 
     init(resolver: AppleLibraryMetadataResolver = .shared, playbackStore: ApplePlaybackStore? = nil,
-         groups: [AppleLibrarySeries] = [], sources: [AppleSource] = [], offlineIDs: [String: String] = [:]) {
+         groups: [AppleLibrarySeries] = [], sources: [AppleSource] = [], offlineIDs: [String: String] = [:], versionCacheURL: URL? = nil) {
         metadataResolver = resolver
         injectedPlaybackStore = playbackStore
         self.groups = groups
         self.sources = sources
         self.offlineIDs = offlineIDs
+        self.mediaVersionCache = versionCacheURL.map { AppleMediaVersionCache(url: $0) } ?? .shared
     }
 
     @concurrent nonisolated private static func episodeCandidates(groups: [AppleLibrarySeries], sources: [AppleSource],
@@ -84,6 +85,7 @@ final class AppleLocalLibraryStore {
         progress = [:]
         offlineIDs = [:]
         recordedIdentityFileIDs = []
+        versionItemIDs = [:]
         episodesByGroup = [:]
         lastScan = nil
         staleSourceIDs = []
@@ -133,6 +135,7 @@ final class AppleLocalLibraryStore {
         metadata.merge(cached) { _, persisted in persisted }
         contentDidChange()
         appleTrace("library published from persisted index: \(publishedCount) titles, \(cached.count) cached matches")
+        await recordAllIdentityAliases()
         return true
     }
     /// Bumped whenever `groups` or `metadata` changes, so `sortedCache` knows
@@ -298,7 +301,14 @@ final class AppleLocalLibraryStore {
                 successorAvailable: successor, removedAt: store.isRemovedFromContinueWatching(mediaID: playbackID(file)) ? .distantFuture : nil) else { return nil }
             return (group, activity.updatedAt)
         }
-        return eligible.sorted { $0.1 > $1.1 }.map(\.0)
+        var seen = Set<String>()
+        return eligible.sorted { $0.1 > $1.1 }.compactMap { group, _ in
+            let identity: String
+            if group.parsed.role == .feature, let file = group.items.first, let canonical = versionItemIDs[file.id] {
+                identity = group.parsed.kind == .show ? "series:" + (metadata[group.id]?.mediaID ?? group.id) : canonical
+            } else { identity = group.id }
+            return seen.insert(identity).inserted ? group : nil
+        }
     }
     func refreshProgress() {
         let store = playbackStore
@@ -340,6 +350,17 @@ final class AppleLocalLibraryStore {
         playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
     }
 
+    /// Every title's aliases in one alias-table write and one version-cache write.
+    func recordAllIdentityAliases() async {
+        var entries: [(classID: String, mediaIDs: [String])] = []
+        await mediaVersionCache.recordInOneWrite {
+            for group in groups {
+                entries += await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID)
+            }
+        }
+        playbackStore.recordIdentityAliases(entries)
+    }
+
     private func recordIdentityAliases(for group: AppleLibrarySeries, resolvedMediaID: String?) async
         -> [(classID: String, mediaIDs: [String])] {
         let pending = group.items.filter { !recordedIdentityFileIDs.contains($0.id) && offlineIDs[$0.id] == nil }
@@ -357,15 +378,37 @@ final class AppleLocalLibraryStore {
             guard offlineIDs[file.id] == nil, recordedIdentityFileIDs.insert(file.id).inserted,
                   parsed.role == .feature, file.sizeBytes > 0 else { continue }
             if let match,
-               let title = AppleLogicalItemKey.title(kind: match.kind, imdb: match.imdb, tmdb: match.tmdb),
-               let classID = AppleLogicalItemKey.localFileClass(titleKey: title, season: parsed.season,
+               let title = AppleLogicalItemKey.title(kind: match.kind, imdb: match.imdb, tmdb: match.tmdb) {
+                let base: String
+                if let date = parsed.airDate { base = title + ":d" + date }
+                else if parsed.kind == .show, parsed.episodeNumbers.isEmpty { base = playbackID(file) }
+                else { base = title }
+                if let classID = AppleLogicalItemKey.localFileClass(titleKey: base, season: parsed.season,
                     episode: parsed.episodeNumbers.first, sizeBytes: file.sizeBytes) {
-                entries.append((classID: classID, mediaIDs: [playbackID(file)]))
+                    entries.append((classID: classID, mediaIDs: [playbackID(file)]))
+                }
+                if let season = parsed.season, let episode = parsed.episodeNumbers.first {
+                    versionItemIDs[file.id] = AppleLogicalItemKey.episode(seriesKey: base, season: season, episode: episode)
+                } else { versionItemIDs[file.id] = base }
+
             }
             let current = Self.fileEpisodeID(file)
             if firstLegacy, let legacy, rowIDs.contains(current) {
                 entries.append((classID: AppleLogicalItemKey.legacyEpisodeClass(fileEpisodeID: current),
                     mediaIDs: [current, legacy]))
+            }
+        }
+        var migrated = Set<String>()
+        for file in group.items {
+            guard let itemID = versionItemIDs[file.id], migrated.insert(itemID).inserted else { continue }
+            let versions = mediaVersions(for: file, recordAliases: false)
+            let references = Set(versions.flatMap(\.parts).map(\.reference))
+            let files = groups.flatMap(\.items).filter { references.contains($0.id) }
+            entries.append((classID: itemID, mediaIDs: [itemID] + files.map(playbackID)))
+            if group.parsed.kind == .movie {
+                let catalog = catalogItem(for: group)
+                entries.append((classID: itemID, mediaIDs: [itemID] + AppleTitleProgressIdentity.candidates(
+                    item: catalog, sourceID: file.sourceID, resolvedMediaID: resolvedMediaID)))
             }
         }
         return entries
@@ -503,11 +546,7 @@ final class AppleLocalLibraryStore {
         appleTrace("library cached metadata merged: \(cached.count)")
         refreshProgress()
         appleTrace("library progress refreshed")
-        var identityEntries: [(classID: String, mediaIDs: [String])] = []
-        for group in groups {
-            identityEntries += await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID)
-        }
-        playbackStore.recordIdentityAliases(identityEntries)
+        await recordAllIdentityAliases()
         refreshProgress()
         // Bound eager work. Visible cards resolve the rest on demand.
         for group in sorted(.added).filter({ $0.parsed.kind != .other }).prefix(24) {
@@ -678,42 +717,208 @@ final class AppleLocalLibraryStore {
         return files.first { !completedIDs.contains($0.id) } ?? files.first
     }
 
-    static func format(_ file: AppleLibraryItem) -> String {
+    nonisolated static func format(_ file: AppleLibraryItem) -> String {
         let resolution = file.name.range(of: #"(?i)\b(?:\d{3,4}p|[48]K)\b"#, options: .regularExpression).map { String(file.name[$0]).uppercased() }
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
-    func presentation(for file: AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore,
-                      fromBeginning: Bool = false,
-                      disc: AppleDiscPlaybackChoice? = nil) async throws -> AppleStremioPlayerPresentation {
-        // A disc image always opens through one start choice (Play Disc
-        // unless the page said otherwise), carried to the engine.
-        let disc = AppleDiscImagePolicy.isDiscImage(file) ? disc ?? AppleDiscPlaybackChoice(start: .menu, titleID: nil) : nil
-        let resume = AppleTitlePagePolicy.startPosition(
-            saved: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, fromBeginning: fromBeginning)
+    func mediaVersions(for file: AppleLibraryItem, recordAliases: Bool = true) -> [AppleMediaVersion] {
+        let parsed = AppleLibraryTitleParser.parse(file)
+        guard let group = groups.first(where: { $0.items.contains(where: { $0.id == file.id }) }),
+              parsed.role == .feature, offlineIDs[file.id] == nil else { return [] }
+        // Episodes share a title page but never a playback timeline.
+        let canonical = versionItemIDs[file.id]
+        let matching = canonical.map { id in groups.filter { $0.items.contains { versionItemIDs[$0.id] == id } } } ?? [group]
+        let candidates: [AppleLibraryItem]
+        let fallback: String
+        if canonical != nil {
+            candidates = matching.flatMap(\.items).filter {
+                let other = AppleLibraryTitleParser.parse($0)
+                guard versionItemIDs[$0.id] == canonical else { return false }
+                if parsed.kind == .show, parsed.episodeNumbers.isEmpty, parsed.airDate == nil { return $0.id == file.id }
+                if let date = parsed.airDate { return other.airDate == date }
+                return parsed.kind != .show || (other.season == parsed.season && other.episodeNumbers == parsed.episodeNumbers && other.airDate == parsed.airDate)
+            }
+            fallback = playbackID(file)
+        } else if parsed.part != nil,
+                  let stack = group.mediaVersions(itemID: "", playbackID: playbackID).first(where: { $0.parts.contains { $0.reference == file.id } }),
+                  stack.parts.count > 1 {
+            // An unmatched file keeps its own item (design §2, §5); only the
+            // parts of one stack share a timeline.
+            let references = Set(stack.parts.map(\.reference))
+            candidates = group.items.filter { references.contains($0.id) }
+            fallback = "li:local:" + ApplePlaybackIdentity.digest(for: group.id + ":" + stack.id)
+        } else {
+            candidates = [file]
+            fallback = playbackID(file)
+        }
+        let itemID = canonical ?? fallback
+        let subset = AppleLibrarySeries(id: group.id, parsed: group.parsed, items: candidates)
+        var durations = inspections.compactMapValues(\.duration)
+        for candidate in candidates {
+            // Includes part lengths learned from playback when the probe failed.
+            if let cached = mediaVersionCache.version(containing: candidate.id) {
+                for part in cached.parts where durations[part.reference] == nil { durations[part.reference] = part.duration }
+            }
+        }
+        let candidatesByVersion = subset.mediaVersions(itemID: itemID, playbackID: playbackID, durations: durations)
+        let mappedVersions: [AppleMediaVersion] = candidatesByVersion.map { value -> AppleMediaVersion in
+            var version = value
+            // A previously verified stack remains a stack when a later scan loses a member.
+            if let reference = value.parts.first?.reference, let cached = mediaVersionCache.version(containing: reference),
+               cached.sourceID == value.sourceID, cached.parts.count > value.parts.count,
+               Set(value.parts.map(\.reference)).isSubset(of: Set(cached.parts.map(\.reference))) {
+                version = AppleMediaVersion(id: cached.id, itemID: itemID, sourceID: cached.sourceID,
+                    label: cached.label, parts: cached.parts, providerVersionID: cached.providerVersionID)
+                version.descriptors = cached.descriptors
+                version.formatBadges = cached.formatBadges
+            }
+            if let reference = version.parts.first?.reference, let inspection = inspections[reference] {
+                version.descriptors = inspection.descriptors
+                version.formatBadges = AppleStreamFormatBadge.merged(probed: inspection.badges, named: version.formatBadges)
+            } else if let cached = mediaVersionCache.versions[value.id] {
+                version.descriptors = cached.descriptors
+                version.formatBadges = AppleStreamFormatBadge.merged(probed: cached.formatBadges, named: version.formatBadges)
+            }
+            return version
+        }
+        let versions = mappedVersions.sorted { lhs, rhs in
+            let leftQuality = lhs.quality
+            let rightQuality = rhs.quality
+            return leftQuality == rightQuality ? lhs.id < rhs.id : leftQuality > rightQuality
+        }
+        playbackStore.migrateVersionProgress(itemID: itemID, versions: Dictionary(uniqueKeysWithValues: versions.map { version in
+            (version.id, version.parts.map { part in
+                if let file = candidates.first(where: { $0.id == part.reference }) { return playbackID(file) }
+                // Recompute the same Stage-A key even when this scan lost a known member.
+                let prefix = version.sourceID.uuidString + ":"
+                guard part.reference.hasPrefix(prefix) else { return "" }
+                let path = String(part.reference.dropFirst(prefix.count))
+                let file = AppleLibraryItem(sourceID: version.sourceID, name: URL(fileURLWithPath: path).lastPathComponent,
+                    url: URL(fileURLWithPath: "/" + path), relativePath: path, sizeBytes: 0)
+                return playbackID(file)
+            })
+        }), timelines: Dictionary(uniqueKeysWithValues: versions.map { ($0.id, $0) }), recordAliases: recordAliases)
+        mediaVersionCache.record(versions)
+        return versions
+    }
+
+    @ObservationIgnored private(set) var mediaVersionCache: AppleMediaVersionCache
+    @ObservationIgnored private var versionItemIDs: [String: String] = [:]
+
+    func presentation(for requestedFile: AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore,
+                      fromBeginning: Bool = false, disc: AppleDiscPlaybackChoice? = nil,
+                      explicitVersion: Bool = false, confirmedVersionID: String? = nil,
+                      continuingPart: Bool = false, automaticFallback: Bool = false,
+                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleStremioPlayerPresentation {
+        var file = requestedFile
+        return try await presentation(attempting: &file, sourceStore: sourceStore, settings: settings,
+            fromBeginning: fromBeginning, disc: disc, explicitVersion: explicitVersion, confirmedVersionID: confirmedVersionID,
+            continuingPart: continuingPart, automaticFallback: automaticFallback, engineOverride: engineOverride)
+    }
+
+    /// `file` ends as the file actually tried: the version selection or the
+    /// resume point may move off the requested one, and a failure names that file.
+    func presentation(attempting file: inout AppleLibraryItem, sourceStore: AppleSourceStore, settings: AppleSettingsStore,
+                      fromBeginning: Bool = false, disc: AppleDiscPlaybackChoice? = nil,
+                      explicitVersion: Bool = false, confirmedVersionID: String? = nil,
+                      continuingPart: Bool = false, automaticFallback: Bool = false,
+                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleStremioPlayerPresentation {
+        try Task.checkCancellation()
+        var versions = mediaVersions(for: file)
+        let store = playbackStore
+        let filesByID = Dictionary(groups.flatMap(\.items).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let available = versions.filter { $0.isAvailable(references: Set(filesByID.keys)) }
+        if !continuingPart, let itemID = versions.first?.itemID {
+            // The answered prompt plays the version it asked about; Play resumes the
+            // copy played last. A pick or a fallback after a failure keeps its file.
+            let selected = AppleVersionSelectionPolicy.select(available, confirmed: confirmedVersionID,
+                lastPlayed: explicitVersion || automaticFallback ? nil : store.preferredVersion(itemID: itemID),
+                requestedReference: file.id)
+            // A stack keeps the part it was asked for; resume maps the position to a part below.
+            if let selected, !selected.parts.contains(where: { $0.reference == file.id }),
+               let reference = selected.parts.first?.reference, let selectedFile = filesByID[reference] { file = selectedFile }
+        }
         guard let source = sources.first(where: { $0.id == file.sourceID }) else { throw AppleLibrarySourceError.unavailable }
+        // Inspect each stack member once so offsets are never guessed from file sizes.
+        if let version = versions.first(where: { $0.parts.contains(where: { $0.reference == file.id }) }) {
+            guard version.isAvailable(references: Set(filesByID.keys)) else { throw AppleLibrarySourceError.unavailable }
+            for part in version.parts where part.duration == nil {
+                guard let member = filesByID[part.reference], inspections[member.id]?.duration == nil else { continue }
+                if source.kind == .nas {
+                    // A probe that cannot even start is a failed probe, never a failed play.
+                    let credentials = (try? sourceStore.networkCredentials(for: source)) ?? AppleSMBCredentials(username: "", password: "")
+                    if let url = try? await AppleSMBRangeServer.shared.playbackURL(sourceURL: member.url,
+                        credentials: credentials, sizeBytes: member.sizeBytes) {
+                        let result = await Task.detached(priority: .utility) {
+                            AppleLocalFileInspection.inspect(url: url, isDisc: false)
+                        }.value
+                        try Task.checkCancellation()
+                        inspections[member.id] = result
+                    }
+                    try Task.checkCancellation()
+                } else { _ = await inspection(for: member) }
+                // One unmeasured part is enough to fall back; skip probing the rest.
+                if version.parts.count > 1, inspections[member.id]?.duration == nil { break }
+            }
+            try Task.checkCancellation()
+            versions = mediaVersions(for: file)
+        }
+        let chosen = versions.first { $0.parts.contains { $0.reference == file.id } }
+        // A stack whose parts could not be measured plays part by part, each
+        // file on its own position, as it did before versions; never unavailable.
+        let version = chosen.flatMap { $0.parts.count > 1 && $0.duration == nil ? nil : $0 }
+        let itemID = version?.itemID ?? playbackID(file)
+        let resolution = version == nil && chosen != nil
+            ? AppleVersionResumePolicy.Resolution(position: store.fileProgress(for: itemID)?.resumePosition, needsConfirmation: false)
+            : AppleVersionResumePolicy.resolve(
+                own: version.flatMap { store.versionProgress(itemID: itemID, versionID: $0.id) },
+                item: store.progress(for: itemID), duration: version?.duration)
+        if !fromBeginning, !continuingPart, let version, confirmedVersionID != version.id,
+           resolution.needsConfirmation, let position = resolution.position {
+            throw AppleVersionResumeConfirmation(position: position, versionID: version.id)
+        }
+        var resume = fromBeginning || continuingPart ? nil : resolution.position
+        if let version, let position = resume, let location = version.location(at: position),
+           let reference = version.parts.first(where: { $0.ordinal == location.ordinal })?.reference,
+           let resumedFile = groups.flatMap(\.items).first(where: { $0.id == reference }) {
+            file = resumedFile
+            resume = location.offset
+        }
+        let part = version?.parts.first { $0.reference == file.id }
+        var hints = ApplePlaybackRequest.Hints(filename: file.name, libraryFileURL: file.url)
+        hints.disc = AppleDiscImagePolicy.isDiscImage(file) ? disc ?? AppleDiscPlaybackChoice(start: .menu, titleID: nil) : nil
+        hints.versionID = version?.id
+        hints.playbackDecision = ApplePlaybackDecision.decide(inspections[file.id]?.descriptors ?? .init(container: file.url.pathExtension))
+        hints.versionOffset = part.flatMap { version?.cumulativePosition(ordinal: $0.ordinal, offset: 0) } ?? 0
+        hints.versionDuration = version?.duration
         let title = AppleLibraryTitleParser.parse(file).title
+        let presentation: AppleStremioPlayerPresentation
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
             let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials, sizeBytes: file.sizeBytes)
+            try Task.checkCancellation()
             var request = AppleSMBPlaybackRequestFactory.make(source: source, item: file, playbackURL: url)
+            request.mediaID = itemID
             request.resumePosition = resume
-            request.hints.disc = disc
-            return tracked(AppleStremioPlayerPresentation(request: request, settings: settings), file: file)
+            request.hints = hints
+            presentation = AppleStremioPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
+        } else {
+            let root = file.sourceID == Self.downloadsID ? nil : try AppleLibraryBookmark.resolve(source)
+            let access = root.map { AppleSecurityScopedAccess(url: $0) }
+            defer { withExtendedLifetime(access) {} }
+            let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: engineOverride ?? settings.playbackEngine)
+            try Task.checkCancellation()
+            presentation = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
+                resumePosition: resume, mediaID: itemID, title: title, sourceKind: .files, hints: hints), settings: settings, securityScopedURL: root, engineOverride: engineOverride)
         }
-        let root = file.sourceID == Self.downloadsID ? nil : try AppleLibraryBookmark.resolve(source)
-        let access = root.map { AppleSecurityScopedAccess(url: $0) }
-        defer { withExtendedLifetime(access) {} }
-        let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: settings.playbackEngine)
-        var hints = ApplePlaybackRequest.Hints(libraryFileURL: file.url)
-        hints.disc = disc
-        return tracked(AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
-            resumePosition: resume, mediaID: playbackID(file), title: title, sourceKind: .files, hints: hints), settings: settings, securityScopedURL: root), file: file)
-    }
-    private func tracked(_ presentation: AppleStremioPlayerPresentation, file: AppleLibraryItem) -> AppleStremioPlayerPresentation {
-        let store = playbackStore
-        let identity = playbackID(file)
+        let request = presentation.request
+        // An unmeasured stack part saves its own (part, offset) and learns its length.
+        let learnsDuration = version == nil && chosen != nil
+        let reference = file.id
+        let cache = mediaVersionCache
         presentation.coordinator.progressWriter = { position, duration in
-            store.save(mediaID: identity, position: position, duration: duration)
+            store.save(request: request, position: position, duration: duration)
+            if learnsDuration { cache.learnDuration(duration, reference: reference) }
         }
         return presentation
     }

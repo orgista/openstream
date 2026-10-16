@@ -158,8 +158,12 @@ struct AppleMediaServerLibraryTests {
             #expect(req.url?.path == "/emby/Items/i1/PlaybackInfo")
             #expect(req.httpMethod == "POST")
             
-            let body = try! JSONDecoder().decode([String: AnyValue].self, from: req.httpBody!)
-            #expect(body["UserId"]?.value as? String == "user_456")
+            let data = try #require(req.httpBody)
+            let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(body["UserId"] as? String == "user_456")
+            let profile = try #require(body["DeviceProfile"] as? [String: Any])
+            #expect(profile["DirectPlayProfiles"] is [[String: Any]])
+            #expect(body["MaxStreamingBitrate"] == nil)
             
             let json = """
             {

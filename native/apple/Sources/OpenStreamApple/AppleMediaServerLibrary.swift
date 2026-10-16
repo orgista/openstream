@@ -295,7 +295,59 @@ public struct AppleMediaServerPlaybackInfo: Codable, Equatable, Sendable {
         public let transcodingURLPath: String?
         public let directStreamURLPath: String?
         public let name: String?
-        
+        public var runtimeTicks: Int64? = nil
+        public var bitrate: Int? = nil
+        public var mediaStreams: [MediaStream] = []
+
+        public struct MediaStream: Codable, Equatable, Sendable {
+            public var type: String?
+            public var codec: String?
+            public var level: Double?
+            public var dvProfile: Int?
+            public var index: Int?
+            public var width: Int?
+            public var height: Int?
+            public var channels: Int?
+            public var profile: String?
+            public var videoRangeType: String?
+            enum CodingKeys: String, CodingKey {
+                case type = "Type", codec = "Codec", level = "Level", dvProfile = "DvProfile"
+                case index = "Index", width = "Width", height = "Height"
+                case channels = "Channels", profile = "Profile", videoRangeType = "VideoRangeType"
+            }
+        }
+
+        public var descriptors: AppleStreamDescriptors {
+            let video = mediaStreams.first { $0.type?.lowercased() == "video" }
+            let audio = mediaStreams.first { $0.type?.lowercased() == "audio" }
+            let subtitle = mediaStreams.first { $0.type?.lowercased() == "subtitle" }
+            let level = video?.level.map { $0 > 10 ? $0 / (video?.codec?.lowercased() == "hevc" ? 30 : 10) : $0 }
+            return .init(container: container, videoCodec: video?.codec, videoLevel: level,
+                dolbyVisionProfile: video?.dvProfile.flatMap { $0 > 0 ? $0 : nil }, audioCodec: audio?.codec, subtitleCodec: subtitle?.codec,
+                bitrate: bitrate, duration: runtimeTicks.map { Double($0) / 10_000_000 }, width: video?.width, height: video?.height)
+        }
+
+        public var formatBadges: [AppleStreamFormatBadge] {
+            let video = mediaStreams.first { $0.type?.lowercased() == "video" }
+            let audio = mediaStreams.first { $0.type?.lowercased() == "audio" }
+            let rawRange = video?.videoRangeType?.lowercased() ?? ""
+            let range: AppleStreamFormatBadge.ProbedFormat.DynamicRange
+            if (video?.dvProfile ?? 0) > 0 || rawRange.contains("dovi") { range = .dolbyVision }
+            else if rawRange.contains("hdr10+") || rawRange.contains("hdr10plus") { range = .hdr10Plus }
+            else if rawRange.contains("hlg") { range = .hlg }
+            else if rawRange.contains("hdr") { range = .hdr10 }
+            else { range = .sdr }
+            let probed = AppleStreamFormatBadge.badges(for: .init(width: video?.width ?? 0, height: video?.height ?? 0,
+                dynamicRange: range, audioChannels: audio?.channels ?? 0,
+                isAtmos: audio?.profile?.localizedCaseInsensitiveContains("atmos") == true))
+            return AppleStreamFormatBadge.merged(probed: probed, named: AppleStreamFormatBadge.parse(name ?? ""))
+        }
+
+        public var versionLabel: String {
+            [name, container?.uppercased(), id].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first(where: { !$0.isEmpty }) ?? id
+        }
+
         private enum CodingKeys: String, CodingKey {
             case id = "Id"
             case container = "Container"
@@ -304,11 +356,15 @@ public struct AppleMediaServerPlaybackInfo: Codable, Equatable, Sendable {
             case transcodingURLPath = "TranscodingUrl"
             case directStreamURLPath = "DirectStreamUrl"
             case name = "Name"
+            case runtimeTicks = "RunTimeTicks", bitrate = "Bitrate", mediaStreams = "MediaStreams"
         }
-        
+
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
+            runtimeTicks = try container.decodeIfPresent(Int64.self, forKey: .runtimeTicks)
+            bitrate = try container.decodeIfPresent(Int.self, forKey: .bitrate)
+            mediaStreams = try container.decodeIfPresent([MediaStream].self, forKey: .mediaStreams) ?? []
             self.container = try container.decodeIfPresent(String.self, forKey: .container)
             supportsDirectPlay = try container.decodeIfPresent(Bool.self, forKey: .supportsDirectPlay) ?? false
             supportsDirectStream = try container.decodeIfPresent(Bool.self, forKey: .supportsDirectStream) ?? false
@@ -331,6 +387,9 @@ public struct AppleMediaServerPlaybackInfo: Codable, Equatable, Sendable {
             var enc = encoder.container(keyedBy: CodingKeys.self)
             try enc.encode(id, forKey: .id)
             try enc.encodeIfPresent(container, forKey: .container)
+            try enc.encodeIfPresent(runtimeTicks, forKey: .runtimeTicks)
+            try enc.encodeIfPresent(bitrate, forKey: .bitrate)
+            try enc.encode(mediaStreams, forKey: .mediaStreams)
             try enc.encode(supportsDirectPlay, forKey: .supportsDirectPlay)
             try enc.encode(supportsDirectStream, forKey: .supportsDirectStream)
             try enc.encodeIfPresent(transcodingURLPath, forKey: .transcodingURLPath)
@@ -530,7 +589,8 @@ extension AppleMediaServerClient {
     
     public func playbackInfo(
         session: AppleMediaServerSession,
-        itemID: String
+        itemID: String,
+        forceConversion: Bool = false
     ) async throws -> AppleMediaServerPlaybackInfo {
         var query: [URLQueryItem] = []
         query.append(URLQueryItem(name: "UserId", value: session.userID))
@@ -541,9 +601,10 @@ extension AppleMediaServerClient {
         
         let body: [String: Any] = [
             "UserId": session.userID,
-            "MaxStreamingBitrate": 140000000,
-            "EnableDirectPlay": true,
-            "EnableDirectStream": true,
+            "DeviceProfile": AppleJellyfinPlaybackPolicy.deviceProfile,
+            "EnableDirectPlay": !forceConversion,
+            "EnableDirectStream": !forceConversion,
+            "EnableTranscoding": true,
             "AutoOpenLiveStream": true
         ]
         

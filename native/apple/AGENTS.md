@@ -9,7 +9,10 @@ Mac Studio (it has no Xcode). Edit here; run every heavy command through `script
 tree to dev-mini:~/Developer/openstream-build/src/native/apple and runs the command there under the shared build lock.
 The gate below becomes: `scripts/mini.sh 'swift test --scratch-path ~/Developer/openstream-build/spm 2>&1 | tail -30'`.
 xcodebuild DerivedData on the mini: `~/Developer/openstream-build/dd-<platform>`. Test device: iPhone 16e DevPlus
-(UDID 00008140-000809A82E89801C) on the mini — prefer it over creating simulators. Read
+(UDID 00008140-000809A82E89801C) on the mini — prefer it over creating simulators. Also paired with the mini
+(2026-10-15): Apple TV 4K 2nd gen **DevTV** (`18139e8e65153ff7c3d6f1284646cd12d82a6173`, low-end tvOS target), Apple TV
+4K 3rd gen **OfficePlus** (`00008110-0001486E2189A01E`) and Vision Pro **VP** (`00008112-001150E40C41A01E`; it sleeps
+when not worn, so VP runs need the owner to wear it). Read
 /Volumes/Files/Projects/AGENTS.md "Apple builds and tests run on the Mac mini" and its concurrency gate.
 
 ## 1. The three commands (verbatim — no substitutions)
@@ -188,6 +191,7 @@ references under `design/*.md`. Everything else is trash.
 ## Not done / unclear
 - <item> — <why>
 ## Gates run
+- code-anti-slop pass → removed <N comments, N dead paths, …> (owner rule 2026-10-15; run it on your diff before the gates)
 - swift test … → pass N/M | fail (<one line>)
 - xcodebuild <scheme> → recompiled: <files confirmed by grep> | BUILD FAILED (<one line>)
 - zero-byte check → clean
@@ -198,6 +202,7 @@ references under `design/*.md`. Everything else is trash.
 ```
 
 ## 8. Skills — read the matching SKILL.md BEFORE writing that kind of code
+**Always, on every diff (owner 2026-10-15: "use skill anti slop for the code"): `code-anti-slop`** before you report.
 They live in `~/.claude/skills/<name>/SKILL.md`. Every worker loads them **by name** — the iOS/Swift
 set below is symlinked into `~/.claude-work/skills` (work Claude and Muse), `~/.codex/skills`,
 `~/.codex-headless/skills` and `~/.gemini/config/skills` (agy), verified 2026-09-22. If you do not

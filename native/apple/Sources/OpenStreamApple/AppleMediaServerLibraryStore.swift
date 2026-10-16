@@ -209,7 +209,9 @@ public final class AppleMediaServerLibraryStore {
     }
 
     private var activeTickets: [String: AppleMediaServerPlaybackTicket] = [:]
-    private var stoppedSessions: Set<String> = []
+    /// Plays that already sent their stop. Bounded: only a recent player can repeat one.
+    private var stoppedPlaybackIDs: [UUID] = []
+    @ObservationIgnored private var verifiedVersionItems: Set<String> = []
 
     private let client: AppleMediaServerClient
     private let plexClient: ApplePlexClient
@@ -777,15 +779,22 @@ public final class AppleMediaServerLibraryStore {
     }
 
     public func attach(to coordinator: ApplePlaybackCoordinator) {
+        let tickets = activeTickets
         coordinator.remoteProgressSink = { [weak self] mediaID, position, duration, event in
-            guard let self = self else { return }
-            self.handleRemoteProgress(mediaID: mediaID, position: position, duration: duration, event: event)
+            guard let self, let ticket = tickets[mediaID] else { return }
+            self.handleRemoteProgress(mediaID: mediaID, position: position, duration: duration, event: event, ticket: ticket)
         }
     }
 
     internal func handleRemoteProgress(mediaID: String, position: Double, duration: Double, event: ApplePlaybackCoordinator.RemoteProgressEvent) {
-        guard let ref = AppleMediaServerItemReference.parse(mediaID),
-              let ticket = activeTickets[mediaID], !stoppedSessions.contains(mediaID) else { return }
+        guard let ticket = activeTickets[mediaID] else { return }
+        handleRemoteProgress(mediaID: mediaID, position: position, duration: duration, event: event, ticket: ticket)
+    }
+
+    private func handleRemoteProgress(mediaID: String, position: Double, duration: Double,
+                                      event: ApplePlaybackCoordinator.RemoteProgressEvent,
+                                      ticket: AppleMediaServerPlaybackTicket) {
+        guard let ref = AppleMediaServerItemReference.parse(mediaID), !stoppedPlaybackIDs.contains(ticket.playbackID) else { return }
         
         let completed = event == .stopped && AppleCompletionPolicy.isComplete(position: position, duration: duration)
         let baseline = ticket.session.kind == .plex ? (plexIndex[ref]?.viewCount ?? 0) : (index[ref]?.userData?.playCount ?? 0)
@@ -795,8 +804,8 @@ public final class AppleMediaServerLibraryStore {
         if event == .stopped {
             // One stop per play: a second .stopped for the same request is ignored
             // until `playbackRequest` hands out a new ticket for this media id.
-            if stoppedSessions.contains(mediaID) { return }
-            stoppedSessions.insert(mediaID)
+            if stoppedPlaybackIDs.contains(ticket.playbackID) { return }
+            stoppedPlaybackIDs = Array((stoppedPlaybackIDs + [ticket.playbackID]).suffix(32))
             applyStop(reference: ref, mediaID: mediaID, position: position, duration: duration)
         }
         
@@ -1070,7 +1079,36 @@ public final class AppleMediaServerLibraryStore {
                      protectedCapabilityToRevoke: nil, usesBackgroundSession: true)
     }
 
-    public func playbackRequest(for item: AppleMediaServerItem, in detail: AppleMediaServerDetail, resume: Bool) async throws -> ApplePlaybackRequest {
+    public func mediaVersions(for item: AppleMediaServerItem, in detail: AppleMediaServerDetail) async throws -> [AppleMediaVersion] {
+        guard detail.session.kind != .plex else { return [] }
+        let itemID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
+        // The menu reads the shared cache; PlaybackInfo is asked again only when it is old.
+        let cached = AppleMediaVersionCache.shared.versions(itemID: itemID)
+        if !cached.isEmpty, verifiedVersionItems.contains(itemID)
+            || cached.allSatisfy({ Date.now.timeIntervalSince($0.lastVerified) < Self.versionCacheLifetime }) {
+            return cached.sorted { $0.quality == $1.quality ? $0.id < $1.id : $0.quality > $1.quality }
+        }
+        let info = try await client.playbackInfo(session: detail.session, itemID: item.id)
+        let versions = info.mediaSources.map { source in
+            var version = AppleMediaVersion(id: source.id, itemID: itemID, sourceID: detail.source.id,
+                label: source.versionLabel,
+                parts: [.init(id: "mp:" + ApplePlaybackIdentity.digest(for: itemID + source.id), ordinal: 1,
+                    duration: source.descriptors.duration, reference: ApplePlaybackIdentity.digest(for: itemID + source.id))],
+                providerVersionID: source.id)
+            version.descriptors = source.descriptors
+            version.formatBadges = source.formatBadges
+            return version
+        }
+        AppleMediaVersionCache.shared.record(versions)
+        verifiedVersionItems.insert(itemID)
+        return versions
+    }
+
+    static let versionCacheLifetime: TimeInterval = 6 * 60 * 60
+
+    public func playbackRequest(for item: AppleMediaServerItem, in detail: AppleMediaServerDetail, resume: Bool, versionID: String? = nil, afterFailure: Bool = false,
+                                failedVersions: Set<String> = [], confirmedVersionID: String? = nil) async throws -> ApplePlaybackRequest {
+        try Task.checkCancellation()
         if detail.session.kind == .plex {
             guard let plexItem = plexIndex[AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id)] else {
                 throw AppleMediaServerError.unsupported
@@ -1081,8 +1119,7 @@ public final class AppleMediaServerLibraryStore {
             let url = plexClient.directPlayURL(session: detail.session, part: part)
             
             let mediaID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
-            stoppedSessions.remove(mediaID)
-            activeTickets[mediaID] = AppleMediaServerPlaybackTicket(
+                activeTickets[mediaID] = AppleMediaServerPlaybackTicket(
                 session: detail.session,
                 mediaSourceID: part.key,
                 playSessionID: nil
@@ -1118,22 +1155,34 @@ public final class AppleMediaServerLibraryStore {
             )
         }
         
-        let info = try await client.playbackInfo(session: detail.session, itemID: item.id)
-        
-        guard let mediaSource = info.mediaSources.first(where: { $0.supportsDirectPlay || $0.supportsDirectStream }) else {
+        let info = try await client.playbackInfo(session: detail.session, itemID: item.id, forceConversion: afterFailure)
+        try Task.checkCancellation()
+
+        let itemMediaID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
+        let localPlayback = ApplePlaybackStore()
+        // An answered resume prompt plays the version it asked about.
+        // Otherwise the copy played last; when it is gone, the best available one.
+        let preferred = confirmedVersionID ?? versionID ?? localPlayback.preferredVersion(itemID: itemMediaID)
+        guard let mediaSource = AppleJellyfinPlaybackPolicy.select(info.mediaSources, failed: failedVersions, preferred: preferred) else {
             throw AppleMediaServerError.unsupported
         }
         
         let container = mediaSource.container?.components(separatedBy: ",").first ?? mediaSource.container
-        let url = try client.directStreamURL(
-            session: detail.session,
-            itemID: item.id,
-            mediaSourceID: mediaSource.id,
-            container: container
-        )
+        // The retry after a failure converts only when the server offers a
+        // conversion; replaying the same original would fail the same way.
+        if afterFailure, mediaSource.transcodingURLPath == nil { throw AppleMediaServerError.unsupported }
+        let url: URL
+        if AppleJellyfinPlaybackPolicy.route(for: mediaSource, afterFailure: afterFailure) == .conversion,
+           let path = mediaSource.transcodingURLPath {
+            url = try AppleJellyfinPlaybackPolicy.conversionURL(path, session: detail.session,
+                audioStreamIndex: mediaSource.mediaStreams.first { $0.type?.lowercased() == "audio" }?.index,
+                audioOnly: AppleJellyfinPlaybackPolicy.isAudioOnlyMismatch(mediaSource), videoCodec: mediaSource.descriptors.videoCodec)
+        } else {
+            url = try client.directStreamURL(session: detail.session, itemID: item.id,
+                mediaSourceID: mediaSource.id, container: container)
+        }
         
         let mediaID = AppleMediaServerItemReference(sourceID: detail.source.id, itemID: item.id).mediaID
-        stoppedSessions.remove(mediaID)
         activeTickets[mediaID] = AppleMediaServerPlaybackTicket(
             session: detail.session,
             mediaSourceID: mediaSource.id,
@@ -1141,8 +1190,15 @@ public final class AppleMediaServerLibraryStore {
         )
 
         let localStore = ApplePlaybackStore()
-        let position = resume ? Self.resumePosition(for: item, local: localStore.progress(for: mediaID),
-            localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: mediaID)) : nil
+        let localProgress = localStore.progress(for: mediaID)
+        let resolution = AppleVersionResumePolicy.resolve(own: localStore.versionProgress(itemID: mediaID, versionID: mediaSource.id),
+            item: localProgress, duration: mediaSource.descriptors.duration)
+        let serverOwns = Self.prefersServer(item.userData, localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: mediaID))
+        if resume, !serverOwns, confirmedVersionID != mediaSource.id, resolution.needsConfirmation, let position = resolution.position {
+            throw AppleVersionResumeConfirmation(position: position, versionID: mediaSource.id)
+        }
+        let position = resume ? (serverOwns ? Self.resumePosition(for: item, local: localProgress,
+            localUpdatedAt: localStore.localPlaybackUpdatedAt(mediaID: mediaID)) : resolution.position) : nil
         
         let title: String
         if item.type == .episode {
@@ -1156,7 +1212,7 @@ public final class AppleMediaServerLibraryStore {
         
         return ApplePlaybackRequest(
             url: url,
-            headers: [:],
+            headers: afterFailure ? ["X-Emby-Token": detail.session.accessToken] : [:],
             isLive: false,
             resumePosition: position,
             autoplay: true,
@@ -1164,7 +1220,14 @@ public final class AppleMediaServerLibraryStore {
             title: title,
             sourceName: detail.source.name,
             sourceKind: .mediaServer,
-            hints: ApplePlaybackRequest.Hints()
+            hints: {
+                var hints = ApplePlaybackRequest.Hints()
+                hints.versionID = mediaSource.id
+                hints.playbackDecision = afterFailure && mediaSource.transcodingURLPath != nil
+                    ? AppleJellyfinPlaybackPolicy.conversionDecision(for: mediaSource)
+                    : ApplePlaybackDecision.decide(mediaSource.descriptors, remote: true)
+                return hints
+            }()
         )
     }
 

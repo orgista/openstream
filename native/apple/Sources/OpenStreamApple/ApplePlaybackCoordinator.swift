@@ -1062,6 +1062,8 @@ public final class ApplePlaybackCoordinator {
             if rejectsPlaceholder(request) { return }
             if request.isLive { noteLivePlaying() }
             let isResume = (phase == .paused)
+            // A version that really plays is the title's resume copy from now on.
+            if !isResume { ApplePlaybackStore().notePlaybackStarted(request) }
             setPhase(.playing)
             cancelTimeout()
             // An error clip shows its length only once it plays; keep the
@@ -1206,6 +1208,10 @@ public final class ApplePlaybackCoordinator {
                     mediaIdentity: identity,
                     partID: surfaceProgressPartID
                 )
+                coordinator.writer = { [weak self] position, duration in
+                    if let writer = self?.progressWriter { writer(position, duration) }
+                    else { ApplePlaybackStore().save(request: request, position: position, duration: duration) }
+                }
                 coordinator.startObserving(player)
                 progressCoordinator = coordinator
 
@@ -1262,8 +1268,12 @@ public final class ApplePlaybackCoordinator {
         // this the position was only ever saved by the tvOS Menu handler, so
         // nothing resumed on any other platform or exit path.
         guard let surfaceProgressIdentity, let duration = engine.duration, duration > 0 else { return }
-        ApplePlaybackStore().save(mediaID: surfaceProgressIdentity, position: position,
-            duration: duration, partID: surfaceProgressPartID)
+        if let request = lastRequest {
+            ApplePlaybackStore().save(request: request, position: position, duration: duration)
+        } else {
+            ApplePlaybackStore().save(mediaID: surfaceProgressIdentity, position: position,
+                duration: duration, partID: surfaceProgressPartID)
+        }
     }
 
     /// Reports failures raised by an `ApplePlayerSession` (the AVPlayer-only
