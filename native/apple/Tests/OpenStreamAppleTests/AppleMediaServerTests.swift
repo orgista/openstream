@@ -271,6 +271,16 @@ struct AppleSourceStoreMediaServerTests {
     }
 }
 
+/// The scheme and timeout of each request the loader saw, in order.
+private final class AppleMediaServerTimeoutLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [[String: TimeInterval]] = []
+    var entries: [[String: TimeInterval]] { lock.withLock { storage } }
+    func record(_ request: URLRequest) {
+        lock.withLock { storage.append([request.url?.scheme ?? "-": request.timeoutInterval]) }
+    }
+}
+
 /// Answers `http://fixture.example/…` with a 301 to the same path on https,
 /// and the https `System/Info/Public` with Jellyfin's public info, so the
 /// real URLSession redirect handling runs.
@@ -321,6 +331,24 @@ struct AppleMediaServerAddressTests {
         let resolved = try await client.resolveBaseURL("10.0.0.20:8096")
         #expect(resolved.baseURL.absoluteString == "http://10.0.0.20:8096/")
         #expect(resolved.info.serverName == "LAN")
+    }
+
+    @Test("The guessed https gets a short timeout; http and a typed scheme keep the default")
+    func guessedHTTPSTimesOutQuickly() async throws {
+        let timeouts = AppleMediaServerTimeoutLog()
+        let client = AppleMediaServerClient(loader: { request in
+            timeouts.record(request)
+            guard request.url?.scheme == "http" else { throw URLError(.timedOut) }
+            let body = Data(#"{"ServerName":"LAN"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, deviceID: "fixture")
+        let defaultTimeout = URLRequest(url: URL(string: "http://fixture.example")!).timeoutInterval
+        let resolved = try await client.resolveBaseURL("10.0.0.20:8096")
+        #expect(resolved.baseURL.absoluteString == "http://10.0.0.20:8096/")
+        #expect(timeouts.entries == [["https": AppleMediaServerClient.guessTimeout], ["http": defaultTimeout]])
+
+        _ = try? await client.resolveBaseURL("https://10.0.0.20:8096")
+        #expect(timeouts.entries.last == ["https": defaultTimeout])
     }
 
     @Test("https that answers with an error does not fall back to http")

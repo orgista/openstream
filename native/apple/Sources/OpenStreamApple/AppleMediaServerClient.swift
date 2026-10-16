@@ -252,14 +252,16 @@ public struct AppleMediaServerClient: Sendable {
     }
 
     static let publicInfoPath = "System/Info/Public"
+    static let guessTimeout: TimeInterval = 5
 
     /// The public info and the base URL the server really answers on: the
     /// one the request was redirected to (http → https behind Cloudflare),
     /// so a later POST never goes to an address that redirects it. A
     /// redirected POST comes back as a GET without its body.
-    func reachedPublicInfo(baseURL: URL) async throws -> (baseURL: URL, info: AppleMediaServerPublicInfo) {
+    func reachedPublicInfo(baseURL: URL, timeout: TimeInterval? = nil) async throws -> (baseURL: URL, info: AppleMediaServerPublicInfo) {
         let url = try normalizedURL(base: baseURL, path: Self.publicInfoPath)
-        let req = request(url: url)
+        var req = request(url: url)
+        if let timeout { req.timeoutInterval = timeout }
         let (data, response) = try await performResponse(req)
         guard let info = try? JSONDecoder().decode(AppleMediaServerPublicInfo.self, from: data) else {
             throw malformed(req, response: response)
@@ -281,10 +283,14 @@ public struct AppleMediaServerClient: Sendable {
     /// The first address that answers, in `AppleMediaServerFormPolicy.candidateBaseURLs`
     /// order (https before http when the scheme was left out), as reached
     /// after redirects. Only a failure to connect moves on to the next one.
+    /// A guess with a fallback after it waits `guessTimeout`, not the 60 s
+    /// default: a LAN host that silently drops 443 would stall the form.
     public func resolveBaseURL(_ text: String) async throws -> (baseURL: URL, info: AppleMediaServerPublicInfo) {
-        for candidate in AppleMediaServerFormPolicy.candidateBaseURLs(text) {
+        let candidates = AppleMediaServerFormPolicy.candidateBaseURLs(text)
+        for (index, candidate) in candidates.enumerated() {
             do {
-                return try await reachedPublicInfo(baseURL: candidate)
+                let timeout = index < candidates.count - 1 ? Self.guessTimeout : nil
+                return try await reachedPublicInfo(baseURL: candidate, timeout: timeout)
             } catch AppleMediaServerError.unreachable {
                 continue
             }
