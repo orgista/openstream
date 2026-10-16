@@ -23,20 +23,38 @@ public enum AppleDiscPlaybackStart: String, Equatable, Sendable {
     }
 }
 
+/// What a disc image holds, as far as its menus go. DVD menus (IFO and the
+/// DVD virtual machine) play; Blu-ray and UHD menus (HDMV, BD-J) do not: BD-J
+/// needs a Java runtime, and Infuse does not offer them either. A Blu-ray
+/// plays its main feature, with no "Play Disc" or "Skip to Movie" wording.
+public enum AppleDiscFormat: String, Equatable, Sendable {
+    case dvd
+    case bluRay
+
+    public var supportsMenu: Bool { self == .dvd }
+}
+
 /// One disc start: the start choice and, from the Titles row, the title.
 public struct AppleDiscPlaybackChoice: Equatable, Sendable {
     public var start: AppleDiscPlaybackStart
     public var titleID: Int?
+    public var format: AppleDiscFormat
 
-    public init(start: AppleDiscPlaybackStart, titleID: Int? = nil) {
-        self.start = start
+    /// A Blu-ray asked for its menu starts at the main feature instead.
+    public init(start: AppleDiscPlaybackStart, titleID: Int? = nil, format: AppleDiscFormat = .dvd) {
+        self.start = format.supportsMenu ? start : .mainTitle
         self.titleID = titleID
+        self.format = format
     }
 
     /// The `discTitleID` handed to `AetherEngine.load`.
     public var engineTitleID: Int? { AppleDiscPlaybackStart.engineTitleID(start: start, titleID: titleID) }
     public var engineStartMode: DVDStartMode { titleID == nil && start == .menu ? .menu : .mainTitle }
-    public var traceLine: String { AppleDiscPlaybackStart.traceLine(start: start, titleID: titleID) }
+    public var traceLine: String {
+        let line = AppleDiscPlaybackStart.traceLine(start: start, titleID: titleID)
+        guard format == .bluRay, titleID == nil else { return line }
+        return line + " (Blu-ray: disc menus are not supported, playing the main feature)"
+    }
 }
 
 /// Which library files are disc images: an ISO (or a raw UDF image), or a
@@ -62,6 +80,31 @@ public enum AppleDiscImagePolicy {
     public static func isDiscImage(_ item: AppleLibraryItem) -> Bool {
         isDiscImage(path: item.relativePath) || isDiscImage(path: item.url.path)
     }
+
+    /// The largest DVD (DVD-9) holds 8.5 GB; an image past this is a Blu-ray.
+    static let dvdMaximumBytes: Int64 = 9_000_000_000
+    /// Release-name words that only Blu-ray and UHD images carry.
+    static let bluRayNameTokens: Set<String> = ["BLURAY", "BDMV", "UHD", "BDREMUX", "BD25", "BD50", "BD66", "BD100"]
+
+    /// Blu-ray or DVD, before the engine has read the image: a `BDMV` folder,
+    /// a Blu-ray release name, or a size no DVD reaches. Anything else is a
+    /// DVD, whose menu the engine opens or falls back from on its own.
+    public static func format(path: String, sizeBytes: Int64 = 0) -> AppleDiscFormat {
+        let url = URL(fileURLWithPath: path)
+        let folders = url.pathComponents.dropLast().map { $0.uppercased() }
+        if folders.contains("BDMV") { return .bluRay }
+        if folders.contains("VIDEO_TS") { return .dvd }
+        let words = url.deletingPathExtension().lastPathComponent.uppercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let joinedPairs = zip(words, words.dropFirst()).map { $0 + $1 }
+        if words.contains(where: bluRayNameTokens.contains) || joinedPairs.contains("BLURAY") { return .bluRay }
+        return sizeBytes > dvdMaximumBytes ? .bluRay : .dvd
+    }
+
+    public static func format(_ item: AppleLibraryItem) -> AppleDiscFormat {
+        let named = format(path: item.relativePath, sizeBytes: item.sizeBytes)
+        return named == .bluRay ? named : format(path: item.url.path, sizeBytes: item.sizeBytes)
+    }
 }
 
 /// A title on a disc, as the Titles row lists it.
@@ -76,8 +119,9 @@ public struct AppleDiscTitle: Identifiable, Equatable, Sendable {
         self.chapterCount = chapterCount
     }
 
-    /// "Title 1".
-    public var name: String { "Title \(id + 1)" }
+    /// "Main Feature" for the title the engine plays as the film (id 0),
+    /// else "Title 4".
+    public var name: String { id == 0 ? "Main Feature" : "Title \(id + 1)" }
 
     /// "1 hr 42 min", "12 min", "45 sec".
     public var durationLabel: String {
@@ -86,13 +130,55 @@ public struct AppleDiscTitle: Identifiable, Equatable, Sendable {
         return AppleTitleMetadataPresentation.formattedRuntime(seconds / 60)
     }
 
-    /// The titles worth a row: longest first (the engine's order, id 0 is
-    /// the main feature), nothing under a few seconds (menu stubs, logos),
-    /// and no row at all for a disc with a single title.
-    public static func rowTitles(_ titles: [Self], minimumSeconds: Double = 5) -> [Self] {
-        let kept = titles.filter { $0.durationSeconds >= minimumSeconds }
+    /// "1 hr 42 min · 24 chapters"; a title with one chapter or none gives
+    /// its length alone.
+    public var detailLabel: String {
+        chapterCount > 1 ? "\(durationLabel) · \(chapterCount) chapters" : durationLabel
+    }
+
+    /// Whether two engine titles are one title the disc lists twice: the same
+    /// length within `tolerance` and the same chapters. Obfuscated Blu-rays
+    /// list hundreds of playlists that differ only in clip order.
+    func duplicates(_ other: Self, tolerance: Double = 2) -> Bool {
+        abs(durationSeconds - other.durationSeconds) <= tolerance && chapterCount == other.chapterCount
+    }
+}
+
+/// The disc's Titles row: the main feature first, each title once, nothing
+/// under two minutes (logos, trailers, menu stubs), and a short list, with the
+/// rest behind a More card so the row stays finite on the remote.
+public struct AppleDiscTitleList: Equatable, Sendable {
+    /// Titles shown before More; the first is the main feature.
+    public let visible: [AppleDiscTitle]
+    /// Titles More reveals.
+    public let more: [AppleDiscTitle]
+
+    public static let minimumSeconds: Double = 120
+    public static let visibleLimit = 6
+    public static let moreLimit = 24
+
+    public var isEmpty: Bool { visible.isEmpty }
+    public var all: [AppleDiscTitle] { visible + more }
+
+    public init(visible: [AppleDiscTitle] = [], more: [AppleDiscTitle] = []) {
+        self.visible = visible
+        self.more = more
+    }
+
+    /// `titles` in the engine's order: longest first, and id 0 is the title
+    /// the engine plays as the main feature, so it leads even when a longer
+    /// playlist exists. No row for a disc with a single title worth listing.
+    public init(_ titles: [AppleDiscTitle]) {
+        let main = titles.first { $0.id == 0 }
+        let ordered = (main.map { [$0] } ?? []) + titles.filter { $0.id != 0 }
             .sorted { $0.durationSeconds == $1.durationSeconds ? $0.id < $1.id : $0.durationSeconds > $1.durationSeconds }
-        return kept.count > 1 ? kept : []
+        var kept: [AppleDiscTitle] = []
+        for title in ordered where title.durationSeconds >= Self.minimumSeconds {
+            if !kept.contains(where: { $0.duplicates(title) }) { kept.append(title) }
+        }
+        guard kept.count > 1 else { self.init(); return }
+        self.init(visible: Array(kept.prefix(Self.visibleLimit)),
+                  more: Array(kept.dropFirst(Self.visibleLimit).prefix(Self.moreLimit)))
     }
 }
 
@@ -105,6 +191,8 @@ public final class AppleDiscCatalog {
 
     public private(set) var keys: Set<String> = []
     public private(set) var titles: [URL: [AppleDiscTitle]] = [:]
+    /// What the engine's read of a local image found it to be.
+    public private(set) var formats: [URL: AppleDiscFormat] = [:]
 
     public init() {}
 
@@ -116,6 +204,17 @@ public final class AppleDiscCatalog {
     func record(_ discTitles: [AppleDiscTitle], for fileURL: URL) {
         guard !discTitles.isEmpty, titles[fileURL] != discTitles else { return }
         titles[fileURL] = discTitles
+    }
+
+    func record(_ format: AppleDiscFormat, for fileURL: URL) {
+        guard formats[fileURL] != format else { return }
+        formats[fileURL] = format
+    }
+
+    /// Blu-ray or DVD: the engine's read of the image when there was one,
+    /// else its name, folder and size (`AppleDiscImagePolicy.format`).
+    public func format(for file: AppleLibraryItem) -> AppleDiscFormat {
+        formats[file.url] ?? AppleDiscImagePolicy.format(file)
     }
 
     /// Whether a poster for `item` gets the disc badge.

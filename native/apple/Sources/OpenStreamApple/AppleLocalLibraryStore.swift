@@ -197,6 +197,7 @@ final class AppleLocalLibraryStore {
         }.value
         inspections[file.id] = result
         if !result.discTitles.isEmpty { AppleDiscCatalog.shared.record(result.discTitles, for: url) }
+        if let format = result.discFormat { AppleDiscCatalog.shared.record(format, for: url) }
         appleTrace("local inspect \(url.lastPathComponent.suffix(40)): badges=\(result.badges.map(\.title)) discTitles=\(result.discTitles.count)")
         return result
     }
@@ -943,7 +944,11 @@ final class AppleLocalLibraryStore {
         }
         let part = version?.parts.first { $0.reference == file.id }
         var hints = ApplePlaybackRequest.Hints(filename: file.name, libraryFileURL: file.url)
-        hints.disc = AppleDiscImagePolicy.isDiscImage(file) ? disc ?? AppleDiscPlaybackChoice(start: .menu, titleID: nil) : nil
+        // A Blu-ray has no menu to open (`AppleDiscFormat`): its main feature.
+        hints.disc = AppleDiscImagePolicy.isDiscImage(file)
+            ? AppleDiscPlaybackChoice(start: disc?.start ?? .menu, titleID: disc?.titleID,
+                                      format: AppleDiscCatalog.shared.format(for: file))
+            : nil
         hints.versionID = version?.id
         hints.playbackDecision = ApplePlaybackDecision.decide(inspections[file.id]?.descriptors ?? .init(container: file.url.pathExtension))
         hints.versionOffset = part.flatMap { version?.cumulativePosition(ordinal: $0.ordinal, offset: 0) } ?? 0
