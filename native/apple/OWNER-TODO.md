@@ -41,6 +41,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       3. Vision Pro on the iPad screens (P1s from the Fable review first): **Codex running since 08:05** (branch avp-ipad).
       4. Plex/Jellyfin/Emby trailers; Unmatched section.
       5. Flaky-e2e harness; engine 7.36.
+      **Owner 2026-10-16 14:05: concurrency by resources + scoped tests per job; when the queue is empty run the full
+      verification (specs/full-verification-2026-10-16.md: feature matrix, real-data runs on every platform, screenshot
+      visual-judge pass, data assertions, timing budgets, owner-bug regression suite, coverage + sanitizers,
+      exploratory crawl).** Dev-Mini lanes: buildlock.sh = sims/devices/emulators (one), buildlock-compile.sh = compile
+      only (one) beside it; mini.sh OPENSTREAM_MINI_LANE=compile.
       Then the release-candidate run (App Store flavour, all four platforms, clean installs) and "ship 19".
       **YOU today:** (a) ASC → App Privacy → "Data Not Collected" → Publish (API can't confirm); (b) release type: ASC
       has all four on automatic release after approval; say if you want manual; (c) ~~"Radarr & Sonarr" visible~~ **owner 22:35: keep them visible ("look at Ruddarr ... I don't think having the arrs
