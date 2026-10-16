@@ -25,9 +25,17 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         /// app does. `artworkURL` stays the poster for a row that cannot go
         /// landscape. Snapshots written before this field decode it as nil.
         public let landscapeArtworkURL: URL?
+        /// What the full-screen Top Shelf carousel writes under the title, as
+        /// the Apple TV app does: the synopsis, the first genre, the year and
+        /// the running time. Absent in older snapshots and when unknown.
+        public let summary: String?
+        public let genre: String?
+        public let year: Int?
+        public let durationSeconds: Double?
 
         public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
-                    progress: Double? = nil, landscapeArtworkURL: URL? = nil) {
+                    progress: Double? = nil, landscapeArtworkURL: URL? = nil,
+                    summary: String? = nil, genre: String? = nil, year: Int? = nil, durationSeconds: Double? = nil) {
             self.id = id
             self.title = title
             self.kind = kind
@@ -36,6 +44,10 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.playURL = playURL
             self.progress = progress
             self.landscapeArtworkURL = landscapeArtworkURL
+            self.summary = summary.map { String($0.prefix(600)) }
+            self.genre = genre.map { String($0.prefix(60)) }
+            self.year = year
+            self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         }
     }
 
@@ -116,7 +128,33 @@ public struct AppleTopShelfSection: Equatable, Sendable {
     }
 }
 
+/// One page of the full-screen Top Shelf carousel, the Apple TV app's shelf:
+/// the 16:9 backdrop edge to edge, the context ("Continue Watching", "Top
+/// Picks") over the title, the details under it, Play and More Info. No
+/// progress bar (owner 2026-10-15). Plain mirror of the
+/// `TVTopShelfCarouselItem` `TopShelfProvider` builds; keep the two in sync.
+public struct AppleTopShelfCarouselItem: Equatable, Sendable {
+    public let contextTitle: String
+    public let item: AppleTopShelfSnapshot.Item
+
+    /// The full-screen art: the backdrop, never a poster stretched to 16:9.
+    public var imageURL: URL? { item.landscapeArtworkURL }
+}
+
 public enum AppleTopShelfContentBuilder {
+    /// The carousel holds this many pages at most.
+    public static let carouselLimit = 12
+
+    /// Continue Watching first, then Top Picks, each title once, only titles
+    /// with a backdrop to fill the screen. Empty when no title has one: the
+    /// provider then serves the rows (`sections(for:)`).
+    public static func carouselItems(for snapshot: AppleTopShelfSnapshot) -> [AppleTopShelfCarouselItem] {
+        var seen = Set<String>()
+        let pages = snapshot.continueWatching.map { AppleTopShelfCarouselItem(contextTitle: "Continue Watching", item: $0) }
+            + snapshot.topPicks.map { AppleTopShelfCarouselItem(contextTitle: "Top Picks", item: $0) }
+        return Array(pages.filter { $0.imageURL != nil && seen.insert($0.item.id).inserted }.prefix(carouselLimit))
+    }
+
     /// Continue Watching first (when non-empty), then Top Picks. Returns an
     /// empty array when there is nothing to show at all — the provider
     /// should return `nil` for that result.
@@ -325,16 +363,19 @@ public actor AppleTopShelfSnapshotWriter {
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
         let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)
             .prefix(AppleContinueWatchingResolver.maximumCount))
-        let backdrops = Self.backdrops(for: Set(shownContinued.map(\.record.id)), in: sections)
+        let listed = Self.listedItems(for: Set(shownContinued.map(\.record.id)), in: sections)
         let snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
             continueWatching: shownContinued.map { entry in
-                Self.item(entry.record, progress: savedProgress.map {
+                let listedItem = listed[entry.record.id] ?? Self.matchedItem(for: entry)
+                return Self.item(entry.record, progress: savedProgress.map {
                     AppleContinueWatchingResolver.progress(isSeries: entry.record.kind == .series,
                         saved: $0[entry.record.id], recordProgress: entry.record.progress)
                 } ?? entry.record.progress,
-                          landscapeArtworkURL: backdrops[entry.record.id] ?? Self.landscapeURL(for: entry))
+                          landscapeArtworkURL: listed[entry.record.id].flatMap { Self.landscapeURL(for: $0) }
+                              ?? Self.landscapeURL(for: entry),
+                          catalogItem: listedItem)
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
@@ -376,6 +417,12 @@ public actor AppleTopShelfSnapshotWriter {
         return AppleSystemArtworkPolicy.publicURL(entry.record.backdropURL)
     }
 
+    /// The listed item a merged source names, for its genre and running time.
+    private static func matchedItem(for entry: AppleContinueWatchingResolver.Entry) -> AppleCatalogItem? {
+        if case .listed(let match) = entry.resolution { return match.item }
+        return nil
+    }
+
     /// The first non-empty catalog shelf, e.g. Cinemeta Popular for a fresh
     /// Stremio source. Ids are derived the same way `AppleMediaIngestion`
     /// would ingest the item, so the deep link resolves once the app has
@@ -397,25 +444,34 @@ public actor AppleTopShelfSnapshotWriter {
                 ?? AppleSystemArtworkPolicy.publicURL(item.backgroundURL),
             displayURL: display,
             playURL: play,
-            landscapeArtworkURL: landscapeURL(for: item)
+            landscapeArtworkURL: landscapeURL(for: item),
+            summary: item.summary,
+            genre: item.genres?.first,
+            year: year(of: item),
+            durationSeconds: item.runtimeMinutes.map { Double($0 * 60) }
         )
     }
 
-    /// The backdrop each Continue Watching record's card shows on Discover:
-    /// the catalog item the record was ingested from, matched by record id
-    /// as `AppleCatalogSearchLookup` does. Stops once every wanted id is found.
-    private static func backdrops(for recordIDs: Set<String>,
-                                  in sections: [AppleCatalogSection]) -> [String: URL] {
-        var found: [String: URL] = [:]
+    private static func year(of item: AppleCatalogItem) -> Int? {
+        item.year ?? item.releaseInfo.flatMap { Int($0.prefix(4)) }
+    }
+
+    /// The catalog item each Continue Watching record's card shows on
+    /// Discover, for its backdrop and details: the item the record was
+    /// ingested from, matched by record id as `AppleCatalogSearchLookup`
+    /// does. Stops once every wanted id is found.
+    private static func listedItems(for recordIDs: Set<String>,
+                                    in sections: [AppleCatalogSection]) -> [String: AppleCatalogItem] {
+        var found: [String: AppleCatalogItem] = [:]
         var remaining = recordIDs
         for section in sections where !remaining.isEmpty {
             for item in section.items where !remaining.isEmpty {
                 let id = AppleMediaIngestion.catalogRecord(instanceID: section.sourceID, item: item).id
                 // Only a match with a backdrop settles the id: the same record
                 // can appear in a later shelf that has one (review of 3217b67).
-                guard remaining.contains(id), let url = landscapeURL(for: item) else { continue }
+                guard remaining.contains(id), landscapeURL(for: item) != nil else { continue }
                 remaining.remove(id)
-                found[id] = url
+                found[id] = item
             }
         }
         return found
@@ -432,7 +488,8 @@ public actor AppleTopShelfSnapshotWriter {
     }
 
     private static func item(_ record: AppleMediaRecord, progress: Double? = nil,
-                             landscapeArtworkURL: URL? = nil) -> AppleTopShelfSnapshot.Item {
+                             landscapeArtworkURL: URL? = nil,
+                             catalogItem: AppleCatalogItem? = nil) -> AppleTopShelfSnapshot.Item {
         let display = URL(string: "openstream://media/\(record.id)?action=display")!
         let play = record.availability.count == 1
             ? URL(string: "openstream://media/\(record.id)?action=play")
@@ -445,7 +502,11 @@ public actor AppleTopShelfSnapshotWriter {
             displayURL: display,
             playURL: play,
             progress: progress.map { min(max($0, 0), 1) },
-            landscapeArtworkURL: landscapeArtworkURL
+            landscapeArtworkURL: landscapeArtworkURL,
+            summary: record.summary ?? catalogItem?.summary,
+            genre: catalogItem?.genres?.first,
+            year: record.year ?? catalogItem.flatMap(year(of:)),
+            durationSeconds: record.kind == .series ? nil : catalogItem?.runtimeMinutes.map { Double($0 * 60) }
         )
     }
 

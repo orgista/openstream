@@ -39,12 +39,17 @@ struct AppleDiscSpinner: View {
     }
 }
 
-/// The disc's titles (the feature, extras), longest first. Choosing one plays
+/// The disc's titles (`AppleDiscTitleList`): the main feature first, then
+/// the extras longest first, and a More card for the rest. Choosing one plays
 /// that title.
 struct AppleDiscTitlesRow: View {
-    let titles: [AppleDiscTitle]
+    let titles: AppleDiscTitleList
     var horizontalInset: CGFloat = 16
     let play: (AppleDiscTitle) -> Void
+    @State private var showsMore = false
+    /// More leaves the row, so focus moves to the first title it revealed
+    /// instead of the focus engine falling back to the row's first card.
+    @FocusState private var focusedTitleID: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -52,15 +57,31 @@ struct AppleDiscTitlesRow: View {
                 .padding(.horizontal, horizontalInset)
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(titles) { title in
-                        Button { play(title) } label: { card(title) }
+                    ForEach(showsMore ? titles.all : titles.visible) { title in
+                        Button { play(title) } label: { card(title.name, detail: title.detailLabel) }
                             #if os(tvOS)
                             .buttonStyle(.card)
                             #else
                             .buttonStyle(.plain)
                             #endif
-                            .accessibilityLabel("\(title.name), \(title.durationLabel)")
+                            .accessibilityLabel("\(title.name), \(title.detailLabel)")
                             .accessibilityIdentifier("detail.disc.title.\(title.id)")
+                            .focused($focusedTitleID, equals: title.id)
+                    }
+                    if !showsMore, !titles.more.isEmpty {
+                        Button {
+                            showsMore = true
+                            focusedTitleID = titles.more.first?.id
+                        } label: {
+                            card("More", detail: titles.more.count == 1 ? "1 title" : "\(titles.more.count) titles")
+                        }
+                        #if os(tvOS)
+                        .buttonStyle(.card)
+                        #else
+                        .buttonStyle(.plain)
+                        #endif
+                        .accessibilityLabel("More titles, \(titles.more.count)")
+                        .accessibilityIdentifier("detail.disc.titles.more")
                     }
                 }
             }
@@ -74,12 +95,12 @@ struct AppleDiscTitlesRow: View {
         .accessibilityIdentifier("detail.disc.titles")
     }
 
-    private func card(_ title: AppleDiscTitle) -> some View {
+    private func card(_ name: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.name)
+            Text(name)
                 .font(.headline)
                 .foregroundStyle(.white)
-            Text(title.durationLabel)
+            Text(detail)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.6))
         }
@@ -88,7 +109,7 @@ struct AppleDiscTitlesRow: View {
         .frame(width: 300, alignment: .leading)
         .padding(24)
         #else
-        .frame(width: 140, alignment: .leading)
+        .frame(width: 180, alignment: .leading)
         .padding(14)
         .background(.white.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
         #endif

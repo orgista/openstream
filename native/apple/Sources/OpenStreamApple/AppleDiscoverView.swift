@@ -3132,6 +3132,15 @@ struct AppleCatalogItemDetailView: View {
     @State private var titlePageStreamBadges: [AppleStreamFormatBadge] = []
 
     private var isDiscTitle: Bool { discFile != nil }
+    /// A DVD, whose menu Play Disc opens. A Blu-ray has no menu here
+    /// (`AppleDiscFormat`): its Play is the main feature and there is no
+    /// Skip to Movie.
+    private var discOffersMenu: Bool {
+        discFile.map { AppleDiscCatalog.shared.format(for: $0).supportsMenu } ?? false
+    }
+    /// What the disc page's Play does: the menu on a DVD, the main feature
+    /// on a Blu-ray.
+    private var discPlayStart: AppleDiscPlaybackStart { discOffersMenu ? .menu : .mainTitle }
 
     /// Library matching is tied to content changes, never playback progress.
     private func refreshTitleLocalFiles() {
@@ -3147,16 +3156,17 @@ struct AppleCatalogItemDetailView: View {
 
     /// The disc's titles, from the engine's read of the local image or from
     /// the last play of it; empty for one title.
-    private var discTitles: [AppleDiscTitle] {
-        guard let discFile else { return [] }
-        return AppleDiscTitle.rowTitles(AppleDiscCatalog.shared.titles[discFile.url] ?? [])
+    private var discTitles: AppleDiscTitleList {
+        guard let discFile else { return AppleDiscTitleList() }
+        return AppleDiscTitleList(AppleDiscCatalog.shared.titles[discFile.url] ?? [])
     }
 
     /// Play Disc (the disc's menu, the main title until the engine has one),
     /// Skip to Movie (the main feature), or one title from the Titles row.
     private func startDisc(_ start: AppleDiscPlaybackStart, titleID: Int? = nil) {
         guard canStartPlayback else { return }
-        playbackUI.disc = AppleDiscPlaybackChoice(start: start, titleID: titleID)
+        let format = discFile.map { AppleDiscCatalog.shared.format(for: $0) } ?? .dvd
+        playbackUI.disc = AppleDiscPlaybackChoice(start: start, titleID: titleID, format: format)
         // The menu and a chosen title start from the top; Skip to Movie
         // resumes where the film was left.
         if start == .menu || titleID != nil { playbackUI.startsFromBeginning = true }
@@ -4403,7 +4413,7 @@ struct AppleCatalogItemDetailView: View {
                     tvOSWatchOnButton(watchOnAction)
                 } else if tvOSShowsPlay {
                     tvOSPlayButton
-                    if isDiscTitle {
+                    if discOffersMenu {
                         tvOSSkipToMovieButton
                     }
                     if offersStartFromBeginning {
@@ -4506,7 +4516,7 @@ struct AppleCatalogItemDetailView: View {
     private var tvOSPlayButton: some View {
         Button {
             guard canStartPlayback else { return }
-            if isDiscTitle { startDisc(.menu) } else { playbackUI.request = UUID() }
+            if isDiscTitle { startDisc(discPlayStart) } else { playbackUI.request = UUID() }
         } label: {
             HStack(spacing: AppleTVDetailMetrics.pillGlyphSpacing) {
                 if tvOSPlayIsBusy, isDiscTitle {
@@ -5617,7 +5627,7 @@ struct AppleCatalogItemDetailView: View {
     /// phone's button already says; the Apple TV page said Play after
     /// watching (Apple TV regression 2026-10-01).
     private var regularPlayTitle: String {
-        if isDiscTitle { return "Play Disc" }
+        if discOffersMenu { return "Play Disc" }
         if case .resume? = titlePagePrimaryAction, let titlePagePrimaryAction {
             return titlePagePrimaryAction.title
         }
@@ -5644,7 +5654,7 @@ struct AppleCatalogItemDetailView: View {
             kind: .play,
             width: actionButtonWidth
         ) {
-            if isDiscTitle { startDisc(.menu) } else { playbackUI.request = UUID() }
+            if isDiscTitle { startDisc(discPlayStart) } else { playbackUI.request = UUID() }
         }
         .disabled(!canStartPlayback)
         .accessibilityLabel(
@@ -5759,7 +5769,7 @@ struct AppleCatalogItemDetailView: View {
     private func primaryActionRow(_ layout: AnyLayout) -> some View {
         layout {
             primaryPlayButton
-            if isDiscTitle, watchOnAction == nil {
+            if discOffersMenu, watchOnAction == nil {
                 skipToMovieButton
             }
             if showsDownloadAction {
@@ -9594,7 +9604,7 @@ extension AppleCatalogItemDetailView {
                     .buttonStyle(.plain)
             } else if let state = titlePagePrimaryButtonState {
                 phonePrimaryButton(state)
-                if isDiscTitle, !state.isTrailer { phoneSkipToMovieButton }
+                if discOffersMenu, !state.isTrailer { phoneSkipToMovieButton }
             }
             HStack(spacing: 12) {
                 Button(action: toggleFavorite) {
@@ -9635,7 +9645,7 @@ extension AppleCatalogItemDetailView {
         let isBusy = !isTrailer && (playbackCoordinator.phase.isBusy || pageMetadata.isPreparing)
         let title: String = if isBusy {
             playbackCoordinator.phase.isBusy ? "Preparing" : "Loading"
-        } else if !isTrailer, isDiscTitle {
+        } else if !isTrailer, discOffersMenu {
             "Play Disc"
         } else {
             action.displayTitle(hasCompletedDownload: downloadCoordinator.state.isCompleted)
@@ -9645,8 +9655,9 @@ extension AppleCatalogItemDetailView {
     }
 
     private var offersStartFromBeginning: Bool {
-        // A disc's Play Disc already starts from the top.
-        AppleTitlePagePolicy.offersStartFromBeginning(titlePagePrimaryAction) && watchOnAction == nil && !isDiscTitle
+        // A DVD's Play Disc already starts from the top; a Blu-ray resumes
+        // its main feature like any film.
+        AppleTitlePagePolicy.offersStartFromBeginning(titlePagePrimaryAction) && watchOnAction == nil && !discOffersMenu
     }
 
     /// The title (or the episode Resume names) from the top; its saved
@@ -9662,7 +9673,7 @@ extension AppleCatalogItemDetailView {
     @ViewBuilder
     private var playButtonMenuItems: some View {
         AppleLibraryFixMatchMenuAction()
-        if isDiscTitle {
+        if discOffersMenu {
             Button("Skip to Movie", systemImage: "forward.end.fill") { startDisc(.mainTitle) }
         }
         if offersStartFromBeginning {
@@ -9679,7 +9690,7 @@ extension AppleCatalogItemDetailView {
         if titlePagePrimaryButtonState?.isTrailer == true {
             if let key = trailerKey { playTrailerInHero(key: key) }
         } else if isDiscTitle {
-            startDisc(.menu)
+            startDisc(discPlayStart)
         } else {
             playbackUI.request = UUID()
         }

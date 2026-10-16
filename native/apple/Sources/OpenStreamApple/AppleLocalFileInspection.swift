@@ -6,20 +6,24 @@ import AetherEngine
 struct AppleLocalFileInspection: Equatable, Sendable {
     var badges: [AppleStreamFormatBadge]
     var discTitles: [AppleDiscTitle]
+    /// Blu-ray or DVD, when the engine recognised the image.
+    var discFormat: AppleDiscFormat?
 
     /// Blocking file reads; call off the main actor. A file the engine cannot
     /// read gives its name's badges and no titles.
     static func inspect(url: URL, isDisc: Bool) -> Self {
         let named = AppleStreamFormatBadge.parse(url.lastPathComponent)
         var titles: [AppleDiscTitle] = []
+        var format: AppleDiscFormat?
         if isDisc {
             let inspection = AetherEngine.inspectDisc(url: url)
+            format = inspection.kind == .bluRay ? .bluRay : inspection.kind == .dvdVideo ? .dvd : nil
             titles = inspection.titles.map {
                 AppleDiscTitle(id: $0.id, durationSeconds: $0.durationSeconds, chapterCount: $0.chapterStartsSeconds.count)
             }
         }
         let probed = (try? AetherEngine.probe(url: url)).map { AppleStreamFormatBadge.badges(for: Self.format(of: $0)) }
-        return Self(badges: AppleStreamFormatBadge.merged(probed: probed, named: named), discTitles: titles)
+        return Self(badges: AppleStreamFormatBadge.merged(probed: probed, named: named), discTitles: titles, discFormat: format)
     }
 
     static func format(of probe: SourceProbe) -> AppleStreamFormatBadge.ProbedFormat {

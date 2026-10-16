@@ -70,11 +70,15 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         XCTAssertTrue(focusedOnOpenStream, "never managed to focus the oStream icon on the home screen")
         let expected = ProcessInfo.processInfo.environment["OPENSTREAM_TOPSHELF_EXPECT"]?
             .split(separator: "\u{1f}").map(String.init) ?? []
-        let wanted = ["Continue Watching", "Top Picks"] + expected
+        // The full-screen carousel (owner 2026-10-15): PineBoard exposes the
+        // pages' titles and its own swipe-up affordance, not the context titles.
+        let isCarousel = texts.contains("top-shelf/swipe-up-affordance/label")
+        let wanted = ["Stub Movie"] + expected
         let hit = wanted.filter { needle in
             texts.contains { $0.localizedCaseInsensitiveContains(needle) }
         }
-        print("TOPSHELF matched: \(hit)")
+        print("TOPSHELF carousel: \(isCarousel) matched: \(hit)")
+        XCTAssertTrue(isCarousel, "the Top Shelf is not the full-screen carousel")
         XCTAssertFalse(hit.isEmpty, "the Top Shelf showed none of \(wanted) — it is empty or stale")
         // Deliberately no `press(.home)` here: the run ends with the shelf on
         // screen so a `simctl io screenshot` from outside catches the same frame.

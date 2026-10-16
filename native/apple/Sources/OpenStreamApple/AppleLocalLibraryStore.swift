@@ -194,6 +194,7 @@ final class AppleLocalLibraryStore {
         }.value
         inspections[file.id] = result
         if !result.discTitles.isEmpty { AppleDiscCatalog.shared.record(result.discTitles, for: url) }
+        if let format = result.discFormat { AppleDiscCatalog.shared.record(format, for: url) }
         appleTrace("local inspect \(url.lastPathComponent.suffix(40)): badges=\(result.badges.map(\.title)) discTitles=\(result.discTitles.count)")
         return result
     }
@@ -687,7 +688,11 @@ final class AppleLocalLibraryStore {
                       disc: AppleDiscPlaybackChoice? = nil) async throws -> AppleStremioPlayerPresentation {
         // A disc image always opens through one start choice (Play Disc
         // unless the page said otherwise), carried to the engine.
-        let disc = AppleDiscImagePolicy.isDiscImage(file) ? disc ?? AppleDiscPlaybackChoice(start: .menu, titleID: nil) : nil
+        // A Blu-ray has no menu to open (`AppleDiscFormat`): its main feature.
+        let disc = AppleDiscImagePolicy.isDiscImage(file)
+            ? AppleDiscPlaybackChoice(start: disc?.start ?? .menu, titleID: disc?.titleID,
+                                      format: AppleDiscCatalog.shared.format(for: file))
+            : nil
         let resume = AppleTitlePagePolicy.startPosition(
             saved: ApplePlaybackStore().progress(for: playbackID(file))?.resumePosition, fromBeginning: fromBeginning)
         guard let source = sources.first(where: { $0.id == file.sourceID }) else { throw AppleLibrarySourceError.unavailable }

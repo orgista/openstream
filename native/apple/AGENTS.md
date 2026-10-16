@@ -188,6 +188,7 @@ references under `design/*.md`. Everything else is trash.
 ## Not done / unclear
 - <item> — <why>
 ## Gates run
+- code-anti-slop pass → removed <N comments, N dead paths, …> (owner rule 2026-10-15; run it on your diff before the gates)
 - swift test … → pass N/M | fail (<one line>)
 - xcodebuild <scheme> → recompiled: <files confirmed by grep> | BUILD FAILED (<one line>)
 - zero-byte check → clean
@@ -198,6 +199,7 @@ references under `design/*.md`. Everything else is trash.
 ```
 
 ## 8. Skills — read the matching SKILL.md BEFORE writing that kind of code
+**Always, on every diff (owner 2026-10-15: "use skill anti slop for the code"): `code-anti-slop`** before you report.
 They live in `~/.claude/skills/<name>/SKILL.md`. Every worker loads them **by name** — the iOS/Swift
 set below is symlinked into `~/.claude-work/skills` (work Claude and Muse), `~/.codex/skills`,
 `~/.codex-headless/skills` and `~/.gemini/config/skills` (agy), verified 2026-09-22. If you do not

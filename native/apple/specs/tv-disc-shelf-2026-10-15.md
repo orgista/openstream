@@ -37,3 +37,9 @@ dev build and checking the shelf; screenshot it.
 ## Gates
 Serial Swift suite; tvOS + iOS builds with recompile greps; E2E-tvOS Top Shelf + disc tests; the four Release (no
 add-ons) builds if near `OPENSTREAM_ADDONS`. Report per AGENTS.md §7 with screenshots of the shelf and the titles list.
+
+## Lead note 16:55: device installs DO work
+The mini has "Apple Development: Created via API" in build.keychain-db. Recipe used for OfficePlus today:
+`/Volumes/DevExt/dev/openstream-build/owner-build.sh AppStore-tvOS 00008110-0001486E2189A01E dd-<name>` (Release,
+automatic signing with the ASC key, PROVISIONING_PROFILE_SPECIFIER= blank), then `xcrun devicectl device install app
+--device <udid> <.app>`. Point its `cd` at your synced tree (copy the script, edit the path) and run it under buildlock.
