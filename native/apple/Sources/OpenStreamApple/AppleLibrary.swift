@@ -24,6 +24,8 @@ public struct AppleLibraryItem: Identifiable, Hashable, Sendable {
     public let relativePath: String
     public let sizeBytes: Int64
     public let addedAt: Date
+    /// When the share last saw the file change; nil for folders that do not say.
+    public let modifiedAt: Date?
 
     public init(
         sourceID: AppleSource.ID,
@@ -31,7 +33,8 @@ public struct AppleLibraryItem: Identifiable, Hashable, Sendable {
         url: URL,
         relativePath: String,
         sizeBytes: Int64,
-        addedAt: Date = .distantPast
+        addedAt: Date = .distantPast,
+        modifiedAt: Date? = nil
     ) {
         id = "\(sourceID.uuidString):\(relativePath)"
         self.sourceID = sourceID
@@ -40,6 +43,7 @@ public struct AppleLibraryItem: Identifiable, Hashable, Sendable {
         self.relativePath = relativePath
         self.sizeBytes = sizeBytes
         self.addedAt = addedAt
+        self.modifiedAt = modifiedAt
     }
 }
 

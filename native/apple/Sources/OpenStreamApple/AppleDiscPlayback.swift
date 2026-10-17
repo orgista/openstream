@@ -49,6 +49,21 @@ public struct AppleDiscPlaybackChoice: Equatable, Sendable {
 
     /// The `discTitleID` handed to `AetherEngine.load`.
     public var engineTitleID: Int? { AppleDiscPlaybackStart.engineTitleID(start: start, titleID: titleID) }
+
+    /// The title to open when the disc's titles are already known: the
+    /// chosen one, or for a Blu-ray's main feature the policy's pick when it
+    /// is not the engine's own (id 0).
+    func engineTitleID(knownTitles: [AppleDiscTitle]) -> Int? {
+        engineTitleID ?? replacementMainTitleID(for: knownTitles)
+    }
+
+    /// The main feature to switch to once the engine has listed the titles,
+    /// or nil to keep the one it opened.
+    func replacementMainTitleID(for titles: [AppleDiscTitle]) -> Int? {
+        guard format == .bluRay, start == .mainTitle, titleID == nil,
+              let pick = AppleDiscMainTitlePolicy.mainTitleID(titles), pick != 0 else { return nil }
+        return pick
+    }
     public var engineStartMode: DVDStartMode { titleID == nil && start == .menu ? .menu : .mainTitle }
     public var traceLine: String {
         let line = AppleDiscPlaybackStart.traceLine(start: start, titleID: titleID)
@@ -119,9 +134,11 @@ public struct AppleDiscTitle: Identifiable, Equatable, Sendable {
         self.chapterCount = chapterCount
     }
 
-    /// "Main Feature" for the title the engine plays as the film (id 0),
-    /// else "Title 4".
-    public var name: String { id == 0 ? "Main Feature" : "Title \(id + 1)" }
+    /// Set by `AppleDiscTitleList` on the title it leads with.
+    var isMainFeature = false
+
+    /// "Main Feature" for the title played as the film, else "Title 4".
+    public var name: String { isMainFeature ? "Main Feature" : "Title \(id + 1)" }
 
     /// "1 hr 42 min", "12 min", "45 sec".
     public var durationLabel: String {
@@ -141,6 +158,32 @@ public struct AppleDiscTitle: Identifiable, Equatable, Sendable {
     /// list hundreds of playlists that differ only in clip order.
     func duplicates(_ other: Self, tolerance: Double = 2) -> Bool {
         abs(durationSeconds - other.durationSeconds) <= tolerance && chapterCount == other.chapterCount
+    }
+}
+
+/// Which Blu-ray title is the film. The engine has dropped short and
+/// repeated-clip decoy playlists and made the longest title id 0. libbluray's
+/// guess, which Infuse plays (REA 2026-10-17), puts chapters ahead of length:
+/// between two playlists over half an hour, one with chapters beats one with
+/// none (or one) when their counts differ by more than five. Otherwise the
+/// engine's pick stands. libbluray then compares video and audio streams,
+/// which the engine (07afad62) does not read from the playlists.
+enum AppleDiscMainTitlePolicy {
+    static let longTitleSeconds: Double = 30 * 60
+    static let chapterGap = 5
+
+    /// The main feature's id; nil for no titles.
+    static func mainTitleID(_ titles: [AppleDiscTitle]) -> Int? {
+        let ordered = titles.sorted { $0.id < $1.id }
+        guard var best = ordered.first else { return nil }
+        for title in ordered.dropFirst() where prefers(title, over: best) { best = title }
+        return best.id
+    }
+
+    static func prefers(_ title: AppleDiscTitle, over best: AppleDiscTitle) -> Bool {
+        title.durationSeconds > longTitleSeconds && best.durationSeconds > longTitleSeconds
+            && min(title.chapterCount, best.chapterCount) < 2
+            && title.chapterCount - best.chapterCount > chapterGap
     }
 }
 
@@ -165,12 +208,14 @@ public struct AppleDiscTitleList: Equatable, Sendable {
         self.more = more
     }
 
-    /// `titles` in the engine's order: longest first, and id 0 is the title
-    /// the engine plays as the main feature, so it leads even when a longer
+    /// `titles` in the engine's order: longest first. The main feature
+    /// (`AppleDiscMainTitlePolicy`, else id 0) leads even when a longer
     /// playlist exists. No row for a disc with a single title worth listing.
     public init(_ titles: [AppleDiscTitle]) {
-        let main = titles.first { $0.id == 0 }
-        let ordered = (main.map { [$0] } ?? []) + titles.filter { $0.id != 0 }
+        let mainID = AppleDiscMainTitlePolicy.mainTitleID(titles) ?? 0
+        var main = titles.first { $0.id == mainID }
+        main?.isMainFeature = true
+        let ordered = (main.map { [$0] } ?? []) + titles.filter { $0.id != mainID }
             .sorted { $0.durationSeconds == $1.durationSeconds ? $0.id < $1.id : $0.durationSeconds > $1.durationSeconds }
         var kept: [AppleDiscTitle] = []
         for title in ordered where title.durationSeconds >= Self.minimumSeconds {

@@ -185,6 +185,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public var avPlayer: AVPlayer? { aether.currentAVPlayer }
 
+    public var startupCheckpoint: Int { aether.startupProgress?.completed ?? 0 }
+
     /// What the live source can actually rewind, on the session axis
     /// `position` is published on.
     ///
@@ -311,13 +313,16 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         // engine opens navigation unless an explicit title bypasses it.
         if let disc = request.hints.disc { appleTrace(disc.traceLine) }
         discFileURL = request.hints.disc != nil ? (request.hints.libraryFileURL ?? request.url) : nil
+        let knownDiscTitles = discFileURL.flatMap { AppleDiscCatalog.shared.titles[$0] } ?? []
+        let discTitleID = request.hints.disc?.engineTitleID(knownTitles: knownDiscTitles)
+        if let discTitleID, request.hints.disc?.titleID == nil { appleTrace("disc main title: title \(discTitleID) by chapters") }
         acceptsChapterUpdates = true
         do {
             _ = try await aether.load(
                 url: sourceURL,
                 startPosition: request.resumePosition,
                 options: options,
-                discTitleID: request.hints.disc?.engineTitleID
+                discTitleID: discTitleID
             )
         } catch {
             if generation == loadGeneration {
@@ -333,6 +338,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             appleTrace("playback decision video=\(decision.video) audio=\(decision.audio) observed=\(aether.videoRoute) decoder=\(aether.activeVideoDecoder ?? "unknown") range=\(outputInfo.dynamicRange)\(decision.mismatch(observedSoftwareDecode: software) ? " decisionMismatch" : "")")
         }
         guard generation == loadGeneration, !Task.isCancelled else { throw CancellationError() }
+        if knownDiscTitles.isEmpty { switchToMainTitle(request) }
         performCaptionHandoff(captionHandoff.reloadFinished(succeeded: true))
         applyLiveBuffer()
         observeLiveCaptions(request, generation: generation)
@@ -820,6 +826,23 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         aether.clock.$sourceTime
             .sink { [weak self] seconds in self?.applyPresentationTime(seconds) }
             .store(in: &cancellables)
+    }
+
+    /// A Blu-ray opened before its titles were known started on the engine's
+    /// longest playlist; the main feature by chapters
+    /// (`AppleDiscMainTitlePolicy`) replaces it from the top. A resumed play
+    /// stays put, since its position belongs to the title it opened.
+    private func switchToMainTitle(_ request: ApplePlaybackRequest) {
+        let titles = aether.discTitles.map {
+            AppleDiscTitle(id: $0.id, durationSeconds: $0.durationSeconds, chapterCount: $0.chapterCount)
+        }
+        guard let pick = request.hints.disc?.replacementMainTitleID(for: titles) else { return }
+        guard (request.resumePosition ?? 0) <= 0 else {
+            appleTrace("disc main title: title \(pick) by chapters, kept title 0 for the resume point")
+            return
+        }
+        appleTrace("disc main title: switching to title \(pick) by chapters")
+        aether.selectTitle(id: pick)
     }
 
     /// Aether can select at startup or when live 608 is discovered. Its

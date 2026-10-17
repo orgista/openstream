@@ -20,4 +20,41 @@ public enum ApplePlaybackStartPolicy {
         guard isLive, sourceOpened, !alreadyExtended else { return nil }
         return liveOpenedExtension
     }
+
+    /// How far a disc image's start has got: the engine's startup checkpoint
+    /// and the bytes the SMB bridge has sent it.
+    public struct DiscStartProgress: Equatable, Sendable {
+        public var checkpoint: Int
+        public var bytesRead: UInt64
+
+        public init(checkpoint: Int = 0, bytesRead: UInt64 = 0) {
+            self.checkpoint = checkpoint
+            self.bytesRead = bytesRead
+        }
+
+        func isAhead(of other: Self) -> Bool {
+            checkpoint > other.checkpoint || bytesRead > other.bytesRead
+        }
+    }
+
+    /// A disc image gets no picture until the engine has read its structure,
+    /// which over the owner's Wi-Fi took 17 s of the 20 s deadline, and the
+    /// rest of the start did not fit (trace iphone-1017b, 2026-10-17: Blu-ray
+    /// recognized at 60.0 s, timed out at 62.6 s). Past the deadline a disc
+    /// that is still being read gets another window at a time, up to the cap.
+    /// Only discs the SMB bridge serves show progress before recognition: the
+    /// engine (07afad62) reports no checkpoint until then, so a disc from a
+    /// media server or a local file still fails at the first deadline.
+    public static let discProgressWindow: Duration = .seconds(10)
+    public static let discStartCap: Duration = .seconds(60)
+
+    /// The extension to grant a disc start at its deadline, or nil to fail
+    /// now: nothing moved since the last deadline, or the cap is reached.
+    public static func discStartExtension(
+        elapsed: Duration, previous: DiscStartProgress, current: DiscStartProgress,
+        window: Duration = discProgressWindow, cap: Duration = discStartCap
+    ) -> Duration? {
+        guard current.isAhead(of: previous), elapsed < cap else { return nil }
+        return min(window, cap - elapsed)
+    }
 }

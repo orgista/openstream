@@ -71,7 +71,7 @@ final class AppleLocalLibraryStore {
             let activeItems = snapshot.items.filter { activeSourceIDs.contains($0.sourceID) }
             guard !activeItems.isEmpty else { return nil }
             let parsed = AppleLibraryTitle(title: snapshot.title, year: snapshot.year, season: nil, episode: nil, kind: snapshot.kind)
-            let items = activeItems.map { AppleLibraryItem(sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
+            let items = activeItems.map { AppleLibraryItem(sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt, modifiedAt: $0.modifiedAt) }
             return AppleLibrarySeries(id: snapshot.id, parsed: parsed, items: items)
         }
     }
@@ -89,6 +89,7 @@ final class AppleLocalLibraryStore {
             let relativePath: String
             let sizeBytes: Int64
             let addedAt: Date
+            let modifiedAt: Date?
         }
         let items: [Item]
     }
@@ -639,7 +640,7 @@ final class AppleLocalLibraryStore {
                 title: group.parsed.title,
                 year: group.parsed.year,
                 kind: group.parsed.kind,
-                items: group.items.map { AppleLibraryGroupSnapshot.Item(id: $0.id, sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt) }
+                items: group.items.map { AppleLibraryGroupSnapshot.Item(id: $0.id, sourceID: $0.sourceID, name: $0.name, url: $0.url, relativePath: $0.relativePath, sizeBytes: $0.sizeBytes, addedAt: $0.addedAt, modifiedAt: $0.modifiedAt) }
             )
         }
         guard Self.persistsScanResults else { return }
@@ -1002,7 +1003,8 @@ final class AppleLocalLibraryStore {
         let presentation: AppleStremioPlayerPresentation
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
-            let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials, sizeBytes: file.sizeBytes)
+            let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials,
+                sizeBytes: file.sizeBytes, modifiedAt: file.modifiedAt)
             try Task.checkCancellation()
             var request = AppleSMBPlaybackRequestFactory.make(source: source, item: file, playbackURL: url)
             request.mediaID = itemID

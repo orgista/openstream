@@ -124,7 +124,7 @@ struct AppleSMBLibraryScanner: Sendable {
                     )
                     result.items.append(AppleLibraryItem(
                         sourceID: source.id, name: entry.name, url: mediaURL,
-                        relativePath: path, sizeBytes: entry.sizeBytes
+                        relativePath: path, sizeBytes: entry.sizeBytes, modifiedAt: entry.modifiedAt
                     ))
                 }
             }

@@ -221,6 +221,9 @@ public protocol ApplePlaybackEngine: AnyObject {
     var chapters: [AppleChapter] { get }
     var chapterMediaVersion: UUID? { get }
     var failure: ApplePlaybackFailure? { get }
+    /// Startup checkpoints the engine has passed in this load (0 before the
+    /// source is open), for the disc start budget.
+    var startupCheckpoint: Int { get }
     /// Non-nil only on `.avPlayer` routes.
     var avPlayer: AVPlayer? { get }
     /// The span the stream can actually be seeked within, on the same axis as
@@ -338,4 +341,5 @@ public extension ApplePlaybackEngine {
 public extension ApplePlaybackEngine {
     var chapters: [AppleChapter] { [] }
     var chapterMediaVersion: UUID? { nil }
+    var startupCheckpoint: Int { 0 }
 }

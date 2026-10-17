@@ -291,6 +291,14 @@ public final class ApplePlaybackCoordinator {
     private var liveRetryAttempted = false
     /// The live start deadline was already extended once for this attempt.
     private var liveStartExtended = false
+    /// A disc image's start: when it began and how far it had got at the last
+    /// deadline (`ApplePlaybackStartPolicy.discStartExtension`).
+    private var discStartBegan: ContinuousClock.Instant?
+    private var discStartMark = ApplePlaybackStartPolicy.DiscStartProgress()
+    /// Injected by tests with millisecond windows.
+    @ObservationIgnored var discStartWindow = ApplePlaybackStartPolicy.discProgressWindow
+    @ObservationIgnored var discStartCap = ApplePlaybackStartPolicy.discStartCap
+    @ObservationIgnored var discCrashGuard = AppleDiscCrashGuard.shared
 
     // MARK: - Live reconnect (`AppleLiveReconnectPolicy`)
 
@@ -622,6 +630,8 @@ public final class ApplePlaybackCoordinator {
         AppleInteractionTrace.count { $0.recordAttempt(isLive: request.isLive) }
         liveRetryAttempted = false
         liveStartExtended = false
+        discStartBegan = request.hints.disc != nil && !request.isLive ? .now : nil
+        discStartMark = .init()
         lastProgressWrite = nil
         remoteProgressStarted = false
         lastKnownPosition = 0
@@ -631,12 +641,22 @@ public final class ApplePlaybackCoordinator {
         engine.stop()
         setPhase(.loading)
         setRoute(engine.route)
+        let discKey = discCrashGuard.key(for: request)
+        if let discKey, discCrashGuard.refuses(discKey) {
+            fail(ApplePlaybackFailure(kind: .unavailable, message: AppleDiscCrashGuard.refusalMessage))
+            return
+        }
         let joinProfile = request.hints.nativeRemoteHLS ? "standard" : "fastZap"
         appleTrace("play \"\(request.title ?? "untitled")\" attempt \(fallbackAttempted)/\(fallbackTotal) \(request.sourceKind.rawValue)\(request.isLive ? " live" : "") host=\(request.url.host() ?? "?") file=\(request.hints.filename.map { String($0.suffix(48)) } ?? "-") route=\(route)\(request.isLive ? " join=\(joinProfile)" : "")")
         setupProgress(for: request)
         startTimeout()
         let engine = self.engine
-        let task = Task { @MainActor in try await engine.load(request) }
+        let crashGuard = discCrashGuard
+        let task = Task { @MainActor in
+            if let discKey { crashGuard.opening(discKey) }
+            defer { if let discKey { crashGuard.opened(discKey) } }
+            try await engine.load(request)
+        }
         loadTask = task
         startExternalSubtitles(for: request, attempt: attempt, load: task)
         do {
@@ -1156,6 +1176,12 @@ public final class ApplePlaybackCoordinator {
         timeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled, let self, self.generation == attempt else { return }
+            let discExtension = await self.discStartExtension()
+            guard !Task.isCancelled, self.generation == attempt else { return }
+            if let discExtension {
+                self.startTimeout(after: discExtension)
+                return
+            }
             switch self.phase {
             case .idle, .resolving, .loading, .waiting:
                 // The engine has opened the channel (its load returned: the
@@ -1184,6 +1210,29 @@ public final class ApplePlaybackCoordinator {
                 break
             }
         }
+    }
+
+    /// More time for a disc image that is still starting and has moved since
+    /// the last deadline, or nil.
+    private func discStartExtension() async -> Duration? {
+        guard let began = discStartBegan, let request = lastRequest else { return nil }
+        switch phase {
+        case .idle, .resolving, .loading, .waiting: break
+        case .playing, .paused, .ended, .failed: return nil
+        }
+        let checkpoint = engine.startupCheckpoint
+        let bytesRead = await AppleSMBRangeServer.shared.bytesServed(playbackURL: request.url)
+        let current = ApplePlaybackStartPolicy.DiscStartProgress(checkpoint: checkpoint, bytesRead: bytesRead)
+        let elapsed = began.duration(to: .now)
+        guard let more = ApplePlaybackStartPolicy.discStartExtension(
+            elapsed: elapsed, previous: discStartMark, current: current,
+            window: discStartWindow, cap: discStartCap) else {
+            appleTrace("disc start: no progress since the last deadline or the cap reached after \(elapsed) (checkpoint \(checkpoint), \(bytesRead) bytes)")
+            return nil
+        }
+        discStartMark = current
+        appleTrace("disc start still reading after \(elapsed) (checkpoint \(checkpoint), \(bytesRead) bytes); waiting \(more) more")
+        return more
     }
 
     // MARK: - Progress persistence

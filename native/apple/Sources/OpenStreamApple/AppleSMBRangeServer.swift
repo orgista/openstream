@@ -23,11 +23,22 @@ public actor AppleSMBRangeServer {
         let sourceURL: URL
         let credentials: AppleSMBCredentials
         let sizeBytes: UInt64
+        let modifiedAt: Date?
         let expiresAt: Date
+
+        /// The file as the block cache knows it: a file replaced at the same
+        /// path and size is another file.
+        var cacheFile: String {
+            "\(sourceURL.absoluteString)#\(sizeBytes)#\(modifiedAt?.timeIntervalSince1970 ?? 0)"
+        }
     }
 
     private let client: any AppleNetworkShareClient
     private let readTimeout: Duration
+    private let addedLatency: Duration
+    private let usesBlockCache: Bool
+    private var blockCache = AppleSMBBlockCache()
+    private var readStats: [String: AppleSMBReadStats] = [:]
     private struct ConnectionJob {
         let connection: NWConnection
         let task: Task<Void, Never>
@@ -40,15 +51,50 @@ public actor AppleSMBRangeServer {
     private var listenerError: (any Error)?
     private var listenerIsReady = false
 
-    public init(client: any AppleNetworkShareClient = AppleSMBClient(), readTimeout: Duration = .seconds(30)) {
+    public init(
+        client: any AppleNetworkShareClient = AppleSMBClient(),
+        readTimeout: Duration = .seconds(30),
+        addedLatency: Duration = AppleSMBRangeServer.launchArgumentLatency(),
+        usesBlockCache: Bool = AppleSMBRangeServer.launchArgumentUsesBlockCache()
+    ) {
         self.client = client
         self.readTimeout = max(readTimeout, .milliseconds(1))
+        self.addedLatency = addedLatency
+        self.usesBlockCache = usesBlockCache
+    }
+
+    /// `-OpenStreamSMBTestLatencyMs 40`: a pause before every SMB read, so a
+    /// device on a fast LAN can stand in for a slow Wi-Fi path. Launch
+    /// arguments only, never a stored setting.
+    public static func launchArgumentLatency() -> Duration {
+        let value = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["OpenStreamSMBTestLatencyMs"]
+        let milliseconds = (value as? String).flatMap(Int.init) ?? (value as? Int) ?? 0
+        return .milliseconds(min(max(milliseconds, 0), 500))
+    }
+
+    /// `-OpenStreamSMBBlockCache NO`: the bridge as it was before the disc
+    /// block cache, for before/after measurements.
+    public static func launchArgumentUsesBlockCache() -> Bool {
+        let value = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["OpenStreamSMBBlockCache"]
+        return (value as? String).map { $0.uppercased() != "NO" } ?? true
+    }
+
+    /// Bytes the bridge has sent for `playbackURL` so far; 0 for a URL it did
+    /// not issue. A disc image's start shows its progress here while the
+    /// engine reads the disc structure and reports nothing else.
+    func bytesServed(playbackURL: URL) -> UInt64 {
+        Self.token(of: playbackURL).flatMap { readStats[$0]?.bytesServed } ?? 0
+    }
+
+    func readStats(playbackURL: URL) -> AppleSMBReadStats? {
+        Self.token(of: playbackURL).flatMap { readStats[$0] }
     }
 
     public func playbackURL(
         sourceURL: URL,
         credentials: AppleSMBCredentials,
         sizeBytes: Int64,
+        modifiedAt: Date? = nil,
         lifetime: TimeInterval = 4 * 60 * 60
     ) async throws -> URL {
         guard sourceURL.scheme?.lowercased() == "smb", sizeBytes > 0 else {
@@ -56,12 +102,14 @@ public actor AppleSMBRangeServer {
         }
         let port = try await ensureListener()
         sessions = sessions.filter { $0.value.expiresAt > .now }
+        readStats = readStats.filter { sessions[$0.key] != nil }
         guard sessions.count < 32 else { throw AppleSMBRangeServerError.listenerUnavailable }
         let token = Self.token()
         sessions[token] = Session(
             sourceURL: sourceURL,
             credentials: credentials,
             sizeBytes: UInt64(sizeBytes),
+            modifiedAt: modifiedAt,
             expiresAt: .now.addingTimeInterval(min(max(lifetime, 60), 24 * 60 * 60))
         )
         let filename = sourceURL.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
@@ -70,9 +118,10 @@ public actor AppleSMBRangeServer {
     }
 
     public func revoke(playbackURL: URL) async {
-        let pieces = playbackURL.path.split(separator: "/")
-        guard pieces.count >= 2, pieces[0] == "media" else { return }
-        let token = String(pieces[1])
+        guard let token = Self.token(of: playbackURL) else { return }
+        if let stats = readStats.removeValue(forKey: token), stats.requests > 0 {
+            AppleInteractionTrace.record(.network, "smb bridge \(playbackURL.lastPathComponent.suffix(48)): \(stats.traceLine)")
+        }
         sessions.removeValue(forKey: token)
         cancelConnections(token: token)
         if sessions.isEmpty {
@@ -84,6 +133,8 @@ public actor AppleSMBRangeServer {
 
     public func removeAllSessions() async {
         sessions.removeAll()
+        readStats.removeAll()
+        blockCache.removeAll()
         cancelConnections()
         await client.closeAll()
         stopListenerIfIdle()
@@ -210,6 +261,7 @@ public actor AppleSMBRangeServer {
             return
         }
         connectionJobs[id]?.token = token
+        readStats[token, default: AppleSMBReadStats()].requests += 1
 
         let rangeHeader = lines.first { $0.lowercased().hasPrefix("range:") }
         let requestedRange = rangeHeader.flatMap { Self.parseRange($0, size: session.sizeBytes) }
@@ -240,16 +292,51 @@ public actor AppleSMBRangeServer {
 
         var offset = range.lowerBound
         let chunkSize: UInt64 = 4 * 1_024 * 1_024
+        let cached = usesBlockCache && AppleSMBBlockCache.caches(path: session.sourceURL.path, request: range)
         while offset < range.upperBound {
             try Task.checkCancellation()
             let end = min(offset + chunkSize, range.upperBound)
-            let data = try await read(session: session, range: offset ..< end)
+            let data = cached
+                ? try await cachedRead(session: session, token: token, range: offset ..< end)
+                : try await measuredRead(session: session, token: token, range: offset ..< end)
             guard !data.isEmpty else { throw AppleSMBRangeServerError.invalidMedia }
             let remaining = Int(range.upperBound - offset)
             let bounded = data.count > remaining ? Data(data.prefix(remaining)) : data
             offset += UInt64(bounded.count)
             try await send(bounded, connection: connection, final: offset >= range.upperBound)
+            readStats[token]?.bytesServed += UInt64(bounded.count)
         }
+    }
+
+    /// `range` assembled from whole cached blocks (`AppleSMBBlockCache`),
+    /// reading the missing ones.
+    private func cachedRead(session: Session, token: String, range: Range<UInt64>) async throws -> Data {
+        var data = Data(capacity: Int(range.count))
+        for index in AppleSMBBlockCache.blockIndices(for: range) {
+            let key = AppleSMBBlockCache.Key(file: session.cacheFile, index: index)
+            let block: Data
+            if let hit = blockCache.block(for: key) {
+                block = hit
+                readStats[token]?.cacheHits += 1
+            } else {
+                block = try await measuredRead(session: session, token: token,
+                    range: AppleSMBBlockCache.byteRange(ofBlock: index, fileSize: session.sizeBytes))
+                guard !block.isEmpty else { break }
+                blockCache.store(block, for: key)
+            }
+            let part = AppleSMBBlockCache.slice(block, index: index, of: range)
+            guard !part.isEmpty else { break }
+            data.append(part)
+        }
+        return data
+    }
+
+    private func measuredRead(session: Session, token: String, range: Range<UInt64>) async throws -> Data {
+        let started = ContinuousClock.now
+        if addedLatency > .zero { try await Task.sleep(for: addedLatency) }
+        let data = try await read(session: session, range: range)
+        readStats[token]?.recordSMBRead(bytes: data.count, milliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+        return data
     }
 
     private func read(session: Session, range: Range<UInt64>) async throws -> Data {
@@ -318,6 +405,12 @@ public actor AppleSMBRangeServer {
         let inclusiveEnd = bounds[1].isEmpty ? size - 1 : min(UInt64(bounds[1]) ?? (size - 1), size - 1)
         guard inclusiveEnd >= start else { return nil }
         return start ..< (inclusiveEnd + 1)
+    }
+
+    private static func token(of playbackURL: URL) -> String? {
+        let pieces = playbackURL.path.split(separator: "/")
+        guard pieces.count >= 2, pieces[0] == "media" else { return nil }
+        return String(pieces[1])
     }
 
     private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
