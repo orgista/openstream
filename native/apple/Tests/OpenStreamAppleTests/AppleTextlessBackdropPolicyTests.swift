@@ -296,11 +296,11 @@ import Testing
         // rather than whenever the seven-day lifetime happens to run out.
         #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")?.logoURL == wordmark)
 
-        // And the rewritten entry is now publishable: `cachedMetadata` applies
+        // And the rewritten entry is now publishable: `cachedLookups` applies
         // the same gate, so the store no longer skips the group as "already
         // resolved" while holding the old shape.
         let group = AppleLibrarySeries(id: "g", parsed: AppleLibraryTitleParser.parse(item), items: [item])
-        #expect(await resolver.cachedMetadata(for: [group])["g"]?.logoURL == wordmark)
+        #expect(await resolver.cachedLookups(for: [group]).metadata["g"]?.logoURL == wordmark)
     }
 
     /// Cached items written before the field existed must still decode.
