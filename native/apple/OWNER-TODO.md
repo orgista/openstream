@@ -43,6 +43,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
           Follow-ups: (a) launch: billboard must accept a late Continue Watching pick so saved rows can draw before
           the index load (rows at 1.3 s); (b) trace the 0.5–0.75 s main-thread hangs iOS's Hang Detection HUD showed
           after the full-screen trailer and on Settings › Sources.
+      2f. **Done 10-16/17:** Unmatched section (77538b9), Top Shelf round 2 (13e7a26), speed round 2 (Fable review) →
+          integration branch batch-1017 + full suites. Speed round 2 on DevTV: Play fresh 2.1–2.7 → 1.1 s (dropped
+          first share connection fixed), library first change 2.7 → 1.7 s, launch parser CPU 3× less, Top 10 parse
+          766 → 3 ms. Left: launch → first focus 3.3 s (Plex 2.4; `AppleDiscoverView.topPicks` ≈1.26 s CPU → speed 3),
+          tvOS stock tab transition holds the old page ~1.1 s (system), resume spinner ~9 s from AetherEngine's 8 s
+          "scrub landing" watchdog (→ engine job).
       3. Vision Pro on the iPad screens (P1s from the Fable review first): **Codex running since 08:05** (branch avp-ipad).
       4. Plex/Jellyfin/Emby trailers; Unmatched section.
       5. Flaky-e2e harness; engine 7.36.
