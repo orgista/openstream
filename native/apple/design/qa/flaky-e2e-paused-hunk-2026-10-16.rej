@@ -1,0 +1,31 @@
+@@ -3823,23 +3898,14 @@
+                 let transport = app.buttons["player.play-pause"].firstMatch
+                 resumeAfterSkip = transport.label == "Pause"
+                 if resumeAfterSkip { transport.tap() }
+-                let scrubber = app.sliders.firstMatch
+-                XCTAssertTrue(scrubber.exists, "Skip verification requires the real scrubber")
+-                // A slider fraction is quantized to its pixel width. Seek
+-                // well inside the synthetic 1800s movie, then measure the
+-                // actual paused position rather than the requested fraction.
+-                scrubber.adjust(toNormalizedSliderPosition: 0.1)
+-                let positioned = Date().addingTimeInterval(5)
+-                var position = crawlPlaybackSeconds()
+-                while Date() < positioned {
+-                    Thread.sleep(forTimeInterval: 0.3)
+-                    let next = crawlPlaybackSeconds()
+-                    if let next, next == position { break }
+-                    position = next
++                let paused = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
++                    transport.exists && transport.label == "Play"
++                }, object: nil)
++                guard XCTWaiter.wait(for: [paused], timeout: 5) == .completed,
++                      let observed = crawlSeekToInterior() else {
++                    result.defects.append("[\(screen.name)] Skip test did not reach a changed, stable interior position")
++                    continue
+                 }
+-                let observed = position ?? -100
+-                XCTAssertGreaterThan(observed, 10, "Skip test did not reach an interior position")
+-                XCTAssertLessThan(observed, 1790)
+                 expectedSkip = observed + (target.identifier == "player.skip-back" ? -10 : 10)
+             }
+             var settledPlayPause: XCUIElement?

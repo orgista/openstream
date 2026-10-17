@@ -38,6 +38,11 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
           Top 10 cards without art, "Open Season 3" parsed as show "Open", Live 0-channel import toast + panel
           timeouts, Blu-ray ISO still offering Play Disc, YouTube overlays on trailers, an "oStream 540 ms" capsule.
           Next iPhone job after 2c.
+      2e. Recording fixes done 15:50 (Fable review running): Open Season parser, Top 10 cached + TMDB art (rows ~4.5 s
+          instead of 13 s), Live import card/quiet retry, trailer art held until 4.5 s of play, episode-row jump.
+          Follow-ups: (a) launch: billboard must accept a late Continue Watching pick so saved rows can draw before
+          the index load (rows at 1.3 s); (b) trace the 0.5–0.75 s main-thread hangs iOS's Hang Detection HUD showed
+          after the full-screen trailer and on Settings › Sources.
       3. Vision Pro on the iPad screens (P1s from the Fable review first): **Codex running since 08:05** (branch avp-ipad).
       4. Plex/Jellyfin/Emby trailers; Unmatched section.
       5. Flaky-e2e harness; engine 7.36.
@@ -58,7 +63,10 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       fast").** **Done 12:18:** design/reference-apps/2026-10-16-speed-and-metadata-rea.md — 12 ranked actions (Top 10 art via
       TMDB + disk cache, parser "Season N"+year = movie, saved rows before index load, any-size image first, colour
       placeholders/BlurHash, server-sized images, decoded thumbnail cache, prefetch, parallel matching, Plex request
-      shapes). Items 1-4 folded into the recording job; 5-12 → a speed job after the Plex-vs-us DevTV numbers.
+      shapes). Items 1-4 folded into the recording job; 5-12 → specs/speed-round2-2026-10-16.md.
+      **Plex vs us on DevTV (17:20):** we're faster at focus moves (381 vs 610 ms) and opening a title (2.2 vs 3.2 s);
+      Plex is faster at cold launch (~1 s), library page (~1.1 s); Plex never started the 4K DV file (buffered 50 s),
+      we start in 2.75 s but lose ~1 s to a dropped first connection. Speed round 2 queued after the recording merge.
       Side-by-side timing needs Plex installed on DevTV + DevPlus (App Store, owner's Apple ID): **owner OK/install?**
 - [ ] **Apple TV Top Shelf follow-up (owner feedback window 10-16 12:05, OfficePlus build 2f8604f):** "full screen on
       apple tv working but no wordmark and swipe for full screen not working, no trailers or sync through heros".
