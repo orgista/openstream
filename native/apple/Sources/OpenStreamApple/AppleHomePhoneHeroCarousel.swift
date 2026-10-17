@@ -111,6 +111,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// Holds the timer where it is, or runs it on from there.
     private func holdOrRun() {
         if isPaused { cycle.pause(at: .now) } else { cycle.resume(at: .now) }
+        appleTrace("hero cycle \(isPaused ? "held" : "runs") visible=\(heroIsVisible) trailer=\(trailer.isPlaying)")
     }
 
     private func select(_ position: Int) {
@@ -125,6 +126,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
         withAnimation(reduceMotion ? .easeInOut(duration: 0.35) : .smooth(duration: 0.45)) {
             cycle.step(by: offset, at: .now)
         }
+        appleTrace("hero cycle page \(cycle.index + 1)/\(cycle.count)")
     }
 
     /// A new set of pages keeps the one on screen when it is still there,
@@ -133,6 +135,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
         let index = id.flatMap { pageIDs.firstIndex(of: $0) } ?? 0
         cycle = AppleHeroRotation.Cycle(count: pageIDs.count, index: index)
         if isPaused { cycle.pause(at: .now) }
+        appleTrace("hero cycle restart page \(index + 1)/\(pageIDs.count) paused=\(isPaused)")
     }
 }
 #endif

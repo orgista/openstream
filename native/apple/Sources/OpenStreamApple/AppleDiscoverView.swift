@@ -58,11 +58,6 @@ struct AppleDiscoverView: View {
     /// The scroll view's height and bar insets, which size the iPhone
     /// portrait hero and pull it up under the navigation bar.
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
-    /// The last reading, drawn once it has held (`AppleHomePhoneHeroLayout.settled`).
-    @State private var measuredPhoneHeroLayout = AppleHomePhoneHeroLayout()
-    /// Until the first layout has held, readings are drawn as they come: the
-    /// launch passes (965 then 931 pt) land in the same frame.
-    @State private var phoneHeroLayoutHeld = false
     /// The Mac hero's size, off the window and the toolbar's inset.
     @State private var macHeroLayout = AppleMacHeroLayout()
     /// The iPad's: the same hero, off the screen and the bars' insets.
@@ -319,38 +314,7 @@ struct AppleDiscoverView: View {
                 .scrollPosition($reviewScrollPosition)
                 #endif
                 #if os(iOS)
-                .onScrollGeometryChange(for: AppleHomePhoneHeroLayout.self) { geometry in
-                    // The container is the part between the bars.
-                    AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height
-                                                 + geometry.contentInsets.top + geometry.contentInsets.bottom,
-                                             topInset: geometry.contentInsets.top,
-                                             bottomInset: geometry.contentInsets.bottom)
-                } action: { _, layout in
-                    measuredPhoneHeroLayout = layout
-                    appleTrace("discover phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
-                    if phoneHeroLayoutHeld {
-                        drawPhoneHeroLayout(AppleHomePhoneHeroLayout.settled(drawn: phoneHeroLayout, measured: layout))
-                    } else if layout.topInset > 0 {
-                        drawPhoneHeroLayout(layout)
-                    }
-                }
-                .task(id: measuredPhoneHeroLayout) {
-                    try? await Task.sleep(for: AppleHomePhoneHeroLayout.settleDelay)
-                    guard !Task.isCancelled, measuredPhoneHeroLayout.topInset > 0 else { return }
-                    if measuredPhoneHeroLayout.containerHeight != phoneHeroLayout.containerHeight {
-                        drawPhoneHeroLayout(measuredPhoneHeroLayout)
-                    }
-                    phoneHeroLayoutHeld = true
-                }
-                .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
-                    AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
-                                       windowHeight: geometry.containerSize.height
-                                           + geometry.contentInsets.top + geometry.contentInsets.bottom,
-                                       topInset: geometry.contentInsets.top,
-                                       platform: .pad)
-                } action: { _, layout in
-                    padHeroLayout = layout
-                }
+                .modifier(AppleDiscoverHeroLayoutReader(page: "discover", phone: $phoneHeroLayout, pad: $padHeroLayout))
                 #elseif os(macOS)
                 .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
                     AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
@@ -431,7 +395,7 @@ struct AppleDiscoverView: View {
         #endif
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
-        } action: { viewportSize = $0 }
+        } action: { viewportSize = AppleHomePageViewport.settled(drawn: viewportSize, measured: $0) }
         // tvOS: no toolbar items. Search is its own tab there and the catalog
         // refreshes on appear, so nothing floats over the billboard (X4).
         #if !os(tvOS)
@@ -639,12 +603,6 @@ struct AppleDiscoverView: View {
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
-    }
-
-    private func drawPhoneHeroLayout(_ layout: AppleHomePhoneHeroLayout) {
-        guard layout != phoneHeroLayout else { return }
-        phoneHeroLayout = layout
-        appleTrace("discover phone hero drawn h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) art=\(Int(layout.artHeight))")
     }
 
     private func rebuildRecommendations(for revision: String) async {

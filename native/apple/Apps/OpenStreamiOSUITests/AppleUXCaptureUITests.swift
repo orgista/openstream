@@ -248,6 +248,39 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         }
     }
 
+    /// Discover's hero as the owner used it on iOS 18 (trace iphone-1017b):
+    /// 30 s untouched (the cycle should move on by itself), small drags that
+    /// collapse and expand the bar, then three swipes through the pages. The
+    /// host records video around it and counts the trace's `hero drawn` and
+    /// `hero cycle` lines.
+    func testB8DiscoverJank() {
+        launch([])
+        let details = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+        print("UXCAPTURE JANK shown=\(details.waitForExistence(timeout: 60)) t=\(Date().timeIntervalSince1970)")
+        shot("jank-00-rest")
+        Thread.sleep(forTimeInterval: 30)
+        shot("jank-01-after-30s")
+        let window = app.windows.firstMatch
+        for (step, dy) in [(2, 0.12), (3, -0.12), (4, 0.2), (5, -0.2)].map({ ($0.0, CGFloat($0.1)) }) {
+            print("UXCAPTURE JANK drag \(step) t=\(Date().timeIntervalSince1970)")
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55 - dy)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            Thread.sleep(forTimeInterval: 1.5)
+            shot(String(format: "jank-%02d-drag", step))
+        }
+        for step in 6...8 {
+            print("UXCAPTURE JANK swipe \(step) t=\(Date().timeIntervalSince1970)")
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.33)),
+                       withVelocity: .fast, thenHoldForDuration: 0)
+            Thread.sleep(forTimeInterval: 2)
+            shot(String(format: "jank-%02d-swipe", step))
+        }
+        Thread.sleep(forTimeInterval: 15)
+        shot("jank-09-end")
+    }
+
     // MARK: - Helpers
 
     private func launch(_ extra: [String]) {
