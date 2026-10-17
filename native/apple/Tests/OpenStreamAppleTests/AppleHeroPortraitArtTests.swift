@@ -313,6 +313,62 @@ import Testing
         #expect(AppleHomePhoneHeroLayout.settled(drawn: drawn, measured: taller).topInset == 143)
     }
 
+    /// The owner's 15 Pro Max on iOS 18, Discover at launch then scrolled
+    /// near the top (trace iphone-1017b, session 14:53Z): the bar collapses
+    /// and expands, the screen height wobbles a frame either side of 931 pt
+    /// and the tab bar reads 82.67 or 83 pt. The hero drew 12 times there,
+    /// every frame with the same art; it may draw the two launch passes only.
+    @Test func theOwnersIOS18SessionDrawsTheHeroAtMostTwice() {
+        let launch: [(CGFloat, CGFloat, CGFloat)] = [(0, 0, 0), (699, 0, 0), (965, 149, 83), (931, 115, 83)]
+        let afterwards: [(CGFloat, CGFloat, CGFloat)] = [
+            (933, 111, 83), (936, 110, 82.67), (938, 105, 82.67), (932, 98, 82.67), (931, 97, 83),
+            (927, 97, 83), (917, 101, 83), (931, 115, 83), (940, 107, 83), (931, 97, 83),
+            (930, 98, 83), (930, 104, 82.67), (930.67, 110, 82.67), (931, 111, 83), (931, 112, 82.67),
+            (931, 113, 82.67), (931, 114, 83), (931, 114, 82.67), (932, 115, 83), (931, 115, 83),
+        ]
+        var drawn = AppleHomePhoneHeroLayout()
+        var draws = 0
+        for (index, reading) in (launch + afterwards).enumerated() {
+            let measured = AppleHomePhoneHeroLayout(containerHeight: reading.0, topInset: reading.1, bottomInset: reading.2)
+            let next = AppleHomePhoneHeroLayout.next(drawn: drawn, measured: measured, held: index >= launch.count)
+            if next != drawn { draws += 1 }
+            drawn = next
+        }
+        #expect(draws <= 2)
+        #expect(drawn == AppleHomePhoneHeroLayout(containerHeight: 931, topInset: 115, bottomInset: 83))
+    }
+
+    @Test func aTabBarThatReallyChangesIsDrawn() {
+        let drawn = AppleHomePhoneHeroLayout(containerHeight: 931, topInset: 115, bottomInset: 83)
+        let hidden = AppleHomePhoneHeroLayout(containerHeight: 931, topInset: 115, bottomInset: 34)
+        #expect(AppleHomePhoneHeroLayout.settled(drawn: drawn, measured: hidden).bottomInset == 34)
+    }
+
+    /// The same session: Discover's safe area lost and regained the bar's
+    /// 18 pt every frame, and each reading re-ran the whole page.
+    @Test func theBarsDoNotResizeTheHomePage() {
+        func settled(_ drawn: CGSize, _ measured: CGSize) -> CGSize {
+            AppleHomePageViewport.settled(drawn: drawn, measured: measured, barSlack: 60)
+        }
+        let drawn = CGSize(width: 430, height: 734)
+        #expect(settled(drawn, CGSize(width: 430, height: 752)) == drawn)
+        #expect(settled(drawn, CGSize(width: 430, height: 733.33)) == drawn)
+        let turned = CGSize(width: 932, height: 370)
+        #expect(settled(drawn, turned) == turned)
+        let resized = CGSize(width: 430, height: 600)
+        #expect(settled(drawn, resized) == resized)
+        #expect(settled(.zero, drawn) == drawn)
+    }
+
+    #if !os(iOS)
+    /// A Mac or visionOS window has no bars that move; a small resize is a resize.
+    @Test func aWindowTakesEveryResize() {
+        let drawn = CGSize(width: 1200, height: 800)
+        let resized = CGSize(width: 1200, height: 780)
+        #expect(AppleHomePageViewport.settled(drawn: drawn, measured: resized) == resized)
+    }
+    #endif
+
     @Test func aPosterCardInAnUnmeasuredFrameIsEmpty() {
         #expect(AppleHeroPortraitArt.posterCardRect(posterAspect: 2.0 / 3.0, in: .zero, topInset: 100) == .zero)
     }

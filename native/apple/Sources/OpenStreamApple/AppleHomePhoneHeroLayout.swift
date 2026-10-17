@@ -59,17 +59,27 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     /// resized with each reading. A reading at the screen height already
     /// drawn keeps the tallest top inset, the bar with its title expanded;
     /// another height is only drawn once it has held for `settleDelay`.
+    /// The owner's 15 Pro Max also reports the tab bar as 82.67 then 83 pt
+    /// while the bar moves (trace 2026-10-17): less than a point is not a
+    /// new layout, or the hero redrew every frame with nothing moved.
     public static func settled(drawn: Self, measured: Self) -> Self {
         guard measured.topInset > 0 else { return drawn }
         guard drawn.topInset > 0 else { return measured }
         guard abs(measured.containerHeight - drawn.containerHeight) < 1 else { return drawn }
         var next = drawn
-        next.topInset = max(drawn.topInset, measured.topInset)
-        next.bottomInset = measured.bottomInset
+        if measured.topInset >= drawn.topInset + 1 { next.topInset = measured.topInset }
+        if abs(measured.bottomInset - drawn.bottomInset) >= 1 { next.bottomInset = measured.bottomInset }
         return next
     }
 
     public static let settleDelay: Duration = .milliseconds(750)
+
+    /// What is drawn after one reading: as read until the first layout has
+    /// held (the launch passes land in the same frame), `settled` after.
+    public static func next(drawn: Self, measured: Self, held: Bool) -> Self {
+        if held { return settled(drawn: drawn, measured: measured) }
+        return measured.topInset > 0 ? measured : drawn
+    }
 
     /// How far the hero is pulled up so its art starts at the top edge.
     public var topOverlap: CGFloat { topInset + Self.stackTopPadding }

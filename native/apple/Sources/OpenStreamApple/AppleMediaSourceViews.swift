@@ -3357,17 +3357,11 @@ struct AppleLibraryView: View {
             .padding(.vertical)
             #endif
         }.scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: {
+            viewportSize = AppleHomePageViewport.settled(drawn: viewportSize, measured: $0)
+        }
         #if os(iOS)
-        .onScrollGeometryChange(for: AppleHomePhoneHeroLayout.self) { geometry in
-            AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
-                topInset: geometry.contentInsets.top, bottomInset: geometry.contentInsets.bottom)
-        } action: { _, layout in phoneHeroLayout = layout }
-        .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
-            AppleMacHeroLayout(contentWidth: geometry.containerSize.width,
-                windowHeight: geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom,
-                topInset: geometry.contentInsets.top, platform: .pad)
-        } action: { _, layout in padHeroLayout = layout }
+        .modifier(AppleDiscoverHeroLayoutReader(page: "library", phone: $phoneHeroLayout, pad: $padHeroLayout))
         #elseif os(macOS)
         .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
             AppleMacHeroLayout(contentWidth: geometry.containerSize.width,

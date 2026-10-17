@@ -43,6 +43,14 @@ struct AppleHomePhoneHero<Actions: View>: View {
     /// A trailer is on screen over the still, whose tone then no longer applies.
     @State private var videoIsShowing = false
 
+    /// `showsTitle`, nil while the art is being chosen. A titled poster's
+    /// trailer covers the poster, so the name comes back while the video is up
+    /// (iOS 18.6 sim, 2026-10-17: Spider-Man: Homecoming's trailer with no name
+    /// on the page).
+    private var drawsTitle: Bool? {
+        videoIsShowing ? true : showsTitle
+    }
+
     private var scrim: AppleHeroScrim {
         let region = AppleHeroCopyRegion.phone(width: artWidth, artHeight: artHeight)
         let reading = artLuminance?.reading(region: region, in: CGSize(width: artWidth, height: artHeight))
@@ -59,10 +67,10 @@ struct AppleHomePhoneHero<Actions: View>: View {
             // paging (iOS 18.6 regression 2026-10-01). A tap fails once the
             // finger travels.
             VStack(spacing: 10) {
-                if showsTitle != false {
+                if drawsTitle != false {
                     title
-                        .opacity(showsTitle == nil ? 0 : 1)
-                        .animation(.easeOut(duration: 0.25), value: showsTitle)
+                        .opacity(drawsTitle == nil ? 0 : 1)
+                        .animation(.easeOut(duration: 0.25), value: drawsTitle)
                 } else {
                     // The art says the name; VoiceOver still hears it.
                     Color.clear
@@ -72,6 +80,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 }
                 AppleHomePhoneHeroMetadata(item: item)
             }
+            .animation(.easeOut(duration: 0.25), value: videoIsShowing)
             .appleHeroCopyShadow(scrim.copyShadow)
             .animation(.easeInOut(duration: 0.3), value: scrim.copyShadow)
             .frame(maxWidth: .infinity)
