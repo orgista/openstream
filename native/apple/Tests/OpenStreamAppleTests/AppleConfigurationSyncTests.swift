@@ -409,6 +409,38 @@ struct AppleConfigurationSyncTests {
         }
         #expect(snapshot.sources.map(\.name) == ["Seeded"])
     }
+
+    // MARK: - Which copy wins
+
+    @Test func anEditIsStampedAfterTheCopyItWasMadeFromWhateverTheClockSays() {
+        let ahead = epoch.addingTimeInterval(600)
+        #expect(AppleConfigurationSyncPolicy.editStamp(now: epoch, after: nil) == epoch)
+        #expect(AppleConfigurationSyncPolicy.editStamp(now: ahead, after: epoch) == ahead)
+        let behind = AppleConfigurationSyncPolicy.editStamp(now: epoch, after: ahead)
+        #expect(behind > ahead)
+        #expect(AppleConfigurationSyncPolicy.editStamp(now: epoch, after: epoch) > epoch)
+    }
+
+    @Test func aStampSurvivesTheCloudCopyAndStillReadsAsNewer() throws {
+        let applied = epoch.addingTimeInterval(600)
+        let stamp = AppleConfigurationSyncPolicy.editStamp(now: epoch, after: applied)
+        let decision = try AppleCloudConfigurationRead.decide(
+            data: cloudData(savedAt: stamp, sources: [source()]), localSavedAt: applied)
+        guard case .apply = decision else {
+            Issue.record("a later stamp must reach a device that applied the earlier copy, got \(decision)")
+            return
+        }
+    }
+
+    // MARK: - Passwords on the Apple TV
+
+    @Test func theAppleTVNeverWaitsOnICloudKeychain() {
+        #expect(AppleConfigurationSyncPolicy.receivesICloudKeychain(mode: .viewerChoice))
+        #expect(!AppleConfigurationSyncPolicy.receivesICloudKeychain(mode: .automaticReadOnly))
+        let status = AppleConfigurationSyncStatus(sourceCount: 3, waitingForKeychain: 2)
+        #expect(status.detailLine(mode: .viewerChoice) == "3 sources · 2 waiting for passwords from iCloud Keychain")
+        #expect(status.detailLine(mode: .automaticReadOnly) == "3 sources · 2 need sign-in")
+    }
 }
 
 /// An in-memory `AppleCloudKeyValueStore`, so the read path can be exercised

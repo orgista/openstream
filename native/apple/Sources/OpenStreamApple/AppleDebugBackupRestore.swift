@@ -34,6 +34,16 @@ public enum AppleDebugBackupRestore {
         pending = (data, passphrase)
     }
 
+    /// `-OpenStreamResumeICloudSync YES`: lets a device the hook below held
+    /// back into iCloud at launch, as Restore from iCloud does.
+    static let resumeKey = "OpenStreamResumeICloudSync"
+
+    static func resumeICloudIfRequested(controller: AppleConfigurationController, defaults: UserDefaults = .standard) async {
+        guard defaults.bool(forKey: resumeKey) else { return }
+        appleTrace("backup restore hook: resuming iCloud sync")
+        await controller.restoreFromCloud()
+    }
+
     static func restorePendingIfNeeded(controller: AppleConfigurationController, defaults: UserDefaults = .standard) async {
         guard let pending else { return }
         self.pending = nil

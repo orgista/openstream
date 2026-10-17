@@ -80,6 +80,7 @@ final class AppleConfigurationController {
     /// configuration if iCloud lacks it, and look again for sign-ins iCloud
     /// Keychain may have delivered since the retry schedule ended.
     func becameActive() async {
+        if syncEnabled { cloud.synchronize() }
         await readCloud()
         retryKeychainNow()
         publishIfNeeded()
@@ -112,8 +113,10 @@ final class AppleConfigurationController {
     /// No Sources' "Restore from iCloud". Turns sync on if the viewer had
     /// turned it off, then pulls what iCloud holds into the empty device.
     func restoreFromCloud() async {
-        // After Reset OpenStream this tap is what lets iCloud back in.
+        // After Reset OpenStream this tap is what lets iCloud back in, and
+        // what iCloud holds is applied even if this device stamped later.
         defaults.removeObject(forKey: AppleDeviceReset.cloudRestoreHeldKey)
+        defaults.removeObject(forKey: Self.savedAtKey)
         if !syncEnabled { await setSyncEnabled(true) }
         guard syncEnabled else { return }
         cloud.synchronize()
@@ -169,8 +172,12 @@ final class AppleConfigurationController {
         let ids = Set(snapshot.sources.map(\.id))
         let waiting = sources.sources.filter { ids.contains($0.id) && $0.needsSignIn }.count
         appleTrace("\(trace): \(ids.count - waiting) restored, \(waiting) need sign-in")
-        // A deliberate file restore is a new local edit, regardless of the file's date.
-        defaults.set(Date.now, forKey: Self.savedAtKey)
+        // A deliberate file restore is a new local edit, regardless of the
+        // file's date. A reader keeps the imported copy's own clock instead,
+        // so the next copy the phone publishes still reads as newer.
+        defaults.set(AppleConfigurationSyncPolicy.publishesChanges()
+            ? AppleConfigurationSyncPolicy.editStamp(after: localSavedAt) : snapshot.savedAt,
+            forKey: Self.savedAtKey)
         lastContent = try contentFingerprint()
         if syncEnabled { scheduleWrite() }
     }
@@ -260,7 +267,7 @@ final class AppleConfigurationController {
             // applied", so a setting nudged with the remote cannot leave the
             // television permanently ahead of the phone and stop it syncing.
             guard AppleConfigurationSyncPolicy.publishesChanges() else { return }
-            defaults.set(Date.now, forKey: Self.savedAtKey)
+            defaults.set(AppleConfigurationSyncPolicy.editStamp(after: localSavedAt), forKey: Self.savedAtKey)
             if syncEnabled { scheduleWrite() }
         } catch { result = "Could not prepare configuration" }
     }
@@ -291,7 +298,7 @@ final class AppleConfigurationController {
             applying = false
             let decision = try AppleCloudConfigurationRead.decide(
                 data: cloud.data(forKey: Self.cloudKey),
-                localSavedAt: defaults.object(forKey: Self.savedAtKey) as? Date,
+                localSavedAt: localSavedAt,
                 localIsEmpty: fillingEmptyLocal && sources.sources.isEmpty
             )
             guard case .apply(let snapshot) = decision else {
@@ -312,11 +319,18 @@ final class AppleConfigurationController {
                 return
             }
             pendingWrite?.cancel()
-            try await apply(snapshot, secrets: nil, mergeSources: false)
-            defaults.set(snapshot.savedAt, forKey: Self.savedAtKey)
+            try await apply(snapshot, secrets: nil)
+            // Sources only this device has, or deletions iCloud has not seen,
+            // are a local edit made after this copy: stamp them later than it,
+            // or every device that applied it reads the next send as not newer.
+            let contributesSources = sources.sourceTombstones != snapshot.sourceTombstones
+                || !Set(localSourceIDs).subtracting(Self.sourceIDs(in: snapshot)).isEmpty
+            defaults.set(contributesSources && AppleConfigurationSyncPolicy.publishesChanges()
+                ? AppleConfigurationSyncPolicy.editStamp(after: snapshot.savedAt) : snapshot.savedAt,
+                forKey: Self.savedAtKey)
             lastContent = try contentFingerprint()
             let hasPlaybackContribution = await AppleConfigurationSyncPolicy.playbackContributionOffMain(try capture(), cloud: snapshot)
-            if sources.sourceTombstones != snapshot.sourceTombstones || hasPlaybackContribution { scheduleWrite() }
+            if contributesSources || hasPlaybackContribution { scheduleWrite() }
             if !sources.sources.isEmpty || !sources.sourceTombstones.isEmpty { heldSources = true }
             appleTrace("configuration sync applied: \(snapshot.sources.count) sources from iCloud")
             updateStatus { $0.recordingReceived(at: .now, sourceCount: self.sources.sources.count) }
@@ -330,12 +344,23 @@ final class AppleConfigurationController {
 
     func setResult(_ value: String) { result = value }
 
+    private var localSavedAt: Date? { defaults.object(forKey: Self.savedAtKey) as? Date }
+
+    private var localSourceIDs: [UUID] {
+        sources.sources.map(\.id) + sources.preservedConfigurationSources.compactMap { $0.sourceID.flatMap(UUID.init(uuidString:)) }
+    }
+
+    private static func sourceIDs(in snapshot: AppleConfigurationSnapshot) -> Set<UUID> {
+        Set(snapshot.sources.map(\.id) + snapshot.preservedSourcePayloads.compactMap { $0.sourceID.flatMap(UUID.init(uuidString:)) })
+    }
+
     /// A restored source waits signed out for credentials iCloud Keychain has
     /// not delivered yet. Becoming active and iCloud's own changes look again
     /// (`readCloud`); this also looks a few times on its own, because the
     /// keychain can arrive with neither.
     private func scheduleKeychainRetry() {
-        guard syncEnabled, keychainRetry == nil, hasSourcesAwaitingKeychain else { return }
+        guard syncEnabled, AppleConfigurationSyncPolicy.receivesICloudKeychain(), keychainRetry == nil,
+              hasSourcesAwaitingKeychain else { return }
         keychainRetry = Task { [weak self] in
             for delay in AppleConfigurationSyncPolicy.keychainRetryDelays {
                 do { try await Task.sleep(for: delay) } catch { return }
@@ -401,7 +426,6 @@ final class AppleConfigurationController {
         } else {
             cloudSnapshot = nil
         }
-        let localSavedAt = defaults.object(forKey: Self.savedAtKey) as? Date
         guard let local = try? capture(savedAt: localSavedAt ?? .now),
               AppleConfigurationSyncPolicy.publishesWithoutEdit(
                 syncEnabled: syncEnabled, restoreHeld: cloudRestoreHeld,
@@ -440,10 +464,22 @@ final class AppleConfigurationController {
     }
 
     private func contentFingerprint() throws -> Data {
-        try AppleConfigurationSnapshot.encoder.encode(capture(savedAt: .distantPast))
+        var snapshot = try capture(savedAt: .distantPast)
+        snapshot.sources = snapshot.sources.map(Self.withoutCheckResults)
+        return try AppleConfigurationSnapshot.encoder.encode(snapshot)
     }
 
-    private func apply(_ snapshot: AppleConfigurationSnapshot, secrets: AppleConfigurationSecrets?, mergeSources: Bool = true) async throws {
+    /// Every library scan and source check rewrites these. On their own they
+    /// are not an edit worth sending every other device a new setup for.
+    private static func withoutCheckResults(_ source: AppleSource) -> AppleSource {
+        var copy = source
+        copy.lastValidatedAt = nil
+        copy.lastValidationFailureAt = nil
+        copy.discoveredItemCount = nil
+        return copy
+    }
+
+    private func apply(_ snapshot: AppleConfigurationSnapshot, secrets: AppleConfigurationSecrets?) async throws {
         try traced("validate") { try snapshot.validate() }
         var values = snapshot.settings
         if let secrets {
@@ -466,13 +502,15 @@ final class AppleConfigurationController {
         // basis: a part this device cannot keep is skipped and traced, so the
         // rest still arrives (build 17's Apple TV lost the whole setup to its
         // unwritable Application Support).
+        // Merged, never replaced: a source leaves through its tombstone, so
+        // one only this device has (an Apple TV's own) survives every read.
         sources.mergeSourceTombstones(snapshot.sourceTombstones)
         try traced("sources") {
-            let signedOut = try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets, merge: mergeSources)
+            let signedOut = try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets)
             if signedOut > 0 { appleTraceFailure("configuration apply: \(signedOut) sources kept signed out") }
         }
         try traced("other sources") {
-            try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: mergeSources)
+            try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: true)
         }
         #if OPENSTREAM_ADDONS
         sources.refreshRestoredManifests(ids: snapshot.sources.map(\.id))
@@ -535,8 +573,18 @@ final class AppleConfigurationController {
         guard syncEnabled, AppleConfigurationSyncPolicy.publishesChanges(), !cloudRestoreHeld else { return false }
         pendingWrite?.cancel()
         do {
-            let stored = cloud.data(forKey: Self.cloudKey)
-                .flatMap { try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: $0) }
+            let storedData = cloud.data(forKey: Self.cloudKey)
+            let stored = storedData.flatMap { try? JSONDecoder().decode(AppleConfigurationSnapshot.self, from: $0) }
+            // Another device's newer copy has not been applied here yet. Sent
+            // now, this older one would replace its edits and carry an older
+            // clock that devices which applied it ignore. The read on iCloud's
+            // change notification applies it, then sends what this device adds.
+            // A copy that read rejects is never applied, so it must not hold sends.
+            if let stored, stored.savedAt > localSavedAt ?? .distantPast,
+               (try? AppleCloudConfigurationRead.decide(data: storedData, localSavedAt: localSavedAt)) != nil {
+                appleTrace("configuration sync: iCloud has a newer copy, reading it before sending")
+                return false
+            }
             guard AppleConfigurationSyncPolicy.mayPublish(
                 localSourceCount: sources.sources.count, heldSourcesSinceLaunch: heldSources,
                 storedSourceCount: stored?.sources.count ?? 0) else {
@@ -580,6 +628,9 @@ struct AppleConfigurationSync: ViewModifier {
                 if let controller { await AppleDebugBackupRestore.restorePendingIfNeeded(controller: controller) }
                 #endif
                 await controller?.start()
+                #if DEBUG
+                if let controller { await AppleDebugBackupRestore.resumeICloudIfRequested(controller: controller) }
+                #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
                 controller?.localChanged()
