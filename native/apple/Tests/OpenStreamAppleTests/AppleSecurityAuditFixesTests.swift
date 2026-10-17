@@ -25,6 +25,10 @@ private final class AuditCredentialStore: AppleCredentialStoring {
         #expect(cached.backgroundURL == item.backgroundURL)
         #expect(!String(decoding: data, as: UTF8.self).contains("fixture-secret"))
         #expect(AppleCachedCredentialPolicy.artwork(URL(string: "https://fixture.example/live/user/pass/image")) == nil)
+        // A stamped file is read as written; an unstamped one is scrubbed on read.
+        #expect(try AppleCachedCredentialPolicy.forReading(data) == data)
+        let unstamped = try JSONEncoder().encode(item)
+        #expect(!String(decoding: try AppleCachedCredentialPolicy.forReading(unstamped), as: UTF8.self).contains("fixture-secret"))
     }
 
     @Test func mediaIndexCacheDoesNotRetainServerTokensAndMigratesOldCopies() async throws {
@@ -42,6 +46,7 @@ private final class AuditCredentialStore: AppleCredentialStoring {
         var records = try #require(legacy["records"] as? [[String: Any]])
         records[0]["artworkURL"] = tokenURL.absoluteString
         legacy["records"] = records
+        legacy["credentialScrub"] = nil // copies from before the stamp carry none
         try JSONSerialization.data(withJSONObject: legacy).write(to: url)
         let reloaded = AppleMediaIndexRepository(fileURL: url)
         #expect(await reloaded.records().first?.artworkURL == nil)

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Synchronization
 import Security
 
 /// One stable session, with non-secret job metadata kept across app relaunches.
@@ -279,11 +280,19 @@ extension AppleMediaServerBackgroundDownloads.Job {
 /// Secondary metadata never retains an authenticated URL. Live objects keep the
 /// original URLs; a network refresh restores their artwork after a cold launch.
 enum AppleCachedCredentialPolicy {
+    /// `metadata(_:)` stamps its output with this as `credentialScrub`. A reader
+    /// trusts a stamped file instead of walking it again (the read-time walk
+    /// was ~0.6 s of a DevTV launch, 2026-10-16); bump it when the rules below
+    /// change, so files written under the old rules are scrubbed once more.
+    static let version = 1
+    private static let secretNames: Set<String> = ["api_key", "apikey", "x-plex-token", "token", "access_token", "auth", "authorization", "username", "password", "key"]
+    /// Verdicts per URL string: the same artwork URLs are written again on every index save.
+    private static let verdicts = Mutex<[String: Bool]>([:])
+
     static func artwork(_ url: URL?) -> URL? {
         guard let url else { return nil }
         guard url.user == nil, url.password == nil else { return nil }
         let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let secretNames: Set<String> = ["api_key", "apikey", "x-plex-token", "token", "access_token", "auth", "authorization", "username", "password", "key"]
         if parts?.queryItems?.contains(where: { secretNames.contains($0.name.lowercased()) }) == true { return nil }
         let path = url.path.lowercased().split(separator: "/")
         if ["live", "movie", "series"].contains(path.first.map(String.init) ?? ""), path.count >= 4 { return nil }
@@ -293,15 +302,40 @@ enum AppleCachedCredentialPolicy {
         return url
     }
 
+    private static func isSecret(_ text: String) -> Bool {
+        if let known = verdicts.withLock({ $0[text] }) { return known }
+        let secret = URL(string: text).map {
+            ["https", "http", "smb"].contains($0.scheme?.lowercased() ?? "") && artwork($0) == nil
+        } ?? false
+        verdicts.withLock { known in
+            if known.count >= 50_000 { known.removeAll(keepingCapacity: true) }
+            known[text] = secret
+        }
+        return secret
+    }
+
     static func metadata(_ data: Data) throws -> Data {
         func scrub(_ value: Any) -> Any {
             if let fields = value as? [String: Any] { return fields.mapValues(scrub) }
             if let values = value as? [Any] { return values.map(scrub) }
-            if let text = value as? String, let url = URL(string: text),
-               ["https", "http", "smb"].contains(url.scheme?.lowercased() ?? ""), artwork(url) == nil { return NSNull() }
+            if let text = value as? String, isSecret(text) { return NSNull() }
             return value
         }
-        return try JSONSerialization.data(withJSONObject: scrub(JSONSerialization.jsonObject(with: data)), options: [.sortedKeys])
+        var object = scrub(try JSONSerialization.jsonObject(with: data))
+        if var fields = object as? [String: Any] {
+            fields["credentialScrub"] = version
+            object = fields
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private struct Mark: Decodable { let credentialScrub: Int? }
+
+    /// What a reader decodes: a file `metadata(_:)` stamped under the current
+    /// rules as it is, anything else scrubbed now.
+    static func forReading(_ data: Data) throws -> Data {
+        if (try? JSONDecoder().decode(Mark.self, from: data))?.credentialScrub == version { return data }
+        return try metadata(data)
     }
 }
 

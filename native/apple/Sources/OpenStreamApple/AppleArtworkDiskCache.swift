@@ -1,10 +1,20 @@
 import Foundation
 import CryptoKit
 
+struct AppleArtworkColour: Equatable, Sendable {
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+}
+
 /// Pure, testable policies for the artwork disk cache.
 struct AppleArtworkDiskCachePolicy {
     static let version = "Artwork-v1"
     static let maximumBytes = 512 * 1024 * 1024
+
+    /// A trim frees down to here, so the writes after it do not each walk the
+    /// whole folder again.
+    static func trimTarget(maximumBytes: Int) -> Int { maximumBytes / 8 * 7 }
 
     static func fileName(for url: URL, variant: String) -> String {
         let input = url.absoluteString.data(using: .utf8) ?? Data()
@@ -40,11 +50,14 @@ actor AppleArtworkDiskCache {
     }()
 
     private let directory: URL
+    private let maximumBytes: Int
     private let fileManager = FileManager.default
-    private var hasTrimmed = false
+    private var totalBytes: Int?
+    private var trimScheduled = false
 
-    init(directory: URL) {
+    init(directory: URL, maximumBytes: Int = AppleArtworkDiskCachePolicy.maximumBytes) {
         self.directory = directory
+        self.maximumBytes = maximumBytes
     }
 
     func data(for url: URL, variant: String) -> Data? {
@@ -57,6 +70,16 @@ actor AppleArtworkDiskCache {
         return data
     }
 
+    func colour(for url: URL) -> AppleArtworkColour? {
+        guard let bytes = data(for: url, variant: "colour"), bytes.count == 3 else { return nil }
+        let values = Array(bytes)
+        return AppleArtworkColour(red: values[0], green: values[1], blue: values[2])
+    }
+
+    func storeColour(_ colour: AppleArtworkColour, for url: URL) {
+        store(Data([colour.red, colour.green, colour.blue]), for: url, variant: "colour")
+    }
+
     func contains(url: URL, variant: String) -> Bool {
         let name = AppleArtworkDiskCachePolicy.fileName(for: url, variant: variant)
         let fileURL = directory.appendingPathComponent(name, isDirectory: false)
@@ -66,19 +89,23 @@ actor AppleArtworkDiskCache {
     func store(_ data: Data, for url: URL, variant: String) {
         let name = AppleArtworkDiskCachePolicy.fileName(for: url, variant: variant)
         let fileURL = directory.appendingPathComponent(name, isDirectory: false)
+        let previousSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             // Atomic write
             try data.write(to: fileURL, options: .atomic)
+            if let totalBytes { self.totalBytes = totalBytes - previousSize + data.count }
         } catch {
             // Ignore errors as requested
         }
 
-        if !hasTrimmed {
-            hasTrimmed = true
-            Task.detached(priority: .background) {
-                await self.trimIfNeeded()
-            }
+        if totalBytes == nil {
+            // The first write sizes the folder in the background, off the launch path.
+            guard !trimScheduled else { return }
+            trimScheduled = true
+            Task.detached(priority: .background) { await self.trimIfNeeded() }
+        } else if let totalBytes, totalBytes > maximumBytes {
+            trimIfNeeded()
         }
     }
 
@@ -93,10 +120,16 @@ actor AppleArtworkDiskCache {
             entries.append((name: url.lastPathComponent, bytes: size, modified: modified))
         }
 
-        let toEvict = AppleArtworkDiskCachePolicy.evictionOrder(entries, limit: AppleArtworkDiskCachePolicy.maximumBytes)
+        totalBytes = entries.reduce(0) { $0 + $1.bytes }
+        let toEvict = AppleArtworkDiskCachePolicy.evictionOrder(entries, limit: AppleArtworkDiskCachePolicy.trimTarget(maximumBytes: maximumBytes))
         for name in toEvict {
             let fileURL = directory.appendingPathComponent(name, isDirectory: false)
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+                totalBytes = (totalBytes ?? 0) - (entries.first { $0.name == name }?.bytes ?? 0)
+            } catch {
+                // A failed eviction remains counted toward the budget.
+            }
         }
     }
 }

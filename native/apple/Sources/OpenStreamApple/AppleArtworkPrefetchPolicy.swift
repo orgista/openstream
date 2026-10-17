@@ -1,7 +1,29 @@
 import Foundation
+import CoreGraphics
 
 /// Pure policies for deciding what artwork to prefetch.
 public enum AppleArtworkPrefetchPolicy {
+    struct Request: Hashable, Sendable {
+        let url: URL
+        let maximumPixelDimension: Int
+    }
+
+    static func requests(items: [AppleCatalogItem], pixels: CGSize, landscape: Bool,
+                         after itemID: String? = nil) -> [Request] {
+        let start = itemID.flatMap { id in items.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
+        var seen = Set<Request>()
+        return items.dropFirst(start).prefix(20).compactMap { item in
+            guard let candidate = AppleCatalogArtworkPolicy.candidates(item: item, landscape: landscape).first else { return nil }
+            let purpose = AppleCatalogArtworkPolicy.purpose(of: candidate, item: item, fallback: nil,
+                                                          preferred: landscape ? .resume : .poster)
+            let display = AppleCatalogArtworkPolicy.displayRequest(url: candidate, pixels: pixels, purpose: purpose)
+            guard let url = display.url else { return nil }
+            let request = Request(url: url, maximumPixelDimension: display.fixedPixelDimension.map(AppleArtworkSizePolicy.bucket)
+                ?? AppleArtworkSizePolicy.bucket(size: pixels, scale: 1))
+            return seen.insert(request).inserted ? request : nil
+        }
+    }
+
     /// Returns the URLs to prefetch for a list of catalogue sections.
     ///
     /// Preserves order (first position wins) and removes duplicates.

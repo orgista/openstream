@@ -48,42 +48,6 @@ public struct AppleMediaAvailability: Codable, Equatable, Sendable {
     }
 }
 
-/// `AppleLibraryTitleParser.parse` per file, remembered for the run. Library's
-/// body asks for every file's record id on each pass
-/// (`AppleLocalLibraryStore.playbackID` → `libraryRecord`), and each parse runs
-/// a dozen regular expressions: 2.4 s of main thread per pass for a
-/// 1,472-file library on the iOS 18.6 sim, which held the Library hero's art
-/// back by several seconds (sampled 2026-10-14). The parse depends only on
-/// the name, the path and the parser's version.
-enum AppleLibraryParseMemo {
-    private struct Key: Hashable {
-        let version: Int
-        let name: String
-        let relativePath: String
-    }
-
-    private static let memo = Mutex<[Key: AppleLibraryTitle]>([:])
-    private static let capacity = 20_000
-
-    static func parse(_ item: AppleLibraryItem) -> AppleLibraryTitle {
-        let key = Key(version: AppleLibraryTitleParser.version, name: item.name, relativePath: item.relativePath)
-        if let known = memo.withLock({ $0[key] }) { return known }
-        let parsed = AppleLibraryTitleParser.parse(item)
-        memo.withLock { titles in
-            if titles.count >= capacity { titles.removeAll(keepingCapacity: true) }
-            titles[key] = parsed
-        }
-        return parsed
-    }
-
-    /// Parses `items` off the main actor, so the main-actor callers that
-    /// follow find every answer remembered: the first pass after launch
-    /// parsed ~400 files on the main thread (~240 ms on an Apple TV 4K, 2026-10-15).
-    @concurrent static func warm(_ items: [AppleLibraryItem]) async {
-        for item in items { _ = parse(item) }
-    }
-}
-
 public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
     public let id: String
     public let canonicalID: String?
@@ -180,6 +144,8 @@ public actor AppleMediaIndexRepository {
         let version: Int
         let records: [AppleMediaRecord]
         var successfulScans: [String: Date]? = nil
+        /// Stamped by `AppleCachedCredentialPolicy.metadata` on write.
+        var credentialScrub: Int? = nil
     }
 
     private var successfulScans: [String: Date] = [:]
@@ -209,13 +175,15 @@ public actor AppleMediaIndexRepository {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
             let data = try Data(contentsOf: fileURL)
-            let clean = try AppleCachedCredentialPolicy.metadata(data)
-            let envelope = try JSONDecoder().decode(Envelope.self, from: clean)
+            var envelope = try JSONDecoder().decode(Envelope.self, from: data)
+            let scrubbed = envelope.credentialScrub == AppleCachedCredentialPolicy.version
+            let clean = scrubbed ? data : try AppleCachedCredentialPolicy.metadata(data)
+            if !scrubbed { envelope = try JSONDecoder().decode(Envelope.self, from: clean) }
             guard envelope.version == 1 else {
                 blockedVersion = envelope.version
                 return
             }
-            if clean != data {
+            if !scrubbed {
                 #if os(iOS) || os(tvOS) || os(visionOS)
                 try clean.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
                 #else
@@ -595,7 +563,7 @@ public enum AppleMediaIngestion {
         item: AppleLibraryItem,
         verifiedAt: Date = .now
     ) -> AppleMediaRecord {
-        let parsed = AppleLibraryParseMemo.parse(item)
+        let parsed = AppleLibraryTitleParser.parse(item)
         return AppleMediaRecord(
             canonicalID: ApplePlaybackIdentity.digest(
                 for: "library|\(source.id.uuidString)|\(item.relativePath)"

@@ -391,7 +391,7 @@ public final class AppleMediaServerLibraryStore {
         
         let backgroundURL: URL?
         if let backdropTag = item.backdropImageTags.first {
-            backgroundURL = try? client.imageURL(session: session, itemID: item.id, type: .backdrop, tag: backdropTag, maxWidth: nil)
+            backgroundURL = try? client.imageURL(session: session, itemID: item.id, type: .backdrop, tag: backdropTag, maxWidth: AppleArtworkSizePolicy.backdropMaximumWidth)
         } else {
             backgroundURL = nil
         }
@@ -731,14 +731,14 @@ public final class AppleMediaServerLibraryStore {
     
     public func loadPersisted() {
         guard let data = try? Data(contentsOf: cacheURL()),
-              let clean = try? AppleCachedCredentialPolicy.metadata(data),
+              let clean = try? AppleCachedCredentialPolicy.forReading(data),
               let state = try? JSONDecoder().decode(PersistedState.self, from: clean) else {
             return
         }
         self.shelves = state.shelves
         self.continueWatching = state.continueWatching
         self.lastLoadedAt = state.lastLoadedAt
-        persist() // Strip tokens from older saved copies as soon as they are read.
+        if clean != data { persist() } // Strip tokens from older saved copies as soon as they are read.
     }
     
     public struct AppleMediaServerDetail: Equatable, Sendable {
@@ -1243,7 +1243,7 @@ public final class AppleMediaServerLibraryStore {
         
         let backdropURL: URL? = {
             if let tag = item.backdropImageTags.first {
-                return try? client.imageURL(session: detail.session, itemID: item.id, type: .backdrop, tag: tag, maxWidth: nil)
+                return try? client.imageURL(session: detail.session, itemID: item.id, type: .backdrop, tag: tag, maxWidth: AppleArtworkSizePolicy.backdropMaximumWidth)
             }
             return nil
         }()

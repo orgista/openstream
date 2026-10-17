@@ -414,7 +414,8 @@ public actor AppleSMBClient: AppleNetworkShareClient {
     }
 
     private var connections: [ConnectionKey: CachedConnection] = [:]
-    private var pendingConnections: [ConnectionKey: UUID] = [:]
+    /// Unstructured, so an open runs to the end even if the caller waiting on it is cancelled.
+    private var pendingConnections: [ConnectionKey: Task<SMB2Manager, any Error>] = [:]
     private var connectionGeneration = 0
     private var idleCleanupTask: Task<Void, Never>?
     #endif
@@ -621,18 +622,30 @@ public actor AppleSMBClient: AppleNetworkShareClient {
             scheduleIdleCleanup()
             return cached.manager
         }
-        guard pendingConnections[key] == nil,
-              connections.count + pendingConnections.count < 8 else {
+        // A play reads the head and the tail of the file at once. The second
+        // read waits for the share the first one is opening: failing it made
+        // the bridge drop the player's first connection, and the engine
+        // retried ~1 s later on every play (DevTV, 2026-10-16).
+        if let opening = pendingConnections[key] { return try await opening.value }
+        guard connections.count + pendingConnections.count < 8 else {
             throw AppleSMBError.connectionFailed
         }
         let generation = connectionGeneration
-        let reservation = UUID()
-        pendingConnections[key] = reservation
+        let opening = Task { try await openManager(key: key, credentials: credentials, generation: generation) }
+        pendingConnections[key] = opening
         defer {
-            if pendingConnections[key] == reservation {
+            if pendingConnections[key] == opening {
                 pendingConnections.removeValue(forKey: key)
             }
         }
+        return try await opening.value
+    }
+
+    private func openManager(
+        key: ConnectionKey,
+        credentials: AppleSMBCredentials,
+        generation: Int
+    ) async throws -> SMB2Manager {
         let manager = try manager(host: key.host, port: key.port, credentials: credentials)
         do {
             try await manager.connectShare(name: key.share)

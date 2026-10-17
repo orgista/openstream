@@ -43,8 +43,8 @@ final class AppleLocalLibraryStore {
         offlineIDs: [String: String]) async -> [String: [AppleStremioEpisode]] {
         let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return Dictionary(uniqueKeysWithValues: groups.filter { $0.parsed.kind == .show }.map { group in
-            let episodes = group.items.filter { AppleLibraryParseMemo.parse($0).role == .feature }.map { file in
-                let parsed = AppleLibraryParseMemo.parse(file)
+            let episodes = group.items.filter { AppleLibraryTitleParser.parse($0).role == .feature }.map { file in
+                let parsed = AppleLibraryTitleParser.parse(file)
                 let id = offlineIDs[file.id] ?? sourcesByID[file.sourceID].map {
                     AppleMediaIngestion.libraryRecord(source: $0, item: file).id
                 } ?? file.id
@@ -370,8 +370,16 @@ final class AppleLocalLibraryStore {
     func playbackID(_ file: AppleLibraryItem) -> String {
         if let id = offlineIDs[file.id] { return id }
         guard let source = sources.first(where: { $0.id == file.sourceID }) else { return file.id }
-        return AppleMediaIngestion.libraryRecord(source: source, item: file).id
+        let key = source.id.uuidString + "|" + file.relativePath
+        if let known = playbackIDs[key] { return known }
+        let id = AppleMediaIngestion.libraryRecord(source: source, item: file).id
+        playbackIDs[key] = id
+        return id
     }
+    /// A record's id depends only on its source and path. Building the whole
+    /// record for every file on each Library body pass (Continue Watching asks
+    /// for every file) was ~180 ms of the tab switch on DevTV (2026-10-16).
+    @ObservationIgnored private var playbackIDs: [String: String] = [:]
     func resolve(_ group: AppleLibrarySeries, sourceStore: AppleSourceStore, settings: AppleSettingsStore, refresh: Bool = false) async {
         if refresh { recordedIdentityFileIDs.subtract(group.items.map(\.id)) }
         guard let file = group.items.first else { return }
@@ -398,7 +406,7 @@ final class AppleLocalLibraryStore {
 
     /// Every title's aliases in one alias-table write and one version-cache write.
     func recordAllIdentityAliases() async {
-        await AppleLibraryParseMemo.warm(groups.flatMap(\.items))
+        await AppleLibraryTitleParser.warm(groups.flatMap(\.items))
         var entries: [(classID: String, mediaIDs: [String])] = []
         await mediaVersionCache.recordInOneWrite {
             for group in groups {
@@ -418,7 +426,7 @@ final class AppleLocalLibraryStore {
         let rowIDs: Set<String> = group.parsed.kind == .show
             ? resolvedMediaID.map { id in Set(Self.episodes(group: group, mediaID: id, enriched: []).map(\.id)) } ?? [] : []
         for (index, file) in group.items.enumerated() {
-            let parsed = AppleLibraryParseMemo.parse(file)
+            let parsed = AppleLibraryTitleParser.parse(file)
             let legacy = resolvedMediaID.map { "\($0):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)" }
             let firstLegacy = legacy.map { legacySeen.insert($0).inserted } ?? false
             // Recheck after the actor hop; weak/missing evidence is also deduped.
@@ -656,7 +664,7 @@ final class AppleLocalLibraryStore {
     }
 
     nonisolated static func matchesEpisode(_ file: AppleLibraryItem, episode: AppleStremioEpisode) -> Bool {
-        let parsed = AppleLibraryParseMemo.parse(file)
+        let parsed = AppleLibraryTitleParser.parse(file)
         if episode.id == fileEpisodeID(file) { return true }
         guard parsed.role == .feature else { return false }
         if let date = parsed.airDate { return episode.releaseInfo.map { String($0.prefix(10)) } == date }
@@ -674,8 +682,8 @@ final class AppleLocalLibraryStore {
                 return Self.matchesEpisode(file, episode: episode) ? file : nil
             }
         }.sorted {
-            let firstPart = AppleLibraryParseMemo.parse($0).part ?? 1
-            let secondPart = AppleLibraryParseMemo.parse($1).part ?? 1
+            let firstPart = AppleLibraryTitleParser.parse($0).part ?? 1
+            let secondPart = AppleLibraryTitleParser.parse($1).part ?? 1
             if firstPart != secondPart { return firstPart < secondPart }
             let lhs = AppleStremioCandidateRanking.resolution($0.name)
             let rhs = AppleStremioCandidateRanking.resolution($1.name)
@@ -712,7 +720,7 @@ final class AppleLocalLibraryStore {
     static func episodes(group: AppleLibrarySeries, mediaID: String, enriched: [AppleStremioEpisode]) -> [AppleStremioEpisode] {
         var seen = Set<String>()
         return group.items.flatMap { file -> [AppleStremioEpisode] in
-            let parsed = AppleLibraryParseMemo.parse(file)
+            let parsed = AppleLibraryTitleParser.parse(file)
             if parsed.role == .feature, let season = parsed.season, !parsed.episodeNumbers.isEmpty {
                 return parsed.episodeNumbers.compactMap { number in
                     let id = "\(mediaID):\(season):\(number)"
@@ -741,7 +749,7 @@ final class AppleLocalLibraryStore {
         let rowIDs = Set(episodes.map(\.id))
         var legacySeen = Set<String>()
         let aliases = group.items.enumerated().compactMap { index, file -> (String, String)? in
-            let parsed = AppleLibraryParseMemo.parse(file)
+            let parsed = AppleLibraryTitleParser.parse(file)
             let legacy = "\(mediaID):\(parsed.season ?? 1):\(parsed.episode ?? index + 1)"
             // The old row builder deduplicated these keys. Do not borrow a
             // numbered episode's history for a filename row it had suppressed.
@@ -780,7 +788,7 @@ final class AppleLocalLibraryStore {
         return [resolution, file.url.pathExtension.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
     func mediaVersions(for file: AppleLibraryItem, recordAliases: Bool = true) -> [AppleMediaVersion] {
-        let parsed = AppleLibraryParseMemo.parse(file)
+        let parsed = AppleLibraryTitleParser.parse(file)
         guard let group = groups.first(where: { $0.items.contains(where: { $0.id == file.id }) }),
               parsed.role == .feature, offlineIDs[file.id] == nil else { return [] }
         // Episodes share a title page but never a playback timeline.
@@ -790,7 +798,7 @@ final class AppleLocalLibraryStore {
         let fallback: String
         if canonical != nil {
             candidates = matching.flatMap(\.items).filter {
-                let other = AppleLibraryParseMemo.parse($0)
+                let other = AppleLibraryTitleParser.parse($0)
                 guard versionItemIDs[$0.id] == canonical else { return false }
                 if parsed.kind == .show, parsed.episodeNumbers.isEmpty, parsed.airDate == nil { return $0.id == file.id }
                 if let date = parsed.airDate { return other.airDate == date }
@@ -956,7 +964,7 @@ final class AppleLocalLibraryStore {
         hints.playbackDecision = ApplePlaybackDecision.decide(inspections[file.id]?.descriptors ?? .init(container: file.url.pathExtension))
         hints.versionOffset = part.flatMap { version?.cumulativePosition(ordinal: $0.ordinal, offset: 0) } ?? 0
         hints.versionDuration = version?.duration
-        let title = AppleLibraryParseMemo.parse(file).title
+        let title = AppleLibraryTitleParser.parse(file).title
         let presentation: AppleStremioPlayerPresentation
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")

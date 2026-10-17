@@ -1387,8 +1387,21 @@ struct AppleDiscoverView: View {
             onReachEnd: { [catalogStore, sourceStore] in
                 Task { await catalogStore.loadNextPage(sectionID: section.id, sources: sourceStore.sources) }
             },
-            allowedIdentities: allowed
+            allowedIdentities: allowed,
+            nextArtworkRow: nextArtworkRow(after: section.id)
         )
+    }
+
+    /// The catalog row below `sectionID`, whose art is fetched and decoded
+    /// with this row's so it is ready when focus moves down.
+    private func nextArtworkRow(after sectionID: String) -> AppleArtworkPrefetchRow? {
+        guard let index = visibleSections.firstIndex(where: { $0.id == sectionID }),
+              index + 1 < visibleSections.count else { return nil }
+        let next = visibleSections[index + 1]
+        let style = AppleCatalogShelfPolicy.style(for: next.catalog)
+        let source = sourceStore.sources.first { $0.id == next.sourceID }
+        let candidates = style == .ranked ? Array(next.items.prefix(10)) : next.items
+        return AppleArtworkPrefetchRow(items: AppleCatalogShelfPolicy.visibleItems(candidates, allowed: nil, source: source), style: style)
     }
 
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
@@ -2357,6 +2370,11 @@ struct AppleSearchView: View {
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 }
 
+private struct AppleArtworkPrefetchRow {
+    let items: [AppleCatalogItem]
+    let style: AppleCatalogShelfPolicy.Style
+}
+
 private struct AppleCatalogSectionView: View {
     let section: AppleCatalogSection
     let source: AppleSource
@@ -2376,6 +2394,11 @@ private struct AppleCatalogSectionView: View {
     /// ignores it for a catalog without `skip` or one that has run out.
     var onReachEnd: (() -> Void)? = nil
     var allowedIdentities: Set<String>? = nil
+    var nextArtworkRow: AppleArtworkPrefetchRow? = nil
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.appleDiscoverRows) private var rowStyle
+    @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
+    @State private var prefetchedFirstPaint = false
     @FocusState private var focusedItemID: String?
     @State private var artworkSettledFocusID: String?
     @State private var artworkVisibleItemID: String?
@@ -2389,6 +2412,21 @@ private struct AppleCatalogSectionView: View {
         let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
             ? Array(section.items.prefix(10)) : section.items
         return AppleCatalogShelfPolicy.visibleItems(items, allowed: allowedIdentities, source: source)
+    }
+
+    private func prefetchRequests(items: [AppleCatalogItem], style: AppleCatalogShelfPolicy.Style,
+                                  after itemID: String? = nil) -> [AppleArtworkPrefetchPolicy.Request] {
+        let sizing: AppleCatalogCardSizing = switch style {
+        case .featured: .portraitPromo
+        case .ranked: .ranked
+        case .poster: .catalog
+        }
+        let width = AppleCatalogCard.width(sizing: sizing, rowStyle: rowStyle, scaledCardWidth: scaledCardWidth,
+                                           viewportWidth: viewportWidth, regularWidth: false)
+        let height = AppleCatalogCard.height(sizing: sizing, width: width)
+        return AppleArtworkPrefetchPolicy.requests(items: items,
+            pixels: CGSize(width: (width * displayScale).rounded(.up), height: (height * displayScale).rounded(.up)),
+            landscape: style == .ranked, after: itemID)
     }
 
     var body: some View {
@@ -2419,11 +2457,18 @@ private struct AppleCatalogSectionView: View {
         .environment(\.appleArtworkLoadsPaused, inheritedArtworkPause || (focusedItemID != nil && artworkSettledFocusID != focusedItemID))
         .task(id: "\(section.id)|anchor:\(focusedItemID ?? artworkVisibleItemID ?? "")|scroll:\(inheritedArtworkPause)") {
             guard !inheritedArtworkPause else { return }
-            do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
-            let anchor = focusedItemID ?? artworkVisibleItemID
-            let urls = anchor.map { AppleArtworkPrefetchPolicy.ahead(after: $0, in: displayedItems) }
-                ?? AppleArtworkPrefetchPolicy.urls(sections: [displayedItems])
-            await AppleRemoteImageCache.shared.prefetch(urls)
+            if prefetchedFirstPaint {
+                do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
+            }
+            let anchor = prefetchedFirstPaint ? focusedItemID ?? artworkVisibleItemID : nil
+            var requests = prefetchRequests(items: displayedItems,
+                style: AppleCatalogShelfPolicy.style(for: section.catalog), after: anchor)
+            if let nextArtworkRow {
+                requests += prefetchRequests(items: nextArtworkRow.items, style: nextArtworkRow.style)
+            }
+            await AppleRemoteImageCache.shared.prefetch(requests)
+            guard !Task.isCancelled else { return }
+            prefetchedFirstPaint = true
         }
         // The focused poster's art loads once focus has rested for the dwell,
         // on every platform and whether or not its detail is prefetched below.
@@ -2706,6 +2751,11 @@ struct AppleCatalogCard: View {
     /// The Discover row style (iPhone, Mac) applies to the home rails only,
     /// never to a detail page's suggestions or the full-width promo card.
     private var activeRowStyle: AppleDiscoverRowStyle? {
+        Self.activeRowStyle(rowStyle, sizing: sizing)
+    }
+
+    nonisolated private static func activeRowStyle(_ rowStyle: AppleDiscoverRowStyle?,
+                                                   sizing: AppleCatalogCardSizing) -> AppleDiscoverRowStyle? {
         [.catalog, .featured, .continueWatching, .ranked].contains(sizing) ? rowStyle : nil
     }
 
@@ -2955,7 +3005,11 @@ struct AppleCatalogCard: View {
         }
     }
 
-    private var isLandscapeCard: Bool { sizing == .featured || sizing == .continueWatching || sizing == .ranked }
+    private var isLandscapeCard: Bool { Self.isLandscape(sizing) }
+
+    nonisolated private static func isLandscape(_ sizing: AppleCatalogCardSizing) -> Bool {
+        sizing == .featured || sizing == .continueWatching || sizing == .ranked
+    }
 
     /// The poster's width over height when it is drawn whole in a 16:9 card.
     private var posterAspect: Double? {
@@ -2984,7 +3038,19 @@ struct AppleCatalogCard: View {
     }
 
     private var cardWidth: CGFloat {
-        if let activeRowStyle {
+        Self.width(sizing: sizing, rowStyle: rowStyle, scaledCardWidth: scaledCardWidth,
+                   viewportWidth: viewportWidth, regularWidth: horizontalSizeClass == .regular)
+    }
+
+    private var cardHeight: CGFloat {
+        Self.height(sizing: sizing, width: cardWidth)
+    }
+
+    /// The tile's size in points. `AppleCatalogSectionView` prefetches at the same
+    /// size, so the tile finds its decoded bucket already in memory.
+    nonisolated static func width(sizing: AppleCatalogCardSizing, rowStyle: AppleDiscoverRowStyle?,
+                                  scaledCardWidth: CGFloat, viewportWidth: CGFloat?, regularWidth: Bool) -> CGFloat {
+        if let activeRowStyle = activeRowStyle(rowStyle, sizing: sizing) {
             switch sizing {
             case .ranked: return activeRowStyle.rankedWidth
             case .continueWatching, .featured: return activeRowStyle.stillWidth
@@ -2999,7 +3065,7 @@ struct AppleCatalogCard: View {
             return max(1, min(width - 32, 480))
             #endif
         }
-        if isLandscapeCard {
+        if isLandscape(sizing) {
             #if os(tvOS)
             // Continue Watching is the row people come back to, so it is not
             // the smallest one on the screen: 480 on a 1920 pt stage is the
@@ -3012,7 +3078,7 @@ struct AppleCatalogCard: View {
         }
         if sizing == .detailSuggestions {
             #if os(iOS)
-            if horizontalSizeClass == .regular { return 150 }
+            if regularWidth { return 150 }
             let width = viewportWidth.flatMap { $0 > 0 ? $0 : nil } ?? 390
             return max(1, (width - 48) / 2.7)
             #else
@@ -3028,8 +3094,8 @@ struct AppleCatalogCard: View {
         #endif
     }
 
-    private var cardHeight: CGFloat {
-        cardWidth * (isLandscapeCard ? 9.0 / 16.0 : 1.5)
+    nonisolated static func height(sizing: AppleCatalogCardSizing, width: CGFloat) -> CGFloat {
+        width * (isLandscape(sizing) ? 9.0 / 16.0 : 1.5)
     }
 
     /// The bar sits inside the artwork, inset from its edges as in the

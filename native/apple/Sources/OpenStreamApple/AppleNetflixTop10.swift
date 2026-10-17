@@ -53,6 +53,11 @@ public actor AppleNetflixTop10Client {
     private let fileURL: URL?
     private var stored: Stored?
     private var didReadDisk = false
+    /// Discover asks again when it remounts or the setting flips; a second
+    /// caller waits for the download already running instead of parsing the
+    /// file twice. The download is unstructured, so it runs to the end even
+    /// when a caller is cancelled.
+    private var inFlight: Task<AppleNetflixTop10Week, Error>?
 
     public init(session: URLSession, country: String = "US", fileURL: URL? = nil) {
         self.session = session
@@ -70,6 +75,14 @@ public actor AppleNetflixTop10Client {
         if let stored, now.timeIntervalSince(stored.fetchedAt) < Self.refreshInterval {
             return stored.week.marked(stale: false)
         }
+        if let inFlight { return try await inFlight.value }
+        let task = Task { try await download(now: now) }
+        inFlight = task
+        defer { inFlight = nil }
+        return try await task.value
+    }
+
+    private func download(now: Date) async throws -> AppleNetflixTop10Week {
         guard let url = URL(string: "https://www.netflix.com/tudum/top10/data/all-weeks-countries.tsv") else {
             throw URLError(.badURL)
         }
@@ -103,19 +116,17 @@ public actor AppleNetflixTop10Client {
                     throw URLError(.dataLengthExceedsMaximum)
                 }
                 if byte == 10 {
-                    try parser.consume(String(decoding: line, as: UTF8.self))
+                    if !parser.isOtherCountry(line) { try parser.consume(String(decoding: line, as: UTF8.self)) }
                     line.removeAll(keepingCapacity: true)
                 } else { line.append(byte) }
             }
             if !line.isEmpty { try parser.consume(String(decoding: line, as: UTF8.self)) }
-            try Task.checkCancellation()
             let week = try parser.finish()
             save(Stored(country: country, week: week, fetchedAt: now,
                         entityTag: response.value(forHTTPHeaderField: "ETag"),
                         lastModified: response.value(forHTTPHeaderField: "Last-Modified")))
             return week
         } catch {
-            try Task.checkCancellation()
             if let stored {
                 return stored.week.marked(stale: now.timeIntervalSince(stored.fetchedAt) > Self.staleAfter)
             }
@@ -140,7 +151,27 @@ struct AppleNetflixTop10Parser {
     private var shows: [Int: AppleNetflixTop10Entry] = [:]
     let country: String
 
-    init(country: String) { self.country = country }
+    private let countryCode: [UInt8]
+
+    init(country: String) {
+        self.country = country
+        countryCode = Array(country.uppercased().utf8)
+    }
+
+    /// Most rows are other countries; reading the country cell from the raw
+    /// bytes skips them without building a String per cell (the full parse was
+    /// ~1.5 s of CPU on an Apple TV 4K, 2026-10-16).
+    func isOtherCountry(_ line: [UInt8]) -> Bool {
+        guard let index = columns["country_iso2"] else { return false }
+        var cell = 0, start = 0, end = line.count
+        for position in line.indices where line[position] == 9 {
+            if cell == index { end = position; break }
+            cell += 1
+            start = position + 1
+        }
+        guard cell == index else { return false }
+        return !line[start..<end].lazy.map { (97...122).contains($0) ? $0 - 32 : $0 }.elementsEqual(countryCode)
+    }
 
     mutating func consume(_ line: String) throws {
         guard !line.isEmpty else { return }

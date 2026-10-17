@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public struct AppleLibraryTitle: Equatable, Sendable {
     public enum Kind: String, Codable, Sendable { case movie, show, other }
@@ -35,7 +36,24 @@ public enum AppleLibraryTitleParser {
     static let version = 3
     /// "Open.Season.3.2010…": a numbered "Season" followed by a release year is a film title.
     private static let seasonTitledMovie = #"(?i)\bSeason[ ._-]*\d{1,3}[ ._()\[\]-]+(?:19|20)\d{2}\b"#
+    /// Remembered per name and folder: the launch pass, the series grouping and
+    /// each match lookup parse the same files again.
     public static func parse(name: String, parentPath: String = "") -> AppleLibraryTitle {
+        let key = MemoKey(name: name, parentPath: parentPath)
+        if let known = memo.withLock({ $0[key] }) { return known }
+        let parsed = parseUncached(name: name, parentPath: parentPath)
+        memo.withLock { titles in
+            if titles.count >= memoCapacity { titles.removeAll(keepingCapacity: true) }
+            titles[key] = parsed
+        }
+        return parsed
+    }
+
+    private struct MemoKey: Hashable { let name: String; let parentPath: String }
+    private static let memo = Mutex<[MemoKey: AppleLibraryTitle]>([:])
+    private static let memoCapacity = 20_000
+
+    private static func parseUncached(name: String, parentPath: String) -> AppleLibraryTitle {
         let parents = parentPath.split(separator: "/").map(String.init)
         let stem = removingExtension(name)
         let full = (parents + [stem]).joined(separator: "/")
@@ -137,12 +155,19 @@ public enum AppleLibraryTitleParser {
         parse(name: item.name, parentPath: (item.relativePath as NSString).deletingLastPathComponent)
     }
 
+    /// Parses `items` off the main actor, so the main-actor callers that
+    /// follow find every answer remembered: the first pass after launch
+    /// parsed ~400 files on the main thread (~240 ms on an Apple TV 4K, 2026-10-15).
+    @concurrent static func warm(_ items: [AppleLibraryItem]) async {
+        for item in items { _ = parse(item) }
+    }
+
     private static func fileRole(_ text: String) -> AppleLibraryTitle.Role {
-        let normalized = text.lowercased().replacingOccurrences(of: #"[._-]+"#, with: " ", options: .regularExpression)
+        let normalized = replacing(#"[._-]+"#, in: text.lowercased(), with: " ")
         for (pattern, role) in [(#"\bbehind the scenes\b"#, AppleLibraryTitle.Role.behindTheScenes),
             (#"\bdeleted scenes\b"#, .deletedScenes), (#"\bfeaturettes?\b"#, .featurette),
             (#"\btrailers?\b"#, .trailer), (#"\bsamples?\b"#, .sample)] {
-            if normalized.range(of: pattern + #"(?:/|$|\s+\d{3,4}p\b)"#, options: .regularExpression) != nil { return role }
+            if firstRange(pattern + #"(?:/|$|\s+\d{3,4}p\b)"#, in: normalized) != nil { return role }
         }
         return .feature
     }
@@ -166,14 +191,13 @@ public enum AppleLibraryTitleParser {
     private static func isDiscPlaylist(_ name: String) -> Bool {
         // Not `removingExtension`: a disc rip may carry a container the
         // scanner does not list (`.VOB`), and the shape is what matters.
-        let value = name.replacingOccurrences(of: #"\.[A-Za-z0-9]{2,4}$"#, with: "", options: .regularExpression)
+        let value = replacing(#"\.[A-Za-z0-9]{2,4}$"#, in: name, with: "")
         if value.count >= 2, value.allSatisfy(\.isNumber) { return true }
-        return value.range(of: #"(?i)^(?:VTS[_ ]\d{1,3}[_ ]\d{1,3}|title[_ ]?t?\d{1,3})$"#,
-                           options: .regularExpression) != nil
+        return firstRange(#"(?i)^(?:VTS[_ ]\d{1,3}[_ ]\d{1,3}|title[_ ]?t?\d{1,3})$"#, in: value) != nil
     }
 
     private static func isShortNumber(_ name: String) -> Bool {
-        let value = name.replacingOccurrences(of: #"\.[A-Za-z0-9]{2,4}$"#, with: "", options: .regularExpression)
+        let value = replacing(#"\.[A-Za-z0-9]{2,4}$"#, in: name, with: "")
         return value.count < 5 && value.allSatisfy(\.isNumber)
     }
 
@@ -182,7 +206,7 @@ public enum AppleLibraryTitleParser {
     }
 
     private static func isDiscFolder(_ name: String) -> Bool {
-        name.range(of: #"(?i)^(?:cd|disc|disk|part)[ ._-]*\d{1,2}$"#, options: .regularExpression) != nil
+        firstRange(#"(?i)^(?:cd|disc|disk|part)[ ._-]*\d{1,2}$"#, in: name) != nil
     }
 
     /// Compact tags are file parts. Separated “Part 1” / “Part.1” before
@@ -190,15 +214,15 @@ public enum AppleLibraryTitleParser {
     /// Separated part tags after a year remain explicit file parts.
     private static func multipartMarker(_ raw: String) -> (range: Range<String.Index>, number: Int)? {
         let pattern = #"(?i)\b(cd|disc|disk|part)([ ._-]*)(\d{1,2})\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        for match in regex.matches(in: raw, range: NSRange(raw.startIndex..., in: raw)) {
+        guard let expression = icuRegex(pattern) else { return nil }
+        for match in expression.matches(in: raw, range: NSRange(raw.startIndex..., in: raw)) {
             guard let range = Range(match.range, in: raw),
                   let marker = Range(match.range(at: 1), in: raw),
                   let separator = Range(match.range(at: 2), in: raw),
                   let digits = Range(match.range(at: 3), in: raw),
                   let number = Int(raw[digits]), number > 0 else { continue }
             if raw[marker].lowercased() == "part", !raw[separator].isEmpty,
-               String(raw[..<range.lowerBound]).range(of: #"\b(?:19|20)\d{2}\b"#, options: .regularExpression) == nil {
+               firstRange(#"\b(?:19|20)\d{2}\b"#, in: String(raw[..<range.lowerBound])) == nil {
                 continue
             }
             return (range, number)
@@ -213,50 +237,84 @@ public enum AppleLibraryTitleParser {
         let titleStem: String
         if let marker = multipartMarker(raw) { titleStem = raw.replacingCharacters(in: marker.range, with: " ") }
         else { titleStem = raw }
-        var value = titleStem.replacingOccurrences(of: #"^(?:\s*\[[^\]]*\]\s*)+"#, with: "", options: .regularExpression)
+        var value = replacing(#"^(?:\s*\[[^\]]*\]\s*)+"#, in: titleStem, with: "")
         if forSearch {
             // Recognized staging and release labels only; never strip arbitrary numbers/groups.
-            value = value.replacingOccurrences(of: #"(?i)^ISO-STAGE-\d+-|^sharphd-"#, with: "", options: .regularExpression)
-            value = value.replacingOccurrences(of: #"(?i)^(?:A[ ._]Marvel[ ._]Television[ ._]Special[ ._]Presentation)[ ._]*--[ ._]*"#, with: "", options: .regularExpression)
-            value = value.replacingOccurrences(of: #"(?i)[{\[]?(?:imdb(?:id)?[ :=_-]+tt\d{7,10}|tmdb(?:id)?[ :=_-]+\d+|tvdb(?:id)?[ :=_-]+\d+)[}\]]?"#, with: " ", options: .regularExpression)
-            value = value.replacingOccurrences(of: #"(?i)\b(?:director'?s[ ._-]+cut|extended[ ._-]+(?:cut|edition)|theatrical[ ._-]+cut|unrated|remastered)\b"#, with: " ", options: .regularExpression)
+            value = replacing(#"(?i)^ISO-STAGE-\d+-|^sharphd-"#, in: value, with: "")
+            value = replacing(#"(?i)^(?:A[ ._]Marvel[ ._]Television[ ._]Special[ ._]Presentation)[ ._]*--[ ._]*"#, in: value, with: "")
+            value = replacing(#"(?i)[{\[]?(?:imdb(?:id)?[ :=_-]+tt\d{7,10}|tmdb(?:id)?[ :=_-]+\d+|tvdb(?:id)?[ :=_-]+\d+)[}\]]?"#, in: value, with: " ")
+            value = replacing(#"(?i)\b(?:director'?s[ ._-]+cut|extended[ ._-]+(?:cut|edition)|theatrical[ ._-]+cut|unrated|remastered)\b"#, in: value, with: " ")
         }
         // Tracker stamps: "www.UIndex.org    -    Hey Arnold The Movie 2002…".
         // The mandatory " - " after the domain is what keeps this off real
         // titles — "W.A.R - The Movie" and "Dr.No.1962" do not match.
-        value = value.replacingOccurrences(
-            of: #"(?i)^\s*(?:www[._])?[a-z0-9-]+[._][a-z]{2,6}\s*-+\s*"#,
-            with: "", options: .regularExpression)
-        value = value.replacingOccurrences(of: #"[._]+"#, with: " ", options: .regularExpression)
+        value = replacing(#"(?i)^\s*(?:www[._])?[a-z0-9-]+[._][a-z]{2,6}\s*-+\s*"#, in: value, with: "")
+        value = replacing(#"[._]+"#, in: value, with: " ")
         let year = captures(#"(?<=.)(?<!\d)\b((?:19|20)\d{2})\b"#, value).flatMap { Int($0[0]) }
         // Cut at release metadata, keeping ordinary title words such as “Atmosphere”.
         let boundary = #"(?i)\b(?:S\d{1,3}[ -]*E\d{1,4}|\d{1,3}x\d{1,4}|"# + (keepsSeason ? "" : #"Season\s*\d{1,3}\b|"#) + #"Episode\s*\d+|(?:19|20)\d{2}|\d{3,4}p|[48]K|x26[45]|h[ -]?26[45]|HEVC|AVC|WEB[ -]?(?:DL|Rip)|Blu[ -]?Ray|BRRip|BDRip|HDR10\+?|HDR|DV|DOVI|Atmos|DTS|DDP|AAC|AC3|EAC3|REMUX|PROPER|REPACK|(?:[a-z]+[ -]+)?edition|(?:trailer|featurette|behind[ -]the[ -]scenes|deleted[ -]scenes|sample)(?=\s*$)|\{?(?:imdb|tmdb)[ -])\b"#
-        if let range = value.range(of: boundary, options: .regularExpression) {
+        if let range = firstRange(boundary, in: value) {
             // A numeric title (1917, 2001) is not a release year at the beginning.
             if range.lowerBound != value.startIndex || Int(value[range]) == nil {
                 value = String(value[..<range.lowerBound])
             } else {
                 let suffix = String(value[range.upperBound...])
-                if let next = suffix.range(of: boundary, options: .regularExpression) {
+                if let next = firstRange(boundary, in: suffix) {
                     value = String(value[range]) + String(suffix[..<next.lowerBound])
                 }
             }
         }
         if forSearch { value = value.replacingOccurrences(of: "-", with: " ") }
-        value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        value = replacing(#"\s+"#, in: value, with: " ")
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-()[]")))
         return (value, year == Int(value) ? nil : year)
     }
 
     private static func matches(_ pattern: String, _ text: String) -> Bool {
-        text.range(of: pattern, options: .regularExpression) != nil
+        firstRange(pattern, in: text) != nil
     }
 
     private static func captures(_ pattern: String, _ text: String) -> [String]? {
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        guard let match = icuRegex(pattern)?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
         return (1..<match.numberOfRanges).map { index in
             Range(match.range(at: index), in: text).map { String(text[$0]) } ?? ""
         }
+    }
+
+    private static func firstRange(_ pattern: String, in text: String) -> Range<String.Index>? {
+        stringRegex(pattern).flatMap { text.firstRange(of: $0) }
+    }
+
+    private static func replacing(_ pattern: String, in text: String, with template: String) -> String {
+        guard let expression = icuRegex(pattern) else { return text }
+        return expression.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
+    }
+
+    // Every pattern compiled once: compiling them per call was ~0.9 s of a
+    // DevTV launch (2026-10-16). The identity form must not move, so each
+    // helper keeps the engine of the call it replaced. `String.range(of:options:
+    // .regularExpression)` is Swift `Regex` with simple word boundaries;
+    // `replacingOccurrences(…, options: .regularExpression)` and
+    // `NSRegularExpression` are ICU. They disagree: ICU misses
+    // `\b(?:Season\s*\d{1,3}\b|Episode)\b` in "Season 1".
+    private static let compiledICU = Mutex<[String: NSRegularExpression]>([:])
+    private static let compiledString = Mutex<[String: SharedRegex]>([:])
+
+    /// `Regex` is not `Sendable`, but a compiled one is immutable and publishes
+    /// its lowered program atomically, so threads can share it.
+    private struct SharedRegex: @unchecked Sendable { let value: Regex<AnyRegexOutput> }
+
+    private static func icuRegex(_ pattern: String) -> NSRegularExpression? {
+        if let known = compiledICU.withLock({ $0[pattern] }) { return known }
+        guard let made = try? NSRegularExpression(pattern: pattern) else { return nil }
+        compiledICU.withLock { $0[pattern] = made }
+        return made
+    }
+
+    private static func stringRegex(_ pattern: String) -> Regex<AnyRegexOutput>? {
+        if let known = compiledString.withLock({ $0[pattern] }) { return known.value }
+        guard let made = try? Regex(pattern).wordBoundaryKind(.simple) else { return nil }
+        compiledString.withLock { $0[pattern] = SharedRegex(value: made) }
+        return made
     }
 }

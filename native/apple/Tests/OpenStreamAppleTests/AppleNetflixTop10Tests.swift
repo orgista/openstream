@@ -85,6 +85,9 @@ class MockURLProtocol: URLProtocol {
     let result = try parser.finish()
     #expect(result.films.map(\.title) == ["First", "Second"])
     #expect(result.tv.map(\.title) == ["Show"])
+    #expect(parser.isOtherCountry(Array("GB\t2026-09-08\tFilms\t1\tForeign\tN/A".utf8)))
+    #expect(!parser.isOtherCountry(Array("us\t2026-09-08\tFilms\t1\tHome\tN/A".utf8)))
+    #expect(!parser.isOtherCountry(Array("US".utf8)))
 }
 
 private final class Top10WeekCacheProtocol: URLProtocol {
@@ -129,4 +132,13 @@ private final class Top10WeekCacheProtocol: URLProtocol {
     #expect(revalidated == first)
     #expect(Top10WeekCacheProtocol.requests.count == 2)
     #expect(Top10WeekCacheProtocol.requests.last?.value(forHTTPHeaderField: "If-None-Match") == "\"week-41\"")
+
+    // Two callers at once share one download.
+    Top10WeekCacheProtocol.status = 200
+    let fresh = AppleNetflixTop10Client(session: session)
+    async let one = fresh.latestWeek(now: now)
+    async let two = fresh.latestWeek(now: now)
+    let both = try await [one, two]
+    #expect(both.allSatisfy { $0.films.map(\.title) == ["First"] })
+    #expect(Top10WeekCacheProtocol.requests.count == 3)
 }

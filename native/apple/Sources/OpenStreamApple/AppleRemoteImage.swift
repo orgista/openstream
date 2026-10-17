@@ -9,6 +9,24 @@ import UIKit
 import AppKit
 #endif
 
+enum AppleArtworkSizePolicy {
+    static let buckets = [64, 128, 256, 384, 512, 768, 1280, 1920, 2560]
+    // Catalog backdrops also serve the billboard, so keep one bounded server URL.
+    static let backdropMaximumWidth = 1920
+
+    static func bucket(_ pixels: Int) -> Int {
+        buckets.first { $0 >= pixels } ?? 2560
+    }
+
+    static func bucket(size: CGSize, scale: CGFloat) -> Int {
+        let pixels = max(size.width, size.height) * scale
+        guard pixels.isFinite else { return 64 }
+        return bucket(Int(min(2560, max(64, pixels)).rounded(.up)))
+    }
+
+    static func displayVariant(_ pixels: Int) -> String { "display-\(bucket(pixels))" }
+}
+
 enum AppleRemoteImageContentMode: Equatable {
     case fill
     case fit
@@ -57,9 +75,11 @@ struct AppleRemoteImage: View {
     @Environment(\.displayScale) private var displayScale
     @State private var image: CGImage?
     @State private var failed = false
+    @State private var placeholderColour: (url: URL, colour: AppleArtworkColour)?
     @State private var loadingGate = AppleArtworkLoadingGate()
     /// The load `image` belongs to.
     @State private var imageIdentity: String?
+    @State private var imageURL: URL?
 
     var body: some View {
         GeometryReader { geometry in
@@ -73,7 +93,13 @@ struct AppleRemoteImage: View {
                     // loading. A spinner inside every poster reads as a
                     // boxed loading state and makes the detail page jump when
                     // the image arrives.
-                    loadingFill
+                    if let placeholderColour, placeholderColour.url == url {
+                        Color(red: Double(placeholderColour.colour.red) / 255,
+                              green: Double(placeholderColour.colour.green) / 255,
+                              blue: Double(placeholderColour.colour.blue) / 255)
+                    } else {
+                        loadingFill
+                    }
                 }
             }
             .onChange(of: loadsPaused, initial: true) { _, paused in
@@ -83,8 +109,10 @@ struct AppleRemoteImage: View {
                 let identity = loadIdentity(url: url, size: geometry.size)
                 guard AppleArtworkLoadingPolicy.needsReload(loadedIdentity: imageIdentity, requestedIdentity: identity, hasImage: image != nil) else { return }
                 loadingGate.isPaused = loadsPaused
+                imageIdentity = nil
                 if !keepsImageWhileReloading { image = nil }
                 failed = false
+                placeholderColour = nil
                 guard let url else {
                     image = nil
                     failed = true
@@ -94,11 +122,26 @@ struct AppleRemoteImage: View {
                 do {
                     let pixelDimension = maximumPixelDimension(for: geometry.size)
                     let inMemory = AppleRemoteImageCache.shared.cachedImage(url: url, maximumPixelDimension: pixelDimension)
+                    if let preview = inMemory ?? AppleRemoteImageCache.shared.cachedPlaceholderImage(url: url) {
+                        image = preview
+                        imageURL = url
+                    }
+                    if image == nil {
+                        let colour = await AppleArtworkDiskCache.shared.colour(for: url)
+                        try Task.checkCancellation()
+                        placeholderColour = colour.map { (url, $0) }
+                    }
                     let isCached: Bool
                     if inMemory != nil {
                         isCached = true
                     } else {
-                        isCached = await AppleArtworkDiskCache.shared.contains(url: url, variant: "raw")
+                        let hasDisplay = await AppleArtworkDiskCache.shared.contains(url: url,
+                            variant: AppleArtworkSizePolicy.displayVariant(pixelDimension))
+                        if hasDisplay {
+                            isCached = true
+                        } else {
+                            isCached = await AppleArtworkDiskCache.shared.contains(url: url, variant: "raw")
+                        }
                     }
                     try await loadingGate.waitUntilReady(isCached: isCached)
                     let loaded = try await AppleRemoteImageCache.shared.image(
@@ -108,6 +151,7 @@ struct AppleRemoteImage: View {
                     guard !Task.isCancelled else { return }
                     image = loaded
                     imageIdentity = identity
+                    imageURL = url
                     #if DEBUG
                     AppleLaunchClock.count(fixedPixelDimension != nil || keepsImageWhileReloading ? "image.hero" : "image.card",
                                            marking: [1, 8, 16, 32])
@@ -117,9 +161,11 @@ struct AppleRemoteImage: View {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
-                    image = nil
-                    failed = true
-                    onFailure?()
+                    if image == nil || imageURL != url {
+                        image = nil
+                        failed = true
+                        onFailure?()
+                    }
                 }
             }
         }
@@ -164,13 +210,12 @@ struct AppleRemoteImage: View {
     }
 
     private func maximumPixelDimension(for size: CGSize) -> Int {
-        if let fixedPixelDimension { return fixedPixelDimension }
-        return min(max(64, Int(max(size.width, size.height) * displayScale)), 2_560)
+        if let fixedPixelDimension { return AppleArtworkSizePolicy.bucket(fixedPixelDimension) }
+        return AppleArtworkSizePolicy.bucket(size: size, scale: displayScale)
     }
 
     private func loadIdentity(url: URL?, size: CGSize) -> String {
-        if let fixedPixelDimension { return "\(url?.absoluteString ?? "")|fixed\(fixedPixelDimension)" }
-        return "\(url?.absoluteString ?? "")|\(Int(size.width))x\(Int(size.height))@\(displayScale)"
+        "\(url?.absoluteString ?? "")|\(maximumPixelDimension(for: size))"
     }
 }
 
@@ -288,12 +333,6 @@ actor AppleRemoteImageCache {
         init(_ image: CGImage) { self.image = image }
     }
 
-    private final class PlaceholderEntry {
-        weak var entry: Entry?
-        init(_ entry: Entry) { self.entry = entry }
-    }
-
-    nonisolated(unsafe) private let placeholders = NSCache<NSString, PlaceholderEntry>()
     nonisolated(unsafe) private let cache = NSCache<NSString, Entry>()
     private var inFlight: [NSString: Task<CGImage, any Error>] = [:]
     private let loader: Loader
@@ -301,7 +340,6 @@ actor AppleRemoteImageCache {
     init(loader: @escaping Loader = AppleRemoteImageCache.load) {
         self.loader = loader
         cache.countLimit = 300
-        placeholders.countLimit = 300
         cache.totalCostLimit = 160 * 1_024 * 1_024
     }
 
@@ -309,23 +347,20 @@ actor AppleRemoteImageCache {
     /// thread-safe.
     nonisolated func removeAllCached() {
         cache.removeAllObjects()
-        placeholders.removeAllObjects()
     }
 
     /// The decoded image if it is already in memory, without waiting on the
     /// actor. `NSCache` is thread-safe.
     nonisolated func cachedImage(url: URL, maximumPixelDimension: Int) -> CGImage? {
-        cache.object(forKey: "\(url.absoluteString)|\(maximumPixelDimension)" as NSString)?.image
+        cache.object(forKey: "\(url.absoluteString)|\(AppleArtworkSizePolicy.bucket(maximumPixelDimension))" as NSString)?.image
     }
 
-    /// An already decoded bitmap at any size. The weak index adds no image
-    /// retention beyond the existing bounded variant cache.
+    /// Lookups do not retain extra bitmaps after NSCache evicts a variant.
     nonisolated func cachedPlaceholderImage(url: URL) -> CGImage? {
-        placeholders.object(forKey: url.absoluteString as NSString)?.entry?.image
-    }
-
-    private func rememberPlaceholder(_ entry: Entry, url: URL) {
-        placeholders.setObject(PlaceholderEntry(entry), forKey: url.absoluteString as NSString)
+        for pixels in AppleArtworkSizePolicy.buckets.reversed() {
+            if let image = cachedImage(url: url, maximumPixelDimension: pixels) { return image }
+        }
+        return nil
     }
 
     func image(url: URL, maximumPixelDimension: Int) async throws -> CGImage {
@@ -335,14 +370,13 @@ actor AppleRemoteImageCache {
               url.password == nil else {
             throw URLError(.unsupportedURL)
         }
-        let key = "\(url.absoluteString)|\(maximumPixelDimension)" as NSString
+        let key = "\(url.absoluteString)|\(AppleArtworkSizePolicy.bucket(maximumPixelDimension))" as NSString
         if let cached = cache.object(forKey: key) {
-            rememberPlaceholder(cached, url: url)
             return cached.image
         }
         if let task = inFlight[key] { return try await task.value }
 
-        let task = Task<CGImage, any Error> { try await loader(url, maximumPixelDimension) }
+        let task = Task<CGImage, any Error> { try await loader(url, AppleArtworkSizePolicy.bucket(maximumPixelDimension)) }
         inFlight[key] = task
         defer { inFlight[key] = nil }
         let decoded = try await task.value
@@ -352,62 +386,41 @@ actor AppleRemoteImageCache {
             forKey: key,
             cost: decoded.bytesPerRow * decoded.height
         )
-        rememberPlaceholder(entry, url: url)
         return decoded
     }
 
-    public func prefetch(_ urls: [URL]) async {
-        var uniqueURLs: [URL] = []
-        var seen: Set<URL> = []
-        for url in urls {
-            if !seen.contains(url) {
-                seen.insert(url)
-                uniqueURLs.append(url)
-            }
-        }
-
+    func prefetch(_ requests: [AppleArtworkPrefetchPolicy.Request]) async {
+        var seen = Set<AppleArtworkPrefetchPolicy.Request>()
+        let uniqueRequests = requests.filter { seen.insert($0).inserted }
         await withTaskGroup(of: Void.self) { group in
-            var inFlight = 0
-            for url in uniqueURLs {
+            var active = 0
+            for request in uniqueRequests {
                 if Task.isCancelled { break }
-                let exists = await AppleArtworkDiskCache.shared.contains(url: url, variant: "raw")
-                if !exists {
-                    if inFlight >= 4 {
-                        await group.next()
-                        inFlight -= 1
-                    }
-                    if Task.isCancelled { break }
-                    inFlight += 1
-                    group.addTask(priority: .utility) {
-                        do {
-                            var request = URLRequest(url: url)
-                            request.timeoutInterval = 15
-                            let (data, response) = try await AppleBoundedHTTPDataLoader.load(
-                                request,
-                                maximumBytes: 12 * 1_024 * 1_024
-                            )
-                            guard let http = response as? HTTPURLResponse,
-                                  (200 ... 299).contains(http.statusCode) else {
-                                return
-                            }
-                            await AppleArtworkDiskCache.shared.store(data, for: url, variant: "raw")
-                        } catch {
-                            // Never throws, never logs
-                        }
-                    }
+                if active >= 4 {
+                    await group.next()
+                    active -= 1
+                }
+                if Task.isCancelled { break }
+                active += 1
+                group.addTask(priority: .utility) {
+                    // Speculative artwork failures are retried by the visible tile.
+                    _ = try? await self.image(url: request.url, maximumPixelDimension: request.maximumPixelDimension)
                 }
             }
         }
     }
 
     private static func load(url: URL, maximumPixelDimension: Int) async throws -> CGImage {
-        if let cachedData = await AppleArtworkDiskCache.shared.data(for: url, variant: "raw") {
-            return try await Task.detached(priority: .utility) {
-                try AppleRemoteImageDecoder.downsample(
-                    data: cachedData,
-                    maximumPixelDimension: maximumPixelDimension
-                )
-            }.value
+        let disk = AppleArtworkDiskCache.shared
+        let variant = AppleArtworkSizePolicy.displayVariant(maximumPixelDimension)
+        if let displayData = await disk.data(for: url, variant: variant),
+           let image = await Task.detached(priority: .utility, operation: {
+               AppleRemoteImageDecoder.displayImage(data: displayData)
+           }).value {
+            return image
+        }
+        if let cachedData = await disk.data(for: url, variant: "raw") {
+            return try await decodeAndStore(cachedData, url: url, maximumPixelDimension: maximumPixelDimension)
         }
 
         var request = URLRequest(url: url)
@@ -425,16 +438,65 @@ actor AppleRemoteImageCache {
             throw URLError(.cannotDecodeContentData)
         }
         await AppleArtworkDiskCache.shared.store(data, for: url, variant: "raw")
-        return try await Task.detached(priority: .utility) {
-            try AppleRemoteImageDecoder.downsample(
-                data: data,
-                maximumPixelDimension: maximumPixelDimension
-            )
+        return try await decodeAndStore(data, url: url, maximumPixelDimension: maximumPixelDimension)
+    }
+
+    private static func decodeAndStore(_ data: Data, url: URL, maximumPixelDimension: Int) async throws -> CGImage {
+        let image = try await Task.detached(priority: .utility) {
+            try AppleRemoteImageDecoder.downsample(data: data, maximumPixelDimension: maximumPixelDimension)
         }.value
+        // The colour and the display-size copy serve the next launch; the
+        // tile waiting for this image does not wait for them.
+        Task.detached(priority: .background) {
+            let disk = AppleArtworkDiskCache.shared
+            if let colour = AppleRemoteImageDecoder.averageColour(image) {
+                await disk.storeColour(colour, for: url)
+            }
+            if let encoded = AppleRemoteImageDecoder.displayData(image) {
+                await disk.store(encoded, for: url, variant: AppleArtworkSizePolicy.displayVariant(maximumPixelDimension))
+            }
+        }
+        return image
     }
 }
 
 enum AppleRemoteImageDecoder {
+    static func displayImage(data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    }
+
+    static func displayData(_ image: CGImage) -> Data? {
+        let data = NSMutableData()
+        let opaque = [CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)
+        // Photograph variants stay small; logos retain their transparency.
+        let format = opaque ? "public.jpeg" : "public.png"
+        guard let destination = CGImageDestinationCreateWithData(data, format as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+
+    static func averageColour(_ image: CGImage) -> AppleArtworkColour? {
+        let side = 16
+        guard let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+            bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+              let pixels = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        var red = 0, green = 0, blue = 0, alpha = 0
+        for offset in stride(from: 0, to: side * side * 4, by: 4) {
+            red += Int(pixels[offset])
+            green += Int(pixels[offset + 1])
+            blue += Int(pixels[offset + 2])
+            alpha += Int(pixels[offset + 3])
+        }
+        guard alpha > 0 else { return nil }
+        return AppleArtworkColour(red: UInt8(min(255, red * 255 / alpha)),
+                                  green: UInt8(min(255, green * 255 / alpha)),
+                                  blue: UInt8(min(255, blue * 255 / alpha)))
+    }
+
     static func downsample(data: Data, maximumPixelDimension: Int) throws -> CGImage {
         guard maximumPixelDimension > 0,
               let source = CGImageSourceCreateWithData(data as CFData, nil),

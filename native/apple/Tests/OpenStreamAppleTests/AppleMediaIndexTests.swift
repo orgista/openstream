@@ -291,8 +291,8 @@ import Testing
 }
 
 @Test func aRememberedLibraryParseMatchesAFreshOne() {
-    // `libraryRecord` parses each file once per run (`AppleLibraryParseMemo`):
-    // asked twice, it answers what the parser says, per name and path.
+    // The parser remembers each parse per name and folder: asked twice, it
+    // answers the same, and the same name in another folder is its own entry.
     let source = AppleSource(kind: .library, name: "Library", url: URL(fileURLWithPath: "/tmp"))
     let movie = AppleLibraryItem(sourceID: source.id, name: "Heat.1995.1080p.mkv", url: URL(fileURLWithPath: "/tmp/heat.mkv"),
                                  relativePath: "Movies/Heat.1995.1080p.mkv", sizeBytes: 1)
@@ -303,8 +303,8 @@ import Testing
         let fresh = AppleLibraryTitleParser.parse(item)
         #expect(record.title == AppleMediaRecord(kind: .video, title: fresh.title, availability: []).title)
         #expect(record.year == fresh.year)
-        #expect(AppleLibraryParseMemo.parse(item) == fresh)
     }
+    #expect(AppleLibraryTitleParser.parse(movie).alternatives != AppleLibraryTitleParser.parse(other).alternatives)
 }
 
 @Test func topShelfSnapshotIsBoundedAndUsesOnlyOpaqueDeepLinks() async throws {
