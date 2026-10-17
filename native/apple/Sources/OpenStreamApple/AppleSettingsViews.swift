@@ -74,7 +74,8 @@ struct AppleSettingsView: View {
 
     @ViewBuilder private var settingsContent: some View {
         #if os(tvOS)
-        AppleTVSettingsSplitView(settings: settings, sourceStore: sourceStore, webManagement: webManagement)
+        AppleTVSettingsSplitView(settings: settings, sourceStore: sourceStore, webManagement: webManagement,
+                                 backupController: backupController)
             .navigationDestination(for: AppleSettingsRoute.self) { route in
                 destination(for: route)
             }
@@ -328,6 +329,7 @@ private struct AppleTVSettingsSplitView: View {
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
     let webManagement: any AppleWebManagementServing
+    let backupController: AppleConfigurationController?
 
     @State private var selection = AppleTVSettingsSection.defaultSelection
     #if DEBUG
@@ -407,7 +409,8 @@ private struct AppleTVSettingsSplitView: View {
                 sourceStore: sourceStore,
                 settings: settings,
                 webManagement: webManagement,
-                embeddedInSplit: true
+                embeddedInSplit: true,
+                backupController: backupController
             )
         case .channels:
             AppleChannelManagerView(settings: settings, sourceStore: sourceStore, embeddedInSplit: true)

@@ -490,6 +490,135 @@ struct AppleDeviceResetTests {
     #expect(published.playbackProgress[key] == nil)
 }
 
+private let configurationKey = "openstream.configuration.v1"
+private let savedAtKey = "openstream.backup.savedAt.v1"
+
+private func publishedSnapshot(_ device: BackupTestDevice) throws -> AppleConfigurationSnapshot {
+    try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: #require(device.cloud.data(forKey: configurationKey)))
+}
+
+/// The phone's clock is behind the device that published last: its edit
+/// still goes out stamped later, so a television that applied the earlier
+/// copy reads it as newer instead of "not newer".
+@MainActor @Test func anEditOnADeviceWhoseClockIsBehindStillReachesTheOthers() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let fixture = try device.sources.addIPTV(name: "Fixture", type: .m3u, endpoint: "https://fixture.example/playlist.m3u")
+    let ahead = Date(timeIntervalSinceNow: 3_600)
+    let published = AppleConfigurationSnapshot(savedAt: ahead, sources: device.sources.sources)
+    device.cloud.set(try published.cloudData(), forKey: configurationKey)
+    await device.controller.start()
+    #expect(device.defaults.object(forKey: savedAtKey) as? Date == ahead)
+
+    #expect(device.sources.remove(id: fixture.id))
+    await device.controller.localChanged()?.value
+    await device.controller.syncNow()
+
+    let sent = try publishedSnapshot(device)
+    #expect(sent.savedAt > ahead)
+    #expect(sent.sourceTombstones[fixture.id] != nil)
+    let television = try AppleCloudConfigurationRead.decide(data: device.cloud.data(forKey: configurationKey), localSavedAt: ahead)
+    guard case .apply(let received) = television else {
+        Issue.record("the television must apply the deletion, got \(television)")
+        return
+    }
+    #expect(received.sources.isEmpty)
+}
+
+/// A deletion this device made offline, folded into another device's newer
+/// copy, is a new edit: without a later stamp every device that applied that
+/// copy keeps the deleted source.
+@MainActor @Test func anOfflineDeletionIsStampedAfterTheCopyItIsMergedInto() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let kept = try device.sources.addIPTV(name: "Kept", type: .m3u, endpoint: "https://fixture.example/kept.m3u")
+    let removed = try device.sources.addIPTV(name: "Removed", type: .m3u, endpoint: "https://fixture.example/removed.m3u")
+    let other = AppleConfigurationSnapshot(savedAt: Date(timeIntervalSinceNow: 60), sources: device.sources.sources)
+    #expect(device.sources.remove(id: removed.id))
+    device.cloud.set(try other.cloudData(), forKey: configurationKey)
+
+    await device.controller.start()
+    await device.controller.syncNow()
+
+    #expect(device.sources.sources.map(\.id) == [kept.id])
+    let sent = try publishedSnapshot(device)
+    #expect(sent.savedAt > other.savedAt)
+    #expect(sent.sources.map(\.id) == [kept.id])
+}
+
+/// A newer copy from iCloud adds and updates sources; it does not drop one
+/// this device has and the copy never had (an Apple TV's own source).
+@MainActor @Test func aNewerCopyKeepsSourcesOnlyThisDeviceHas() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let local = try device.sources.addIPTV(name: "Local", type: .m3u, endpoint: "https://fixture.example/local.m3u")
+    let phone = AppleSource(kind: .liveTV, name: "Phone", url: try #require(URL(string: "https://fixture.example/phone.m3u")))
+    device.defaults.set(Date(timeIntervalSince1970: 100), forKey: savedAtKey)
+    device.cloud.set(try AppleConfigurationSnapshot(savedAt: .now, sources: [phone]).cloudData(), forKey: configurationKey)
+
+    await device.controller.start()
+
+    #expect(Set(device.sources.sources.map(\.id)) == [local.id, phone.id])
+}
+
+/// A newer copy this device cannot read is never applied, so it must not
+/// hold this device's sends: the local edit replaces it.
+@MainActor @Test func aNewerCopyThatCannotBeReadDoesNotHoldTheSend() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let kept = try device.sources.addIPTV(name: "Kept", type: .m3u, endpoint: "https://fixture.example/kept.m3u")
+    let removed = try device.sources.addIPTV(name: "Removed", type: .m3u, endpoint: "https://fixture.example/removed.m3u")
+    await device.controller.start()
+    let newer = AppleConfigurationSnapshot(savedAt: Date(timeIntervalSinceNow: 3_600), sources: device.sources.sources)
+    var payload = try #require(JSONSerialization.jsonObject(with: newer.cloudData()) as? [String: Any])
+    payload["formatVersion"] = 2
+    device.cloud.set(try JSONSerialization.data(withJSONObject: payload), forKey: configurationKey)
+
+    #expect(device.sources.remove(id: removed.id))
+    await device.controller.localChanged()?.value
+    await device.controller.syncNow()
+
+    let sent = try publishedSnapshot(device)
+    #expect(sent.formatVersion == 1)
+    #expect(sent.sources.map(\.id) == [kept.id])
+    #expect(sent.sourceTombstones[removed.id] != nil)
+}
+
+/// Restore from iCloud (and the Debug resume flag) applies what iCloud holds
+/// even when this device stamped its own restore later, as DevTV's did.
+@MainActor @Test func restoreFromICloudAppliesWhatICloudHoldsAfterAHeldRestore() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    _ = try device.sources.addIPTV(name: "Restored", type: .m3u, endpoint: "https://fixture.example/restored.m3u")
+    let phone = AppleSource(kind: .liveTV, name: "Phone", url: try #require(URL(string: "https://fixture.example/phone.m3u")))
+    device.defaults.set(Date(timeIntervalSinceNow: 3_600), forKey: savedAtKey)
+    device.defaults.set(true, forKey: AppleDeviceReset.cloudRestoreHeldKey)
+    device.cloud.set(try AppleConfigurationSnapshot(savedAt: .now, sources: [phone]).cloudData(), forKey: configurationKey)
+    await device.controller.start()
+    #expect(device.sources.sources.map(\.name) == ["Restored"])
+
+    await device.controller.restoreFromCloud()
+
+    #expect(Set(device.sources.sources.map(\.name)) == ["Restored", "Phone"])
+    #expect(!device.defaults.bool(forKey: AppleDeviceReset.cloudRestoreHeldKey))
+}
+
+/// A library scan or source check is not an edit: the phone no longer sends
+/// every device a new setup each time one finishes.
+@MainActor @Test func aSourceCheckAloneIsNotALocalEdit() async throws {
+    let device = try BackupTestDevice(keys: MemoryBackupKeys())
+    defer { device.tearDown() }
+    let fixture = try device.sources.addIPTV(name: "Fixture", type: .m3u, endpoint: "https://fixture.example/playlist.m3u")
+    await device.controller.start()
+    let stamped = Date(timeIntervalSince1970: 100)
+    device.defaults.set(stamped, forKey: savedAtKey)
+
+    device.sources.recordValidationSuccess(id: fixture.id, summary: "402 files", discoveredItemCount: 402)
+    await device.controller.localChanged()?.value
+
+    #expect(device.defaults.object(forKey: savedAtKey) as? Date == stamped)
+}
+
 /// One device's stores on throwaway defaults, keychain and index file.
 @MainActor
 private struct BackupTestDevice {

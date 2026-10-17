@@ -87,6 +87,7 @@ struct AppleSourcesSettingsView: View {
     /// Apple TV has no Backup & Sync page, so what iCloud sync last did is
     /// shown here instead (`AppleConfigurationSyncStatus`).
     @AppStorage(AppleConfigurationSyncStatus.defaultsKey) private var syncStatusData: Data?
+    @AppStorage(AppleDeviceReset.cloudRestoreHeldKey) private var cloudRestoreHeld = false
     #endif
 
     let sourceStore: AppleSourceStore
@@ -95,6 +96,14 @@ struct AppleSourcesSettingsView: View {
     /// True inside the Apple TV Settings split view's detail pane, where the
     /// header is drawn at the pane's leading edge instead of as a page title.
     var embeddedInSplit = false
+    var backupController: AppleConfigurationController? = nil
+
+    #if os(tvOS)
+    private var syncStatus: AppleConfigurationSyncStatus {
+        syncStatusData.flatMap { try? JSONDecoder().decode(AppleConfigurationSyncStatus.self, from: $0) }
+            ?? AppleConfigurationSyncStatus()
+    }
+    #endif
 
     var body: some View {
         AppleSettingsCollection {
@@ -176,10 +185,21 @@ struct AppleSourcesSettingsView: View {
             }
             #if os(tvOS)
             Section {
-                AppleConfigurationSyncStatusLines(status: syncStatusData
-                    .flatMap { try? JSONDecoder().decode(AppleConfigurationSyncStatus.self, from: $0) }
-                    ?? AppleConfigurationSyncStatus())
+                AppleConfigurationSyncStatusLines(status: syncStatus)
                     .focusable()
+                if cloudRestoreHeld, let backupController {
+                    Button("Resume iCloud Sync") {
+                        Task { await backupController.restoreFromCloud() }
+                    }
+                    .accessibilityIdentifier("sources.icloud.resume")
+                }
+                // iCloud Keychain never reaches tvOS; the phone hands sign-ins over.
+                if syncStatus.waitingForKeychain > 0 {
+                    Button(AppleSetupTransferDevice.receiveTitle) {
+                        AppleSetupTransferCenter.shared.presentReceiver()
+                    }
+                    .accessibilityIdentifier("sources.icloud.setupFromPhone")
+                }
             } header: {
                 Text("iCloud Sync").textCase(.uppercase)
             }

@@ -74,6 +74,22 @@ public enum AppleConfigurationSyncPolicy: Sendable {
         localSourceCount > 0 || heldSourcesSinceLaunch || storedSourceCount == 0
     }
 
+    /// The configuration clock for a new local edit. Device clocks disagree,
+    /// so an edit is stamped just after the configuration it was made from
+    /// even when this device's clock is behind the one that published it;
+    /// otherwise every other device would read the edit as "not newer".
+    public static func editStamp(now: Date = .now, after previous: Date?) -> Date {
+        guard let previous, previous >= now else { return now }
+        return previous.addingTimeInterval(0.001)
+    }
+
+    /// Does iCloud Keychain reach this device? Not the Apple TV: tvOS never
+    /// receives another device's synchronizable keychain items, so a source
+    /// that arrives signed out there waits for Set Up from iPhone instead.
+    public static func receivesICloudKeychain(mode: AppleConfigurationSyncMode = current) -> Bool {
+        mode != .automaticReadOnly
+    }
+
     /// How long to wait between looks for credentials iCloud Keychain has not
     /// delivered yet. A restored source waits on them signed out; after the
     /// last look it stays that way until the viewer signs in.
@@ -280,11 +296,16 @@ public struct AppleConfigurationSyncStatus: Codable, Equatable, Sendable {
     }
 
     /// The error if there is one, otherwise "8 sources · 2 waiting for
-    /// passwords from iCloud Keychain".
-    public var detailLine: String {
+    /// passwords from iCloud Keychain" ("2 need sign-in" on the Apple TV).
+    public var detailLine: String { detailLine() }
+
+    public func detailLine(mode: AppleConfigurationSyncMode = AppleConfigurationSyncPolicy.current) -> String {
         if let lastError { return lastError }
         let sources = sourceCount == 1 ? "1 source" : "\(sourceCount) sources"
         guard waitingForKeychain > 0 else { return sources }
+        guard AppleConfigurationSyncPolicy.receivesICloudKeychain(mode: mode) else {
+            return "\(sources) · \(waitingForKeychain) need sign-in"
+        }
         return "\(sources) · \(waitingForKeychain) waiting for passwords from iCloud Keychain"
     }
 
