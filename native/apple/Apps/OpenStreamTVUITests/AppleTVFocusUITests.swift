@@ -1505,6 +1505,17 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(wait(for: element("home.featured.play"), 90), "the Discover billboard never appeared")
         let playing = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier == 'hero.serverTrailer' AND value == 'playing'")).firstMatch
+        // Focus starts in the tab bar, where Right changes tabs: go down to
+        // the first row and back up into the hero first (as N12 does).
+        let heroIDs = ["home.featured.play", "home.featured.my-list", "home.featured.details"]
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        if !heroIDs.contains(focusedElement.identifier) {
+            remote.press(.up)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        XCTAssertTrue(heroIDs.contains(focusedElement.identifier),
+                      "focus never reached the hero, got '\(focusedElement.identifier)'")
         var page = 0
         while !playing.waitForExistence(timeout: 20), page < 10 {
             // Right past the last button turns the page (`AppleTVHeroPaging`).
@@ -1520,7 +1531,9 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         for _ in 0..<4 where !details.hasFocus { remote.press(.right); Thread.sleep(forTimeInterval: 0.6) }
         guard details.hasFocus else { return XCTFail("the hero's Details never took focus") }
         remote.press(.select)
-        let trailer = element("detail.serverTrailer")
+        // The row's `detail.icon-row` identifier replaces its buttons' own.
+        let trailer = app.buttons.matching(NSPredicate(
+            format: "identifier == 'detail.icon-row' AND label == 'Play Trailer'")).firstMatch
         XCTAssertTrue(wait(for: trailer, 30), "the title page offered no Trailer button")
         for _ in 0..<4 where !trailer.hasFocus { remote.press(.right); Thread.sleep(forTimeInterval: 0.6) }
         attachScreen("server-trailer-devtv-title-page")

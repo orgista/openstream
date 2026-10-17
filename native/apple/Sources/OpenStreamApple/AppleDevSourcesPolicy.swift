@@ -92,6 +92,8 @@ struct AppleDevSourcesFile: Equatable, Sendable {
 /// carries a secret.
 enum AppleDevSourcesPolicy {
     static let launchKey = "OpenStreamDevSources"
+    /// `-OpenStreamDevSourcesRemove YES`: delete the file's sources instead of adding them.
+    static let removeKey = "OpenStreamDevSourcesRemove"
     static let supportedVersion = 1
     static let tracePrefix = "dev sources:"
 
@@ -126,28 +128,33 @@ enum AppleDevSourcesPolicy {
 
     /// Same kind and same address as a source that is already saved.
     static func alreadyAdded(_ source: AppleDevSource, in existing: [AppleSource]) -> Bool {
+        saved(source, in: existing) != nil
+    }
+
+    /// The saved source with the same kind and address, which a remove run deletes.
+    static func saved(_ source: AppleDevSource, in existing: [AppleSource]) -> AppleSource? {
         switch source {
         case .stremio(_, let manifestURL):
-            guard let url = try? AppleManifestURLPolicy.normalize(manifestURL) else { return false }
-            return existing.contains { $0.isAddon && $0.url == url }
+            guard let url = try? AppleManifestURLPolicy.normalize(manifestURL) else { return nil }
+            return existing.first { $0.isAddon && $0.url == url }
         case .xtream(_, let serverURL, _, _, _):
             return existingIPTV(.xtream, endpoint: serverURL, in: existing)
         case .m3u(_, let playlistURL, _):
             return existingIPTV(.m3u, endpoint: playlistURL, in: existing)
         case .smb(_, let host, let port, let share, let path, _, _, _):
             guard let url = try? AppleSMBEndpointPolicy.makeURL(host: host, port: port, share: share, path: path) else {
-                return false
+                return nil
             }
-            return existing.contains { $0.kind == .nas && $0.url == url }
+            return existing.first { $0.kind == .nas && $0.url == url }
         case .mediaServer(let kind, _, let urlText, _):
-            guard let url = AppleMediaServerFormPolicy.normalizedBaseURL(urlText) else { return false }
-            return existing.contains {
+            guard let url = AppleMediaServerFormPolicy.normalizedBaseURL(urlText) else { return nil }
+            return existing.first {
                 $0.kind == .mediaServer && $0.serverKind == kind
                     && $0.url.host?.lowercased() == url.host?.lowercased() && $0.url.port == url.port
             }
         case .folder(_, let path):
             let url = URL(fileURLWithPath: path).standardizedFileURL
-            return existing.contains { $0.kind == .library && $0.url.standardizedFileURL == url }
+            return existing.first { $0.kind == .library && $0.url.standardizedFileURL == url }
         }
     }
 
@@ -256,9 +263,9 @@ enum AppleDevSourcesPolicy {
                                     qualityProfileID: string(object["qualityProfileID"]))
     }
 
-    private static func existingIPTV(_ type: AppleIPTVSourceType, endpoint: String, in existing: [AppleSource]) -> Bool {
-        guard let url = try? AppleIPTVEndpointPolicy.normalize(endpoint) else { return false }
-        return existing.contains { $0.kind == .liveTV && $0.iptvType == type && $0.url == url }
+    private static func existingIPTV(_ type: AppleIPTVSourceType, endpoint: String, in existing: [AppleSource]) -> AppleSource? {
+        guard let url = try? AppleIPTVEndpointPolicy.normalize(endpoint) else { return nil }
+        return existing.first { $0.kind == .liveTV && $0.iptvType == type && $0.url == url }
     }
 
     /// Strings are trimmed; a number (the Python script can write a port or

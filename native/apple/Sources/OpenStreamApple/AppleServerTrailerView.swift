@@ -27,6 +27,7 @@ final class AppleServerTrailerPlayback {
         let item = AVPlayerItem(url: trailer.url)
         let player = AVPlayer(playerItem: item)
         player.isMuted = muted || AppleTestAudioMute.isActive
+        appleTrace("server trailer start \(muted ? "muted" : "with sound")\(AppleTestAudioMute.isActive ? " (test mute on)" : "")")
         #if !os(visionOS)
         player.preventsDisplaySleepDuringVideoPlayback = false
         #endif

@@ -1,10 +1,13 @@
 #if DEBUG && OPENSTREAM_ADDONS
 import Foundation
 
-/// `-OpenStreamDevSources <absolute path>`: adds every source in the owner's
+/// `-OpenStreamDevSources <path>`: adds every source in the owner's
 /// private dev-sources file through the same store calls the add screens use,
 /// and applies its service keys. Debug builds only; `scripts/seed-sim.sh`
 /// copies the file into the simulator app's container and passes its path.
+/// A relative path is read from the app's home, for a device where the file
+/// is copied in with `devicectl device copy to`. With
+/// `-OpenStreamDevSourcesRemove YES` the file's sources are removed instead.
 ///
 /// The file is read and deleted in `App.init`, before
 /// `-OpenStreamResetOnLaunch` empties the container, and imported once the
@@ -14,6 +17,7 @@ import Foundation
 public enum AppleDevSourcesImport {
     private static var pendingData: Data?
     private static var pendingReadFailure: String?
+    private static var removes = false
 
     /// A dev-sources file was handed over at launch and not yet imported.
     public static var isPending: Bool { pendingData != nil || pendingReadFailure != nil }
@@ -30,7 +34,8 @@ public enum AppleDevSourcesImport {
             }
             return
         }
-        let url = URL(fileURLWithPath: path)
+        removes = defaults.bool(forKey: AppleDevSourcesPolicy.removeKey)
+        let url = URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
         do {
             pendingData = try Data(contentsOf: url)
         } catch {
@@ -58,6 +63,14 @@ public enum AppleDevSourcesImport {
         }
         for problem in file.problems { appleTrace("\(AppleDevSourcesPolicy.tracePrefix) skipped \(problem)") }
         for kind in file.ignoredKinds { appleTrace("\(AppleDevSourcesPolicy.tracePrefix) ignored unknown kind \(kind)") }
+        if removes {
+            for source in file.sources {
+                let saved = AppleDevSourcesPolicy.saved(source, in: sourceStore.sources)
+                let removed = saved.map { sourceStore.remove(id: $0.id) } ?? false
+                appleTrace("\(AppleDevSourcesPolicy.tracePrefix) \(source.name): \(removed ? "removed" : "not saved")")
+            }
+            return
+        }
 
         var added = 0, exists = 0, failed = 0
         for source in file.sources {
