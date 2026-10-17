@@ -104,7 +104,7 @@ actor AppleLibraryMetadataResolver {
             let date = dates[key] ?? (item.addedAt == .distantPast ? now : item.addedAt)
             dates[key] = date
             return AppleLibraryItem(sourceID: item.sourceID, name: item.name, url: item.url,
-                relativePath: item.relativePath, sizeBytes: item.sizeBytes, addedAt: date)
+                relativePath: item.relativePath, sizeBytes: item.sizeBytes, addedAt: date, modifiedAt: item.modifiedAt)
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONEncoder().encode(dates).write(to: file, options: .atomic)

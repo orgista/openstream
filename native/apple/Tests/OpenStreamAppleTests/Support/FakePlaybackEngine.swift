@@ -32,6 +32,7 @@ final class FakePlaybackEngine: ApplePlaybackEngine {
     var activeSubtitleTrackID: Int?
     var activeAudioTrackID: Int?
     var failure: ApplePlaybackFailure? = nil
+    var startupCheckpoint = 0
     var avPlayer: AVPlayer? { nil }
     /// The real seekable span the transport reads for every live decision.
     /// Scripted here because no AVPlayer exists in a unit test.

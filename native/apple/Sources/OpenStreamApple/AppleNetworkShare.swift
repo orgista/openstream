@@ -784,7 +784,8 @@ struct AppleSMBNetworkLibraryScanner: Sendable {
                 name: entry.name,
                 url: url,
                 relativePath: entry.path,
-                sizeBytes: entry.sizeBytes
+                sizeBytes: entry.sizeBytes,
+                modifiedAt: entry.modifiedAt
             )
         }
         try Task.checkCancellation()
