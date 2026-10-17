@@ -4,8 +4,8 @@ import SwiftUI
 /// Holds the iPhone portrait hero's page and its cycle: the page changes when
 /// its dot has filled, a horizontal swipe moves a page either way, a dot jumps
 /// straight to its page, and the timer holds while a finger is on the hero or
-/// its trailer is playing (`AppleHeroRotation.cycleIsPaused`); on the iPhone
-/// it moves on a second after the trailer ends.
+/// its trailer is playing (`AppleHeroRotation.cycleIsPaused`); it moves on a
+/// second after the trailer ends.
 /// With Reduce Motion the pages cross-fade instead of sliding.
 struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// One id per page, in order.
@@ -13,16 +13,15 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// The bottom of the art to the centre of the page dots. The iPad's
     /// full-bleed hero (N20) sets its own.
     var dotsCentreInset: CGFloat = AppleHomePhoneHeroLayout.dotsCentreInset
-    /// The iPhone: a page whose trailer has played to its end moves on a
-    /// second later (`AppleHeroRotation.afterVideoDelay`) instead of after
-    /// what was left of its interval. The iPad keeps the remainder.
-    var advancesAfterVideoEnds = false
+    /// Loads the trailer of the page after the one showing.
+    var prefetchTrailer: (Int) async -> Void = { _ in }
     @ViewBuilder let page: (Int) -> Page
     /// Draws a page's art invisibly, so the next page is already decoded when
     /// it slides in rather than arriving as a bare surface under its copy.
     @ViewBuilder let preload: (Int) -> Preload
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appleHeroesSettled) private var heroesSettled
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isTouching = false
     @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
@@ -56,9 +55,9 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             }
             .simultaneousGesture(swipe)
             .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
-                let ended = advancesAfterVideoEnds && state.lastEnd != nil && state.lastEnd != trailer.lastEnd
+                let event = state.cycleEvent(after: trailer)
                 trailer = state
-                if ended { cycle.videoEnded(at: .now) }
+                if let event { cycle.handle(event, at: .now) }
             }
 
             if cycle.count > 1 {
@@ -77,6 +76,11 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             holdOrRun()
         }
         .onChange(of: isPaused) { holdOrRun() }
+        // Keyed on the settled list too: a provisional launch page prefetches nothing.
+        .task(id: heroesSettled ? cycle.pages(available: pageIDs.count)?.next : nil) {
+            guard heroesSettled, let next = cycle.pages(available: pageIDs.count)?.next else { return }
+            await prefetchTrailer(next)
+        }
         .task(id: cycle) {
             // Restarted by every change to the cycle, so this only ever waits
             // for the page that is showing.

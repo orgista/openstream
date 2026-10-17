@@ -8,9 +8,11 @@ import Foundation
 /// rather than held in state, so both screens agree, nothing has to be
 /// invalidated to advance it, and the behaviour is testable without a view.
 public enum AppleHeroRotation: Sendable {
-    /// Long enough to read the copy and press Play, short enough that a second
-    /// title is reachable without leaving the screen.
-    public static let interval: TimeInterval = 12
+    /// How long a page shows its still. The Apple TV app's image-only dwell is
+    /// 5 s (`advanceToNextPageDelayDurationImageOnly`); 12 s with five pages
+    /// felt stalled (REA round 3, 2026-10-17). A page whose trailer plays holds
+    /// the timer and moves on `afterVideoDelay` after it ends.
+    public static let interval: TimeInterval = 6
 
     /// A billboard loads full-bleed artwork, so the rotation stays short: five
     /// titles cover the recommendations without cycling the network.

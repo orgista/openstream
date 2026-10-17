@@ -1,11 +1,12 @@
 import CoreGraphics
 import Foundation
 
-/// The iPhone title page's header art: a 16:9 slot the trailer crossfades
-/// over (Mythos §5). Known catalog art draws immediately; better metadata
-/// can replace it after decoding, while the previous image stays visible.
+/// The iPhone title page's header art, full bleed under the approved fade,
+/// which the trailer crossfades over. Known catalog art draws immediately;
+/// better metadata can replace it after decoding, while the previous image
+/// stays visible.
 public enum AppleTitlePageSlotArt: Equatable, Sendable {
-    /// Fills the 16:9 slot exactly.
+    /// Fills the header.
     case backdrop(URL)
     /// No backdrop anywhere: the poster as a card on a blurred copy of itself.
     case posterCard(URL)
@@ -59,7 +60,7 @@ public enum AppleTitlePageSlotArt: Equatable, Sendable {
         return false
     }
 
-    /// The slot's height: 16:9 of the width.
+    /// 16:9 of the width: the size of a poster card's frame.
     public static func slotHeight(width: CGFloat) -> CGFloat {
         max(0, (width * 9 / 16).rounded())
     }

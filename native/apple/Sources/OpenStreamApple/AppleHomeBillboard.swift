@@ -518,6 +518,7 @@ private struct AppleHomeHeroPreview: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appleHeroIsCovered) private var isCovered
+    @Environment(\.appleHeroesSettled) private var heroesSettled
     @State private var isVisible = false
     @State private var isPresented = false
     @State private var embedURL: URL?
@@ -532,9 +533,16 @@ private struct AppleHomeHeroPreview: View {
     /// The art frame the still fills, which the 16:9 web view overhangs.
     @State private var artFrameSize: CGSize?
     @State private var isMuted = true
-    /// The viewer turned the sound on with the trailer's control: the
-    /// muted-only rule is lifted and the next hero starts with sound.
-    @State private var soundUnlocked = false
+    /// The viewer's remembered choice is sound on (`AppleTrailerSoundMemory`):
+    /// the muted-only rule is lifted and autoplay starts with sound.
+    @State private var soundUnlocked = AppleTrailerSoundMemory.soundOn() == true
+    /// When this page appeared: the trailer's start delay runs from here.
+    @State private var pageShownAt = Date.now
+    /// The player has reported playing since the trailer was asked for.
+    @State private var playerStarted = false
+    /// New each time this trailer fails or misses its startup timeout
+    /// (`AppleHomeHeroTrailerStateKey.lastFailure`).
+    @State private var lastFailure: UUID?
     @State private var replayGeneration = 0
     /// New each time the trailer plays to its end (`AppleHomeHeroTrailerStateKey.lastEnd`).
     @State private var lastEnd: UUID?
@@ -574,7 +582,7 @@ private struct AppleHomeHeroPreview: View {
             autoPlaySetting: settings.autoPlayTrailer, reduceMotion: reduceMotion, lowPower: lowPowerMode,
             systemVideoAutoplay: systemVideoAutoplay, sceneIsActive: scenePhase == .active, halfVisible: isVisible,
             isPresented: isPresented, isCovered: isCovered, windowIsVisible: windowIsVisible,
-            art: art, pressed: trailerRequest != nil))
+            art: art, heroesSettled: heroesSettled, pressed: trailerRequest != nil))
     }
 
     /// The iPhone and iPad hero holds its art until the trailer's crop is
@@ -651,7 +659,10 @@ private struct AppleHomeHeroPreview: View {
                     .transition(.opacity)
                 // Nothing is added over the art until the video is up.
                 if isPlaying, isRevealed, let muteTopInset {
-                    AppleMacHeroMuteButton(isMuted: isMuted) { isMuted.toggle() }
+                    AppleMacHeroMuteButton(isMuted: isMuted) {
+                        isMuted.toggle()
+                        AppleTrailerSoundMemory.remember(soundOn: !isMuted)
+                    }
                         .padding(.top, muteTopInset)
                         .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -665,6 +676,7 @@ private struct AppleHomeHeroPreview: View {
         }
         .onAppear {
             isPresented = true
+            pageShownAt = .now
             #if DEBUG && os(iOS)
             AppleHeroTrailerProbeIOS.applyDebugOrientation()
             #endif
@@ -674,8 +686,9 @@ private struct AppleHomeHeroPreview: View {
         .preference(key: AppleHomeHeroTrailerStateKey.self,
                     value: .init(isPlaying: shouldPreview && isPlaying,
                                  isOnScreen: shouldPreview && isPlaying && isRevealed, isMuted: isMuted,
-                                 isRequested: trailerRequest != nil, lastEnd: lastEnd))
+                                 isRequested: trailerRequest != nil, lastEnd: lastEnd, lastFailure: lastFailure))
         .onChange(of: settings.autoMuteTrailer) { _, muted in isMuted = muted }
+        .onChange(of: item.id) { pageShownAt = .now }
         .onChange(of: portraitCover, initial: true) { _, cover in liveCover = cover }
         // The frame changed under a playing trailer: draw its cover again.
         .task(id: liveCover) {
@@ -692,15 +705,36 @@ private struct AppleHomeHeroPreview: View {
               priority: .low) {
             await startPreview()
         }
+        // A trailer that plays by itself and has not started playing within
+        // the timeout counts as failed: the still stays and the page gets a
+        // fresh dwell. A pressed one has its own 30 s give-up.
+        .task(id: "\(embedURL?.absoluteString ?? ""):\(playerStarted)") {
+            guard embedURL != nil, !playerStarted, trailerRequest == nil else { return }
+            do { try await Task.sleep(for: .seconds(AppleTrailerStartPolicy.homeStartupTimeout)) } catch { return }
+            guard embedURL != nil, !playerStarted else { return }
+            appleTrace("hero trailer startup timed out: back to the art (\(item.name))")
+            lastFailure = UUID()
+            withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
+                stop()
+            }
+        }
+    }
+
+    /// Waits out what is left of the still's delay before an autoplaying
+    /// trailer goes in; a pressed one goes in at once. False when cancelled.
+    private func waitForStartDelay() async -> Bool {
+        guard trailerRequest == nil else { return true }
+        let remaining = AppleTrailerStartPolicy.remainingDelay(on: AppleTrailerStartPolicy.current,
+                                                               pageShownAt: pageShownAt, now: .now)
+        guard remaining > 0 else { return true }
+        do { try await Task.sleep(for: .seconds(remaining)) } catch { return false }
+        return true
     }
 
     private func startPreview() async {
         stop()
         guard shouldPreview else { return }
         #if os(macOS)
-        if trailerRequest == nil {
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
-        }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
             preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
@@ -714,20 +748,19 @@ private struct AppleHomeHeroPreview: View {
             * Double(displayScale)
             * Double(AppleMacYouTubeHeroPreview.layoutScale(displayScale: displayScale))
         let quality = AppleTrailerPreviewPolicy.quality(forPixelHeight: pixelHeight)
-        guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality) else { return }
+        guard let url = AppleTrailerPreviewPolicy.embedURL(for: key, quality: quality),
+              await waitForStartDelay(), shouldPreview else { return }
         trailerKeys = keys
         trailerKeyIndex = 0
         trailerQuality = quality
-        // Always starts muted, as it does on the iPhone; the round button
-        // top-right turns the sound on (the Mac has no audio session to lose).
-        isMuted = trailerRequest == nil
+        // Autoplay starts muted unless the viewer chose sound before; the
+        // round button top-right toggles it (the Mac has no audio session to lose).
+        isMuted = trailerRequest == nil && AppleTrailerSoundMemory.autoplayStartsMuted()
         appleTrace("mac hero trailer start \(item.name) frame=\(Int(pixelHeight))px vq=\(quality)")
+        playerStarted = false
         embedURL = url
         isPlaying = true
         #else
-        if trailerRequest == nil {
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
-        }
         let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
             preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
@@ -735,16 +768,18 @@ private struct AppleHomeHeroPreview: View {
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
         // The cover is drawn only now, with a video to play (Fable review 2026-10-14).
         await renderCover()
-        guard !Task.isCancelled, shouldPreview else { return }
+        guard !Task.isCancelled, shouldPreview, await waitForStartDelay(), shouldPreview else { return }
         trailerKeys = keys
         trailerKeyIndex = 0
         trailerQuality = nil
-        // Autoplay starts muted (owner 2026-10-09) unless the viewer has
-        // already turned the sound on; the control over the video unmutes.
+        // Autoplay starts muted (owner 2026-10-09) unless the viewer's
+        // remembered choice is sound on; the control over the video toggles it.
+        soundUnlocked = AppleTrailerSoundMemory.soundOn() == true
         isMuted = trailerRequest == nil && !soundUnlocked
         guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: trailerRequest != nil) else { return }
         if trailerRequest != nil { appleTrace("trailer unmuted (explicit press)") }
         appleTrace("hero trailer start \(item.name)")
+        playerStarted = false
         embedURL = url
         isPlaying = true
         #endif
@@ -763,8 +798,9 @@ private struct AppleHomeHeroPreview: View {
     private func toggleSound() {
         let next = AppleTrailerSoundBridge.tapped(isMuted: isMuted, allowsSound: trailerRequest != nil || soundUnlocked)
         if !next.isMuted, !ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true) { return }
-        // Sound on carries to the next hero this visit; muting again ends it.
+        // Remembered for every trailer after this one, across launches.
         soundUnlocked = !next.isMuted
+        AppleTrailerSoundMemory.remember(soundOn: !next.isMuted)
         isMuted = next.isMuted
         appleTrace("hero trailer sound \(next.isMuted ? "off" : "on") (sound control)")
     }
@@ -781,6 +817,7 @@ private struct AppleHomeHeroPreview: View {
 
     private func handleState(_ state: String, muted: Bool, errorCode: Int?) {
         isMuted = muted
+        if state == "playing" || state == "revealed" { playerStarted = true }
         if state == "error", playNextTrailerKey(errorCode: errorCode) { return }
         if let change = AppleTrailerArtFirstPolicy.videoLayerChange(forPlayerState: state) {
             isRevealed = change == .reveal
@@ -792,6 +829,8 @@ private struct AppleHomeHeroPreview: View {
             if state == "ended" {
                 appleTrace("hero trailer ended: back to the art (\(item.name))")
                 lastEnd = UUID()
+            } else {
+                lastFailure = UUID()
             }
             withAnimation(.easeInOut(duration: AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: reduceMotion))) {
                 stop()
@@ -816,6 +855,7 @@ private struct AppleHomeHeroPreview: View {
         if isRevealed { onTrailerOnScreen(false) }
         isRevealed = false
         trailerKeyIndex = next
+        playerStarted = false
         embedURL = url
         isPlaying = true
         return true

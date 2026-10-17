@@ -77,7 +77,7 @@ struct AppleHeroMixPolicyTests {
     @Test func artworkGateAndArtlessFallback() {
         #expect(ids([candidate("noArt", resume: 0, art: false), candidate("art")]) == ["art"])
         #expect(ids([candidate("noArt", art: false)]) == ["noArt"])
-        #expect(AppleHeroRotation.interval == 12)
+        #expect(AppleHeroRotation.interval == 6)
     }
 
     @Test func sectionsAreGatheredRoundRobin() {

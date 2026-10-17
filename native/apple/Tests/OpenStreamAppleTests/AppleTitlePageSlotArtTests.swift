@@ -54,11 +54,6 @@ import Testing
         #expect(AppleTitlePageSlotArt.slotHeight(width: 375) == 211)
     }
 
-    @Test func theTrailerFillsAnExactSlotWithNoZoom() {
-        let size = CGSize(width: 430, height: 242)
-        #expect(AppleTrailerPreviewLayout.slotFrame(in: size) == CGRect(origin: .zero, size: size))
-    }
-
     @Test func thePausedControlIsCentredAndTheSoundControlSitsBottomRight() {
         let visible = CGRect(x: 0, y: 0, width: 430, height: 242)
         let paused = AppleTrailerPreviewLayout.controlFrame(in: visible, paused: true, topInset: nil)

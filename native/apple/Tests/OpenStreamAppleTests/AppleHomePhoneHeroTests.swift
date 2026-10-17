@@ -11,7 +11,7 @@ struct AppleHeroRotationCycleTests {
     private let start = Date(timeIntervalSinceReferenceDate: 1_000)
 
     @Test func slowArtGetsTwelveSecondsAfterPresentation() {
-        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        var cycle = AppleHeroRotation.Cycle(count: 3, interval: 12, now: start)
         cycle.step(by: 1, at: start.addingTimeInterval(12))
         cycle.waitForPresentation()
         #expect(cycle.dueDate == nil)
@@ -27,7 +27,7 @@ struct AppleHeroRotationCycleTests {
     }
 
     @Test func manualPagingWhileLoadingKeepsShownIndicatorAndFocusPause() {
-        var cycle = AppleHeroRotation.Cycle(count: 4, now: start)
+        var cycle = AppleHeroRotation.Cycle(count: 4, interval: 12, now: start)
         cycle.pause(at: start)
         cycle.step(by: 1, at: start)
         cycle.waitForPresentation()
@@ -44,7 +44,7 @@ struct AppleHeroRotationCycleTests {
     }
 
     @Test func repeatedReadyNotificationsDoNotRestartVisibleDwell() {
-        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        var cycle = AppleHeroRotation.Cycle(count: 3, interval: 12, now: start)
         cycle.waitForPresentation()
         cycle.didPresent(at: start.addingTimeInterval(10))
         cycle.didPresent(at: start.addingTimeInterval(15))
@@ -56,7 +56,7 @@ struct AppleHeroRotationCycleTests {
     }
 
     @Test func initialArtAndVisibilityPauseDoNotConsumeDwell() {
-        var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
+        var cycle = AppleHeroRotation.Cycle(count: 3, interval: 12, now: start)
         cycle.waitForPresentation()
         cycle.pause(at: start.addingTimeInterval(2))
         cycle.resume(at: start.addingTimeInterval(30))
@@ -73,7 +73,7 @@ struct AppleHeroRotationCycleTests {
         #expect(cycle.dueDate == start.addingTimeInterval(12))
     }
 
-    @Test func itAdvancesWhenDueAndStopsAtTheLastPage() {
+    @Test func itAdvancesWhenDueAndWrapsFromTheLastPage() {
         var cycle = AppleHeroRotation.Cycle(count: 2, interval: 12, now: start)
         let early = cycle.advanceIfDue(at: start.addingTimeInterval(11))
         #expect(!early)
@@ -81,10 +81,10 @@ struct AppleHeroRotationCycleTests {
         #expect(due)
         #expect(cycle.index == 1)
         #expect(cycle.progress(at: start.addingTimeInterval(12)) == 0)
+        #expect(cycle.dueDate == start.addingTimeInterval(24))
         let wrapped = cycle.advanceIfDue(at: start.addingTimeInterval(24))
-        #expect(!wrapped)
-        #expect(cycle.index == 1)
-        #expect(cycle.dueDate == nil)
+        #expect(wrapped)
+        #expect(cycle.index == 0)
     }
 
     @Test func pausingHoldsTheFillAndResumingCarriesOn() {

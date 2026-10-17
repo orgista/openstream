@@ -119,6 +119,7 @@ private struct AppleHeroPagePreload: View {
 
     @State private var backdropSettled = false
     @State private var wordmarkResult: Bool?
+    @State private var reported = false
 
     var body: some View {
         ZStack {
@@ -136,10 +137,18 @@ private struct AppleHeroPagePreload: View {
                 .frame(width: wordmarkSize.width, height: wordmarkSize.height)
             }
         }
+        .task {
+            try? await Task.sleep(for: AppleHeroPageSwap.artTimeout)
+            guard !Task.isCancelled, !reported else { return }
+            appleTrace("hero page art timed out: \(page.id)")
+            reported = true
+            onReady(AppleHeroPageSwap.wordmarkFailedAtTimeout(hasWordmark: page.wordmark != nil, result: wordmarkResult))
+        }
     }
 
     private func reportIfSettled() {
-        guard backdropSettled, page.wordmark == nil || wordmarkResult != nil else { return }
+        guard !reported, backdropSettled, page.wordmark == nil || wordmarkResult != nil else { return }
+        reported = true
         onReady(wordmarkResult == false)
     }
 }

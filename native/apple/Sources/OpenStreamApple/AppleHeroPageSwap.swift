@@ -22,6 +22,18 @@ public enum AppleHeroPageSwap: Sendable {
         return isReady(requested) ? requested : shown
     }
 
+    /// How long a page's art may take to report loaded or failed before it
+    /// counts as settled anyway: the page shows its placeholder and the cycle
+    /// keeps paging, as the Apple TV app's does. Art that never answered (an
+    /// image waiting on a size that never came) held the timer for good.
+    public static let artTimeout: Duration = .seconds(8)
+
+    /// Whether a page's wordmark failed, once the art timeout has passed: one
+    /// that never answered counts as failed, so the page draws the name.
+    public static func wordmarkFailedAtTimeout(hasWordmark: Bool, result: Bool?) -> Bool {
+        hasWordmark && result != true
+    }
+
     /// The pages whose art to fetch ahead: the one requested and the one after
     /// it, so the next change is usually ready when its tick arrives and the
     /// swap lands on time.

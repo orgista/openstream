@@ -37,9 +37,10 @@ extension AppleHeroRotation {
         }
 
         /// When the page changes on its own, or nil when it will not (paused, or
-        /// nothing to move to).
+        /// nothing to move to). The last page wraps to the first, as build 15
+        /// did (owner, 2026-10-17: "the hero cycle is gone").
         public var dueDate: Date? {
-            guard !awaitsPresentation, count > 1, index < count - 1, interval > 0, let runningSince else { return nil }
+            guard !awaitsPresentation, count > 1, interval > 0, let runningSince else { return nil }
             return runningSince.addingTimeInterval(max(interval - elapsedBeforeRun, 0))
         }
 
@@ -85,6 +86,14 @@ extension AppleHeroRotation {
             if runningSince != nil { runningSince = now }
         }
 
+        /// The page's trailer failed or never started: its still gets a full
+        /// dwell from now, as if the page had just appeared.
+        public mutating func videoFailed(at now: Date) {
+            guard !awaitsPresentation else { return }
+            elapsedBeforeRun = 0
+            if runningSince != nil { runningSince = now }
+        }
+
         /// Shows `target` (wrapping) with a fresh timer, keeping the paused or
         /// running state as it was.
         public mutating func show(_ target: Int, at now: Date) {
@@ -115,6 +124,14 @@ extension AppleHeroRotation {
             return (index, next == index ? nil : next)
         }
 
+        /// Applies what the page's trailer just did.
+        public mutating func handle(_ event: VideoEvent, at now: Date) {
+            switch event {
+            case .ended: videoEnded(at: now)
+            case .failed: videoFailed(at: now)
+            }
+        }
+
         /// Moves to the next page when its timer has run out. True when it moved.
         @discardableResult
         public mutating func advanceIfDue(at now: Date) -> Bool {
@@ -127,7 +144,7 @@ extension AppleHeroRotation {
         /// grown by half a device pixel, and never faster than 30 Hz. The Mac,
         /// iPhone and iPad dots all tick by this.
         ///
-        /// The Mac's 22 pt fill crosses 44 pixels in 12 s, so a 30 Hz timeline
+        /// The Mac's 22 pt fill crosses 44 pixels over a 12 s interval, so a 30 Hz timeline
         /// redrew it 360 times to move it 44 pixels — and on the Mac every
         /// tick lays out and renders the whole window (~6 ms of main thread,
         /// a fifth of a core while Discover sits idle, N34 trace). Half-pixel
@@ -142,18 +159,23 @@ extension AppleHeroRotation {
         static let slowestFillTick: TimeInterval = 0.5
     }
 
-    /// Whether a hero's timer holds still: while a finger (or the pointer) is
-    /// on the hero, and while its trailer plays — muted or not. The page moves
-    /// on only once the trailer ends (the player reports "ended"/"paused" and
-    /// `isPlaying` drops), then after what is left of its art interval (owner,
-    /// 2026-09-24: "the trailer loads and it cycles too fast … give it more
-    /// time, depending how long the trailer is"). Mute and Play Trailer no
-    /// longer change this; the parameters stay for the callers. It also
-    /// holds while nobody can see the hero (`heroIsVisible`), so the page is
-    /// where it was when the viewer comes back.
-    /// How long after a hero's trailer ends the iPhone hero moves on.
+    /// A hero trailer's end or failure, as the cycle sees it.
+    public enum VideoEvent: Equatable, Sendable {
+        case ended, failed
+    }
+
+    /// How long after a hero's trailer ends the page moves on, on every
+    /// platform (the Apple TV app's `advanceToNextPageDelayDuration`).
     public static let afterVideoDelay: TimeInterval = 1
 
+    /// Whether a hero's timer holds still: while a finger (or the pointer) is
+    /// on the hero, and while its trailer plays — muted or not. The page moves
+    /// on `afterVideoDelay` after the trailer ends (owner, 2026-09-24: "the
+    /// trailer loads and it cycles too fast … give it more time, depending how
+    /// long the trailer is"). Mute and Play Trailer no longer change this; the
+    /// parameters stay for the callers. It also holds while nobody can see the
+    /// hero (`heroIsVisible`), so the page is where it was when the viewer
+    /// comes back.
     public static func cycleIsPaused(isTouching: Bool, trailerIsPlaying: Bool, trailerIsMuted _: Bool,
                                      trailerWasRequested _: Bool = false, isHidden: Bool = false) -> Bool {
         isHidden || isTouching || trailerIsPlaying
