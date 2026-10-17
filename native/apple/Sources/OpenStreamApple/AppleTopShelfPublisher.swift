@@ -30,6 +30,7 @@ public final class AppleTopShelfPublisher {
         records: [AppleMediaRecord],
         sections: [AppleCatalogSection],
         sources: [AppleSource],
+        heroes: [AppleTopShelfHero] = [],
         enabled: Bool,
         playbackStore: ApplePlaybackStore = ApplePlaybackStore()
     ) async {
@@ -57,6 +58,8 @@ public final class AppleTopShelfPublisher {
         let digest = Self.digest(records: records, sections: sections, sources: sources,
                                  savedProgress: savedProgress, enabled: enabled)
             + "|activity:\(ApplePlaybackProgressFeed.shared.revision)|successors:\(successorAvailable.sorted())|removed:\(removals.keys.sorted())"
+            + "|heroes:" + heroes.map { "\($0.item.id)#\($0.backdropURL?.absoluteString ?? "")#\($0.wordmarkURL?.absoluteString ?? "")" }
+                .joined(separator: ",")
         let live = AppleLiveSystemChannels.shared
         let sourceIDs = Set(sources.filter { $0.kind == .liveTV && $0.isEnabled }.map(\.id))
         let favorites = AppleLiveSystemChannels.supported(live.favorites, sourceIDs: sourceIDs)
@@ -69,9 +72,11 @@ public final class AppleTopShelfPublisher {
             try await writer.write(records: records, sections: sections, sources: sources,
                                    watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
                                    successorAvailable: successorAvailable, removedAt: removals,
-                                   favoriteChannels: favorites, recentChannels: recents, enabled: enabled)
+                                   favoriteChannels: favorites, recentChannels: recents, heroes: heroes, enabled: enabled)
             // Only a completed write/removal may suppress the next identical publish.
             lastDigest = combinedDigest
+        } catch is CancellationError {
+            // A newer publish replaced this one.
         } catch {
             let failure: String
             if error is AppleTopShelfSnapshotWriter.WriteError {

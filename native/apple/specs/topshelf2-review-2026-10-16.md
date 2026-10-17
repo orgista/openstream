@@ -1,0 +1,18 @@
+**Verdict: FIX** (small; the feature itself is sound and matches the spec).
+
+1. `Sources/OpenStreamApple/AppleDiscoverView.swift:296` — the hero feed `.onChange` hangs on `AppleHomeHeroCarousel`, which only exists inside `if !heroes.isEmpty` (line 257). When the hero list empties (last source removed or disabled) nothing calls `update([])`, so the Top Shelf keeps publishing removed titles until relaunch. Fix: move the `#if os(tvOS) .onChange(of: topShelfHeroes(heroes), initial: true) { … }` onto the enclosing container that is always in the tree (the view wrapping the hero block and rails), so an empty list also reaches `AppleTopShelfHeroFeed.shared`.
+
+2. `Apps/OpenStreamTVUITests/AppleTVTopShelfUITests.swift:93-103` — fixed `Thread.sleep(5)` after `.up` and `Thread.sleep(4)` after `.right`, where the condition is observable in snapshots. Fix: add `private func waitForHomeScreen(_ matches: ([String]) -> Bool, timeout: TimeInterval = 8) -> [String]` that loops `homeScreenTexts()` every 0.5 s until `matches` or timeout, and use it: `let fullScreen = waitForHomeScreen { !$0.contains("top-shelf/swipe-up-affordance/label") }` and `let nextPage = waitForHomeScreen { $0.contains { $0.hasPrefix("page ") } }`. Keep the two existing Home sleeps (no element to wait on there).
+
+3. `Sources/OpenStreamApple/AppleTopShelfArtwork.swift:14,53` and `AppleTopShelfSnapshot.swift:142,159` — `public` on `AppleTopShelfArtworkLayout.canvas`, `fileName(backdrop:wordmark:)`, `AppleTopShelfTrailerPolicy` and its `previewVideoURL`, and `AppleTopShelfHero.init`: nothing outside the module uses them and the tests are `@testable`. Fix: drop `public` on those (the `AppleTopShelfArtworkStore` type and `AppleTopShelfSnapshotWriter.defaultArtwork` must stay public because they sit in a public init signature).
+
+Checked and fine:
+- Data safety: the only deletes are inside the app's own `Library/Caches/topshelf-art` (`removeAll(in:except:)` and the disabled path at `AppleTopShelfSnapshot.swift:453`). Manual corrections and other app-group files are untouched. Hero backdrop and wordmark URLs reach the file name only as a SHA256 hash and the in-memory digest. The snapshot still passes every URL through `publicURL`, and the extension re-checks https and a bare `.jpg` name before touching a file (`TopShelfProvider.swift:143`).
+- Main thread: drawing and fetching run on the `AppleTopShelfSnapshotWriter` actor with at most 3 concurrent decodes. `topShelfHeroes(heroes)` is dictionary lookups per body pass. Existing files are reused without refetch.
+- Cancellation: `checkCancellation` precedes `removeAll`, so a replaced publish never deletes files; `CancellationError` is swallowed only in the publisher and `lastDigest` stays unset.
+- Older snapshots decode (`heroes`, `shelfImage`, `previewVideoURL` all optional or defaulted) in both the app and the extension; the extension mirrors the builder's order and dedupe exactly.
+- iOS, visionOS and macOS: `defaultArtwork` is nil off tvOS, `AppleTopShelfHeroFeed` is defined for every platform and always empty there, so behaviour is unchanged. Report says tvOS Debug, tvOS Release no-add-ons and iOS Debug built with recompile proof, and the serial swift test passed 3452/428.
+- Trailer hook rejects http, query strings, non-file paths and YouTube hosts. Nothing supplies a URL yet, as the spec asked.
+- Test quality: the "Stub Movie" relaxation is gated on `OPENSTREAM_STUB_DIR`, so the simulator run still asserts it; the device run gains the full-screen and paging assertions.
+
+Note for the owner, not a fix: the corner scrim under the wordmark (55% black radial fade) was asked for in the spec but conflicts with the standing "no scrims over artwork" rule. The worker flagged it too. Confirm before shipping.
