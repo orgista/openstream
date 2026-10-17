@@ -38,6 +38,10 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         attach("01-app-running")
 
         // 2. Home, then leftmost, then step right until OpenStream has focus.
+        // A device whose TV button opens the Apple TV app (DevTV) lands there
+        // first; a second press goes on to the home screen, which ignores it.
+        remote.press(.home)
+        Thread.sleep(forTimeInterval: 4)
         remote.press(.home)
         Thread.sleep(forTimeInterval: 4)
         attach("02-home-screen")
@@ -73,26 +77,61 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         // The full-screen carousel (owner 2026-10-15): PineBoard exposes the
         // pages' titles and its own swipe-up affordance, not the context titles.
         let isCarousel = texts.contains("top-shelf/swipe-up-affordance/label")
-        let wanted = ["Stub Movie"] + expected
+        // The stubbed title exists only on the simulator's fixtures; a device
+        // runs its own sources.
+        let stubbed = ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false
+        let wanted = (stubbed ? ["Stub Movie"] : []) + expected
         let hit = wanted.filter { needle in
             texts.contains { $0.localizedCaseInsensitiveContains(needle) }
         }
         print("TOPSHELF carousel: \(isCarousel) matched: \(hit)")
         XCTAssertTrue(isCarousel, "the Top Shelf is not the full-screen carousel")
-        XCTAssertFalse(hit.isEmpty, "the Top Shelf showed none of \(wanted) — it is empty or stale")
+        XCTAssertTrue(wanted.isEmpty || !hit.isEmpty, "the Top Shelf showed none of \(wanted) — it is empty or stale")
+
+        // 4. Swipe up: the carousel takes the whole screen, and Right moves
+        //    to the next page (owner 2026-10-16: "swipe for full screen not working").
+        remote.press(.up)
+        let fullScreen = waitForHomeScreen {
+            // An empty read is a failed snapshot, not a full-screen shelf.
+            !$0.isEmpty && !$0.contains("top-shelf/swipe-up-affordance/label")
+        }
+        attach("04-full-screen")
+        print("TOPSHELF full-screen strings (\(fullScreen.count)): \(fullScreen.joined(separator: " | "))")
+        XCTAssertFalse(fullScreen.isEmpty || fullScreen.contains("top-shelf/swipe-up-affordance/label"),
+                       "Up did not take the shelf full screen")
+        remote.press(.right)
+        let nextPage = waitForHomeScreen { $0.contains { $0.hasPrefix("page ") } }
+        attach("05-next-page")
+        print("TOPSHELF next-page strings: \(nextPage.joined(separator: " | "))")
+        XCTAssertTrue(nextPage.contains { $0.hasPrefix("page ") }, "Right did not page the full-screen carousel")
         // Deliberately no `press(.home)` here: the run ends with the shelf on
         // screen so a `simctl io screenshot` from outside catches the same frame.
     }
 
+    /// From a snapshot: a query on a host with no accessibility server
+    /// (hardware) fails the test, a snapshot only throws.
     private func focusedLabel() -> String? {
         for host in [pineBoard, headBoard] {
-            let focused = host.descendants(matching: .any)
-                .matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            guard focused.exists else { continue }
-            let label = focused.label
-            if !label.isEmpty { return label }
+            guard let snapshot = try? host.snapshot() else { continue }
+            var stack = [snapshot]
+            while let node = stack.popLast() {
+                if node.hasFocus, !node.label.isEmpty { return node.label }
+                stack.append(contentsOf: node.children)
+            }
         }
         return nil
+    }
+
+    /// The home screen's strings once `matches` holds, or the last ones read
+    /// when `timeout` runs out (the caller's assertion then fails on them).
+    private func waitForHomeScreen(_ matches: ([String]) -> Bool, timeout: TimeInterval = 8) -> [String] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var texts = homeScreenTexts()
+        while !matches(texts), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+            texts = homeScreenTexts()
+        }
+        return texts
     }
 
     /// One snapshot of the whole tree per host. Walking `allElementsBoundByIndex`

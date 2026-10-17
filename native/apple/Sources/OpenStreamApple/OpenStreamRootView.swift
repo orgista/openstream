@@ -1070,6 +1070,7 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
             .onChange(of: sourceStore.sources) { schedulePublish() }
             .onChange(of: AppleLiveSystemChannels.shared.revision) { schedulePublish() }
             .onChange(of: settingsStore.topShelfEnabled) { schedulePublish() }
+            .onChange(of: AppleTopShelfHeroFeed.shared.heroes) { schedulePublish() }
         #else
         // macOS. The shared app group container works here now (the
         // entitlement was added and `AppleTopShelfSnapshotWriter.appGroup`
@@ -1095,6 +1096,7 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 records: mediaIndex.records,
                 sections: catalogStore.sections,
                 sources: sourceStore.sources,
+                heroes: AppleTopShelfHeroFeed.shared.heroes,
                 enabled: settingsStore.topShelfEnabled
             )
         }

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 #if os(tvOS)
 import TVServices
@@ -32,10 +33,18 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         public let genre: String?
         public let year: Int?
         public let durationSeconds: Double?
+        /// The carousel page's picture the app drew (`AppleTopShelfArtworkStore`):
+        /// a file name in the group's Library/Caches/topshelf-art. Nil keeps
+        /// the remote backdrop.
+        public let shelfImage: String?
+        /// A trailer file the carousel may play behind the page
+        /// (`AppleTopShelfTrailerPolicy`). Nothing supplies one yet.
+        public let previewVideoURL: URL?
 
         public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
                     progress: Double? = nil, landscapeArtworkURL: URL? = nil,
-                    summary: String? = nil, genre: String? = nil, year: Int? = nil, durationSeconds: Double? = nil) {
+                    summary: String? = nil, genre: String? = nil, year: Int? = nil, durationSeconds: Double? = nil,
+                    shelfImage: String? = nil, previewVideoURL: URL? = nil) {
             self.id = id
             self.title = title
             self.kind = kind
@@ -48,6 +57,14 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.genre = genre.map { String($0.prefix(60)) }
             self.year = year
             self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            self.shelfImage = shelfImage
+            self.previewVideoURL = AppleTopShelfTrailerPolicy.previewVideoURL(previewVideoURL)
+        }
+
+        func withShelfImage(_ name: String?) -> Item {
+            .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
+                  progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
+                  year: year, durationSeconds: durationSeconds, shelfImage: name, previewVideoURL: previewVideoURL)
         }
     }
 
@@ -63,6 +80,10 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
     public let topPicks: [Item]
     public let favoriteChannels: [Item]
     public let recentChannels: [Item]
+    /// The Home hero carousel's pages, in its order: the Top Shelf carousel
+    /// shows the same titles (owner 2026-10-16). Empty in older snapshots and
+    /// before Home has drawn.
+    public let heroes: [Item]
 
     public init(
         version: Int,
@@ -72,7 +93,8 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         favorites: [Item],
         topPicks: [Item] = [],
         favoriteChannels: [Item] = [],
-        recentChannels: [Item] = []
+        recentChannels: [Item] = [],
+        heroes: [Item] = []
     ) {
         self.version = version
         self.generatedAt = generatedAt
@@ -82,10 +104,12 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         self.topPicks = topPicks
         self.favoriteChannels = favoriteChannels
         self.recentChannels = recentChannels
+        self.heroes = heroes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, generatedAt, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels, recentChannels
+        case version, generatedAt, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels, recentChannels,
+             heroes
     }
 
     public init(from decoder: Decoder) throws {
@@ -98,6 +122,68 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         favoriteChannels = try container.decodeIfPresent([Item].self, forKey: .favoriteChannels) ?? []
         recentChannels = try container.decodeIfPresent([Item].self, forKey: .recentChannels) ?? []
         topPicks = try container.decodeIfPresent([Item].self, forKey: .topPicks) ?? []
+        heroes = try container.decodeIfPresent([Item].self, forKey: .heroes) ?? []
+    }
+
+    /// The same snapshot with each listed item's carousel picture, by item id.
+    func withShelfImages(_ names: [String: String]) -> AppleTopShelfSnapshot {
+        let apply: ([Item]) -> [Item] = { $0.map { $0.withShelfImage(names[$0.id]) } }
+        return AppleTopShelfSnapshot(version: version, generatedAt: generatedAt, continueWatching: apply(continueWatching),
+                                     recentlyAdded: recentlyAdded, favorites: favorites, topPicks: apply(topPicks),
+                                     favoriteChannels: favoriteChannels, recentChannels: recentChannels,
+                                     heroes: apply(heroes))
+    }
+}
+
+/// Which trailer the full-screen carousel may play behind a page: a direct
+/// video file over https, never a YouTube page (the in-app trailers are
+/// YouTube embeds, which the system player cannot open). The server's
+/// trailers job will supply these; until then every page is a still.
+enum AppleTopShelfTrailerPolicy {
+    static let fileExtensions: Set<String> = ["mp4", "m4v", "mov", "m3u8"]
+
+    static func previewVideoURL(_ url: URL?) -> URL? {
+        guard let url = AppleSystemArtworkPolicy.publicURL(url),
+              let host = url.host?.lowercased(),
+              !["youtube.com", "youtu.be", "youtube-nocookie.com"].contains(where: { host == $0 || host.hasSuffix(".\($0)") }),
+              fileExtensions.contains(url.pathExtension.lowercased()) else { return nil }
+        return url
+    }
+}
+
+/// One page of the Home hero carousel as the Top Shelf mirrors it: the item
+/// it publishes, plus the art the billboard draws, which only the app
+/// fetches (for the page's picture) and which never enters the snapshot.
+public struct AppleTopShelfHero: Equatable, Sendable {
+    public let item: AppleTopShelfSnapshot.Item
+    public let backdropURL: URL?
+    public let wordmarkURL: URL?
+
+    init(item: AppleTopShelfSnapshot.Item, backdropURL: URL?, wordmarkURL: URL?) {
+        self.item = item
+        self.backdropURL = backdropURL
+        self.wordmarkURL = wordmarkURL
+    }
+
+    /// The hero page for a title the billboard shows: `item` already carries
+    /// the billboard's textless backdrop and wordmark when they have arrived.
+    public static func page(record: AppleMediaRecord, item: AppleCatalogItem, wordmark: URL?) -> AppleTopShelfHero {
+        AppleTopShelfHero(item: AppleTopShelfSnapshotWriter.catalogItem(id: record.id, title: record.title,
+                                                                        kind: record.kind.rawValue, item: item),
+                          backdropURL: item.backgroundURL, wordmarkURL: wordmark)
+    }
+}
+
+/// Where Home hands its hero pages to the Top Shelf publisher. Home decides
+/// the pages (`AppleDiscoverView`); the root view republishes when they move.
+@MainActor
+@Observable
+public final class AppleTopShelfHeroFeed {
+    public static let shared = AppleTopShelfHeroFeed()
+    public private(set) var heroes: [AppleTopShelfHero] = []
+
+    public func update(_ heroes: [AppleTopShelfHero]) {
+        if heroes != self.heroes { self.heroes = heroes }
     }
 }
 
@@ -129,29 +215,39 @@ public struct AppleTopShelfSection: Equatable, Sendable {
 }
 
 /// One page of the full-screen Top Shelf carousel, the Apple TV app's shelf:
-/// the 16:9 backdrop edge to edge, the context ("Continue Watching", "Top
-/// Picks") over the title, the details under it, Play and More Info. No
-/// progress bar (owner 2026-10-15). Plain mirror of the
+/// the 16:9 picture edge to edge with the title's wordmark in it, the context
+/// ("Continue Watching") over the title, the details under it, Play and More
+/// Info. No progress bar (owner 2026-10-15). Plain mirror of the
 /// `TVTopShelfCarouselItem` `TopShelfProvider` builds; keep the two in sync.
 public struct AppleTopShelfCarouselItem: Equatable, Sendable {
-    public let contextTitle: String
+    /// Nil for a hero page that is not a resume: the Home hero names none.
+    public let contextTitle: String?
     public let item: AppleTopShelfSnapshot.Item
 
-    /// The full-screen art: the backdrop, never a poster stretched to 16:9.
+    /// The remote backdrop, never a poster stretched to 16:9; the page shows
+    /// `item.shelfImage` instead once the app has drawn it.
     public var imageURL: URL? { item.landscapeArtworkURL }
 }
 
 public enum AppleTopShelfContentBuilder {
     /// The carousel holds this many pages at most.
     public static let carouselLimit = 12
+    static let continueWatchingTitle = "Continue Watching"
 
-    /// Continue Watching first, then Top Picks, each title once, only titles
-    /// with a backdrop to fill the screen. Empty when no title has one: the
-    /// provider then serves the rows (`sections(for:)`).
+    /// The Home hero's pages in its order, then Continue Watching (owner
+    /// 2026-10-16: "sync through heros"); before Home has drawn, Continue
+    /// Watching then Top Picks. Each title once, only titles with a backdrop
+    /// to fill the screen. Empty when no title has one: the provider then
+    /// serves the rows (`sections(for:)`).
     public static func carouselItems(for snapshot: AppleTopShelfSnapshot) -> [AppleTopShelfCarouselItem] {
         var seen = Set<String>()
-        let pages = snapshot.continueWatching.map { AppleTopShelfCarouselItem(contextTitle: "Continue Watching", item: $0) }
-            + snapshot.topPicks.map { AppleTopShelfCarouselItem(contextTitle: "Top Picks", item: $0) }
+        let resumed = Set(snapshot.continueWatching.map(\.id))
+        let continued = snapshot.continueWatching.map { AppleTopShelfCarouselItem(contextTitle: continueWatchingTitle, item: $0) }
+        let pages = snapshot.heroes.isEmpty
+            ? continued + snapshot.topPicks.map { AppleTopShelfCarouselItem(contextTitle: "Top Picks", item: $0) }
+            : snapshot.heroes.map {
+                AppleTopShelfCarouselItem(contextTitle: resumed.contains($0.id) ? continueWatchingTitle : nil, item: $0)
+            } + continued
         return Array(pages.filter { $0.imageURL != nil && seen.insert($0.item.id).inserted }.prefix(carouselLimit))
     }
 
@@ -298,12 +394,24 @@ public actor AppleTopShelfSnapshotWriter {
 
     private let containerProvider: @Sendable () -> URL?
     private let snapshotLocation: @Sendable (URL) -> URL
+    /// Draws the carousel pages' pictures; only the Apple TV has a Top Shelf.
+    private let artwork: AppleTopShelfArtworkStore?
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
-    }, snapshotLocation: @escaping @Sendable (URL) -> URL = { snapshotURL(in: $0) }) {
+    }, snapshotLocation: @escaping @Sendable (URL) -> URL = { snapshotURL(in: $0) },
+       artwork: AppleTopShelfArtworkStore? = defaultArtwork) {
         self.containerProvider = containerProvider
         self.snapshotLocation = snapshotLocation
+        self.artwork = artwork
+    }
+
+    public static var defaultArtwork: AppleTopShelfArtworkStore? {
+        #if os(tvOS)
+        AppleTopShelfArtworkStore()
+        #else
+        nil
+        #endif
     }
 
     func snapshotExists() -> Bool {
@@ -333,14 +441,16 @@ public actor AppleTopShelfSnapshotWriter {
         removedAt: [String: Date] = [:],
         favoriteChannels: [AppleTopShelfSnapshot.Item] = [],
         recentChannels: [AppleTopShelfSnapshot.Item] = [],
+        heroes: [AppleTopShelfHero] = [],
         enabled: Bool
-    ) throws {
+    ) async throws {
         guard let root = containerProvider() else { throw WriteError.containerUnavailable }
         let url = snapshotLocation(root)
         #if os(tvOS)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         #endif
         guard enabled else {
+            try? FileManager.default.removeItem(at: AppleTopShelfArtworkStore.directory(in: root))
             // The extension can still read a snapshot left by older builds at the root.
             for location in Set([url, root.appending(path: Self.filename)]) {
                 do {
@@ -364,7 +474,7 @@ public actor AppleTopShelfSnapshotWriter {
         let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)
             .prefix(AppleContinueWatchingResolver.maximumCount))
         let listed = Self.listedItems(for: Set(shownContinued.map(\.record.id)), in: sections)
-        let snapshot = AppleTopShelfSnapshot(
+        var snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
             continueWatching: shownContinued.map { entry in
@@ -380,8 +490,31 @@ public actor AppleTopShelfSnapshotWriter {
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
             topPicks: Self.topPicks(from: sections),
-            favoriteChannels: favoriteChannels, recentChannels: recentChannels
+            favoriteChannels: favoriteChannels, recentChannels: recentChannels,
+            heroes: heroes.map(\.item)
         )
+        if let artwork {
+            // Each carousel page's art: the hero's as the billboard draws it,
+            // else the backdrop and the wordmark its listed item carries.
+            var art: [String: (backdrop: URL?, wordmark: URL?)] = [:]
+            for entry in shownContinued {
+                let item = listed[entry.record.id] ?? Self.matchedItem(for: entry)
+                art[entry.record.id] = (nil, await Self.wordmark(for: item))
+            }
+            for hero in heroes { art[hero.item.id] = (hero.backdropURL, hero.wordmarkURL) }
+            let pages = AppleTopShelfContentBuilder.carouselItems(for: snapshot)
+                .compactMap { page -> (id: String, backdrop: URL, wordmark: URL?)? in
+                    let source = art[page.item.id]
+                    guard let backdrop = source?.backdrop ?? page.imageURL else { return nil }
+                    return (page.item.id, backdrop, source.flatMap(\.wordmark))
+                }
+            let directory = AppleTopShelfArtworkStore.directory(in: root)
+            let names = await artwork.pictures(for: pages, in: directory)
+            // A newer publish is already on its way and will draw the rest.
+            try Task.checkCancellation()
+            artwork.removeAll(in: directory, except: Set(names.values))
+            snapshot = snapshot.withShelfImages(names)
+        }
         let data = try JSONEncoder().encode(snapshot)
         #if os(iOS) || os(visionOS)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
@@ -434,12 +567,17 @@ public actor AppleTopShelfSnapshotWriter {
 
     private static func topPickItem(sourceID: AppleSource.ID, item: AppleCatalogItem) -> AppleTopShelfSnapshot.Item {
         let record = AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: item)
-        let display = URL(string: "openstream://media/\(record.id)?action=display")!
-        let play = URL(string: "openstream://media/\(record.id)?action=play")
+        return catalogItem(id: record.id, title: record.title, kind: record.kind.rawValue, item: item)
+    }
+
+    /// A catalog title's page, for Top Picks and the Home hero.
+    static func catalogItem(id: String, title: String, kind: String, item: AppleCatalogItem) -> AppleTopShelfSnapshot.Item {
+        let display = URL(string: "openstream://media/\(id)?action=display")!
+        let play = URL(string: "openstream://media/\(id)?action=play")
         return .init(
-            id: record.id,
-            title: record.title,
-            kind: record.kind.rawValue,
+            id: id,
+            title: title,
+            kind: kind,
             artworkURL: AppleSystemArtworkPolicy.publicURL(item.posterURL)
                 ?? AppleSystemArtworkPolicy.publicURL(item.backgroundURL),
             displayURL: display,
@@ -450,6 +588,15 @@ public actor AppleTopShelfSnapshotWriter {
             year: year(of: item),
             durationSeconds: item.runtimeMinutes.map { Double($0 * 60) }
         )
+    }
+
+    /// The wordmark the title page would draw: the listed item's own, else
+    /// what the preview-assets cache already knows. Cache only, never a fetch.
+    private static func wordmark(for item: AppleCatalogItem?) async -> URL? {
+        guard let item else { return nil }
+        if let logo = item.logoURL { return logo }
+        let key = AppleStremioPreviewAssetsCache.key(type: item.type, mediaID: item.mediaID)
+        return await AppleStremioPreviewAssetsCache.shared.entry(for: key)?.assets?.logoURL
     }
 
     private static func year(of item: AppleCatalogItem) -> Int? {

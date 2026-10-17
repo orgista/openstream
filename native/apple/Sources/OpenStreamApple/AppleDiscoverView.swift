@@ -620,6 +620,13 @@ struct AppleDiscoverView: View {
             selectHero(first, autoPlay: false)
         }
         #endif
+        #if os(tvOS)
+        // The Top Shelf carousel shows the same pages, art and wordmarks. On
+        // the Group, not the billboard, so an empty list clears the shelf too.
+        .onChange(of: topShelfHeroes(heroes), initial: true) { _, pages in
+            AppleTopShelfHeroFeed.shared.update(pages)
+        }
+        #endif
         // The same Search and Refresh on every page pushed from here.
         .environment(\.appleTabToolbar, tabToolbarContext)
     }
@@ -1465,6 +1472,13 @@ struct AppleDiscoverView: View {
 
     private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
         heroWordmarks[value.item.mediaID] ?? item.logoURL
+    }
+
+    private func topShelfHeroes(_ heroes: [IndexedCatalogItem]) -> [AppleTopShelfHero] {
+        heroes.map { value in
+            let item = heroItem(value.item)
+            return .page(record: value.record, item: item, wordmark: heroWordmark(value, item: item))
+        }
     }
 
     /// The hero's own record, with any textless art that has since arrived.
