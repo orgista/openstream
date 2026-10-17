@@ -46,6 +46,9 @@ struct AppleLiveTVView: View {
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
     /// Why each failed playlist failed, for the one-line failure states.
     @State private var sourceCauses: [UUID: AppleLiveFailureCause] = [:]
+    /// One quiet retry of a playlist whose refresh failed under its saved channels.
+    @State private var quietRetry: Task<Void, Never>?
+    @State private var quietRetryUsed = false
     @State private var query = ""
     @State private var selectedCategory = "All"
     /// Pay-per-view channels in the lineup, for the Events tab.
@@ -408,6 +411,7 @@ struct AppleLiveTVView: View {
                 startFirstChannelIfNeeded()
             }
         }
+        .onDisappear { quietRetry?.cancel() }
         .refreshable { await refreshGuide(Set(channelSnapshot.channelIDs), force: true) }
         .task(id: reloadIdentity) { await reload() }
         .task(id: "\(channelsRevision)|\(settings.guideTimeOffsets.sorted { $0.key < $1.key })|\(settings.guideChannelAssignments.sorted { $0.key < $1.key })") {
@@ -682,10 +686,10 @@ struct AppleLiveTVView: View {
         // Every playlist at once: a dead panel's timeout no longer holds up
         // the others, and each one's channels go up as it answers.
         let iptvClient = client
-        var requests: [(source: AppleSource, credentials: AppleIPTVCredentials?)] = []
+        var requests: [(source: AppleSource, credentials: AppleIPTVCredentials?, announcesImport: Bool)] = []
         for source in sources {
             do {
-                requests.append((source, try sourceStore.iptvCredentials(for: source)))
+                requests.append((source, try sourceStore.iptvCredentials(for: source), cached[source.id]?.isEmpty ?? true))
             } catch {
                 let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
                 sourceStore.recordValidationFailure(id: source.id, summary: message)
@@ -698,7 +702,8 @@ struct AppleLiveTVView: View {
                 group.addTask {
                     do {
                         return (request.source, .success(try await iptvClient.channels(
-                            source: request.source, credentials: request.credentials)))
+                            source: request.source, credentials: request.credentials,
+                            announcesImport: request.announcesImport)))
                     } catch {
                         return (request.source, .failure(error))
                     }
@@ -757,7 +762,26 @@ struct AppleLiveTVView: View {
         for failure in load.failures {
             appleTrace("live playlist failed: \(failure.sourceName) saved=\(failure.showsSavedChannels) \(failure.message)")
         }
+        scheduleQuietRetry(after: load.failures)
         startFirstChannelIfNeeded()
+    }
+
+    /// A provider that timed out under its saved lineup is asked once more, half a minute
+    /// later, with no card and no row: the viewer is already watching the saved channels.
+    private func scheduleQuietRetry(after failures: [AppleLiveSourceLoad.Failure]) {
+        quietRetry?.cancel()
+        guard failures.contains(where: \.showsSavedChannels) else {
+            quietRetryUsed = false
+            return
+        }
+        guard !quietRetryUsed else { return }
+        quietRetryUsed = true
+        quietRetry = Task {
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            appleTrace("live playlist quiet retry")
+            await reload()
+        }
     }
 
     /// Fills the player with the last-watched channel (or the first) once

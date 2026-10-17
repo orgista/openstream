@@ -231,4 +231,10 @@ struct AppleDiscPlaybackTests {
         #expect(hints.disc?.engineTitleID == nil)
         #expect(hints != ApplePlaybackRequest.Hints())
     }
+
+    @Test func aBluRaySizedImageOnAShareIsABluRay() {
+        let size: Int64 = 27_800_000_000
+        #expect(AppleDiscImagePolicy.format(path: "Media/movies/The Last Airbender (2010).iso", sizeBytes: size) == .bluRay)
+        #expect(AppleDiscImagePolicy.format(path: "Media/movies/The Last Airbender (2010).iso", sizeBytes: 7_900_000_000) == .dvd)
+    }
 }

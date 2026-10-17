@@ -1320,7 +1320,7 @@ struct AppleDiscoverView: View {
         #endif
         Task {
             do {
-                top10Week = try await AppleNetflixTop10Client(session: .shared).latestWeek()
+                top10Week = try await AppleNetflixTop10Client.shared.latestWeek()
                 top10Error = nil
             } catch {
                 top10Error = error.localizedDescription
@@ -1341,12 +1341,15 @@ struct AppleDiscoverView: View {
                 ForEach(ordered, id: \.rank) { entry in
                     Group {
                         let match = catalogLookup.match(title: entry.title, type: type, seasonTitle: entry.seasonTitle, ignoringLeadingArticle: true)
+                            ?? AppleTop10ArtworkStore.shared.cached(title: entry.title, type: type)
+                                .map { AppleTop10ArtworkStore.match($0, sources: sourceStore.sources) }
                         if let match {
                             let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
                             let value = IndexedCatalogItem(record: record, item: match.item, source: match.source)
                             NavigationLink { detail(value) } label: { AppleTop10Card(item: match.item, rank: entry.rank) }
                         } else {
-                            AppleTop10SearchCard(entry: entry, type: type, sources: sourceStore.sources) { match in
+                            AppleTop10SearchCard(entry: entry, type: type, sources: sourceStore.sources,
+                                                 metadataConfiguration: metadataConfiguration) { match in
                                 let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
                                 detail(IndexedCatalogItem(record: record, item: match.item, source: match.source))
                             }
@@ -2229,8 +2232,7 @@ struct AppleSearchView: View {
                 routedResult = .init(record: record, item: match.item, source: match.source, action: .display, revision: revision)
                 appleTrace("shared link match title page \(record.title)")
             } else if let item = resolution.item {
-                let source = sourceStore.sources.first { $0.isEnabled && $0.isAddon }
-                    ?? AppleSource(kind: .library, name: "oStream", url: URL(string: "https://fixture.example/shared-link")!)
+                let source = AppleTop10ArtworkStore.match(item, sources: sourceStore.sources).source
                 let record = AppleMediaRecord(canonicalID: item.mediaID, kind: item.type == "movie" ? .movie : .series,
                                              title: item.name, year: item.year, availability: [])
                 query = item.name
@@ -2555,6 +2557,7 @@ private struct AppleTop10SearchCard<Destination: View>: View {
     let entry: AppleNetflixTop10Entry
     let type: String
     let sources: [AppleSource]
+    let metadataConfiguration: AppleTMDBConfiguration?
     @ViewBuilder let destination: (AppleCatalogSearchMatch) -> Destination
     @State private var match: AppleCatalogSearchMatch?
     @State private var isLoading = true
@@ -2571,11 +2574,20 @@ private struct AppleTop10SearchCard<Destination: View>: View {
                     .accessibilityValue(isLoading ? "Finding artwork" : "Unavailable from connected catalogs")
             }
         }
-        .task(id: "\(entry.title):\(catalogConfigurationIdentity(sources))") {
+        .task(id: "\(entry.title):\(catalogConfigurationIdentity(sources)):\(metadataConfiguration != nil)") {
             match = nil
             isLoading = true
-            match = await AppleTop10ArtworkLookup.find(title: entry.title, type: type,
-                seasonTitle: entry.seasonTitle, sources: sources)
+            // TMDB first: it knows the documentaries and older titles a catalog search by exact
+            // name misses, and its answer is kept on disk for the next launch.
+            if let metadataConfiguration,
+               let item = await AppleTop10ArtworkStore.shared.resolve(title: entry.title, type: type,
+                                                                       configuration: metadataConfiguration) {
+                guard !Task.isCancelled else { return }
+                match = AppleTop10ArtworkStore.match(item, sources: sources)
+            } else {
+                match = await AppleTop10ArtworkLookup.find(title: entry.title, type: type,
+                    seasonTitle: entry.seasonTitle, sources: sources)
+            }
             guard !Task.isCancelled else { return }
             isLoading = false
         }
@@ -5938,6 +5950,16 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    /// How far this page's own download has got, once its size is known.
+    private var downloadFraction: Double? {
+        switch downloadCoordinator.state {
+        case .downloading(_, _, let received, let expected), .resuming(_, _, let received, let expected),
+             .paused(_, _, let received, let expected):
+            AppleEpisodeDownloadIndicator.fraction(received, expected)
+        default: nil
+        }
+    }
+
     private var downloadGlyph: AppleDetailActionButtonGlyph {
         switch downloadCoordinator.state {
         case .resolving: .progress
@@ -6106,15 +6128,7 @@ struct AppleCatalogItemDetailView: View {
             ProgressView().controlSize(.small)
         case .downloading(let fraction), .paused(let fraction):
             ZStack {
-                Circle().stroke(.white.opacity(0.25), lineWidth: 2.5)
-                if let fraction {
-                    Circle().trim(from: 0, to: fraction)
-                        .stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.25), value: fraction)
-                } else {
-                    ProgressView().controlSize(.mini)
-                }
+                AppleDownloadRing(fraction: fraction)
                 if case .paused = indicator {
                     Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
                 } else if fraction != nil {
@@ -9957,7 +9971,8 @@ extension AppleCatalogItemDetailView {
             case .progress, .disc:
                 AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: AppleSemanticAction.download(.preparing).symbol, showsProgress: true)
             case .systemImage(let name):
-                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: name)
+                AppleTitlePageRoundButtonLabel(title: downloadButtonLabel, systemImage: name,
+                                               downloadFraction: seasonDownloads.isRunning ? nil : downloadFraction)
             }
         }
         .buttonStyle(.plain)
@@ -10031,12 +10046,8 @@ extension AppleCatalogItemDetailView {
             if !titlePageStreamBadgesBesideChips(chips).isEmpty {
                 AppleStreamFormatBadgeRow(badges: titlePageStreamBadgesBesideChips(chips))
             }
-            if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
-                Text(downloadButtonLabel)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("detail.download.progress")
-            }
+            // No progress line here: it pushed the episodes ~28 pt down as a download began.
+            // The ring on the download button (and on the episode's card) shows it in place.
             downloadFailureNotice
             seasonDownloadStatus
         }
@@ -10749,12 +10760,7 @@ extension AppleCatalogItemDetailView {
             if !titlePageStreamBadgesBesideChips(chips).isEmpty {
                 AppleStreamFormatBadgeRow(badges: titlePageStreamBadgesBesideChips(chips))
             }
-            if downloadCoordinator.state.ownsDownload, !seasonDownloads.isRunning {
-                Text(downloadButtonLabel)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("detail.download.progress")
-            }
+            // No progress line: see `phoneHeroFooter`.
             downloadFailureNotice
             seasonDownloadStatus
         }

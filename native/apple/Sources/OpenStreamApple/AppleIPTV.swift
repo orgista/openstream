@@ -534,11 +534,17 @@ public struct AppleIPTVClient: Sendable {
         self.protectedPlaybackURL = protectedPlaybackURL
     }
 
+    /// `announcesImport: false` refreshes a lineup that is already on screen without the import
+    /// card: its card came back on every Live visit while the saved channels were listed.
     public func channels(
         source: AppleSource,
-        credentials: AppleIPTVCredentials? = nil
+        credentials: AppleIPTVCredentials? = nil,
+        announcesImport: Bool = true
     ) async throws -> [AppleIPTVChannel] {
-        try await AppleImportStore.shared.run(title: source.name, unit: "channels") { progress in
+        guard announcesImport else {
+            return try await channelsImport(source: source, credentials: credentials) { _ in }
+        }
+        return try await AppleImportStore.shared.run(title: source.name, unit: "channels") { progress in
             try await channelsImport(source: source, credentials: credentials, progress: progress)
         }
     }

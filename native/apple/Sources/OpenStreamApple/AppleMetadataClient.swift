@@ -482,6 +482,31 @@ public struct AppleTMDBClient: Sendable {
         return nil
     }
 
+    /// A chart title (Netflix Top 10) to one TMDB title with its art. Only an exact name (or original
+    /// name) counts, "The" aside; between equal names the newest release wins, since a chart lists
+    /// what is new. A series title that TMDB only knows as a film (stand-up, specials) is tried as one.
+    func top10Search(title: String, type: String, configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem? {
+        let kinds: [SharedLink.Kind] = type == "movie" ? [.movie] : [.show, .movie]
+        let names = [title, AppleTop10ArtworkLookup.anthologySeries(of: title, type: type)].compactMap { $0 }
+        for kind in kinds {
+            for name in names {
+                let result = try await load(path: "/3/search/\(kind == .movie ? "movie" : "tv")",
+                                            queryItems: [.init(name: "query", value: name)],
+                                            configuration: configuration, as: SharedSearchEnvelope.self)
+                let wanted = AppleTop10ArtworkLookup.chartKey(name)
+                let exact = result.results.filter { value in
+                    [value.title, value.name, value.originalTitle, value.originalName].contains {
+                        $0.map(AppleTop10ArtworkLookup.chartKey) == wanted
+                    }
+                }
+                guard let newest = exact.max(by: { ($0.releaseDate ?? $0.firstAirDate ?? "") < ($1.releaseDate ?? $1.firstAirDate ?? "") })
+                else { continue }
+                return try await sharedLinkDetails(id: newest.id, kind: kind, configuration: configuration)
+            }
+        }
+        return nil
+    }
+
     private struct SharedSearchEnvelope: Decodable, Sendable { let results: [SharedTitleEnvelope] }
     private struct SharedTitleEnvelope: Decodable, Sendable {
         let id: Int

@@ -196,3 +196,35 @@ private actor LibraryLookupProbe {
     // A title that merely contains a dot-word is not a tracker stamp.
     #expect(AppleLibraryTitleParser.parse(name: "W.A.R - The Movie 2011 1080p.mkv").title.contains("W A R"))
 }
+
+@Test func seasonWordWithYearInFileNameIsAMovie() {
+    let open = AppleLibraryTitleParser.parse(name: "Open.Season.3.2010.1080p.BluRay.DD+5.1.x264-playHD.mkv")
+    #expect(open.title == "Open Season 3")
+    #expect(open.year == 2010)
+    #expect(open.season == nil)
+    #expect(open.kind == .movie)
+    let radarr = AppleLibraryTitleParser.parse(name: "Open.Season.2.2008.1080p.BluRay.REMUX.AVC.TrueHD.5.1-TRiToN.mkv",
+                                               parentPath: "movies/Open Season 2 (2008)")
+    #expect(radarr.title == "Open Season 2")
+    #expect(radarr.year == 2008)
+    #expect(radarr.kind == .movie)
+    // A year straight after "Season" is the year, not a season number.
+    let first = AppleLibraryTitleParser.parse(name: "Open.Season.2006.BluRay.1080p.TrueHD.5.1.AVC.REMUX-FraMeSToR.mkv",
+                                              parentPath: "movies/Open Season (2006)")
+    #expect(first.title == "Open Season")
+    #expect(first.year == 2006)
+    #expect(first.kind == .movie)
+    let witch = AppleLibraryTitleParser.parse(name: "Season.of.the.Witch.2011.720p.BluRay.mkv")
+    #expect(witch.title == "Season of the Witch")
+    #expect(witch.kind == .movie)
+    let episode = AppleLibraryTitleParser.parse(name: "Show.Season.3.2010.Episode.4.mkv")
+    #expect(episode.season == 3)
+    #expect(episode.episode == 4)
+    #expect(episode.kind == .show)
+    let folder = AppleLibraryTitleParser.parse(name: "Show.S03E04.mkv", parentPath: "Shows/Show/Show.Season.3.1080p")
+    #expect(folder.title == "Show")
+    #expect(folder.season == 3)
+    let folderOnly = AppleLibraryTitleParser.parse(name: "Pilot.mkv", parentPath: "Show Season 3 (2010)")
+    #expect(folderOnly.season == 3)
+    #expect(folderOnly.kind == .show)
+}

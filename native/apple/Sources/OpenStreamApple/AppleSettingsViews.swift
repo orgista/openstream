@@ -655,7 +655,7 @@ private struct AppleChannelManagerView: View {
                     }
                     .accessibilityIdentifier("channels.add")
                     if let errorMessage {
-                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                        Text(errorMessage).font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(selectedChannels) { channel in
                         HStack(spacing: 12) {
@@ -883,6 +883,7 @@ private struct AppleChannelManagerView: View {
         defer { isLoading = false }
         var loaded: [AppleIPTVChannel] = []
         var errors: [String] = []
+        let listed = !channels.isEmpty
         for source in sources {
             do {
                 let credentials = try sourceStore.iptvCredentials(for: source)
@@ -891,7 +892,7 @@ private struct AppleChannelManagerView: View {
                 // its idle timeout; My Channels then spun for good (full test
                 // 2026-10-01). Each source gets a deadline, then says so.
                 let received = try await AppleChannelManagerLoad.withDeadline(AppleChannelManagerLoad.deadline) {
-                    try await client.channels(source: source, credentials: credentials)
+                    try await client.channels(source: source, credentials: credentials, announcesImport: !listed)
                 }
                 try Task.checkCancellation()
                 loaded += await AppleIPTVChannelCache.shared.reconcileAndStore(received, for: source.id)
@@ -1503,7 +1504,8 @@ enum AppleChannelManagerLoad {
         if (error as? URLError)?.code == .timedOut {
             return "\(sourceName) is not responding."
         }
-        return "\(sourceName): \(error.localizedDescription)"
+        // The Live tab's plain words for a panel that did not answer, not the setup advice.
+        return AppleIPTVFailureCause.message(for: error, providerName: sourceName)
     }
 
     static func withDeadline<Value: Sendable>(

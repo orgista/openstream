@@ -772,12 +772,22 @@ struct AppleTitlePageRoundButtonLabel: View {
     let systemImage: String
     /// A spinner in place of the glyph, while a download is being prepared.
     var showsProgress = false
+    /// A ring around the glyph while a download's bytes arrive.
+    var downloadFraction: Double? = nil
 
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
 
     var body: some View {
         Group {
-            if showsProgress {
+            if let downloadFraction {
+                ZStack {
+                    AppleDownloadRing(fraction: downloadFraction)
+                    Label(title, systemImage: systemImage)
+                        .labelStyle(.iconOnly)
+                        .font(.footnote.weight(.semibold))
+                }
+                .padding(8)
+            } else if showsProgress {
                 ProgressView()
                     .tint(.white)
                     .accessibilityLabel(title)
@@ -791,5 +801,25 @@ struct AppleTitlePageRoundButtonLabel: View {
         .frame(width: side, height: side)
         .background(Color(white: 70.0 / 255.0).opacity(0.9), in: .circle)
         .contentShape(.circle)
+    }
+}
+
+/// The App Store-style download ring: a faint track, the arc filling
+/// clockwise from the top, or a small spinner while the size is unknown.
+struct AppleDownloadRing: View {
+    let fraction: Double?
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.25), lineWidth: 2.5)
+            if let fraction {
+                Circle().trim(from: 0, to: fraction)
+                    .stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.25), value: fraction)
+            } else {
+                ProgressView().controlSize(.mini)
+            }
+        }
     }
 }

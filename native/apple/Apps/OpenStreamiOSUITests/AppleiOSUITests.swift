@@ -3798,13 +3798,19 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             if ["player.skip-back", "player.skip-forward"].contains(target.identifier) {
                 let transport = app.buttons["player.play-pause"].firstMatch
                 resumeAfterSkip = transport.label == "Pause"
-                if resumeAfterSkip { transport.tap() }
-                let scrubber = app.sliders.firstMatch
-                XCTAssertTrue(scrubber.exists, "Skip verification requires the real scrubber")
-                // A slider fraction is quantized to its pixel width. Seek
-                // well inside the synthetic 1800s movie, then measure the
-                // actual paused position rather than the requested fraction.
-                scrubber.adjust(toNormalizedSliderPosition: 0.1)
+                // Playback itself carries the clock past 10 s: a scrub to 10 % of
+                // the slider landed at 1-9 s, and how fast the crawl got here (or
+                // that it just paused the player) must not decide this check.
+                if (crawlPlaybackSeconds() ?? 0) <= 10 {
+                    if transport.label == "Play" { transport.tap() }
+                    let played = Date().addingTimeInterval(15)
+                    while Date() < played, (crawlPlaybackSeconds() ?? 0) <= 10 {
+                        Thread.sleep(forTimeInterval: 0.5)
+                    }
+                }
+                if transport.label == "Pause" { transport.tap() }
+                XCTAssertTrue(app.sliders.firstMatch.exists, "Skip verification requires the real scrubber")
+                // Measure the settled paused position, not the moment of the tap.
                 let positioned = Date().addingTimeInterval(5)
                 var position = crawlPlaybackSeconds()
                 while Date() < positioned {

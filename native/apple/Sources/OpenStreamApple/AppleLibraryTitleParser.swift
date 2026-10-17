@@ -32,16 +32,23 @@ public struct AppleLibraryTitle: Equatable, Sendable {
 }
 
 public enum AppleLibraryTitleParser {
-    static let version = 2
+    static let version = 3
+    /// "Open.Season.3.2010…": a numbered "Season" followed by a release year is a film title.
+    private static let seasonTitledMovie = #"(?i)\bSeason[ ._-]*\d{1,3}[ ._()\[\]-]+(?:19|20)\d{2}\b"#
     public static func parse(name: String, parentPath: String = "") -> AppleLibraryTitle {
         let parents = parentPath.split(separator: "/").map(String.init)
         let stem = removingExtension(name)
         let full = (parents + [stem]).joined(separator: "/")
         let pair = captures(#"(?i)\bS(\d{1,3})[ ._-]*E(\d{1,4})\b|\b(\d{1,3})x(\d{1,4})\b"#, full)
+        let episodeWord = captures(#"(?i)\bEpisode[ ._-]*(\d{1,4})\b"#, full).flatMap { Int($0[0]) }
+        // Without an episode token, "Season N <year>" in the file name is part of a film title;
+        // a folder with that shape is skipped only when the file name carries it too.
+        let movieSeason = pair == nil && episodeWord == nil && matches(seasonTitledMovie, stem)
+        let seasonText = movieSeason
+            ? (parents + [stem]).filter { !matches(seasonTitledMovie, $0) }.joined(separator: "/") : full
         let season = pair.flatMap { Int($0[0]) ?? Int($0[2]) }
-            ?? captures(#"(?i)\bSeason[ ._-]*(\d{1,3})\b"#, full).flatMap { Int($0[0]) }
-        let episode = pair.flatMap { Int($0[1]) ?? Int($0[3]) }
-            ?? captures(#"(?i)\bEpisode[ ._-]*(\d{1,4})\b"#, full).flatMap { Int($0[0]) }
+            ?? captures(#"(?i)\bSeason[ ._-]*(\d{1,3})\b"#, seasonText).flatMap { Int($0[0]) }
+        let episode = pair.flatMap { Int($0[1]) ?? Int($0[3]) } ?? episodeWord
         let rangeEnd = captures(#"(?i)\bS\d{1,3}[ ._-]*E\d{1,4}[ ._]*-[ ._]*(?:E)?(\d{1,4})\b"#, stem).flatMap { Int($0[0]) }
         let dateParts = captures(#"\b((?:19|20)\d{2})[._-](\d{2})[._-](\d{2})\b"#, stem)
         let airDate = dateParts.flatMap { values -> String? in
@@ -55,7 +62,7 @@ public enum AppleLibraryTitleParser {
         let role = fileRole(full)
         let isShow = airDate != nil || season != nil || episode != nil || parents.contains { $0.lowercased() == "shows" }
         let part = isShow ? nil : multipartMarker(stem)?.number
-        var parsed = clean(stem)
+        var parsed = clean(stem, movieSeason: movieSeason)
         var selectedFromParent = false
         // A bare 2–4 digit stem (`0001.mkv`, `1917.mkv`) is a disc playlist only
         // when a title folder exists to defer to; with no folder it is the title.
@@ -69,7 +76,7 @@ public enum AppleLibraryTitleParser {
             // keeps every local season on the same card.
             for parent in parents.reversed() {
                 guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()), !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
-                let candidate = clean(parent)
+                let candidate = clean(parent, movieSeason: movieSeason)
                 if !candidate.0.isEmpty { parsed = candidate; selectedFromParent = true; break }
             }
         }
@@ -77,7 +84,7 @@ public enum AppleLibraryTitleParser {
             parsed = ("", nil)
             for parent in parents.reversed() {
                 guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()), !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
-                let candidate = clean(parent)
+                let candidate = clean(parent, movieSeason: movieSeason)
                 if !candidate.0.isEmpty { parsed = candidate; selectedFromParent = true; break }
             }
         }
@@ -88,14 +95,14 @@ public enum AppleLibraryTitleParser {
         var alternatives: [AppleLibraryTitle.Alternative] = []
         var filenameSearch: (String, Int?)?
         if !parsed.0.isEmpty, !selectedFromParent {
-            let search = clean(stem, forSearch: true)
+            let search = clean(stem, forSearch: true, movieSeason: movieSeason)
             filenameSearch = search.0.isEmpty ? parsed : search
         }
         var folderSearch: (String, Int?)?
         for parent in parents.reversed() {
             guard !["movies", "shows", "tv", "media"].contains(parent.lowercased()),
                   !prefersParent(parent), !isDiscFolder(parent), fileRole(parent) == .feature else { continue }
-            let candidate = clean(parent, forSearch: true)
+            let candidate = clean(parent, forSearch: true, movieSeason: movieSeason)
             guard !candidate.0.isEmpty else { continue }
             folderSearch = candidate
             // Only the nearest meaningful title folder is evidence.
@@ -201,7 +208,8 @@ public enum AppleLibraryTitleParser {
 
     /// `forSearch: false` is the identity form and must stay byte-for-byte
     /// what earlier versions produced; new normalisation goes behind `forSearch`.
-    private static func clean(_ raw: String, forSearch: Bool = false) -> (String, Int?) {
+    private static func clean(_ raw: String, forSearch: Bool = false, movieSeason: Bool = false) -> (String, Int?) {
+        let keepsSeason = movieSeason && matches(seasonTitledMovie, raw)
         let titleStem: String
         if let marker = multipartMarker(raw) { titleStem = raw.replacingCharacters(in: marker.range, with: " ") }
         else { titleStem = raw }
@@ -222,7 +230,7 @@ public enum AppleLibraryTitleParser {
         value = value.replacingOccurrences(of: #"[._]+"#, with: " ", options: .regularExpression)
         let year = captures(#"(?<=.)(?<!\d)\b((?:19|20)\d{2})\b"#, value).flatMap { Int($0[0]) }
         // Cut at release metadata, keeping ordinary title words such as “Atmosphere”.
-        let boundary = #"(?i)\b(?:S\d{1,3}[ -]*E\d{1,4}|\d{1,3}x\d{1,4}|Season\s*\d+|Episode\s*\d+|(?:19|20)\d{2}|\d{3,4}p|[48]K|x26[45]|h[ -]?26[45]|HEVC|AVC|WEB[ -]?(?:DL|Rip)|Blu[ -]?Ray|BRRip|BDRip|HDR10\+?|HDR|DV|DOVI|Atmos|DTS|DDP|AAC|AC3|EAC3|REMUX|PROPER|REPACK|(?:[a-z]+[ -]+)?edition|(?:trailer|featurette|behind[ -]the[ -]scenes|deleted[ -]scenes|sample)(?=\s*$)|\{?(?:imdb|tmdb)[ -])\b"#
+        let boundary = #"(?i)\b(?:S\d{1,3}[ -]*E\d{1,4}|\d{1,3}x\d{1,4}|"# + (keepsSeason ? "" : #"Season\s*\d{1,3}\b|"#) + #"Episode\s*\d+|(?:19|20)\d{2}|\d{3,4}p|[48]K|x26[45]|h[ -]?26[45]|HEVC|AVC|WEB[ -]?(?:DL|Rip)|Blu[ -]?Ray|BRRip|BDRip|HDR10\+?|HDR|DV|DOVI|Atmos|DTS|DDP|AAC|AC3|EAC3|REMUX|PROPER|REPACK|(?:[a-z]+[ -]+)?edition|(?:trailer|featurette|behind[ -]the[ -]scenes|deleted[ -]scenes|sample)(?=\s*$)|\{?(?:imdb|tmdb)[ -])\b"#
         if let range = value.range(of: boundary, options: .regularExpression) {
             // A numeric title (1917, 2001) is not a release year at the beginning.
             if range.lowerBound != value.startIndex || Int(value[range]) == nil {
@@ -238,6 +246,10 @@ public enum AppleLibraryTitleParser {
         value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-()[]")))
         return (value, year == Int(value) ? nil : year)
+    }
+
+    private static func matches(_ pattern: String, _ text: String) -> Bool {
+        text.range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func captures(_ pattern: String, _ text: String) -> [String]? {

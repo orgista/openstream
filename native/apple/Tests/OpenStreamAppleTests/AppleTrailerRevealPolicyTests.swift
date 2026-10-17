@@ -4,10 +4,9 @@ import Testing
 
 /// N70/N75: the shared trailer page reveals as soon as the video is really
 /// advancing where YouTube's start-up chrome cannot reach the screen (the
-/// Mac's desktop embed draws none; on iPhone and iPad the frame script's CSS
-/// hides the mobile embed's title strip and link), and keeps the old fixed
-/// wait where it has not been filmed (Vision Pro).
-@Suite("Trailer page: reveal once the video advances, never later than the old wait")
+/// Mac's desktop embed draws none), and after that chrome has faded where the
+/// mobile embed draws it (iPhone, iPad, Vision Pro).
+@Suite("Trailer page: reveal once the video advances and YouTube's start-up chrome is gone")
 struct AppleTrailerRevealPolicyTests {
     private let fast = AppleTrailerRevealPolicy.rule(isLandscape: true, startupChromeCanShow: false)
 
@@ -33,13 +32,14 @@ struct AppleTrailerRevealPolicyTests {
         #expect(fast.allowsReveal(sincePlaying: 3.2, mediaAdvance: -40))
     }
 
-    @Test("The mobile embed keeps the old waits exactly: 3.2 s landscape, 0.9 s portrait",
-          arguments: [(true, 3.2), (false, 0.9)])
-    func mobileEmbedKeepsTheFixedWait(isLandscape: Bool, cap: TimeInterval) {
+    @Test("The mobile embed waits for its start-up chrome to fade", arguments: [true, false])
+    func mobileEmbedWaitsForItsChrome(isLandscape: Bool) {
         let rule = AppleTrailerRevealPolicy.rule(isLandscape: isLandscape, startupChromeCanShow: true)
-        #expect(rule == AppleTrailerRevealRule(minimumWait: cap, minimumMediaAdvance: 0, cap: cap))
-        #expect(!rule.allowsReveal(sincePlaying: cap - 0.01, mediaAdvance: 3))
-        #expect(rule.allowsReveal(sincePlaying: cap, mediaAdvance: 0))
+        // N75: the title strip, link and "More videos" are up until 3.9–4.2 s of media time.
+        #expect(!rule.allowsReveal(sincePlaying: 4.3, mediaAdvance: 4.2))
+        #expect(rule.allowsReveal(sincePlaying: 4.6, mediaAdvance: 4.5))
+        #expect(!rule.allowsReveal(sincePlaying: 11.9, mediaAdvance: 1))
+        #expect(rule.allowsReveal(sincePlaying: 12, mediaAdvance: 1))
     }
 
     @Test("Portrait without start-up chrome: still capped at 0.9 s")
@@ -50,12 +50,12 @@ struct AppleTrailerRevealPolicyTests {
         #expect(rule.allowsReveal(sincePlaying: 0.9, mediaAdvance: 0))
     }
 
-    @Test("Only Vision Pro keeps the start-up chrome wait")
+    @Test("Only the Mac's desktop embed has no start-up chrome")
     func platformDefault() {
-        #if os(visionOS)
-        #expect(AppleTrailerRevealPolicy.startupChromeCanShow == true)
-        #else
+        #if os(macOS)
         #expect(AppleTrailerRevealPolicy.startupChromeCanShow == false)
+        #else
+        #expect(AppleTrailerRevealPolicy.startupChromeCanShow == true)
         #endif
     }
 
@@ -77,7 +77,7 @@ struct AppleTrailerRevealPolicyTests {
         #expect(mac.contains("var revealRules = {landscape: [500, 0.3, 3200], portrait: [500, 0.3, 900]};"))
         let mobile = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true, isLandscape: true,
                                                       startupChromeCanShow: true)
-        #expect(mobile.contains("var revealRules = {landscape: [3200, 0.0, 3200], portrait: [900, 0.0, 900]};"))
+        #expect(mobile.contains("var revealRules = {landscape: [500, 4.5, 12000], portrait: [500, 4.5, 12000]};"))
         for html in [mac, mobile] {
             #expect(html.contains("if (waited >= rule[2]) return true;"))
             #expect(html.contains("return currentMediaTime() - playingMediaTime >= rule[1];"))

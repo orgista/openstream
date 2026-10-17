@@ -86,3 +86,47 @@ class MockURLProtocol: URLProtocol {
     #expect(result.films.map(\.title) == ["First", "Second"])
     #expect(result.tv.map(\.title) == ["Show"])
 }
+
+private final class Top10WeekCacheProtocol: URLProtocol {
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    nonisolated(unsafe) static var status = 200
+    static let tsv = "country_iso2\tweek\tcategory\tweekly_rank\tshow_title\tseason_title\nUS\t2026-10-05\tFilms\t1\tFirst\tN/A\n"
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.append(request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil,
+                                       headerFields: ["ETag": "\"week-41\""])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if Self.status == 200 { client?.urlProtocol(self, didLoad: Data(Self.tsv.utf8)) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// One test drives the protocol's shared state, so nothing else runs beside it.
+@Test func top10WeekIsKeptOnDiskAndRevalidatedDaily() async throws {
+    let file = FileManager.default.temporaryDirectory.appending(path: "netflix-top10-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [Top10WeekCacheProtocol.self]
+    let session = URLSession(configuration: configuration)
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+    let first = try await AppleNetflixTop10Client(session: session, fileURL: file).latestWeek(now: now)
+    #expect(first.films.map(\.title) == ["First"])
+    #expect(Top10WeekCacheProtocol.requests.count == 1)
+
+    // A relaunch the same day reads the disk and asks nobody.
+    let relaunch = AppleNetflixTop10Client(session: session, fileURL: file)
+    #expect(try await relaunch.latestWeek(now: now.addingTimeInterval(3600)) == first)
+    #expect(Top10WeekCacheProtocol.requests.count == 1)
+
+    // A day later it asks with the file's validator; 304 keeps the saved week.
+    Top10WeekCacheProtocol.status = 304
+    let revalidated = try await relaunch.latestWeek(now: now.addingTimeInterval(AppleNetflixTop10Client.refreshInterval + 1))
+    #expect(revalidated == first)
+    #expect(Top10WeekCacheProtocol.requests.count == 2)
+    #expect(Top10WeekCacheProtocol.requests.last?.value(forHTTPHeaderField: "If-None-Match") == "\"week-41\"")
+}

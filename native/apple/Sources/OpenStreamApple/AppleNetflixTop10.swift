@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AppleNetflixTop10Entry: Sendable, Equatable {
+public struct AppleNetflixTop10Entry: Codable, Sendable, Equatable {
     public let rank: Int
     public let title: String
     public let seasonTitle: String?
@@ -14,7 +14,7 @@ public struct AppleNetflixTop10Entry: Sendable, Equatable {
     }
 }
 
-public struct AppleNetflixTop10Week: Sendable, Equatable {
+public struct AppleNetflixTop10Week: Codable, Sendable, Equatable {
     public let week: Date
     public let films: [AppleNetflixTop10Entry]
     public let tv: [AppleNetflixTop10Entry]
@@ -26,47 +26,73 @@ public struct AppleNetflixTop10Week: Sendable, Equatable {
         self.tv = tv
         self.isStale = isStale
     }
+
+    func marked(stale: Bool) -> Self { .init(week: week, films: films, tv: tv, isStale: stale) }
 }
 
+/// Netflix publishes the chart once a week as one file of every week and country (tens of MB).
+/// One shared client keeps the parsed week on disk and asks again at most once a day, with the
+/// file's validators, so a launch draws the rows from disk instead of re-reading the whole file.
 public actor AppleNetflixTop10Client {
+    static let shared = AppleNetflixTop10Client(session: .shared, fileURL: FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: "netflix-top10-v1.json"))
+    static let refreshInterval: TimeInterval = 86_400
+    static let staleAfter: TimeInterval = 30 * 3600
+
+    private struct Stored: Codable {
+        let country: String
+        let week: AppleNetflixTop10Week
+        let fetchedAt: Date
+        let entityTag: String?
+        let lastModified: String?
+    }
+
     private let session: URLSession
     private let country: String
-    private var lastSnapshot: AppleNetflixTop10Week?
-    private var lastFetchTime: Date?
-    
-    public init(session: URLSession, country: String = "US") {
+    private let fileURL: URL?
+    private var stored: Stored?
+    private var didReadDisk = false
+
+    public init(session: URLSession, country: String = "US", fileURL: URL? = nil) {
         self.session = session
         self.country = country.uppercased()
+        self.fileURL = fileURL
     }
-    
-    public func latestWeek() async throws -> AppleNetflixTop10Week {
-        let now = Date()
-        
-        if let snapshot = lastSnapshot, let fetchTime = lastFetchTime, now.timeIntervalSince(fetchTime) < 4 * 3600 {
-            let stale = now.timeIntervalSince(fetchTime) > 30 * 3600
-            if snapshot.isStale == stale {
-                return snapshot
-            } else {
-                let updated = AppleNetflixTop10Week(week: snapshot.week, films: snapshot.films, tv: snapshot.tv, isStale: stale)
-                lastSnapshot = updated
-                return updated
-            }
+
+    public func latestWeek(now: Date = .now) async throws -> AppleNetflixTop10Week {
+        if !didReadDisk {
+            didReadDisk = true
+            stored = fileURL.flatMap { try? Data(contentsOf: $0) }
+                .flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
+                .flatMap { $0.country == country ? $0 : nil }
         }
-        
+        if let stored, now.timeIntervalSince(stored.fetchedAt) < Self.refreshInterval {
+            return stored.week.marked(stale: false)
+        }
         guard let url = URL(string: "https://www.netflix.com/tudum/top10/data/all-weeks-countries.tsv") else {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 45
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         request.setValue("OpenStream/\(version) (+https://orgista.com/support)", forHTTPHeaderField: "User-Agent")
         request.setValue("https://www.netflix.com/tudum/top10/", forHTTPHeaderField: "Referer")
-        
+        if let stored {
+            request.setValue(stored.entityTag, forHTTPHeaderField: "If-None-Match")
+            request.setValue(stored.lastModified, forHTTPHeaderField: "If-Modified-Since")
+        }
+
         do {
             let (bytes, response) = try await session.bytes(for: request)
-            guard let response = response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
-                throw URLError(.badServerResponse)
+            guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            if response.statusCode == 304, let previous = stored {
+                save(Stored(country: country, week: previous.week, fetchedAt: now,
+                            entityTag: previous.entityTag, lastModified: previous.lastModified))
+                return previous.week.marked(stale: false)
             }
+            guard (200...299).contains(response.statusCode) else { throw URLError(.badServerResponse) }
             var parser = AppleNetflixTop10Parser(country: country)
             var line: [UInt8] = []
             line.reserveCapacity(1024)
@@ -83,31 +109,26 @@ public actor AppleNetflixTop10Client {
             }
             if !line.isEmpty { try parser.consume(String(decoding: line, as: UTF8.self)) }
             try Task.checkCancellation()
-            let result = try parser.finish()
-
-            let newSnapshot = AppleNetflixTop10Week(
-                week: result.week,
-                films: result.films,
-                tv: result.tv,
-                isStale: false
-            )
-            
-            lastSnapshot = newSnapshot
-            lastFetchTime = now
-            return newSnapshot
-            
+            let week = try parser.finish()
+            save(Stored(country: country, week: week, fetchedAt: now,
+                        entityTag: response.value(forHTTPHeaderField: "ETag"),
+                        lastModified: response.value(forHTTPHeaderField: "Last-Modified")))
+            return week
         } catch {
             try Task.checkCancellation()
-            if let snapshot = lastSnapshot {
-                let stale = now.timeIntervalSince(lastFetchTime ?? .distantPast) > 30 * 3600
-                let fallback = AppleNetflixTop10Week(week: snapshot.week, films: snapshot.films, tv: snapshot.tv, isStale: stale)
-                lastSnapshot = fallback
-                return fallback
+            if let stored {
+                return stored.week.marked(stale: now.timeIntervalSince(stored.fetchedAt) > Self.staleAfter)
             }
             throw error
         }
     }
-    
+
+    private func save(_ value: Stored) {
+        stored = value
+        guard let fileURL, let data = try? JSONEncoder().encode(value) else { return }
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: fileURL, options: .atomic)
+    }
 }
 
 /// Keeps only the newest country's twenty ranked entries while reading a TSV.

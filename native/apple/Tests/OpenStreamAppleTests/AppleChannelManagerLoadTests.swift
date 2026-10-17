@@ -23,4 +23,9 @@ struct AppleChannelManagerLoadTests {
         #expect(AppleChannelManagerLoad.message(sourceName: "Panel", error: URLError(.timedOut))
             == "Panel is not responding.")
     }
+
+    @Test func anUnreachablePanelReadsLikeTheLiveTab() {
+        let error = AppleIPTVError.unreachable("The request timed out.")
+        #expect(AppleChannelManagerLoad.message(sourceName: "IPTV", error: error) == "Can’t reach IPTV.")
+    }
 }
