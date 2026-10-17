@@ -198,9 +198,9 @@ public struct ApplePlexItem: Codable, Equatable, Sendable {
 
 public struct ApplePlexClient: Sendable {
     private let loader: AppleMediaServerClient.Loader
-    private let clientIdentifier: String
+    let clientIdentifier: String
     
-    private var platformName: String {
+    var platformName: String {
         #if os(tvOS)
         return "tvOS"
         #elseif os(visionOS)
@@ -245,7 +245,7 @@ public struct ApplePlexClient: Sendable {
         return headers
     }
     
-    private func performRequest(url: URL, method: String = "GET", token: String? = nil, headers: [String: String] = [:], timeout: TimeInterval = 60.0) async throws -> Data {
+    func performRequest(url: URL, method: String = "GET", token: String? = nil, headers: [String: String] = [:], timeout: TimeInterval = 60.0) async throws -> Data {
         var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
         let defaults = defaultHeaders(token: token)

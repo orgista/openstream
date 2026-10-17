@@ -28,6 +28,10 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             /// Library/Caches/topshelf-art. Absent in older snapshots.
             let shelfImage: String?
             let previewVideoURL: URL?
+            /// The page's trailer the app saved from the user's server: a
+            /// file in Library/Caches/topshelf-trailers. Absent in older
+            /// snapshots.
+            let shelfVideo: String?
         }
 
         let version: Int
@@ -87,10 +91,12 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         // pages then Continue Watching, no progress bars. Mirrors
         // AppleTopShelfContentBuilder.carouselItems(for:) in OpenStreamApple.
         let art = root.appending(path: "Library/Caches/topshelf-art", directoryHint: .isDirectory)
-        let carousel = carouselItems(snapshot, art: art)
+        let trailers = root.appending(path: "Library/Caches/topshelf-trailers", directoryHint: .isDirectory)
+        let carousel = carouselItems(snapshot, art: art, trailers: trailers)
         if !carousel.isEmpty {
             let drawn = carousel.filter { $0.imageURL(for: .screenScale2x)?.isFileURL == true }.count
-            log.info("serving carousel of \(carousel.count) (\(drawn) drawn): heroes=\(snapshot.heroes.count) continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
+            let videos = carousel.filter { $0.previewVideoURL != nil }.count
+            log.info("serving carousel of \(carousel.count) (\(drawn) drawn, \(videos) with trailers): heroes=\(snapshot.heroes.count) continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
             completionHandler(TVTopShelfCarouselContent(style: .details, items: carousel))
             return
         }
@@ -107,7 +113,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 
-    private func carouselItems(_ snapshot: Snapshot, art: URL) -> [TVTopShelfCarouselItem] {
+    private func carouselItems(_ snapshot: Snapshot, art: URL, trailers: URL) -> [TVTopShelfCarouselItem] {
         var seen = Set<String>()
         let resumed = Set(snapshot.continueWatching.map(\.id))
         let continued: [(String?, Snapshot.Item)] = snapshot.continueWatching.map { ("Continue Watching", $0) }
@@ -130,7 +136,11 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             item.displayAction = TVTopShelfAction(url: value.displayURL)
             if let playURL = value.playURL { item.playAction = TVTopShelfAction(url: playURL) }
             item.setImageURL(imageURL, for: [.screenScale1x, .screenScale2x])
-            if let video = value.previewVideoURL, video.scheme?.lowercased() == "https" { item.previewVideoURL = video }
+            if let video = Self.savedVideoURL(value.shelfVideo, in: trailers) {
+                item.previewVideoURL = video
+            } else if let video = value.previewVideoURL, video.scheme?.lowercased() == "https" {
+                item.previewVideoURL = video
+            }
             return item
         }.prefix(12))
     }
@@ -142,6 +152,15 @@ final class TopShelfProvider: TVTopShelfContentProvider {
     /// The app's drawn picture, when the file is there; a bare file name only.
     private static func drawnImageURL(_ name: String?, in directory: URL) -> URL? {
         guard let name, !name.contains("/"), name.hasSuffix(".jpg") else { return nil }
+        let url = directory.appending(path: name, directoryHint: .notDirectory)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// The app's saved trailer, when the file is there; a bare file name
+    /// with a video extension only (mirrors AppleTopShelfTrailerPolicy).
+    private static func savedVideoURL(_ name: String?, in directory: URL) -> URL? {
+        guard let name, !name.contains("/"), !name.hasPrefix("."),
+              ["mp4", "m4v", "mov"].contains((name as NSString).pathExtension.lowercased()) else { return nil }
         let url = directory.appending(path: name, directoryHint: .notDirectory)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }

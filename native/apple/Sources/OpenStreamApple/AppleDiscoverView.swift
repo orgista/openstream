@@ -3142,6 +3142,10 @@ struct AppleCatalogItemDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// The title's trailer on the user's server (`AppleServerTrailerStore`):
+    /// the Trailer button plays it, on every platform.
+    @State private var serverTrailer: AppleServerTrailer?
+    @State private var showsServerTrailer = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -3418,7 +3422,14 @@ struct AppleCatalogItemDetailView: View {
         }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
         .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
+        .task(id: "\(item.mediaID):\(AppleServerTrailerStore.shared.revision)") {
+            // Throws only when the servers changed; the task runs again then.
+            do { serverTrailer = try await AppleServerTrailerStore.shared.trailer(for: item) } catch {}
+        }
+        .appleServerTrailerPresentation(serverTrailer, isPresented: $showsServerTrailer)
     }
+
+    static let serverTrailerSymbol = "film"
 
     private func applyDetailViewport(_ viewport: AppleDetailViewport) {
         pageGeometry.safeAreaInsets = viewport.insets
@@ -4671,6 +4682,15 @@ struct AppleCatalogItemDetailView: View {
 
     private var tvOSIconRow: some View {
         HStack(alignment: .appleTVControlCenter, spacing: 0) {
+            if serverTrailer != nil {
+                Button { showsServerTrailer = true } label: {
+                    AppleTVDetailIconLabel(title: "Trailer", systemImage: Self.serverTrailerSymbol)
+                }
+                .buttonStyle(AppleTVBareButtonStyle())
+                .focused($tvDetailFocus, equals: .trailer)
+                .accessibilityLabel("Play Trailer")
+                .accessibilityIdentifier("detail.serverTrailer")
+            }
             Button(action: toggleFavorite) {
                 AppleTVDetailIconLabel(title: "My List", systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol)
             }
@@ -5890,6 +5910,11 @@ struct AppleCatalogItemDetailView: View {
         // "My ListRate" (measured on the iPad, 2026-09-17), so the row supplies
         // the gap itself at those sizes.
         HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 0) {
+            if serverTrailer != nil {
+                detailIconAction("Trailer", systemImage: Self.serverTrailerSymbol) { showsServerTrailer = true }
+                    .accessibilityLabel("Play Trailer")
+                    .accessibilityIdentifier("detail.serverTrailer")
+            }
             detailIconAction("My List", systemImage: AppleSemanticAction.myList(saved: titleActions.isFavorite).symbol, action: toggleFavorite)
                 .accessibilityLabel(AppleSemanticAction.myList(saved: titleActions.isFavorite).label)
                 .accessibilityValue(titleActions.isFavorite ? "Saved" : "Not saved")
@@ -9780,6 +9805,14 @@ extension AppleCatalogItemDetailView {
                 if discOffersMenu, !state.isTrailer { phoneSkipToMovieButton }
             }
             HStack(spacing: 12) {
+                if serverTrailer != nil {
+                    Button { showsServerTrailer = true } label: {
+                        AppleTitlePageRoundButtonLabel(title: "Trailer", systemImage: Self.serverTrailerSymbol)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Play Trailer")
+                    .accessibilityIdentifier("detail.serverTrailer")
+                }
                 Button(action: toggleFavorite) {
                     AppleTitlePageRoundButtonLabel(
                         title: AppleSemanticAction.myList(saved: titleActions.isFavorite).label,
@@ -10699,6 +10732,15 @@ extension AppleCatalogItemDetailView {
                 .contextMenu {
                     playButtonMenuItems
                 }
+            }
+
+            if serverTrailer != nil {
+                Button { showsServerTrailer = true } label: {
+                    AppleTitlePageMacRoundLabel(title: "Trailer", systemImage: Self.serverTrailerSymbol)
+                }
+                .buttonStyle(AppleMacHeroButtonStyle(kind: .round))
+                .help("Play Trailer")
+                .accessibilityIdentifier("detail.serverTrailer")
             }
 
             Button(action: toggleFavorite) {

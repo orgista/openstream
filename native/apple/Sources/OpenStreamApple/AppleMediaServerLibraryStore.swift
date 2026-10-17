@@ -317,6 +317,7 @@ public final class AppleMediaServerLibraryStore {
         }
         sourceIndex.removeValue(forKey: sourceID)
         sessionIndex.removeValue(forKey: sourceID)
+        AppleServerTrailerStore.shared.update(sessions: sessionIndex)
         failures.removeValue(forKey: sourceID)
         if sessionIndex.isEmpty {
             deliveryTask?.cancel()
@@ -461,6 +462,7 @@ public final class AppleMediaServerLibraryStore {
         }
         
         sessionIndex = Dictionary(uniqueKeysWithValues: validSources.map { ($0.source.id, $0.session) })
+        AppleServerTrailerStore.shared.update(sessions: sessionIndex)
         // A disabled or signed-out source keeps its outbox. Only removal from
         // the complete source list is an explicit deletion of delivery state.
         outbox.retainSources(Set(sources.map(\.id)))

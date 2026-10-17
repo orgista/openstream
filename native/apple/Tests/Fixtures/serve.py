@@ -8,6 +8,7 @@ Routes mirror the contract required by T3's fixture tests:
   GET /slow/<name>       sleeps 12 s, then behaves like /media/<name>
   GET /protected/<name>  requires Referer: https://fixtures.local/...
   GET /hls/<path>        static file from out/hls/
+  /jf/...                a Jellyfin server whose stub titles each have a local MP4 trailer
   *                      404
 
 Run:
@@ -181,6 +182,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if parsed.path == "/fixture-poster.svg":
             return self._send_simple(200, b'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><rect width="300" height="450" fill="gray"/><text x="30" y="200" fill="white" font-size="32">Fixture</text></svg>', "image/svg+xml")
 
+        if parsed.path.startswith("/jf/"):
+            return self._serve_jellyfin(parsed.path[len("/jf"):], query)
+
         if path == "/addon/manifest.json":
             return self._send_json({
                 "id": "org.openstream.fixture",
@@ -267,6 +271,58 @@ class FixtureHandler(BaseHTTPRequestHandler):
     # HEAD is implemented by doing GET without a body.
     def do_HEAD(self):
         self.do_GET()
+
+    def do_POST(self):
+        self.protocol_version = "HTTP/1.0"
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        parsed = urlsplit(self.path)
+        if parsed.path == "/jf/Users/AuthenticateByName":
+            return self._send_json({"User": {"Id": "fixture-user", "Name": "fixture"},
+                                    "AccessToken": "fixture-token", "ServerId": "fixture-server"})
+        return self._send_simple(404, b"not found")
+
+    # ------------------------------------------------------------------
+    # a Jellyfin server with one local trailer per stub title (/jf/...)
+    # ------------------------------------------------------------------
+    def _stub_titles(self):
+        """Stub catalog names by IMDb id, so a title search finds the stub's own id."""
+        catalog = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                               "Apps", "TestPlans", "Stubs", "fixture.example", "catalog")
+        titles = {}
+        for folder, _, files in os.walk(catalog):
+            for name in files:
+                if not name.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(folder, name)) as handle:
+                        for meta in json.load(handle).get("metas", []):
+                            titles[meta["id"]] = (meta["name"], meta.get("type", "movie"))
+                except (OSError, ValueError, KeyError):
+                    pass
+        return titles
+
+    def _serve_jellyfin(self, path, query):
+        if path == "/System/Info/Public":
+            return self._send_json({"ServerName": "Fixture", "Version": "10.10.7", "Id": "fixture-server",
+                                    "ProductName": "Jellyfin Server"})
+        if path == "/Users/fixture-user/Items" and "SearchTerm" in query:
+            term = query["SearchTerm"][0].lower()
+            items = [{"Id": imdb, "Name": name, "Type": "Series" if kind == "series" else "Movie",
+                      "ProviderIds": {"Imdb": imdb}}
+                     for imdb, (name, kind) in self._stub_titles().items() if name.lower() == term]
+            return self._send_json({"Items": items, "TotalRecordCount": len(items)})
+        match = re.match(r"^/Items/([^/]+)/LocalTrailers$", path)
+        if match:
+            trailer = "trailer-" + match.group(1)
+            return self._send_json([{"Id": trailer, "Name": "Trailer", "Container": "mp4", "RunTimeTicks": 100000000,
+                                     "MediaSources": [{"Id": trailer, "Container": "mp4"}]}])
+        if re.match(r"^/Videos/trailer-[^/]+/stream\.mp4$", path):
+            return self._serve_file(os.path.join(self.server.root, "mp4-h264-aac.mp4"), allow_range=True)
+        if path.startswith("/Users/fixture-user/Items/Latest"):
+            return self._send_json([])
+        return self._send_json({"Items": [], "TotalRecordCount": 0})
 
     # ------------------------------------------------------------------
     # file serving (with optional byte-range)
