@@ -12,8 +12,9 @@ import Combine
 ///
 /// This view supplies the inline trailer stage and the shared title-page
 /// primary action, so every hero layout agrees on what its button will do.
-/// The Apple TV's stage is the still alone: it plays no trailer and looks
-/// none up (`AppleTitlePagePolicy.offersTrailers`).
+/// The Apple TV and Vision Pro play the title's trailer from the user's own
+/// server first (`AppleServerTrailerStore`); the Apple TV has no other, and
+/// looks no YouTube trailer up (`AppleTitlePagePolicy.offersTrailers`).
 /// A stacked card lived here between 2026-09-18
 /// and 2026-09-20 and was the iPad landscape regression the owner reported: the
 /// art was capped at a flat 600 pt, the wordmark sat below it at a flat 90 pt,
@@ -65,6 +66,11 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var previewTrailerKeys: [String] = []
     @State private var detailTrailerKeys: [String] = []
     @State private var trailerRequest: UUID?
+    /// The title's trailer on the user's server, and whether that lookup
+    /// has answered for this page (the Vision Pro waits for it before
+    /// YouTube: the server's file comes first).
+    @State private var serverTrailer: AppleServerTrailer?
+    @State private var serverTrailerLookedUp = false
     @State private var downloadCoordinator = AppleOfflineDownloadCoordinator()
 
     private var selectedEpisode: AppleStremioEpisode? {
@@ -103,12 +109,14 @@ struct AppleHomeBillboard<Actions: View>: View {
         return trailerLookupPatienceElapsed ? .unknown : .pending
     }
 
-    /// The Apple TV hero never offers a trailer (N23 removes them there).
+    /// The Apple TV hero never offers a trailer button (N23 removes them
+    /// there): its server trailer plays by itself, muted.
     private var trailerAvailability: AppleTitlePagePolicy.TrailerAvailability {
         #if os(tvOS)
         .none
         #else
-        AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil, lookupsAnswered: actionMetadataLoaded,
+        AppleTitlePagePolicy.trailerAvailability(hasTrailer: trailerKey != nil || serverTrailer != nil,
+                                                 lookupsAnswered: actionMetadataLoaded,
                                                  patienceElapsed: trailerLookupPatienceElapsed)
         #endif
     }
@@ -273,6 +281,22 @@ struct AppleHomeBillboard<Actions: View>: View {
         heroBody
             .appleMeasuresHeroArt(loadedStill) { artMeasurement = $0 }
             .task(id: "\(item.id):\(catalogConfigurationIdentity(sources))") { await loadActionMetadata() }
+            #if os(tvOS) || os(visionOS)
+            .task(id: "\(item.id):\(AppleServerTrailerStore.shared.revision)") {
+                serverTrailer = nil
+                serverTrailerLookedUp = false
+                // A removed stage reports nothing: its video is off screen.
+                trailerIsOnScreen = false
+                do {
+                    let trailer = try await AppleServerTrailerStore.shared.trailer(for: item)
+                    guard !Task.isCancelled else { return }
+                    serverTrailer = trailer
+                    serverTrailerLookedUp = true
+                } catch {
+                    // The servers changed: the task runs again for the new revision.
+                }
+            }
+            #endif
             .task(id: item.id) {
                 trailerLookupPatienceElapsed = false
                 try? await Task.sleep(for: AppleTitlePagePolicy.heroTrailerLookupPatience)
@@ -429,15 +453,30 @@ struct AppleHomeBillboard<Actions: View>: View {
                     // Centred like the trailer's cover over it (N44).
                     fillAlignment: mac?.layout.platform == .mac ? .center : nil
                 )
-                #if !os(tvOS)
-                AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
-                                     trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
-                                     art: stillArt,
-                                     artworkImage: mac != nil ? stillImage : nil,
-                                     muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset },
-                                     onTrailerOnScreen: { trailerIsOnScreen = $0 })
-                    .id(item.id)
-                #endif
+                switch AppleTrailerSourcePolicy.heroSource(server: serverTrailer, serverLookedUp: serverTrailerLookedUp) {
+                case .server(let trailer):
+                    #if os(tvOS) || os(visionOS)
+                    AppleHeroServerTrailer(trailer: trailer, settings: settings, art: stillArt,
+                                           trailerRequest: trailerRequest, onScreen: { trailerIsOnScreen = $0 })
+                        .id(item.id)
+                    #else
+                    EmptyView()
+                    #endif
+                case .youTube:
+                    #if !os(tvOS)
+                    AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
+                                         trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
+                                         art: stillArt,
+                                         artworkImage: mac != nil ? stillImage : nil,
+                                         muteTopInset: mac.map { $0.layout.topInset + AppleMacHeroLayout.muteTopInset },
+                                         onTrailerOnScreen: { trailerIsOnScreen = $0 })
+                        .id(item.id)
+                    #else
+                    EmptyView()
+                    #endif
+                case nil:
+                    EmptyView()
+                }
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 appleTrace("hero stage \(item.name) \(Int(size.width))x\(Int(size.height))")

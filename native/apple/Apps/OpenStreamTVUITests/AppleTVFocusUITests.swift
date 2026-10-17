@@ -1462,6 +1462,95 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(play.exists, "Discover lost its billboard actions")
     }
 
+    /// Server trailers: the fixture Jellyfin (`Tests/Fixtures/serve.py`, /jf)
+    /// has a local MP4 trailer for every stub title, and the Apple TV hero
+    /// plays it muted over the art once the art is up.
+    func testDiscoverHeroPlaysServerTrailer() throws {
+        let mediaBase = ProcessInfo.processInfo.environment["OPENSTREAM_STUB_MEDIA_BASE"] ?? "http://127.0.0.1:8767"
+        let stubSources = URL(fileURLWithPath: Self.stubDirectory).appendingPathComponent("e2e-sources.json")
+        var file = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: stubSources)) as? [String: Any])
+        var sources = file["sources"] as? [[String: Any]] ?? []
+        sources.append(["kind": "mediaServer", "server": "jellyfin", "name": "Fixture Jellyfin",
+                        "url": mediaBase + "/jf", "username": "fixture", "password": "fixture"])
+        file["sources"] = sources
+        let sourcesFile = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("server-trailer-sources.json")
+        try JSONSerialization.data(withJSONObject: file).write(to: sourcesFile)
+        app.launchArguments += ["-OpenStreamDevSources", sourcesFile.path, "-OpenStreamResetOnLaunch", "YES"]
+        launch(screen: "discover")
+        XCTAssertTrue(wait(for: element("home.featured.play"), 60), "the Discover billboard never appeared")
+
+        let playing = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == 'hero.serverTrailer' AND value == 'playing'")).firstMatch
+        XCTAssertTrue(playing.waitForExistence(timeout: 60), "the hero never played the server's trailer")
+        attachScreen("server-trailer-hero-playing")
+
+        // Later tests expect the stub sources alone.
+        app.terminate()
+        app.launchArguments = Self.stubbedLaunchArguments
+        app.launch()
+        XCTAssertTrue(wait(for: element("home.featured.play"), 60))
+        app.terminate()
+    }
+
+    /// Server trailers on a device with the owner's own Plex and Jellyfin
+    /// sources (`OPENSTREAM_REAL_SOURCES=1`, DevTV): the hero pages until one
+    /// plays its server trailer, then that title's page offers Trailer and
+    /// plays it full screen. Silent with `-OpenStreamMuteAudio` (Debug).
+    func testServerTrailersWithRealServers() throws {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_REAL_SOURCES"] == "1" else {
+            throw XCTSkip("Set OPENSTREAM_REAL_SOURCES=1 on a device with real media servers.")
+        }
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES", "-OpenStreamTrace", "YES"]
+        app.launch()
+        XCTAssertTrue(wait(for: element("home.featured.play"), 90), "the Discover billboard never appeared")
+        let playing = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == 'hero.serverTrailer' AND value == 'playing'")).firstMatch
+        // Focus starts in the tab bar, where Right changes tabs: go down to
+        // the first row and back up into the hero first (as N12 does).
+        let heroIDs = ["home.featured.play", "home.featured.my-list", "home.featured.details"]
+        remote.press(.down)
+        Thread.sleep(forTimeInterval: 1.5)
+        if !heroIDs.contains(focusedElement.identifier) {
+            remote.press(.up)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        XCTAssertTrue(heroIDs.contains(focusedElement.identifier),
+                      "focus never reached the hero, got '\(focusedElement.identifier)'")
+        var page = 0
+        while !playing.waitForExistence(timeout: 20), page < 10 {
+            // Right past the last button turns the page (`AppleTVHeroPaging`).
+            for _ in 0..<4 { remote.press(.right); Thread.sleep(forTimeInterval: 0.6) }
+            page += 1
+        }
+        XCTAssertTrue(playing.exists, "no hero page played a server trailer in \(page + 1) pages")
+        print("SERVER TRAILER hero playing on page \(page + 1)")
+        Thread.sleep(forTimeInterval: 3)
+        attachScreen("server-trailer-devtv-hero")
+
+        let details = element("home.featured.details")
+        for _ in 0..<4 where !details.hasFocus { remote.press(.right); Thread.sleep(forTimeInterval: 0.6) }
+        guard details.hasFocus else { return XCTFail("the hero's Details never took focus") }
+        remote.press(.select)
+        // The row's `detail.icon-row` identifier replaces its buttons' own.
+        let trailer = app.buttons.matching(NSPredicate(
+            format: "identifier == 'detail.icon-row' AND label == 'Play Trailer'")).firstMatch
+        XCTAssertTrue(wait(for: trailer, 30), "the title page offered no Trailer button")
+        for _ in 0..<4 where !trailer.hasFocus { remote.press(.right); Thread.sleep(forTimeInterval: 0.6) }
+        attachScreen("server-trailer-devtv-title-page")
+        XCTAssertTrue(trailer.hasFocus, "focus never reached Trailer, got '\(focusedElement.identifier)'")
+        remote.press(.select)
+        XCTAssertTrue(wait(for: element("trailer.player"), 15), "Trailer opened no player")
+        Thread.sleep(forTimeInterval: 8)
+        attachScreen("server-trailer-devtv-player")
+        // The player's first Menu may only hide its transport.
+        for _ in 0..<2 where !trailer.isHittable {
+            remote.press(.menu)
+            Thread.sleep(forTimeInterval: 2)
+        }
+        XCTAssertTrue(trailer.isHittable, "Menu should close the trailer and return to the title page")
+        remote.press(.menu)
+    }
+
     /// N12: the Discover hero after the Apple TV app. Read-only: focus moves
     /// over the buttons and pages, nothing is selected. Frames: at rest, after
     /// one cycle, focus on Play/Resume, on My List, and the page `→` turns.

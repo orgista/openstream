@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -37,14 +38,19 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         /// a file name in the group's Library/Caches/topshelf-art. Nil keeps
         /// the remote backdrop.
         public let shelfImage: String?
-        /// A trailer file the carousel may play behind the page
-        /// (`AppleTopShelfTrailerPolicy`). Nothing supplies one yet.
+        /// A public trailer file the carousel may play behind the page
+        /// (`AppleTopShelfTrailerPolicy`).
         public let previewVideoURL: URL?
+        /// The page's trailer the app saved from the user's server
+        /// (`AppleTopShelfTrailerFiles`): a file name in the group's
+        /// Library/Caches/topshelf-trailers. Its URL carries a token, so the
+        /// file goes on the shelf and the URL never does.
+        public let shelfVideo: String?
 
         public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
                     progress: Double? = nil, landscapeArtworkURL: URL? = nil,
                     summary: String? = nil, genre: String? = nil, year: Int? = nil, durationSeconds: Double? = nil,
-                    shelfImage: String? = nil, previewVideoURL: URL? = nil) {
+                    shelfImage: String? = nil, previewVideoURL: URL? = nil, shelfVideo: String? = nil) {
             self.id = id
             self.title = title
             self.kind = kind
@@ -59,12 +65,21 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             self.shelfImage = shelfImage
             self.previewVideoURL = AppleTopShelfTrailerPolicy.previewVideoURL(previewVideoURL)
+            self.shelfVideo = AppleTopShelfTrailerPolicy.shelfVideo(shelfVideo)
         }
 
         func withShelfImage(_ name: String?) -> Item {
             .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
                   progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
-                  year: year, durationSeconds: durationSeconds, shelfImage: name, previewVideoURL: previewVideoURL)
+                  year: year, durationSeconds: durationSeconds, shelfImage: name, previewVideoURL: previewVideoURL,
+                  shelfVideo: shelfVideo)
+        }
+
+        func withShelfVideo(_ name: String?) -> Item {
+            .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
+                  progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
+                  year: year, durationSeconds: durationSeconds, shelfImage: shelfImage, previewVideoURL: previewVideoURL,
+                  shelfVideo: name)
         }
     }
 
@@ -127,20 +142,61 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
 
     /// The same snapshot with each listed item's carousel picture, by item id.
     func withShelfImages(_ names: [String: String]) -> AppleTopShelfSnapshot {
-        let apply: ([Item]) -> [Item] = { $0.map { $0.withShelfImage(names[$0.id]) } }
-        return AppleTopShelfSnapshot(version: version, generatedAt: generatedAt, continueWatching: apply(continueWatching),
-                                     recentlyAdded: recentlyAdded, favorites: favorites, topPicks: apply(topPicks),
-                                     favoriteChannels: favoriteChannels, recentChannels: recentChannels,
-                                     heroes: apply(heroes))
+        carouselPages { $0.withShelfImage(names[$0.id]) }
+    }
+
+    /// The same snapshot with each carousel page's saved trailer, by item id.
+    func withShelfVideos(_ names: [String: String]) -> AppleTopShelfSnapshot {
+        carouselPages { $0.withShelfVideo(names[$0.id]) }
+    }
+
+    private func carouselPages(_ change: (Item) -> Item) -> AppleTopShelfSnapshot {
+        AppleTopShelfSnapshot(version: version, generatedAt: generatedAt, continueWatching: continueWatching.map(change),
+                              recentlyAdded: recentlyAdded, favorites: favorites, topPicks: topPicks.map(change),
+                              favoriteChannels: favoriteChannels, recentChannels: recentChannels,
+                              heroes: heroes.map(change))
     }
 }
 
 /// Which trailer the full-screen carousel may play behind a page: a direct
-/// video file over https, never a YouTube page (the in-app trailers are
-/// YouTube embeds, which the system player cannot open). The server's
-/// trailers job will supply these; until then every page is a still.
+/// video file over https, never a YouTube page (the system player cannot
+/// open one), or the copy the app saved of the title's trailer on the
+/// user's server (`AppleTopShelfTrailerFiles`): a server URL carries the
+/// user's token, so only the file reaches the shelf.
 enum AppleTopShelfTrailerPolicy {
     static let fileExtensions: Set<String> = ["mp4", "m4v", "mov", "m3u8"]
+    static let savedExtensions: Set<String> = ["mp4", "m4v", "mov"]
+    static let directoryName = "topshelf-trailers"
+
+    static func directory(in root: URL) -> URL {
+        root.appending(path: "Library/Caches", directoryHint: .isDirectory)
+            .appending(path: directoryName, directoryHint: .isDirectory)
+    }
+
+    /// A saved trailer's name: a bare file name with a video extension.
+    static func shelfVideo(_ name: String?) -> String? {
+        guard let name, !name.isEmpty, !name.contains("/"), !name.hasPrefix("."),
+              savedExtensions.contains((name as NSString).pathExtension.lowercased()) else { return nil }
+        return name
+    }
+
+    /// One name per title, from nothing secret: the server's URL (and its
+    /// token) is not part of it.
+    static func fileName(mediaID: String, trailer: AppleServerTrailer) -> String {
+        let ext = trailer.url.pathExtension.lowercased()
+        return "\(stem(mediaID: mediaID)).\(savedExtensions.contains(ext) ? ext : "mp4")"
+    }
+
+    /// The title's saved trailer in `directory`, whatever its extension.
+    static func savedFile(mediaID: String, in directory: URL) -> String? {
+        let stem = stem(mediaID: mediaID)
+        return savedExtensions.sorted().map { "\(stem).\($0)" }
+            .first { FileManager.default.fileExists(atPath: directory.appending(path: $0).path) }
+    }
+
+    private static func stem(mediaID: String) -> String {
+        SHA256.hash(data: Data(mediaID.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     static func previewVideoURL(_ url: URL?) -> URL? {
         guard let url = AppleSystemArtworkPolicy.publicURL(url),
@@ -158,11 +214,14 @@ public struct AppleTopShelfHero: Equatable, Sendable {
     public let item: AppleTopShelfSnapshot.Item
     public let backdropURL: URL?
     public let wordmarkURL: URL?
+    /// What finds the page's trailer on the user's server.
+    let trailerQuery: AppleServerTrailerQuery?
 
-    init(item: AppleTopShelfSnapshot.Item, backdropURL: URL?, wordmarkURL: URL?) {
+    init(item: AppleTopShelfSnapshot.Item, backdropURL: URL?, wordmarkURL: URL?, trailerQuery: AppleServerTrailerQuery? = nil) {
         self.item = item
         self.backdropURL = backdropURL
         self.wordmarkURL = wordmarkURL
+        self.trailerQuery = trailerQuery
     }
 
     /// The hero page for a title the billboard shows: `item` already carries
@@ -170,7 +229,8 @@ public struct AppleTopShelfHero: Equatable, Sendable {
     public static func page(record: AppleMediaRecord, item: AppleCatalogItem, wordmark: URL?) -> AppleTopShelfHero {
         AppleTopShelfHero(item: AppleTopShelfSnapshotWriter.catalogItem(id: record.id, title: record.title,
                                                                         kind: record.kind.rawValue, item: item),
-                          backdropURL: item.backgroundURL, wordmarkURL: wordmark)
+                          backdropURL: item.backgroundURL, wordmarkURL: wordmark,
+                          trailerQuery: AppleServerTrailerQuery(item: item))
     }
 }
 
@@ -396,14 +456,34 @@ public actor AppleTopShelfSnapshotWriter {
     private let snapshotLocation: @Sendable (URL) -> URL
     /// Draws the carousel pages' pictures; only the Apple TV has a Top Shelf.
     private let artwork: AppleTopShelfArtworkStore?
+    /// Saves the hero pages' server trailers; only the Apple TV has a Top Shelf.
+    private let trailerFiles: AppleTopShelfTrailerFiles?
+    private let trailerDownloads: AppleTopShelfTrailerDownloads
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
     }, snapshotLocation: @escaping @Sendable (URL) -> URL = { snapshotURL(in: $0) },
        artwork: AppleTopShelfArtworkStore? = defaultArtwork) {
+        self.init(containerProvider: containerProvider, snapshotLocation: snapshotLocation, artwork: artwork,
+                  trailerFiles: Self.defaultTrailerFiles)
+    }
+
+    init(containerProvider: @escaping @Sendable () -> URL?, snapshotLocation: @escaping @Sendable (URL) -> URL,
+         artwork: AppleTopShelfArtworkStore?, trailerFiles: AppleTopShelfTrailerFiles?,
+         trailerDownloads: AppleTopShelfTrailerDownloads = .shared) {
         self.containerProvider = containerProvider
         self.snapshotLocation = snapshotLocation
         self.artwork = artwork
+        self.trailerFiles = trailerFiles
+        self.trailerDownloads = trailerDownloads
+    }
+
+    static var defaultTrailerFiles: AppleTopShelfTrailerFiles? {
+        #if os(tvOS)
+        AppleTopShelfTrailerFiles()
+        #else
+        nil
+        #endif
     }
 
     public static var defaultArtwork: AppleTopShelfArtworkStore? {
@@ -450,7 +530,9 @@ public actor AppleTopShelfSnapshotWriter {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         #endif
         guard enabled else {
+            await trailerDownloads.cancel()
             try? FileManager.default.removeItem(at: AppleTopShelfArtworkStore.directory(in: root))
+            try? FileManager.default.removeItem(at: AppleTopShelfTrailerPolicy.directory(in: root))
             // The extension can still read a snapshot left by older builds at the root.
             for location in Set([url, root.appending(path: Self.filename)]) {
                 do {
@@ -515,6 +597,35 @@ public actor AppleTopShelfSnapshotWriter {
             artwork.removeAll(in: directory, except: Set(names.values))
             snapshot = snapshot.withShelfImages(names)
         }
+        // The trailers already saved go out with this snapshot; the rest are
+        // fetched apart from it (`AppleTopShelfTrailerDownloads`) and added to
+        // whatever snapshot is current when they land.
+        guard let trailerFiles else { return try save(snapshot, to: url) }
+        let shown = Set(AppleTopShelfContentBuilder.carouselItems(for: snapshot).map(\.item.id))
+        let pages = heroes.compactMap { hero in
+            hero.trailerQuery.flatMap { shown.contains(hero.item.id) ? (id: hero.item.id, query: $0) : nil }
+        }
+        let trailerDirectory = AppleTopShelfTrailerPolicy.directory(in: root)
+        let plan = await trailerFiles.plan(for: pages, in: trailerDirectory)
+        try Task.checkCancellation()
+        trailerFiles.removeAll(in: trailerDirectory, except: plan.wanted)
+        try save(snapshot.withShelfVideos(plan.saved), to: url)
+        await trailerDownloads.fetch(plan, with: trailerFiles, in: trailerDirectory) { [self] fetched in
+            try? await addShelfVideos(fetched, at: url)
+        }
+    }
+
+    /// Adds newly saved trailers to the snapshot on disk, for the pages it
+    /// still shows.
+    private func addShelfVideos(_ names: [String: String], at url: URL) throws {
+        let current = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(contentsOf: url))
+        let videos = Dictionary((current.heroes + current.continueWatching + current.topPicks).compactMap { item in
+            item.shelfVideo.map { (item.id, $0) }
+        }, uniquingKeysWith: { first, _ in first }).merging(names) { $1 }
+        try save(current.withShelfVideos(videos), to: url)
+    }
+
+    private func save(_ snapshot: AppleTopShelfSnapshot, to url: URL) throws {
         let data = try JSONEncoder().encode(snapshot)
         #if os(iOS) || os(visionOS)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])

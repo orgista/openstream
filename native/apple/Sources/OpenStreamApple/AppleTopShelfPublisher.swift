@@ -60,6 +60,7 @@ public final class AppleTopShelfPublisher {
             + "|activity:\(ApplePlaybackProgressFeed.shared.revision)|successors:\(successorAvailable.sorted())|removed:\(removals.keys.sorted())"
             + "|heroes:" + heroes.map { "\($0.item.id)#\($0.backdropURL?.absoluteString ?? "")#\($0.wordmarkURL?.absoluteString ?? "")" }
                 .joined(separator: ",")
+            + "|serverTrailers:\(AppleServerTrailerStore.shared.revision)"
         let live = AppleLiveSystemChannels.shared
         let sourceIDs = Set(sources.filter { $0.kind == .liveTV && $0.isEnabled }.map(\.id))
         let favorites = AppleLiveSystemChannels.supported(live.favorites, sourceIDs: sourceIDs)

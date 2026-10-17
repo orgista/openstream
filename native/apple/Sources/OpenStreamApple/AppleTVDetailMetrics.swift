@@ -25,6 +25,8 @@ public enum AppleUIPlatform: Sendable, Equatable {
 /// Focus targets on the Apple TV title page. Play is the default.
 enum AppleTVDetailFocus: Hashable, Sendable {
     case play
+    /// The server trailer's button, first in the icon row.
+    case trailer
     /// "Start from Beginning", beside Resume.
     case startFromBeginning
     /// "Skip to Movie", beside Play Disc.
@@ -80,7 +82,7 @@ enum AppleTVDetailOpeningFocus {
                            target: AppleTVDetailFocus = .play) -> AppleTVDetailFocus? {
         switch focus {
         case let focus? where focus == target: nil
-        case .play, .startFromBeginning, .skipToMovie, .myList, .rate, .rateChoice: target
+        case .play, .startFromBeginning, .skipToMovie, .trailer, .myList, .rate, .rateChoice: target
         case .similar: nil
         case nil: hasHadAnyFocus ? nil : target
         }

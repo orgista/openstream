@@ -137,6 +137,17 @@ struct AppleDevSourcesPolicyTests {
                     password: "p", epgURL: nil), in: saved))
     }
 
+    @Test func aRemoveRunFindsTheSavedServerByKindAndAddress() throws {
+        var plex = AppleSource(kind: .mediaServer, name: "Plex", url: try #require(URL(string: "http://192.0.2.20:32400")))
+        plex.serverKind = .plex
+        let source = AppleDevSource.mediaServer(kind: .plex, name: "", url: "http://192.0.2.20:32400", credential: .token("t"))
+
+        #expect(AppleDevSourcesPolicy.saved(source, in: [plex])?.id == plex.id)
+        #expect(AppleDevSourcesPolicy.saved(
+            .mediaServer(kind: .jellyfin, name: "", url: "http://192.0.2.20:32400",
+                         credential: .password(username: "u", password: "")), in: [plex]) == nil)
+    }
+
     @Test func traceLinesCarryNoSecrets() {
         struct Failure: LocalizedError {
             var errorDescription: String? {

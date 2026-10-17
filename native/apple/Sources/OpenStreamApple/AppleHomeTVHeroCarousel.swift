@@ -16,10 +16,11 @@ struct AppleHomeTVHeroContext {
 /// Holds the Apple TV Discover hero's page and its cycle, as the iPhone and
 /// Mac carousels do (same `AppleHeroRotation.Cycle`), and hands the requested
 /// page to `AppleHeroPageGate`, which keeps the old page up until the new
-/// page's art is decoded. The hero is backdrop art only — no trailer on the
-/// Apple TV. The active dot fills over the cycle; the cycle holds while the
-/// hero has focus; left past the first button and right past the last turn the
-/// page (`AppleTVHeroPaging`).
+/// page's art is decoded. A page whose title has a trailer on the user's
+/// server plays it muted over the art (`AppleHeroServerTrailer`). The active
+/// dot fills over the cycle; the cycle holds while the hero has focus or its
+/// trailer plays, and moves on after the trailer ends; left past the first
+/// button and right past the last turn the page (`AppleTVHeroPaging`).
 ///
 /// The buttons are a focus section as wide as the screen, so Down from any
 /// tab and Up from any card reach them, and focus that arrives goes to Play,
@@ -38,6 +39,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     @State private var returnTarget: AppleTVHeroPaging.Target?
     /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
     @State private var heroIsVisible = false
+    @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
 
     var body: some View {
         let requested = min(cycle.index, max(pages.count - 1, 0))
@@ -52,6 +54,11 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
         } onPresent: { shown in
             guard shown == cycle.index else { return }
             cycle.didPresent(at: .now)
+        }
+        .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
+            let ended = state.lastEnd != nil && state.lastEnd != trailer.lastEnd
+            trailer = state
+            if ended { cycle.videoEnded(at: .now) }
         }
         .onChange(of: focus) { old, target in
             if old == nil, let target {
@@ -93,7 +100,7 @@ struct AppleHomeTVHeroCarousel<Page: View>: View {
     }
 
     private var isPaused: Bool {
-        reduceMotion || !heroIsVisible || AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
+        reduceMotion || !heroIsVisible || trailer.isPlaying || AppleTVHeroPaging.cycleIsPaused(heroHasFocus: focus != nil)
     }
 
     /// Holds the timer where it is, or runs it on from there.
