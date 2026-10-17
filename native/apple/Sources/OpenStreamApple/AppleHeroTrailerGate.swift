@@ -6,9 +6,10 @@ import SwiftUI
 ///
 /// Autoplay needs the Auto-Play Trailers setting, Reduce Motion and Low Power
 /// Mode off, the system's video autoplay on, the app active, at least half the
-/// hero visible, nothing pushed or presented over it, and its still settled
-/// first. A pressed Play Trailer skips only the setting, and may play over art
-/// that failed to load (`AppleTrailerArtFirstPolicy.mayRequestTrailer`).
+/// hero visible, nothing pushed or presented over it, its still settled
+/// first, and the hero list unchanged for `settleDelay`. A pressed Play Trailer skips the setting, Low Power Mode and the
+/// system switch (which gate only automatic playback in the Apple TV app), and
+/// may play over art that failed to load (`AppleTrailerArtFirstPolicy.mayRequestTrailer`).
 public enum AppleHeroTrailerGate {
     public struct Conditions: Equatable, Sendable {
         public var autoPlaySetting: Bool
@@ -26,13 +27,16 @@ public enum AppleHeroTrailerGate {
         /// The Mac window is on screen and not fully covered; true elsewhere.
         public var windowIsVisible: Bool
         public var art: AppleTrailerArtFirstPolicy.Art
+        /// The hero list has not changed for `settleDelay`.
+        public var heroesSettled: Bool
         /// The viewer pressed Play Trailer.
         public var pressed: Bool
 
         public init(autoPlaySetting: Bool = true, reduceMotion: Bool = false, lowPower: Bool = false,
                     systemVideoAutoplay: Bool = true, sceneIsActive: Bool = true, halfVisible: Bool = true,
                     isPresented: Bool = true, isCovered: Bool = false, windowIsVisible: Bool = true,
-                    art: AppleTrailerArtFirstPolicy.Art = .loaded, pressed: Bool = false) {
+                    art: AppleTrailerArtFirstPolicy.Art = .loaded, heroesSettled: Bool = true,
+                    pressed: Bool = false) {
             self.autoPlaySetting = autoPlaySetting
             self.reduceMotion = reduceMotion
             self.lowPower = lowPower
@@ -43,20 +47,34 @@ public enum AppleHeroTrailerGate {
             self.isCovered = isCovered
             self.windowIsVisible = windowIsVisible
             self.art = art
+            self.heroesSettled = heroesSettled
             self.pressed = pressed
         }
     }
+
+    /// How long the hero list must hold still before a trailer plays by
+    /// itself. At launch the list changes several times in the first seconds;
+    /// each provisional page would otherwise open a web view it then throws away.
+    public static let settleDelay: Duration = .seconds(1)
 
     /// Whether the trailer may be up. When this turns false the video is
     /// taken down and the still crossfades back; when it turns true again the
     /// trailer starts over.
     public static func plays(_ conditions: Conditions) -> Bool {
-        guard !conditions.reduceMotion, !conditions.lowPower, conditions.systemVideoAutoplay else { return false }
+        guard !conditions.reduceMotion,
+              allowsVideo(lowPower: conditions.lowPower, systemVideoAutoplay: conditions.systemVideoAutoplay,
+                          pressed: conditions.pressed) else { return false }
         let onScreen = conditions.halfVisible && conditions.isPresented && !conditions.isCovered
             && conditions.windowIsVisible && conditions.sceneIsActive
         guard onScreen, AppleTrailerArtFirstPolicy.mayRequestTrailer(art: conditions.art, pressed: conditions.pressed)
         else { return false }
-        return conditions.pressed || conditions.autoPlaySetting
+        return conditions.pressed || (conditions.autoPlaySetting && conditions.heroesSettled)
+    }
+
+    /// Low Power Mode and the system's Auto-Play Video Previews switch stop
+    /// only trailers that play by themselves; a pressed one plays through them.
+    public static func allowsVideo(lowPower: Bool, systemVideoAutoplay: Bool, pressed: Bool) -> Bool {
+        pressed || (!lowPower && systemVideoAutoplay)
     }
 }
 
@@ -64,4 +82,6 @@ extension EnvironmentValues {
     /// A sheet or full-screen cover is up over the hero: its trailer stops
     /// (`AppleHeroTrailerGate`). A pushed page is seen by the hero itself.
     @Entry var appleHeroIsCovered = false
+    /// The hero list has held still for `AppleHeroTrailerGate.settleDelay`.
+    @Entry var appleHeroesSettled = true
 }

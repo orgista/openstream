@@ -12,12 +12,15 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
     /// One id per page, in order.
     let pageIDs: [String]
     let layout: AppleMacHeroLayout
+    /// Loads the trailer of the page after the one showing.
+    var prefetchTrailer: (Int) async -> Void = { _ in }
     @ViewBuilder let page: (Int) -> Page
     /// Draws a page's art invisibly, so the next page is already decoded when
     /// it slides in.
     @ViewBuilder let preload: (Int) -> Preload
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appleHeroesSettled) private var heroesSettled
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isHovering = false
     @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
@@ -47,7 +50,9 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
                 }
             }
             .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
+                let event = state.cycleEvent(after: trailer)
                 trailer = state
+                if let event { cycle.handle(event, at: .now) }
             }
 
             if cycle.count > 1 {
@@ -93,6 +98,11 @@ struct AppleHomeMacHeroCarousel<Page: View, Preload: View>: View {
             holdOrRun()
         }
         .onChange(of: isPaused) { holdOrRun() }
+        // Keyed on the settled list too: a provisional launch page prefetches nothing.
+        .task(id: heroesSettled ? cycle.pages(available: pageIDs.count)?.next : nil) {
+            guard heroesSettled, let next = cycle.pages(available: pageIDs.count)?.next else { return }
+            await prefetchTrailer(next)
+        }
         .task(id: cycle) {
             // Restarted by every change to the cycle, so this only ever waits
             // for the page that is showing.

@@ -13,15 +13,25 @@ struct AppleHomeHeroTrailerStateKey: PreferenceKey {
         var isMuted = true
         /// Started by the Play Trailer button rather than autoplay.
         var isRequested = false
-        /// New each time a trailer plays to its end, so the iPhone hero can
-        /// move on a moment later (`AppleHeroRotation.Cycle.videoEnded`).
+        /// New each time a trailer plays to its end, so the hero can move on
+        /// a moment later (`AppleHeroRotation.Cycle.videoEnded`).
         var lastEnd: UUID?
+        /// New each time a trailer fails or misses its startup timeout, so the
+        /// hero gives the still a fresh dwell (`AppleHeroRotation.Cycle.videoFailed`).
+        var lastFailure: UUID?
+
+        /// What the cycle should do with `self` arriving after `previous`.
+        func cycleEvent(after previous: Self) -> AppleHeroRotation.VideoEvent? {
+            if lastEnd != nil, lastEnd != previous.lastEnd { return .ended }
+            if lastFailure != nil, lastFailure != previous.lastFailure { return .failed }
+            return nil
+        }
     }
 
     static let defaultValue = Value()
 
     static func reduce(value: inout Value, nextValue: () -> Value) {
         let next = nextValue()
-        if next.isPlaying || (!value.isPlaying && next.lastEnd != nil) { value = next }
+        if next.isPlaying || (!value.isPlaying && (next.lastEnd != nil || next.lastFailure != nil)) { value = next }
     }
 }
