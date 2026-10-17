@@ -129,7 +129,10 @@ final class AppleiOSWidgetPlacementUITests: OpenStreamUITestCase {
         Thread.sleep(forTimeInterval: 3)
         attach("03-widget-gallery")
 
-        let search = springboard.searchFields.firstMatch
+        // iOS 18 keeps the App Library's search field in the tree off screen,
+        // and a bare firstMatch re-resolved to it between the tap and typing.
+        let search = springboard.searchFields.matching(
+            NSPredicate(format: "identifier != %@", "dewey-search-field")).firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 20), "the widget gallery had no search field")
         search.tap()
         search.typeText("oStream")
@@ -279,8 +282,11 @@ final class AppleiOSConfigurationTransferUITests: OpenStreamUITestCase {
         }
         attach("03-save-sheet-location")
 
-        let save = app.buttons["Save"]
-        guard save.waitForExistence(timeout: 20), save.isHittable else {
+        // iOS 18's exporting picker titles its confirm button "Move"; 26 says "Save".
+        _ = app.buttons.matching(NSPredicate(format: "label IN %@", ["Save", "Move"])).firstMatch
+            .waitForExistence(timeout: 20)
+        let save = app.buttons["Save"].exists ? app.buttons["Save"] : app.buttons["Move"]
+        guard save.exists, save.isHittable else {
             dump("save-sheet-no-save")
             return XCTFail("the save sheet had no Save button — tree above")
         }

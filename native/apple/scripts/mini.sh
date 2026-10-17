@@ -24,4 +24,7 @@ rsync -a --delete \
 [[ ${1:-} == --sync-only ]] && exit 0
 (( $# )) || { print -u2 "usage: scripts/mini.sh <command…>"; exit 2; }
 CMD="$*"
-ssh $HOST "cd $DEST && ~/Developer/bin/buildlock.sh zsh -c ${(q)CMD}"
+# OPENSTREAM_MINI_LANE=compile: swift test / builds with no simulator or device take the second lock and can run beside
+# one simulator/device job (owner 2026-10-16). Anything that boots a simulator or touches a device uses the default lane.
+LOCK=buildlock.sh; [[ ${OPENSTREAM_MINI_LANE:-} == compile ]] && LOCK=buildlock-compile.sh
+ssh $HOST "cd $DEST && ~/Developer/bin/$LOCK zsh -c ${(q)CMD}"

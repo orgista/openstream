@@ -2675,6 +2675,25 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(row.exists, "TF1 row disappeared")
     }
 
+    /// iOS 18's XCTest never reports a SwiftUI `Menu` button as hittable,
+    /// though a finger opens it (proved on the 18.6 simulator, 2026-10-16).
+    /// There these are judged by where they are; the press still has to open
+    /// the menu.
+    private static let iOS18MenuButtons: Set<String> = ["player.options", "player.captions"]
+
+    private func isTouchableMenuButton(_ element: XCUIElement, identifier: String) -> Bool {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 26,
+              Self.iOS18MenuButtons.contains(identifier),
+              let snapshot = try? element.snapshot(), snapshot.isEnabled,
+              snapshot.frame.width >= 1, snapshot.frame.height >= 1 else { return false }
+        return crawlScreenRect.contains(snapshot.frame)
+    }
+
+    private func playerCaptionsAreUp() -> Bool {
+        let captions = app.buttons["player.captions"].firstMatch
+        return captions.exists && (captions.isHittable || isTouchableMenuButton(captions, identifier: "player.captions"))
+    }
+
     /// A guide selection opens the player directly and channel changes stay there.
 
     /// Reveals the player chrome only when it is hidden; tapping the surface while chrome is up would hide it.
@@ -2687,11 +2706,16 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     @discardableResult
     private func revealPlayerControls() -> Bool {
         let captions = app.buttons["player.captions"]
-        for _ in 0..<4 {
-            if captions.exists, captions.isHittable { return true }
+        for _ in 0..<6 {
+            if playerCaptionsAreUp() { return true }
             let background = app.buttons["player.controls.show"].firstMatch
-            guard background.exists,
-                  let offset = crawlPlayerBackgroundHitOffset(background.frame, scene: crawlScene()) else { return false }
+            guard background.exists else { return false }
+            // iOS 18 turns a player that opens with the phone already sideways;
+            // mid-turn its surface is not inside the screen yet, so wait it out.
+            guard let offset = crawlPlayerBackgroundHitOffset(background.frame, scene: crawlScene()) else {
+                Thread.sleep(forTimeInterval: 1)
+                continue
+            }
             background.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
             if captions.waitForExistence(timeout: 2) { return true }
         }
@@ -3895,8 +3919,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                     app.buttons["player.play-pause"].firstMatch.tap()
                 }
             } else if target.identifier == "player.controls.show" {
-                let captions = app.buttons["player.captions"].firstMatch
-                answered = captions.exists && captions.isHittable
+                answered = playerCaptionsAreUp()
             } else if target.identifier == "player.captions" {
                 let off = app.buttons["Off"].firstMatch
                 let english = app.buttons["English"].firstMatch
@@ -4125,9 +4148,18 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     private func undoCrawlDownload(control: XCUIElement, node: CrawlNode, screen: CrawlScreen, result: inout CrawlResult) {
         func originalRowControl() -> XCUIElement? {
             guard !node.identifier.isEmpty else { return nil }
-            return app.buttons.matching(identifier: node.identifier).allElementsBoundByIndex
+            let candidates = app.buttons.matching(identifier: node.identifier).allElementsBoundByIndex
+            // A started download puts its status line above the episode row
+            // and the row moves down; the episode named in the label does not.
+            if let episode = Self.crawlDownloadSubject(node.label),
+               let same = candidates.first(where: { Self.crawlDownloadSubject($0.label) == episode }) {
+                if !isSafelyHittable(same) { scrollToControl(same, in: app) }
+                return isSafelyHittable(same) ? same : nil
+            }
+            return candidates
                 .filter { candidate in
-                    candidate.isHittable && candidate.frame.intersects(node.frame.insetBy(dx: -8, dy: -8))
+                    // On iOS 18 one of the matches has no hit point, and raw isHittable throws on it.
+                    isSafelyHittable(candidate) && candidate.frame.intersects(node.frame.insetBy(dx: -8, dy: -8))
                         && abs(candidate.frame.midY - node.frame.midY) <= max(44, node.frame.height)
                 }
                 .min {
@@ -4186,6 +4218,15 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         crawlDownloadsAreOff = true
         crawlNote("   ! a download the walk started could not be cancelled from the UI — CHECK THE SIMULATOR")
         result.defects.append("[\(screen.name)] the download the crawl started could not be cancelled from its own options")
+    }
+
+    /// "Downloading S1 E1 · Pilot, 40%" → "S1 E1 · Pilot": the episode a
+    /// download control speaks for, whatever state its label is in.
+    private static func crawlDownloadSubject(_ label: String) -> String? {
+        let verbs = ["Download ", "Preparing ", "Downloading ", "Paused ", "Downloaded "]
+        guard let verb = verbs.first(where: { label.hasPrefix($0) }) else { return nil }
+        return String(label.dropFirst(verb.count))
+            .replacingOccurrences(of: #", \d+%$"#, with: "", options: .regularExpression)
     }
 
     private enum CrawlDownloadState { case running, finished, notRunning }
@@ -4646,6 +4687,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             return .offScreen
         }
         if element.isHittable { return .hittable }
+        if isTouchableMenuButton(element, identifier: element.identifier) { return .hittable }
         if crawlContentOverlapsNavigationBar(element, frame: frame) { return .offScreen }
         return .blocked
     }
