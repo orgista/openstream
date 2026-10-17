@@ -24,6 +24,10 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             let genre: String?
             let year: Int?
             let durationSeconds: Double?
+            /// The page's picture the app drew, wordmark included: a file in
+            /// Library/Caches/topshelf-art. Absent in older snapshots.
+            let shelfImage: String?
+            let previewVideoURL: URL?
         }
 
         let version: Int
@@ -34,9 +38,11 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         let favorites: [Item]
         let topPicks: [Item]
         let favoriteChannels: [Item]
+        /// The Home hero's pages, in its order. Absent in older snapshots.
+        let heroes: [Item]
 
         private enum CodingKeys: String, CodingKey {
-            case version, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels
+            case version, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels, heroes
         }
 
         init(from decoder: Decoder) throws {
@@ -47,6 +53,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             favorites = try container.decode([Item].self, forKey: .favorites)
             favoriteChannels = try container.decodeIfPresent([Item].self, forKey: .favoriteChannels) ?? []
             topPicks = try container.decodeIfPresent([Item].self, forKey: .topPicks) ?? []
+            heroes = try container.decodeIfPresent([Item].self, forKey: .heroes) ?? []
         }
     }
 
@@ -76,12 +83,14 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             return
         }
 
-        // The Apple TV app's shelf: full-screen backdrops, Continue Watching
-        // first, then Top Picks, no progress bars. Mirrors
+        // The Apple TV app's shelf: full-screen pictures, the Home hero's
+        // pages then Continue Watching, no progress bars. Mirrors
         // AppleTopShelfContentBuilder.carouselItems(for:) in OpenStreamApple.
-        let carousel = carouselItems(snapshot)
+        let art = root.appending(path: "Library/Caches/topshelf-art", directoryHint: .isDirectory)
+        let carousel = carouselItems(snapshot, art: art)
         if !carousel.isEmpty {
-            log.info("serving carousel of \(carousel.count): continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
+            let drawn = carousel.filter { $0.imageURL(for: .screenScale2x)?.isFileURL == true }.count
+            log.info("serving carousel of \(carousel.count) (\(drawn) drawn): heroes=\(snapshot.heroes.count) continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
             completionHandler(TVTopShelfCarouselContent(style: .details, items: carousel))
             return
         }
@@ -98,12 +107,17 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 
-    private func carouselItems(_ snapshot: Snapshot) -> [TVTopShelfCarouselItem] {
+    private func carouselItems(_ snapshot: Snapshot, art: URL) -> [TVTopShelfCarouselItem] {
         var seen = Set<String>()
-        let pages = snapshot.continueWatching.map { ("Continue Watching", $0) } + snapshot.topPicks.map { ("Top Picks", $0) }
+        let resumed = Set(snapshot.continueWatching.map(\.id))
+        let continued: [(String?, Snapshot.Item)] = snapshot.continueWatching.map { ("Continue Watching", $0) }
+        let pages: [(String?, Snapshot.Item)] = snapshot.heroes.isEmpty
+            ? continued + snapshot.topPicks.map { ("Top Picks", $0) }
+            : snapshot.heroes.map { (resumed.contains($0.id) ? "Continue Watching" : nil, $0) } + continued
         return Array(pages.compactMap { context, value -> TVTopShelfCarouselItem? in
-            guard let imageURL = value.landscapeArtworkURL.flatMap(Self.systemImageURL),
+            guard let remote = value.landscapeArtworkURL.flatMap(Self.systemImageURL),
                   seen.insert(value.id).inserted else { return nil }
+            let imageURL = Self.drawnImageURL(value.shelfImage, in: art) ?? remote
             let item = TVTopShelfCarouselItem(identifier: value.id)
             item.contextTitle = context
             item.title = String(value.title.prefix(200))
@@ -116,12 +130,20 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             item.displayAction = TVTopShelfAction(url: value.displayURL)
             if let playURL = value.playURL { item.playAction = TVTopShelfAction(url: playURL) }
             item.setImageURL(imageURL, for: [.screenScale1x, .screenScale2x])
+            if let video = value.previewVideoURL, video.scheme?.lowercased() == "https" { item.previewVideoURL = video }
             return item
         }.prefix(12))
     }
 
     private static func systemImageURL(_ url: URL) -> URL? {
         ["https", "http"].contains(url.scheme?.lowercased()) && url.user == nil && url.password == nil ? url : nil
+    }
+
+    /// The app's drawn picture, when the file is there; a bare file name only.
+    private static func drawnImageURL(_ name: String?, in directory: URL) -> URL? {
+        guard let name, !name.contains("/"), name.hasSuffix(".jpg") else { return nil }
+        let url = directory.appending(path: name, directoryHint: .notDirectory)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     private func collection(title: String, values: [Snapshot.Item]) -> TVTopShelfItemCollection<TVTopShelfSectionedItem>? {

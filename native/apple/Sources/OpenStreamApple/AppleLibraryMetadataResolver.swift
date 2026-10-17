@@ -111,28 +111,36 @@ actor AppleLibraryMetadataResolver {
         return result
     }
 
-    func cachedMetadata(for groups: [AppleLibrarySeries]) -> [String: AppleCatalogItem] {
-        var result: [String: AppleCatalogItem] = [:]
+    /// Known matches, plus the titles whose last lookup found no such title,
+    /// from one read of each cache file. An outage or a missing key is not a
+    /// no-match, and a manual correction is always a match.
+    func cachedLookups(for groups: [AppleLibrarySeries]) -> (metadata: [String: AppleCatalogItem], noMatch: Set<String>) {
+        var metadata: [String: AppleCatalogItem] = [:]
+        var noMatch = Set<String>()
         for group in groups {
             guard let item = group.items.first else { continue }
             if let record = matchRecord(for: item), record.isManual {
-                result[group.id] = record.candidate
+                metadata[group.id] = record.candidate
                 continue
             }
-            let file = directory.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(Self.cacheKey(item) + ".json")
+            guard let data = try? Data(contentsOf: cacheURL(item)),
+                  let entry = try? JSONDecoder().decode(Entry.self, from: data) else { continue }
             // Same schema gate as `resolve`: an old shape is missing fields and
             // must re-resolve. Age is not a gate: a known match is shown at
             // once, and the store revalidates stale ones in the background
             // (`needsRevalidation`), publishing only when the answer changes.
-            if let data = try? Data(contentsOf: file), let entry = try? JSONDecoder().decode(Entry.self, from: data),
-               (entry.schema ?? 0) == Self.currentSchema, let value = entry.value { result[group.id] = value }
+            if let value = entry.value {
+                if (entry.schema ?? 0) == Self.currentSchema { metadata[group.id] = value }
+            } else if entry.reason == .noMatch {
+                noMatch.insert(group.id)
+            }
         }
-        return result
+        return (metadata, noMatch)
     }
 
     func needsRevalidation(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String) -> Bool {
         if let record = matchRecord(for: item), record.isManual { return false }
-        let file = directory.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(Self.cacheKey(item) + ".json")
+        let file = cacheURL(item)
         guard let data = try? Data(contentsOf: file), let entry = try? JSONDecoder().decode(Entry.self, from: data),
               (entry.schema ?? 0) == Self.currentSchema else { return true }
         return !Self.cacheIsFresh(value: entry.value, reason: entry.reason, checkedAt: entry.checkedAt,
@@ -143,6 +151,10 @@ actor AppleLibraryMetadataResolver {
 
     static func cacheKey(_ item: AppleLibraryItem) -> String {
         ApplePlaybackIdentity.digest(for: "\(item.relativePath)|\(item.sizeBytes)")
+    }
+
+    private func cacheURL(_ item: AppleLibraryItem) -> URL {
+        directory.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(Self.cacheKey(item) + ".json")
     }
 
     func resolve(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String, refresh: Bool = false) async throws -> AppleCatalogItem? {
@@ -160,8 +172,7 @@ actor AppleLibraryMetadataResolver {
     private func performResolve(_ item: AppleLibraryItem, sources: [AppleSource], tmdbKey: String, omdbKey: String, refresh: Bool) async throws -> AppleCatalogItem? {
         try Task.checkCancellation()
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
-        let file = directory.appendingPathComponent(item.sourceID.uuidString)
-            .appendingPathComponent(Self.cacheKey(item) + ".json")
+        let file = cacheURL(item)
         let cached = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Entry.self, from: $0) }
         let configuration = Self.configurationDigest(sources, tmdbKey, omdbKey)
         if !refresh, let cached, (cached.schema ?? 0) == Self.currentSchema,
@@ -274,9 +285,12 @@ actor AppleLibraryMetadataResolver {
         return matchRecord(logicalID: logicalID)
     }
 
+    private func logicalMatchURL(_ logicalID: String) -> URL {
+        matchDirectory.appendingPathComponent("logical-" + ApplePlaybackIdentity.digest(for: logicalID) + ".json")
+    }
+
     func matchRecord(logicalID: String) -> MatchRecord? {
-        let url = matchDirectory.appendingPathComponent("logical-" + ApplePlaybackIdentity.digest(for: logicalID) + ".json")
-        guard let data = try? Data(contentsOf: url), let record = try? JSONDecoder().decode(MatchRecord.self, from: data),
+        guard let data = try? Data(contentsOf: logicalMatchURL(logicalID)), let record = try? JSONDecoder().decode(MatchRecord.self, from: data),
               record.isManual || record.confidence >= 0.95 else { return nil }
         return record
     }
@@ -290,6 +304,23 @@ actor AppleLibraryMetadataResolver {
     func correctMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem, provider: String,
                       explicitIDs: [String: String] = [:]) throws {
         try saveMatch(for: item, candidate: candidate, provider: provider, explicitIDs: explicitIDs, isManual: true)
+    }
+
+    func isManualMatch(_ item: AppleLibraryItem) -> Bool {
+        matchRecord(for: item)?.isManual == true
+    }
+
+    /// Removes the manual correction, so the automatic answer is used again.
+    func removeManualMatch(for item: AppleLibraryItem) throws {
+        guard let record = matchRecord(for: item), record.isManual else { return }
+        let fileManager = FileManager.default
+        let url = matchURL(item)
+        if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+        if let kind = AppleMediaKind(rawValue: record.candidate.type),
+           let logicalID = AppleLogicalItemKey.title(kind: kind, imdb: record.explicitIDs["imdb"], tmdb: record.explicitIDs["tmdb"]),
+           matchRecord(logicalID: logicalID)?.isManual == true {
+            try fileManager.removeItem(at: logicalMatchURL(logicalID))
+        }
     }
 
     private func saveAutomaticMatch(for item: AppleLibraryItem, candidate: AppleCatalogItem,
@@ -321,7 +352,7 @@ actor AppleLibraryMetadataResolver {
         if record.isManual || record.confidence >= 0.95,
            let kind = AppleMediaKind(rawValue: candidate.type),
            let logicalID = AppleLogicalItemKey.title(kind: kind, imdb: ids["imdb"], tmdb: ids["tmdb"]) {
-            try encoded.write(to: matchDirectory.appendingPathComponent("logical-" + ApplePlaybackIdentity.digest(for: logicalID) + ".json"), options: .atomic)
+            try encoded.write(to: logicalMatchURL(logicalID), options: .atomic)
         }
     }
 

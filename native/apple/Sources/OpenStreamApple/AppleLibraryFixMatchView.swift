@@ -14,6 +14,15 @@ struct AppleLibraryFixMatchView: View {
     @State private var isSearching = false
     @State private var status: String?
     @State private var library = AppleLocalLibraryStore.shared
+    /// Fixed when the sheet opens, so a pick does not retitle it on the way out.
+    @State private var title: String
+
+    init(group: AppleLibrarySeries, sources: [AppleSource], settings: AppleSettingsStore) {
+        self.group = group
+        self.sources = sources
+        self.settings = settings
+        _title = State(initialValue: AppleLocalLibraryStore.shared.metadata[group.id] == nil ? "Match" : "Change Metadata")
+    }
 
     var body: some View {
         NavigationStack {
@@ -46,7 +55,7 @@ struct AppleLibraryFixMatchView: View {
                 #endif
             }
             .scrollIndicators(.hidden)
-            .navigationTitle("Fix Match")
+            .navigationTitle(title)
             #if !os(tvOS)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -18,6 +18,8 @@ final class AppleLocalLibraryStore {
     private(set) var groups: [AppleLibrarySeries] = []
     private(set) var sources: [AppleSource] = []
     private(set) var metadata: [String: AppleCatalogItem] = [:]
+    /// Titles whose cached lookup found no such title (`AppleLibraryUnmatchedPolicy`).
+    private(set) var noMatchIDs: Set<String> = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
@@ -96,6 +98,7 @@ final class AppleLocalLibraryStore {
         groups = []
         sources = []
         metadata = [:]
+        noMatchIDs = []
         isLoading = false
         errorMessage = nil
         progress = [:]
@@ -123,10 +126,11 @@ final class AppleLocalLibraryStore {
         // Known matches go out with the groups: published bare, the Library
         // hero drew one title and then rebuilt with another page first when
         // the scan merged the same cache ~6 s later.
-        let cached = await metadataResolver.cachedMetadata(for: realGroups)
+        let (cached, noMatch) = await metadataResolver.cachedLookups(for: realGroups)
         self.sources = activeSources
         self.groups = realGroups
         metadata.merge(cached) { _, persisted in persisted }
+        noMatchIDs = noMatch
         contentDidChange()
         appleTrace("library published from persisted index: \(publishedCount) titles, \(cached.count) cached matches")
         // Episode lists and Continue Watching's next-episode check redraw
@@ -398,6 +402,9 @@ final class AppleLocalLibraryStore {
                 recordedIdentityFileIDs.subtract(group.items.map(\.id))
                 contentDidChange()
             }
+            if value == nil || noMatchIDs.contains(group.id) {
+                setNoMatch(await metadataResolver.cachedLookups(for: [group]).noMatch.contains(group.id), for: group)
+            }
         } catch {
             // A cancelled or failed lookup leaves the currently published metadata intact.
         }
@@ -603,13 +610,14 @@ final class AppleLocalLibraryStore {
         }
         #endif
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
-        let cached = await metadataResolver.cachedMetadata(for: groups)
+        let (cached, missed) = await metadataResolver.cachedLookups(for: groups)
         let merged = metadata.merging(cached) { _, persisted in persisted }
         if merged != metadata {
             metadata = merged
             contentDidChange()
         }
-        appleTrace("library cached metadata merged: \(cached.count)")
+        if missed != noMatchIDs { noMatchIDs = missed }
+        appleTrace("library cached metadata merged: \(cached.count), no match: \(noMatchIDs.count)")
         refreshProgress()
         appleTrace("library progress refreshed")
         await recordAllIdentityAliases()
@@ -619,7 +627,7 @@ final class AppleLocalLibraryStore {
             guard !Task.isCancelled else { return }
             await resolve(group, sourceStore: sourceStore, settings: settings)
         }
-        appleTrace("library eager metadata resolved")
+        appleTrace("library eager metadata resolved, no match: \(noMatchIDs.count)")
         let completedSources = pendingIndexWrites.filter { $0.status == .complete }
         for entry in completedSources { lastSuccessfulScanBySource[entry.source.id] = .now }
         if pendingIndexWrites.allSatisfy({ $0.status == .complete }) { lastScan = .now }
@@ -657,6 +665,32 @@ final class AppleLocalLibraryStore {
         metadata[group.id] = candidate
         recordedIdentityFileIDs.subtract(group.items.map(\.id))
         contentDidChange()
+    }
+
+    var unmatched: [AppleLibrarySeries] {
+        AppleLibraryUnmatchedPolicy.members(groups, metadata: metadata, noMatchIDs: noMatchIDs)
+    }
+
+    func hasManualMatch(_ group: AppleLibrarySeries) async -> Bool {
+        guard let file = group.items.first else { return false }
+        return await metadataResolver.isManualMatch(file)
+    }
+
+    /// Drops the manual correction and publishes the automatic answer the
+    /// disk cache holds, which is none for a title that never matched.
+    func useAutomaticMatch(_ group: AppleLibrarySeries) async throws {
+        guard let file = group.items.first else { return }
+        try await metadataResolver.removeManualMatch(for: file)
+        let cached = await metadataResolver.cachedLookups(for: [group])
+        metadata[group.id] = cached.metadata[group.id]
+        setNoMatch(cached.noMatch.contains(group.id), for: group)
+        recordedIdentityFileIDs.subtract(group.items.map(\.id))
+        contentDidChange()
+    }
+
+    private func setNoMatch(_ missed: Bool, for group: AppleLibrarySeries) {
+        guard missed != noMatchIDs.contains(group.id) else { return }
+        if missed { noMatchIDs.insert(group.id) } else { noMatchIDs.remove(group.id) }
     }
 
     nonisolated static func fileEpisodeID(_ file: AppleLibraryItem) -> String {
@@ -1070,6 +1104,8 @@ struct AppleLocalTitleDestination: View {
     var autoPlay = false
     @State private var library = AppleLocalLibraryStore.shared
     @State private var showsFixMatch = false
+    @State private var isManualMatch = false
+    @State private var automaticMatchRequest: UUID?
     var body: some View {
         if let source = library.sources.first(where: { $0.id == group.items.first?.sourceID }) {
             AppleCatalogItemDetailView(item: library.catalogItem(for: group), source: source, mediaIndex: mediaIndex,
@@ -1080,9 +1116,25 @@ struct AppleLocalTitleDestination: View {
                 openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
                 tabToolbar: tabToolbar)
                 .environment(\.appleLibraryFixMatch, { showsFixMatch = true })
+                .environment(\.appleLibraryIsMatched, library.metadata[group.id] != nil)
+                .environment(\.appleLibraryAutomaticMatch, automaticMatchAction)
                 .sheet(isPresented: $showsFixMatch) {
                     AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
                 }
+                .task(id: library.metadata[group.id]) { isManualMatch = await library.hasManualMatch(group) }
+                .task(id: automaticMatchRequest) {
+                    guard automaticMatchRequest != nil else { return }
+                    do { try await library.useAutomaticMatch(group) } catch {
+                        appleTraceFailure("library automatic match failed: \(appleErrorLabel(error))")
+                        return
+                    }
+                    await library.resolve(group, sourceStore: sourceStore, settings: settings)
+                }
         }
+    }
+
+    private var automaticMatchAction: (@MainActor () -> Void)? {
+        guard isManualMatch else { return nil }
+        return { automaticMatchRequest = UUID() }
     }
 }

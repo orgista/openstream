@@ -3340,6 +3340,10 @@ struct AppleLibraryView: View {
                 sourceShelves
                 AppleXtreamLibrarySections(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, accessory: accessoryShelf == nil ? sortAccessory : nil)
                 if !groups.isEmpty { shelf("Recently Added", library.sorted(.added), previewLimit: 24) }
+                let unmatched = library.unmatched
+                if !unmatched.isEmpty {
+                    AppleLibraryUnmatchedShelf(groups: unmatched, sourceStore: sourceStore, settings: settings)
+                }
                 if (library.isLoading || AppleXtreamLibraryStore.shared.isLoading) && groups.isEmpty
                     && AppleXtreamLibraryStore.shared.shelves.isEmpty {
                     AppleSourceLoadingState()
