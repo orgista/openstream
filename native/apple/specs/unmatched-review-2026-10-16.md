@@ -1,0 +1,17 @@
+Finished reading; writing the verdict now.
+
+**FIX** (one required change, rest are notes)
+
+1. `Sources/OpenStreamApple/AppleLocalLibraryStore.swift:133` — launch publishes later than before. `cachedMetadata(for:)` already opens and decodes every group's cache JSON; `noMatchGroupIDs(for: realGroups)` re-reads the same files a second time, and both run before the first `contentDidChange()` / "library published from persisted index" trace. On a large library that is thousands of extra file reads before the first Library frame. Fix: make it one pass, e.g. have `cachedMetadata(for:)` return `(metadata: [String: AppleCatalogItem], noMatch: Set<String>)` (the `entry.value == nil && entry.reason == .noMatch && !isManual` branch goes in its existing loop) and set both in `load`. `AppleLibraryMetadataResolver.swift:114-131`, `:151-163`. Same double read at `AppleLocalLibraryStore.swift:609` (`merged` and `missed` on the same groups); fold it the same way.
+
+Notes, no change required:
+
+- Spec gap, documented by the worker: the shelf only lists titles already looked up. With the eager pass capped at 24, a library of 500 unmatched files shows a shelf that grows as cards are resolved. Acceptable for now; say so in GUI-AUDIT when the driver records it.
+- `removeManualMatch` (`AppleLibraryMetadataResolver.swift:320-329`) deletes the shared `logical-*` record when it is manual, and `isManualMatch` falls back to that shared record, so "Use Automatic Match" can appear on file B and remove the record file A created. A's own file record survives, so A keeps its match. Worker flagged it; fine.
+- TMDB `search/movie.json` and `search/tv.json` stubs change every stub E2E run from "outage" to "no match" for any title Cinemeta does not know. Existing Library tests passed with it. Owner decision as the worker said; no code change.
+- tvOS test `AppleTVStubSmokeUITests.swift` keeps a `sleep(2)` while the system keyboard opens. Other tvOS tests use the same pattern (`AppleTVTopShelfUITests`), and no element is known to wait on. Acceptable; if it flakes, wait on `app.keyboards.firstMatch` first and fall back to the sleep.
+- Data safety is otherwise sound: manual corrections are only removed through the explicit menu action, the cache entry is never written by the new code, `removeManualMatch` is a guarded no-op without a manual record, and a failed delete surfaces through `appleTraceFailure` instead of being swallowed.
+- Main thread: all file work stays on the resolver actor; `library.unmatched` in the Library body is a filter over `groups` plus a sort of the members only. Fine.
+- Platforms: no new `os()` branches; tvOS Form rows and menu items are matched by label or containing cell, which matches how tvOS exposes them. The sheet title is fixed at open, so a pick does not retitle the sheet on dismiss. Release no-add-ons builds passed on all four platforms per the report.
+- Anti-slop: comments say why, not what. No dead paths, no force unwraps added, no new style islands. The `appleLibraryIsMatched` environment key is the smallest way to get the matched state into the shared menu view without a group parameter. Clean.
+- Tests: the five unit tests exercise the real resolver on a temp directory, including the E2E fixture through the stub host with a TMDB key set. No tautologies, no weakened assertions. The iOS test's `back` fallback (`detail.back` or the first nav-bar button) is a reasonable guard, not a skip.

@@ -128,7 +128,7 @@ struct AppleMetadataMatchFixTests {
             return nil
         }
         #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == manual)
-        #expect(await resolver.cachedMetadata(for: [group])[legacyID] == manual)
+        #expect(await resolver.cachedLookups(for: [group]).metadata[legacyID] == manual)
         #expect(AppleLibraryMetadataResolver.searchQueries(AppleLibraryTitleParser.parse(item)).first?.title == value.3)
     }
 
@@ -395,12 +395,12 @@ struct AppleMetadataMatchFixTests {
         let probe = CacheMissProbe()
         let offline = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in try await probe.lookup() }
         let groups = AppleLibrarySeries.groups([item])
-        #expect(await offline.cachedMetadata(for: groups)[groups[0].id] == original)
+        #expect(await offline.cachedLookups(for: groups).metadata[groups[0].id] == original)
         #expect(await probe.calls == 0)
         // Ten days is past every entry's jittered deadline.
         object["checkedAt"] = Date().addingTimeInterval(-10 * 86400).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
-        #expect(await offline.cachedMetadata(for: groups)[groups[0].id] == original)
+        #expect(await offline.cachedLookups(for: groups).metadata[groups[0].id] == original)
         #expect(await offline.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
         let changed = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in
             AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Updated")

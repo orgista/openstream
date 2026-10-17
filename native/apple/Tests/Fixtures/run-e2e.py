@@ -250,6 +250,9 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
             result["libraryFixtureTrace"] = [line for line in lines
                                              if "library scanned" in line or "library scans done" in line
                                              or "library grouped" in line]
+            result["libraryMatchTrace"] = [line for line in lines
+                                           if "network stub:" in line or "library cached metadata" in line
+                                           or "library eager" in line or "Library match" in line][-40:]
             result["discFixtureTrace"] = [line for line in lines
                                            if "title page disc:" in line or "disc start=" in line
                                            or "dvd menu" in line.lower()]

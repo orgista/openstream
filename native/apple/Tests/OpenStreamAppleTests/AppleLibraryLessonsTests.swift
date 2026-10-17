@@ -82,7 +82,7 @@ struct AppleLibraryLessonsTests {
             return nil
         }
         #expect(try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
-        #expect(await reopened.cachedMetadata(for: AppleLibrarySeries.groups([item])).values.first == candidate)
+        #expect(await reopened.cachedLookups(for: AppleLibrarySeries.groups([item])).metadata.values.first == candidate)
         #expect(await reopened.matchRecord(for: item) == nil)
     }
 
@@ -104,7 +104,7 @@ struct AppleLibraryLessonsTests {
         #expect(record.isManual)
         #expect(record.explicitIDs["imdb"] == correct.mediaID)
         #expect(record.candidate.releaseInfo == "2020")
-        #expect(await reopened.cachedMetadata(for: AppleLibrarySeries.groups([rescanned])).values.first == correct)
+        #expect(await reopened.cachedLookups(for: AppleLibrarySeries.groups([rescanned])).metadata.values.first == correct)
         let duplicate = file("Dune.1984.mkv", source: source)
         #expect(await reopened.matchRecord(for: duplicate) == nil)
         #expect(original.id == "\(source):\(original.relativePath)")
