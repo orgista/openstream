@@ -48,6 +48,10 @@ struct AppleMediaShelf<Content: View>: View {
             railScrollView
             #endif
         }.appleCatalogFocusSection()
+        .onAppear {
+            // The loading skeleton is a shelf with no title; the mark is for the first row of real titles.
+            if !title.isEmpty { AppleLaunchMarks.record(.firstRow, title) }
+        }
     }
 
     private var rail: some View {

@@ -615,6 +615,13 @@ struct AppleDiscoverView: View {
     }
 
     private func rebuildRecommendations(for revision: String) async {
+        // The first pass with heroes draws the billboard. The index, lookup, server and art revisions that follow
+        // it at launch each asked for another (~0.1 s of CPU apiece on the 18.6 sim, up to four in the first 2 s);
+        // they wait out the launch window, and a newer revision cancels the wait, so only the last one runs.
+        let launchWait = AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())
+        if !recommendations.heroes.isEmpty, launchWait > .zero {
+            do { try await Task.sleep(for: launchWait) } catch { return }
+        }
         // A rating may change while this screen is covered and unsubscribed.
         ratingStoreRevision = AppleTitleRatingStore.revision
         relationRevision = AppleTMDBRelationCache.revision
@@ -634,8 +641,11 @@ struct AppleDiscoverView: View {
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
             artwork: heroArtwork, debugHeroTitle: wanted, now: .now)
         do {
+            let started = ContinuousClock.now
             var result = try await Self.buildRecommendations(snapshot)
             guard !Task.isCancelled, revision == recommendationRevision else { return }
+            appleTrace("discover recommendations \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms"
+                + " picks=\(result.picks.count) heroes=\(result.heroes.count)")
             result.continueWatching = AppleContinueWatchingResolver.merge(recommendations.continueWatching,
                 incoming: result.continueWatching, id: { $0.record.id }, timestamp: { $0.continueWatchingUpdatedAt ?? $0.record.lastVerified })
             recommendations = result
@@ -1293,9 +1303,14 @@ struct AppleDiscoverView: View {
         if AppleTop10Fixture.isEnabled { return }
         #endif
         Task {
+            // Before the rows exist, so they draw with the art matched on an earlier launch.
+            await AppleTop10ArtworkStore.shared.load()
+            if let stored = await AppleNetflixTop10Client.shared.storedWeek() { top10Week = stored }
+            try? await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
             do {
                 top10Week = try await AppleNetflixTop10Client.shared.latestWeek()
                 top10Error = nil
+                appleTrace("discover top 10 loaded")
             } catch {
                 top10Error = error.localizedDescription
             }
@@ -2617,6 +2632,9 @@ private struct AppleTop10SearchCard<Destination: View>: View {
         .task(id: "\(entry.title):\(catalogConfigurationIdentity(sources)):\(metadataConfiguration != nil)") {
             match = nil
             isLoading = true
+            do {
+                try await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
+            } catch { return }
             // TMDB first: it knows the documentaries and older titles a catalog search by exact
             // name misses, and its answer is kept on disk for the next launch.
             if let metadataConfiguration,

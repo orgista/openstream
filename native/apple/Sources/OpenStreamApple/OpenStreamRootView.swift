@@ -563,6 +563,10 @@ public struct OpenStreamRootView: View {
         // drew one (macOS sweep, 2026-09-21).
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
         #endif
+        .onAppear {
+            AppleLaunchMarks.record(.firstFrame)
+            AppleHangMonitor.shared.startIfTracing()
+        }
         .task {
             sharePlay.startListening()
             mediaServerLibrary.loadPersisted()
@@ -1088,11 +1092,14 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
     /// at launch the catalog's sections arrive one after another, and each
     /// publish reads every record's playback state on the main actor
     /// (five publishes in 1.5 s, ~200 ms on an Apple TV 4K, 2026-10-15).
+    /// None starts inside the launch window (`AppleLaunchWorkPolicy.launchWindow`).
     private func schedulePublish() {
         pendingPublish?.cancel()
         pendingPublish = Task {
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: max(.milliseconds(500),
+                AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())))
             guard !Task.isCancelled else { return }
+            let started = ContinuousClock.now
             await AppleTopShelfPublisher.shared.publish(
                 records: mediaIndex.records,
                 sections: catalogStore.sections,
@@ -1100,6 +1107,7 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 heroes: AppleTopShelfHeroFeed.shared.heroes,
                 enabled: settingsStore.topShelfEnabled
             )
+            appleTrace("top shelf published in \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms")
         }
     }
 }

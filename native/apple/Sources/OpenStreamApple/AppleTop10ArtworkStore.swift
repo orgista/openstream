@@ -4,6 +4,9 @@ import Synchronization
 /// Netflix Top 10 titles matched to TMDB titles with art, kept on disk so the next launch draws the
 /// ranked rows with artwork from their first frame. Keyed by the chart's title, not its rank: a
 /// title moves between ranks from week to week. A miss is asked again after a day.
+///
+/// The file is read by `load()`, on this actor, never by `init`: the first touch of `shared` is `cached(title:type:)`
+/// inside Discover's body, on the main thread.
 actor AppleTop10ArtworkStore {
     typealias Search = @Sendable (_ title: String, _ type: String, AppleTMDBConfiguration) async throws -> AppleCatalogItem?
     struct Record: Codable, Sendable {
@@ -19,14 +22,23 @@ actor AppleTop10ArtworkStore {
     private let fileURL: URL
     private let search: Search
     private var inFlight: [String: Task<Result<AppleCatalogItem?, Error>, Never>] = [:]
+    private var isLoaded = false
 
     init(fileURL: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: "top10-artwork-v1.json"),
          search: @escaping Search = { try await AppleTMDBClient().top10Search(title: $0, type: $1, configuration: $2) }) {
         self.fileURL = fileURL
         self.search = search
-        let stored = (try? Data(contentsOf: fileURL)).flatMap { try? JSONDecoder().decode([String: Record].self, from: $0) }
-        records = Mutex(stored ?? [:])
+        records = Mutex([:])
+    }
+
+    /// Reads the matches kept by an earlier launch; later calls do nothing.
+    func load() {
+        guard !isLoaded else { return }
+        isLoaded = true
+        guard let stored = (try? Data(contentsOf: fileURL))
+            .flatMap({ try? JSONDecoder().decode([String: Record].self, from: $0) }) else { return }
+        records.withLock { $0 = stored }
     }
 
     /// A metadata-only title opens its page through the first enabled add-on, as a shared link does.
@@ -41,13 +53,14 @@ actor AppleTop10ArtworkStore {
         "\(type)|\(AppleTop10ArtworkLookup.chartKey(title))"
     }
 
-    /// The title found on an earlier visit or launch; cheap enough to call while a view draws.
+    /// The title found on an earlier visit or launch, once `load()` has run; cheap enough to call while a view draws.
     nonisolated func cached(title: String, type: String) -> AppleCatalogItem? {
         records.withLock { $0[Self.key(title: title, type: type)]?.item }
     }
 
     func resolve(title: String, type: String, configuration: AppleTMDBConfiguration,
                  now: Date = .now) async -> AppleCatalogItem? {
+        load()
         let key = Self.key(title: title, type: type)
         if let record = records.withLock({ $0[key] }),
            record.item != nil || now.timeIntervalSince(record.checkedAt) < Self.missRetry { return record.item }
