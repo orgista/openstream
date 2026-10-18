@@ -138,13 +138,71 @@ private actor CountingSMBClient: AppleNetworkShareClient {
         #expect(await server.bytesServed(playbackURL: first) == UInt64(walk.count) * 262_144)
         let stats = try #require(await server.readStats(playbackURL: first))
         #expect(stats.requests == walk.count)
-        #expect(stats.smbReads == 3)
+        #expect(stats.smbOpens == 3)
         await server.revoke(playbackURL: first)
 
         let replay = try await server.playbackURL(sourceURL: source, credentials: credentials, sizeBytes: Int64(payload.count))
         _ = try await get(replay, walk[0] ..< walk[0] + 262_144)
         #expect(await client.reads.count == 3)
         await server.removeAllSessions()
+    }
+
+    /// REA round 4, fix 1: a disc opened again after a relaunch reads its
+    /// structure from disk; the cold open stays within 10 SMB reads.
+    @Test func aDiscOpenedAfterARelaunchReadsItsStructureFromDisk() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("disc-structure-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = AppleDiscStructureStore(directory: directory)
+        let source = URL(string: "smb://fixture.invalid/Media/disc.iso")!
+        let modified = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let cold = CountingSMBClient(payload: payload)
+        let first = AppleSMBRangeServer(client: cold, addedLatency: .zero, usesBlockCache: true, structureStore: store)
+        let firstURL = try await first.playbackURL(sourceURL: source, credentials: credentials,
+            sizeBytes: Int64(payload.count), modifiedAt: modified)
+        for offset in walk { _ = try await get(firstURL, offset ..< offset + 262_144) }
+        #expect(await cold.reads.count <= 10)
+        await first.removeAllSessions()
+
+        let warm = CountingSMBClient(payload: payload)
+        let relaunched = AppleSMBRangeServer(client: warm, addedLatency: .zero, usesBlockCache: true, structureStore: store)
+        let url = try await relaunched.playbackURL(sourceURL: source, credentials: credentials,
+            sizeBytes: Int64(payload.count), modifiedAt: modified)
+        for offset in walk {
+            let range = offset ..< offset + 262_144
+            #expect(try await get(url, range) == payload.subdata(in: Int(range.lowerBound) ..< Int(range.upperBound)))
+        }
+        #expect(await warm.reads.isEmpty)
+        #expect(await relaunched.readStats(playbackURL: url)?.diskBlocks == 3)
+        await relaunched.removeAllSessions()
+    }
+
+    @Test func aDiscWithoutAModificationDateIsNotKept() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("disc-structure-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = AppleSMBRangeServer(client: CountingSMBClient(payload: payload), addedLatency: .zero,
+            usesBlockCache: true, structureStore: AppleDiscStructureStore(directory: directory))
+        let url = try await server.playbackURL(sourceURL: URL(string: "smb://fixture.invalid/Media/disc.iso")!,
+            credentials: credentials, sizeBytes: Int64(payload.count))
+        _ = try await get(url, walk[0] ..< walk[0] + 262_144)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        await server.removeAllSessions()
+    }
+
+    @Test func theStoreKeepsOnlyTheMostRecentDiscs() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("disc-structure-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = AppleDiscStructureStore(directory: directory)
+        let block = Data(repeating: 7, count: Int(AppleSMBBlockCache.blockSize))
+        for disc in 0 ... AppleDiscStructureStore.discLimit {
+            await store.store(block, index: 0, file: "disc-\(disc)")
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(disc) * 60)],
+                ofItemAtPath: directory.appendingPathComponent(ApplePlaybackIdentity.digest(for: "disc-\(disc)")).path)
+        }
+        await store.store(block, index: 0, file: "newest")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == AppleDiscStructureStore.discLimit)
+        #expect(await store.blocks(file: "disc-0", fileSize: 40 * 1_048_576).isEmpty)
+        #expect(await store.blocks(file: "newest", fileSize: 40 * 1_048_576)[0] == block)
     }
 
     @Test func theEndOfTheImageIsServedFromAShortBlock() async throws {
@@ -178,9 +236,18 @@ private actor CountingSMBClient: AppleNetworkShareClient {
         let server = AppleSMBRangeServer(client: client, addedLatency: .zero, usesBlockCache: true)
         let url = try await server.playbackURL(sourceURL: URL(string: "smb://fixture.invalid/Media/disc.iso")!,
             credentials: credentials, sizeBytes: Int64(payload.count))
-        let ramp: Range<UInt64> = 20 * 1_048_576 + 4_096 ..< 21 * 1_048_576 + 4_096
-        #expect(try await get(url, ramp) == payload.subdata(in: Int(ramp.lowerBound) ..< Int(ramp.upperBound)))
-        #expect(await client.reads == [ramp])
+        // The engine's disc reader doubles its bounded ranges up to 8 MiB past the
+        // 256 KiB the structure cache takes; each is one SMB open.
+        var start: UInt64 = 20 * 1_048_576 + 4_096
+        var ramp: [Range<UInt64>] = []
+        for size in [524_288, 1_048_576, 8 * 1_048_576] as [UInt64] {
+            let range = start ..< start + size
+            #expect(try await get(url, range) == payload.subdata(in: Int(range.lowerBound) ..< Int(range.upperBound)))
+            ramp.append(range)
+            start = range.upperBound
+        }
+        #expect(await client.reads == ramp)
+        #expect(await server.readStats(playbackURL: url)?.smbOpens == ramp.count)
         await server.removeAllSessions()
     }
 

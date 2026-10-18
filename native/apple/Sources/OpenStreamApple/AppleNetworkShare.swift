@@ -392,11 +392,55 @@ public protocol AppleNetworkShareClient: Sendable {
     func listDirectory(url: URL, credentials: AppleSMBCredentials, recursive: Bool) async throws
         -> [AppleSMBDirectoryEntry]
     func read(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws -> Data
+    /// `range` read front to back, the bytes handed over as they arrive.
+    func openStream(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws
+        -> any AppleNetworkShareFileStream
     func closeAll() async
 }
 
 public extension AppleNetworkShareClient {
     func closeAll() async {}
+
+    func openStream(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws
+        -> any AppleNetworkShareFileStream {
+        AppleChunkedShareStream(client: self, url: url, credentials: credentials, range: range)
+    }
+}
+
+/// One sequential read of a file on a share.
+public protocol AppleNetworkShareFileStream: Sendable {
+    /// The next bytes, or nil once the range is read.
+    func next() async throws -> Data?
+    /// Stops reading and releases the file; `next()` throws afterwards.
+    func cancel()
+}
+
+/// A stream made of separate range reads, for clients that cannot keep a file open.
+actor AppleChunkedShareStream: AppleNetworkShareFileStream {
+    private let client: any AppleNetworkShareClient
+    private let url: URL
+    private let credentials: AppleSMBCredentials
+    private let end: UInt64
+    private var offset: UInt64
+
+    init(client: any AppleNetworkShareClient, url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) {
+        self.client = client
+        self.url = url
+        self.credentials = credentials
+        self.end = range.upperBound
+        self.offset = range.lowerBound
+    }
+
+    func next() async throws -> Data? {
+        guard offset < end else { return nil }
+        let data = try await client.read(url: url, credentials: credentials,
+            range: offset ..< min(offset + 4 * 1_024 * 1_024, end))
+        guard !data.isEmpty else { return nil }
+        offset += UInt64(data.count)
+        return data
+    }
+
+    nonisolated func cancel() {}
 }
 
 public actor AppleSMBClient: AppleNetworkShareClient {
@@ -418,6 +462,18 @@ public actor AppleSMBClient: AppleNetworkShareClient {
     private var pendingConnections: [ConnectionKey: Task<SMB2Manager, any Error>] = [:]
     private var connectionGeneration = 0
     private var idleCleanupTask: Task<Void, Never>?
+    /// Reads and streams in flight on each connection, by manager. libsmb2
+    /// frees every file handle when a share disconnects, and a stream closes
+    /// its handle on AMSMB2's queue after it is cancelled, so a disconnect
+    /// first waits for them (`smb2_close_async` on a freed handle is a
+    /// use-after-free). A play streams for hours without another call here,
+    /// so the idle prune skips a connection that is in use.
+    private var activeReads: [ObjectIdentifier: Int] = [:]
+    private var activeStreams: [ObjectIdentifier: [ObjectIdentifier: AppleSMBFileStream]] = [:]
+    private var drainWaiters: [ObjectIdentifier: [CheckedContinuation<Void, Never>]] = [:]
+    /// Connections whose readers outlived `drainTimeout`: never disconnected, so never freed under them.
+    private var abandonedManagers: [SMB2Manager] = []
+    private static let drainTimeout: Duration = .seconds(10)
     #endif
 
     public init() {}
@@ -501,7 +557,7 @@ public actor AppleSMBClient: AppleNetworkShareClient {
             try Task.checkCancellation()
             let manager = try await connectedManager(key: key, credentials: credentials)
             do {
-                let data = try await manager.contents(atPath: parts.path, range: range)
+                let data = try await reading(on: manager) { try await manager.contents(atPath: parts.path, range: range) }
                 try Task.checkCancellation()
                 connections[key]?.lastUsed = .now
                 scheduleIdleCleanup()
@@ -509,6 +565,43 @@ public actor AppleSMBClient: AppleNetworkShareClient {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
+                lastError = error
+                try Task.checkCancellation()
+                await invalidateConnection(key)
+                if attempt == 1 { throw AppleSMBError.mapped(from: error) }
+            }
+        }
+        throw AppleSMBError.mapped(from: lastError)
+        #else
+        throw AppleSMBError.unavailableOnPlatform
+        #endif
+    }
+
+    /// One SMB open for the whole of `range`: AMSMB2 reads it in the share's
+    /// largest read size on that handle. Returns once the first bytes are in,
+    /// so a share that fails to open gets the same one retry as `read`.
+    public func openStream(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws
+        -> any AppleNetworkShareFileStream {
+        #if canImport(AMSMB2)
+        let parts = try AppleSMBEndpointPolicy.parts(from: url)
+        let key = connectionKey(parts: parts, credentials: credentials)
+        var lastError: (any Error) = AppleSMBError.connectionFailed
+        for attempt in 0 ... 1 {
+            try Task.checkCancellation()
+            let manager = try await connectedManager(key: key, credentials: credentials)
+            let managerID = ObjectIdentifier(manager)
+            let stream = AppleSMBFileStream(manager: manager, path: parts.path, range: range) { [weak self] streamID in
+                Task { await self?.streamEnded(streamID, on: managerID) }
+            }
+            activeStreams[managerID, default: [:]][ObjectIdentifier(stream)] = stream
+            do {
+                try await stream.prime()
+                return stream
+            } catch is CancellationError {
+                stream.cancel()
+                throw CancellationError()
+            } catch {
+                stream.cancel()
                 lastError = error
                 try Task.checkCancellation()
                 await invalidateConnection(key)
@@ -530,7 +623,7 @@ public actor AppleSMBClient: AppleNetworkShareClient {
         let cached = Array(connections.values)
         connections.removeAll()
         for connection in cached {
-            try? await connection.manager.disconnectShare()
+            await disconnect(connection.manager)
         }
         #endif
     }
@@ -682,13 +775,66 @@ public actor AppleSMBClient: AppleNetworkShareClient {
 
     private func pruneConnections() async {
         let cutoff = Date.now.addingTimeInterval(-5 * 60)
-        let stale = connections.filter { $0.value.lastUsed < cutoff }.map(\.key)
+        let stale = connections.filter { $0.value.lastUsed < cutoff && !isInUse($0.value.manager) }.map(\.key)
         for key in stale { await invalidateConnection(key) }
     }
 
     private func invalidateConnection(_ key: ConnectionKey) async {
         guard let cached = connections.removeValue(forKey: key) else { return }
-        try? await cached.manager.disconnectShare()
+        await disconnect(cached.manager)
+    }
+
+    /// Cancels the manager's streams and disconnects once its reads and
+    /// streams have released their file handles; past `drainTimeout` it keeps
+    /// the manager forever instead.
+    private func disconnect(_ manager: SMB2Manager) async {
+        let id = ObjectIdentifier(manager)
+        for stream in activeStreams[id, default: [:]].values { stream.cancel() }
+        if isInUse(manager) {
+            let timeout = Task { [weak self] in
+                try? await Task.sleep(for: Self.drainTimeout)
+                await self?.resumeDrainWaiters(id)
+            }
+            await withCheckedContinuation { drainWaiters[id, default: []].append($0) }
+            timeout.cancel()
+        }
+        guard !isInUse(manager) else {
+            abandonedManagers.append(manager)
+            return
+        }
+        try? await manager.disconnectShare()
+    }
+
+    private func isInUse(_ manager: SMB2Manager) -> Bool {
+        let id = ObjectIdentifier(manager)
+        return activeReads[id] != nil || activeStreams[id] != nil
+    }
+
+    private func reading<Value: Sendable>(on manager: SMB2Manager,
+                                          _ operation: () async throws -> Value) async throws -> Value {
+        let id = ObjectIdentifier(manager)
+        activeReads[id, default: 0] += 1
+        defer {
+            let remaining = activeReads[id, default: 1] - 1
+            activeReads[id] = remaining > 0 ? remaining : nil
+            if remaining == 0, activeStreams[id] == nil { resumeDrainWaiters(id) }
+        }
+        return try await operation()
+    }
+
+    private func streamEnded(_ streamID: ObjectIdentifier, on managerID: ObjectIdentifier) {
+        activeStreams[managerID]?.removeValue(forKey: streamID)
+        guard activeStreams[managerID]?.isEmpty == true else { return }
+        activeStreams[managerID] = nil
+        if activeReads[managerID] == nil { resumeDrainWaiters(managerID) }
+        if let key = connections.first(where: { ObjectIdentifier($0.value.manager) == managerID })?.key {
+            connections[key]?.lastUsed = .now
+            scheduleIdleCleanup()
+        }
+    }
+
+    private func resumeDrainWaiters(_ id: ObjectIdentifier) {
+        for waiter in drainWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     }
 
     private func scheduleIdleCleanup() {

@@ -88,28 +88,111 @@ struct AppleSMBBlockCache {
     var count: Int { blocks.count }
 }
 
+/// The disc-structure blocks of recent disc images on disk, so a disc opened
+/// again after a relaunch reads its structure without touching the share.
+///
+/// The engine keeps its disc parse per process and keys it by the playback
+/// URL, which carries a fresh bridge token every play, so every open after a
+/// relaunch walked the UDF and BDMV tree over SMB again. A file is the same
+/// file only at the same path, size and modification date; without a date
+/// nothing is kept.
+public struct AppleDiscStructureStore: Sendable {
+    static let standard = AppleDiscStructureStore(directory: FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("OpenStream", isDirectory: true).appendingPathComponent("disc-structure", isDirectory: true))
+    /// Discs kept; each holds only the 1 MiB structure blocks its opens read (4 for one Blu-ray).
+    static let discLimit = 8
+
+    let directory: URL
+
+    /// The stored blocks of `file`, dropping any that are not the block's full length.
+    @concurrent func blocks(file: String, fileSize: UInt64) async -> [UInt64: Data] {
+        let folder = folder(for: file)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        var blocks: [UInt64: Data] = [:]
+        for name in names {
+            guard let index = UInt64(name), index < AppleSMBBlockCache.structureBlocks,
+                  let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
+                  data.count == AppleSMBBlockCache.byteRange(ofBlock: index, fileSize: fileSize).count else { continue }
+            blocks[index] = data
+        }
+        if !blocks.isEmpty {
+            try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: folder.path)
+        }
+        return blocks
+    }
+
+    @concurrent func store(_ block: Data, index: UInt64, file: String) async {
+        let fileManager = FileManager.default
+        let folder = folder(for: file)
+        let isNew = !fileManager.fileExists(atPath: folder.path)
+        do {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try block.write(to: folder.appendingPathComponent(String(index)), options: .atomic)
+        } catch {
+            return
+        }
+        if isNew { pruneOldestDiscs() }
+    }
+
+    private func folder(for file: String) -> URL {
+        directory.appendingPathComponent(ApplePlaybackIdentity.digest(for: file), isDirectory: true)
+    }
+
+    private func pruneOldestDiscs() {
+        let fileManager = FileManager.default
+        let folders = (try? fileManager.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        guard folders.count > Self.discLimit else { return }
+        let byAge = folders.sorted {
+            let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return left < right
+        }
+        for folder in byAge.prefix(folders.count - Self.discLimit) { try? fileManager.removeItem(at: folder) }
+    }
+}
+
 /// What one bridge session read, for the trace and the disc start budget.
 struct AppleSMBReadStats: Equatable, Sendable {
     var requests = 0
     var bytesServed: UInt64 = 0
     var cacheHits = 0
-    var smbReads = 0
+    var diskBlocks = 0
+    /// SMB file opens: one per read and one per streamed range.
+    var smbOpens = 0
     var smbBytes: UInt64 = 0
-    var smbMilliseconds = 0
-    var slowestSMBMilliseconds = 0
+    /// Whole reads: open, read and close, timed to the last byte.
+    var smbReads = 0
+    var readMilliseconds = 0
+    var slowestReadMilliseconds = 0
+    /// Streamed ranges, timed to the first bytes the player can be sent.
+    var streams = 0
+    var firstByteMilliseconds = 0
+    var slowestFirstByteMilliseconds = 0
 
-    mutating func recordSMBRead(bytes: Int, milliseconds: Int) {
+    mutating func recordSMBRead(milliseconds: Int) {
+        smbOpens += 1
         smbReads += 1
-        smbBytes += UInt64(bytes)
-        smbMilliseconds += milliseconds
-        slowestSMBMilliseconds = max(slowestSMBMilliseconds, milliseconds)
+        readMilliseconds += milliseconds
+        slowestReadMilliseconds = max(slowestReadMilliseconds, milliseconds)
     }
 
-    /// "312 requests (41.0 MB), 296 from cache, 16 SMB reads (16.0 MB, avg 58 ms, max 120 ms)".
+    mutating func recordStreamFirstByte(milliseconds: Int) {
+        streams += 1
+        firstByteMilliseconds += milliseconds
+        slowestFirstByteMilliseconds = max(slowestFirstByteMilliseconds, milliseconds)
+    }
+
+    /// "312 requests (41.0 MB), 296 from cache, 4 blocks from disk, 17 SMB opens (16.0 MB):
+    /// 15 reads avg 58 ms max 120 ms, 2 streams first byte avg 21 ms max 40 ms".
     var traceLine: String {
-        let average = smbReads > 0 ? smbMilliseconds / smbReads : 0
-        return "\(requests) requests (\(Self.megabytes(bytesServed))), \(cacheHits) from cache, "
-            + "\(smbReads) SMB reads (\(Self.megabytes(smbBytes)), avg \(average) ms, max \(slowestSMBMilliseconds) ms)"
+        let readAverage = smbReads > 0 ? readMilliseconds / smbReads : 0
+        let firstByteAverage = streams > 0 ? firstByteMilliseconds / streams : 0
+        return "\(requests) requests (\(Self.megabytes(bytesServed))), \(cacheHits) from cache, \(diskBlocks) blocks from disk, "
+            + "\(smbOpens) SMB opens (\(Self.megabytes(smbBytes))): "
+            + "\(smbReads) reads avg \(readAverage) ms max \(slowestReadMilliseconds) ms, "
+            + "\(streams) streams first byte avg \(firstByteAverage) ms max \(slowestFirstByteMilliseconds) ms"
     }
 
     private static func megabytes(_ bytes: UInt64) -> String {

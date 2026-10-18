@@ -16,8 +16,12 @@ public enum AppleSMBRangeServerError: Error, LocalizedError, Sendable {
 /// A loopback-only HTTP byte-range bridge for AVPlayer. The random token is a
 /// short-lived capability; SMB credentials and paths never appear in logs or
 /// in a public network response.
+///
+/// Connections are kept alive between requests. A bounded range is one SMB
+/// open. An open-ended range starts with a few small reads and, if the player
+/// keeps reading, goes on as one SMB open streamed as the share answers.
 public actor AppleSMBRangeServer {
-    public static let shared = AppleSMBRangeServer()
+    public static let shared = AppleSMBRangeServer(structureStore: .standard)
 
     private struct Session: Sendable {
         let sourceURL: URL
@@ -31,12 +35,17 @@ public actor AppleSMBRangeServer {
         var cacheFile: String {
             "\(sourceURL.absoluteString)#\(sizeBytes)#\(modifiedAt?.timeIntervalSince1970 ?? 0)"
         }
+
+        var isDiscImage: Bool {
+            AppleDiscImagePolicy.imageExtensions.contains(sourceURL.pathExtension.lowercased())
+        }
     }
 
     private let client: any AppleNetworkShareClient
     private let readTimeout: Duration
     private let addedLatency: Duration
     private let usesBlockCache: Bool
+    private let structureStore: AppleDiscStructureStore?
     private var blockCache = AppleSMBBlockCache()
     private var readStats: [String: AppleSMBReadStats] = [:]
     private struct ConnectionJob {
@@ -55,12 +64,14 @@ public actor AppleSMBRangeServer {
         client: any AppleNetworkShareClient = AppleSMBClient(),
         readTimeout: Duration = .seconds(30),
         addedLatency: Duration = AppleSMBRangeServer.launchArgumentLatency(),
-        usesBlockCache: Bool = AppleSMBRangeServer.launchArgumentUsesBlockCache()
+        usesBlockCache: Bool = AppleSMBRangeServer.launchArgumentUsesBlockCache(),
+        structureStore: AppleDiscStructureStore? = nil
     ) {
         self.client = client
         self.readTimeout = max(readTimeout, .milliseconds(1))
         self.addedLatency = addedLatency
         self.usesBlockCache = usesBlockCache
+        self.structureStore = structureStore
     }
 
     /// `-OpenStreamSMBTestLatencyMs 40`: a pause before every SMB read, so a
@@ -105,20 +116,29 @@ public actor AppleSMBRangeServer {
         readStats = readStats.filter { sessions[$0.key] != nil }
         guard sessions.count < 32 else { throw AppleSMBRangeServerError.listenerUnavailable }
         let token = Self.token()
-        sessions[token] = Session(
+        let session = Session(
             sourceURL: sourceURL,
             credentials: credentials,
             sizeBytes: UInt64(sizeBytes),
             modifiedAt: modifiedAt,
             expiresAt: .now.addingTimeInterval(min(max(lifetime, 60), 24 * 60 * 60))
         )
+        sessions[token] = session
+        if let store = discStore(for: session) {
+            let stored = await store.blocks(file: session.cacheFile, fileSize: session.sizeBytes)
+            for (index, block) in stored {
+                let key = AppleSMBBlockCache.Key(file: session.cacheFile, index: index)
+                if blockCache.block(for: key) == nil { blockCache.store(block, for: key) }
+            }
+            readStats[token, default: AppleSMBReadStats()].diskBlocks = stored.count
+        }
         let filename = sourceURL.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
             ?? "media"
         return URL(string: "http://127.0.0.1:\(port)/media/\(token)/\(filename)")!
     }
 
     public func revoke(playbackURL: URL) async {
-        guard let token = Self.token(of: playbackURL) else { return }
+        guard let token = Self.token(of: playbackURL), sessions[token] != nil else { return }
         if let stats = readStats.removeValue(forKey: token), stats.requests > 0 {
             AppleInteractionTrace.record(.network, "smb bridge \(playbackURL.lastPathComponent.suffix(48)): \(stats.traceLine)")
         }
@@ -138,6 +158,11 @@ public actor AppleSMBRangeServer {
         cancelConnections()
         await client.closeAll()
         stopListenerIfIdle()
+    }
+
+    private func discStore(for session: Session) -> AppleDiscStructureStore? {
+        guard usesBlockCache, session.isDiscImage, session.modifiedAt != nil else { return nil }
+        return structureStore
     }
 
     func diagnostics() -> (sessionCount: Int, listenerActive: Bool, connectionCount: Int) {
@@ -221,27 +246,36 @@ public actor AppleSMBRangeServer {
             return
         }
         connection.start(queue: DispatchQueue(label: "com.orgista.openstream.smb-range.connection"))
-        let timeout = Task {
-            try? await Task.sleep(for: .seconds(10))
-            if !Task.isCancelled { connection.cancel() }
+        // The engine's disc reader asks for hundreds of small ranges; each one
+        // on a new connection was a new loopback handshake.
+        var pending = Data()
+        var keepAlive = true
+        while keepAlive, !Task.isCancelled {
+            connectionJobs[id]?.responseStarted = false
+            let timeout = Task {
+                try? await Task.sleep(for: .seconds(10))
+                if !Task.isCancelled { connection.cancel() }
+            }
+            do {
+                let request = try await receiveRequest(connection, pending: &pending)
+                timeout.cancel()
+                guard let request else { break }
+                keepAlive = try await respond(to: request, connection: connection, id: id)
+            } catch {
+                timeout.cancel()
+                if !Task.isCancelled, connectionJobs[id]?.responseStarted != true { try? await send(
+                    Data("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".utf8),
+                    connection: connection,
+                    final: true
+                ) }
+                keepAlive = false
+            }
         }
-        do {
-            let request = try await receiveRequest(connection)
-            timeout.cancel()
-            try await respond(to: request, connection: connection, id: id)
-        } catch {
-            timeout.cancel()
-            if !Task.isCancelled, connectionJobs[id]?.responseStarted != true { try? await send(
-                Data("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".utf8),
-                connection: connection,
-                final: true
-            ) }
-        }
-        timeout.cancel()
         connection.cancel()
     }
 
-    private func respond(to request: String, connection: NWConnection, id: UUID) async throws {
+    /// Answers one request; true when the connection can take another.
+    private func respond(to request: String, connection: NWConnection, id: UUID) async throws -> Bool {
         let lines = request.components(separatedBy: "\r\n")
         let requestParts = lines.first?.split(separator: " ") ?? []
         guard requestParts.count >= 2 else { throw AppleSMBRangeServerError.invalidMedia }
@@ -258,7 +292,7 @@ public actor AppleSMBRangeServer {
                 connection: connection,
                 final: true
             )
-            return
+            return false
         }
         connectionJobs[id]?.token = token
         readStats[token, default: AppleSMBReadStats()].requests += 1
@@ -272,10 +306,12 @@ public actor AppleSMBRangeServer {
                 "Content-Range: bytes */\(session.sizeBytes)\r\n" +
                 "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
             try await send(Data(response.utf8), connection: connection, final: true)
-            return
+            return false
         }
+        let keepAlive = Self.keepsAlive(requestLine: lines[0], headers: lines.dropFirst())
         let range = requestedRange ?? 0 ..< session.sizeBytes
         let partial = requestedRange != nil
+        let openEnded = rangeHeader.map(Self.isOpenEnded) ?? true
         let contentLength = range.upperBound - range.lowerBound
         let contentType = Self.contentType(for: session.sourceURL.pathExtension)
         var headers = "HTTP/1.1 \(partial ? "206 Partial Content" : "200 OK")\r\n"
@@ -285,31 +321,83 @@ public actor AppleSMBRangeServer {
         if partial {
             headers += "Content-Range: bytes \(range.lowerBound)-\(range.upperBound - 1)/\(session.sizeBytes)\r\n"
         }
-        headers += "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+        headers += "Cache-Control: no-store\r\nConnection: \(keepAlive ? "keep-alive" : "close")\r\n\r\n"
         connectionJobs[id]?.responseStarted = true
-        try await send(Data(headers.utf8), connection: connection, final: method == "HEAD" || contentLength == 0)
-        guard method == "GET", contentLength > 0 else { return }
+        let bodyless = method == "HEAD" || contentLength == 0
+        try await send(Data(headers.utf8), connection: connection, final: bodyless && !keepAlive)
+        guard !bodyless else { return keepAlive }
 
         var offset = range.lowerBound
-        let chunkSize: UInt64 = 4 * 1_024 * 1_024
-        let cached = usesBlockCache && AppleSMBBlockCache.caches(path: session.sourceURL.path, request: range)
-        while offset < range.upperBound {
-            try Task.checkCancellation()
-            let end = min(offset + chunkSize, range.upperBound)
-            let data = cached
-                ? try await cachedRead(session: session, token: token, range: offset ..< end)
-                : try await measuredRead(session: session, token: token, range: offset ..< end)
+        if usesBlockCache, AppleSMBBlockCache.caches(path: session.sourceURL.path, request: range) {
+            let data = try await cachedRead(session: session, token: token, range: range)
             guard !data.isEmpty else { throw AppleSMBRangeServerError.invalidMedia }
-            let remaining = Int(range.upperBound - offset)
-            let bounded = data.count > remaining ? Data(data.prefix(remaining)) : data
-            offset += UInt64(bounded.count)
-            try await send(bounded, connection: connection, final: offset >= range.upperBound)
-            readStats[token]?.bytesServed += UInt64(bounded.count)
+            offset = try await sendBody(data, from: offset, of: range, token: token,
+                connection: connection, keepAlive: keepAlive)
+        } else if !openEnded, range.count <= Self.singleReadLimit {
+            let data = try await measuredRead(session: session, token: token, range: range)
+            guard !data.isEmpty else { throw AppleSMBRangeServerError.invalidMedia }
+            offset = try await sendBody(data, from: offset, of: range, token: token,
+                connection: connection, keepAlive: keepAlive)
+        } else if openEnded {
+            for size in Self.leadingReads where offset < range.upperBound {
+                let data = try await measuredRead(session: session, token: token,
+                    range: offset ..< min(offset + size, range.upperBound))
+                guard !data.isEmpty else { throw AppleSMBRangeServerError.invalidMedia }
+                offset = try await sendBody(data, from: offset, of: range, token: token,
+                    connection: connection, keepAlive: keepAlive)
+            }
         }
+        if offset < range.upperBound {
+            let started = ContinuousClock.now
+            let stream = try await openStream(session: session, token: token, range: offset ..< range.upperBound)
+            defer { stream.cancel() }
+            // A revoke cancels this task while `next()` may be waiting on the share.
+            try await withTaskCancellationHandler {
+                var waitingForFirstByte = true
+                while offset < range.upperBound {
+                    try Task.checkCancellation()
+                    guard let data = try await withReadTimeout({ try await stream.next() }), !data.isEmpty else { break }
+                    if waitingForFirstByte {
+                        waitingForFirstByte = false
+                        readStats[token]?.recordStreamFirstByte(milliseconds: Self.milliseconds(since: started))
+                    }
+                    readStats[token]?.smbBytes += UInt64(data.count)
+                    offset = try await sendBody(data, from: offset, of: range, token: token,
+                        connection: connection, keepAlive: keepAlive)
+                }
+            } onCancel: {
+                stream.cancel()
+            }
+        }
+        guard offset >= range.upperBound else { throw AppleSMBRangeServerError.invalidMedia }
+        return keepAlive
+    }
+
+    /// The engine's disc reader asks for bounded ranges of up to 8 MiB; one
+    /// `read` is one SMB open and a single SMB read of that size on Samba.
+    static let singleReadLimit: UInt64 = 8 * 1_024 * 1_024
+
+    /// The first reads of an open-ended range, before it becomes one streamed open. A stream
+    /// reads in the share's largest read size (8 MiB on Samba) and holds the
+    /// share connection for each read, so the engine's seek probes, which read
+    /// a few kilobytes and hang up, took 7.7 s to place John Wick 4 on DevPlus
+    /// when every request was a stream (2026-10-17). 4 MiB in all, the size
+    /// the bridge read per request before.
+    static let leadingReads: [UInt64] = [256 * 1_024, 768 * 1_024, 3 * 1_024 * 1_024]
+
+    /// Sends the part of `data` that belongs in `range` from `offset`; returns the offset after it.
+    private func sendBody(_ data: Data, from offset: UInt64, of range: Range<UInt64>, token: String,
+                          connection: NWConnection, keepAlive: Bool) async throws -> UInt64 {
+        let remaining = Int(range.upperBound - offset)
+        let bounded = data.count > remaining ? Data(data.prefix(remaining)) : data
+        let next = offset + UInt64(bounded.count)
+        try await send(bounded, connection: connection, final: !keepAlive && next >= range.upperBound)
+        readStats[token]?.bytesServed += UInt64(bounded.count)
+        return next
     }
 
     /// `range` assembled from whole cached blocks (`AppleSMBBlockCache`),
-    /// reading the missing ones.
+    /// reading the missing ones and keeping them on disk for the next launch.
     private func cachedRead(session: Session, token: String, range: Range<UInt64>) async throws -> Data {
         var data = Data(capacity: Int(range.count))
         for index in AppleSMBBlockCache.blockIndices(for: range) {
@@ -323,6 +411,7 @@ public actor AppleSMBRangeServer {
                     range: AppleSMBBlockCache.byteRange(ofBlock: index, fileSize: session.sizeBytes))
                 guard !block.isEmpty else { break }
                 blockCache.store(block, for: key)
+                await discStore(for: session)?.store(block, index: index, file: session.cacheFile)
             }
             let part = AppleSMBBlockCache.slice(block, index: index, of: range)
             guard !part.isEmpty else { break }
@@ -334,40 +423,64 @@ public actor AppleSMBRangeServer {
     private func measuredRead(session: Session, token: String, range: Range<UInt64>) async throws -> Data {
         let started = ContinuousClock.now
         if addedLatency > .zero { try await Task.sleep(for: addedLatency) }
-        let data = try await read(session: session, range: range)
-        readStats[token]?.recordSMBRead(bytes: data.count, milliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+        let data = try await withReadTimeout { [client] in
+            try await client.read(url: session.sourceURL, credentials: session.credentials, range: range)
+        }
+        readStats[token]?.recordSMBRead(milliseconds: Self.milliseconds(since: started))
+        readStats[token]?.smbBytes += UInt64(data.count)
         return data
     }
 
-    private func read(session: Session, range: Range<UInt64>) async throws -> Data {
+    private func openStream(session: Session, token: String, range: Range<UInt64>) async throws
+        -> any AppleNetworkShareFileStream {
+        if addedLatency > .zero { try await Task.sleep(for: addedLatency) }
+        // Not raced against `readTimeout`: a stream that opened as the timeout
+        // fired would be dropped with its reader still holding the file. The
+        // SMB client's own 8 s timeout bounds the open; each read is raced.
+        let stream = try await client.openStream(url: session.sourceURL, credentials: session.credentials, range: range)
+        readStats[token]?.smbOpens += 1
+        return stream
+    }
+
+    private func withReadTimeout<Value: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
         try Task.checkCancellation()
-        return try await withThrowingTaskGroup(of: Data.self) { group in
+        return try await withThrowingTaskGroup(of: Value.self) { group in
             defer { group.cancelAll() }
-            group.addTask { [client] in
-                try await client.read(url: session.sourceURL, credentials: session.credentials, range: range)
-            }
+            group.addTask(operation: operation)
             group.addTask { [readTimeout] in
                 try await Task.sleep(for: readTimeout)
                 throw URLError(.timedOut)
             }
-            guard let data = try await group.next() else { throw CancellationError() }
-            return data
+            guard let value = try await group.next() else { throw CancellationError() }
+            return value
         }
     }
 
-    private func receiveRequest(_ connection: NWConnection) async throws -> String {
-        var data = Data()
-        while data.count < 65_536 {
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        Int(start.duration(to: .now) / .milliseconds(1))
+    }
+
+    /// The request's header block, or nil when the client closed the
+    /// connection between requests. Bytes after the header stay in `pending`.
+    private func receiveRequest(_ connection: NWConnection, pending: inout Data) async throws -> String? {
+        let terminator = Data("\r\n\r\n".utf8)
+        while true {
+            if let end = pending.range(of: terminator)?.upperBound {
+                let header = pending[pending.startIndex ..< end]
+                pending = Data(pending[end...])
+                guard let value = String(data: header, encoding: .utf8) else { throw AppleSMBRangeServerError.invalidMedia }
+                return value
+            }
+            guard pending.count < 65_536 else { throw AppleSMBRangeServerError.invalidMedia }
             let chunk = try await receive(connection)
-            data.append(chunk)
-            if data.range(of: Data("\r\n\r\n".utf8)) != nil { break }
-            if chunk.isEmpty { break }
+            if chunk.isEmpty {
+                guard pending.isEmpty else { throw AppleSMBRangeServerError.invalidMedia }
+                return nil
+            }
+            pending.append(chunk)
         }
-        guard data.range(of: Data("\r\n\r\n".utf8)) != nil,
-              let value = String(data: data, encoding: .utf8) else {
-            throw AppleSMBRangeServerError.invalidMedia
-        }
-        return value
     }
 
     private func receive(_ connection: NWConnection) async throws -> Data {
@@ -386,6 +499,20 @@ public actor AppleSMBRangeServer {
                 else { continuation.resume() }
             })
         }
+    }
+
+    /// HTTP/1.1 keeps the connection unless the client says close; HTTP/1.0 never does.
+    static func keepsAlive<Headers: Sequence<String>>(requestLine: String, headers: Headers) -> Bool {
+        guard requestLine.hasSuffix("HTTP/1.1") else { return false }
+        return !headers.contains { line in
+            let lower = line.lowercased()
+            return lower.hasPrefix("connection:") && lower.contains("close")
+        }
+    }
+
+    /// `bytes=N-`: the player reads on until it hangs up.
+    static func isOpenEnded(_ rangeHeader: String) -> Bool {
+        rangeHeader.trimmingCharacters(in: .whitespaces).hasSuffix("-")
     }
 
     static func parseRange(_ line: String, size: UInt64) -> Range<UInt64>? {
