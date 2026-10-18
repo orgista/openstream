@@ -166,52 +166,47 @@ struct AppleLiveChannelSnapshot: Sendable {
                 categoryByID[channel.id] = category
             }
         }
+        // Complete Guide is the curated lineup, one channel per lineup number,
+        // not the lineup plus everything that failed to match it (4749 of the
+        // owner's 9376 channels reached the guide, 2026-09-14). Unmatched
+        // channels stay reachable through Search and the Everything package.
+        // Below the match floor the lineup is a coincidence, not a guide (a
+        // foreign M3U sharing "CNN" showed one channel, build 10), and the
+        // viewer gets everything.
+        var curated: [AppleIPTVChannel]?
+        if package == .completeGuide {
+            var seenNumbers = Set<Int>()
+            let numbered = selected.compactMap { channel -> (AppleChannelLineupEntry, AppleIPTVChannel)? in
+                guard let entry = entryByChannelID[channel.id],
+                      seenNumbers.insert(entry.number).inserted else { return nil }
+                return (entry, channel)
+            }.sorted {
+                $0.0.number == $1.0.number
+                    ? $0.1.name.localizedCaseInsensitiveCompare($1.1.name) == .orderedAscending
+                    : $0.0.number < $1.0.number
+            }
+            if numbered.count >= Self.minimumLineupMatches { curated = numbered.map(\.1) }
+        }
+        let lineup = curated ?? selected
         let available = Set(categoryByID.values)
         let order = AppleLiveCategoryPolicy.order
         let categories = ["All", "Favorites"] + order.filter { available.contains($0) }
         let channels: [AppleIPTVChannel]
         if category == "All" {
-            if package == .completeGuide {
-                // Complete Guide is the curated lineup — not the lineup plus
-                // everything that failed to match it. `completeGuideGroups`
-                // also returns an "Other" group, and flattening both put the
-                // whole provider list back into the guide: 4749 of the owner's
-                // 9376 channels, where the phone shows a few hundred (owner
-                // 2026-09-14: use the curated lineup on every platform).
-                // Unmatched channels
-                // stay reachable through Search and the Everything package.
-                // Same ordering `completeGuideGroups` produced — one channel per
-                // lineup number, by number then name — built from the matches
-                // already in hand.
-                var seenNumbers = Set<Int>()
-                let numbered = selected.compactMap { channel -> (AppleChannelLineupEntry, AppleIPTVChannel)? in
-                    guard let entry = entryByChannelID[channel.id],
-                          seenNumbers.insert(entry.number).inserted else { return nil }
-                    return (entry, channel)
-                }.sorted {
-                    $0.0.number == $1.0.number
-                        ? $0.1.name.localizedCaseInsensitiveCompare($1.1.name) == .orderedAscending
-                        : $0.0.number < $1.0.number
-                }
-                // The lineup only describes this source if it matched a
-                // meaningful number of channels. This used to fall back only
-                // when *nothing* matched, so a foreign M3U with one channel
-                // that happened to share a name with the US lineup — "CNN",
-                // say — showed exactly one channel under All. That is the
-                // tester's "only one TV channel is displayed in M3U" (build
-                // 10, 2026-09-17). Below the floor the curated list is not a
-                // guide, it is a coincidence, and the viewer gets everything.
-                channels = numbered.count < Self.minimumLineupMatches
-                    ? selected
-                    : numbered.map(\.1)
-            } else {
-                channels = Dictionary(grouping: selected) { entryByChannelID[$0.id]?.category ?? "Other" }
+            channels = package == .completeGuide
+                ? lineup
+                : Dictionary(grouping: selected) { entryByChannelID[$0.id]?.category ?? "Other" }
                     .sorted { $0.key < $1.key }.flatMap(\.value)
-            }
         } else if category == "Favorites" {
             channels = selected.filter { favoriteIDs.contains($0.id) }
         } else {
-            channels = selected.filter { categoryByID[$0.id] == category }
+            // The guide-matched channels All shows lead, so the tab opens on
+            // rows with programme info (owner recording 2026-10-15: "no
+            // metadata in these, only in the All"); the rest of the category,
+            // regional affiliates and event feeds, follows them.
+            let leading = lineup.filter { categoryByID[$0.id] == category }
+            let leadingIDs = Set(leading.map(\.id))
+            channels = leading + selected.filter { categoryByID[$0.id] == category && !leadingIDs.contains($0.id) }
         }
         let shown = Array(channels.prefix(Self.maximumDisplayedChannels))
         return .init(channels: shown, channelIDs: shown.map(\.id), categories: categories,

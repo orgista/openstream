@@ -779,7 +779,7 @@ public final class AppleWebManagementServer {
             url: normalized,
             iptvType: .m3u
         )
-        let channels = try await iptvClient.channels(source: draft)
+        let channels = try await iptvClient.validate(source: draft)
         return try sourceStore.addIPTV(
             name: form["m3uName"] ?? "",
             type: .m3u,
@@ -807,7 +807,7 @@ public final class AppleWebManagementServer {
             iptvType: .xtream
         )
         let credentials = AppleIPTVCredentials(username: username, password: password)
-        let channels = try await iptvClient.channels(source: draft, credentials: credentials)
+        let channels = try await iptvClient.validate(source: draft, credentials: credentials)
         return try sourceStore.addIPTV(
             name: form["xtreamName"] ?? "",
             type: .xtream,

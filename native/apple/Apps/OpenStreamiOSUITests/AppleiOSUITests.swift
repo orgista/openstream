@@ -2901,8 +2901,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         app.launchArguments += (env["OPENSTREAM_UX_CAPTURE_ARGS"] ?? "").split(separator: " ").map(String.init)
         if env["OPENSTREAM_UX_CAPTURE_LANDSCAPE"] == "1" { XCUIDevice.shared.orientation = .landscapeLeft }
         launch(screen: "live")
-        let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
-        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row")
+        let watching = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true", "Play ")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no playing row")
         Thread.sleep(forTimeInterval: 10)
         shot("default")
 
@@ -2976,8 +2976,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
         launch(screen: "live")
-        let watching = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Watching")).firstMatch
-        if inlineFixture == nil { XCTAssertTrue(watching.waitForExistence(timeout: 90), "no WATCHING row") }
+        let watching = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true", "Play ")).firstMatch
+        if inlineFixture == nil { XCTAssertTrue(watching.waitForExistence(timeout: 90), "no playing row") }
         Thread.sleep(forTimeInterval: 8)
         let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
         if inlineFixture != nil {

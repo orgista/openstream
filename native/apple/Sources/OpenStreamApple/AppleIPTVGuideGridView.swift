@@ -490,6 +490,8 @@ private struct GuideProgrammeTitle: View {
             }
         }
         .padding(8)
+        // A sliver ending beside the rail showed "C …"; too narrow to read, so it shows no text.
+        .opacity(width - inset < 40 ? 0 : 1)
         .frame(width: max(0, width - inset), height: height, alignment: .topLeading)
         .frame(width: width, height: height, alignment: .trailing)
         .clipped()

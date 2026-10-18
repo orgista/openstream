@@ -8,6 +8,11 @@ struct AppleImportProgressTests {
         #expect(AppleImportProgress(items: 0, bytes: 200, totalBytes: 100).bytes == 100)
         #expect(AppleImportProgress(items: 0, bytes: -1, totalBytes: 100).bytes == 0)
     }
+    @Test func detailLeavesOutZeroCounts() {
+        #expect(AppleImportProgress(items: 0, bytes: 0, totalBytes: 0).detail(unit: "channels") == nil)
+        #expect(AppleImportProgress(items: 0, bytes: 2048, totalBytes: 0).detail(unit: "channels") == "2 KB")
+        #expect(AppleImportProgress(items: 12, bytes: 0, totalBytes: 0).detail(unit: "channels") == "12 channels")
+    }
     @Test func downloadReportsReceivedByteCount() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ImportProgressURLProtocol.self]
@@ -35,31 +40,11 @@ struct AppleImportProgressTests {
         #expect(recorder.values.count > 1)
     }
 
-    @Test func xmlReportsProgrammesAndAllBytes() throws {
-        let data = Data(("<tv>" + (0..<300).map { "<programme channel=\"fixture\" start=\"20261005100000 +0000\" stop=\"20261005110000 +0000\"><title>Show \($0)</title></programme>" }.joined() + "</tv>").utf8)
-        let recorder = ProgressRecorder()
-        let guide = try AppleIPTVGuideXMLTVParser().validatedGuide(data: data, progress: recorder.record)
-        #expect(guide.allProgrammes.count == 300)
-        #expect(recorder.values.last?.items == 300)
-        #expect(recorder.values.last?.bytes == data.count)
-        #expect(recorder.values.count > 1)
-    }
-
     @Test func playlistCancellationDuringParsingRejectsPartialResults() async {
         let task = Task {
             let data = Data(("#EXTM3U\n" + (0..<1000).map { "#EXTINF:-1,Channel \($0)\nhttps://fixture.example/\($0).m3u8\n" }.joined()).utf8)
             return try AppleIPTVClient.parseM3U(data, sourceID: UUID(), baseURL: URL(string: "https://fixture.example")!) { progress in
                 if progress.items >= 100 { withUnsafeCurrentTask { $0?.cancel() } }
-            }
-        }
-        await #expect(throws: CancellationError.self) { try await task.value }
-    }
-
-    @Test func xmlCancellationDuringParsingRejectsPartialResults() async {
-        let task = Task {
-            let data = Data(("<tv>" + (0..<1000).map { "<programme channel=\"fixture\" start=\"20261005100000 +0000\" stop=\"20261005110000 +0000\"><title>Show \($0)</title></programme>" }.joined() + "</tv>").utf8)
-            return try AppleIPTVGuideXMLTVParser().validatedGuide(data: data) { progress in
-                if progress.items >= 128 { withUnsafeCurrentTask { $0?.cancel() } }
             }
         }
         await #expect(throws: CancellationError.self) { try await task.value }

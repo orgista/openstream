@@ -2,6 +2,8 @@ import Foundation
 
 public enum AppleChannelHealthBucket: String, Codable, Sendable {
     case online, reachable, timeout, offline
+    /// The provider refused the probe (403/429, its connection limit): unknown, not offline.
+    case busy
 }
 
 /// Contains no locator, headers, provider text, or localized error descriptions.
@@ -17,7 +19,7 @@ public struct AppleChannelHealthResult: Codable, Equatable, Sendable {
 
     /// Reuses the failure vocabulary consumed by AppleLiveFailurePresentation.
     public var failureKind: ApplePlaybackFailure.Kind? {
-        if bucket == .online { return nil }
+        if bucket == .online || bucket == .busy { return nil }
         if httpStatus == 401 || httpStatus == 403 { return .authentication }
         if bucket == .timeout { return .timedOut }
         if bucket == .offline { return httpStatus == nil ? .network : .unavailable }

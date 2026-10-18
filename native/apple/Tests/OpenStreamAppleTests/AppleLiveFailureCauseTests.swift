@@ -68,7 +68,7 @@ struct AppleLiveCategoryOrderTests {
         #expect(AppleLiveCategoryOrder.tabs(groups: ["News", "Sports"], hasFavorites: false, eventCount: 0)
                 == ["All", "News", "Sports"])
         #expect(AppleLiveCategoryOrder.tabs(groups: ["All", "Favorites", "News"], hasFavorites: true, eventCount: 3)
-                == ["All", "Favorites", "Events", "News"])
+                == ["All", "Favorites", "Pay-Per-View", "News"])
     }
 
     @Test func aVanishedTabFallsBackToAll() {
@@ -87,5 +87,25 @@ struct AppleLiveCategoryOrderTests {
                              streamURL: URL(string: "https://fixture.example/3.ts")!),
         ]
         #expect(AppleLiveCategoryOrder.eventChannels(channels).map(\.id) == ["3", "1"])
+    }
+
+    /// The owner's provider: pay-per-view in an "EVENTS" group, most slots empty on a given day.
+    @Test func anEventsGroupIsPayPerViewWithoutItsEmptySlots() {
+        let source = UUID()
+        let channels = ["EVENTS 01: 4pm UFC Fight Night", "EVENTS 24:", "EVENTS 02: 6pm WWE Money in the Bank"]
+            .enumerated().map { index, name in
+                AppleIPTVChannel(id: "\(index)", sourceID: source, name: name, group: "EVENTS",
+                                 streamURL: URL(string: "https://fixture.example/\(index).ts")!)
+            }
+        #expect(channels.allSatisfy(AppleChannelVisibilityPolicy.isPayPerView))
+        #expect(AppleLiveCategoryOrder.eventChannels(channels).map(\.id) == ["0", "2"])
+    }
+
+    @Test(arguments: [("EVENTS", true), ("Pay-Per-View", true), ("|PPV|", true), ("Live_Event", false),
+                      ("US | SPORTS EVENTS", false), ("Special Events Channel", false)])
+    func onlyAnEventsGroupByItselfIsPayPerView(group: String, expected: Bool) {
+        let channel = AppleIPTVChannel(id: "1", sourceID: UUID(), name: "Feed 1", group: group,
+                                       streamURL: URL(string: "https://fixture.example/1.ts")!)
+        #expect(AppleChannelVisibilityPolicy.isPayPerView(channel) == expected)
     }
 }

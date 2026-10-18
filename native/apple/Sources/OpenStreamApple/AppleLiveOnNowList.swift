@@ -3,9 +3,9 @@ import SwiftUI
 
 /// The Live tab's channel list on iPhone and iPad (owner items 7 and 8): one
 /// row per channel with its logo, name and what is on now; the channel being
-/// watched carries the only badge on the screen, WATCHING. No time grid, no
-/// progress line under every row, no trailing glyph. The only thing on the
-/// Live tab that scrolls.
+/// watched shows the system playing waveform, as Music marks the song playing.
+/// No time grid, no progress line under every row. The only thing on the Live
+/// tab that scrolls.
 struct AppleLiveOnNowList: View {
     struct SourceProblem: Identifiable, Equatable {
         let id: UUID
@@ -97,8 +97,8 @@ struct AppleLiveOnNowList: View {
         .listRowBackground(Color.black)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel("Play \(channel.name)")
-        .accessibilityValue([title, channel.id == currentChannelID ? "Watching" : nil]
-            .compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(title ?? "")
+        .accessibilityAddTraits(channel.id == currentChannelID ? .isSelected : [])
         .accessibilityIdentifier("guide.play.\(channel.id)")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button { onToggleFavorite(channel.id) } label: {
@@ -129,7 +129,7 @@ struct AppleLiveOnNowList: View {
     }
 }
 
-/// One On Now row: logo slot 48 × 32, name over programme, WATCHING pill.
+/// One On Now row: logo slot 48 × 32, name over programme, the playing waveform.
 private struct AppleLiveOnNowRow: View {
     let channel: AppleIPTVChannel
     let programmeTitle: String?
@@ -154,28 +154,16 @@ private struct AppleLiveOnNowRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
             if isWatching {
-                AppleLiveWatchingPill()
+                // The owner called the pink WATCHING pill "AI sloppy" (recording 2026-10-15).
+                Image(systemName: "waveform")
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .symbolEffect(.variableColor.iterative)
+                    .accessibilityHidden(true)
             }
         }
         .frame(minHeight: 60)
         .contentShape(.rect)
-    }
-}
-
-/// The only badge on the Live screen, and the only pink besides the
-/// favourite swipe: 11 pt bold, tracking 0.5, a 20 pt capsule.
-struct AppleLiveWatchingPill: View {
-    var body: some View {
-        Text("WATCHING")
-            .font(.system(size: 11, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .frame(minHeight: 20)
-            .background(Capsule().fill(AppleDesignTokens.brandAccent))
-            .fixedSize()
-            .accessibilityIdentifier("live.watching")
     }
 }
 #endif

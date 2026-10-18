@@ -116,6 +116,22 @@ struct AppleCompleteGuideLineupTests {
         #expect(snapshot.channelIDs.count == list.count)
     }
 
+    /// Owner recording 2026-10-15: "no metadata in these, only in the All". Sports opened on
+    /// provider feeds with no guide; the curated channels All shows now lead, the feeds follow.
+    @Test func aCategoryLeadsWithTheCuratedLineup() {
+        let sports = networks.enumerated().map { index, name in
+            AppleChannelLineupEntry(number: index + 2, name: name, aliases: ["\(name) (EAST)"], category: "Sports")
+        }
+        let feeds = (1...3).map {
+            AppleIPTVChannel(id: "feed\($0)", sourceID: source, name: "MLB GAME \($0)", group: "US| SPORTS",
+                             streamURL: URL(string: "https://fixture.example/feed\($0).ts")!)
+        }
+        let snapshot = AppleLiveChannelSnapshot.build(
+            groups: [.init(name: "All", channels: channels + feeds)], package: .completeGuide,
+            custom: .init(), entries: sports, favoriteIDs: [], category: "Sports")
+        #expect(snapshot.channelIDs == curatedIDs + ["feed1", "feed2", "feed3"])
+    }
+
     @Test func favoritesAreNotLimitedToTheLineup() {
         let snapshot = AppleLiveChannelSnapshot.build(
             groups: [.init(name: "All", channels: channels)], package: .completeGuide,

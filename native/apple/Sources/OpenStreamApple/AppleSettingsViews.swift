@@ -886,7 +886,6 @@ private struct AppleChannelManagerView: View {
         defer { isLoading = false }
         var loaded: [AppleIPTVChannel] = []
         var errors: [String] = []
-        let listed = !channels.isEmpty
         for source in sources {
             do {
                 let credentials = try sourceStore.iptvCredentials(for: source)
@@ -895,7 +894,7 @@ private struct AppleChannelManagerView: View {
                 // its idle timeout; My Channels then spun for good (full test
                 // 2026-10-01). Each source gets a deadline, then says so.
                 let received = try await AppleChannelManagerLoad.withDeadline(AppleChannelManagerLoad.deadline) {
-                    try await client.channels(source: source, credentials: credentials, announcesImport: !listed)
+                    try await client.channels(source: source, credentials: credentials)
                 }
                 try Task.checkCancellation()
                 loaded += await AppleIPTVChannelCache.shared.reconcileAndStore(received, for: source.id)

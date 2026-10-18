@@ -10,7 +10,7 @@ public enum AppleChannelHealthIndicator: Equatable, Sendable {
 
     public init?(bucket: AppleChannelHealthBucket) {
         switch bucket {
-        case .online: return nil
+        case .online, .busy: return nil
         case .reachable: self = .notPlayable
         case .offline, .timeout: self = .offline
         }
@@ -86,6 +86,7 @@ public struct AppleChannelHealthDetail: Equatable, Sendable {
         case .reachable: "Not playable"
         case .timeout: "Timed out"
         case .offline: "Offline"
+        case .busy: "Provider busy"
         }
     }
 
