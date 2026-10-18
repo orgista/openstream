@@ -33,3 +33,14 @@ Engine tests + lab scoreboard; app serial Swift suite; iOS + tvOS builds with re
 (no add-ons) builds; `scripts/apple-license-check.sh` (ThirdPartyLicenses updated for any new library); E2E-iOS and
 E2E-tvOS (known: Live AirPlay); DVD/ISO e2e cases. Everything through buildlock, foreground. No app commits.
 Report per AGENTS.md §7 with the licence verdict at the top.
+
+## Lead note 2026-10-17: continue + two engine issues found since
+- An earlier run (stopped 10-15 17:30 to free the lock) re-applied 17 of our 22 commits onto upstream 7.36 on the mini
+  as local branch `engine-lab-7.36` (4 dropped as already upstream: cb30d708, a55f5d0a, 5562de85, 2fe42dd7; 5fbcade3
+  software seek preroll set aside). Continue from there; do the licence gate first if not written yet.
+- Resume stall (speed round 2, DevTV): on a resume the engine starts at the requested segment, the player asks for an
+  earlier one, and the engine's 8 s "scrub landing" watchdog fires: picture at ~3 s but readyToPlay/first-frame ~9 s.
+  Fix in the engine so the player's earlier-segment request is served (or the watchdog doesn't gate first frame).
+- Disc parse cache: the engine forgets the parsed disc whenever a new file loads; the UDF/BDMV parse takes 12–14 s on
+  the owner's iPhone over the share. Cache the parsed structure per file (size + mtime) inside the engine.
+Pin the app to the new fork branch only after the engine tests + the app gates pass.

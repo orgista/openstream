@@ -7,6 +7,19 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
 
 ## Open
 
+- [ ] **10-18 13:00 speed-up (lead call, owner asked "anyway to get it faster?"):** batch gates run the full E2E-iOS suite on iOS 18.6 only (the owner's OS, owner setup); iOS 27 gets a smoke set (launch, tabs, title page, player open, Live open). Saves ~3 h per batch. Waiting on the owner: (a) use the current Mac Studio as a second test node now (reinstall Xcode; lifts the 10-06 no-builds-on-Studio rule), (b) Xcode Cloud for test suites (code goes to Apple via GitHub). ETA given: next owner build tonight/tomorrow AM, second batch 10-19 evening, full verification 10-20/21, submission ~10-21/22.
+- [ ] **3090 (owner 10-18):** not hardware per the owner (same setup fine with the 2080 Ti). Fable diagnosis in Infrastructure & Server/ServerPlus/Files/agent-state/gpu-3090-diagnosis-2026-10-18.md: every host setting identical to the clean 2080 Ti run except Ollama 0.40.6 (first GPU run ever) and an unidentified Qwen2.5:7b caller. Proposed test A (Ollama stopped, non-Ollama CUDA copy + gpu-burn) waits for the owner's go + a reboot. Open question to the owner: did the 2080 Ti ever run on the new ADT dock + cable? No purchases (owner).
+
+- [ ] **10-18 04:35:** flaky-e2e2 committed (a73850a) + merged into batch-1018a (2f9964f); Codex batch gate running (iOS 27 E2E 12/0 so far). avp-ipad NOT merged: Fable found unasked shared changes (custom iPad sidebar, deleted AX caps, removed text shadows) and the immersive player enabled against the 10-07 decision → redone narrowly as avp-native (visionOS-only paths) on work Opus. live-r4: wrap-around zapping restored (it was an unasked change), coalescer races fixed, iOS pending-channel banner. Note for the owner: after this update Apple TV auto-resumes Live only for a channel watched in the last 30 min, so the first launch won't resume.
+
+- [ ] **10-18 02:35: batch-1017b gate PASSED → main fast-forwarded to cbeee9c and pushed** (server trailers, iCloud sync, ISO open, iOS 18 jank, hero trailers/cycle + build-15 title header). Swift 3548/443; iOS 27 40/2 and iOS 18.6 41/2 (known flakes only); tvOS 22/0; ISO fixtures 8/8; hero drawn 2 on 18.6; DevTV Top Shelf + hero wrap OK; DevPlus John Wick 4 ISO 7.9 s to picture. Owner iPhone install running (add-ons build); OfficePlus at 09:00. Next batch: hero-settle + settings-narration + live-narration + flaky2 + stability1 + launch-speed + gui-r4a when each passes review.
+
+- [ ] **10-18 02:05 status:** committed on their branches for the next batch: settings-narration e37d846 (in-app QR scanner for Transfer To; camera usage key added by the lead; needs a real-camera check on DevPlus), live-narration ce4920e, hero-settle 74d484e. In review/fix: stability1 (ISO 17 s → ~8 s on DevPlus; Fable CHANGES → SMB open count + a libsmb2 close race), launch-speed (Fable CHANGES → prewarm launches skip the deferral). Owner still to decide: Top 10 saved ON on the phone, the "Test" wording.
+
+- [ ] **Round 4 fixes launched 22:40** (specs/round4-fixes-2026-10-17.md, from the three reports): S1 disc/SMB stability (Infuse I1-I3, work Opus, branch stability1), S2 launch speed (F8/F11, branch launch-speed), S3 tvOS hero cycle/crossfade + title-page clean-up (G2/G3/G12/G15/G16, branch gui-r4a). Settings Job B: Fable CHANGES → work Opus fixing (in-app QR scanner for Transfer To, no Transfer To on tvOS, tests off the owner's sources). Codex AVP job stopped 22:27 (held the sim 40+ min twice); its diff awaits review + one scheduled runtime slot.
+
+- [ ] **Why the app got worse since build 15 + REA round 4** (owner 2026-10-17: "leverage work Claude a lot and work Fable until limit is exhausted… REA Paramount+ Live, Netflix and Apple TV as the main GUI and Infuse as the main stability… the app used to be decent and now it's kinda in a worse place and we gotta find out why"). Spec: specs/regression-and-rea-2026-10-17.md. R1 regression forensics (work Fable), R2 GUI REA (work Opus), R3 Infuse stability REA (work Fable), launched 21:40. Findings become fix jobs.
+
 - [ ] **PRIORITY (owner 2026-10-15): fix everything, verified end to end, THEN submit.** 17:20 "app store submission
       today ... use skill anti slop for the code"; 17:30 "lets fix and test e2e before just stagger each step let set
       a max agent fixes at a time verify them e2e then move on we need to fix before submissions there is still work
@@ -49,6 +62,12 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
           766 → 3 ms. Left: launch → first focus 3.3 s (Plex 2.4; `AppleDiscoverView.topPicks` ≈1.26 s CPU → speed 3),
           tvOS stock tab transition holds the old page ~1.1 s (system), resume spinner ~9 s from AetherEngine's 8 s
           "scrub landing" watchdog (→ engine job).
+      2g. **Speed round 2 merged to main 72966f9 (04:30 10-17)** after the batch gate (3475/431, 8 builds, E2E-tvOS 21/0,
+          E2E-iOS known flakes, DevTV Play → picture ~1 s, 0 dropped connections).
+          **Server trailers done (Fable review running):** Plex extras + Jellyfin/Emby local trailers → Apple TV/Vision Pro
+          hero (muted, no YouTube on Apple TV), title-page Trailer button everywhere, Top Shelf preview from a local file.
+          **Owner 10-17: "Use plex server token"** → token copied (never shown) to Dev-Mini ~/Developer/openstream-build/.plex-server-token (0600); real-server check on DevTV running. Rill should arrive by iCloud sync (→ iCloud sync job).
+          Undo later: two test trailers added to jellyfin-demo on ServerPlus (Sintel, Big Buck Bunny).
       3. Vision Pro on the iPad screens (P1s from the Fable review first): **Codex running since 08:05** (branch avp-ipad).
       4. Plex/Jellyfin/Emby trailers; Unmatched section.
       5. Flaky-e2e harness; engine 7.36.
@@ -96,10 +115,21 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       Spec `specs/tv-disc-shelf-2026-10-15.md` (branch tv-disc-shelf, work Claude): no menu promise on Blu-ray, Infuse-
       style Titles list (main feature first, duplicates merged, short clips hidden), full-screen carousel Top Shelf;
       trailers there only from direct trailer files (Plex/Jellyfin), not YouTube.
+- [ ] **LEAD MISTAKE (found 2026-10-17 11:00): the dev builds installed on the owner's iPhone + OfficePlus on 10-16 and
+      10-17 had NO add-ons** — owner-build.sh never passed SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited)
+      OPENSTREAM_ADDONS' (Release doesn't define it). The owner's 6 add-ons were hidden on both devices, which explains
+      part of "the app got worse". Fixed: the script passes the flag and owner-install.sh refuses a build without it;
+      reinstalled with add-ons 11:0x. Re-check any perf numbers taken with owner-build.sh copies.
 - [ ] **PRIORITY (owner 2026-10-15): Vision Pro needs real e2e testing; "its probably the worse out all".** Spec
       `specs/visionos-e2e-2026-10-15.md`: full E2E-visionOS crawl on the simulator (3 green runs) + fixing what it
       finds. **Owner 2026-10-15: "ipad it is!"**: Vision Pro uses the iPad screens, kept native (glass, hover, ornaments, 60 pt targets), and a 5-minute worn device pass (build prepared BEFORE the headset goes on). VP registered and a Debug
       build (dd8d32d) installed 2026-10-15; the first pass didn't happen (build took too long while the owner wore it).
+- [x] **Owner decision (2026-10-17 09:35): TrueHD Atmos heights via APAC — OFF** ("okay so off"). Licence check
+      (design/engine/2026-10-15-object-audio-licences.md): DTS:X can't ship (its decoder is an LGPL FFmpeg port relabelled
+      Apache, linked statically; no DTS licence) → OFF. TrueHD Atmos code is clean but Dolby object-audio patents are
+      unlicensed → OFF until the owner decides; lead recommends OFF for submission. E-AC-3 Atmos passthrough unaffected.
+      Engine 7.36 rebase pushed (cyberbanksy/AetherEngine engine-lab-7.36 37bb7a32): 5,019 + 775 engine tests pass;
+      resume-stall fix + cross-load disc parse cache; app pinned in worktree engine-736 with traits off (3475/431, 8 builds).
 - [ ] **TrueHD Atmos / DTS:X on Apple TV via APAC (owner 2026-10-15: "make sure to account for" r/appletv post
       1x6e633).** Our engine fork is based on upstream 6.66.0 (Sept 2), ~1,190 commits behind; upstream 7.34–7.36 has
       TrueHD Atmos and DTS:X heights rendered to APAC, BDMV over HTTP, a teardown crash fix. Plan: licence check of
@@ -434,7 +464,9 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       an empty iPad/iPhone it is also a button on No Sources. Apple TV's empty No Sources screen has the button too
       (24517d6). Still to do: the Android TV side (the format
       is written down in HANDOFF-NEXT-SESSION.md).
-- [ ] **iCloud sync still looks broken (owner 2026-10-08):** owner doesn't think it works and doesn't know how
+- [ ] **iCloud sync still looks broken (owner 2026-10-08):** 2026-10-17: owner's iPhone sends 3 sources (incl. Rill) but
+      OfficePlus last applied 9; DevTV held by a debug restore. Job: specs/icloud-sync-2026-10-17.md (next free slot).
+      Original note: owner doesn't think it works and doesn't know how
       to test it. Fixed in code, waiting for your test: a phone set up before sync was on by default never sent
       anything to iCloud, so the other devices found nothing. Now it sends at launch, when the app comes back,
       and on the new **Sync Now** button whenever iCloud has nothing or an older copy (never from the Apple TV,
@@ -605,6 +637,8 @@ never dropped a second time. Detail and evidence stay in `FEEDBACK.md`; this fil
       first row under the nav bar; no-backdrop title is a big black area.
 - [ ] **Apple Intelligence** (2026-09-28): owner asks where it could help when available. Ideas to propose.
 ## Waiting on an owner decision
+
+- [ ] **Owner decisions from the 10-17 reports:** (a) YouTube chrome on trailers: hide again or accept until server/iTunes trailers replace it (F3); (b) tvOS Live: keep guide-first, or channel full screen behind a guide overlay like Paramount+ (needs a fade, against the no-dimming rule) (G20); (c) Live categories: keep All + Favorites (recommended) (G21); (d) your phone has Top 10 rows saved ON — the default is now off, switch it off in Settings if you don't want them; (e) "Test Connection" was shortened to "Test" — was "could use work too" about the wording or the greyed look?
 
 - [x] **Mac launch test for build 19 (2026-10-13):** owner OK'd. Dev-Mini registered (ASC device X54DASSTUH,
       Provisioning UDID) and new profile "OpenStream Mac Development 2026-10-13" (5CLWYB44Z7; certs 6BCK8Q8A2P mini +
