@@ -129,33 +129,29 @@ public actor AppleIPTVGuideLoader {
                           lastModified: String? = nil, contentDigest: String? = nil) async throws -> XMLTVResponse {
         guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
               url.host?.isEmpty == false else { throw AppleIPTVError.invalidEndpoint }
-        return try await AppleImportStore.shared.run(title: "Programme Guide", unit: "programmes") { progress in
-            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.requestTimeout)
-            request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
-            request.setValue(eTag, forHTTPHeaderField: "If-None-Match")
-            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
-            let (data, response) = try await self.client.load(request, maximumBytes: Self.maximumGuideBytes,
-                redirectPolicy: Self.redirectPolicy, behavior: .rejectOverflow) { bytes, total in
-                    progress(.init(items: 0, bytes: bytes, totalBytes: total > 0 ? Int(total) : 0, phase: .downloading))
-                }
-            guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-            try Task.checkCancellation()
-            let tag = response.value(forHTTPHeaderField: "ETag")
-            let modified = response.value(forHTTPHeaderField: "Last-Modified")
-            if response.statusCode == 304 {
-                return XMLTVResponse(guide: nil, eTag: tag ?? eTag, lastModified: modified ?? lastModified, contentDigest: contentDigest)
-            }
-            guard 200..<300 ~= response.statusCode else { throw AppleIPTVError.requestFailed(response.statusCode) }
-            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            let guide = digest == contentDigest ? nil : try await Self.parseXMLTV(data, defaultOffsetHours: defaultOffsetHours, progress: progress)
-            return XMLTVResponse(guide: guide, eTag: tag, lastModified: modified, contentDigest: digest)
+        // A guide refresh runs behind Live, so it shows no import card.
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.requestTimeout)
+        request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue(eTag, forHTTPHeaderField: "If-None-Match")
+        request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        let (data, response) = try await client.load(request, maximumBytes: Self.maximumGuideBytes,
+            redirectPolicy: Self.redirectPolicy, behavior: .rejectOverflow)
+        guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        try Task.checkCancellation()
+        let tag = response.value(forHTTPHeaderField: "ETag")
+        let modified = response.value(forHTTPHeaderField: "Last-Modified")
+        if response.statusCode == 304 {
+            return XMLTVResponse(guide: nil, eTag: tag ?? eTag, lastModified: modified ?? lastModified, contentDigest: contentDigest)
         }
+        guard 200..<300 ~= response.statusCode else { throw AppleIPTVError.requestFailed(response.statusCode) }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let guide = digest == contentDigest ? nil : try await Self.parseXMLTV(data, defaultOffsetHours: defaultOffsetHours)
+        return XMLTVResponse(guide: guide, eTag: tag, lastModified: modified, contentDigest: digest)
     }
 
     @concurrent
-    private static func parseXMLTV(_ data: Data, defaultOffsetHours: Double,
-        progress: @escaping @Sendable (AppleImportProgress) -> Void) async throws -> AppleIPTVGuide {
-        try AppleIPTVGuideXMLTVParser().validatedGuide(data: data, defaultOffsetHours: defaultOffsetHours, progress: progress)
+    private static func parseXMLTV(_ data: Data, defaultOffsetHours: Double) async throws -> AppleIPTVGuide {
+        try AppleIPTVGuideXMLTVParser().validatedGuide(data: data, defaultOffsetHours: defaultOffsetHours)
     }
 
     /// - Parameter archiveStreamIDs: channels with catch-up. Those are read

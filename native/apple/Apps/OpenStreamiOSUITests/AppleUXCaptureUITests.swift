@@ -121,6 +121,64 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         }
     }
 
+    /// Live items from the owner's narrated recording (2026-10-15): the top, the playing row, the
+    /// category tabs (their names are logged), then the guide sheet scrolled.
+    func testC1LiveNarration() {
+        launch(["-OpenStreamVisionScreen", "live"])
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label != %@", "Play ", "Play preview")).firstMatch
+        _ = row.waitForExistence(timeout: 90)
+        Thread.sleep(forTimeInterval: 4)
+        shot("live-top")
+        let tabs = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "live.category.")).allElementsBoundByIndex
+        print("UXCAPTURE LIVE tabs: \(tabs.map(\.identifier).joined(separator: ", "))")
+        // Tapping the row already playing opens the full-screen player instead.
+        let other = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label != %@ AND selected == false",
+            "Play ", "Play preview")).firstMatch
+        guard other.exists else { return print("UXCAPTURE LIVE no other channel row") }
+        other.tap()
+        Thread.sleep(forTimeInterval: 10)
+        shot("live-watching")
+        for tab in ["Sports", "Locals", "Premium", "Pay-Per-View"] where tapCategory(tab) {
+            Thread.sleep(forTimeInterval: 4)
+            shot("live-tab-\(tab)")
+        }
+        if tapCategory("All") { Thread.sleep(forTimeInterval: 2) }
+        let guide = app.buttons["live.guide"].firstMatch
+        guard guide.waitForExistence(timeout: 5) else { return print("UXCAPTURE LIVE no guide button") }
+        guide.tap()
+        Thread.sleep(forTimeInterval: 4)
+        shot("guide-top")
+        let window = app.windows.firstMatch
+        for index in 1...3 {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.8))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.4)),
+                       withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.6)
+            shot("guide-scrolled-\(index)")
+        }
+    }
+
+    /// Channel Health from Settings: progress logged every 5 s until the sweep ends or 4 minutes pass.
+    func testC2ChannelHealthSweep() {
+        launch(["-OpenStreamVisionScreen", "settings"])
+        let check = app.buttons["settings.health.check"].firstMatch
+        for _ in 0..<4 where !check.isHittable { app.swipeUp(); Thread.sleep(forTimeInterval: 0.6) }
+        guard check.waitForExistence(timeout: 20), check.isEnabled else { return XCTFail("no enabled Check Channels Now") }
+        check.tap()
+        let start = Date()
+        let summary = app.descendants(matching: .any).matching(identifier: "settings.health.summary").firstMatch
+        let stop = app.buttons["settings.health.stop"].firstMatch
+        var shots = 0
+        while Date().timeIntervalSince(start) < 240 {
+            Thread.sleep(forTimeInterval: 5)
+            print(String(format: "UXCAPTURE HEALTH t=%.0f %@", Date().timeIntervalSince(start), summary.label))
+            if shots < 2 { shots += 1; shot("health-\(shots)") }
+            if !stop.exists { break }
+        }
+        shot("health-end")
+    }
+
     /// Settings: the root page top to bottom.
     func testB2Settings() {
         launch(["-OpenStreamVisionScreen", "settings"])
@@ -293,6 +351,21 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
         let notNow = app.buttons["Not Now"].firstMatch
         if notNow.waitForExistence(timeout: 2) { notNow.tap() }
+    }
+
+    /// Scrolls the Live category bar until the chip is on screen, then taps it.
+    private func tapCategory(_ name: String) -> Bool {
+        let chip = app.descendants(matching: .any).matching(identifier: "live.category.\(name)").firstMatch
+        let bar = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+        guard chip.exists, bar.exists else { return false }
+        let screen = app.windows.firstMatch.frame
+        for attempt in 0..<8 where !screen.contains(chip.frame) {
+            if attempt < 4, chip.frame.minX > screen.midX { bar.swipeLeft() } else { bar.swipeRight() }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        guard screen.contains(chip.frame) else { print("UXCAPTURE LIVE \(name) stayed off screen"); return false }
+        chip.tap()
+        return true
     }
 
     private func revealControls() {

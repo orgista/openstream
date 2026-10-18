@@ -1,14 +1,15 @@
 import Foundation
 
 /// The Live tab's category row on iPhone and iPad: All, Favorites (only with
-/// a favourite), Events (pay-per-view, only when the lineup has some), then
-/// the lineup's groups in the guide's order. Events is where pay-per-view
-/// lives (owner item 11); it shows even with "Show pay-per-view" off, since
-/// the tab itself is the opt-in.
+/// a favourite), Pay-Per-View (only when the lineup has some), then the
+/// lineup's groups in the guide's order. It shows even with "Show
+/// Pay-Per-View" off, since the tab itself is the opt-in (owner item 11). It
+/// was called Events, and the owner could not find it (recording 2026-10-15:
+/// "I don't even know where pay-per-view is").
 enum AppleLiveCategoryOrder {
     static let all = "All"
     static let favorites = "Favorites"
-    static let events = "Events"
+    static let events = "Pay-Per-View"
 
     static func tabs(groups: [String], hasFavorites: Bool, eventCount: Int) -> [String] {
         var tabs = [all]
@@ -28,9 +29,12 @@ enum AppleLiveCategoryOrder {
         tabs.contains(selected) ? selected : all
     }
 
-    /// Pay-per-view channels for the Events tab, by name.
+    /// Pay-per-view channels by name, without the provider's empty slots ("EVENTS 24:").
     static func eventChannels(_ channels: [AppleIPTVChannel]) -> [AppleIPTVChannel] {
-        channels.filter(AppleChannelVisibilityPolicy.isPayPerView)
+        channels.filter { channel in
+            AppleChannelVisibilityPolicy.isPayPerView(channel) && !AppleChannelVisibilityPolicy.isPlaceholder(channel)
+                && !channel.name.trimmingCharacters(in: .whitespaces).hasSuffix(":")
+        }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

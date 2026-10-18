@@ -13,6 +13,14 @@ public struct AppleImportProgress: Sendable, Equatable {
         self.bytes = totalBytes > 0 ? min(max(0, bytes), totalBytes) : max(0, bytes)
         self.totalBytes = max(0, totalBytes)
     }
+
+    /// "1,204 channels · 3.1 MB", leaving out whatever is still zero (never "0 channels · Zero KB").
+    func detail(unit: String) -> String? {
+        var parts: [String] = []
+        if items > 0 { parts.append("\(items.formatted()) \(unit)") }
+        if bytes > 0 { parts.append(AppleByteFormatting.string(Int64(bytes))) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 }
 
 /// Owns cancellable imports independently of the page displaying their progress.

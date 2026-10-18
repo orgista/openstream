@@ -169,11 +169,16 @@ public enum AppleChannelVisibilityPolicy {
         }
         return startsWithFillerPrefix(channel.group) || startsWithFillerPrefix(channel.name)
     }
+    /// By name or playlist group. The owner's provider files its pay-per-view under a group
+    /// called "EVENTS" ("EVENTS 01: 4pm UFC Fight Night"), which no name check caught. Only a
+    /// group that is nothing but that name counts: "US | SPORTS EVENTS" holds ordinary feeds.
     public static func isPayPerView(_ channel: AppleIPTVChannel) -> Bool {
         let value = "\(channel.name) \(channel.group)".lowercased()
-        return ["pay-per-view", "pay per view", "ppv", "event only"]
-            .contains(where: value.contains)
+        if ["pay-per-view", "pay per view", "ppv", "event only"].contains(where: value.contains) { return true }
+        let group = channel.group.lowercased().split(whereSeparator: { !$0.isLetter }).joined(separator: " ")
+        return payPerViewGroups.contains(group)
     }
+    private static let payPerViewGroups: Set<String> = ["event", "events", "ppv", "ppv events", "pay per view"]
 
     private static let regionalIndicators: Set<String> = [
         "region",
@@ -534,12 +539,13 @@ public struct AppleIPTVClient: Sendable {
         self.protectedPlaybackURL = protectedPlaybackURL
     }
 
-    /// `announcesImport: false` refreshes a lineup that is already on screen without the import
-    /// card: its card came back on every Live visit while the saved channels were listed.
+    /// Only an import the user started (adding a source) shows the import card. Live and Channel
+    /// Manager refreshes stay quiet: the owner saw "IPTV · Importing · 0 channels" on every visit
+    /// (recording 2026-10-15) and "never asked for it".
     public func channels(
         source: AppleSource,
         credentials: AppleIPTVCredentials? = nil,
-        announcesImport: Bool = true
+        announcesImport: Bool = false
     ) async throws -> [AppleIPTVChannel] {
         guard announcesImport else {
             return try await channelsImport(source: source, credentials: credentials) { _ in }
@@ -612,7 +618,7 @@ public struct AppleIPTVClient: Sendable {
         source: AppleSource,
         credentials: AppleIPTVCredentials? = nil
     ) async throws -> [AppleIPTVChannel] {
-        try await channels(source: source, credentials: credentials)
+        try await channels(source: source, credentials: credentials, announcesImport: true)
     }
 
     /// Mints a short-lived loopback capability only when the user presses Play.

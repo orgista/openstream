@@ -13,10 +13,8 @@ struct AppleImportProgressView: View {
                         Text(operation.title).font(.headline)
                             .accessibilityIdentifier("import.progress")
                         Text(operation.progress.phase == .downloading ? "Downloading" : "Importing").font(.caption)
-                        // Nothing counted yet (an Xtream panel still answering) says nothing, not "0 · Zero KB".
-                        if operation.progress.items > 0 || operation.progress.bytes > 0 {
-                            Text("\(operation.progress.items) \(operation.unit) · \(ByteCountFormatter.string(fromByteCount: Int64(operation.progress.bytes), countStyle: .file))")
-                                .monospacedDigit()
+                        if let detail = operation.progress.detail(unit: operation.unit) {
+                            Text(detail).monospacedDigit()
                         }
                         if operation.progress.totalBytes > 0 {
                             ProgressView(value: Double(operation.progress.bytes), total: Double(operation.progress.totalBytes))

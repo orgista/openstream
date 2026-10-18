@@ -14,14 +14,14 @@ public struct AppleChannelHealthConfiguration: Sendable {
     }
 }
 
-/// Shared by every rung and redirect in a sweep. No burst after a delayed wakeup.
+/// Spaces channel starts per host across a sweep. No burst after a delayed wakeup. Each channel's
+/// redirects, variant and segment follow at once, as a player's would. Gating every one of those
+/// requests, each pushing the next slot back until its body had arrived, made one channel cost
+/// several slots: "Checking 12 of 136" for minutes (owner recording 2026-10-15).
 private actor AppleHealthHostLimiter {
     private var next: [String: ContinuousClock.Instant] = [:]
     let interval: Duration
     init(rate: Double) { interval = .seconds(1 / rate) }
-    func completed(_ url: URL) {
-        next[url.host?.lowercased() ?? ""] = ContinuousClock.now.advanced(by: interval)
-    }
     func acquire(_ url: URL) async throws {
         let host = url.host?.lowercased() ?? ""
         while true {
@@ -156,10 +156,13 @@ public struct AppleChannelHealthProbe: Sendable {
                   httpStatus: status, ttfbMs: ttfb, videoInfo: info)
         }
         do {
+            try await limiter.acquire(channel.streamURL)
             var response = try await fetch(channel.streamURL, headers: channel.playbackHeaders)
             status = response.status
             ttfb = response.ttfb
-            guard (200..<300).contains(response.status) else { return result(.offline) }
+            guard (200..<300).contains(response.status) else {
+                return result(Self.refusedStatuses.contains(response.status) ? .busy : .offline)
+            }
             stage = .manifest
             guard !response.bodyFailed else { return result(.reachable) }
             var media = response.data
@@ -235,10 +238,8 @@ public struct AppleChannelHealthProbe: Sendable {
             var request = URLRequest(url: current, timeoutInterval: configuration.requestTimeout)
             request.allHTTPHeaderFields = headers
             request.setValue(range ?? "bytes=0-4194303", forHTTPHeaderField: "Range")
-            try await limiter.acquire(current)
             let response = try await delegate.load(request, session: session)
             try Task.checkCancellation()
-            await limiter.completed(current)
             if [301, 302, 303, 307, 308].contains(response.status),
                let location = response.location,
                let target = URL(string: location, relativeTo: current)?.absoluteURL {
@@ -249,6 +250,9 @@ public struct AppleChannelHealthProbe: Sendable {
         }
         throw URLError(.httpTooManyRedirects)
     }
+
+    /// What a provider answers past its connection limit. Says nothing about the channel.
+    private static let refusedStatuses: Set<Int> = [403, 429]
 
     private static func isManifest(_ data: Data) -> Bool {
         String(data: data.prefix(64), encoding: .utf8)?
@@ -306,7 +310,19 @@ public struct AppleChannelHealthSweep: Sendable {
         public let result: AppleChannelHealthResult
     }
     private let configuration: AppleChannelHealthConfiguration
-    public init(configuration: AppleChannelHealthConfiguration = .init()) { self.configuration = configuration }
+    private let connectionLimits: [UUID: Int]?
+    /// `connectionLimits` (source → Xtream `max_connections`) defaults to what the last account
+    /// check recorded.
+    public init(configuration: AppleChannelHealthConfiguration = .init(), connectionLimits: [UUID: Int]? = nil) {
+        self.configuration = configuration
+        self.connectionLimits = connectionLimits
+    }
+
+    /// Probes in flight per provider: its connection limit up to 4, and 2 when it is unknown.
+    /// More than the limit gets the extra probes refused, and a refusal is not an outage.
+    static func probeCap(connectionLimit: Int?) -> Int {
+        connectionLimit.map { min($0, 4) } ?? 2
+    }
 
     /// Structured children are bounded; cancellation throws, never records a false outage.
     /// Completed results remain in history when the caller cancels a partial sweep.
@@ -314,25 +330,33 @@ public struct AppleChannelHealthSweep: Sendable {
     public func run(_ lineup: [AppleIPTVChannel], history: AppleChannelHealthHistory? = .shared,
                     progress: @escaping @Sendable (Progress) async -> Void = { _ in }) async throws -> [AppleChannelHealthResult] {
         let probe = AppleChannelHealthProbe(configuration: configuration)
-        return try await withThrowingTaskGroup(of: AppleChannelHealthResult.self) { group in
-            var next = 0
+        let limits: [UUID: Int]
+        if let connectionLimits { limits = connectionLimits } else { limits = await AppleIPTVAccountLimits.shared.snapshot() }
+        var waiting = Dictionary(grouping: lineup, by: \.sourceID).mapValues { $0[...] }
+        var seen = Set<UUID>()
+        let sources = lineup.map(\.sourceID).filter { seen.insert($0).inserted }
+        return try await withThrowingTaskGroup(of: (UUID, AppleChannelHealthResult).self) { group in
+            var inFlight: [UUID: Int] = [:]
+            var running = 0
             var results: [AppleChannelHealthResult] = []
-            for _ in 0..<min(configuration.concurrency, lineup.count) {
-                let channel = lineup[next]
-                next += 1
-                group.addTask { try await probe.probe(channel) }
-            }
-            while let result = try await group.next() {
+            repeat {
+                for source in sources {
+                    let cap = Self.probeCap(connectionLimit: limits[source])
+                    while running < configuration.concurrency, inFlight[source, default: 0] < cap,
+                          let channel = waiting[source]?.popFirst() {
+                        inFlight[source, default: 0] += 1
+                        running += 1
+                        group.addTask { try await (source, probe.probe(channel)) }
+                    }
+                }
+                guard let (source, result) = try await group.next() else { break }
+                inFlight[source, default: 0] -= 1
+                running -= 1
                 try Task.checkCancellation()
                 results.append(result)
                 try await history?.record(result)
                 await progress(.init(completed: results.count, total: lineup.count, result: result))
-                if next < lineup.count {
-                    let channel = lineup[next]
-                    next += 1
-                    group.addTask { try await probe.probe(channel) }
-                }
-            }
+            } while true
             try Task.checkCancellation()
             return results
         }

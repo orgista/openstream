@@ -686,10 +686,10 @@ struct AppleLiveTVView: View {
         // Every playlist at once: a dead panel's timeout no longer holds up
         // the others, and each one's channels go up as it answers.
         let iptvClient = client
-        var requests: [(source: AppleSource, credentials: AppleIPTVCredentials?, announcesImport: Bool)] = []
+        var requests: [(source: AppleSource, credentials: AppleIPTVCredentials?)] = []
         for source in sources {
             do {
-                requests.append((source, try sourceStore.iptvCredentials(for: source), cached[source.id]?.isEmpty ?? true))
+                requests.append((source, try sourceStore.iptvCredentials(for: source)))
             } catch {
                 let message = AppleIPTVFailureCause.message(for: error, providerName: source.name)
                 sourceStore.recordValidationFailure(id: source.id, summary: message)
@@ -702,8 +702,7 @@ struct AppleLiveTVView: View {
                 group.addTask {
                     do {
                         return (request.source, .success(try await iptvClient.channels(
-                            source: request.source, credentials: request.credentials,
-                            announcesImport: request.announcesImport)))
+                            source: request.source, credentials: request.credentials)))
                     } catch {
                         return (request.source, .failure(error))
                     }
@@ -1434,6 +1433,10 @@ struct AppleLiveTVView: View {
                     showsGuide = false
                     startChannel(channel, shareSelection: false, present: false, programme: programme)
                 })
+                // The grid's scroll views reach under the inline bar, so rows drew above the pinned
+                // time bar behind "Guide" (owner recording 2026-10-15, 7:20). Clip them to the grid.
+                .clipped()
+                .background(Color.black)
                 .navigationTitle("Guide")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -1511,7 +1514,7 @@ struct AppleLiveTVView: View {
             currentChannelID: pendingProbe?.channel.id ?? selectedChannel?.id,
             favoriteIDs: settings.favoriteChannelIDs,
             hiddenCount: showsSourceProblems ? channelSnapshot.hiddenCount : 0,
-            showsEmptyText: snapshotRevision > 0,
+            showsEmptyText: snapshotRevision > 0 && hasResolvedFirstLoad,
             sourceProblems: showsSourceProblems ? liveSourceProblems : [],
             onSelect: playFromList,
             onToggleFavorite: toggleFavorite,
@@ -1530,7 +1533,7 @@ struct AppleLiveTVView: View {
     }
 
     /// A row plays in the frame above the list, like Paramount+; the row
-    /// already playing goes full screen. The WATCHING pill moves at once,
+    /// already playing goes full screen. The playing mark moves at once,
     /// before the stream starts.
     private func playFromList(_ channel: AppleIPTVChannel) {
         if channel.id == selectedChannel?.id, catchUp == nil, pendingProbe == nil {
