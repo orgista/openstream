@@ -4,6 +4,12 @@ import Testing
 @MainActor
 @Suite("Live full-screen chrome")
 struct AppleLiveSystemChromePolicyTests {
+    @Test(arguments: [(0, 0, false), (1, 0, false), (2, 0, true), (0, 1, true), (1, 1, true)])
+    func trackMenuNeedsAnAudioChoiceOrSubtitles(audioCount: Int, subtitleCount: Int, enabled: Bool) {
+        #expect(AppleLiveSystemChromePolicy.hasTrackChoices(audioChoiceCount: audioCount,
+                                                          subtitleTrackCount: subtitleCount) == enabled)
+    }
+
     @Test func skipsNeedARewindWindowLongerThanThirtySeconds() {
         #expect(!AppleLiveSystemChromePolicy.showsSkips(dvrSpan: 0))
         #expect(!AppleLiveSystemChromePolicy.showsSkips(dvrSpan: 30))

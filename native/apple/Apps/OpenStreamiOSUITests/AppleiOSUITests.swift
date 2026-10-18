@@ -500,7 +500,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         guard element.exists else { return false }
         let frame = element.frame
         guard frame.width >= 1, frame.height >= 1 else { return false }
-        guard app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+        guard crawlScreenRect.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
         return element.isHittable
     }
 
@@ -2691,7 +2691,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
     private func playerCaptionsAreUp() -> Bool {
         let captions = app.buttons["player.captions"].firstMatch
-        return captions.exists && (captions.isHittable || isTouchableMenuButton(captions, identifier: "player.captions"))
+        if captions.exists, captions.isEnabled {
+            return captions.isHittable || isTouchableMenuButton(captions, identifier: "player.captions")
+        }
+        return app.buttons.matching(identifier: "player.play-pause").allElementsBoundByIndex
+            .contains(where: { isSafelyHittable($0) })
     }
 
     /// A guide selection opens the player directly and channel changes stay there.
@@ -3617,6 +3621,32 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         return value.split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
     }
 
+    private func crawlInlineLiveHasState(_ state: String) -> Bool {
+        app.descendants(matching: .any).matching(identifier: "live.stage.player")
+            .allElementsBoundByIndex.contains { ($0.value as? String) == state && !$0.frame.isEmpty }
+    }
+
+    #if targetEnvironment(simulator)
+    // AVRoutePickerView exposes its system button on the simulator without
+    // presenting receivers. Discovery and routing need a physical device.
+    private func crawlSimulatorAirPlayIsAvailable(_ button: XCUIElement) -> Bool {
+        let picker = app.otherElements["player.airplay"].firstMatch
+        let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.state == .runningForeground && picker.exists && button.exists
+                && button.label == "AirPlay" && button.isEnabled
+                && picker.frame.contains(button.frame) && self.isSafelyHittable(button)
+                && self.crawlInlineLiveHasState("Playing")
+                && !self.app.progressIndicators["live.loading"].exists
+        }, object: nil)
+        let passed = XCTWaiter.wait(for: [available], timeout: 5) == .completed
+        let evidence = XCTAttachment(string: "Simulator route-control check: \(passed); routing requires hardware.\n"
+            + app.debugDescription + "\nSystem host:\n"
+            + XCUIApplication(bundleIdentifier: "com.apple.springboard").debugDescription)
+        evidence.name = "live-airplay-simulator-surface"; evidence.lifetime = .keepAlways; add(evidence)
+        return passed
+    }
+    #endif
+
     private func waitForCrawlResponse(from before: String, target: CrawlTarget) -> (Bool, CrawlScene) {
         let deadline = Date().addingTimeInterval(3)
         while true {
@@ -3642,6 +3672,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         var result = CrawlResult()
         let route = screen.route
         let isPlayer = screen.opener != .none
+        let isLive = route == "live"
+        let isInlineLive = isLive && !isPlayer
 
         launchForCrawl(screen)
         crawlNote("== \(screen.name)")
@@ -3656,8 +3688,25 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             app.terminate()
             return result
         }
+        if isPlayer {
+            let transport = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.crawlScene().nodes.contains { $0.identifier == "player.play-pause" }
+            }, object: nil)
+            guard XCTWaiter.wait(for: [transport], timeout: 10) == .completed else {
+                let evidence = XCTAttachment(string: "Snapshot controls: \(crawlScene().nodes.map(\.identifier))\n"
+                    + app.debugDescription)
+                evidence.name = "players-missing-transport"; evidence.lifetime = .keepAlways; add(evidence)
+                result.defects.append("[\(screen.name)] the player snapshot never exposed its transport")
+                app.terminate()
+                return result
+            }
+            if isLive, ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false {
+                XCTAssertFalse(app.buttons["player.captions"].firstMatch.isEnabled,
+                               "The audio-only Live fixture must not offer an empty track menu")
+            }
+        }
 
-        crawlWindowRect = (try? app.windows.firstMatch.snapshot())?.frame ?? .null
+        crawlWindowRect = app.windows.firstMatch.frame
         crawlBarRect = isPlayer ? .null : tabBarRectForCrawl()
         crawlPressesPerCollection = [:]
         crawlDownloadsPressed = 0
@@ -3819,7 +3868,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // Scrolling may move the target after the original scene snapshot.
             var expectedSkip: Double?
             var resumeAfterSkip = false
-            if ["player.skip-back", "player.skip-forward"].contains(target.identifier) {
+            if !isLive, ["player.skip-back", "player.skip-forward"].contains(target.identifier) {
                 let transport = app.buttons["player.play-pause"].firstMatch
                 resumeAfterSkip = transport.label == "Pause"
                 // Playback itself carries the clock past 10 s: a scrub to 10 % of
@@ -3866,7 +3915,15 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                     let clock = crawlPlaybackSeconds()
                     let currentLabel = transport.label
                     samples.append("clock=\(String(describing: clock)), label=\(currentLabel)")
-                    if let start, let clock, clock > start, currentLabel == "Pause", currentLabel == previousLabel {
+                    let playbackReady: Bool
+                    if isLive {
+                        // Live publishes Playing or Live/Behind live, not a VOD clock.
+                        playbackReady = isInlineLive ? crawlInlineLiveHasState("Playing")
+                            : app.descendants(matching: .any).matching(identifier: "player.live").firstMatch.exists
+                    } else {
+                        playbackReady = start.flatMap { start in clock.map { $0 > start } } ?? false
+                    }
+                    if playbackReady, currentLabel == "Pause", currentLabel == previousLabel {
                         settled = true
                         break
                     }
@@ -3874,12 +3931,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 }
                 let timing = XCTAttachment(string: samples.joined(separator: "\n"))
                 timing.name = "players-play-pause-settle-clock"; timing.lifetime = .keepAlways; add(timing)
-                guard settled, revealPlayerControls(),
+                let chromeReady = settled && (isInlineLive ? revealInlineLiveControls() : revealPlayerControls())
+                guard chromeReady,
                       let current = app.buttons.matching(identifier: "player.play-pause")
                         .allElementsBoundByIndex.first(where: { $0.isHittable && $0.label == "Pause" }) else {
                     result.silent += 1
-                    result.defects.append("[\(screen.name)] playback did not settle with an advancing clock before Play/Pause within 10 s")
-                    crawlNote("   ✗ playback clock/transport did not settle before Play/Pause")
+                    let condition = isLive ? "live Playing state" : "advancing VOD clock"
+                    result.defects.append("[\(screen.name)] playback did not settle with \(condition) before Play/Pause within 10 s")
+                    crawlNote("   ✗ playback did not settle with \(condition) before Play/Pause")
                     let failed = XCTAttachment(string: app.debugDescription)
                     failed.name = "players-play-pause-unsettled"; failed.lifetime = .keepAlways; add(failed)
                     attach("players-play-pause-unsettled")
@@ -3890,6 +3949,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             }
             scene = crawlScene()
             let before = crawlStateString(scene, target: target)
+            let opensBrowser = target.identifier == "settings.about.sourceCode"
+            let controlsWereUp = target.identifier == "player.controls.show" && playerCaptionsAreUp()
             if let settledPlayPause {
                 settledPlayPause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else {
@@ -3902,10 +3963,42 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                     Thread.sleep(forTimeInterval: 0.2)
                 }
                 answered = settledPlayPause.label == "Play"
+                if answered, isInlineLive {
+                    let paused = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                        settledPlayPause.exists && settledPlayPause.label == "Play"
+                            && self.crawlInlineLiveHasState("")
+                    }, object: nil)
+                    answered = XCTWaiter.wait(for: [paused], timeout: 3) == .completed
+                }
+                if answered, isLive {
+                    settledPlayPause.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    let resumed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                        settledPlayPause.exists && settledPlayPause.label == "Pause"
+                            && (!isInlineLive || self.crawlInlineLiveHasState("Playing"))
+                    }, object: nil)
+                    answered = XCTWaiter.wait(for: [resumed], timeout: 5) == .completed
+                }
                 let evidence = XCTAttachment(string: "label=\(settledPlayPause.label), clock=\(String(describing: crawlPlaybackSeconds()))\n" + app.debugDescription)
                 evidence.name = "players-play-pause-after"; evidence.lifetime = .keepAlways; add(evidence)
+            } else if opensBrowser {
+                // The repository may return 404; the response is the browser handoff.
+                let handedOff = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    let state = self.app.state
+                    return state == .runningBackground || state == .runningBackgroundSuspended
+                }, object: nil)
+                answered = XCTWaiter.wait(for: [handedOff], timeout: 15) == .completed
+                app.activate()
+                XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "OpenStream did not return from the browser")
             } else {
                 answered = waitForCrawlResponse(from: before, target: target).0
+                #if targetEnvironment(simulator)
+                if !answered, isInlineLive, target.label == "AirPlay" {
+                    answered = crawlSimulatorAirPlayIsAvailable(element)
+                    if answered {
+                        crawlNote("   AirPlay system control remains available after touch; routing needs hardware")
+                    }
+                }
+                #endif
             }
             if let expectedSkip {
                 let deadline = Date().addingTimeInterval(5)
@@ -3919,11 +4012,22 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                     app.buttons["player.play-pause"].firstMatch.tap()
                 }
             } else if target.identifier == "player.controls.show" {
-                answered = playerCaptionsAreUp()
+                if isLive {
+                    let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                        self.playerCaptionsAreUp() != controlsWereUp
+                    }, object: nil)
+                    answered = XCTWaiter.wait(for: [changed], timeout: 3) == .completed
+                } else {
+                    answered = playerCaptionsAreUp()
+                }
             } else if target.identifier == "player.captions" {
-                let off = app.buttons["Off"].firstMatch
-                let english = app.buttons["English"].firstMatch
-                answered = off.exists && off.isHittable && english.exists && english.isHittable
+                let off = app.buttons.matching(NSPredicate(format: "label == %@", "Off"))
+                let english = app.buttons.matching(NSPredicate(format: "label == %@", "English"))
+                let choices = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    off.allElementsBoundByIndex.contains(where: { $0.isHittable })
+                        && (isLive || english.allElementsBoundByIndex.contains(where: { $0.isHittable }))
+                }, object: nil)
+                answered = XCTWaiter.wait(for: [choices], timeout: 5) == .completed
                 let menu = XCTAttachment(string: app.debugDescription)
                 menu.name = "players-caption-menu-actions"; menu.lifetime = .keepAlways; add(menu)
             }
@@ -3946,7 +4050,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 result.silent += 1
                 crawlNote("   ✗ \(target.name) — NO VISIBLE RESPONSE")
                 attach("\(screen.name)__\(target.slug)")
-                result.defects.append("[\(screen.name)] \(target.name) produced no visible response within 3 s")
+                let response = opensBrowser ? "did not hand off to the browser within 15 s"
+                    : "produced no visible response within 3 s"
+                result.defects.append("[\(screen.name)] \(target.name) \(response)")
             }
 
             // Everything the press opened is walked before it is closed. The
@@ -4490,12 +4596,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     }
 
     private func launchForCrawl(_ screen: CrawlScreen) {
+        crawlWindowRect = .null
         app.terminate()
         app.launchArguments = []
         XCUIDevice.shared.orientation = screen.landscape ? .landscapeLeft : .portrait
         app.launchArguments += ["-OpenStreamHoldPlayerChrome", "YES"]
         launch(screen: screen.route)
         _ = app.wait(for: .runningForeground, timeout: 30)
+        if app.windows.firstMatch.exists { crawlWindowRect = app.windows.firstMatch.frame }
         // Discover and Live pull their shelves over the network; the rest of the
         // app is drawn by the time the first frame lands.
         Thread.sleep(forTimeInterval: ["discover", "live", "library", "detail", "episodes"].contains(screen.route) ? 8 : 2)
