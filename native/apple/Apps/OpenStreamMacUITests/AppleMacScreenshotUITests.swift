@@ -7,6 +7,37 @@ import XCTest
 /// automation path instead and only ever sees the app's own window.
 @MainActor
 final class AppleMacScreenshotUITests: OpenStreamUITestCase {
+    func testNarratedSettingsTransferAndMetadata() {
+        let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+        defer { app.terminate() }
+        app.launchArguments = ["-OpenStreamVisionScreen", "settings", "-OpenStreamMuteAudio", "YES"]
+        app.launch()
+        let transfer = app.descendants(matching: .any)["settings.transfer"].firstMatch
+        XCTAssertTrue(transfer.waitForExistence(timeout: 30))
+        transfer.click()
+        XCTAssertTrue(app.descendants(matching: .any)["setup.transfer.to"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["setup.transfer.from"].exists)
+        capture(app, "mac-transfer")
+        app.terminate()
+        app.launchArguments = ["-OpenStreamVisionScreen", "metadata", "-OpenStreamMuteAudio", "YES"]
+        app.launch()
+        let advanced = app.descendants(matching: .any)["settings.metadata.advanced"].firstMatch
+        XCTAssertTrue(advanced.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.secureTextFields.firstMatch.exists)
+        capture(app, "mac-metadata-default")
+        advanced.click()
+        XCTAssertTrue(app.secureTextFields["TMDB API key or read token"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.secureTextFields["OMDb API key"].exists)
+        capture(app, "mac-metadata-advanced")
+    }
+
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testDiscoverWindowScreenshot() throws {
         let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
         app.launchArguments += ["-OpenStreamTrace", "YES"]

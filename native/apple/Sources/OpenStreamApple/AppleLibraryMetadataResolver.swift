@@ -18,16 +18,9 @@ actor AppleLibraryMetadataResolver {
         var attempts: Int?
     }
 
-    /// Bumped when a new field means a cached entry is *missing* something
-    /// rather than merely being old.
-    ///
-    /// 1 → `AppleCatalogItem.logoURL`. Without this, a viewer who already had
-    /// a Library keeps a hero with no wordmark for up to the seven-day
-    /// lifetime below, because the cached JSON simply has no logo in it — the
-    /// fix would look like it had not shipped. Re-resolving is the same work
-    /// the title did on its first ever appearance, four at a time, and
-    /// `addedAt` is carried across so "Recently Added" does not reshuffle.
-    private static let currentSchema = 1
+    /// Schema 2 carries genres. Schema 1 can still draw its known title and
+    /// artwork while the existing background refresh fills the missing fields.
+    private static let currentSchema = 2
 
     struct MatchRecord: Codable, Sendable {
         let candidate: AppleCatalogItem
@@ -125,12 +118,9 @@ actor AppleLibraryMetadataResolver {
             }
             guard let data = try? Data(contentsOf: cacheURL(item)),
                   let entry = try? JSONDecoder().decode(Entry.self, from: data) else { continue }
-            // Same schema gate as `resolve`: an old shape is missing fields and
-            // must re-resolve. Age is not a gate: a known match is shown at
-            // once, and the store revalidates stale ones in the background
-            // (`needsRevalidation`), publishing only when the answer changes.
+            // Keep known artwork visible while an older entry refreshes.
             if let value = entry.value {
-                if (entry.schema ?? 0) == Self.currentSchema { metadata[group.id] = value }
+                if (1...Self.currentSchema).contains(entry.schema ?? 0) { metadata[group.id] = value }
             } else if entry.reason == .noMatch {
                 noMatch.insert(group.id)
             }
@@ -212,7 +202,7 @@ actor AppleLibraryMetadataResolver {
         // A background revalidation that finds nothing keeps the match it had
         // as a positive for another cycle; only Fix Match or a refresh drops it.
         let keepsPositive = evidence == nil && !refresh && reason == .noMatch && cached?.value != nil
-            && cached?.reason == nil && (cached?.schema ?? 0) == Self.currentSchema
+            && cached?.reason == nil && (1...Self.currentSchema).contains(cached?.schema ?? 0)
         let value = evidence?.candidate
             ?? ((reason == .providerUnreachable || reason == .configMissing || keepsPositive) ? cached?.value : nil)
         try Task.checkCancellation()
@@ -438,7 +428,7 @@ actor AppleLibraryMetadataResolver {
                 let detail = try await AppleStremioMetadataClient().details(source: AppleStremioMetadataClient.defaultMetadataSource, type: type, mediaID: imdb)
                 return LookupEvidence(candidate: AppleCatalogItem(mediaID: imdb, type: type,
                     name: detail.title ?? parsed.title, posterURL: detail.posterURL, backgroundURL: detail.backdropURL,
-                    summary: detail.overview, releaseInfo: detail.releaseInfo, logoURL: detail.logoURL), provider: "cinemeta:explicitID")
+                    summary: detail.overview, releaseInfo: detail.releaseInfo, genres: detail.genres, logoURL: detail.logoURL), provider: "cinemeta:explicitID")
             } catch { try Task.checkCancellation(); failures.append(missReason(error)) }
         }
         var cinemeta = AppleStremioMetadataClient.defaultMetadataSource
@@ -460,6 +450,7 @@ actor AppleLibraryMetadataResolver {
                         let candidate = AppleCatalogItem(mediaID: match.mediaID, type: type, name: detail?.title ?? match.name,
                             posterURL: detail?.posterURL ?? match.posterURL, backgroundURL: detail?.backdropURL ?? match.backgroundURL,
                             summary: detail?.overview ?? match.summary, releaseInfo: detail?.releaseInfo ?? match.releaseInfo,
+                            genres: detail?.genres.isEmpty == false ? detail?.genres : match.genres,
                             logoURL: detail?.logoURL ?? match.logoURL, imdbID: match.imdbID)
                         return LookupEvidence(candidate: candidate, provider: "addon:" + source.id.uuidString)
                     }
@@ -608,7 +599,10 @@ actor AppleLibraryMetadataResolver {
               AppleStremioMetadataClient.isIMDBIdentifier(id) else { throw AppleTMDBError.invalidResponse }
         let poster = (object["Poster"] as? String).flatMap { $0 == "N/A" ? nil : URL(string: $0) }
         let candidate = AppleCatalogItem(mediaID: id, type: show ? "series" : "movie", name: name,
-            posterURL: poster, summary: object["Plot"] as? String, releaseInfo: object["Year"] as? String)
+            posterURL: poster, summary: object["Plot"] as? String, releaseInfo: object["Year"] as? String,
+            genres: (object["Genre"] as? String)?.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty && $0 != "N/A" })
         return explicit == id ? candidate : bestMatch([candidate], parsed: parsed)
     }
 }

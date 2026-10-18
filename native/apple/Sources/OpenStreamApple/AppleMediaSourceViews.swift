@@ -3316,6 +3316,10 @@ struct AppleLibraryView: View {
         }
     }
 
+    private var genreShelves: some View {
+        ForEach(library.genreShelves(sort), id: \.genre) { shelf($0.genre, $0.groups) }
+    }
+
     private var libraryScroll: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
@@ -3339,7 +3343,10 @@ struct AppleLibraryView: View {
                 if !resumable.isEmpty { shelf("Continue Watching", resumable, progress: true) }
                 sourceShelves
                 AppleXtreamLibrarySections(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, accessory: accessoryShelf == nil ? sortAccessory : nil)
-                if !groups.isEmpty { shelf("Recently Added", library.sorted(.added), previewLimit: 24) }
+                if !groups.isEmpty {
+                    shelf("Recently Added", library.sorted(.added), previewLimit: 24, opensFullList: false)
+                }
+                genreShelves
                 let unmatched = library.unmatched
                 if !unmatched.isEmpty {
                     AppleLibraryUnmatchedShelf(groups: unmatched, sourceStore: sourceStore, settings: settings)
@@ -3389,10 +3396,10 @@ struct AppleLibraryView: View {
         await library.reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings)
         await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore, force: true)
     }
-    private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil, previewLimit: Int? = nil) -> some View {
+    private func shelf(_ title: String, _ groups: [AppleLibrarySeries], progress: Bool = false, accessory: AnyView? = nil, previewLimit: Int? = nil, opensFullList: Bool = true) -> some View {
         AppleLocalTitleShelf(title: title, groups: groups, sourceStore: sourceStore,
             mediaIndex: mediaIndex, settings: settings, openSettings: openSettings, tabToolbar: titlePageToolbar,
-            showsProgress: progress, accessory: accessory, previewLimit: previewLimit)
+            showsProgress: progress, accessory: accessory, previewLimit: previewLimit, opensFullList: opensFullList)
     }
 
     /// The first kind a source actually has, so the Sort control lands on the

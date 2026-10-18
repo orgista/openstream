@@ -451,3 +451,15 @@ func devSeedTMDBKeyTurnsMetadataOn() {
     #expect(!AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).topShelfEnabled)
     #expect(!AppleSettingsStore.topShelfEnabled(in: defaults))
 }
+
+@MainActor
+@Test
+func topTenListsRequireAnOptInAndRememberIt() {
+    let defaults = makeIsolatedDefaults()
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    #expect(!store.top10ListsEnabled)
+    store.top10ListsEnabled = true
+    #expect(AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).top10ListsEnabled)
+    store.top10ListsEnabled = false
+    #expect(!AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).top10ListsEnabled)
+}

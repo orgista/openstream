@@ -5,6 +5,7 @@ enum AppleSettingsRoute: Hashable {
     case channels
     case restrictions
     case metadata
+    case metadataAdvanced
     case serverDownloads
     case trakt
     case watchProviders
@@ -17,6 +18,8 @@ enum AppleSettingsRoute: Hashable {
     case about
     #if !os(tvOS)
     case backup
+    case transfer
+    case transferTo
     #endif
 }
 
@@ -64,9 +67,6 @@ struct AppleSettingsView: View {
     /// as the right column's stack. Nil pushes everything on one stack.
     var splitPath: Binding<NavigationPath>? = nil
     @State private var splitSelection: AppleSettingsRoute = .sources
-    #if os(iOS)
-    @State private var showsSendSetup = false
-    #endif
 
     var body: some View {
         settingsContent.modifier(AppleSettingsPINLock())
@@ -140,6 +140,8 @@ struct AppleSettingsView: View {
             AppleRestrictionsView(sourceStore: sourceStore)
         case .metadata:
             AppleMetadataSettingsView(settings: settings)
+        case .metadataAdvanced:
+            AppleMetadataCredentialsView(settings: settings)
         case .serverDownloads:
             AppleServerDownloadsSettingsView(settings: settings)
         case .trakt:
@@ -163,6 +165,10 @@ struct AppleSettingsView: View {
         #if !os(tvOS)
         case .backup:
             if let backupController { AppleBackupSettingsView(controller: backupController) }
+        case .transfer:
+            AppleSetupTransferSettingsView()
+        case .transferTo:
+            AppleSetupTransferToView(controller: backupController)
         #endif
         }
     }
@@ -181,7 +187,10 @@ struct AppleSettingsView: View {
                         .appleTVReadableFocus()
                     }
                     if entries.contains(.backup) {
-                        setupTransferRows
+                        settingsLink(AppleSettingsRoute.transfer) {
+                            AppleTVNavigationLabel("Transfer", systemImage: "arrow.left.arrow.right")
+                        }
+                        .accessibilityIdentifier("settings.transfer")
                     }
                 }
             }
@@ -257,36 +266,6 @@ struct AppleSettingsView: View {
             }
         }
         .appleSettingsContent()
-        #if os(iOS)
-        .alert("Open the Camera", isPresented: $showsSendSetup) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Point it at the code on the other device.")
-        }
-        #endif
-    }
-
-    /// Set Up from iPhone, both ends, beside Backup & Sync (owner 2026-10-09:
-    /// "can't find where to scan a QR code"); before this they were only
-    /// under Sources and at the bottom of Backup & Sync.
-    @ViewBuilder
-    private var setupTransferRows: some View {
-        Button {
-            AppleSetupTransferCenter.shared.presentReceiver()
-        } label: {
-            AppleTVNavigationLabel(AppleSetupTransferDevice.receiveTitle, systemImage: "qrcode")
-        }
-        .foregroundStyle(.primary)
-        .accessibilityIdentifier("settings.setupFromPhone")
-        #if os(iOS)
-        Button {
-            showsSendSetup = true
-        } label: {
-            AppleTVNavigationLabel("Send Setup to Another Device", systemImage: "iphone.and.arrow.forward")
-        }
-        .foregroundStyle(.primary)
-        .accessibilityIdentifier("settings.sendSetup")
-        #endif
     }
     #endif
 }
@@ -917,38 +896,52 @@ private struct AppleChannelManagerView: View {
 
 @MainActor
 private struct AppleMetadataSettingsView: View {
-    private enum Field: Hashable { case tmdb, omdb }
-    private static let chain: [Field] = [.tmdb, .omdb]
-    @FocusState private var focusedField: Field?
-
     let settings: AppleSettingsStore
 
     var body: some View {
         @Bindable var settings = settings
-
         Form {
             Section {
                 Toggle("Use Metadata APIs", isOn: $settings.metadataEnabled)
             }
-
             Section {
-                SecureField("API key or read token", text: $settings.tmdbAPIKey)
-                    .disabled(!settings.metadataEnabled)
-                    .appleFormSubmit(.tmdb, chain: Self.chain, focus: $focusedField)
-            } header: {
-                // TMDB's credit lives once, in About (owner 2026-10-08: no notices around the app).
-                Text("TMDB")
+                NavigationLink(value: AppleSettingsRoute.metadataAdvanced) {
+                    AppleTVNavigationLabel("Advanced")
+                }
+                .appleTVReadableFocus()
+                .accessibilityIdentifier("settings.metadata.advanced")
             }
-
-            Section("OMDb") {
-                SecureField("API key", text: $settings.omdbAPIKey)
-                    .disabled(!settings.metadataEnabled)
-                    .appleFormSubmit(.omdb, chain: Self.chain, focus: $focusedField)
-            }
-
             AppleSettingsPersistenceError(settings: settings)
         }
         .appleSettingsPage("Metadata")
+    }
+}
+
+@MainActor
+private struct AppleMetadataCredentialsView: View {
+    private enum Field: Hashable { case tmdb, omdb }
+    private static let chain: [Field] = [.tmdb, .omdb]
+    @FocusState private var focusedField: Field?
+    let settings: AppleSettingsStore
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("TMDB") {
+                SecureField("API key or read token", text: $settings.tmdbAPIKey)
+                    .accessibilityLabel("TMDB API key or read token")
+                    .disabled(!settings.metadataEnabled)
+                    .appleFormSubmit(.tmdb, chain: Self.chain, focus: $focusedField)
+            }
+            Section("OMDb") {
+                SecureField("API key", text: $settings.omdbAPIKey)
+                    .accessibilityLabel("OMDb API key")
+                    .disabled(!settings.metadataEnabled)
+                    .appleFormSubmit(.omdb, chain: Self.chain, focus: $focusedField)
+            }
+            AppleSettingsPersistenceError(settings: settings)
+        }
+        .appleSettingsPage("Advanced")
     }
 }
 

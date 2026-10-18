@@ -334,6 +334,22 @@ final class AppleLocalLibraryStore {
         sortedCache[sort] = (contentRevision, value)
         return value
     }
+    /// Library's genre shelves: every genre at least two titles share, each in
+    /// `sort` order. Kept until the content changes, like `sorted(_:)`.
+    func genreShelves(_ sort: AppleLibrarySort) -> [(genre: String, groups: [AppleLibrarySeries])] {
+        let ordered = sorted(sort)
+        if let cached = genreCache[sort], cached.revision == contentRevision { return cached.value }
+        var byGenre: [String: [AppleLibrarySeries]] = [:]
+        for group in ordered {
+            for genre in Set(metadata[group.id]?.genres ?? []) where !genre.isEmpty {
+                byGenre[genre, default: []].append(group)
+            }
+        }
+        let value = byGenre.filter { $0.value.count >= 2 }.sorted { $0.key < $1.key }.map { (genre: $0.key, groups: $0.value) }
+        genreCache[sort] = (contentRevision, value)
+        return value
+    }
+    @ObservationIgnored private var genreCache: [AppleLibrarySort: (revision: Int, value: [(genre: String, groups: [AppleLibrarySeries])])] = [:]
     var continueWatching: [AppleLibrarySeries] {
         let store = playbackStore
         let eligible = groups.compactMap { group -> (AppleLibrarySeries, Date)? in

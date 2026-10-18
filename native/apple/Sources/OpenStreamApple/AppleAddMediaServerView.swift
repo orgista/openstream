@@ -351,7 +351,7 @@ struct AppleAddMediaServerView: View {
                 
                 if kind == .emby && embyMode == .connect {
                     HStack(spacing: metrics.pillSpacing) {
-                        Button { connectionAction = .signIn(UUID()) } label: { connectionLabel(saving: true, text: "Sign In") }
+                        Button { connectionAction = .signIn(UUID()) } label: { connectionLabel("Sign In", working: "Signing In…", saving: true) }
                             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                             .disabled(!AppleMediaServerFormPolicy.canSignIn(email: embyEmail, password: embyPassword) || isWorking)
                             .accessibilityIdentifier("sources.mediaServer.embySignIn")
@@ -359,13 +359,14 @@ struct AppleAddMediaServerView: View {
                     .focusSection()
                 } else if showPassword && kind != .plex {
                     HStack(spacing: metrics.pillSpacing) {
-                        Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
+                        Button { connectionAction = .save(UUID()) } label: { connectionLabel("Save", working: "Saving…", saving: true) }
                             .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                             .disabled(!AppleMediaServerFormPolicy.canSave(urlText: url, username: username) || isWorking)
                             .accessibilityIdentifier("sources.mediaServer.save")
-                        Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
+                        Button { connectionAction = .test(UUID()) } label: { connectionLabel("Test", working: "Testing…", saving: false) }
                             .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                             .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+                            .accessibilityLabel("Test Connection")
                             .accessibilityIdentifier("sources.mediaServer.test")
                     }
                     .focusSection()
@@ -375,7 +376,7 @@ struct AppleAddMediaServerView: View {
                     VStack(alignment: .leading, spacing: metrics.groupSpacing) {
                         AppleTVFormGroup("Quick Connect") {
                             HStack(spacing: metrics.pillSpacing) {
-                                Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
+                                Button { connectionAction = .connect(UUID()) } label: { connectionLabel("Use Quick Connect", working: "Connecting…", saving: false) }
                                     .buttonStyle(AppleTVPillStyle(isSelected: false, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                                     .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
                                     .accessibilityIdentifier("sources.mediaServer.quickConnect")
@@ -420,7 +421,7 @@ struct AppleAddMediaServerView: View {
                             Button {
                                 guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
                                 saveEmbyServer(server: server)
-                            } label: { connectionLabel(saving: true, text: "Save") }
+                            } label: { connectionLabel("Save", working: "Saving…", saving: true) }
                                 .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                                 .disabled(isWorking)
                                 .accessibilityIdentifier("sources.mediaServer.saveEmby")
@@ -463,7 +464,7 @@ struct AppleAddMediaServerView: View {
                             HStack(spacing: metrics.pillSpacing) {
                                 Button {
                                     Task { await plexModel.saveSelectedServer() }
-                                } label: { connectionLabel(saving: true, text: "Save") }
+                                } label: { connectionLabel("Save", working: "Saving…", saving: true) }
                                     .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
                                     .disabled(plexModel.isWorking)
                                     .accessibilityIdentifier("sources.mediaServer.plex.save")
@@ -561,7 +562,7 @@ struct AppleAddMediaServerView: View {
                 .disabled(isWorking)
                 
                 AppleFormActionSection {
-                    Button { connectionAction = .signIn(UUID()) } label: { connectionLabel(saving: true, text: "Sign In") }
+                    Button { connectionAction = .signIn(UUID()) } label: { connectionLabel("Sign In", working: "Signing In…", saving: true) }
                         .disabled(!AppleMediaServerFormPolicy.canSignIn(email: embyEmail, password: embyPassword) || isWorking)
                         .appleMacFormPrimaryAction()
                         .accessibilityIdentifier("sources.mediaServer.embySignIn")
@@ -712,7 +713,7 @@ struct AppleAddMediaServerView: View {
     }
 
     private var saveConnectionButton: some View {
-        Button { connectionAction = .save(UUID()) } label: { connectionLabel(saving: true, text: "Save") }
+        Button { connectionAction = .save(UUID()) } label: { connectionLabel("Save", working: "Saving…", saving: true) }
             .buttonStyle(.brandPrimary)
             #if os(macOS)
             .keyboardShortcut(.defaultAction)
@@ -722,7 +723,7 @@ struct AppleAddMediaServerView: View {
     }
 
     private var quickConnectButton: some View {
-        Button { connectionAction = .connect(UUID()) } label: { connectionLabel(saving: false, text: "Use Quick Connect") }
+        Button { connectionAction = .connect(UUID()) } label: { connectionLabel("Use Quick Connect", working: "Connecting…", saving: false) }
             .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
             #if os(macOS)
             // It shares the action bar with Test Connection and Save.
@@ -732,9 +733,10 @@ struct AppleAddMediaServerView: View {
     }
 
     private var testConnectionButton: some View {
-        Button { connectionAction = .test(UUID()) } label: { connectionLabel(saving: false, text: "Test Connection") }
+        Button { connectionAction = .test(UUID()) } label: { connectionLabel("Test", working: "Testing…", saving: false) }
             .buttonStyle(.brandSecondary)
             .disabled(!AppleMediaServerFormPolicy.canTest(urlText: url) || isWorking)
+            .accessibilityLabel("Test Connection")
             .accessibilityIdentifier("sources.mediaServer.test")
     }
 
@@ -742,7 +744,7 @@ struct AppleAddMediaServerView: View {
         Button {
             guard let server = embyServers.first(where: { $0.id == selectedEmbyServerID }) else { return }
             saveEmbyServer(server: server)
-        } label: { connectionLabel(saving: true, text: "Save") }
+        } label: { connectionLabel("Save", working: "Saving…", saving: true) }
             .disabled(isWorking)
             .appleMacFormPrimaryAction()
             .accessibilityIdentifier("sources.mediaServer.saveEmby")
@@ -763,14 +765,9 @@ struct AppleAddMediaServerView: View {
     }
     #endif
     
-    private func connectionLabel(saving: Bool, text: String) -> some View {
-        let active = isWorking && (connectionAction?.shouldSave == saving)
-        let workingText = text == "Test Connection" ? "Testing…" : (text == "Sign In" ? "Signing In…" : (text == "Save" ? "Saving…" : (text == "Use Quick Connect" ? "Connecting…" : "\(text)…")))
-        return AppleWorkingButtonLabel(
-            title: LocalizedStringKey(text),
-            workingTitle: LocalizedStringKey(workingText),
-            isWorking: active
-        )
+    private func connectionLabel(_ title: LocalizedStringKey, working: LocalizedStringKey, saving: Bool) -> some View {
+        AppleWorkingButtonLabel(title: title, workingTitle: working,
+            isWorking: isWorking && connectionAction?.shouldSave == saving)
     }
     
     private func resetState() {

@@ -493,3 +493,16 @@ func titlePageTrailerAutoplaysWithTheSettingOnAndReduceMotionOff(device: AppleTr
     let details = try await client.details(source: source, type: "series", mediaID: "tt0903747")
     #expect(details.countries == ["United States", "Mexico"])
 }
+
+@Test func tmdbLibraryTitlesKeepTheirGenres() async throws {
+    let configuration = try AppleTMDBConfiguration(credential: "eyJheader.payload.signature")
+    let client = AppleTMDBClient { request in
+        #expect(request.url?.path == "/3/movie/42")
+        let body = Data(#"{"id":42,"title":"Fixture Film","release_date":"2024-01-01","genres":[{"name":"Drama"},{"name":"Adventure"}]}"#.utf8)
+        let url = try #require(request.url)
+        let response = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+        return (body, response)
+    }
+    let item = try await client.sharedLinkDetails(id: 42, kind: .movie, configuration: configuration)
+    #expect(item.genres == ["Drama", "Adventure"])
+}

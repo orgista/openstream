@@ -1,0 +1,260 @@
+1
+00:00:00,000 --> 00:00:07,000
+ Okay, so look, it takes a favor to look.
+
+2
+00:00:30,000 --> 00:00:58,100
+ I don't know what this is here, open, and then live, look at this, okay, I don't know what's up with that, I also don't even know where pay-per-view is, maybe premium?
+
+3
+00:01:00,000 --> 00:01:23,940
+ And there's also no, like, metadata in these, only in the All.
+
+4
+00:01:25,400 --> 00:01:26,720
+ Actually, is there anything in the All?
+
+5
+00:01:30,000 --> 00:01:32,100
+ Oh yeah, there's Cheers, I've got a different one.
+
+6
+00:01:41,180 --> 00:01:46,280
+ And the Watching Pills, I don't know where that came, but that's kind of like, AI sloppy.
+
+7
+00:01:48,480 --> 00:01:52,120
+ And this gets cut off, can't see the full poster.
+
+8
+00:01:52,800 --> 00:02:04,060
+ And then this, if we go to a disc, look at this, I'm going to click on it, it's like, the trailer's like cut off, then the word mark is like, below the trailer, it like, got worse.
+
+9
+00:02:04,140 --> 00:02:08,140
+ Like, it used to be pretty good, and I don't know how I ended up getting this bad.
+
+10
+00:02:12,140 --> 00:02:17,400
+ And then look, I don't know what this, what's up with that?
+
+11
+00:02:20,720 --> 00:02:22,220
+ Yeah, yeah, doesn't play anything.
+
+12
+00:02:32,060 --> 00:02:33,520
+ Okay, I don't know what this is, open.
+
+13
+00:02:35,960 --> 00:02:36,720
+ Open season.
+
+14
+00:02:37,620 --> 00:02:40,200
+ You're saying you can't match open season three with anything?
+
+15
+00:02:47,000 --> 00:02:50,020
+ And there's not enough categories in library, it just says movies.
+
+16
+00:02:51,320 --> 00:02:58,500
+ And so I don't see, like, recently added, or, I guess recently added here, and then, I don't know why this, I don't like this.
+
+17
+00:02:59,200 --> 00:03:01,120
+ I shouldn't be able to tap recently added here.
+
+18
+00:03:03,800 --> 00:03:04,860
+ What was the point of this?
+
+19
+00:03:05,360 --> 00:03:06,320
+ I didn't ask for this.
+
+20
+00:03:07,140 --> 00:03:17,660
+ So we could remove that, and then choose, there's no shoes, but I think that's because in library, we had changed it, so sources, I guess it's the only source right now.
+
+21
+00:03:34,060 --> 00:03:36,820
+ Yeah, I could only add still one folder.
+
+22
+00:03:37,140 --> 00:03:50,880
+ And I need two folders, which is movies, and TV.
+
+23
+00:03:55,300 --> 00:03:58,380
+ And this setup from another iPhone could just say, like, transfer.
+
+24
+00:03:59,300 --> 00:04:00,260
+ Same thing for here.
+
+25
+00:04:00,540 --> 00:04:01,200
+ It's, like, double.
+
+26
+00:04:01,420 --> 00:04:02,480
+ It says setup, send.
+
+27
+00:04:03,020 --> 00:04:11,860
+ You could just say, it could just be one transfer, then you click on it, and you could either choose, you know, transfer to, or transfer from, or something like that.
+
+28
+00:04:16,860 --> 00:04:19,540
+ And everywhere you go, it says, send setup to another device.
+
+29
+00:04:20,880 --> 00:04:24,300
+ And it just says, open camera, point at another device, because what's the point of that?
+
+30
+00:04:24,380 --> 00:04:25,380
+ Might as well just remove that.
+
+31
+00:04:26,680 --> 00:04:27,520
+ It doesn't do anything.
+
+32
+00:04:28,860 --> 00:04:39,060
+ And the API key there, so.
+
+33
+00:04:39,060 --> 00:04:39,120
+ And the API key there, so.
+
+34
+00:04:39,860 --> 00:04:41,640
+ And the API key there, so.
+
+35
+00:04:41,640 --> 00:04:43,640
+ And the API key there, so.
+
+36
+00:04:43,640 --> 00:04:52,700
+ And the API key there, so.
+
+37
+00:04:52,700 --> 00:05:08,520
+ And the API key there, so, and the API key there, so.
+
+38
+00:05:08,520 --> 00:05:10,200
+ This channel, how, things take you forever.
+
+39
+00:05:10,200 --> 00:05:22,440
+ Oh, this box right here, where it says IPTV, I don't know where this box is coming from, but.
+
+40
+00:05:22,440 --> 00:05:24,600
+ I never asked for it, I don't know why you'll add it.
+
+41
+00:05:32,140 --> 00:05:33,660
+ But I don't know why this is like this.
+
+42
+00:05:37,460 --> 00:05:38,840
+ And these don't load any, do.
+
+43
+00:05:40,200 --> 00:05:46,180
+ And these shouldn't be, like, default, these top tens.
+
+44
+00:05:47,740 --> 00:05:52,280
+ That should be the add, add-ons, which I don't think this has any of it yet.
+
+45
+00:05:52,280 --> 00:05:53,460
+ Let me see, sources.
+
+46
+00:05:55,800 --> 00:05:56,560
+ Yeah, I don't see it.
+
+47
+00:05:57,220 --> 00:05:57,760
+ I don't see it.
+
+48
+00:05:57,760 --> 00:05:57,780
+ I don't see it.
+
+49
+00:05:57,780 --> 00:06:02,120
+ It's just IPTV, and instance.
+
+50
+00:06:07,740 --> 00:06:08,460
+ MediaServe.
+
+51
+00:06:09,400 --> 00:06:11,340
+ Jellyman, MB.
+
+52
+00:06:26,680 --> 00:06:28,800
+ This button could use Word2, the test connection.
+
+53
+00:06:30,800 --> 00:06:32,360
+ I guess it's okay-ish.
+
+54
+00:06:36,360 --> 00:07:01,440
+ There's a box right here where it says, zero channel, zero KB, cancel.
+
+55
+00:07:03,500 --> 00:07:04,680
+ And it looks like it's not loaded.
+
+56
+00:07:16,580 --> 00:07:17,400
+ Yeah, it's not loaded.
+
+57
+00:07:20,540 --> 00:07:25,040
+ Oh, then look, the guy, that bar right there gets, like, stuck.
+
+58
+00:07:25,140 --> 00:07:26,880
+ And then it looks just weird right there.
+
+59
+00:07:26,880 --> 00:07:27,320
+ You see that?
+
+60
+00:07:27,320 --> 00:07:27,780
+ I don't know.
+
+61
+00:07:27,780 --> 00:07:57,760
+ Thank you.
+
+62
+00:07:57,780 --> 00:08:14,340
+ And this will stream at 749 no seconds.
+
+63
+00:08:14,520 --> 00:08:15,520
+ I don't know why that's up there either.
+
+64
+00:08:27,780 --> 00:08:57,760
+ I don't know why that's up there.
+
+65
+00:08:57,780 --> 00:09:06,000
+ I don't know why that's up there.
+

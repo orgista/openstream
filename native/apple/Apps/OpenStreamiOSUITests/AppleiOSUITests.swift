@@ -504,6 +504,13 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         return element.isHittable
     }
 
+    private func attachHierarchy(_ name: String) {
+        let tree = XCTAttachment(string: app.debugDescription)
+        tree.name = name
+        tree.lifetime = .keepAlways
+        add(tree)
+    }
+
     private func attach(_ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
@@ -652,6 +659,95 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         attach("ios-launch")
     }
 
+    /// Read-only walk of the owner's own library and share (narrated recording
+    /// 2026-10-15): it opens Add Folder's browser and backs out without adding.
+    /// Navigates by the tab bar: the debug screen hook does not hold on the owner's setup.
+    func testNarratedOwnerLibraryAndShare() throws {
+        guard let sourceName = ProcessInfo.processInfo.environment["OPENSTREAM_NARRATION_SOURCE"], !sourceName.isEmpty else {
+            throw XCTSkip("Requires the owner source named by OPENSTREAM_NARRATION_SOURCE")
+        }
+        launch()
+        app.tabBars.buttons["Library"].tap()
+        // The owner's library loads from the share; give it time before the first look.
+        Thread.sleep(forTimeInterval: 8)
+        attach("narration-after-library-top")
+        let recent = app.descendants(matching: .any)["library.shelf.Recently Added"].firstMatch
+        scrollToControl(recent, in: app, limit: 20)
+        attach("narration-after-library")
+        attachHierarchy("narration-after-library-hierarchy")
+        XCTAssertTrue(recent.waitForExistence(timeout: 30))
+        XCTAssertNotEqual(recent.elementType, .button, "Recently Added must not open a list")
+        let genre = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.shelf."))
+            .matching(NSPredicate(format: "NOT (identifier IN %@)", ["library.shelf.Recently Added", "library.shelf.Continue Watching"]))
+            .firstMatch
+        scrollToControl(genre, in: app, limit: 20)
+        attach("narration-after-library-genres")
+
+        app.tabBars.buttons["Settings"].tap()
+        let sources = app.buttons["Sources"].firstMatch
+        XCTAssertTrue(sources.waitForExistence(timeout: 10))
+        sources.tap()
+        let mediaServer = app.buttons["Media Server"].firstMatch
+        XCTAssertTrue(mediaServer.waitForExistence(timeout: 10))
+        mediaServer.tap()
+        XCTAssertTrue(app.buttons["sources.mediaServer.test"].waitForExistence(timeout: 20))
+        attach("narration-add-media-server")
+        app.navigationBars.buttons.firstMatch.tap()
+        let source = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", sourceName)).firstMatch
+        scrollToControl(source, in: app, limit: 20)
+        XCTAssertTrue(source.waitForExistence(timeout: 20))
+        source.tap()
+        let addFolder = app.descendants(matching: .any)["sources.smb.addFolderFromSettings"].firstMatch
+        XCTAssertTrue(addFolder.waitForExistence(timeout: 20))
+        attach("narration-after-share-details")
+        addFolder.tap()
+        let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sources.smb.select.'"))
+        XCTAssertTrue(choices.firstMatch.waitForExistence(timeout: 60))
+        attach("narration-after-share-folder-browser")
+    }
+
+    func testNarratedSettingsHaveOneTransferAndAdvancedMetadata() {
+        launch()
+        app.tabBars.buttons["Settings"].tap()
+        let transferLink = app.descendants(matching: .any)["settings.transfer"].firstMatch
+        XCTAssertTrue(transferLink.waitForExistence(timeout: 10))
+        attach("narration-settings-transfer")
+        transferLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["setup.transfer.to"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["setup.transfer.from"].exists)
+        attach("narration-transfer-directions")
+        app.descendants(matching: .any)["setup.transfer.to"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["setup.transfer.link"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["setup.transfer.continue"].isEnabled)
+        XCTAssertFalse(app.alerts["Open the Camera"].exists)
+        attach("narration-transfer-to")
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["setup.transfer.from"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["setup.receive.qr"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.alerts["Open the Camera"].exists)
+        attach("narration-transfer-from")
+        app.buttons["setup.receive.cancel"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        let metadata = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Metadata")).firstMatch
+        scrollToControl(metadata, in: app)
+        Thread.sleep(forTimeInterval: 1)
+        metadata.tap()
+        XCTAssertTrue(app.buttons["settings.metadata.advanced"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.secureTextFields.firstMatch.exists)
+        attach("narration-metadata-default")
+        app.buttons["settings.metadata.advanced"].tap()
+        XCTAssertTrue(app.secureTextFields["TMDB API key or read token"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.secureTextFields["OMDb API key"].exists)
+        attach("narration-metadata-advanced")
+        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        let topTen = app.switches["Top 10 lists"].firstMatch
+        scrollToControl(topTen, in: app, limit: 20)
+        XCTAssertTrue(topTen.exists)
+        attach("narration-top-ten")
+    }
+
     /// Owner: "type by keyboard on iPhone doesn't work".
     ///
     /// Typing is only half of it — the value has to survive leaving the screen
@@ -680,6 +776,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 XCTAssertEqual(toggle.value as? String, "0", "Metadata setting was not restored")
             }
         }
+        app.buttons["settings.metadata.advanced"].tap()
         let field = app.secureTextFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 20), "no field to type into")
         XCTAssertTrue(field.isEnabled, "the fixture must enable Metadata for this typing scenario")
@@ -694,8 +791,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // focused is the failure being chased.
         app.navigationBars.buttons.firstMatch.tap()
         Thread.sleep(forTimeInterval: 2.0)
-        scrollToControl(metadata, in: app)
-        metadata.tap()
+        app.buttons["settings.metadata.advanced"].tap()
         Thread.sleep(forTimeInterval: 2.5)
         attach("typing-after-returning")
 
@@ -798,8 +894,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             enabled.switches.firstMatch.tap()
         }
 
-        let first = app.secureTextFields["API key or read token"]
-        let last = app.secureTextFields["API key"]
+        app.buttons["settings.metadata.advanced"].tap()
+        let first = app.secureTextFields["TMDB API key or read token"]
+        let last = app.secureTextFields["OMDb API key"]
         XCTAssertTrue(first.waitForExistence(timeout: 20), "the TMDB field never appeared")
         XCTAssertTrue(last.exists, "the OMDb field never appeared")
         XCTAssertTrue(first.isEnabled && last.isEnabled, "Metadata fields must be enabled to test the keyboard")
