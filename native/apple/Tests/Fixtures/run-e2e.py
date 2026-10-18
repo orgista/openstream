@@ -134,9 +134,11 @@ def extract_results(bundle):
     return {"summary": summary, "tests": tests}
 
 
-def run_platform(platform, work, only, media_environment=None, compile_files=(), media_metadata=None):
+def run_platform(platform, work, only, media_environment=None, compile_files=(), media_metadata=None,
+                 simulator=None, derived_data=None):
     global ACTIVE_TEST_PROCESS
-    sim = SIMS[platform]
+    sim = simulator or SIMS[platform]
+    derived_data = derived_data or DD
     devices = read_json(["xcrun", "simctl", "list", "devices", "--json"])
     booted = [d["udid"] for group in devices["devices"].values() for d in group if d["state"] == "Booted"]
     if booted:
@@ -156,11 +158,11 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
         with buildlog.open("w") as log:
             # The UI-test schemes have no app dependency: build the app explicitly.
             command(["xcodebuild", "-project", "OpenStreamApps.xcodeproj", "-scheme", "OpenStream " + platform,
-                     "-destination", "id=" + sim, "-derivedDataPath", str(DD), "build"],
+                     "-destination", "id=" + sim, "-derivedDataPath", str(derived_data), "build"],
                     cwd=ROOT / "Apps", stdout=log, stderr=subprocess.STDOUT)
             command(["xcodebuild", "-project", "OpenStreamApps.xcodeproj", "-scheme", SCHEMES[platform],
                      "-testPlan", "E2E-" + platform, "-destination", "id=" + sim,
-                     "-derivedDataPath", str(DD), "-parallel-testing-enabled", "NO", "build-for-testing"],
+                     "-derivedDataPath", str(derived_data), "-parallel-testing-enabled", "NO", "build-for-testing"],
                     cwd=ROOT / "Apps", stdout=log, stderr=subprocess.STDOUT)
         if CANCEL_REQUESTED:
             raise RuntimeError("E2E cancelled before test execution")
@@ -168,7 +170,7 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
         compiled = buildlog.read_text(errors="replace").splitlines()
         result["compileEvidence"] = {name: sum("SwiftCompile normal arm64 Compiling" in line and name in line
                                                for line in compiled) for name in compile_files}
-        products = DD / "Build/Products"
+        products = derived_data / "Build/Products"
         app_path = products / ("Debug-iphonesimulator" if platform == "iOS" else "Debug-appletvsimulator") / "OpenStream.app"
         if not app_path.exists():
             apps = list((products / ("Debug-iphonesimulator" if platform == "iOS" else "Debug-appletvsimulator")).glob("*.app"))
@@ -202,7 +204,7 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
         test_run.write_bytes(plistlib.dumps(config))
         bundle = work / "tests.xcresult"
         args = ["xcodebuild", "-xctestrun", str(test_run), "-destination", "id=" + sim,
-                "-derivedDataPath", str(DD), "-parallel-testing-enabled", "NO", "-resultBundlePath", str(bundle)]
+                "-derivedDataPath", str(derived_data), "-parallel-testing-enabled", "NO", "-resultBundlePath", str(bundle)]
         args += ["-only-testing:" + TARGETS[platform] + "/" + t for t in only]
         with (work / "tests.log").open("w") as log:
             with subprocess.Popen(args + ["test-without-building"], stdout=log, stderr=subprocess.STDOUT) as proc:
@@ -332,6 +334,9 @@ def isolated_subtitle_copy(source, output, index):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=SIMS, action="append")
+    parser.add_argument("--simulator", help="Existing simulator UDID; requires exactly one --platform")
+    parser.add_argument("--derived-data", type=Path, default=DD, help="Internal simulator DerivedData directory")
+    parser.add_argument("--repeat", type=int, default=1, help="Independent runs, restoring simulator data after each")
     parser.add_argument("--engine-fork", help="Dev-Mini-only temporary engine dependency override")
     parser.add_argument("--matrix", action="store_true", help="Run all ISO/caption cases and affected iOS baseline retries")
     parser.add_argument("--only", action="append", default=[])
@@ -343,6 +348,10 @@ def main():
     parser.add_argument("--iso-repro", action="store_true", help="Capture pre-fix disc playback without requiring navigation")
     parser.add_argument("--caption-fixtures", action="store_true", help="Include the local bitmap caption corpus")
     args = parser.parse_args()
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    if args.simulator and (not args.platform or len(args.platform) != 1):
+        parser.error("--simulator requires exactly one --platform")
     signal.signal(signal.SIGINT, request_cancel)
     with local_engine_override(args.engine_fork):
         os.environ["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
@@ -476,8 +485,6 @@ def main():
         codes = []
         try:
             for platform in args.platform or SIMS:
-                platform_work = work / platform
-                platform_work.mkdir()
                 selectors = args.only + (args.only_ios if platform == "iOS" else args.only_tvos)
                 if args.matrix:
                     class_name = "AppleiOSUITests" if platform == "iOS" else "AppleTVFocusUITests"
@@ -487,8 +494,15 @@ def main():
                                  method.startswith(("testDVDMenu", "testHTTPDisc")) or "CaptionsOffAndOnStayInFrame" in method]
                     if platform == "iOS":
                         selectors += [class_name + "/testCrawlDetailAndEpisodes", class_name + "/testCrawlPlayers"]
-                codes.append(run_platform(platform, platform_work, selectors, media_environment,
-                                          args.compile_file, caption_metadata))
+                for iteration in range(1, args.repeat + 1):
+                    platform_work = work / platform
+                    if args.repeat > 1:
+                        platform_work /= str(iteration)
+                    platform_work.mkdir(parents=True)
+                    codes.append(run_platform(platform, platform_work, selectors, media_environment,
+                                              args.compile_file, caption_metadata, args.simulator, args.derived_data))
+                    if CANCEL_REQUESTED:
+                        break
                 if CANCEL_REQUESTED:
                     break
         finally:

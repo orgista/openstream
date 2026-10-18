@@ -2357,10 +2357,9 @@ private struct AppleLiveFullScreenControls: View {
         .modifier(AppleSleepTimerPresentation(coordinator: coordinator))
         .modifier(ApplePINPresenter())
         #if os(iOS)
-        // UIKit's modal flag alone leaves the presenting SwiftUI inline
-        // controls exposed. Isolate this cover just like the VOD player.
+        // UIKit isolates the presented host. SwiftUI's isModal trait spreads
+        // into caption nodes, making them synthetic alerts that hide controls.
         .background(ApplePlayerAccessibilityModal().frame(width: 0, height: 0))
-        .accessibilityAddTraits(.isModal)
         // The transport's full-screen "show channels" Button fires on any
         // touch that lifts inside it — gesture priority does not stop it — so
         // a channel swipe also opened the Channels list (DevPlus, 2026-10-06).

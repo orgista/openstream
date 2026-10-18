@@ -16,6 +16,10 @@ enum AppleLiveSystemChromePolicy {
     /// ±15 s skips only with a rewind window longer than 30 s.
     static func showsSkips(dvrSpan: Double) -> Bool { dvrSpan > 30 }
 
+    static func hasTrackChoices(audioChoiceCount: Int, subtitleTrackCount: Int) -> Bool {
+        audioChoiceCount > 1 || subtitleTrackCount > 0
+    }
+
     /// "−0:42" while behind the live edge; nothing at it.
     static func behindText(position: Double, range: AppleSeekableRange?, tolerance: Double) -> String? {
         guard let range, AppleLiveSeekPolicy.offersDVR(range), position.isFinite else { return nil }
@@ -241,6 +245,9 @@ struct AppleLiveSystemChrome: View {
                     onMenuItemAppeared: { model.menuItemAppeared() },
                     onMenuItemDisappeared: { model.menuItemDisappeared() }
                 )
+                .disabled(!AppleLiveSystemChromePolicy.hasTrackChoices(
+                    audioChoiceCount: AppleAudioTrackMenu.entries(model.audioTracks, activeTrackID: model.selectedAudioID).count,
+                    subtitleTrackCount: model.subtitleTracks.count))
                 if let onShowChannels {
                     Button {
                         model.bumpActivity()

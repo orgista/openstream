@@ -13,8 +13,7 @@ import XCTest
 ///
 /// The rows come from `topshelf-v1.json` in `group.com.orgista.openstream`,
 /// which the app writes only while Continue Watching publishing is on under
-/// Settings › Privacy. With no snapshot the extension draws its empty state,
-/// and this test checks that instead of failing.
+/// Settings › Privacy. Fixture runs publish their own Continue Watching title.
 @MainActor
 final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
     private var messages: XCUIApplication!
@@ -29,6 +28,27 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
     }
 
     func testOpenStreamComposesAShareBubble() throws {
+        let fixtureRun = ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false
+        let fixtureTitle = "Stub Movie Six"
+        let host = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+        defer { if fixtureRun { host.terminate() } }
+        if fixtureRun {
+            host.launchArguments = Self.stubbedLaunchArguments + [
+                "-OpenStreamStubContinueWatching", "YES", "-OpenStreamVisionScreen", "discover",
+            ]
+            configureFixtureLaunch(host)
+            host.launch()
+            let continued = host.descendants(matching: .any).matching(NSPredicate(format:
+                "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "home.continue.", fixtureTitle)).firstMatch
+            XCTAssertTrue(host.descendants(matching: .any).matching(NSPredicate(format:
+                "identifier BEGINSWITH 'home.' OR identifier BEGINSWITH 'discover.'")).firstMatch
+                .waitForExistence(timeout: 40), "Discover did not load the Messages fixture")
+            for _ in 0..<8 where !continued.exists {
+                host.swipeUp()
+                _ = continued.waitForExistence(timeout: 3)
+            }
+            XCTAssertTrue(continued.exists, "the Messages fixture was not published in Continue Watching")
+        }
         messages.launch()
 
         // iOS 26 opens Messages behind a one-time notice about message
@@ -36,20 +56,18 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         let acknowledge = messages.buttons["OK"]
         if acknowledge.waitForExistence(timeout: 5) { acknowledge.tap() }
 
-        // The list is a collection view whose cells nest a duplicate cell, and
-        // neither reports itself hittable; a coordinate tap lands regardless.
-        let list = messages.collectionViews["ConversationList"]
-        let conversation = (list.exists ? list : messages).cells.firstMatch
-        XCTAssertTrue(conversation.waitForExistence(timeout: 20), "no conversation to open")
-        conversation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-
-        // The conversation is open once the compose field is there.
-        XCTAssertTrue(messages.textViews.firstMatch.waitForExistence(timeout: 10)
-                      || messages.textFields.firstMatch.waitForExistence(timeout: 5),
-                      "the conversation never opened")
+        // Messages can restore the conversation instead of its list.
+        let compose = messages.descendants(matching: .any).matching(identifier: "messageBodyField").firstMatch
+        if !compose.exists {
+            let list = messages.collectionViews["ConversationList"]
+            XCTAssertTrue(list.waitForExistence(timeout: 20), "Messages showed neither a conversation nor its list")
+            let conversation = list.cells.firstMatch
+            XCTAssertTrue(conversation.waitForExistence(timeout: 20), "no conversation to open")
+            conversation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(compose.waitForExistence(timeout: 10), "the conversation never opened")
         // Match the compose field's adjacent add button, rather than an arbitrary
         // unlabelled button below y=400 (which can be a transcript control).
-        let compose = messages.textViews.firstMatch.exists ? messages.textViews.firstMatch : messages.textFields.firstMatch
         let namedApps = messages.buttons.matching(NSPredicate(format:
             "identifier == %@ OR label == %@ OR label == %@", "Apps", "Apps", "Add")).firstMatch
         let adjacentApps = messages.buttons.matching(NSPredicate { value, _ in
@@ -64,24 +82,32 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         // Host versions expose menu entries as cells, buttons, or combined elements.
         let entry = messages.descendants(matching: .any).matching(NSPredicate(format:
             "identifier CONTAINS %@ OR label == %@", "com.orgista.openstream.messages", "oStream")).firstMatch
+        // Messages can report an edge as a tiny negative coordinate while the
+        // entire row is visible. Allow one point of geometry rounding.
+        let visibleEntry = NSPredicate { _, _ in
+            entry.exists && !entry.frame.isEmpty && self.messages.frame.insetBy(dx: -1, dy: -1).contains(entry.frame)
+        }
         for _ in 0..<6 {
-            if entry.exists, !entry.frame.isEmpty, messages.frame.contains(entry.frame) { break }
+            let visible = XCTNSPredicateExpectation(predicate: visibleEntry, object: nil)
+            if XCTWaiter.wait(for: [visible], timeout: 2) == .completed { break }
             let more = messages.buttons["More"].firstMatch
             if more.exists, more.isHittable { more.tap() } else { messages.swipeUp() }
         }
-        XCTAssertTrue(entry.exists && !entry.frame.isEmpty && messages.frame.contains(entry.frame),
+        XCTAssertTrue(visibleEntry.evaluate(with: nil),
                       "oStream is not visible in the Messages menu: \(messages.debugDescription)")
         // Like ConversationList above, Messages nests app cells that XCTest
         // reports as unhittable even when the full cell is visible. Tap its
         // visible centre; the extension and staged bubble assertions still prove the selection.
         entry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
-        let row = messages.buttons["messages.share.row"].firstMatch
-        guard row.waitForExistence(timeout: 10) else {
+        let rows = messages.buttons.matching(identifier: "messages.share.row")
+        let row = fixtureRun ? rows.matching(NSPredicate(format: "label BEGINSWITH %@", fixtureTitle + ",")).firstMatch
+            : rows.firstMatch
+        guard row.waitForExistence(timeout: 20) else {
             // No snapshot published: the extension still has to have loaded and
             // drawn rather than crashed or come up blank.
             XCTAssertTrue(
-                messages.otherElements["messages.share.empty"].exists,
+                !fixtureRun && messages.otherElements["messages.share.empty"].exists,
                 "the extension drew neither a row nor its empty state"
             )
             return
