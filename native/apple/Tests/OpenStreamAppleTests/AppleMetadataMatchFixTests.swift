@@ -65,6 +65,20 @@ struct AppleMetadataMatchFixTests {
         #expect(AppleLibraryMetadataResolver.bestMatch([items[1]], parsed: AppleLibraryTitleParser.parse(name: "Dune Messiah.mkv"), aliases: ["new": ["Dune Messiah"]])?.mediaID == "new")
     }
 
+    /// Checklist row 20: Cinemeta has two series named "Chernobyl" (2019, 2022) and the folder has no year.
+    @Test func yearlessSeriesTakesTheFirstSameNamedResult() throws {
+        let parsed = AppleLibraryTitleParser.parse(name: "Chernobyl - S01E01 - 1-23-45 WEBDL-1080p.mkv",
+                                                   parentPath: "TV/Chernobyl/Season 1")
+        #expect(parsed.kind == .show)
+        #expect(parsed.year == nil)
+        let query = try #require(AppleLibraryMetadataResolver.searchQueries(parsed).first)
+        #expect(query.title == "Chernobyl")
+        let results = [AppleCatalogItem(mediaID: "tt7366338", type: "series", name: "Chernobyl", releaseInfo: "2019"),
+                       AppleCatalogItem(mediaID: "tt14780354", type: "series", name: "Chernobyl", releaseInfo: "2022"),
+                       AppleCatalogItem(mediaID: "tt4032214", type: "series", name: "Chernobyl: Zone of Exclusion", releaseInfo: "2014")]
+        #expect(AppleLibraryMetadataResolver.bestMatch(results, parsed: query)?.mediaID == "tt7366338")
+    }
+
     @Test(arguments: ["00001.m2ts", "Film.S01E01.mkv"])
     func parentSelectedTitleRetainsItsProvenance(_ name: String) {
         let parsed = AppleLibraryTitleParser.parse(name: name, parentPath: "Movies/Film (2024)")

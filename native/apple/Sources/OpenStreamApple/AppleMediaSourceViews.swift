@@ -146,13 +146,13 @@ struct AppleLiveTVView: View {
                 // Nothing until the first load answers: "No Live Channels"
                 // used to flash before the lineup drew.
                 Color.clear
-            } else if isLoading, channels.isEmpty {
+            } else if isLoading, channels.isEmpty, !isIOS || sourceFailures.isEmpty {
                 ProgressView()
-            } else if channels.isEmpty, errorMessage != nil, let cause = tabFailureCause {
+            } else if channels.isEmpty, errorMessage != nil, let cause = tabFailureCause, cause.action != .tryAgain {
                 AppleLiveFailureCard(cause: cause, size: .tab) { perform(cause.action) }
             } else if channels.isEmpty, !hasLiveSources, isIOS {
                 AppleLiveFailureCard(cause: .noSources, size: .tab) { perform(.addSource) }
-            } else if channels.isEmpty, errorMessage != nil {
+            } else if channels.isEmpty, errorMessage != nil, !isIOS {
                 // A panel that timed out may answer next time: Try Again
                 // first, the settings that fix a wrong address under it. The
                 // same page as Discover's "Couldn't Load Your Catalogs": the
@@ -167,7 +167,7 @@ struct AppleLiveTVView: View {
                     secondaryActionTitle: "Open Settings",
                     secondaryAction: openSettings
                 )
-            } else if channels.isEmpty {
+            } else if channels.isEmpty, errorMessage == nil {
                 AppleSourceEmptyState(
                     title: "No Live Channels",
                     systemImage: OpenStreamTab.live.systemImage,
@@ -534,7 +534,9 @@ struct AppleLiveTVView: View {
     }
 
     /// iPhone and iPad: the whole-tab failure, from the first playlist that
-    /// failed (one symbol, one title naming it, one button).
+    /// failed (one symbol, one title naming it, one button). One that only
+    /// needs Try Again is a line in the channel list instead, under the
+    /// player, categories and guide (owner checklist rows 44 and 46).
     private var tabFailureCause: AppleLiveFailureCause? {
         #if os(iOS)
         guard let failure = sourceFailures.first else { return nil }
@@ -1459,7 +1461,8 @@ struct AppleLiveTVView: View {
                         .accessibilityValue(playbackCoordinator.phase == .playing ? "Playing"
                             : (playbackCoordinator.phase.isBusy ? "Loading" : ""))
                 } else {
-                    AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL)
+                    AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL,
+                                               label: channels.isEmpty ? "No channels" : "Connecting to live channel")
                 }
             }
             .aspectRatio(16 / 9, contentMode: .fit)
@@ -1575,6 +1578,7 @@ struct AppleLiveTVView: View {
 
 private struct AppleLiveConnectingArtwork: View {
     let logoURL: URL?
+    var label = "Connecting to live channel"
     var body: some View {
         ZStack {
             Color.black
@@ -1583,7 +1587,7 @@ private struct AppleLiveConnectingArtwork: View {
             } placeholder: { Color.clear }
             .frame(width: 132, height: 76)
         }
-        .accessibilityLabel("Connecting to live channel")
+        .accessibilityLabel(label)
     }
 }
 

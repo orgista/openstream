@@ -33,7 +33,8 @@ public struct AppleLibraryTitle: Equatable, Sendable {
 }
 
 public enum AppleLibraryTitleParser {
-    static let version = 3
+    /// Moves when parsing or matching changes, so cached misses are looked up again.
+    static let version = 4
     /// "Open.Season.3.2010…": a numbered "Season" followed by a release year is a film title.
     private static let seasonTitledMovie = #"(?i)\bSeason[ ._-]*\d{1,3}[ ._()\[\]-]+(?:19|20)\d{2}\b"#
     /// Remembered per name and folder: the launch pass, the series grouping and

@@ -123,6 +123,9 @@ struct AppleChannelHealthSettingsRows: View {
     #if os(tvOS)
     let webManagement: any AppleWebManagementServing
     #endif
+    /// Set when Check Channels Now found nothing to check; shown in place of
+    /// the summary until the lineup has channels.
+    @State private var nothingToCheck: String?
 
     var body: some View {
         #if os(macOS)
@@ -158,6 +161,9 @@ struct AppleChannelHealthSettingsRows: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.health.summary")
         }
+        .onChange(of: store.lineup.isEmpty) { _, isEmpty in
+            if !isEmpty { nothingToCheck = nil }
+        }
         .task {
             await store.loadIfNeeded()
             await store.prepareLineupIfNeeded(settings: settings, sourceStore: sourceStore)
@@ -176,7 +182,21 @@ struct AppleChannelHealthSettingsRows: View {
             Button("Stop Checking") { store.cancelSweep() }
                 .accessibilityIdentifier("settings.health.stop")
         } else {
-            Button("Check Channels Now") { store.startSweep() }
+            Button("Check Channels Now") {
+                #if os(iOS)
+                if store.lineup.isEmpty {
+                    let failure = sourceStore.sources.first {
+                        $0.kind == .liveTV && $0.isEnabled && $0.hasCurrentValidationFailure
+                    }?.validationFailureSummary
+                    nothingToCheck = AppleChannelHealthSummary.nothingToCheck(sourceFailure: failure)
+                } else {
+                    nothingToCheck = nil
+                    store.startSweep()
+                }
+                #else
+                store.startSweep()
+                #endif
+            }
                 .disabled(store.hasLivePlayback)
                 .accessibilityIdentifier("settings.health.check")
         }
@@ -186,6 +206,7 @@ struct AppleChannelHealthSettingsRows: View {
         if let progress = store.progress {
             return AppleChannelHealthSummary.progress(completed: progress.completed, total: progress.total)
         }
+        if let nothingToCheck, store.lineup.isEmpty { return nothingToCheck }
         return store.summary(now: now)
     }
 }

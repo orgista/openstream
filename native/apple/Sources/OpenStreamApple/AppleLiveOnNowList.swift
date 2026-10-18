@@ -52,7 +52,7 @@ struct AppleLiveOnNowList: View {
             ForEach(channels) { channel in
                 row(channel)
             }
-            if channels.isEmpty, showsEmptyText {
+            if channels.isEmpty, showsEmptyText, sourceProblems.isEmpty {
                 Text("No channels")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

@@ -68,6 +68,14 @@ struct AppleChannelHealthPresentationTests {
         #expect(AppleChannelHealthSummary.progress(completed: 120, total: 780) == "Checking 120 of 780")
     }
 
+    /// Checklist N7: the action with an empty or unreachable lineup says why.
+    @Test func nothingToCheckNamesTheFailedSource() {
+        #expect(AppleChannelHealthSummary.nothingToCheck(sourceFailure: nil) == "No channels to check")
+        #expect(AppleChannelHealthSummary.nothingToCheck(sourceFailure: " ") == "No channels to check")
+        #expect(AppleChannelHealthSummary.nothingToCheck(sourceFailure: "Can’t reach IPTV.")
+            == "No channels to check. Can’t reach IPTV.")
+    }
+
     // MARK: Detail
 
     @Test func detailNamesStatusCodeTimingAndFailedStage() {
