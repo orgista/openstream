@@ -317,6 +317,9 @@ public final class ApplePlaybackCoordinator {
     private var liveStallTask: Task<Void, Never>?
     private var liveStallStart: ContinuousClock.Instant?
     private var liveStallKind: String?
+    private(set) var rebuffers = ApplePlaybackRebufferLedger()
+    /// Holds a rebuffer that starts mid-play off the screen for its first half second.
+    private var rebufferShowTask: Task<Void, Never>?
     static let reconnectingText = "Reconnecting…"
 
     /// The live channel is being reconnected, by this coordinator's bounded
@@ -605,6 +608,7 @@ public final class ApplePlaybackCoordinator {
     private func beginAttempt(_ request: ApplePlaybackRequest) async {
         displayTraceTask?.cancel()
         displayTraceTask = nil
+        closeRebufferLedger()
         generation &+= 1
         let attempt = generation
         if let channelID = request.restrictionChannelID {
@@ -714,6 +718,7 @@ public final class ApplePlaybackCoordinator {
         sharedPlayback?.suspendForLocalTransition()
         displayTraceTask?.cancel()
         displayTraceTask = nil
+        closeRebufferLedger()
         generation &+= 1
         externalSubtitleTask?.cancel()
         externalSubtitleTask = nil
@@ -725,6 +730,9 @@ public final class ApplePlaybackCoordinator {
             remoteProgressSink?(req.mediaID, lastKnownPosition, engine.duration ?? 0, .stopped)
             remoteProgressStarted = false
         }
+        // A share file plays through the bridge; ending its session writes the
+        // bridge's read summary to the trace and lets go of the share.
+        if let url = lastRequest?.url { Task { await AppleSMBRangeServer.shared.revoke(playbackURL: url) } }
         lastRequest = nil
         librarySubtitles = AppleLibrarySubtitleService()
         clearFallback()
@@ -1071,6 +1079,10 @@ public final class ApplePlaybackCoordinator {
 
     private func applyEnginePhase(_ enginePhase: ApplePlaybackEnginePhase, request: ApplePlaybackRequest) {
         switch enginePhase {
+        case .rebuffering, .stalled: break
+        default: endRebuffer()
+        }
+        switch enginePhase {
         case .idle:
             break
         case .loading:
@@ -1101,11 +1113,23 @@ public final class ApplePlaybackCoordinator {
         case .seeking:
             break
         case .rebuffering:
-            appleTrace("rebuffering")
+            if rebuffers.begin(at: .now) {
+                appleTrace("rebuffering")
+                if phase == .playing {
+                    showRebufferAfterShortLimit(request: request)
+                    return
+                }
+            }
+            guard rebufferShowTask == nil else { return }
+            rebuffers.show()
             setPhase(.waiting("Buffering…"))
             if request.isLive { watchLiveStall(kind: "rebuffering") }
         case .stalled(let reconnecting):
             appleTrace("stalled reconnecting=\(reconnecting)")
+            rebufferShowTask?.cancel()
+            rebufferShowTask = nil
+            _ = rebuffers.begin(at: .now)
+            rebuffers.show()
             setPhase(.waiting(Self.reconnectingText))
             if request.isLive { watchLiveStall(kind: "stalled") }
         case .ended:
@@ -1116,6 +1140,31 @@ public final class ApplePlaybackCoordinator {
                 kind: .player,
                 message: AppleTruncatedMediaProbe.readableEngineMessage(message, midStream: attemptCountedStart)))
         }
+    }
+
+    private func showRebufferAfterShortLimit(request: ApplePlaybackRequest) {
+        let attempt = generation
+        rebufferShowTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: ApplePlaybackRebufferLedger.shortLimit)
+            guard !Task.isCancelled, let self, self.generation == attempt, self.rebuffers.isWaiting else { return }
+            self.rebufferShowTask = nil
+            self.rebuffers.show()
+            self.setPhase(.waiting("Buffering…"))
+            if request.isLive { self.watchLiveStall(kind: "rebuffering") }
+        }
+    }
+
+    private func endRebuffer() {
+        rebufferShowTask?.cancel()
+        rebufferShowTask = nil
+        rebuffers.end(at: .now)
+    }
+
+    /// One line per playback with its full and short rebuffers.
+    private func closeRebufferLedger() {
+        endRebuffer()
+        if let summary = rebuffers.summary { appleTrace(summary) }
+        rebuffers = ApplePlaybackRebufferLedger()
     }
 
     private func handleEnded(request: ApplePlaybackRequest) {
