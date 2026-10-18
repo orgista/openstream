@@ -20,6 +20,7 @@ enum AppleSettingsRoute: Hashable {
     case backup
     case transfer
     case transferTo
+    case health
     #endif
 }
 
@@ -169,6 +170,8 @@ struct AppleSettingsView: View {
             AppleSetupTransferSettingsView()
         case .transferTo:
             AppleSetupTransferToView(controller: backupController)
+        case .health:
+            AppleChannelHealthSettingsPage(settings: settings, sourceStore: sourceStore, webManagement: webManagement)
         #endif
         }
     }
@@ -185,12 +188,7 @@ struct AppleSettingsView: View {
                             AppleTVNavigationLabel(entry.title, systemImage: entry.systemImage)
                         }
                         .appleTVReadableFocus()
-                    }
-                    if entries.contains(.backup) {
-                        settingsLink(AppleSettingsRoute.transfer) {
-                            AppleTVNavigationLabel("Transfer", systemImage: "arrow.left.arrow.right")
-                        }
-                        .accessibilityIdentifier("settings.transfer")
+                        .accessibilityIdentifier("settings.\(entry.rawValue)")
                     }
                 }
             }
@@ -218,7 +216,10 @@ struct AppleSettingsView: View {
                 Toggle("Show Live tab", isOn: $settings.liveTVEnabled)
                     .disabled(!appleCanToggleTab(.live, settings: settings))
                     .accessibilityIdentifier("settings.live.enabled")
-                AppleChannelHealthSettingsRows(store: .shared, settings: settings, sourceStore: sourceStore)
+                settingsLink(AppleSettingsRoute.health) {
+                    Text("Channel Health")
+                }
+                .accessibilityIdentifier("settings.health")
             }
 
             Section("Services") {
@@ -271,6 +272,23 @@ struct AppleSettingsView: View {
 }
 
 #if !os(tvOS)
+/// Channel Health, one tap from the Live TV section of the root list.
+@MainActor
+private struct AppleChannelHealthSettingsPage: View {
+    let settings: AppleSettingsStore
+    let sourceStore: AppleSourceStore
+    let webManagement: any AppleWebManagementServing
+
+    var body: some View {
+        Form {
+            Section {
+                AppleChannelHealthSettingsRows(store: .shared, settings: settings, sourceStore: sourceStore)
+            }
+        }
+        .navigationTitle("Channel Health")
+    }
+}
+
 private extension AppleSettingsRootEntry {
     var route: AppleSettingsRoute {
         switch self {

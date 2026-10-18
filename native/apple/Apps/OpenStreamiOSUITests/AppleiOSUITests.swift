@@ -710,6 +710,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     func testNarratedSettingsHaveOneTransferAndAdvancedMetadata() {
         launch()
         app.tabBars.buttons["Settings"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["settings.transfer"].firstMatch.exists)
+        let backup = app.descendants(matching: .any)["settings.backup"].firstMatch
+        XCTAssertTrue(backup.waitForExistence(timeout: 10))
+        backup.tap()
         let transferLink = app.descendants(matching: .any)["settings.transfer"].firstMatch
         XCTAssertTrue(transferLink.waitForExistence(timeout: 10))
         attach("narration-settings-transfer")
@@ -728,6 +732,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertFalse(app.alerts["Open the Camera"].exists)
         attach("narration-transfer-from")
         app.buttons["setup.receive.cancel"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
         app.navigationBars.buttons.firstMatch.tap()
         let metadata = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Metadata")).firstMatch
         scrollToControl(metadata, in: app)

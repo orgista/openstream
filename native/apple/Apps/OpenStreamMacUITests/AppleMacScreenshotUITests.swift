@@ -12,6 +12,10 @@ final class AppleMacScreenshotUITests: OpenStreamUITestCase {
         defer { app.terminate() }
         app.launchArguments = ["-OpenStreamVisionScreen", "settings", "-OpenStreamMuteAudio", "YES"]
         app.launch()
+        XCTAssertFalse(app.descendants(matching: .any)["settings.transfer"].firstMatch.exists)
+        let backup = app.descendants(matching: .any)["settings.backup"].firstMatch
+        XCTAssertTrue(backup.waitForExistence(timeout: 30))
+        backup.click()
         let transfer = app.descendants(matching: .any)["settings.transfer"].firstMatch
         XCTAssertTrue(transfer.waitForExistence(timeout: 30))
         transfer.click()

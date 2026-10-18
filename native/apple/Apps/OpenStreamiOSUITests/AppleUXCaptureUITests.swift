@@ -162,6 +162,10 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
     /// Channel Health from Settings: progress logged every 5 s until the sweep ends or 4 minutes pass.
     func testC2ChannelHealthSweep() {
         launch(["-OpenStreamVisionScreen", "settings"])
+        let health = app.descendants(matching: .any).matching(identifier: "settings.health").firstMatch
+        for _ in 0..<4 where !health.isHittable { app.swipeUp(); Thread.sleep(forTimeInterval: 0.6) }
+        guard health.waitForExistence(timeout: 20) else { return XCTFail("no Channel Health row") }
+        health.tap()
         let check = app.buttons["settings.health.check"].firstMatch
         for _ in 0..<4 where !check.isHittable { app.swipeUp(); Thread.sleep(forTimeInterval: 0.6) }
         guard check.waitForExistence(timeout: 20), check.isEnabled else { return XCTFail("no enabled Check Channels Now") }

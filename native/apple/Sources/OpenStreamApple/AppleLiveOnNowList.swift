@@ -155,7 +155,6 @@ private struct AppleLiveOnNowRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
             if isWatching {
-                // The owner called the pink WATCHING pill "AI sloppy" (recording 2026-10-15).
                 Image(systemName: "waveform")
                     .font(.body)
                     .foregroundStyle(.primary)

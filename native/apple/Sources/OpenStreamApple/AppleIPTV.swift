@@ -616,9 +616,10 @@ public struct AppleIPTVClient: Sendable {
     /// lets connection tests and saves share one authoritative request path.
     public func validate(
         source: AppleSource,
-        credentials: AppleIPTVCredentials? = nil
+        credentials: AppleIPTVCredentials? = nil,
+        announcesImport: Bool = false
     ) async throws -> [AppleIPTVChannel] {
-        try await channels(source: source, credentials: credentials, announcesImport: true)
+        try await channels(source: source, credentials: credentials, announcesImport: announcesImport)
     }
 
     /// Mints a short-lived loopback capability only when the user presses Play.
