@@ -76,9 +76,11 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             holdOrRun()
         }
         .onChange(of: isPaused) { holdOrRun() }
-        // Keyed on the settled list too: a provisional launch page prefetches nothing.
-        .task(id: heroesSettled ? cycle.pages(available: pageIDs.count)?.next : nil) {
-            guard heroesSettled, let next = cycle.pages(available: pageIDs.count)?.next else { return }
+        // A trailer still loading on the shown page goes first; one playing,
+        // or none at all, leaves room to warm the next page's player.
+        .task(id: heroesSettled && !trailerIsLoading ? cycle.pages(available: pageIDs.count)?.next : nil) {
+            guard heroesSettled, !trailerIsLoading,
+                  let next = cycle.pages(available: pageIDs.count)?.next else { return }
             await prefetchTrailer(next)
         }
         .task(id: cycle) {
@@ -89,6 +91,8 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             move(by: 1)
         }
     }
+
+    private var trailerIsLoading: Bool { trailer.isPlaying && !trailer.isOnScreen }
 
     private var isPaused: Bool {
         AppleHeroRotation.cycleIsPaused(isTouching: isTouching, trailerIsPlaying: trailer.isPlaying,
