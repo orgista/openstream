@@ -34,6 +34,10 @@ public enum AppleInteractionTrace {
         case failure
         /// A line from the playback engine's own log (`AppleEngineLogBridge`).
         case engine
+        /// A launch milestone, timed from process start (`AppleLaunchMarks`).
+        case launch
+        /// The main thread stopped answering for longer than a frame budget (`AppleHangMonitor`).
+        case hang
     }
 
     /// Enough to cover a reproduction without holding a session's worth.

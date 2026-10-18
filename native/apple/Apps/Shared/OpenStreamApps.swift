@@ -136,6 +136,7 @@ struct OpenStreamPlatformApp: App {
                 )
                 do { try await Task.sleep(for: hold) } catch { return }
                 withAnimation(.easeOut(duration: 0.22)) { showLaunch = false }
+                AppleLaunchMarks.record(.coverGone)
                 #if DEBUG
                 AppleLaunchClock.mark("launch.cover.hidden")
                 #endif

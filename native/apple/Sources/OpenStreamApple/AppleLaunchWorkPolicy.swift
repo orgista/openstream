@@ -3,6 +3,16 @@ import Foundation
 public enum AppleLaunchWorkPolicy: Sendable {
     public static let backgroundPriority: TaskPriority = .utility
 
+    /// Work that can wait (the Top 10 charts, the Top Shelf snapshot) starts this long after the process did, so it
+    /// does not compete with the first frame, the first rows and the hero's art (F8: rows within 2 s on the phone).
+    public static let launchWindow: Duration = .seconds(2)
+
+    /// How much of the launch window is left `processAge` into the process.
+    public static func remainingLaunchWindow(processAge: Duration?) -> Duration {
+        guard let processAge else { return .zero }
+        return max(.zero, launchWindow - processAge)
+    }
+
     public static func scanDelay(hasPersistedIndex: Bool) -> Duration {
         return hasPersistedIndex ? .seconds(1) : .zero
     }

@@ -32,7 +32,37 @@ struct AppleTop10ArtworkStoreTests {
         #expect(await store.resolve(title: "Unabomber", type: "series", configuration: configuration) == found)
         #expect(calls.withLock { $0 } == 1)
         let relaunched = AppleTop10ArtworkStore(fileURL: file) { _, _, _ in nil }
+        await relaunched.load()
         #expect(relaunched.cached(title: "UNABOMBER", type: "series") == found)
+    }
+
+    /// Discover's body reads `cached` on the main thread; creating the store must not touch the file (F11).
+    @Test func creatingTheStoreReadsNothingUntilItLoads() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let found = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Nimona")
+        let record = AppleTop10ArtworkStore.Record(item: found, checkedAt: .now)
+        try JSONEncoder().encode([AppleTop10ArtworkStore.key(title: "Nimona", type: "movie"): record]).write(to: file)
+        let store = AppleTop10ArtworkStore(fileURL: file) { _, _, _ in nil }
+        #expect(store.cached(title: "Nimona", type: "movie") == nil)
+        await store.load()
+        #expect(store.cached(title: "Nimona", type: "movie") == found)
+    }
+
+    @Test func aResolveBeforeTheLoadKeepsTheEarlierLaunchesMatches() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let kept = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Nimona")
+        try JSONEncoder().encode([AppleTop10ArtworkStore.key(title: "Nimona", type: "movie"):
+            AppleTop10ArtworkStore.Record(item: kept, checkedAt: .now)]).write(to: file)
+        let found = AppleCatalogItem(mediaID: "tt1234567", type: "series", name: "Unabomber")
+        let store = AppleTop10ArtworkStore(fileURL: file) { _, _, _ in found }
+        let configuration = try AppleTMDBConfiguration(credential: "fixture-key")
+        #expect(await store.resolve(title: "Unabomber", type: "series", configuration: configuration) == found)
+        let relaunched = AppleTop10ArtworkStore(fileURL: file) { _, _, _ in nil }
+        await relaunched.load()
+        #expect(relaunched.cached(title: "Nimona", type: "movie") == kept)
+        #expect(relaunched.cached(title: "Unabomber", type: "series") == found)
     }
 
     @Test func aMissWaitsADayAndAFailureIsNotRemembered() async throws {

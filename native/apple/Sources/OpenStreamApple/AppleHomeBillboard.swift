@@ -438,6 +438,7 @@ struct AppleHomeBillboard<Actions: View>: View {
                         if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
                         recordStill(.loaded)
                         appleTrace("hero still loaded \(item.name) \(image.width)px")
+                        AppleLaunchMarks.record(.heroArt)
                         AppleLaunchReadiness.shared.markFirstScreenReady()
                     },
                     onFailure: {

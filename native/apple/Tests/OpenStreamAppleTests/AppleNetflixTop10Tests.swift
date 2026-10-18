@@ -126,6 +126,11 @@ private final class Top10WeekCacheProtocol: URLProtocol {
     #expect(try await relaunch.latestWeek(now: now.addingTimeInterval(3600)) == first)
     #expect(Top10WeekCacheProtocol.requests.count == 1)
 
+    // The kept week is there at launch without the network, before the refresh may run.
+    #expect(await AppleNetflixTop10Client(session: session, fileURL: file).storedWeek(now: now) == first)
+    #expect(await AppleNetflixTop10Client(session: session).storedWeek(now: now) == nil)
+    #expect(Top10WeekCacheProtocol.requests.count == 1)
+
     // A day later it asks with the file's validator; 304 keeps the saved week.
     Top10WeekCacheProtocol.status = 304
     let revalidated = try await relaunch.latestWeek(now: now.addingTimeInterval(AppleNetflixTop10Client.refreshInterval + 1))

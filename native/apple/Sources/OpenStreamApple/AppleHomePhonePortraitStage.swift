@@ -143,6 +143,7 @@ struct AppleHomePhonePortraitStage: View {
         let duration = animated && !reduceMotion ? 0.25 : 0
         withAnimation(duration > 0 ? .easeOut(duration: duration) : nil) { shown = value }
         onReady(value.decision, value.image)
+        if value.image != nil { AppleLaunchMarks.record(.heroArt) }
         AppleLaunchReadiness.shared.markFirstScreenReady()
     }
 }

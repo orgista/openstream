@@ -22,6 +22,7 @@ public extension View {
         detail: @escaping @autoclosure () -> String = ""
     ) -> some View {
         return onAppear {
+            AppleHangMonitor.shared.screenAppeared(name)
             let extra = AppleInteractionTrace.isEnabled ? detail() : ""
             AppleInteractionTrace.record(.screen, extra.isEmpty ? "\(name) appeared" : "\(name) appeared — \(extra)")
         }

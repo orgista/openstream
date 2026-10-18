@@ -65,13 +65,15 @@ public actor AppleNetflixTop10Client {
         self.fileURL = fileURL
     }
 
+    /// The week kept on disk by an earlier launch, without asking the network, so the rows can draw at launch while
+    /// `latestWeek` waits.
+    func storedWeek(now: Date = .now) -> AppleNetflixTop10Week? {
+        readDiskOnce()
+        return stored.map { $0.week.marked(stale: now.timeIntervalSince($0.fetchedAt) > Self.staleAfter) }
+    }
+
     public func latestWeek(now: Date = .now) async throws -> AppleNetflixTop10Week {
-        if !didReadDisk {
-            didReadDisk = true
-            stored = fileURL.flatMap { try? Data(contentsOf: $0) }
-                .flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
-                .flatMap { $0.country == country ? $0 : nil }
-        }
+        readDiskOnce()
         if let stored, now.timeIntervalSince(stored.fetchedAt) < Self.refreshInterval {
             return stored.week.marked(stale: false)
         }
@@ -80,6 +82,14 @@ public actor AppleNetflixTop10Client {
         inFlight = task
         defer { inFlight = nil }
         return try await task.value
+    }
+
+    private func readDiskOnce() {
+        guard !didReadDisk else { return }
+        didReadDisk = true
+        stored = fileURL.flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
+            .flatMap { $0.country == country ? $0 : nil }
     }
 
     private func download(now: Date) async throws -> AppleNetflixTop10Week {
