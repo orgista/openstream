@@ -853,6 +853,11 @@ struct AppleNetworkShareEditRows: View {
             row(.server, title: "Server", value: serverLabel)
             row(.folder, title: "Folder", value: folderLabel)
             row(.account, title: "Account", value: accountLabel)
+            NavigationLink(value: AppleSourceRoute.addNetworkShareFolder(source.id)) {
+                AppleTVNavigationLabel("Add Folder")
+            }
+            .appleTVReadableFocus()
+            .accessibilityIdentifier("sources.smb.addFolderFromSettings")
         }
         .task(id: source.configurationRevision) {
             let credentials = try? sourceStore.networkCredentials(for: source)

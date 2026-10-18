@@ -988,7 +988,7 @@ private struct AppleFirstRunGuidanceView: View {
             // focused pill's ring and glow clear its neighbour.
             HStack(spacing: AppleTVBillboardMetrics.pillGap) {
                 // Apple TV can't import a file; most owners set it up from their iPhone.
-                Button(AppleSetupTransferDevice.receiveTitle) {
+                Button("Transfer from iPhone") {
                     dismiss()
                     // The receiver is a root-level presentation: let this one close first.
                     Task {

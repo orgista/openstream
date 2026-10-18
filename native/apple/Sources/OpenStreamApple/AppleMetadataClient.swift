@@ -517,6 +517,7 @@ public struct AppleTMDBClient: Sendable {
         let posterPath: String?
         let backdropPath: String?
         let overview: String?
+        let genres: [NamedValue]?
         let imdbID: String?
         let externalIDs: ExternalIDs?
         let originalTitle: String?
@@ -527,7 +528,7 @@ public struct AppleTMDBClient: Sendable {
             enum CodingKeys: String, CodingKey { case imdbID = "imdb_id" }
         }
         enum CodingKeys: String, CodingKey {
-            case id, title, name, overview, images
+            case id, title, name, overview, images, genres
             case releaseDate = "release_date", firstAirDate = "first_air_date"
             case posterPath = "poster_path", backdropPath = "backdrop_path"
             case imdbID = "imdb_id", externalIDs = "external_ids"
@@ -547,6 +548,7 @@ public struct AppleTMDBClient: Sendable {
                                     backgroundURL: AppleTMDBClient.imageURL(path: background, width: "w1280"),
                                     summary: overview,
                                     releaseInfo: releaseDate ?? firstAirDate,
+                                    genres: genres?.prefix(12).compactMap { AppleTMDBClient.bounded($0.name, limit: 60) },
                                     year: (releaseDate ?? firstAirDate).flatMap { Int($0.prefix(4)) })
         }
     }

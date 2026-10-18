@@ -1861,7 +1861,7 @@ struct AppleDiscoverView: View {
                 AppleSourceEmptyState(
                     title: state.title,
                     systemImage: OpenStreamTab.home.systemImage,
-                    actionTitle: AppleSetupTransferDevice.receiveTitle,
+                    actionTitle: "Transfer from iPhone",
                     action: { AppleSetupTransferCenter.shared.presentReceiver() },
                     secondaryActionTitle: "Open Settings",
                     secondaryAction: openSettings,

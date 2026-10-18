@@ -838,6 +838,22 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(isChecked("Spanish"), "Spanish is not checked after picking it")
     }
 
+    func testNarratedMetadataKeysAreBehindAdvanced() {
+        launch(screen: "metadata")
+        let advanced = element("settings.metadata.advanced")
+        XCTAssertTrue(advanced.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.secureTextFields.firstMatch.exists)
+        attachScreen("narration-tv-metadata-default")
+        for _ in 0..<8 where !advanced.hasFocus { remote.press(.down) }
+        XCTAssertTrue(advanced.hasFocus)
+        remote.press(.select)
+        XCTAssertTrue(app.secureTextFields["TMDB API key or read token"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.secureTextFields["OMDb API key"].exists)
+        attachScreen("narration-tv-metadata-advanced")
+        remote.press(.menu)
+        XCTAssertTrue(advanced.waitForExistence(timeout: 10))
+    }
+
     /// Every Settings choice opened an empty page and Menu there left the app
     /// (Apple TV verification 2026-10-01). The Package choice must list its
     /// options, check the current one, and Menu must go back one level.

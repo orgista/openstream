@@ -608,6 +608,22 @@ struct AppleNetworkShareSetupTests {
         #expect(fallback.credentials?.username == "second-user")
     }
 
+    @Test func addingTVFromMoviesSettingsPreservesBothFolders() async throws {
+        let (store, _, cleanup) = try makeStore()
+        defer { cleanup() }
+        let movies = try store.addNetworkShare(name: "Movies", host: "127.0.0.1", share: "Media", path: "Movies",
+            username: "fixture-user", password: "fixture-password")
+        let setup = try #require(AppleNetworkShareSetup.make(for: .addFolder(movies.id), sourceStore: store,
+            client: SetupFakeClient(shares: [AppleSMBShare(name: "Media")], acceptedUsername: "fixture-user")))
+        #expect(await setup.connectWithSavedCredentials())
+        let added = try setup.saveFolders([.init(location: .init(share: "Media", path: "TV"), name: "TV")], to: store)
+        #expect(added.count == 1)
+        #expect(store.sources.first { $0.id == movies.id }?.url == movies.url)
+        #expect(Set(store.sources.compactMap { try? AppleSMBEndpointPolicy.parts(from: $0.url).path }) == ["Movies", "TV"])
+        let tv = try #require(store.sources.first { $0.id != movies.id })
+        #expect(try store.networkCredentials(for: tv)?.username == "fixture-user")
+    }
+
     @Test func aNewPasswordForTheSameServerAccountReusesItsCredentialAndInvalidatesSiblings() throws {
         let (store, _, cleanup) = try makeStore()
         defer { cleanup() }

@@ -66,6 +66,58 @@ struct AppleLibraryLessonsTests {
         #expect(AppleLibrarySeries.groups(copies).first?.nextPart(after: copies[0]) == nil)
     }
 
+    @Test(arguments: [true, false])
+    func genreBackfillKeepsCachedArtworkAndTheAddedDate(lookupHasGenres: Bool) async throws {
+        struct Seed: Codable {
+            let value: AppleCatalogItem
+            let checkedAt: Date
+            let addedAt: Date
+            let schema: Int
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let item = file("Film.2024.mkv", source: UUID())
+        let group = try #require(AppleLibrarySeries.groups([item]).first)
+        let poster = try #require(URL(string: "https://fixture.example/poster.jpg"))
+        let old = AppleCatalogItem(mediaID: "tt0000004", type: "movie", name: "Film", posterURL: poster)
+        let enriched = AppleCatalogItem(mediaID: old.mediaID, type: old.type, name: old.name,
+            posterURL: poster, genres: ["Drama", "Adventure"])
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in lookupHasGenres ? enriched : nil }
+        let folder = root.appendingPathComponent(item.sourceID.uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let cache = folder.appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
+        let addedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try JSONEncoder().encode(Seed(value: old, checkedAt: .now, addedAt: addedAt, schema: 1)).write(to: cache)
+        #expect(await resolver.cachedLookups(for: [group]).metadata[group.id] == old)
+        #expect(await resolver.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
+        let expected = lookupHasGenres ? enriched : old
+        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == expected)
+        let saved = try JSONDecoder().decode(Seed.self, from: Data(contentsOf: cache))
+        #expect(saved.addedAt == addedAt)
+        #expect(saved.value.posterURL == poster)
+        #expect(saved.value.genres == expected.genres)
+        #expect(!(await resolver.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: "")))
+    }
+
+    @MainActor
+    @Test func genreShelvesNeedTwoTitlesAndFollowTheSort() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = UUID()
+        let titles = AppleLibrarySeries.groups(["Alpha.2020.mkv", "Beta.2021.mkv", "Gamma.2022.mkv"].map { file($0, source: source) })
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
+        let store = AppleLocalLibraryStore(resolver: resolver, groups: titles)
+        let genres = ["Alpha": ["Drama", "Comedy"], "Beta": ["Drama"], "Gamma": ["Drama", "Horror"]]
+        for (index, title) in titles.enumerated() {
+            let name = title.parsed.title
+            try await store.correctMatch(title, candidate: AppleCatalogItem(mediaID: "tt000000\(index)", type: "movie",
+                name: name, genres: genres[name]), provider: "manualSearch", resolver: resolver)
+        }
+        let shelves = store.genreShelves(.title)
+        #expect(shelves.map(\.genre) == ["Drama"])
+        #expect(shelves.first?.groups.map(\.parsed.title) == ["Alpha", "Beta", "Gamma"])
+    }
+
     @Test func unavailableMatchDirectoryKeepsLookupAndLegacyCacheUsable() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

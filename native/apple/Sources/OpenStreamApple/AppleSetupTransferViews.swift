@@ -28,15 +28,6 @@ enum AppleSetupTransferDevice {
         UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
         #endif
     }
-
-    /// The entry row's title. On an iPhone the sender is another iPhone.
-    static var receiveTitle: String {
-        #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone ? "Set Up from Another iPhone" : "Set Up from iPhone"
-        #else
-        "Set Up from iPhone"
-        #endif
-    }
 }
 
 /// Owns the receiving session (QR → Import question → result) and the link a
@@ -135,6 +126,86 @@ final class AppleSetupTransferCenter {
     }
 }
 
+#if !os(tvOS)
+/// Apple TV only receives, so it has no Transfer page: its entry opens the receiver.
+@MainActor
+struct AppleSetupTransferSettingsView: View {
+    var body: some View {
+        Form {
+            NavigationLink(value: AppleSettingsRoute.transferTo) {
+                AppleTVNavigationLabel("Transfer To", systemImage: "arrow.up.right")
+            }
+            .accessibilityIdentifier("setup.transfer.to")
+            Button {
+                AppleSetupTransferCenter.shared.presentReceiver()
+            } label: {
+                AppleTVNavigationLabel("Transfer From", systemImage: "arrow.down.left")
+            }
+            .foregroundStyle(.primary)
+            .accessibilityIdentifier("setup.transfer.from")
+        }
+        .appleSettingsPage("Transfer")
+    }
+}
+
+/// Sends this setup to the device showing Transfer From: scan its code, or
+/// paste the link its Share Link button gives.
+@MainActor
+struct AppleSetupTransferToView: View {
+    let controller: AppleConfigurationController?
+    @State private var linkText = ""
+    @State private var sendingLink: AppleSetupTransferLink?
+    #if os(iOS)
+    private static let scannerHeight: CGFloat = 320
+    @State private var canScan = AppleSetupTransferScanner.canScan
+    #endif
+
+    private var link: AppleSetupTransferLink? {
+        URL(string: linkText.trimmingCharacters(in: .whitespacesAndNewlines))
+            .flatMap(AppleSetupTransferLink.init(url:))
+    }
+
+    var body: some View {
+        Form {
+            #if os(iOS)
+            if canScan {
+                Section {
+                    AppleSetupTransferScanner { scanned in
+                        if sendingLink == nil, controller != nil { sendingLink = scanned }
+                    } onDenied: {
+                        canScan = false
+                    }
+                    .frame(height: Self.scannerHeight)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+            #endif
+            Section {
+                TextField("Transfer Link", text: $linkText)
+                    .autocorrectionDisabled()
+                    .textContentType(.URL)
+                    #if os(iOS) || os(visionOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    #endif
+                    .accessibilityIdentifier("setup.transfer.link")
+            } footer: {
+                Text("From Share Link on the other device’s Transfer From screen.")
+            }
+            AppleFormActionSection {
+                Button("Continue") { sendingLink = link }
+                    .disabled(link == nil || controller == nil)
+                    .accessibilityIdentifier("setup.transfer.continue")
+            }
+        }
+        .appleSettingsPage("Transfer To")
+        .sheet(item: $sendingLink) { link in
+            AppleSetupSendView(link: link, controller: controller) { sendingLink = nil }
+        }
+    }
+}
+#endif
+
 /// Hosts both ends at the app's root: the receiver opened from Settings and
 /// the send question a scanned QR code opened (`AppleAppRouter.setupSendLink`).
 struct AppleSetupTransferHost: ViewModifier {
@@ -180,11 +251,16 @@ struct AppleSetupReceiveView: View {
             case .starting:
                 ProgressView()
             case .waiting(let link):
-                Text("Scan with your iPhone")
+                Text("Transfer From")
                     .font(.title2.weight(.semibold))
                 AppleWebManagementQRCode(url: link.url, accessibilityText: "Setup QR code")
                     .frame(width: qrSide, height: qrSide)
                     .accessibilityIdentifier("setup.receive.qr")
+                #if !os(tvOS)
+                ShareLink("Share Link", item: link.url)
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("setup.receive.shareLink")
+                #endif
                 Button("Cancel") { center.endReceiving() }
                     .buttonStyle(.brandSecondary)
                     .accessibilityIdentifier("setup.receive.cancel")

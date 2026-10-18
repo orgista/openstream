@@ -138,14 +138,17 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
                 .appleTVReadableFocus()
+                #if os(tvOS)
+                // Apple TV only receives, so Transfer opens the receiver.
                 Button {
                     AppleSetupTransferCenter.shared.presentReceiver()
                 } label: {
-                    AppleTVNavigationLabel(AppleSetupTransferDevice.receiveTitle, systemImage: "qrcode")
+                    AppleTVNavigationLabel("Transfer", systemImage: "arrow.left.arrow.right")
                 }
                 .foregroundStyle(.primary)
                 .appleTVReadableFocus()
-                .accessibilityIdentifier("sources.setupFromPhone")
+                .accessibilityIdentifier("settings.transfer")
+                #endif
             }
 
             // Not "Sources" again: the pane is already titled Sources, so the
@@ -192,13 +195,6 @@ struct AppleSourcesSettingsView: View {
                         Task { await backupController.restoreFromCloud() }
                     }
                     .accessibilityIdentifier("sources.icloud.resume")
-                }
-                // iCloud Keychain never reaches tvOS; the phone hands sign-ins over.
-                if syncStatus.waitingForKeychain > 0 {
-                    Button(AppleSetupTransferDevice.receiveTitle) {
-                        AppleSetupTransferCenter.shared.presentReceiver()
-                    }
-                    .accessibilityIdentifier("sources.icloud.setupFromPhone")
                 }
             } header: {
                 Text("iCloud Sync").textCase(.uppercase)

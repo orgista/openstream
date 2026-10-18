@@ -1387,6 +1387,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1427,6 +1428,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1464,6 +1466,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1497,6 +1500,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1529,6 +1533,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1561,6 +1566,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1598,6 +1604,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1633,6 +1640,7 @@
 				INFOPLIST_FILE = Shared/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = oStream;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "oStream scans the code another device shows to transfer your setup.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "oStream finds media servers and connects to network shares on your local network.";
 				INFOPLIST_PREPROCESS = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
