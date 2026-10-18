@@ -5,135 +5,186 @@ before it and today's messages. Sources: `OWNER-TODO.md`, `specs/iphone-recordin
 `specs/iphone-ios18-discs-2026-10-15.md` (+ report/review/gates), the Dev-Mini owner feedback log (one entry, Apple TV
 Top Shelf only, left out), and the owner's messages of 2026-10-17. Hashes are HEAD's (several in OWNER-TODO were rebased).
 
-**Status on iOS 18:** `verified` = seen working on the iOS 18.6 sim 7530ECB2 (owner's imported setup) in this lane;
-`fixed` = changed in this lane, seen working on 18.6, iOS 27 E2E unchanged; `broken` = reproduced as still wrong; `not checked` = the
-docs' claim only, not exercised on iOS 18 here; `owner` = needs the owner's phone, data or decision.
+**Current iOS 18 status — batch-1018a, 2f9964f (2026-10-18):** `fixed` = supported by a current iOS 18.6 screenshot or trace; `still broken` = reproduced; `can't-reproduce` = not reproduced in the attempted scope. Blocked or unexercised interactions are explicitly identified and are **not verified fixes**. Supplemental fixture evidence is labeled; it does not establish that the owner's provider works. `pending` is an unfinished gate/capture, not a result.
 
-**Evidence root:** `dev-mini:/Volumes/DevExt/dev/openstream-build/iphone-jank/out/<label>-<sim>-<HHMM>/`
-(`run.mp4`, `frames/` at 10 fps, `trace.log`, `counts.txt`, `marks.txt`, PNGs). Capture: `jank.sh run <label> <udid>`
-beside it, driving `AppleUXCaptureUITests/testB8DiscoverJank`. `base` = main 72966f9, `after` = this lane.
+**Evidence root:** `dev-mini:/Volumes/DevExt/dev/openstream-build/batch-1018a/`.
+Prefixes in the tables: `G/` = `gates/`; `J/` = `jank-0755/`; `R/` = `shots/rotation-cold/`; `O/` = `shots/checklist-owner/`; `A/` = `shots/checklist-owner/attachments/`; `T/` = `shots/matilda-detail/`; `C/` = `shots/owner-content/attachments/`; `L/` = `shots/live-fixture/`; `X/` = `shots/cli-walk/`. Other paths are relative to the evidence root. Original exports and readable screenshot names are retained together.
 
 ## Today's items (2026-10-17)
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 1 | ISOs fail to play (disc read 17 s, then the 20 s startup timeout) | owner 10-17; trace iphone-1017b.log; OWNER-TODO 2b | broken, recorded only (job iso-open owns it) | iphone-1017b.log session 14:53Z |
-| 2 | Hero cycle gone | owner 10-17 | fixed: the cycle wraps from the last page again (f82ef99 stopped it after page 5, about 48 s on the owner's phone, where no hero trailer has started since build 17). A playing hero trailer still holds its page until it ends (build 15 did too); a trailer that never comes on screen now lets go after 15 s | unit tests `itAdvancesWhenDueAndWrapsFromTheLastPage`, `theLastPageWrapsToTheFirstAfterItsTrailer`; `hero cycle` trace lines (new) in after-iPhone15ProMaxiOS18-1118 and after-iPhone18Pro-1143 |
-| 3 | Title-page trailers worse than build 15 (ad66774) | owner 10-17 | owner (decisions), before-state recorded | `design/reference-apps/2026-10-17-rea-hero-trailers-disc.md` §4 |
-| 4 | General jank, "app has gotten overall worse" | owner 10-17 | partly fixed: Discover's whole body no longer re-runs on every frame the iOS 18 bar collapses or expands; Library had the same reader. Other screens not walked (see 62) | probe runs base-iPhone15ProMaxiOS18-1109 vs after-iPhone15ProMaxiOS18-1111 (`discover body` 82 → 41 over the same script; about 30 → 1 during the four drags) |
-| 5 | Discover hero relayouts on the phone: top inset 97↔115, `hero drawn` 12× in 3 s | trace iphone-1017b.log (jank spec §1) | fixed: the readings stay in `AppleDiscoverHeroLayoutReader`; a sub-point tab bar change (82.67 ↔ 83 pt) no longer redraws the hero; the page size ignores the bar's 18 pt | replay test `theOwnersIOS18SessionDrawsTheHeroAtMostTwice`; base-iPhone15ProMaxiOS18-1109 `hero drawn` 8 (6 identical-looking redraws at 44.9–45.2 s) vs after-*-1111/-1118 `hero drawn` 2; frames/ at 10 fps |
+| 1 | ISOs fail to play (disc read 17 s, then the 20 s startup timeout) | owner 10-17; trace iphone-1017b.log; OWNER-TODO 2b | can't-reproduce: The DevPlus JW4 UHD ISO reaches an actual frame, but the six-second budget is unproven: disc-start lower bound 5.766 seconds, Play-to-ready upper bound 7.043 seconds. Actual iOS 18 ISO playback was not exercised. | `out/jw4-timing.json`; `shots/jw4/CFCBBA37-6FBE-46B8-9E32-C69A0BCE6557.png` |
+| 2 | Hero cycle gone | owner 10-17 | fixed: Automatic cycling wrapped last to first three times in 96 seconds without swipes. Autoplay was temporarily off; the original preference file was restored. | `R/result.json`; `R/trace.log`; `R/idle-96.png` |
+| 3 | Title-page trailers worse than build 15 (ad66774) | owner 10-17 | still broken: A pressed second trailer still took 6.162 seconds to reveal. Cause guess: the mobile media-time reveal gate remains; Sources/OpenStreamApple/AppleTrailerRevealPolicy.swift:33. | `C/f-card1-on.png`; `shots/owner-content/trace.log` |
+| 4 | General jank, "app has gotten overall worse" | owner 10-17 | can't-reproduce: Discover met the two-draw limit. The broader whole-app jank claim was not quantified with an Instruments trace in this gate. | `J/run.mp4`; `J/counts.txt`; `X/sources-04.png` |
+| 5 | Discover hero relayouts on the phone: top inset 97↔115, `hero drawn` 12× in 3 s | trace iphone-1017b.log (jank spec §1) | fixed: Exactly two hero draws during the idle, drag and swipe probe. | `J/counts.txt`; `J/trace.log` |
 
 ## Hero, Discover, Library
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 6 | Hero shows "Movie · …" and Resume but no title | ios18-gates notes | fixed: a titled poster card's trailer covers the poster, so the hero draws the name while the video is up | before: after-iPhone15ProMaxiOS18-1049/after-jank-01-after-30s.png (Spider-Man trailer, no name); after: after-iPhone15ProMaxiOS18-1118/after-jank-01-after-30s.png (wordmark over the trailer); test `aTitledPostersTrailerBringsTheNameBack` |
-| 7 | iPhone hero lost trailers / full-screen look ("my fave feature") | OWNER-TODO:156 | verified on sim (trailers start at 3.7 s); owner's phone traced no `hero trailer start` since build 17: check Low Power / Auto-Play Video Previews | after-iPhone15ProMaxiOS18-1118/trace.log (`hero trailer start` at 3.7 s, 4 pages) |
-| 8 | Hero cut off, off centre, too zoomed | OWNER-TODO:307 (item 6) | verified (poster card and still pages) | after-*/after-jank-00-rest.png, -08-swipe.png |
-| 9 | Library hero has the same crop problem | OWNER-TODO:341 (item 19) | not checked | |
-| 10 | See-through top bar over the hero on iOS 18 | OWNER-TODO:117 | owner (decide from screenshots) | after-*/after-jank-00-rest.png |
-| 11 | Nav icons and large title unreadable on bright art | OWNER-TODO:820 | not checked (at risk: bar is transparent since f299aff) | |
-| 12 | Billboard locks a pick before Continue Watching is known | recording report "Not done" 1; OWNER-TODO 2e a | not checked (open) | |
-| 13 | Top 10 cards with no artwork | recording #2 | not checked | |
-| 14 | Top 10 rows take about 13 s | recording report | not checked | |
-| 15 | Launch: about 4 s black screen with a faint spinner | recording #1 | owner (not reproduced on sim; speed lanes own it) | |
-| 16 | Hangs of 0.5–0.75 s ("oStream 540 ms" capsule) after the full-screen trailer and on Settings › Sources | recording #7; OWNER-TODO 2e b | not checked | |
-| 17 | "Open Season 3" shown as a show | recording #3 | not checked | |
-| 18 | Top Picks duplicates; Continue Watching order; next episode | OWNER-TODO:621 | owner (needs watch history) | |
-| 19 | "Provider's movies unavailable" should name the provider | item 18 | not checked | |
-| 20 | Metadata fails often | OWNER-TODO:128 | not checked | |
+| 6 | Hero shows "Movie · …" and Resume but no title | ios18-gates notes | fixed: The Spider-Man title remains visible over the hero trailer. | `J/b1018a-jank-01-after-30s.png` |
+| 7 | iPhone hero lost trailers / full-screen look ("my fave feature") | OWNER-TODO:156 | fixed: Hero trailers start and occupy the portrait hero; four starts were recorded in the jank pass. This is simulator evidence. | `J/trace.log`; `J/b1018a-jank-01-after-30s.png` |
+| 8 | Hero cut off, off centre, too zoomed | OWNER-TODO:307 (item 6) | can't-reproduce: No shifting or off-center layout was observed in the captured Discover pages. Portrait video still crops its landscape source; screenshots preserve that appearance for review. | `J/b1018a-jank-00-rest.png`; `J/b1018a-jank-08-swipe.png` |
+| 9 | Library hero has the same crop problem | OWNER-TODO:341 (item 19) | can't-reproduce: Eight Library pages were captured without a changing hero frame. Portrait trailer cropping remains visible; an exact reproduction of the reported poster crop was not established. | `shots/library-pages/batch1018a-ios18-library-hero-01.png`; `shots/library-pages/batch1018a-ios18-library-hero-08.png` |
+| 10 | See-through top bar over the hero on iOS 18 | OWNER-TODO:117 | still broken: The iOS 18 Discover bar remains transparent over artwork/video. Cause guess: the explicit overArtwork branch keeps the transparent bar; Sources/OpenStreamApple/AppleAlignedTabTitle.swift:60. | `J/b1018a-jank-00-rest.png`; `J/b1018a-jank-01-after-30s.png` |
+| 11 | Nav icons and large title unreadable on bright art | OWNER-TODO:820 | still broken: White Discover text and search/refresh icons lose contrast on a bright trailer frame. Cause guess: transparent artwork navigation has no contrast adaptation; Sources/OpenStreamApple/AppleAlignedTabTitle.swift:60. | `J/b1018a-jank-01-after-30s.png` |
+| 12 | Billboard locks a pick before Continue Watching is known | recording report "Not done" 1; OWNER-TODO 2e a | can't-reproduce: The saved Continue Watching title and initial Discover hero agree. A deliberately delayed history-arrival race was not forced. | `J/b1018a-jank-00-rest.png`; `J/trace.log` |
+| 13 | Top 10 cards with no artwork | recording #2 | can't-reproduce: The captured Top 10 Movie and Show cards have artwork at three and ten seconds; the no-artwork case did not recur. | `X/discover-scroll-1200-03.png`; `X/discover-scroll-1200-10.png`; `X/discover-scroll-2400-03.png` |
+| 14 | Top 10 rows take about 13 s | recording report | still broken: Delayed shelf insertion still shifts visible content: Disney+ Shows is inserted between the three- and ten-second captures at the same requested scroll offset. The exact prior 13-second delay was not reproduced. Cause guess: asynchronously arriving visible sections are inserted without holding the viewport; Sources/OpenStreamApple/AppleDiscoverView.swift:206. | `X/discover-scroll-2400-03.png`; `X/discover-scroll-2400-10.png`; `X/discover-scroll-2400-trace.log` |
+| 15 | Launch: about 4 s black screen with a faint spinner | recording #1 | fixed: The owner-profile trace records first frame at launch +707 ms and cover gone at +1287 ms, rather than a four-second black launch. | `J/trace.log`; `J/run.mp4` |
+| 16 | Hangs of 0.5–0.75 s ("oStream 540 ms" capsule) after the full-screen trailer and on Settings › Sources | recording #7; OWNER-TODO 2e b | can't-reproduce: The Sources screen was captured without the reported latency capsule. A 0.5–0.75-second hang measurement was not taken. | `X/sources-04.png`; `C/f-card1-10s.png` |
+| 17 | "Open Season 3" shown as a show | recording #3 | fixed: The current owner cache classifies Open Season 3 (2010) as a movie, and the owner-profile search finds its full title. | `G/open-season-owner-cache.json`; `shots/open-season/attachments/e-search-results.png` |
+| 18 | Top Picks duplicates; Continue Watching order; next episode | OWNER-TODO:621 | can't-reproduce: Current Continue Watching was captured. Real-history order, duplicate suppression across every shelf and actual episode succession were not fully exercised. | `J/b1018a-jank-00-rest.png`; `C/b-library.png` |
+| 19 | "Provider's movies unavailable" should name the provider | item 18 | can't-reproduce: Owner Library content plays; the provider-movies-unavailable message was not triggered. | `C/b-library-playing-15s.png` |
+| 20 | Metadata fails often | OWNER-TODO:128 | still broken: Chernobyl remains in Unmatched with a gray fallback while Metadata APIs are on. Cause guess: unresolved series matching/artwork lookup; Sources/OpenStreamApple/AppleLibraryMetadataResolver.swift:150. | `A/narration-after-library-genres.png`; `A/narration-metadata-default.png` |
 
 ## Title page and trailers
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 21 | Trailer reveal late (about 6 s after it is picked; art held to 4.5 s of media, e63f693) | owner 10-17 via #3; trace 10-17 | owner (trade-off with #24) | REA round 3 §4 |
-| 22 | iPhone title page trailer is a small 16:9 box (13a2677) instead of build 15's full-bleed header | REA round 3 §4 | owner (REA recommends undoing) | REA round 3 §4 |
-| 23 | Build 16: trailer flashes then disappears; tapping another trailer doesn't play it | OWNER-TODO:448 | not checked | |
-| 24 | YouTube UI over trailers (title strip, logo, More videos) | recording #6 | owner (d70aea9 left it visible for YouTube's terms) | REA round 3 §4 |
-| 25 | Trailer "startup timed out" (Matilda, 15 s) | iphone-1017b.log:1286 | not checked | |
-| 26 | Trailers have no audio / no mute control | items 2–3 | not checked | |
-| 27 | Glitchy trailer start (flash, art jump) | item 4 | not checked | |
-| 28 | Paused trailer shows a triple-circle glyph | item 5 | not checked | |
-| 29 | Title trailer keeps playing under a disc load | ios18-discs spec | not checked | |
-| 30 | Title page back/search buttons have no round backgrounds on iOS 18 | ios18-report | not checked | |
-| 31 | Cast faces cut off in circles | item 1 | not checked | |
-| 32 | Episode row jumps about 28 pt when a download starts | recording spec; ios18-e2e report | iOS 27: E2E `testDownloadStartsWithoutAskingForASource`, `testCrawlDetailAndEpisodes` pass (no y check of its own); iOS 18.6: E2E passes (`e2e-ios18-summary.txt`) | |
-| 33 | Double loading spinner when opening content | OWNER-TODO:128 | owner ("which device/tap?") | |
-| 34 | Title open slow; page fills slowly | OWNER-TODO:128 | not checked (speed lanes) | |
+| 21 | Trailer reveal late (about 6 s after it is picked; art held to 4.5 s of media, e63f693) | owner 10-17 via #3; trace 10-17 | still broken: Second-card press at 22630 ms reveals at 28792 ms: 6.162 seconds. Cause guess: the 4.5-second media-advance gate plus startup; Sources/OpenStreamApple/AppleTrailerRevealPolicy.swift:33. | `shots/owner-content/trace.log`; `C/f-card1-on.png` |
+| 22 | iPhone title page trailer is a small 16:9 box (13a2677) instead of build 15's full-bleed header | REA round 3 §4 | fixed: The title trailer now fills the portrait header; it is not a small standalone 16:9 box in these captures. | `X/matilda-idle-35.png`; `C/f-trailer-10s.png` |
+| 23 | Build 16: trailer flashes then disappears; tapping another trailer doesn't play it | OWNER-TODO:448 | fixed: The actual owner-content probe kept the first trailer on screen for ten seconds, switched to the second card and kept that playing for ten seconds. | `C/f-trailer-10s.png`; `C/f-card1-10s.png`; `shots/owner-content/summary.json` |
+| 24 | YouTube UI over trailers (title strip, logo, More videos) | recording #6 | can't-reproduce: No YouTube title strip, logo or More videos overlay appears in the captured revealed states. Ads and every pause state were not exhausted. | `C/f-trailer-10s.png`; `C/f-card1-10s.png`; `X/matilda-idle-35.png` |
+| 25 | Trailer "startup timed out" (Matilda, 15 s) | iphone-1017b.log:1286 | can't-reproduce: Matilda reveals at 7463 ms and is playing in the 35-second capture; the prior startup timeout did not recur. | `X/matilda-idle-trace.log`; `X/matilda-idle-35.png` |
+| 26 | Trailers have no audio / no mute control | items 2–3 | can't-reproduce: A pressed second trailer requests sound in the trace. Audible output and a manual reveal/tap of the mute control were not verified. | `shots/owner-content/trace.log`; `T/batch1018a-ios18-pressed-trailer.png` |
+| 27 | Glitchy trailer start (flash, art jump) | item 4 | can't-reproduce: The captured trailer states are stable. A continuous title-transition recording was not made, so a transient flash is not ruled out. | `X/matilda-idle-03.png`; `X/matilda-idle-10.png`; `X/matilda-idle-35.png` |
+| 28 | Paused trailer shows a triple-circle glyph | item 5 | can't-reproduce: No triple-circle glyph appears in the captured paused state. | `T/batch1018a-ios18-trailer-paused.png` |
+| 29 | Title trailer keeps playing under a disc load | ios18-discs spec | can't-reproduce: Not exercised: actual iOS 18 disc loading was not entered, so trailer shutdown under that load is unverified. The title screen is captured. | `X/matilda-idle-35.png` |
+| 30 | Title page back/search buttons have no round backgrounds on iOS 18 | ios18-report | still broken: Title-page back and search remain bare glyphs on iOS 18. Cause guess: the legacy title toolbar retains plain controls; Sources/OpenStreamApple/AppleDiscoverView.swift:3616. | `T/batch1018a-ios18-trailer-playing.png`; `X/matilda-idle-35.png` |
+| 31 | Cast faces cut off in circles | item 1 | can't-reproduce: The captured Matilda cast row shows readable faces inside all four visible circles. | `T/batch1018a-ios18-cast.png` |
+| 32 | Episode row jumps about 28 pt when a download starts | recording spec; ios18-e2e report | can't-reproduce: An in-memory episode-state probe captures episode rows and watched controls. An actual episode download was not started; the reported jump after Download remains unverified. | `shots/episode-state-fixture/attachments/1A26BE4B-CC4E-4F8A-8445-84915A4A10EA.png` |
+| 33 | Double loading spinner when opening content | OWNER-TODO:128 | can't-reproduce: No double loading spinner was observed in the captured title states. First-tap transitions were not continuously filmed. | `X/matilda-idle-03.png`; `X/matilda-idle-10.png` |
+| 34 | Title open slow; page fills slowly | OWNER-TODO:128 | can't-reproduce: The cached Matilda title page populates in this pass. The separate trailer reveal delay is still broken in row 21. | `X/matilda-idle-03.png`; `X/matilda-idle-trace.log` |
 
 ## Player, ISO, discs
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 35 | Disc Play: silent black wait of 12–14 s | ios18-discs spec | not checked (iso-open) | |
-| 36 | No way to close the player during the disc-read spinner | ios18-gates notes | not checked (iso-open) | |
-| 37 | Disc picks the wrong title (Airbender played clip 00125) | ios18-discs spec | not checked (iso-open; REA §3 tie-breaks) | |
-| 38 | Blu-ray ISO still offers Play Disc / Skip to Movie | recording #5 | not checked | |
-| 39 | Real DVD menus on iOS; test every ISO | OWNER-TODO:162 | not checked (iso-open) | |
-| 40 | Matilda captions wrong (PGS) | OWNER-TODO:162 | not checked | |
-| 41 | "Did not return a compatible source" | OWNER-TODO:914 | not checked | |
+| 35 | Disc Play: silent black wait of 12–14 s | ios18-discs spec | can't-reproduce: Not exercised on iOS 18: real disc Play to first frame. The separate DevPlus budget result will be recorded in the gate table. | `X/matilda-idle-35.png` |
+| 36 | No way to close the player during the disc-read spinner | ios18-gates notes | can't-reproduce: Not exercised: closing during the iOS 18 disc-read spinner requires manual interaction. A title capture does not prove that control works. | `X/matilda-idle-35.png` |
+| 37 | Disc picks the wrong title (Airbender played clip 00125) | ios18-discs spec | can't-reproduce: The owner-profile search shows The Last Airbender (2010) first. It was not played on iOS 18, so the selected disc title/clip is unverified. | `shots/airbender-search/attachments/58484774-81DC-4DF6-948C-1DC4959E7C13.png` |
+| 38 | Blu-ray ISO still offers Play Disc / Skip to Movie | recording #5 | can't-reproduce: The Matilda catalog title page shows Play without DVD wording. The actual local Blu-ray file page was not opened, so that specific case remains unverified. | `X/matilda-idle-35.png` |
+| 39 | Real DVD menus on iOS; test every ISO | OWNER-TODO:162 | can't-reproduce: The eight DVD fixture tests pass on iOS 27/tvOS. Real owner DVDs and the full ISO collection were not played on iOS 18. | `G/iso-result.json`; `X/matilda-idle-35.png` |
+| 40 | Matilda captions wrong (PGS) | OWNER-TODO:162 | can't-reproduce: Not exercised: Matilda ISO PGS captions on iOS 18. The captions-menu screen was not reached; only the title screen is available. | `X/matilda-idle-35.png` |
+| 41 | "Did not return a compatible source" | OWNER-TODO:914 | can't-reproduce: The owner Library playback probe reaches an actual Thor frame without a compatible-source error. Other titles/providers were not exhausted. | `C/b-library-playing-15s.png`; `shots/owner-content/summary.json` |
 
 ## Live
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 42 | "Importing · 0 channels" toast repeats | recording #4 | not checked | |
-| 43 | "No channels" shown first | recording #4 | not checked | |
-| 44 | Provider timeouts shown loudly; "Can't reach IPTV" | recording #4 | not checked | |
-| 45 | Live doesn't play with the owner's config (0 of 5 channels) | OWNER-TODO:402 | owner (needs the provider) | |
-| 46 | "Can't reach" dialog looks off | OWNER-TODO:906 | not checked | |
-| 47 | Error says "stream limit" for an IP block | item 20 | not checked | |
-| 48 | Live player a cut-off box; nothing shows which channel is on | item 7 | iOS 27: `testLiveTappedStatesArePhotographed` passes; `testCrawlLive` fails on AirPlay (known) and a Live clock that did not settle; iOS 18.6: E2E passes (`e2e-ios18-summary.txt`) | |
-| 49 | Category bar floats and jumps on scroll | item 8 | iOS 27: verified by E2E (`testLiveLayoutIsStable`); iOS 18.6 E2E: E2E passes (`e2e-ios18-summary.txt`) | |
-| 50 | Live title and search waste space | item 9 | not checked | |
-| 51 | Translucent tab bar over the guide | item 10 | not checked | |
-| 52 | Where is pay-per-view? | item 11 | not checked | |
-| 53 | Full-screen Live chrome (X, Channels/Last Channel, progress bar, icons) | items 12–15 | not checked | |
-| 54 | Swiping home stops Live (PiP) | OWNER-TODO:860 | not checked | |
+| 42 | "Importing · 0 channels" toast repeats | recording #4 | can't-reproduce: No zero-channel import toast appears in the captured owner refresh states. The first seconds of every refresh were not continuously recorded. | `O/batch1018a-ios18-live-top.png`; `L/batch1018a-ios18-live-top.png` |
+| 43 | "No channels" shown first | recording #4 | can't-reproduce: The owner attempt ends in a provider error rather than a No channels screen. The initial empty-state transition was not filmed. | `O/batch1018a-ios18-live-top.png` |
+| 44 | Provider timeouts shown loudly; "Can't reach IPTV" | recording #4 | still broken: The owner profile presents a full-page Can’t reach IPTV state. Cause guess: all-source failure selects the large failure card; Sources/OpenStreamApple/AppleMediaSourceViews.swift:538 and AppleLiveFailureCard.swift. | `O/batch1018a-ios18-live-top.png` |
+| 45 | Live doesn't play with the owner's config (0 of 5 channels) | OWNER-TODO:402 | still broken: The owner provider supplies no usable lineup in this attempt. Supplemental fixture playback works. Cause guess: provider fetch/connectivity failure; Sources/OpenStreamApple/AppleLiveFailureCause.swift:80; underlying network/auth cause unconfirmed. | `O/batch1018a-ios18-live-top.png`; `L/batch1018a-ios18-live-watching.png` |
+| 46 | "Can't reach" dialog looks off | OWNER-TODO:906 | still broken: The reported Can’t reach presentation remains a full-page icon/title/Try Again state. Cause guess: the common failure-card presentation is unchanged; Sources/OpenStreamApple/AppleLiveFailureCard.swift. | `O/batch1018a-ios18-live-top.png` |
+| 47 | Error says "stream limit" for an IP block | item 20 | can't-reproduce: This attempt says Can’t reach IPTV, not stream limit. An authenticated IP-block response was not generated. | `O/batch1018a-ios18-live-top.png` |
+| 48 | Live player a cut-off box; nothing shows which channel is on | item 7 | fixed: Supplemental fixture: video is pinned edge to edge, names the current channel and marks its row with a waveform. Real-provider playback remains broken in row 45. | `L/batch1018a-ios18-live-watching.png` |
+| 49 | Category bar floats and jumps on scroll | item 8 | fixed: Supplemental fixture: category-strip pixel matching finds zero vertical displacement across all three scroll frames (search range ±12 pixels). The provider remains unavailable. | `L/batch1018a-ios18-live-scrolled-1.png`; `L/batch1018a-ios18-live-scrolled-2.png`; `L/batch1018a-ios18-live-scrolled-3.png`; `G/category-strip-pixels.json` |
+| 50 | Live title and search waste space | item 9 | fixed: The supplemental Live view uses the compact category/search/Guide strip below the video; the large Live title/search area is absent. | `L/batch1018a-ios18-live-watching.png` |
+| 51 | Translucent tab bar over the guide | item 10 | fixed: The Guide sheet covers the tab bar in the current iOS 18 captures. | `L/batch1018a-ios18-guide-top.png`; `L/batch1018a-ios18-guide-scrolled-3.png` |
+| 52 | Where is pay-per-view? | item 11 | fixed: Pay-Per-View is a visible named category with the fixture’s event channels. | `L/batch1018a-ios18-live-tab-Pay-Per-View.png` |
+| 53 | Full-screen Live chrome (X, Channels/Last Channel, progress bar, icons) | items 12–15 | can't-reproduce: Bare X and list glyph are visible in the fixture player. Last Channel/menu behavior and the buffer bar were not fully exercised in this owner pass; the first-run Players gate remains failed. | `L/batch1018a-ios18-live-inline-controls.png`; `G/e2e18-result.json` |
+| 54 | Swiping home stops Live (PiP) | OWNER-TODO:860 | can't-reproduce: Not exercised: home/background PiP on a playing iOS 18 Live channel. The real provider is unavailable and the fixture pass did not press Home. | `O/batch1018a-ios18-live-top.png`; `L/batch1018a-ios18-live-watching.png` |
 
 ## Settings, sources, sync
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 55 | Remove "Export Working M3U" | item 16 | not checked | |
-| 56 | Can't find QR Set Up / Send Setup | item 17 | not checked | |
-| 57 | Rill / Jellyfin: "The server's reply made no sense" | ios18-discs spec; OWNER-TODO:281 | not checked | |
-| 58 | Several folders from one share | OWNER-TODO:168 | not checked | |
-| 59 | iCloud sync looks broken | OWNER-TODO:437 | owner (two devices) | |
-| 60 | QR setup iPhone → TV/iPad | OWNER-TODO:427 | owner (two devices) | |
+| 55 | Remove "Export Working M3U" | item 16 | fixed: The phone Channel Health section has Check Channels Now and no Export Working M3U action. | `O/batch1018a-ios18-health-end.png` |
+| 56 | Can't find QR Set Up / Send Setup | item 17 | fixed: Settings has the Transfer entry leading to Transfer To and Transfer From. Both pages were opened by the owner-profile probe. | `A/narration-settings-transfer.png`; `A/narration-transfer-directions.png`; `A/narration-transfer-to.png`; `A/narration-transfer-from.png` |
+| 57 | Rill / Jellyfin: "The server's reply made no sense" | ios18-discs spec; OWNER-TODO:281 | can't-reproduce: No Rill/Jellyfin connection was submitted with working server credentials. The current Jellyfin form is captured; the prior bad-reply error is unverified. | `A/narration-add-media-server.png` |
+| 58 | Several folders from one share | OWNER-TODO:168 | can't-reproduce: The share settings Add Folder browser opens. This profile selects the Media root; adding TV while retaining a Movies-only selection was not performed. | `A/narration-after-share-details.png`; `A/narration-after-share-folder-browser.png` |
+| 59 | iCloud sync looks broken | OWNER-TODO:437 | can't-reproduce: Two signed-in iCloud devices/accounts were not available for a sync round trip. Current settings/privacy screens are captured. | `O/batch1018a-ios18-settings-top.png`; `X/privacy-04.png` |
+| 60 | QR setup iPhone → TV/iPad | OWNER-TODO:427 | can't-reproduce: Both Transfer directions render, but a cross-device QR transfer was not performed. The simulator uses the manual-link fallback; the built camera usage description is present. | `A/narration-transfer-to.png`; `A/narration-transfer-from.png` |
 
 ## Older iOS 18 leftovers and pending calls
 
 | # | Item | Where reported | iOS 18 status | Evidence |
 |---|---|---|---|---|
-| 61 | Six E2E tests failed on iOS 18.6 (Save sheet, widget, episode download, stub row, landscape tab bar, player options) | OWNER-TODO 2c; ios18-e2e spec | iOS 27: 41/42 pass (`testCrawlLive`: AirPlay, known since f82ef99's gate); Save sheet, widget, episode download, landscape tab bar pass. iOS 18.6: 41/43 pass; Save sheet, widget, episode download, landscape tab bar, player options pass; the two left are the known 18.6 ones (`testCrawlLive` AirPlay, Messages share bubble) | `dev-mini:…/iphone-jank/e2e-ios27-summary.txt`, `e2e-ios18-summary.txt` |
-| 62 | "iOS 18 build is worse, a ton of issues" (full 18 vs 27 walk never done) | OWNER-TODO:25 | not checked (this lane covered Discover only) | |
-| 63 | "A Different World" search order; title page flashes between auto-advanced episodes; CW time left uses stream length | OWNER-TODO:570-576 | not checked | |
-| 64 | 09-30 UX leftovers (See All posters, Add Service list, "Metadata Is Off", number pad Done, clearing a rating, no-backdrop title, Top 10 pop-in) | OWNER-TODO:595-605 | not checked | |
-| 65 | Pending owner calls: PiP/AirPlay in the player, Refresh, Share, long-press menus, Start from Beginning | OWNER-TODO:612, :491 | owner | |
+| 61 | Six E2E tests failed on iOS 18.6 (Save sheet, widget, episode download, stub row, landscape tab bar, player options) | OWNER-TODO 2c; ios18-e2e spec | still broken: The current first-run iOS 18 gate fails Library and Players; SettingsPages is a cancellation. Cause guess: crawl navigation/visible-response handling, possibly flaky-e2e2; Apps/OpenStreamiOSUITests/AppleiOSUITests.swift. Attribution remains unconfirmed. | `G/e2e18-result.json`; `shots/e2e18/683191A6-49D0-4EF4-A703-51E3339F8509.png`; `G/rerun18-players-result.json` |
+| 62 | "iOS 18 build is worse, a ton of issues" (full 18 vs 27 walk never done) | OWNER-TODO:25 | can't-reproduce: A complete 18-versus-27 comparison remains unfinished: the full iOS 18 gate stopped on Library, and interaction-only owner checks await the UI agent. This is not a clean bill of health. | `G/e2e18-result.json`; `G/e2e27-result.json`; `G/owner-capture-note.json` |
+| 63 | "A Different World" search order; title page flashes between auto-advanced episodes; CW time left uses stream length | OWNER-TODO:570-576 | can't-reproduce: A Different World search passes. The separate in-memory watched-state fixture shows Play S1, E3 after two watched episodes and checks unwatch controls; real episode auto-advance and Continue Watching duration were not exercised. | `C/e-search-results.png`; `shots/episode-state-fixture/summary.json`; `shots/episode-state-fixture/attachments/5EDB0781-BEEC-4F4E-AC35-AE0D13C7FA4E.png` |
+| 64 | 09-30 UX leftovers (See All posters, Add Service list, "Metadata Is Off", number pad Done, clearing a rating, no-backdrop title, Top 10 pop-in) | OWNER-TODO:595-605 | can't-reproduce: Sources, Metadata, playback and title screens are captured. See All, number-pad Done, rating clearing and every no-backdrop/Top 10 transition were not fully exercised. | `X/sources-04.png`; `X/metadata-04.png`; `X/playback-settings-04.png`; `X/matilda-idle-03.png` |
+| 65 | Pending owner calls: PiP/AirPlay in the player, Refresh, Share, long-press menus, Start from Beginning | OWNER-TODO:612, :491 | can't-reproduce: These remain owner decisions. The gate makes no policy changes; manual long-press/start-over and every PiP/AirPlay route were not evaluated. | `L/batch1018a-ios18-live-inline-controls.png`; `X/playback-settings-04.png` |
 
 ## Summary
 
-65 rows. Fixed in this lane and verified on the iOS 18.6 sim, iOS 27 E2E unchanged: 3 (rows 2, 5, 6); partly fixed: 1 (row 4).
-Verified on iOS 18.6 (sim capture or E2E): 6 (rows 7, 8, 32, 48, 49, 61). Still broken, owned elsewhere: 1 (row 1, ISO
-open, job iso-open). Owner decision, device or data: 12. Not checked on iOS 18 in this lane: 42.
+Main: 15 fixed; 11 still broken; 39 can't-reproduce; 0 pending.
 
-Not done: the owner's iPhone (00008130…) was unavailable (not connected or locked) all session, so nothing was
-installed and no trace was pulled; DevPlus was not used. The rest of the app (title page, player, Live, Settings) still
-needs the same 10 fps walk on iOS 18.6 (row 62).
+Narration: 16 fixed; 1 still broken; 7 can't-reproduce; 0 pending.
 
-## Narrated recording — Job B (2026-10-17)
+Reproduced rows: 3, 10, 11, 14, 20, 21, 30, 44, 45, 46, 61, N7. Causes and evidence are recorded in each row.
 
-| Time | Owner's words | Change / status | Evidence |
-|---|---|---|---|
-| 1:48 | “this gets cut off, can't see the full poster” | Already fixed in batch-1017b; signed baseline on the owner iOS 18.6 setup shows the full Airbender poster. | `../2026-10-17-settings-narration/108.png`, `ios18-before-library.png`, `ios18-after-library-top.png` |
-| 2:47 | “there's not enough categories in library, it just says movies” | Movies/Shows retained; provider genres now survive matching and cached matches backfill without losing artwork or added dates. Full serial package gate: 3,553 tests / 443 suites. | `../2026-10-17-settings-narration/167.png`, `ios18-after-library-genres.png` (Thriller shelf) |
-| 2:59 | “I shouldn't be able to tap recently added here … I didn't ask for this” | Recently Added is a plain shelf heading. | `../2026-10-17-settings-narration/179.png`, `ios18-after-library.png` |
-| 3:34 | “I could only add still one folder … I need two folders, which is movies and TV” | Root cause: Add Folder was only on the Sources list (frame 235); on the share's own page (frame 214) the only way to TV was the Folder row, whose edit replaces the folder, so picking TV turned Movies into TV instead of adding it. That page now has an Add Folder row (no glyph, like its section) that adds TV beside Movies; mocked Movies → TV preservation test passes. | `../2026-10-17-settings-narration/214.png`, `ios18-after-share-details.png`, `ios18-after-share-folder-browser.png` (opened, nothing added) |
-| 3:55–4:20 | “one transfer, then … transfer to, or transfer from”; “open camera, point at another device … remove that” | One Transfer entry with To/From on iPhone, iPad and Mac; camera alerts and duplicate entries removed. Transfer To scans the other device's Transfer From code in the app (VisionKit, else AVFoundation), with the Share Link field as the fallback below it. The scanner stays hidden until the app's Info.plist has a camera usage description (owner/lead to add; agents may not edit Info.plist keys). Apple TV only receives: its Transfer opens the receiver, and first-run keeps Transfer from iPhone. | `../2026-10-17-settings-narration/235.png`, `260.png`, `ios18-after-settings-transfer.png`, `ios18-after-transfer-directions.png`, `ios18-after-transfer-to.png`, `ios18-after-transfer-from.png` |
-| 4:28 | “the API key there” | TMDB/OMDb fields moved to Advanced. | `../2026-10-17-settings-narration/268.png`, `ios18-after-metadata-default.png`, `ios18-after-metadata-advanced.png` |
-| 5:40 | “these shouldn't be default, these top tens. That should be the add-ons” | Default is already off in batch-1017b; opt-in and persistence regression test passes. The owner simulator has a saved ON preference, which is preserved. | `../2026-10-17-settings-narration/340.png`, `ios18-after-top-ten.png` (owner's saved ON) |
-| 6:26 | “This button could use word 2, the test connection” | Media server action shortened to Test; VoiceOver still says Test Connection. | `../2026-10-17-settings-narration/386.png`, `ios18-after-add-media-server.png` |
+Unfinished interactions: actual iOS 18 ISO playback/title selection/cancel/PGS; an episode download and real auto-advance; adding TV while preserving Movies; manual mute/PiP/long-press and the remaining compound older UX checks. Exact player/menu screens were not reached for those cases; their nearest available screens are linked and the limitation is explicit. The Mobile connector has no agent on this simulator; the Xcode UI connector runs on the Studio without simctl. The requested simulator-agent installation is awaiting approval under the supplied AGENTS.md Tactics rule. No agent was installed.
 
-Build verification (2026-10-18): serial package gate 3,553 tests / 443 suites; iOS app + UI tests and tvOS Debug build. After screenshots: this branch's build on the owner's iOS 18.6 simulator (owner app and data put back and hash-checked afterwards); the walk only opens Add Folder's browser and adds nothing. Earlier: no-add-ons Release iOS/tvOS/visionOS/macOS and SDK floors passed; the standard parallel gate failed 10 issues in unchanged chapter/caption tests.
+The real IPTV lineup is unavailable. iCloud/QR cross-device round trips and owner product decisions also remain unverified. A complete iOS 18-versus-27 E2E comparison is not finished: the iOS 18 run stopped at the unlisted Library failure. Passing diagnostic retries do not waive the lead's first-run rule.
+
+## Narrated recording — 24 explicit checks (2026-10-18)
+
+The source spec contains 14 multipart bullets. They are expanded into these 24 checks without adding requirements. The unclear Open item at 0:30 is in Library, as the recording frame shows. Original Job B before-frames remain under `design/2026-10-17-settings-narration/` (108, 167, 179, 214, 235, 260, 268, 340 and 386 PNGs); the source transcript is `design/qa/owner-recording-2026-10-15-transcript.srt`.
+
+| ID | Recording time | Clause | iOS 18 result | Evidence |
+|---|---|---|---|---|
+| N1 | 0:30 | Pay-Per-View findable | fixed: The supplemental owner-shaped lineup exposes Pay-Per-View prominently with event channels. The real provider is unavailable. | `L/batch1018a-ios18-live-tab-Pay-Per-View.png` |
+| N2 | 0:30 | Unclear Open item | fixed: The recording’s Open item is in Library. The current owner cache has Open Season 3 (2010), kind movie, and search shows the full title. | `G/open-season-owner-cache.json`; `shots/open-season/attachments/e-search-results.png` |
+| N3 | 1:00 | Programme information beyond All | fixed: Fixture All, Locals and Premium retain programme labels; event channels retain their event titles. This is UI evidence rather than proof of the owner provider’s EPG. | `L/batch1018a-ios18-live-watching.png`; `L/batch1018a-ios18-live-tab-Locals.png`; `L/batch1018a-ios18-live-tab-Premium.png` |
+| N4 | 1:41 | Remove WATCHING pill | fixed: The selected fixture channel has a waveform, without a WATCHING pill. | `L/batch1018a-ios18-live-watching.png` |
+| N5 | 1:41 | Stock playing indicator; no colored labels | fixed: The waveform and channel/category text use the neutral system treatment in the captured lineup. | `L/batch1018a-ios18-live-watching.png` |
+| N6 | 5:08 | Channel start speed | can't-reproduce: The real provider has no usable lineup. Successful fixture starts measure 1.919–1.967 seconds with a deliberate 0.6-second manifest delay; one interrupted/reconnecting attempt has no first-frame event. | `G/live-fixture-timings.json`; `O/batch1018a-ios18-live-top.png` |
+| N7 | 5:08 | Channel Health speed/action | still broken: On the real owner profile, tapping the enabled action leaves Not checked yet. Fixture Health completes 15 of 15 in about ten seconds. Cause guess: the empty-lineup guard returns while the button stays enabled; Sources/OpenStreamApple/AppleChannelHealthStore.swift:172 and AppleChannelHealthViews.swift:179. | `O/batch1018a-ios18-health-end.png`; `L/batch1018a-ios18-health-end.png` |
+| N8 | 5:10 / 6:36 | No background import card | can't-reproduce: No background import card appears in the captured owner refresh states. The first moments of each refresh were not continuously filmed. | `O/batch1018a-ios18-live-top.png`; `L/batch1018a-ios18-live-top.png` |
+| N9 | 5:10 / 6:36 | First import avoids 0 / Zero KB text | can't-reproduce: A first import through the user-facing form was not submitted. The fixture was added through the existing developer import hook; that does not prove the first-import card. | `X/add-live-04.png`; `L/batch1018a-ios18-live-top.png` |
+| N10 | 7:20 | Stuck Guide bar | can't-reproduce: The actual recording frame was checked. The supplemental Guide header remains aligned through three scrolls; the real provider Guide cannot be opened. No exact floating-bar reproduction was established. | `shots/reference-recording-0440.png`; `L/batch1018a-ios18-guide-top.png`; `L/batch1018a-ios18-guide-scrolled-3.png` |
+| N11 | 1:48 | Full posters visible | fixed: Library’s Recently Added and Thriller shelves show complete poster frames. Missing Chernobyl artwork is tracked separately in row 20. | `A/narration-after-library.png`; `A/narration-after-library-genres.png` |
+| N12 | 2:47 | Movies and Shows categories | fixed: Both categories are present in the owner Library. | `A/narration-after-library.png` |
+| N13 | 2:47 | Genres/collections as available | fixed: The owner Library has a populated Thriller shelf and an explicit Unmatched shelf. | `A/narration-after-library-genres.png` |
+| N14 | 2:59 | Recently Added is not tappable | fixed: The owner UI probe asserts that the heading is not a button; the screenshot has no disclosure chevron. | `A/narration-after-library.png`; `shots/checklist-owner/summary.json` |
+| N15 | 3:34 | Add TV from share settings | can't-reproduce: The Add Folder browser opens from ServerPlus settings. TV was not added; this profile currently selects the Media root. Actual addition awaits the manual UI driver. | `A/narration-after-share-details.png`; `A/narration-after-share-folder-browser.png` |
+| N16 | 3:34 | Preserve Movies while adding TV | can't-reproduce: Not exercised on the real share. The package preservation test passes, but browsing alone does not verify the requested Movies-to-Movies-plus-TV action. | `A/narration-after-share-folder-browser.png`; `G/spm-merge.log` |
+| N17 | 3:55–4:20 | One Transfer entry in one place | fixed: The current Settings entry leads to a single Transfer page; the Sources add list does not duplicate it. | `A/narration-settings-transfer.png`; `X/sources-04.png` |
+| N18 | 3:55–4:20 | Transfer To / Transfer From | fixed: Both directions are visible and both destination pages were opened. | `A/narration-transfer-directions.png`; `A/narration-transfer-to.png`; `A/narration-transfer-from.png` |
+| N19 | 3:55–4:20 | Remove Open Camera alert | fixed: The owner UI assertions and captured To/From states show no Open the Camera alert. The simulator uses the manual-link fallback; real camera scanning was not tested. | `A/narration-transfer-to.png`; `A/narration-transfer-from.png` |
+| N20 | 4:28 | TMDB key hidden by default | fixed: The default Metadata page has only the enabled APIs switch and Advanced; the key field appears only inside Advanced. | `A/narration-metadata-default.png`; `A/narration-metadata-advanced.png` |
+| N21 | 4:28 | OMDb key hidden by default | fixed: The OMDb field is absent from the default page and present inside Advanced. | `A/narration-metadata-default.png`; `A/narration-metadata-advanced.png` |
+| N22 | 5:40 | Top 10 off by default | can't-reproduce: The fresh-setting attempt still displayed the saved ON state after the test installation; it did not establish a clean default. The implementation and package tests default OFF, but that is not an iOS 18 visual proof. All five owner scopes were restored and hash-verified. | `shots/fresh-top10/attachments/B77040BF-B3EB-48C7-9E28-36E5A7D5786B.png`; `G/fresh-top10-owner-restoration.json`; `Sources/OpenStreamApple/AppleSettingsStore.swift:715` |
+| N23 | 5:40 | Top 10 opt-in / add-on provided | fixed: The explicit Top 10 switch and the owner’s saved ON state remain available; opt-in/persistence package tests pass. | `A/narration-top-ten.png`; `G/spm-merge.log` |
+| N24 | 6:26 | Clearer Test Connection action | fixed: The media-server form has the shorter Test action; VoiceOver retains Test Connection. | `A/narration-add-media-server.png` |
+
+The previous camera-description caveat is superseded: the current built iOS app already has the usage description. These simulator captures verify the link fallback and alert removal, not real camera scanning.
+
+## Batch-1018a gate — 2026-10-18: NOT CLEAR
+
+Evidence root: `dev-mini:/Volumes/DevExt/dev/openstream-build/batch-1018a/`.
+The row assessments above are current. The eight-platform build matrix predates the flaky-e2e2 merge; the full serial suite and affected E2E were run at 2f9964f as directed. Incomplete interactions remain explicit.
+
+| Completed gate | Result | Evidence under the root |
+|---|---|---|
+| Serial Swift, 9bc43b1 | 3,583 tests / 446 suites passed; verbose repeat also passed | `logs/spm-verbose.log` |
+| Debug and Release app builds, 9bc43b1 | iOS, tvOS, visionOS and macOS passed; every Release has zero add-on flags and passes SDK floors | `gates/build-*-*.log` |
+| Full serial Swift, 2f9964f | Passed: 3,584 tests / 446 suites, 110.380 seconds | `gates/spm-merge.log` |
+| Merged Live policy, 2f9964f | 5 tests / 1 suite passed | `logs/policy-merge.log` |
+| Changed-file compilation | 68/68 changed Swift files have compile evidence, including the merge | `gates/compile-evidence.json` |
+| Full iOS 27 E2E, 2f9964f | 42 passed, 1 failed, 108 skipped; Players reported no visible response for Live Sleep Timer (portrait) and Last Channel (landscape) | `gates/e2e27-result.json`, `shots/e2e27-players/` |
+| Diagnostic Players retry (gate remains failed) | 1 passed, 0 failed, 0 skipped; recorded separately from the full-run failure | `gates/rerun27-players-result.json` |
+| Owner iOS 18.6 preparation | Passed; original app restored; app, group, host and Keychain hashes verified | `gates/prep18-owner-restoration.json` |
+| iOS 18.6 E2E, 2f9964f | Stopped on unexpected `testCrawlLibrary` failure: `home.featured.my-list` had no visible response. Players also could not open landscape Live. Raw partial result: 15 passed, 3 failed, 41 skipped; SettingsPages is the cancellation, not a third observed regression. | `gates/e2e18-result.json` |
+| Diagnostic iOS 18.6 Players retry (gate remains failed) | 1 passed, 0 failed, 0 skipped; all five owner scopes restored and hash-verified | `gates/rerun18-players-result.json`, `gates/rerun18-players-owner-restoration.json` |
+| Owner capture pass, 2f9964f | 18 valid UI probes passed; Library/genres/share browser, Transfer, Advanced metadata, title trailers, search, and supplemental Live fixture captured; all five owner restoration scopes verified. The first title attempt and duplicate-shutdown cleanup error are harness-only exclusions. | `gates/owner-capture-note.json`, `gates/owner-walk-restoration.json`, `shots/` |
+| Idle auto-cycle on owner iOS 18.6 | Passed: 96 seconds without swipes, three last-to-first wraps, zero trailer starts while autoplay was temporarily off; original preference file restored byte for byte | `shots/rotation-cold/result.json`, `shots/rotation-cold/trace.log` |
+| Owner iOS 18.6 Discover jank, 2f9964f | Passed: one UI test; hero drawn 2 (limit 2), cycle pages 3, cycle restarts 2, trailer starts 4; owner restoration hashes verified | `jank-0755/`, `gates/jank18-owner-restoration.json` |
+| DVD ISO fixtures, 2f9964f | Passed: four iOS and four tvOS menu/navigation tests; restoration hashes verified; both simulators shut down | `gates/iso-result.json` |
+| Full tvOS E2E, 2f9964f | 22 passed, 1 failed, 71 skipped. New settings-narration test could not focus Advanced at `AppleTVFocusUITests.swift:848`; no retry. The run finished before cancellation was applied. | `gates/e2etv-result.json` |
+| DevTV Release + add-ons | Passed: installed on DevTV; Top Shelf fullscreen carousel advanced, and hero rotation/focus passed (one test each). Relevant seven Swift files recompiled; SDK floors passed. The optional post-test snapshot copy failed to locate devicectl; screenshots and UI assertions are retained. | `gates/devtv.log`, `out/topshelf.log`, `out/hero.log`, `shots/topshelf/`, `shots/hero/` |
+| DevPlus JW4 UHD ISO | Playback probe passed, but ≤6 s is UNPROVEN: disc-start-to-frame lower bound 5.766 s, Play-to-ready upper bound 7.043 s. Current ISO provenance and actual frame verified; no intervening fallback. Gate exits nonzero. | `out/jw4-timing.json`, `out/jw4-trace.log`, `shots/jw4/CFCBBA37-6FBE-46B8-9E32-C69A0BCE6557.png` |
+| Supplemental owner iOS 18 shelves/search/episode states | Two UI probes passed; 3/10-second shelf captures show late insertion. All five owner scopes restored and hash-verified. Episode state is an in-memory fixture, not real auto-advance/download proof. | `gates/shelves.log`, `gates/shelves-owner-restoration.json`, `shots/airbender-search/`, `shots/episode-state-fixture/`, `shots/cli-walk/discover-scroll-*.png` |
+| Fresh Top 10 attempt | UI test passed, but retained ON is not default-OFF proof. Inner preference cleanup hit a stale container path; the outer restore succeeded and verified all five scopes. No app regression inferred from that harness error. | `gates/fresh-top10.log`, `gates/fresh-top10-owner-restoration.json`, `shots/fresh-top10/` |
+| Hygiene | Code-anti-slop reviewed the harness and report; no app code diff. Zero-byte Swift check clean. This lane's internal simulator DerivedData removed after all runs; no own jobs remain. | `gates/cleanup.json`; worktree diff/status |
+
+Both iOS 27 runs verified app, app-group and host restoration hashes and shut the simulator down. The stopped iOS 18.6 run restored and verified all five scopes, including Keychain (`gates/e2e18-owner-restoration.json`). The lead’s 04:00 update removed all four flake exemptions. Both first-run Players failures remain gate failures despite diagnostic retries; Library was not rerun. Library/hero state from settings-narration or hero-settle is a suspected area; attribution is unconfirmed. The tvOS Advanced failure is in the settings-narration test.
+
+The checklist has no pending placeholders, but the unexercised interactions in Summary remain incomplete. A nearest-screen capture does not prove an unreachable interaction works. The Mobile simulator agent was not installed while its required installation approval was unanswered. No app source changed, no commits, no uploads, and no OfficePlus use.
+
+Dev-Mini rebooted at 10:18 during the network outage, before this lane’s queued device/shelf stages started. Work resumed through its alternate trusted LAN address without changing network or SSH settings. Earlier private `/tmp` result bundles/backups no longer exist after reboot; durable redacted logs, result summaries and PNG exports remain under the evidence root (the full iOS 27 result bundle is also retained in `out/e2e27.xcresult`). Latest post-reboot owner restores verified all five scopes. The Studio SMB mount was unavailable at report time; this existing checklist was updated through the NAS using a content-hash guard.
