@@ -4736,8 +4736,18 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             revealPlayerControls()
             if !closes.allElementsBoundByIndex.contains(where: { isSafelyHittable($0) }) {
                 // Rotation can already have entered fullscreen on iPhone.
+                // A row that switched channels brings the inline chrome back
+                // a moment after Play/Pause; wait for Full Screen to take a touch.
+                let fullScreen = app.buttons["player.fullscreen"].firstMatch
+                let reachable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    self.isSafelyHittable(fullScreen)
+                }, object: nil)
                 guard revealInlineLiveControls(timeout: 60),
-                      tapIfPossible(app.buttons["player.fullscreen"].firstMatch),
+                      XCTWaiter.wait(for: [reachable], timeout: 10) == .completed else {
+                    attachHierarchy("live-player-open-fullscreen-unreachable")
+                    return false
+                }
+                guard tapIfPossible(fullScreen),
                       closes.firstMatch.waitForExistence(timeout: 40) else { return false }
             }
             Thread.sleep(forTimeInterval: 4)
@@ -4891,9 +4901,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
             return .offScreen
         }
+        // The same holds for the navigation bar: XCTest called a Library hero
+        // button hittable under it, and the touch went to the bar.
+        if !isTab, crawlContentOverlapsNavigationBar(element, frame: frame) { return .offScreen }
         if element.isHittable { return .hittable }
         if isTouchableMenuButton(element, identifier: element.identifier) { return .hittable }
-        if crawlContentOverlapsNavigationBar(element, frame: frame) { return .offScreen }
         return .blocked
     }
 
@@ -4902,7 +4914,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// own toolbar buttons are identified by ancestry and remain tappable targets.
     private func crawlContentOverlapsNavigationBar(_ element: XCUIElement, frame: CGRect) -> Bool {
         let bar = app.navigationBars.firstMatch
-        guard bar.exists, frame.intersects(bar.frame) else { return false }
+        // XCTest taps the centre, so only a centre under the bar is unreachable;
+        // a hero button whose edge touches the bar is still pressed.
+        guard bar.exists, bar.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
         let toolbarControl = bar.descendants(matching: element.elementType).matching(NSPredicate(
             format: "identifier == %@ AND label == %@", element.identifier, element.label)).firstMatch
         return !toolbarControl.exists

@@ -844,8 +844,12 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(advanced.waitForExistence(timeout: 30))
         XCTAssertFalse(app.secureTextFields.firstMatch.exists)
         attachScreen("narration-tv-metadata-default")
-        for _ in 0..<8 where !advanced.hasFocus { remote.press(.down) }
-        XCTAssertTrue(advanced.hasFocus)
+        // A Form row's cell takes the focus, not the link inside it that
+        // carries the identifier, as with the Package row below.
+        let advancedFocused = focused(where: NSPredicate(format: "identifier == %@ OR label == %@",
+                                                         "settings.metadata.advanced", "Advanced"))
+        for _ in 0..<8 where !advancedFocused.exists { remote.press(.down) }
+        XCTAssertTrue(advancedFocused.exists, "Advanced never took focus, got '\(focusedElement.label)'")
         remote.press(.select)
         XCTAssertTrue(app.secureTextFields["TMDB API key or read token"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.secureTextFields["OMDb API key"].exists)

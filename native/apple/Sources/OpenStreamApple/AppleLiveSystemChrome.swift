@@ -108,36 +108,10 @@ struct AppleLiveSystemChrome: View {
                 .accessibilityIdentifier("player.pip")
             }
             Spacer(minLength: 0)
-            moreMenu
+            AppleLiveMoreMenu(model: model, coordinator: coordinator, isLive: request.isLive,
+                              onLastChannel: onLastChannel, onStartOver: onStartOver,
+                              sharePlayMenu: sharePlayMenu)
         }
-    }
-
-    private var moreMenu: some View {
-        Menu {
-            if let onLastChannel {
-                Button("Last Channel", systemImage: "arrow.uturn.backward", action: onLastChannel)
-                    .appleLiveMenuPresence(model)
-                    .accessibilityIdentifier("live.player.lastChannel")
-            }
-            if let onStartOver {
-                Button("Start Over", systemImage: "backward.end", action: onStartOver)
-                    .appleLiveMenuPresence(model)
-                    .accessibilityIdentifier("live.player.startOver")
-            }
-            AppleSleepTimerMenu(coordinator: coordinator, isLive: request.isLive, transport: model)
-            if let sharePlayMenu {
-                Button(sharePlayMenu.primaryTitle, systemImage: "shareplay", action: sharePlayMenu.primaryAction)
-                    .appleLiveMenuPresence(model)
-                if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
-                    Button(title, role: .destructive, action: action)
-                }
-            }
-        } label: {
-            glyph("ellipsis", size: 20)
-        }
-        .appleBareMenu()
-        .accessibilityLabel("More")
-        .accessibilityIdentifier("player.options")
     }
 
     // MARK: - Centre
@@ -279,6 +253,54 @@ struct AppleLiveSystemChrome: View {
     private var isPlaying: Bool {
         if case .playing = coordinator.phase { return true }
         return false
+    }
+}
+
+/// More, in its own view: the chrome's body reads the live position and
+/// seekable range, which tick four times a second, and rebuilding an open
+/// menu at that rate kept it animating and lost the taps on its rows (iOS 27
+/// crawl, 2026-10-18). Load-bearing: SwiftUI skips this body only while the
+/// closures below arrive as stored values; wrapping one inline at the call
+/// site (as `onClose` is) brings the per-tick rebuild back.
+@MainActor
+private struct AppleLiveMoreMenu: View {
+    let model: AppleTransportOverlayModel
+    let coordinator: ApplePlaybackCoordinator
+    let isLive: Bool
+    let onLastChannel: (() -> Void)?
+    let onStartOver: (() -> Void)?
+    let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
+
+    var body: some View {
+        Menu {
+            if let onLastChannel {
+                Button("Last Channel", systemImage: "arrow.uturn.backward", action: onLastChannel)
+                    .appleLiveMenuPresence(model)
+                    .accessibilityIdentifier("live.player.lastChannel")
+            }
+            if let onStartOver {
+                Button("Start Over", systemImage: "backward.end", action: onStartOver)
+                    .appleLiveMenuPresence(model)
+                    .accessibilityIdentifier("live.player.startOver")
+            }
+            AppleSleepTimerMenu(coordinator: coordinator, isLive: isLive, transport: model)
+            if let sharePlayMenu {
+                Button(sharePlayMenu.primaryTitle, systemImage: "shareplay", action: sharePlayMenu.primaryAction)
+                    .appleLiveMenuPresence(model)
+                if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
+                    Button(title, role: .destructive, action: action)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 20, weight: .semibold))
+                .appleTransportGlyphLegibility()
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .appleBareMenu()
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("player.options")
     }
 }
 
