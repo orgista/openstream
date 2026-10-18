@@ -30,6 +30,12 @@ struct AppleBackupSettingsView: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink(value: AppleSettingsRoute.transfer) {
+                    AppleTVNavigationLabel("Transfer Setup", systemImage: "arrow.left.arrow.right")
+                }
+                .accessibilityIdentifier("settings.transfer")
+            }
+            Section {
                 Toggle(isOn: $syncEnabled) {
                     Text("Sync with iCloud")
                     if let note = syncAvailability.note {

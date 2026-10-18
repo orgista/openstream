@@ -3,6 +3,40 @@ import Testing
 @testable import OpenStreamApple
 
 struct AppleImportProgressTests {
+    @Test(arguments: [false, true])
+    func validationAnnouncesOnlyAnExplicitFirstImport(announcesImport: Bool) async throws {
+        let name = UUID().uuidString
+        let url = try #require(URL(string: "https://fixture.example/list.m3u"))
+        let source = AppleSource(kind: .liveTV, name: name, url: url, iptvType: .m3u)
+        let client = AppleIPTVClient(loader: { request in
+            let announced = await MainActor.run {
+                AppleImportStore.shared.operations.contains { $0.title == name }
+            }
+            #expect(announced == announcesImport)
+            let response = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (Data("#EXTM3U\n#EXTINF:-1,Fixture\nhttps://fixture.example/live.m3u8\n".utf8), response)
+        })
+        let channels = try await client.validate(source: source, announcesImport: announcesImport)
+        #expect(channels.count == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func validationAndRefreshAreQuietByDefault(refresh: Bool) async throws {
+        let name = UUID().uuidString
+        let url = try #require(URL(string: "https://fixture.example/list.m3u"))
+        let source = AppleSource(kind: .liveTV, name: name, url: url, iptvType: .m3u)
+        let client = AppleIPTVClient(loader: { _ in
+            let announced = await MainActor.run {
+                AppleImportStore.shared.operations.contains { $0.title == name }
+            }
+            #expect(!announced)
+            let response = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (Data("#EXTM3U\n#EXTINF:-1,Fixture\nhttps://fixture.example/live.m3u8\n".utf8), response)
+        })
+        let channels = try await (refresh ? client.channels(source: source) : client.validate(source: source))
+        #expect(channels.count == 1)
+    }
+
     @Test func progressHandlesUnknownLengthAndClampsKnownLength() {
         #expect(AppleImportProgress(items: 0, bytes: 42, totalBytes: 0).bytes == 42)
         #expect(AppleImportProgress(items: 0, bytes: 200, totalBytes: 100).bytes == 100)

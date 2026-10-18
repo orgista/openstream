@@ -1581,15 +1581,19 @@ private struct AppleAddLiveTVSourceView: View {
             let credentials = submittedType == .xtream
                 ? AppleIPTVCredentials(username: submittedUsername, password: submittedPassword)
                 : nil
+            let announcesImport = action.shouldSave && !sourceStore.sources.contains { $0.kind == .liveTV }
             let channels: [AppleIPTVChannel]
-            if importingFile {
+            if importingFile && announcesImport {
                 let data = Data(pastedPlaylist.utf8)
                 channels = try await AppleImportStore.shared.run(title: source.name, unit: "channels") { progress in
                     try await AppleIPTVClient.parseM3UOffMain(data, sourceID: source.id, baseURL: source.url, progress: progress)
                 }
                 guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
+            } else if importingFile {
+                channels = try await AppleIPTVClient.parseM3UOffMain(Data(pastedPlaylist.utf8), sourceID: source.id, baseURL: source.url, progress: { _ in })
+                guard !channels.isEmpty else { throw AppleIPTVError.noChannels }
             } else {
-                channels = try await client.validate(source: source, credentials: credentials)
+                channels = try await client.validate(source: source, credentials: credentials, announcesImport: announcesImport)
             }
             try Task.checkCancellation()
             if action.shouldSave {
