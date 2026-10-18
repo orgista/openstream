@@ -25,7 +25,42 @@ extension View {
     func appleTitlePageToolbar(pageID: String, backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
         modifier(AppleTitlePageToolbar(pageID: pageID, backIsBlocked: backIsBlocked, onBack: onBack))
     }
+
+    /// iOS 26 sets a title page's bar buttons on round glass; iOS 18 draws bare
+    /// glyphs that get lost over the art (owner, checklist row 30), so there
+    /// they sit on a round material backing instead.
+    @ViewBuilder
+    func appleTitleBarButtonBacking(_ isActive: Bool = true) -> some View {
+        #if os(iOS)
+        if #available(iOS 26, *) {
+            self
+        } else if isActive {
+            // A style, not modifiers on the button: iOS 18 turns a plain
+            // toolbar button into a bar item and drops its background.
+            self.buttonStyle(AppleRoundBarButtonStyle())
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
 }
+
+#if os(iOS)
+private struct AppleRoundBarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(.iconOnly)
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(.regularMaterial, in: Circle())
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+#endif
 
 private struct AppleTitlePageToolbar: ViewModifier {
     let pageID: String
@@ -48,6 +83,7 @@ private struct AppleTitlePageToolbar: ViewModifier {
                     .help("Back")
                     .accessibilityIdentifier("detail.back")
                     .appleVisionActionTarget()
+                    .appleTitleBarButtonBacking()
                 }
                 if let tabToolbar {
                     AppleTabToolbar(tab: tabToolbar.tab, isRefreshing: isRefreshing,

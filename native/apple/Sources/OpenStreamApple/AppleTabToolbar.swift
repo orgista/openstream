@@ -36,6 +36,7 @@ struct AppleTabToolbar: ToolbarContent {
                     }
                     .accessibilityLabel("Search")
                     .appleVisionActionTarget()
+                    .appleTitleBarButtonBacking(isTitlePage)
                 case .refresh:
                     Button(action: onRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")
