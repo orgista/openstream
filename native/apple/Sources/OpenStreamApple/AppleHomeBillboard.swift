@@ -816,7 +816,7 @@ private struct AppleHomeHeroPreview: View {
         // remembered choice is sound on; the control over the video toggles it.
         soundUnlocked = AppleTrailerSoundMemory.soundOn() == true
         isMuted = trailerRequest == nil && !soundUnlocked
-        guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: trailerRequest != nil) else { return }
+        ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: trailerRequest != nil)
         if trailerRequest != nil { appleTrace("trailer unmuted (explicit press)") }
         appleTrace("hero trailer start \(item.name)")
         playerStarted = false
@@ -837,7 +837,7 @@ private struct AppleHomeHeroPreview: View {
     #if os(iOS) || os(visionOS)
     private func toggleSound() {
         let next = AppleTrailerSoundBridge.tapped(isMuted: isMuted, allowsSound: trailerRequest != nil || soundUnlocked)
-        if !next.isMuted, !ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true) { return }
+        if !next.isMuted { ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true) }
         // Remembered for every trailer after this one, across launches.
         soundUnlocked = !next.isMuted
         AppleTrailerSoundMemory.remember(soundOn: !next.isMuted)

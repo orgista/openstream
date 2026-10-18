@@ -1,0 +1,62 @@
+Date/Time:        2026-10-18 15:12:10.131 -0500
+End time:         2026-10-18 15:12:11.175 -0500
+OS Version:       iPhone OS 18.7.8 (Build 22H352)
+Architecture:     arm64e
+Report Version:   73
+Share With Devs:  Yes
+
+Data Source:      KPerf Lightweight PET
+Shared Cache:     167A4677-EC19-3261-8C66-4B3A411BA343 slid base address 0x19d290000 (System Primary)
+Shared Cache:     C1491643-71B0-33B7-9862-EF984C1B0FAB slid base address 0x19f5d4000 (DriverKit)
+Reason:           UIKit-runloop-OpenStream iOS: timeout 1045ms
+
+Command:          OpenStream iOS
+Path:             /private/var/containers/Bundle/Application/517BCD0D-75DB-49F4-9C42-FC37E3573299/OpenStream iOS.app/OpenStream iOS
+Identifier:       com.orgista.openstream
+Version:          1.0 (1)
+Architecture:     arm64
+PID:              85245
+Time Since Fork:  56s
+
+Duration:         1.04s
+Duration Sampled: 3.42s (event starts 2.00s after samples start, event ends 0.38s before samples end)
+Steps:            342 (10ms sampling interval)
+
+Hardware model:   iPhone16,2
+Active cpus:      6
+Memory size:      7.48 GB
+HW page size:     16384
+VM page size:     16384
+Shared cache residency: 14.29% (702.66 MB / 4917.88 MB)
+
+=== OpenStream iOS main thread (342 samples) — heaviest branch
+136:                                                                                                        99   AppleYouTubeAutoPreview.updateUIView(_:context:) + 2080 (OpenStream iOS + 2936836) [0x102655004]
+137:                                                                                                          99   specialized static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 144 (OpenStream iOS + 9090404) [0x102c33564]
+151:                                                                                                                                      99   partial apply for closure #1 in static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 24 (OpenStream iOS + 9090536) [0x102c335e8]
+152:                                                                                                                                        99   closure #1 in static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 128 (OpenStream iOS + 9089976) [0x102c333b8]
+153:                                                                                                                                          99   -[AVAudioSession setCategory:mode:options:error:] + 100 (AudioSession + 43068) [0x1bf14283c]
+154:                                                                                                                                            99   -[AVAudioSession(CommonAPI) privateSetCategoryWithOptions:modes:routeSharingPolicy:options:accessor:] + 664 (AudioSession + 44000) [0x1bf142be0]
+155:                                                                                                                                              99   as::client::api_utils::ServerAccessor::SetBatchProperties(NSDictionary<NSString*, id<NSSecureCoding>>*, NSArray<NSDictionary<NSString*, NSNumber*>*>* __autoreleasing*, as::AVAudioSessionBatchSetStrategy, bool, bool) const + 532 (AudioSession + 50804) [0x1bf144674]
+444:                                                                  1    specialized static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 144 (OpenStream iOS + 9090404) [0x102c33564]
+458:                                                                                              1    partial apply for closure #1 in static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 24 (OpenStream iOS + 9090536) [0x102c335e8]
+459:                                                                                                1    closure #1 in static ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed:) + 164 (OpenStream iOS + 9090012) [0x102c333dc]
+460:                                                                                                  1    -[AVAudioSession setActive:withOptions:error:] + 72 (AudioSession + 98536) [0x1bf1500e8]
+461:                                                                                                    1    -[AVAudioSession privateSetActive:withOptions:error:accessor:] + 320 (AudioSession + 98920) [0x1bf150268]
+648:                                    1    -[AVAudioSession isOtherAudioPlaying] + 116 (AudioSession + 67204) [0x1bf148684]
+885:                  3  __66-[AVAudioSession(ClientCommonImplementation) privateDispatchPing:]_block_invoke + 44 (AudioSession + 12644) [0x1bf13b164]
+886:                    2  -[AVAudioSession(ClientCommonImplementation) privateHandlePing] + 204 (AudioSession + 12904) [0x1bf13b268]
+898:                    1  -[AVAudioSession(ClientCommonImplementation) privateHandlePing] + 772 (AudioSession + 13472) [0x1bf13b4a0]
+899:                      1  -[AVAudioSession handleDeferredMessage:userInfo:] + 128 (AudioSession + 19396) [0x1bf13cbc4]
+900:                        1  as::client::cache_util::CacheManager::checkAndRefreshCacheForNotification(AVAudioSession*, NSString*) + 300 (AudioSession + 22656) [0x1bf13d880]
+901:                          1  as::client::cache_util::CacheManager::refreshCachedProperty(AVAudioSession*, NSString*) + 168 (AudioSession + 53432) [0x1bf1450b8]
+902:                            1  -[AVAudioSession(GenericPipe) getMXProperties:propertyErrors:] + 88 (AudioSession + 55584) [0x1bf145920]
+1299:                  1  __66-[AVAudioSession(ClientCommonImplementation) privateDispatchPing:]_block_invoke + 44 (AudioSession + 12644) [0x1bf13b164]
+1300:                    1  -[AVAudioSession(ClientCommonImplementation) privateHandlePing] + 772 (AudioSession + 13472) [0x1bf13b4a0]
+1301:                      1  -[AVAudioSession handleDeferredMessage:userInfo:] + 128 (AudioSession + 19396) [0x1bf13cbc4]
+1302:                        1  as::client::cache_util::CacheManager::checkAndRefreshCacheForNotification(AVAudioSession*, NSString*) + 300 (AudioSession + 22656) [0x1bf13d880]
+1303:                          1  as::client::cache_util::CacheManager::refreshCachedProperty(AVAudioSession*, NSString*) + 168 (AudioSession + 53432) [0x1bf1450b8]
+1304:                            1  -[AVAudioSession(GenericPipe) getMXProperties:propertyErrors:] + 88 (AudioSession + 55584) [0x1bf145920]
+2250:                  1  __66-[AVAudioSession(ClientCommonImplementation) privateDispatchPing:]_block_invoke + 44 (AudioSession + 12644) [0x1bf13b164]
+2251:                    1  -[AVAudioSession(ClientCommonImplementation) privateHandlePing] + 772 (AudioSession + 13472) [0x1bf13b4a0]
+2252:                      1  -[AVAudioSession handleDeferredMessage:userInfo:] + 128 (AudioSession + 19396) [0x1bf13cbc4]
+2253:                        1  as::client::cache_util::CacheManager::checkAndRefreshCacheForNotification(AVAudioSession*, NSString*) + 300 (AudioSession + 22656) [0x1bf13d880]
