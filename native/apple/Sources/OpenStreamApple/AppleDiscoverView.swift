@@ -116,8 +116,8 @@ struct AppleDiscoverView: View {
     /// Textless hero art, keyed by media id, once TMDB has been asked. Empty
     /// through first paint by design — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
-    /// The hero list has held still for `AppleHeroTrailerGate.settleDelay`.
-    @State private var heroesSettled = false
+    /// The hero list that last held still for `AppleHeroTrailerGate.settleDelay`.
+    @State private var settledHeroes: AppleHeroTrailerGate.SettlementInput?
 
     let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
@@ -216,6 +216,14 @@ struct AppleDiscoverView: View {
         let continueWatching = recommendations.continueWatching
         let picks = recommendations.picks
         let heroes = recommendations.heroes
+        let heroSettlement = AppleHeroTrailerGate.SettlementInput(
+            heroIDs: heroes.map(\.id),
+            // A refresh that keeps the same heroes leaves a settled list (and
+            // its playing trailer) alone.
+            catalogReviewDone: sourceStore.sources.allSatisfy { AppleCatalogDiscoveryPolicy.catalogs(for: $0).isEmpty }
+                || (settledCatalogIdentity == catalogConfigurationIdentity(sourceStore.sources)
+                    && (!catalogStore.isLoading || settledHeroes?.heroIDs == heroes.map(\.id)))
+        )
         let recommendationRevision = recommendationRevision
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
             hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
@@ -266,11 +274,13 @@ struct AppleDiscoverView: View {
                                         wordmarkFailed: failed, phone: mode == .phone, mac: mode == .mac,
                                         pad: mode == .pad, tv: tv)
                                 }
-                                .environment(\.appleHeroesSettled, heroesSettled)
-                                .task(id: heroes.map(\.id)) {
-                                    heroesSettled = false
-                                    try? await Task.sleep(for: AppleHeroTrailerGate.settleDelay)
-                                    if !Task.isCancelled { heroesSettled = true }
+                                .environment(\.appleHeroesSettled, heroSettlement.isSettled(by: settledHeroes))
+                                .task(id: heroSettlement) {
+                                    settledHeroes = nil
+                                    guard heroSettlement.catalogReviewDone else { return }
+                                    do { try await Task.sleep(for: AppleHeroTrailerGate.settleDelay) } catch { return }
+                                    guard !Task.isCancelled else { return }
+                                    settledHeroes = heroSettlement
                                 }
                                 .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
                                     // What the cache already knows draws at once;

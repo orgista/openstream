@@ -6,6 +6,30 @@ import Testing
 /// app's rules (REA report §1): muted autoplay once the still has settled,
 /// stopped whenever the hero can't be seen.
 @Suite struct AppleHeroTrailerGateTests {
+    @Test func anUnreviewedListCannotSettle() {
+        let list = AppleHeroTrailerGate.SettlementInput(heroIDs: ["first"], catalogReviewDone: false)
+        #expect(!list.isSettled(by: list))
+        #expect(!AppleHeroTrailerGate.plays(.init(heroesSettled: list.isSettled(by: list))))
+        #expect(AppleHeroTrailerGate.plays(.init(heroesSettled: list.isSettled(by: list), pressed: true)))
+    }
+
+    @Test func reviewCompletionNeedsItsOwnStableInterval() {
+        let provisional = AppleHeroTrailerGate.SettlementInput(heroIDs: ["first"], catalogReviewDone: false)
+        let reviewed = AppleHeroTrailerGate.SettlementInput(heroIDs: ["first"], catalogReviewDone: true)
+        #expect(!reviewed.isSettled(by: provisional))
+        #expect(!reviewed.isSettled(by: nil))
+        #expect(reviewed.isSettled(by: reviewed))
+    }
+
+    @Test func aReplacementListRejectsThePreviousTimersCompletion() {
+        let first = AppleHeroTrailerGate.SettlementInput(heroIDs: ["first", "next"], catalogReviewDone: true)
+        let replacement = AppleHeroTrailerGate.SettlementInput(heroIDs: ["next", "first"], catalogReviewDone: true)
+        #expect(!replacement.isSettled(by: first))
+        #expect(replacement.isSettled(by: replacement))
+        let reviewing = AppleHeroTrailerGate.SettlementInput(heroIDs: replacement.heroIDs, catalogReviewDone: false)
+        #expect(!reviewing.isSettled(by: replacement))
+    }
+
     @Test func autoplayRunsWhenEverythingAllowsIt() {
         #expect(AppleHeroTrailerGate.plays(.init()))
     }
