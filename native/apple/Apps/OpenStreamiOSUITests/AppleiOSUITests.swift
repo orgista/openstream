@@ -4886,7 +4886,12 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // Read where it is now, not where the last look at the screen found it:
         // a player that closed left three of its controls in the report as
         // "on screen and refuses a touch" when they were simply gone.
-        guard let frame = (try? element.snapshot())?.frame else { return .gone }
+        guard let snapshot = try? element.snapshot() else { return .gone }
+        let frame = snapshot.frame
+        // Read once from the same snapshot: the hero auto-advances, and a later
+        // `element.identifier` on a replaced button raises "No matches found".
+        let identifier = snapshot.identifier
+        let label = snapshot.label
         _ = stale
         if frame.width < 1 || frame.height < 1 { return .blocked }
         let screen = crawlScreenRect
@@ -4908,22 +4913,29 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         // The same holds for the navigation bar: XCTest called a Library hero
         // button hittable under it, and the touch went to the bar.
-        if !isTab, crawlContentOverlapsNavigationBar(element, frame: frame) { return .offScreen }
+        if !isTab, crawlContentOverlapsNavigationBar(frame: frame, elementType: snapshot.elementType, identifier: identifier, label: label) {
+            return .offScreen
+        }
         if element.isHittable { return .hittable }
-        if isTouchableMenuButton(element, identifier: element.identifier) { return .hittable }
+        if isTouchableMenuButton(element, identifier: identifier) { return .hittable }
         return .blocked
     }
 
     /// Scroll content can retain a frame under the pinned navigation bar.
     /// The episodes crawl saw My List/Rate at y=62, beneath that bar. Its
     /// own toolbar buttons are identified by ancestry and remain tappable targets.
-    private func crawlContentOverlapsNavigationBar(_ element: XCUIElement, frame: CGRect) -> Bool {
+    private func crawlContentOverlapsNavigationBar(
+        frame: CGRect, elementType: XCUIElement.ElementType, identifier: String, label: String
+    ) -> Bool {
         let bar = app.navigationBars.firstMatch
         // XCTest taps the centre, so only a centre under the bar is unreachable;
         // a hero button whose edge touches the bar is still pressed.
-        guard bar.exists, bar.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
-        let toolbarControl = bar.descendants(matching: element.elementType).matching(NSPredicate(
-            format: "identifier == %@ AND label == %@", element.identifier, element.label)).firstMatch
+        // Everything here comes from snapshots, so a hero that advances or a bar
+        // that goes away mid-check cannot raise.
+        guard let barFrame = (try? bar.snapshot())?.frame,
+              barFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+        let toolbarControl = bar.descendants(matching: elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", identifier, label)).firstMatch
         return !toolbarControl.exists
     }
 
@@ -4942,7 +4954,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             // and on a title page is the hero, and the hero takes the gesture.
             // On the iPad that left twenty-three cards reported as off the
             // screen when the page had simply never moved.
-            if !isTab, crawlContentOverlapsNavigationBar(element, frame: frame) {
+            if !isTab, let current = try? element.snapshot(),
+               crawlContentOverlapsNavigationBar(frame: current.frame, elementType: current.elementType, identifier: current.identifier, label: current.label) {
                 crawlScrollUp()
             } else if !isTab, !crawlBarRect.isNull, frame.intersects(crawlBarRect.insetBy(dx: -10, dy: -10)) {
                 // Push the content away from the bar it is hiding under.
