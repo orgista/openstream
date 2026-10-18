@@ -195,7 +195,7 @@ struct AppleServerTrailerStage: View {
             .task(id: Run(url: trailer.url, plays: plays, restart: restart)) {
                 // Muted, it still takes `.ambient`: a muted player on the
                 // session the last title left would stop the viewer's music.
-                guard plays, ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: !muted) else {
+                guard plays, await ApplePlaybackSessionPolicy.prepareTrailerAudioAwaiting(pressed: !muted) else {
                     playback.stop()
                     return
                 }
@@ -247,7 +247,7 @@ struct AppleServerTrailerPlayerView: View {
             .accessibilityIdentifier("trailer.player")
             .onAppear {
                 #if os(iOS) || os(tvOS) || os(visionOS)
-                _ = ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true)
+                ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true)
                 #endif
                 // The viewer may pause it: no watchdog here.
                 playback.start(trailer, muted: false, watchdog: false)

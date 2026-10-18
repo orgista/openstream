@@ -49,35 +49,85 @@ enum ApplePlaybackSessionPolicy: Equatable, Sendable {
         """
     }
 
-    #if os(iOS) || os(tvOS) || os(visionOS)
-    @MainActor static var activeAudioPolicy: Self?
+    @MainActor static var activeAudioPolicy: Self? {
+        didSet { audioPolicyGeneration &+= 1 }
+    }
+    @MainActor private static var audioPolicyGeneration: UInt64 = 0
 
+    /// Returns once preparation is queued; activation failures are reported in the trace.
+    @MainActor static func prepareTrailerAudio(
+        workQueue: AppleAudioSessionWorkQueue = .shared,
+        activate: @escaping @Sendable () throws -> Void
+    ) {
+        // Required before enqueue: a second back-to-back call must invalidate
+        // this one, or the older completion could apply after the newer.
+        audioPolicyGeneration &+= 1
+        let generation = audioPolicyGeneration
+        appleTrace("trailer audio preparing")
+        // Pending long-form preparation/deactivation must finish before takeover.
+        workQueue.enqueue {
+            do {
+                try activate()
+                Task { @MainActor in
+                    // A newer playback request or teardown owns any later policy change.
+                    guard audioPolicyGeneration == generation else { return }
+                    activeAudioPolicy = .trailer
+                    appleTrace("trailer audio prepared")
+                }
+            } catch {
+                appleTraceFailure("trailer audio unavailable: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Waits for the session to be ready; false when activation failed or was cancelled.
+    @MainActor static func prepareTrailerAudioAwaiting(
+        workQueue: AppleAudioSessionWorkQueue = .shared,
+        activate: @escaping @Sendable () throws -> Void
+    ) async -> Bool {
+        audioPolicyGeneration &+= 1
+        let generation = audioPolicyGeneration
+        appleTrace("trailer audio preparing")
+        do {
+            try await workQueue.perform(activate)
+        } catch {
+            appleTraceFailure("trailer audio unavailable: \(error.localizedDescription)")
+            return false
+        }
+        if audioPolicyGeneration == generation {
+            activeAudioPolicy = .trailer
+            appleTrace("trailer audio prepared")
+        }
+        return true
+    }
+
+    #if os(iOS) || os(tvOS) || os(visionOS)
     /// `pressed` is an explicit "Play Trailer": it takes `.playback` instead
     /// of the trailer's usual `.ambient`, so the silent switch does not mute
     /// the sound the viewer just asked for. Autoplay never passes it — an
     /// unrequested preview must stay silenceable exactly as the ringer
     /// switch expects.
-    @MainActor static func prepareTrailerAudio(pressed: Bool = false) -> Bool {
-        let policy = Self.trailer
-        let session = AVAudioSession.sharedInstance()
-        do {
-            // Drain pending long-form preparation/deactivation before taking over.
-            // Otherwise that queued work can overwrite ambient after this returns.
-            try AppleAudioSessionWorkQueue.shared.performSynchronously {
-                let category: AVAudioSession.Category = pressed
-                    ? .playback
-                    : (policy.audioCategory == .ambient ? .ambient : .playback)
-                try session.setCategory(category, mode: .default, options: [])
-                #if os(visionOS)
-                try session.setIsNowPlayingCandidate(policy.publishesNowPlaying)
-                #endif
-                try session.setActive(true)
-            }
-            activeAudioPolicy = policy
-            return true
-        } catch {
-            appleTraceFailure("trailer audio unavailable: \(error.localizedDescription)")
-            return false
+    @MainActor static func prepareTrailerAudio(pressed: Bool = false) {
+        prepareTrailerAudio(activate: trailerSessionWork(pressed: pressed))
+    }
+
+    /// Same session work, but the caller starts a player right after, so it waits.
+    @MainActor static func prepareTrailerAudioAwaiting(pressed: Bool = false) async -> Bool {
+        await prepareTrailerAudioAwaiting(activate: trailerSessionWork(pressed: pressed))
+    }
+
+    private static func trailerSessionWork(pressed: Bool) -> @Sendable () throws -> Void {
+        {
+            let policy = Self.trailer
+            let session = AVAudioSession.sharedInstance()
+            let category: AVAudioSession.Category = pressed
+                ? .playback
+                : (policy.audioCategory == .ambient ? .ambient : .playback)
+            try session.setCategory(category, mode: .default, options: [])
+            #if os(visionOS)
+            try session.setIsNowPlayingCandidate(policy.publishesNowPlaying)
+            #endif
+            try session.setActive(true)
         }
     }
     #endif

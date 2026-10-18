@@ -5385,6 +5385,7 @@ struct AppleCatalogItemDetailView: View {
     private func prepareTrailerAudio(pressed: Bool = false) -> Bool {
         #if os(iOS) || os(visionOS)
         ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: pressed)
+        return true
         #elseif os(macOS)
         // No audio session to set up; the Mac title page's hero plays it.
         usesMacTitlePage
@@ -8535,7 +8536,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             view.webView.evaluateJavaScript("window.setTrailerLandscape(\(isLandscape ? "true" : "false"));", completionHandler: nil)
         }
         if context.coordinator.lastPlaying != isPlaying {
-            if isPlaying, !ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) { return }
+            if isPlaying { ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) }
             context.coordinator.lastPlaying = isPlaying
             if isPlaying {
                 context.coordinator.prepareForPlayback()
@@ -8548,7 +8549,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             )
         }
         if context.coordinator.lastReplayGeneration != replayGeneration {
-            guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) else { return }
+            ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound)
             context.coordinator.lastReplayGeneration = replayGeneration
             context.coordinator.prepareForPlayback()
             view.webView.evaluateJavaScript("window.restartTrailer();", completionHandler: nil)
@@ -8577,7 +8578,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     }
 
     private func load(_ url: URL, in view: WKWebView, context: Context) {
-        guard ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound) else { return }
+        ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: allowsSound)
         context.coordinator.loadedURL = url
         context.coordinator.loadedLandscape = isLandscape
         context.coordinator.lastAllowsSound = allowsSound
