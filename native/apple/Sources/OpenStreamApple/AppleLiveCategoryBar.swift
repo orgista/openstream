@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 import SwiftUI
 
 /// The Live tab's fixed category row (owner item 8): underlined text tabs
@@ -45,10 +45,11 @@ struct AppleLiveCategoryBar: View {
                     Image(systemName: "tablecells")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .appleHoverAffordance()
                 .accessibilityLabel("Guide")
                 .accessibilityIdentifier("live.guide")
             }
@@ -56,15 +57,16 @@ struct AppleLiveCategoryBar: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
+                    .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .appleHoverAffordance()
             .padding(.trailing, 4)
             .accessibilityLabel("Search Channels")
             .accessibilityIdentifier("live.search")
         }
-        .frame(height: 44)
+        .frame(height: AppleDesignTokens.minimumActionSize)
         .background(Color.black)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("live.categories")
@@ -80,17 +82,18 @@ struct AppleLiveCategoryBar: View {
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .fixedSize()
-                .frame(minHeight: 44)
+                .frame(minHeight: AppleDesignTokens.minimumActionSize)
                 .overlay(alignment: .bottom) {
                     Rectangle()
                         .fill(.white)
                         .frame(height: 2)
                         .opacity(isSelected ? 1 : 0)
                 }
-                .frame(minWidth: 44)
+                .frame(minWidth: AppleDesignTokens.minimumActionSize)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .appleHoverAffordance()
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("live.category.\(tab)")
     }

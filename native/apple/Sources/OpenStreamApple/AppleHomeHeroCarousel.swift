@@ -76,7 +76,7 @@ struct AppleHomeHeroCarousel<Page: View>: View {
                 page(index, failed, .tv, items.count, index, context)
             }
             .padding(.horizontal, -AppleTVChromeMetrics.horizontalSafeInset)
-            #elseif os(iOS)
+            #elseif os(iOS) || os(visionOS)
             if presentation == .phone || presentation == .pad {
                 AppleHomePhoneHeroCarousel(pageIDs: pageIDs,
                     dotsCentreInset: presentation == .pad ? AppleMacHeroLayout.padDotsCentreInset : AppleHomePhoneHeroLayout.dotsCentreInset,

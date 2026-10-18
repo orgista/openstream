@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A7D100000000000000000001 /* ApplePadParityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D100000000000000000003 /* ApplePadParityUITests.swift */; };
+		A7D100000000000000000002 /* ApplePadParityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D100000000000000000003 /* ApplePadParityUITests.swift */; };
 		084BDE91F37ABFC62DD16953 /* AppStoreScreenshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C5AD7DD647D200BEBD523C /* AppStoreScreenshotUITests.swift */; };
 		08897ED4EA3FB6233278368B /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 749D758BBC852A12509217D3 /* Cocoa.framework */; };
 		0A329C96DE873245B81BEDD8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 515F2F6124AE9E61D64D3E10 /* Foundation.framework */; };
@@ -201,6 +203,7 @@
 
 /* Begin PBXFileReference section */
 		1EF3BF2AFB564D81B0674276 /* OpenStreamMessagesViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenStreamMessagesViewController.swift; sourceTree = "<group>"; };
+		A7D100000000000000000003 /* ApplePadParityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplePadParityUITests.swift; sourceTree = "<group>"; };
 		7A1000000000000000000040 /* AppleVisionPlayerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleVisionPlayerUITests.swift; sourceTree = "<group>"; };
 		42C5AD7DD647D200BEBD523C /* AppStoreScreenshotUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppStoreScreenshotUITests.swift; sourceTree = "<group>"; };
 		515F2F6124AE9E61D64D3E10 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -455,6 +458,7 @@
 				A5B000000000000000000002 /* PrivacyInfo.xcprivacy */,
 				A5B000000000000000000001 /* PrivacyInfo.xcprivacy */,
 				42C5AD7DD647D200BEBD523C /* AppStoreScreenshotUITests.swift */,
+				A7D100000000000000000003 /* ApplePadParityUITests.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -990,6 +994,7 @@
 			files = (
 				B273701D1EE329791A414789 /* AppStoreScreenshotUITests.swift in Sources */,
 				7A1000000000000000000041 /* AppleVisionPlayerUITests.swift in Sources */,
+				A7D100000000000000000001 /* ApplePadParityUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1031,6 +1036,7 @@
 				7A1000000000000000000004 /* AppleiOSLiveActivityUITests.swift in Sources */,
 				7A1000000000000000000006 /* AppleiOSSystemIntegrationUITests.swift in Sources */,
 				343E6FBEB8C65C3016DDB601 /* AppStoreScreenshotUITests.swift in Sources */,
+				A7D100000000000000000002 /* ApplePadParityUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

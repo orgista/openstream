@@ -34,7 +34,8 @@
         "name": "OpenStreamVisionUITests"
       },
       "selectedTests": [
-        "AppleVisionPlayerUITests"
+        "AppleVisionPlayerUITests",
+        "ApplePadParityUITests"
       ]
     }
   ],

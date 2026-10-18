@@ -12,10 +12,13 @@ import UIKit
 /// resizes uniformly from the window bar; when it closes, the window goes
 /// back to the size it had. Pure arithmetic, so the SwiftPM gate can test it.
 enum AppleVisionPlayerWindowPolicy {
-    /// The browse window's opening size (`OpenStreamApps`).
-    static let defaultWindowSize = CGSize(width: 1100, height: 760)
-    /// The browse window's minimum (`OpenStreamRootView`).
-    static let browseMinimum = CGSize(width: 760, height: 540)
+    /// The browse window's opening size (`OpenStreamApps`): an 11-inch
+    /// iPad's screen on its side, so every tab opens on the iPad's layout.
+    static let defaultWindowSize = CGSize(width: 1180, height: 820)
+    /// The browse window's minimum (`OpenStreamRootView`): wide enough that
+    /// Live keeps the landscape iPad's player and channel list side by side
+    /// (`AppleLiveStagePolicy`).
+    static let browseMinimum = CGSize(width: 960, height: 600)
     /// The narrowest a playing window may get.
     static let playerMinimumWidth: CGFloat = 640
     static let defaultAspect: CGFloat = 16.0 / 9.0
@@ -150,6 +153,19 @@ final class AppleVisionPlayerStage {
             resizingRestrictions: .uniform), errorHandler: nil)
     }
 
+    #if DEBUG
+    /// `-OpenStreamVisionBrowseWidth`/`-Height`: the UI tests' window size.
+    func applyReviewWindowSizeIfRequested() {
+        let width = UserDefaults.standard.double(forKey: "OpenStreamVisionBrowseWidth")
+        let height = UserDefaults.standard.double(forKey: "OpenStreamVisionBrowseHeight")
+        guard width > 0, height > 0, let scene else { return }
+        scene.requestGeometryUpdate(.Vision(
+            size: CGSize(width: width, height: height),
+            minimumSize: AppleVisionPlayerWindowPolicy.browseMinimum,
+            resizingRestrictions: .freeform), errorHandler: nil)
+    }
+    #endif
+
     private func restoreWindow() {
         let size = AppleVisionPlayerWindowPolicy.restoredSize(saved: savedSize)
         savedSize = nil
@@ -189,7 +205,12 @@ private struct AppleVisionPlayerStageHost: ViewModifier {
                 }
             }
             .background {
-                AppleVisionWindowReader { stage.scene = $0 }
+                AppleVisionWindowReader {
+                    stage.scene = $0
+                    #if DEBUG
+                    stage.applyReviewWindowSizeIfRequested()
+                    #endif
+                }
             }
             .environment(stage)
     }

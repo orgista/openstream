@@ -266,6 +266,10 @@ struct AppleTitlePageSeasonPicker: View {
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.12), value: isHovered)
             #endif
+            #if os(visionOS)
+            // Vision Pro never reports gaze to `onHover`.
+            .hoverEffect(.highlight)
+            #endif
             // The iPhone title page only; Apple TV has its own season menu.
             #if !os(tvOS)
             // On the Mac below the control; on iPhone/iPad wherever there is room.

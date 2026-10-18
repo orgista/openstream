@@ -316,13 +316,13 @@ struct AppleDiscoverView: View {
                 }
                 .modifier(ArtworkScrollPauseModifier())
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-                #if os(iOS)
+                #if os(iOS) || os(visionOS)
                 .refreshable { await refreshContent() }
                 #endif
                 #if DEBUG
                 .scrollPosition($reviewScrollPosition)
                 #endif
-                #if os(iOS)
+                #if os(iOS) || os(visionOS)
                 .modifier(AppleDiscoverHeroLayoutReader(page: "discover", phone: $phoneHeroLayout, pad: $padHeroLayout))
                 #elseif os(macOS)
                 .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in
@@ -1759,7 +1759,7 @@ struct AppleDiscoverView: View {
     }
 
     private var isLandscapeIPad: Bool {
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         horizontalSizeClass == .regular && viewportSize.width > viewportSize.height
         #else
         false
@@ -3072,7 +3072,7 @@ struct AppleCatalogCard: View {
             #endif
         }
         if sizing == .detailSuggestions {
-            #if os(iOS)
+            #if os(iOS) || os(visionOS)
             if regularWidth { return 150 }
             let width = viewportWidth.flatMap { $0 > 0 ? $0 : nil } ?? 390
             return max(1, (width - 48) / 2.7)
@@ -3080,9 +3080,7 @@ struct AppleCatalogCard: View {
             return 150
             #endif
         }
-        #if os(visionOS)
-        return max(180, min(scaledCardWidth, 240))
-        #elseif os(tvOS)
+        #if os(tvOS)
         return 230
         #else
         return min(max(scaledCardWidth, 140), 220)
@@ -3536,7 +3534,7 @@ struct AppleCatalogItemDetailView: View {
         .alert(versionResumeTitle, isPresented: $confirmsVersionResume) {
             versionResumeButtons
         }
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         // The hero extends into the top safe area in both orientations; the
         // status-bar shield above protects text once the page scrolls.
         .scrollClipDisabled()
@@ -3572,7 +3570,7 @@ struct AppleCatalogItemDetailView: View {
         #endif
         .appleTraceScreen("title", detail: "\(item.name) (\(item.mediaID))")
         .navigationTitle("")
-        #if os(macOS) || os(iOS)
+        #if os(macOS) || os(iOS) || os(visionOS)
         // Discover's bar, unchanged, with ‹ at its leading edge (N37).
         .appleTitlePageToolbar(pageID: item.id, backIsBlocked: playbackUI.presentation != nil) { dismiss() }
         .environment(\.appleTabToolbar, tabToolbar)
@@ -3581,7 +3579,7 @@ struct AppleCatalogItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         #endif
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         // The bar stays, as it is over Discover's hero: see-through, the
         // art running up under it (the hero pulls itself up by the page's
         // top inset, which now includes the bar).
@@ -3947,7 +3945,7 @@ struct AppleCatalogItemDetailView: View {
     @ViewBuilder
     var regularTitlePage: some View {
         detailHero
-            #if os(iOS)
+            #if os(iOS) || os(visionOS)
             // With the navigation bar hidden, extend the hero through
             // the status-bar safe area in portrait as well as landscape.
             .padding(.top, -pageGeometry.safeAreaInsets.top)
@@ -3999,7 +3997,7 @@ struct AppleCatalogItemDetailView: View {
                     .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
             }
 
-            #if !os(iOS)
+            #if !os(iOS) && !os(visionOS)
             if item.type == "series" {
                 episodeSection
                     .id("vision-episodes")
@@ -4012,7 +4010,7 @@ struct AppleCatalogItemDetailView: View {
         .padding(.horizontal, detailHorizontalInset)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         // A rail, outside the column for the same reason as More Like This.
         if item.type == "series" {
             padEpisodesSection
@@ -4036,7 +4034,7 @@ struct AppleCatalogItemDetailView: View {
             moreLikeThisSection(title: "More Like This")
                 .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
         }
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         // The iPhone's and the Mac's Cast & Crew rail: the iPad had
         // none, so its portraits were nowhere (N37).
         let credits = titlePageCredits
@@ -4205,9 +4203,7 @@ struct AppleCatalogItemDetailView: View {
     private var heroHeight: CGFloat {
         #if os(tvOS)
         460
-        #elseif os(visionOS)
-        min(viewportSize.height * 0.78, viewportSize.width * 9 / 16)
-        #elseif os(iOS)
+        #elseif os(iOS) || os(visionOS)
         usesPadPortraitHero
             // The iPad's Discover hero, from the same screen.
             ? AppleMacHeroLayout(contentWidth: viewportSize.width, windowHeight: viewportSize.height,
@@ -4218,8 +4214,7 @@ struct AppleCatalogItemDetailView: View {
             )
         #elseif os(macOS)
         // Was a flat 420 pt at every window size, which is a third of a
-        // full-screen Mac display and read as a letterbox strip. The same
-        // proportion visionOS uses, so the two agree on what a wide hero is.
+        // full-screen Mac display and read as a letterbox strip.
         min(viewportSize.height * 0.78, viewportSize.width * 9 / 16)
         #else
         420
@@ -4236,7 +4231,7 @@ struct AppleCatalogItemDetailView: View {
 
     private var viewportSize: CGSize {
         #if os(visionOS)
-        pageGeometry.viewportSize == .zero ? CGSize(width: 1100, height: 760) : pageGeometry.viewportSize
+        pageGeometry.viewportSize == .zero ? AppleVisionPlayerWindowPolicy.defaultWindowSize : pageGeometry.viewportSize
         #elseif os(iOS)
         pageGeometry.viewportSize
         #elseif os(macOS)
@@ -4255,15 +4250,12 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var isLandscapeRegularLayout: Bool {
-        #if os(visionOS)
-        viewportSize.width >= 760 && viewportSize.width > viewportSize.height
-        #elseif os(iOS)
+        #if os(iOS) || os(visionOS)
         horizontalSizeClass == .regular
             && viewportSize.width > viewportSize.height
         #elseif os(macOS)
         // A Mac window is resizable to any shape, so there is no size class to
-        // ask — the window's own proportions are the answer, which is exactly
-        // how visionOS decides it.
+        // ask — the window's own proportions are the answer.
         AppleMacChromeMetrics.isRegularLayout(viewport: viewportSize)
         #else
         false
@@ -4273,9 +4265,7 @@ struct AppleCatalogItemDetailView: View {
     /// Landscape on any device, including the compact phone. Drives the
     /// full-screen hero and its overlaid title, metadata and actions.
     private var isLandscapeLayout: Bool {
-        #if os(visionOS)
-        isLandscapeRegularLayout
-        #elseif os(iOS)
+        #if os(iOS) || os(visionOS)
         AppleDetailMetrics.isLandscapeLayout(viewport: viewportSize)
         #elseif os(macOS)
         isLandscapeRegularLayout
@@ -4295,7 +4285,7 @@ struct AppleCatalogItemDetailView: View {
 
     /// The iPad's hero draws Discover's iPad fades under its copy.
     private var usesPadHeroFades: Bool {
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         horizontalSizeClass == .regular && usesOverlayHero
         #else
         false
@@ -4426,7 +4416,7 @@ struct AppleCatalogItemDetailView: View {
     /// hero's height with the copy over the art (`usesOverlayHero`, N37).
     /// It had been a box of art with the title under it (N32 #9).
     private var usesPadPortraitHero: Bool {
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         horizontalSizeClass == .regular && !isLandscapeLayout
         #else
         false
@@ -5362,7 +5352,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func detailHeroFrameChanged(_ frame: CGRect) {
-        #if os(iOS) || os(macOS)
+        #if os(iOS) || os(visionOS) || os(macOS)
         // Rotation can briefly report a stale frame. Stop only after the
         // hero has actually scrolled above the viewport.
         if frame != .zero, frame.maxY <= 0, heroTrailer.isActive { pauseTrailerPreview(reason: "hero scrolled off, maxY=\(Int(frame.maxY))") }
@@ -5848,9 +5838,6 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var detailContentWidth: CGFloat {
-        #if os(visionOS)
-        max(680, viewportSize.width - 80)
-        #else
         if isLandscapeRegularLayout { return AppleDetailMetrics.regularContentWidth }
         if isLandscapeLayout {
             return max(
@@ -5865,7 +5852,6 @@ struct AppleCatalogItemDetailView: View {
             viewportWidth: viewportSize.width,
             actionColumnWidth: actionColumnWidth
         )
-        #endif
     }
 
     private var primaryActionRowWidth: CGFloat {
@@ -5888,9 +5874,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var detailLayout: AppleDetailLayout {
-        #if os(visionOS)
-        return isLandscapeRegularLayout ? .landscapeIPad : .portraitIPad
-        #elseif os(iOS)
+        #if os(iOS) || os(visionOS)
         if isLandscapeLayout { return .landscapeIPad }
         if horizontalSizeClass == .regular { return .portraitIPad }
         return .portraitPhone
@@ -6346,11 +6330,11 @@ struct AppleCatalogItemDetailView: View {
                 .padding(.vertical, 8)
                 // Leading only: the first card lines up with the heading and the
                 // last one runs off the edge, which is what says "keep scrolling".
-                #if !os(iOS)
+                #if !os(iOS) && !os(visionOS)
                 .padding(.leading, detailHorizontalInset)
                 #endif
             }
-            #if os(iOS)
+            #if os(iOS) || os(visionOS)
             // A content margin, which the whole-tile snap lands on (N65).
             .contentMargins(.leading, detailHorizontalInset, for: .scrollContent)
             #endif
