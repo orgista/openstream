@@ -1,30 +1,12 @@
 import CoreGraphics
 import Foundation
 
-/// What the iPhone's portrait hero (Discover and Library) draws, chosen once,
-/// before anything is shown, and never changed while the page is up (owner
-/// items 6 and 19, spec `live-hero-redesign-2026-10-09` §4.2, Mythos §2.7).
+/// The iPhone hero prefers a portrait poster over a landscape backdrop.
+/// Provider art is kept as an intact card because it may carry a printed title.
 ///
-/// Order, first hit wins:
-/// 1. **Key art**: TMDB's textless (`null`-language) poster, with the wordmark
-///    or the name drawn over it.
-/// 2. **Backdrop**: TMDB's textless backdrop, cropped with a fixed top bias
-///    (`focalPoint`).
-/// 3. **Card**: titled art on a blurred copy of itself, never cropped: the
-///    item's own poster, else its own backdrop. The text title is then
-///    suppressed so the name never appears twice. Every hit is traced.
-/// 4. Nothing: the name over black (`AppleHeroTitlePolicy`).
-///
-/// Only TMDB records which images are textless (a `null` language), so the
-/// item's own poster and backdrop count as titled: aspect-filling one into
-/// the full-bleed frame cut its printed title in half and put the wordmark
-/// under it a second time (lead review 2026-10-14).
-///
-/// Media servers and IPTV map onto the same slots through the item:
-/// Jellyfin `Primary` / Plex `thumb` / Xtream `stream_icon` are the poster,
-/// Jellyfin `Backdrop` / Plex `art` / Xtream `backdrop_path` the backdrop,
-/// Jellyfin `Logo` / Plex `clearLogo` the wordmark. None of them carries a
-/// language, so they count as titled too.
+/// Media servers and IPTV map onto the same slots through the item: Jellyfin
+/// `Primary` / Plex `thumb` / Xtream `stream_icon` are the poster, `Backdrop` /
+/// `art` / `backdrop_path` the backdrop. None carries a language, so all count as titled.
 public enum AppleHeroPortraitArt: Equatable, Sendable {
     case keyArt(URL)
     case backdrop(URL)
@@ -63,7 +45,8 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
         case poster, backdrop, fallback, none
     }
 
-    /// Constant top bias for slice 1 (a Vision focal point is slice 2).
+    /// The default focal point (top bias). Only backdrops use it; key art is
+    /// cropped about its centre.
     public static let focalPoint = CGPoint(x: 0.5, y: 0.35)
 
     /// The decode budget for the hero's still, in pixels on the long side.
@@ -73,8 +56,9 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
     public static func choose(_ candidates: Candidates, failed: Set<URL> = []) -> AppleHeroPortraitArt {
         func usable(_ url: URL?) -> URL? { url.flatMap { failed.contains($0) ? nil : $0 } }
         if let poster = usable(candidates.textlessPoster) { return .keyArt(poster) }
+        if let poster = usable(candidates.poster) { return .posterCard(poster) }
         if let backdrop = usable(candidates.textlessBackdrop) { return .backdrop(backdrop) }
-        if let titled = usable(candidates.poster) ?? usable(candidates.backdrop) { return .posterCard(titled) }
+        if let backdrop = usable(candidates.backdrop) { return .posterCard(backdrop) }
         return .none
     }
 
@@ -100,6 +84,28 @@ public enum AppleHeroPortraitArt: Equatable, Sendable {
     public var showsTitle: Bool {
         if case .posterCard = self { return false }
         return true
+    }
+
+    /// The still and trailer cover share these bounds. Unsafe crops fit whole
+    /// over the same black used by the approved billboard scrim.
+    public func imageRect(imageSize: CGSize, in frame: CGSize, focal: CGPoint = AppleHeroPortraitArt.focalPoint) -> CGRect {
+        switch self {
+        case .keyArt, .backdrop:
+            let minimumVisibleWidth: CGFloat = source == .poster ? 0.95 : 0.60
+            let filled = Self.fillRect(imageSize: imageSize, in: frame,
+                focal: source == .poster ? CGPoint(x: 0.5, y: 0.5) : focal,
+                subjectAnchor: source == .poster ? nil : CGPoint(x: 0.5, y: 0.4))
+            guard imageSize.width > 0, imageSize.height > 0, filled.width > 0,
+                  frame.width / filled.width < minimumVisibleWidth else { return filled }
+            let scale = min(frame.width / imageSize.width, frame.height / imageSize.height)
+            let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+            // Top-anchored: the scrim is clear only to 32 % of the hero height, so
+            // a centred fit would sit inside the fade band.
+            return CGRect(x: (frame.width - size.width) / 2, y: 0,
+                          width: size.width, height: size.height)
+        case .posterCard, .none:
+            return .zero
+        }
     }
 
     /// The image's aspect-fill rect in a frame of `frame`, placed so that

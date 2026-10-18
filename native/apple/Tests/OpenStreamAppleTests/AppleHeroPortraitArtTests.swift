@@ -68,18 +68,18 @@ import Testing
         #expect(AppleHeroPortraitArt.choose(all).source == .poster)
     }
 
-    @Test func withoutATextlessPosterTheTextlessBackdropWins() {
+    @Test func withoutATextlessPosterTheIntactPosterWins() {
         var candidates = all
         candidates.textlessPoster = nil
-        #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(textlessBackdrop))
+        #expect(AppleHeroPortraitArt.choose(candidates) == .posterCard(poster))
     }
 
-    @Test func aTextlessBackdropBeatsATitledPoster() {
+    @Test func aTitledPosterBeatsATextlessBackdrop() {
         let candidates = AppleHeroPortraitArt.Candidates(poster: poster, textlessBackdrop: textlessBackdrop,
                                                          backdrop: backdrop, logo: logo)
         let art = AppleHeroPortraitArt.choose(candidates)
-        #expect(art == .backdrop(textlessBackdrop))
-        #expect(art.showsTitle)
+        #expect(art == .posterCard(poster))
+        #expect(art.showsTitle == false)
     }
 
     /// Lead review 2026-10-14: the item's own backdrop may carry the title
@@ -116,7 +116,8 @@ import Testing
     }
 
     @Test func aFailedImageMovesToTheNextKind() {
-        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster]) == .backdrop(textlessBackdrop))
+        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster]) == .posterCard(poster))
+        #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, poster]) == .backdrop(textlessBackdrop))
         #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop]) == .posterCard(poster))
         #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop, poster]) == .posterCard(backdrop))
         #expect(AppleHeroPortraitArt.choose(all, failed: [textlessPoster, textlessBackdrop, poster, backdrop])
@@ -146,11 +147,11 @@ import Testing
         #expect(AppleHeroPortraitArt.choose(candidates) == .posterCard(poster))
     }
 
-    @Test func tmdbsTextlessBackdropBeatsTheItemsOwnArt() {
+    @Test func theItemsOwnPosterBeatsTMDBsTextlessBackdrop() {
         let item = AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Film",
                                     posterURL: poster, backgroundURL: backdrop)
         let candidates = AppleHeroPortraitArt.Candidates(item: item, tmdbBackdrop: textlessBackdrop, tmdbLogo: logo)
-        #expect(AppleHeroPortraitArt.choose(candidates) == .backdrop(textlessBackdrop))
+        #expect(AppleHeroPortraitArt.choose(candidates) == .posterCard(poster))
     }
 
     @Test func anIPTVItemWithOnlyItsIconGetsTheCardWithNoTextTitle() {
@@ -169,24 +170,83 @@ import Testing
     }
 
 
-    // MARK: Crop
-
-    @Test func aPosterIsCroppedWithTheTopBias() {
-        // A 2:3 poster in 430 × 538: 645 pt tall, 107 pt to lose.
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
-                                                 in: CGSize(width: 430, height: 538))
-        #expect(abs(rect.width - 430) < 0.5)
-        #expect(abs(rect.height - 645) < 0.5)
-        #expect(abs(rect.minY - (-107 * 0.35)) < 0.5)
-        #expect(abs(rect.minX) < 0.5)
+    @Test(arguments: [CGFloat(94.9), 95, 95.1])
+    func posterFillRequiresNinetyFivePercentOfItsWidth(_ width: CGFloat) {
+        let frame = CGSize(width: width, height: 150)
+        let rect = AppleHeroPortraitArt.keyArt(textlessPoster).imageRect(
+            imageSize: CGSize(width: 100, height: 150), in: frame)
+        #expect(abs(rect.midX - frame.width / 2) < 0.001)
+        #expect(abs(rect.minY) < 0.001)  // fitted art is anchored at the top, above the fade
+        if width < 95 {
+            #expect(abs(rect.width - frame.width) < 0.001)
+            #expect(rect.height < frame.height)
+        } else {
+            #expect(rect.size == CGSize(width: 100, height: 150))
+        }
     }
 
-    @Test func aBackdropIsCentredAcrossAndFillsTheHeight() {
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 1280, height: 720),
-                                                 in: CGSize(width: 430, height: 538))
-        #expect(abs(rect.height - 538) < 0.5)
+    @Test(arguments: [CGFloat(59.9), 60, 60.1])
+    func backdropFillRequiresSixtyPercentOfItsWidth(_ width: CGFloat) {
+        let frame = CGSize(width: width, height: 60)
+        let rect = AppleHeroPortraitArt.backdrop(textlessBackdrop).imageRect(
+            imageSize: CGSize(width: 100, height: 60), in: frame, focal: CGPoint(x: 0.5, y: 0.5))
+        if width < 60 {
+            #expect(abs(rect.width - frame.width) < 0.001)
+            #expect(rect.height < frame.height)
+            #expect(rect.minY == 0)
+        } else {
+            #expect(rect.size == CGSize(width: 100, height: 60))
+        }
+        #expect(abs(rect.midX - frame.width / 2) < 0.001)
+    }
+
+    @Test func theOwnersTallHeroShowsTheWholePortraitPoster() {
+        let frame = CGSize(width: 430, height: 932 * 0.73)
+        let rect = AppleHeroPortraitArt.keyArt(textlessPoster).imageRect(
+            imageSize: CGSize(width: 780, height: 1170), in: frame)
+        #expect(abs(rect.width - 430) < 0.001)
+        #expect(abs(rect.height - 645) < 0.001)
+        #expect(abs(rect.minY) < 0.001)  // fitted art is anchored at the top, above the fade
+    }
+
+    @Test func anUnsafeBackdropWithoutAPosterIsFittedWhole() {
+        let art = AppleHeroPortraitArt.choose(.init(textlessBackdrop: textlessBackdrop))
+        #expect(art == .backdrop(textlessBackdrop))
+        let frame = CGSize(width: 430, height: 680)
+        let rect = art.imageRect(imageSize: CGSize(width: 1280, height: 720), in: frame,
+                                 focal: CGPoint(x: 0.9, y: 0.2))
+        #expect(abs(rect.width - 430) < 0.001)
+        #expect(abs(rect.height - 241.875) < 0.001)
+        #expect(abs(rect.midX - 215) < 0.001)
+        // Anchored at the top, in the clear third above the fade band (0 ..< 0.32 × 680 = 217.6 pt).
         #expect(rect.minY == 0)
-        #expect(abs(rect.midX - 215) < 0.5)
+        #expect(abs(rect.maxY - 241.875) < 0.001)
+    }
+
+    @MainActor @Test(arguments: [AppleHeroPortraitArt.backdrop(URL(string: "https://fixture.example/late-backdrop.jpg")!),
+                                .posterCard(URL(string: "https://fixture.example/late-card.jpg")!), .none])
+    func aLatePosterReplacesRememberedFallbackArt(_ art: AppleHeroPortraitArt) {
+        let id = UUID().uuidString
+        let fallback = AppleHeroPortraitDecision(art: art, logo: nil)
+        let poster = AppleHeroPortraitDecision(art: .keyArt(textlessPoster), logo: logo)
+        AppleHeroPortraitMemory.remember(fallback, for: id)
+        #expect(AppleHeroPortraitMemory.decision(for: id) == fallback)
+        AppleHeroPortraitMemory.remember(poster, for: id)
+        #expect(AppleHeroPortraitMemory.decision(for: id) == poster)
+        AppleHeroPortraitMemory.remember(fallback, for: id)
+        #expect(AppleHeroPortraitMemory.decision(for: id) == poster)
+    }
+
+    // MARK: Crop
+
+    @Test func keyArtPosterIsCroppedAboutItsCentre() {
+        // A 2:3 poster in 430 × 538: 645 pt tall, 107 pt to lose, half from the top.
+        let rect = AppleHeroPortraitArt.keyArt(textlessPoster).imageRect(
+            imageSize: CGSize(width: 780, height: 1170), in: CGSize(width: 430, height: 538))
+        #expect(abs(rect.width - 430) < 0.5)
+        #expect(abs(rect.height - 645) < 0.5)
+        #expect(abs(rect.minY - (-107 * 0.5)) < 0.5)
+        #expect(abs(rect.minX) < 0.5)
     }
 
     @Test func theCropNeverLeavesAGap() {
@@ -218,26 +278,15 @@ import Testing
         #expect(layout.topOverlap == layout.topInset + AppleHomePhoneHeroLayout.stackTopPadding)
     }
 
-    @Test func aPosterFillsTheTallFrameCentredAcross() {
-        // A 2:3 poster in 430 × 680 (15 Pro Max): it fills the height and
-        // loses 23 pt across, centred; nothing is lost top or bottom.
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
-                                                 in: CGSize(width: 430, height: 680))
-        #expect(abs(rect.height - 680) < 0.5)
-        #expect(abs(rect.width - 453.3) < 0.5)
-        #expect(abs(rect.midX - 215) < 0.5)
-        #expect(rect.minY == 0)
-    }
-
-    @Test func aPosterKeepsItsTopBiasInTheShortSEFrame() {
-        // The same poster in 375 × 466 (iPhone SE): it fills the width and
-        // 96.5 pt are cropped, 35 % of them from the top (`focalPoint`).
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: CGSize(width: 780, height: 1170),
-                                                 in: CGSize(width: 375, height: 466))
+    @Test func keyArtPosterIsCroppedAboutItsCentreInTheShortSEFrame() {
+        // A 2:3 poster in 375 × 466 (iPhone SE): it fills the width and
+        // 96.5 pt are cropped, half of them from the top.
+        let rect = AppleHeroPortraitArt.keyArt(textlessPoster).imageRect(
+            imageSize: CGSize(width: 780, height: 1170), in: CGSize(width: 375, height: 466))
         #expect(abs(rect.width - 375) < 0.5)
         #expect(abs(rect.height - 562.5) < 0.5)
         #expect(rect.minX == 0)
-        #expect(abs(rect.minY - -(562.5 - 466) * AppleHeroPortraitArt.focalPoint.y) < 0.5)
+        #expect(abs(rect.minY - -(562.5 - 466) * 0.5) < 0.5)
     }
 
     @Test func theTrailerCoverIsDrawnTopEdgeUp() throws {

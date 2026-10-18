@@ -3,13 +3,8 @@ import SwiftUI
 /// The iPhone portrait hero's art (Discover and Library), from the top edge of
 /// the screen to 73 % of it; the trailer plays over it (`AppleHomeBillboard`).
 ///
-/// The art and its crop are settled before anything is drawn
-/// (`AppleHeroPortraitArt`): TMDB is asked first (cache, or at most
-/// `lookupDeadline` of network), the chosen image is decoded, and only then
-/// does it fade in over black. Once a title's art has been shown it is
-/// remembered for the run, so a later TMDB answer, a page coming back round
-/// the carousel, or a re-render never re-crops or swaps it in front of the
-/// viewer (owner items 6 and 19).
+/// The initial lookup is bounded; a late textless poster can replace fallback
+/// art while the view is mounted, and is remembered for subsequent visits.
 struct AppleHomePhonePortraitStage: View {
     let item: AppleCatalogItem
     /// The bottom of the large title, from the top of the art: the poster
@@ -84,6 +79,7 @@ struct AppleHomePhonePortraitStage: View {
             let focal = await focalPoint(for: remembered.art, image: image)
             guard !Task.isCancelled else { return }
             show(Shown(decision: remembered, image: image, focal: focal), animated: false)
+            if remembered.art.source != .poster { await upgradeToPoster() }
             return
         }
         let started = ContinuousClock.now
@@ -100,6 +96,7 @@ struct AppleHomePhonePortraitStage: View {
                 AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
                 AppleHeroPortraitArtTally.record(art, item: item.name)
                 show(Shown(decision: decision, image: nil), animated: false)
+                if tmdb == nil { await upgradeToPoster() }
                 return
             }
             do {
@@ -111,6 +108,7 @@ struct AppleHomePhonePortraitStage: View {
                 AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
                 AppleHeroPortraitArtTally.record(art, item: item.name)
                 show(Shown(decision: decision, image: image, focal: focal), animated: true)
+                if tmdb == nil { await upgradeToPoster() }
                 return
             } catch is CancellationError {
                 return
@@ -119,6 +117,27 @@ struct AppleHomePhonePortraitStage: View {
                 appleTrace("hero portrait art failed \(art.source.rawValue), trying the next (\(item.name))")
                 failed.insert(url)
             }
+        }
+    }
+
+    private func upgradeToPoster() async {
+        guard let configuration, let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item) else { return }
+        let artwork = await AppleHeroArtworkUpgrade.shared.artwork(
+            imdbID: imdbID, kind: item.type == "series" ? .series : .movie, configuration: configuration)
+        guard !Task.isCancelled, let poster = artwork.posterURL else { return }
+        do {
+            let image = try await AppleRemoteImageCache.shared.image(
+                url: poster, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
+            guard !Task.isCancelled else { return }
+            let decision = AppleHeroPortraitDecision(art: .keyArt(poster), logo: artwork.logoURL ?? item.logoURL)
+            AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
+            appleTrace("hero portrait late poster (\(item.name))")
+            AppleHeroPortraitArtTally.record(decision.art, item: item.name)
+            show(Shown(decision: decision, image: image), animated: true)
+        } catch is CancellationError {
+            return
+        } catch {
+            appleTrace("hero portrait late poster failed (\(item.name))")
         }
     }
 
@@ -154,7 +173,7 @@ struct AppleHeroPortraitDecision: Equatable, Sendable {
     let logo: URL?
 }
 
-/// One answer per title per run: once shown, a hero's art never changes.
+/// Fallback choices stay stable until a textless portrait poster arrives.
 @MainActor
 enum AppleHeroPortraitMemory {
     /// The longest the hero waits for TMDB before choosing from what it has.
@@ -163,7 +182,9 @@ enum AppleHeroPortraitMemory {
 
     static func decision(for mediaID: String) -> AppleHeroPortraitDecision? { decisions[mediaID] }
     static func remember(_ decision: AppleHeroPortraitDecision, for mediaID: String) {
-        if decisions[mediaID] == nil { decisions[mediaID] = decision }
+        if decisions[mediaID] == nil || (decision.art.source == .poster && decisions[mediaID]?.art.source != .poster) {
+            decisions[mediaID] = decision
+        }
     }
 }
 
@@ -193,11 +214,8 @@ struct AppleHeroPortraitCover: Equatable {
         let imageSize = CGSize(width: image.width, height: image.height)
         let rect: CGRect
         switch art {
-        case .keyArt:
-            rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size)
-        case .backdrop:
-            rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal,
-                                                 subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+        case .keyArt, .backdrop:
+            rect = art.imageRect(imageSize: imageSize, in: size, focal: focal)
         case .posterCard:
             let renderer = ImageRenderer(content:
                 AppleHeroPortraitArtView(art: art, image: image, size: size, focal: focal, topInset: topInset)
@@ -245,16 +263,15 @@ struct AppleHeroPortraitArtView: View {
     var body: some View {
         let imageSize = CGSize(width: image.width, height: image.height)
         switch art {
-        case .keyArt:
-            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size)
-        case .backdrop:
-            AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: focal,
-                                  subjectAnchor: CGPoint(x: 0.5, y: 0.4))
+        case .keyArt, .backdrop:
+            AppleHeroPositionedImage(image: image, size: size,
+                                     rect: art.imageRect(imageSize: imageSize, in: size, focal: focal))
         case .posterCard:
             let card = AppleHeroPortraitArt.posterCardRect(posterAspect: imageSize.width / max(imageSize.height, 1),
                                                            in: size, topInset: topInset)
             ZStack(alignment: .topLeading) {
-                AppleHeroCroppedImage(image: image, imageSize: imageSize, size: size, focal: CGPoint(x: 0.5, y: 0.5))
+                AppleHeroPositionedImage(image: image, size: size,
+                    rect: AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: CGPoint(x: 0.5, y: 0.5)))
                     .blur(radius: 40)
                     .overlay(Color.black.opacity(0.35))
                 Image(decorative: image, scale: 1)
@@ -272,16 +289,13 @@ struct AppleHeroPortraitArtView: View {
     }
 }
 
-/// An image at its aspect-fill scale, placed by `AppleHeroPortraitArt.fillRect`.
-struct AppleHeroCroppedImage: View {
+/// The same image bounds used by the trailer cover.
+struct AppleHeroPositionedImage: View {
     let image: CGImage
-    let imageSize: CGSize
     let size: CGSize
-    var focal: CGPoint = AppleHeroPortraitArt.focalPoint
-    var subjectAnchor: CGPoint? = nil
+    let rect: CGRect
 
     var body: some View {
-        let rect = AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal, subjectAnchor: subjectAnchor)
         Image(decorative: image, scale: 1)
             .resizable()
             .interpolation(.high)
