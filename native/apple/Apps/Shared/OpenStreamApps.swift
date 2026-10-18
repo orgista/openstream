@@ -69,7 +69,7 @@ struct OpenStreamPlatformApp: App {
             #endif
         }
         #if os(visionOS)
-        .defaultSize(width: 1100, height: 760)
+        .defaultSize(width: 1180, height: 820)
         .windowResizability(.contentMinSize)
         #endif
         #if os(macOS)

@@ -135,7 +135,7 @@ public struct OpenStreamRootView: View {
     /// The player in the Picture in Picture window, for its way back.
     @State private var pictureInPicture = AppleTVPictureInPicture.shared
     #endif
-    #if os(iOS)
+    #if os(iOS) || os(visionOS)
     @State private var rootViewportSize: CGSize = .zero
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
@@ -218,13 +218,22 @@ public struct OpenStreamRootView: View {
         TabView(selection: tabSelection) {
             ForEach(visibleTabs) { tab in
                 #if os(visionOS)
-                NavigationStack(path: Binding(
+                let path = Binding(
                     get: { navigationPaths[tab] ?? NavigationPath() },
                     set: { navigationPaths[tab] = $0 }
-                )) {
-                    content(for: tab)
-                        // The tab ornament leaves while the player has the window.
-                        .toolbar(visionPlayerStage.isPresenting ? .hidden : .automatic, for: .tabBar)
+                )
+                Group {
+                    if tab == .settings, settingsUsesSplitView {
+                        // The landscape iPad's Settings: its own split view.
+                        content(for: tab, settingsSplitPath: path)
+                            .toolbar(visionPlayerStage.isPresenting ? .hidden : .automatic, for: .tabBar)
+                    } else {
+                        NavigationStack(path: path) {
+                            content(for: tab)
+                                // The tab ornament leaves while the player has the window.
+                                .toolbar(visionPlayerStage.isPresenting ? .hidden : .automatic, for: .tabBar)
+                        }
+                    }
                 }
                 .modifier(AppleSettingsPINLock(active: tab == .settings))
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
@@ -346,6 +355,11 @@ public struct OpenStreamRootView: View {
             && horizontalSizeClass == .regular
             && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
     }
+    #elseif os(visionOS)
+    /// The iPad's rule: a sidebar and a pane in a regular, landscape window.
+    private var settingsUsesSplitView: Bool {
+        horizontalSizeClass == .regular && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
+    }
     #endif
 
     public var body: some View {
@@ -427,6 +441,7 @@ public struct OpenStreamRootView: View {
         } action: { rootViewportSize = $0 }
         #endif
         #if os(visionOS)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { rootViewportSize = $0 }
         // While the player has the window its minimum is the film's floor,
         // or this minimum (which `.contentMinSize` turns into the window's)
         // would win over the aspect-locked one (`AppleVisionPlayerStage`).

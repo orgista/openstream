@@ -101,7 +101,7 @@ struct AppleLiveTVView: View {
     /// The channel in the window's full player, while it is up.
     @State private var fullWindowPlayer: AppleStremioPlayerPresentation?
     #endif
-    #if os(iOS)
+    #if os(iOS) || os(visionOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
@@ -177,7 +177,7 @@ struct AppleLiveTVView: View {
             } else {
                 #if os(tvOS)
                 tvGuide
-                #elseif os(iOS)
+                #elseif os(iOS) || os(visionOS)
                 liveStage
                 #else
                 #if os(iOS)
@@ -363,7 +363,7 @@ struct AppleLiveTVView: View {
             }
         }
 .modifier(AppleLiveSearchModifier(isEnabled: !channels.isEmpty, query: $query, selectionRevision: playbackRevision, showsSearch: $showsSearch) {
-            #if os(iOS)
+            #if os(iOS) || os(visionOS)
             liveOnNowList(channels: channelSnapshot.channels, showsSourceProblems: false)
             #else
             AppleIPTVGuideGridView(
@@ -382,10 +382,12 @@ struct AppleLiveTVView: View {
             )
             #endif
         })
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         // No "Live" title and no bar above the video: the tab bar names the
         // tab and search is a glyph in the category row (owner item 9).
         .toolbar(.hidden, for: .navigationBar)
+        #endif
+        #if os(iOS)
         .modifier(AppleLiveTabBarBackground())
         #endif
         .environment(\.liveChannelSettings, settings)
@@ -461,7 +463,7 @@ struct AppleLiveTVView: View {
         }
         .sheet(item: $healthDetailChannel) { channel in
             AppleChannelHealthDetailView(channel: channel, store: healthStore, guideStore: guideStore, settings: settings)
-                #if os(iOS)
+                #if os(iOS) || os(visionOS)
                 .presentationDetents([.medium, .large])
                 #endif
         }
@@ -1384,7 +1386,7 @@ struct AppleLiveTVView: View {
         }
     }
 
-    #if os(iOS)
+    #if os(iOS) || os(visionOS)
     /// iPhone and iPad Live (owner items 7–10): the video edge to edge under
     /// the status bar, the category row fixed under it, the channel list the
     /// only thing that scrolls. One `AnyLayout` stacks the two columns on a
@@ -1455,7 +1457,7 @@ struct AppleLiveTVView: View {
     private var liveStagePlayerColumn: some View {
         VStack(spacing: 0) {
             Group {
-                if let selectedChannel {
+                if let selectedChannel, !fullWindowHoldsChannel {
                     stageInlinePlayer(selectedChannel)
                         .accessibilityLabel("Live player for \(selectedChannel.name)")
                         .accessibilityValue(playbackCoordinator.phase == .playing ? "Playing"
@@ -1492,7 +1494,7 @@ struct AppleLiveTVView: View {
             onSwitchChannel: { startChannel($0, shareSelection: true, present: false) },
             onLastChannel: lastChannelAction,
             onStartOver: startOverAction,
-            onRequestFullWindow: nil,
+            onRequestFullWindow: fullWindowAction,
             isConnecting: pendingProbe != nil,
             onOpenSettings: openSettings
         )
@@ -1541,7 +1543,11 @@ struct AppleLiveTVView: View {
     private func playFromList(_ channel: AppleIPTVChannel) {
         if channel.id == selectedChannel?.id, catchUp == nil, pendingProbe == nil {
             AppleInteractionTrace.record(.press, "live row full screen \(channel.name)")
+            #if os(visionOS)
+            if let fullWindowAction { fullWindowAction() } else { fullScreenRevision &+= 1 }
+            #else
             fullScreenRevision &+= 1
+            #endif
             return
         }
         AppleInteractionTrace.record(.press, "live row \(channel.name)")
@@ -2984,7 +2990,7 @@ private struct AppleLiveSearchModifier<Results: View>: ViewModifier {
                         }
                     }
                     .navigationTitle("Search")
-                    #if os(iOS)
+                    #if os(iOS) || os(visionOS)
                     .navigationBarTitleDisplayMode(.inline)
                     #endif
             }
@@ -3373,7 +3379,7 @@ struct AppleLibraryView: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: {
             viewportSize = AppleHomePageViewport.settled(drawn: viewportSize, measured: $0)
         }
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         .modifier(AppleDiscoverHeroLayoutReader(page: "library", phone: $phoneHeroLayout, pad: $padHeroLayout))
         #elseif os(macOS)
         .onScrollGeometryChange(for: AppleMacHeroLayout.self) { geometry in

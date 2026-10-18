@@ -21,7 +21,7 @@ enum AppleHomePageViewport {
     }
 }
 
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 /// Reads a home page's scroll view (Discover, Library) into the iPhone and
 /// iPad hero layouts. The readings change every frame the bar moves; they
 /// stay in this modifier, so the page only redraws for a layout that is drawn.
@@ -29,7 +29,12 @@ struct AppleDiscoverHeroLayoutReader: ViewModifier {
     /// The page, in the trace.
     let page: String
     /// The iPhone never draws the iPad's hero, so it never reads for it.
+    /// Vision Pro draws the iPad's.
+    #if os(visionOS)
+    private let measuresPad = true
+    #else
     private let measuresPad = UIDevice.current.userInterfaceIdiom == .pad
+    #endif
     @Binding var phone: AppleHomePhoneHeroLayout
     @Binding var pad: AppleMacHeroLayout
     /// The last reading, drawn once it has held (`AppleHomePhoneHeroLayout.settled`).

@@ -334,7 +334,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     @ViewBuilder private var heroBody: some View {
-        #if os(macOS) || os(iOS)
+        #if os(macOS) || os(iOS) || os(visionOS)
         if let mac {
             AppleHomeMacHero(item: item, layout: mac.layout, wordmark: wordmark,
                              wordmarkLookupPending: wordmarkLookupPending, stage: stage,

@@ -10,8 +10,7 @@ enum AppleHomePresentationPolicy {
         switch platform {
         case .mac: .mac
         case .tv: .tv
-        case .vision: .rotating
-        case .pad: accessibility ? .rotating : .pad
+        case .pad, .vision: accessibility ? .rotating : .pad
         case .phone: compact && !landscape ? .phone : .rotating
         }
     }

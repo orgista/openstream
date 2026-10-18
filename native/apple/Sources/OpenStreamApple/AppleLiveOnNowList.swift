@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 import SwiftUI
 
 /// The Live tab's channel list on iPhone and iPad (owner items 7 and 8): one
@@ -75,7 +75,7 @@ struct AppleLiveOnNowList: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .background(Color.black)
-        .environment(\.defaultMinListRowHeight, 44)
+        .environment(\.defaultMinListRowHeight, AppleDesignTokens.minimumActionSize)
         .task(id: appearedRevision) {
             guard !appeared.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(250))
@@ -94,6 +94,7 @@ struct AppleLiveOnNowList: View {
                               isWatching: channel.id == currentChannelID)
         }
         .buttonStyle(.plain)
+        .appleHoverAffordance()
         .listRowBackground(Color.black)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel("Play \(channel.name)")

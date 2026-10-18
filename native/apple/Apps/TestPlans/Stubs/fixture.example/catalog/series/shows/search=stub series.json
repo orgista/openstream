@@ -4,6 +4,8 @@
       "id": "tt0000010",
       "type": "series",
       "name": "Stub Series",
+      "cast": ["Fixture Performer", "Fixture Co-star"],
+      "director": ["Fixture Director"],
       "poster": "https://fixture.example/poster/10.jpg",
       "background": "https://fixture.example/background/tt0000010.jpg",
       "logo": "https://fixture.example/art/wordmark.png",

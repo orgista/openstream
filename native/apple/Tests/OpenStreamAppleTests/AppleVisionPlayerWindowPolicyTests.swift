@@ -54,7 +54,15 @@ struct AppleVisionPlayerWindowPolicyTests {
 
     @Test(arguments: [nil, CGSize.zero, CGSize(width: 0, height: 700), CGSize(width: CGFloat.nan, height: 700)])
     func anUnknownSavedSizeRestoresTheOpeningSize(_ saved: CGSize?) {
-        #expect(AppleVisionPlayerWindowPolicy.restoredSize(saved: saved) == CGSize(width: 1100, height: 760))
+        #expect(AppleVisionPlayerWindowPolicy.restoredSize(saved: saved) == AppleVisionPlayerWindowPolicy.defaultWindowSize)
+    }
+
+    /// The browse window never gets small enough to leave the iPad's
+    /// landscape Live stage, player and channel list side by side.
+    @Test func theBrowseWindowKeepsTheIPadLiveStage() {
+        for size in [AppleVisionPlayerWindowPolicy.defaultWindowSize, AppleVisionPlayerWindowPolicy.browseMinimum] {
+            #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: size))
+        }
     }
 
     /// Owner report: audio played on after the window closed.

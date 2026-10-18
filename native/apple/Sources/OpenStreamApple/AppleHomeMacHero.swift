@@ -1,4 +1,4 @@
-#if os(macOS) || os(iOS)
+#if os(macOS) || os(iOS) || os(visionOS)
 import SwiftUI
 
 /// Discover's hero on the Mac, after the Apple TV app on the Mac and the Figma
@@ -320,6 +320,10 @@ struct AppleMacHeroButtonStyle: ButtonStyle {
                 .contentShape(.capsule)
                 .opacity(isEnabled ? 1 : 0.5)
                 .onHover { isHovered = $0 }
+                #if os(visionOS)
+                // Vision Pro never reports gaze to `onHover`.
+                .hoverEffect(.highlight)
+                #endif
                 .animation(.easeOut(duration: 0.12), value: isHovered)
                 .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
         }

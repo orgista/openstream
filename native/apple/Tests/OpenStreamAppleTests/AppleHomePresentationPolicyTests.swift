@@ -6,7 +6,9 @@ import Testing
     @Test func heroSelectionPreservesDiscoverLayouts() {
         #expect(AppleHomePresentationPolicy.hero(platform: .mac) == .mac)
         #expect(AppleHomePresentationPolicy.hero(platform: .tv) == .tv)
-        #expect(AppleHomePresentationPolicy.hero(platform: .vision) == .rotating)
+        // Vision Pro draws the iPad's hero, accessibility sizes included.
+        #expect(AppleHomePresentationPolicy.hero(platform: .vision) == .pad)
+        #expect(AppleHomePresentationPolicy.hero(platform: .vision, accessibility: true) == .rotating)
         #expect(AppleHomePresentationPolicy.hero(platform: .phone, compact: true) == .phone)
         #expect(AppleHomePresentationPolicy.hero(platform: .phone, compact: true, landscape: true) == .rotating)
         #expect(AppleHomePresentationPolicy.hero(platform: .pad) == .pad)
