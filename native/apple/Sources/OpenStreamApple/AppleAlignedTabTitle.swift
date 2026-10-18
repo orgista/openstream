@@ -17,8 +17,10 @@ enum AppleTabTitleStyle: Equatable, Sendable {
 struct AppleAlignedTabTitle: ViewModifier {
     let title: String
     let isLive: Bool
-    /// Discover's hero runs up under the bar, so the bar stays the stock
-    /// transparent one there on iOS 18 too.
+    /// Discover's hero runs up under the bar. On iOS 18 the stock bar is
+    /// see-through at the top of the page, which left the title and buttons
+    /// unreadable over bright art (owner, checklist rows 10 and 11), so it
+    /// shows its stock material over the hero from the start.
     let overArtwork: Bool
 
     static func style(for platform: AppleUIPlatform, isLive: Bool = false) -> AppleTabTitleStyle {
@@ -59,6 +61,7 @@ struct AppleAlignedTabTitle: ViewModifier {
             content
         } else if overArtwork {
             content
+                .toolbarBackground(.visible, for: .navigationBar)
         } else {
             content
                 .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
