@@ -361,6 +361,11 @@ actor AppleLibraryMetadataResolver {
     /// So: an exact year wins, and when nothing matches exactly the year only
     /// chooses *between* same-named candidates. A single same-named candidate
     /// is accepted; multiple same-named candidates need a clear year margin.
+    ///
+    /// A series with no year takes the provider's first (most popular)
+    /// same-named result; the name alone does not disambiguate between
+    /// several shows that share it, and Fix Match overrides the pick. Refusing
+    /// the tie left a bare `TV/Chernobyl/` unmatched (owner checklist row 20).
     static func bestMatch(_ items: [AppleCatalogItem], parsed: AppleLibraryTitle,
                           aliases: [String: [String]] = [:]) -> AppleCatalogItem? {
         let type = parsed.kind == .show ? "series" : "movie"
@@ -376,7 +381,7 @@ actor AppleLibraryMetadataResolver {
         }
         guard let first = sameName.first else { return nil }
         guard sameName.count > 1 else { return first }
-        guard let year = parsed.year else { return nil }
+        guard let year = parsed.year else { return type == "series" ? first : nil }
         let ranked = sameName.sorted { distance(releaseYear($0), from: year) < distance(releaseYear($1), from: year) }
         let bestDistance = distance(releaseYear(ranked[0]), from: year)
         let nextDistance = distance(releaseYear(ranked[1]), from: year)

@@ -56,6 +56,14 @@ public enum AppleChannelHealthSummary {
     public static func progress(completed: Int, total: Int) -> String {
         "Checking \(completed) of \(total)"
     }
+
+    /// Check Channels Now with an empty lineup: why there is nothing to check,
+    /// from the first Live TV source whose last load failed.
+    public static func nothingToCheck(sourceFailure: String?) -> String {
+        guard let failure = sourceFailure?.trimmingCharacters(in: .whitespacesAndNewlines), !failure.isEmpty
+        else { return "No channels to check" }
+        return "No channels to check. \(failure)"
+    }
 }
 
 /// What the (i) detail shows for one channel, in plain words.
