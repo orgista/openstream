@@ -136,10 +136,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             refreshCaptionHandoff()
         }
     }
-    /// Container chapters from the engine's probe demuxer (`mediaChapters`),
-    /// mapped for `AppleChapterMarkers`. B32: the Skip Intro button used to
-    /// read chapters from the native engine only, so it never appeared on the
-    /// engine route that plays most content.
+    /// Chapters published by the engine for the active container or disc title.
     private var acceptsChapterUpdates = false
     public private(set) var chapterMediaVersion: UUID?
     public private(set) var chapters: [AppleChapter] = [] {
@@ -545,6 +542,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
 
     public func seek(to seconds: Double) async {
         await aether.seek(to: seconds)
+        if discFileURL != nil {
+            lastPositionUpdate = .distantPast
+            applyPosition(aether.currentTime)
+        }
     }
 
     public func selectAudioTrack(id: Int) {
@@ -747,8 +748,10 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
             .sink { [weak self] index in self?.activeAudioTrackID = index }
             .store(in: &cancellables)
         aether.$mediaChapters
-            .sink { [weak self] infos in
+            .combineLatest(aether.$discChapters)
+            .sink { [weak self] container, disc in
                 guard let self, self.acceptsChapterUpdates, let version = self.chapterMediaVersion else { return }
+                let infos = disc.isEmpty ? container : disc
                 self.chapters = infos.map { info in
                     let chapter = Self.mapChapter(info)
                     return AppleChapter(title: chapter.title, start: chapter.start, end: chapter.end,
