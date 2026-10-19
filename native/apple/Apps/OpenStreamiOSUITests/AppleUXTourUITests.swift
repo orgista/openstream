@@ -150,16 +150,10 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
         } else {
             log("  no detail.season on the series page")
         }
-        // Search from a title page that was opened from Search (a dead
-        // magnifier before 2026-10-08).
-        let magnifier = app.buttons.matching(NSPredicate(format: "label == %@", "Search")).allElementsBoundByIndex.first { $0.isHittable }
-        if let magnifier {
-            magnifier.tap(); taps += 1
-            let field = app.searchFields.firstMatch
-            let opened = field.waitForExistence(timeout: 5) && !titlePage.exists
-            record("Search from a title page opened from Search", opened ? "navigated [Search]" : "nothing happened")
-            shot("series-search-from-search")
-            reach()
+        // Owner, 2026-10-19: "in the content page there is a search icon we don't need".
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label == %@", "Search"))
+                .allElementsBoundByIndex.contains { $0.isHittable })
         }
         titlePageTour("series", reach: reach)
     }

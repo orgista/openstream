@@ -5183,7 +5183,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
     /// Opt-in: opens a title page from a Discover poster, the billboard's
     /// Details, a Search result, Continue Watching and Library, and expects
-    /// Discover's (or Library's) Search and Refresh beside Back every time,
+    /// Back alone on iPhone and the tab's Search on iPad,
     /// and the Rate menu as one named element. Navigation only: it never
     /// presses Play, Download, My List, Rate or Refresh.
     func testTitlePageKeepsTheTabBarFromEveryEntryPoint() throws {
@@ -5259,8 +5259,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             let refresh = barButton("Refresh") != nil
             print("TITLE-BAR \(idiom) \(entry): back=\(back) search=\(search) refresh=\(refresh)")
             XCTAssertTrue(back, "\(entry): the title page has no Back")
-            XCTAssertTrue(search, "\(entry): the title page lost Search")
-            XCTAssertTrue(refresh, "\(entry): the title page lost Refresh")
+            // Owner, 2026-10-19: "in the content page there is a search icon we don't need".
+            XCTAssertEqual(search, idiom == "ipad", "\(entry): unexpected title-page Search")
+            // The toolbar policy never put Refresh on title pages.
+            XCTAssertFalse(refresh, "\(entry): Refresh belongs to the tab root")
             // One element named Rate, and no unnamed button on top of it.
             let rates = app.buttons.matching(NSPredicate(format: "label == %@", "Rate")).allElementsBoundByIndex
             if let rate = rates.first(where: { $0.exists && $0.frame.width >= 1 }) {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root toolbar actions passed to pushed pages. Title pages keep Search;
+/// Root toolbar actions passed to pushed pages. iPad, Mac and Vision title pages keep Search;
 /// Refresh belongs to the Discover and Library roots.
 struct AppleTabToolbarContext {
     let tab: OpenStreamTab
@@ -18,12 +18,14 @@ extension EnvironmentValues {
 
 #if !os(tvOS)
 extension View {
-    /// The title page's bar: a round ‹ at the leading edge, then Search. ⌘[ and Esc go back too, except while
+    /// The title page's Back control. ⌘[ and Esc go back too, except while
     /// `backIsBlocked` (a player is up and owns Esc). `pageID` keeps this
     /// page's items apart from the tab's and from a title page under it
     /// (`AppleTabToolbar.scope`).
-    func appleTitlePageToolbar(pageID: String, backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
-        modifier(AppleTitlePageToolbar(pageID: pageID, backIsBlocked: backIsBlocked, onBack: onBack))
+    func appleTitlePageToolbar(pageID: String, title: String, heroIsOffscreen: Bool,
+                               topInset: CGFloat, backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
+        modifier(AppleTitlePageToolbar(pageID: pageID, title: title, heroIsOffscreen: heroIsOffscreen,
+                                      topInset: topInset, backIsBlocked: backIsBlocked, onBack: onBack))
     }
 
     /// iOS 26 sets a title page's bar buttons on round glass; iOS 18 draws bare
@@ -64,11 +66,28 @@ private struct AppleRoundBarButtonStyle: ButtonStyle {
 
 private struct AppleTitlePageToolbar: ViewModifier {
     let pageID: String
+    let title: String
+    let heroIsOffscreen: Bool
+    let topInset: CGFloat
     let backIsBlocked: Bool
     let onBack: () -> Void
     @Environment(\.appleTabToolbar) private var tabToolbar
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            content.modifier(ApplePhoneTitlePageChrome(title: title, heroIsOffscreen: heroIsOffscreen,
+                                                     topInset: topInset, onBack: onBack))
+        } else {
+            standardToolbar(content)
+        }
+        #else
+        standardToolbar(content)
+        #endif
+    }
+
+    private func standardToolbar(_ content: Content) -> some View {
         // Read here, in `body`, so the page redraws when the tab's store
         // changes; the toolbar builder below runs outside that tracking.
         let isRefreshing = tabToolbar?.isRefreshing() ?? false
