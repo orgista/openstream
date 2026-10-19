@@ -4,8 +4,7 @@ import SwiftUI
 /// The Live tab's channel list on iPhone and iPad (owner items 7 and 8): one
 /// row per channel with its logo, name and what is on now; the channel being
 /// watched shows the system playing waveform, as Music marks the song playing.
-/// No time grid, no progress line under every row. The only thing on the Live
-/// tab that scrolls.
+/// The only thing on the Live tab that scrolls.
 struct AppleLiveOnNowList: View {
     struct SourceProblem: Identifiable, Equatable {
         let id: UUID
@@ -22,6 +21,7 @@ struct AppleLiveOnNowList: View {
     /// flashes before the rows arrive.
     let showsEmptyText: Bool
     let sourceProblems: [SourceProblem]
+    var usesPhoneLayout = false
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
     let onHide: (AppleIPTVChannel) -> Void
@@ -88,14 +88,16 @@ struct AppleLiveOnNowList: View {
 
     private func row(_ channel: AppleIPTVChannel) -> some View {
         let isFavorite = favoriteIDs.contains(channel.id)
-        let title = guide.nowAndNext(channelID: channel.id).now?.title
+        let programme = guide.nowAndNext(channelID: channel.id).now
+        let title = programme?.title
+        let isWatching = channel.id == currentChannelID
         return Button { onSelect(channel) } label: {
-            AppleLiveOnNowRow(channel: channel, programmeTitle: title,
-                              isWatching: channel.id == currentChannelID)
+            AppleLiveOnNowRow(channel: channel, programme: programme,
+                              isWatching: isWatching, usesPhoneLayout: usesPhoneLayout)
         }
         .buttonStyle(.plain)
         .appleHoverAffordance()
-        .listRowBackground(Color.black)
+        .listRowBackground(usesPhoneLayout && isWatching ? AppleDesignTokens.surface : Color.black)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel("Play \(channel.name)")
         .accessibilityValue(title ?? "")
@@ -130,27 +132,35 @@ struct AppleLiveOnNowList: View {
     }
 }
 
-/// One On Now row: logo slot 48 × 32, name over programme, the playing waveform.
 private struct AppleLiveOnNowRow: View {
     let channel: AppleIPTVChannel
-    let programmeTitle: String?
+    let programme: AppleIPTVProgramme?
     let isWatching: Bool
+    let usesPhoneLayout: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 12) {
             if !dynamicTypeSize.isAccessibilitySize {
-                AppleLiveLogoMark(url: channel.logoURL, height: 32, maxWidth: 48)
+                AppleLiveLogoMark(url: channel.logoURL,
+                    height: usesPhoneLayout ? AppleLiveStagePolicy.phoneLogoSize.height : 32,
+                    maxWidth: usesPhoneLayout ? AppleLiveStagePolicy.phoneLogoSize.width : 48)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel.name)
                     .font(.body)
                     .foregroundStyle(.white)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                Text(programmeTitle ?? " ")
+                Text(programme?.title ?? " ")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                if usesPhoneLayout, let programme {
+                    AppleLiveProgrammeLine(programme: programme,
+                        lineHeight: AppleLiveStagePolicy.phoneProgrammeLineHeight)
+                        .padding(.top, 4)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
@@ -162,7 +172,8 @@ private struct AppleLiveOnNowRow: View {
                     .accessibilityHidden(true)
             }
         }
-        .frame(minHeight: 60)
+        .padding(.vertical, usesPhoneLayout ? AppleDesignTokens.spacingSmall : 0)
+        .frame(minHeight: usesPhoneLayout ? AppleLiveStagePolicy.phoneChannelRowHeight : 60)
         .contentShape(.rect)
     }
 }

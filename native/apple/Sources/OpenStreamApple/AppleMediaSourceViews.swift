@@ -1421,6 +1421,14 @@ struct AppleLiveTVView: View {
         .sheet(isPresented: $showsGuide) { liveGuideSheet }
     }
 
+    private var usesPhoneLiveLayout: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
     private var liveGuideSheet: some View {
         NavigationStack {
             AppleIPTVGuideGridView(channels: channelSnapshot.channels,
@@ -1436,7 +1444,7 @@ struct AppleLiveTVView: View {
                 onSelectProgramme: { channel, programme in
                     showsGuide = false
                     startChannel(channel, shareSelection: false, present: false, programme: programme)
-                })
+                }, compactPhoneLayout: usesPhoneLiveLayout)
                 // The grid's scroll views reach under the inline bar, so rows drew above the pinned
                 // time bar behind "Guide" (owner recording 2026-10-15, 7:20). Clip them to the grid.
                 .clipped()
@@ -1455,7 +1463,11 @@ struct AppleLiveTVView: View {
     }
 
     private var liveStagePlayerColumn: some View {
-        VStack(spacing: 0) {
+        let channel = usesPhoneLiveLayout ? (pendingProbe?.channel ?? selectedChannel) : selectedChannel
+        let programme = channel.flatMap {
+            guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
+        }
+        return VStack(spacing: 0) {
             Group {
                 if let selectedChannel, !fullWindowHoldsChannel {
                     stageInlinePlayer(selectedChannel)
@@ -1471,9 +1483,12 @@ struct AppleLiveTVView: View {
             .frame(maxWidth: .infinity)
             .clipped()
             .accessibilityIdentifier("live.stage.player")
-            AppleLiveProgrammeLine(programme: selectedChannel.flatMap {
-                guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
-            })
+            #if os(iOS)
+            if usesPhoneLiveLayout, let channel {
+                AppleLivePhoneProgrammeInfo(channel: channel, programme: programme)
+            }
+            #endif
+            AppleLiveProgrammeLine(programme: programme)
         }
     }
 
@@ -1506,7 +1521,8 @@ struct AppleLiveTVView: View {
             AppleLiveCategoryBar(tabs: liveCategoryTabs, selection: Binding(
                 get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
                 set: { selectedCategory = $0 }
-            ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true })
+            ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true },
+                usesPhoneLayout: usesPhoneLiveLayout)
             liveOnNowList(channels: channelSnapshot.channels)
         }
     }
@@ -1521,6 +1537,7 @@ struct AppleLiveTVView: View {
             hiddenCount: showsSourceProblems ? channelSnapshot.hiddenCount : 0,
             showsEmptyText: snapshotRevision > 0 && hasResolvedFirstLoad,
             sourceProblems: showsSourceProblems ? liveSourceProblems : [],
+            usesPhoneLayout: usesPhoneLiveLayout,
             onSelect: playFromList,
             onToggleFavorite: toggleFavorite,
             onHide: { settings.hiddenLiveChannelIDs.insert($0.id) },
