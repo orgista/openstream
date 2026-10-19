@@ -73,6 +73,16 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 30), "the title page never opened")
         XCTAssertTrue(app.staticTexts["Stub Movie One"].firstMatch.waitForExistence(timeout: 10))
 
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            // Owner, 2026-10-19: "in the content page there is a search icon we don't need".
+            XCTAssertFalse(app.buttons["Search"].firstMatch.isHittable)
+            XCTAssertFalse(app.navigationBars.firstMatch.exists)
+            let compactTitle = app.staticTexts["detail.compact-title"].firstMatch
+            XCTAssertFalse(compactTitle.exists)
+            for _ in 0..<3 { app.swipeUp() }
+            XCTAssertTrue(compactTitle.waitForExistence(timeout: 5))
+        }
+
         let back = app.buttons["detail.back"].firstMatch
         if back.waitForExistence(timeout: 5) { back.tap() } else { app.navigationBars.buttons.firstMatch.tap() }
         XCTAssertFalse(play.waitForExistence(timeout: 5), "the title page did not close")

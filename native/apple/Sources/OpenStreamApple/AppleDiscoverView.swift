@@ -3359,6 +3359,7 @@ struct AppleCatalogItemDetailView: View {
     #endif
     /// Scrolls the page back to the hero when a trailer is chosen below it.
     @State private var detailScrollPosition = ScrollPosition(edge: .top)
+    @State private var detailHeroIsOffscreen = false
     @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
     // The text title and its metadata line grow with Dynamic Type; fixed
     // point sizes stayed small at the accessibility sizes (iPad v2 re-run).
@@ -3586,8 +3587,9 @@ struct AppleCatalogItemDetailView: View {
         .appleTraceScreen("title", detail: "\(item.name) (\(item.mediaID))")
         .navigationTitle("")
         #if os(macOS) || os(iOS) || os(visionOS)
-        // Discover's bar, unchanged, with ‹ at its leading edge (N37).
-        .appleTitlePageToolbar(pageID: item.id, backIsBlocked: playbackUI.presentation != nil) { dismiss() }
+        .appleTitlePageToolbar(pageID: item.id, title: displayTitle, heroIsOffscreen: detailHeroIsOffscreen,
+                              topInset: pageGeometry.safeAreaInsets.top,
+                              backIsBlocked: playbackUI.presentation != nil) { dismiss() }
         .environment(\.appleTabToolbar, tabToolbar)
         #endif
         #if os(iOS) || os(visionOS)
@@ -3595,9 +3597,11 @@ struct AppleCatalogItemDetailView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         #endif
         #if os(iOS) || os(visionOS)
-        // The bar stays, as it is over Discover's hero: see-through, the
-        // art running up under it (the hero pulls itself up by the page's
-        // top inset, which now includes the bar).
+        // On iPhone the bar is hidden. The inline title mode, dark toolbar
+        // scheme and hidden bar background here still serve iPad and
+        // visionOS, where the bar stays over the hero as on Discover:
+        // see-through, the art running up under it (the hero pulls itself up
+        // by the page's top inset, which includes the bar).
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #endif
         #if os(tvOS)
@@ -5390,6 +5394,11 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func detailHeroFrameChanged(_ frame: CGRect) {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone, frame != .zero {
+            detailHeroIsOffscreen = frame.maxY <= AppleDesignTokens.minimumActionSize
+        }
+        #endif
         #if os(iOS) || os(visionOS) || os(macOS)
         // Rotation can briefly report a stale frame. Stop only after the
         // hero has actually scrolled above the viewport.
@@ -9648,8 +9657,8 @@ extension AppleCatalogItemDetailView {
             phoneActionRow
                 .padding(.top, 4)
         }
-        // Past accessibility 2 the header ran under the back and search
-        // buttons, Play was clipped and the round buttons hit the screen
+        // Past accessibility 2 the header ran under the back button, Play
+        // was clipped and the round buttons hit the screen
         // edges (iPhone 27 v2 re-run, AX-XXXL). The episode text below the
         // hero still follows the full size.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)

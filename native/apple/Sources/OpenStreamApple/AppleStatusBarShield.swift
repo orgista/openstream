@@ -2,6 +2,9 @@ import SwiftUI
 
 /// Keeps scrolled content from being drawn across the clock.
 ///
+/// On iPhone the detail page no longer uses the shield: its compact title bar /
+/// top gradient (ApplePhoneTitlePageChrome) covers the status-bar legibility case.
+///
 /// The detail page hides the navigation bar on iOS so its hero can bleed to the
 /// top of the screen, which is right — but with no bar there is also nothing
 /// behind the status bar once the page scrolls, so the synopsis was drawn
@@ -47,7 +50,11 @@ extension View {
     @ViewBuilder
     func appleStatusBarShield(topInset: CGFloat) -> some View {
         #if os(iOS)
-        modifier(AppleStatusBarShield(topInset: topInset))
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            self
+        } else {
+            modifier(AppleStatusBarShield(topInset: topInset))
+        }
         #else
         self
         #endif
