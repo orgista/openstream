@@ -325,3 +325,59 @@ func nativeEnginePreservesProtectedHeadersAndTimeAdvances() async throws {
     await waitForPlaying(engine, timeout: 10)
     await waitForPosition(engine, atLeast: 1, timeout: 5)
 }
+
+@Test("ISO title metadata supplies the regular timeline and chapters",
+      .enabled(if: ProcessInfo.processInfo.environment["OPENSTREAM_ISO_FIXTURE_PATH"] != nil))
+@MainActor
+func aetherDiscTitleProvidesDurationSeekAndChapters() async throws {
+    let path = try #require(ProcessInfo.processInfo.environment["OPENSTREAM_ISO_FIXTURE_PATH"])
+    let engine = try makeEngine()
+    defer { engine.stop() }
+    var request = ApplePlaybackRequest(url: URL(fileURLWithPath: path),
+                                       mediaID: "disc-timeline-fixture", sourceKind: .files)
+    request.autoplay = false
+    request.hints.disc = AppleDiscPlaybackChoice(start: .mainTitle, titleID: 0)
+    try await engine.load(request)
+    let title = try #require(engine.aetherEngine.selectedDiscTitle)
+    #expect(title.durationSeconds > 0)
+    let duration = try #require(engine.duration)
+    #expect(abs(duration - title.durationSeconds) < 0.5)
+    let discChapters = engine.aetherEngine.discChapters
+    try #require(discChapters.isEmpty == false)
+    #expect(engine.chapters.map(\.start) == discChapters.map(\.startSeconds))
+    let target = min(10, title.durationSeconds / 2)
+    await engine.seek(to: target)
+    #expect(abs(engine.position - target) < 1)
+}
+
+@Test("DVD menu title publishes its timeline and chapters",
+      .enabled(if: ProcessInfo.processInfo.environment["OPENSTREAM_DVD_MENU_FIXTURE_PATH"] != nil))
+@MainActor
+func aetherDVDMenuTitleProvidesDurationAndChapters() async throws {
+    let path = try #require(ProcessInfo.processInfo.environment["OPENSTREAM_DVD_MENU_FIXTURE_PATH"])
+    let engine = try makeEngine()
+    defer { engine.stop() }
+    var request = ApplePlaybackRequest(url: URL(fileURLWithPath: path),
+                                       mediaID: "dvd-menu-timeline-fixture", sourceKind: .files)
+    request.hints.disc = AppleDiscPlaybackChoice(start: .menu)
+    try await engine.load(request)
+    let clock = ContinuousClock()
+    let menuDeadline = clock.now.advanced(by: .seconds(10))
+    while engine.discMenu.state?.buttons.isEmpty != false, clock.now < menuDeadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    try #require(engine.discMenu.state?.isInMenu == true)
+    try #require(engine.discMenu.state?.buttons.isEmpty == false)
+    engine.aetherEngine.dvdActivate()
+    let titleDeadline = clock.now.advanced(by: .seconds(15))
+    while (engine.duration == nil || engine.chapters.isEmpty), clock.now < titleDeadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    try #require(engine.discMenu.state?.isPlayingTitle == true)
+    let duration = try #require(engine.duration)
+    #expect(duration > 0)
+    let title = try #require(engine.aetherEngine.selectedDiscTitle)
+    #expect(abs(duration - title.durationSeconds) < 0.5)
+    #expect(engine.chapters.isEmpty == false)
+    #expect(engine.chapters.map(\.start) == engine.aetherEngine.discChapters.map(\.startSeconds))
+}

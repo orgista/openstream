@@ -247,6 +247,133 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         check(found, "e-not-found", "Search found nothing for \(query)")
     }
 
+    func testISOPlayShowsTimelineAndSeeks() throws {
+        guard let query = environment["OPENSTREAM_ISO_OWNER_TITLE"], !query.isEmpty else {
+            throw XCTSkip("Requires OPENSTREAM_ISO_OWNER_TITLE")
+        }
+        continueAfterFailure = false
+        launch([])
+        tab("Library")
+        let libraryTitle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.title.")).firstMatch
+        if !libraryTitle.exists {
+            let refresh = app.buttons["Refresh"].firstMatch
+            if refresh.waitForExistence(timeout: 5), refresh.isEnabled { refresh.tap() }
+        }
+        XCTAssertTrue(libraryTitle.waitForExistence(timeout: 240), "Local library is unavailable")
+        tab("Discover")
+        let search = try XCTUnwrap(app.buttons.matching(NSPredicate(format: "label == %@", "Search"))
+            .allElementsBoundByIndex.first { $0.isHittable })
+        search.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText(query)
+        let predicates = query.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.map { NSPredicate(format: "label CONTAINS[c] %@", $0) }
+        let hit = app.buttons.matching(NSCompoundPredicate(andPredicateWithSubpredicates: predicates)).firstMatch
+        XCTAssertTrue(hit.waitForExistence(timeout: 40))
+        hit.tap()
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30))
+        attach("iso-title")
+        play.tap()
+        let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
+        let menu = app.descendants(matching: .any)["player.disc.menu.active"].firstMatch
+        let title = app.descendants(matching: .any)["player.disc.title.active"].firstMatch
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            menu.exists || title.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 60), .completed)
+        if menu.exists {
+            attach("iso-disc-menu")
+            let button = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@", "player.disc.menu.button.")).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            button.tap()
+        }
+        XCTAssertTrue(ready.waitForExistence(timeout: 60), "ISO did not start playing")
+        XCTAssertTrue(app.descendants(matching: .any)["player.disc.title.active"].firstMatch.exists,
+                      "The selected source is not a disc title")
+        let slider = app.sliders.matching(NSPredicate(format: "identifier == %@", "Current position")).firstMatch
+        if !slider.exists || !slider.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+        }
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "ISO has no timeline")
+        XCTAssertTrue(slider.isEnabled)
+        let pause = try XCTUnwrap(app.buttons.matching(NSPredicate(
+            format: "label == %@", "Pause")).allElementsBoundByIndex.first { $0.isHittable })
+        pause.tap()
+        attach("iso-timeline")
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "iso-timeline-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        let expression = try NSRegularExpression(pattern: #"\d+:\d{2}(?::\d{2})?"#)
+        let units = try NSRegularExpression(pattern: #"(\d+)\s*(hours?|minutes?|seconds?)"#)
+        func seconds(_ identifier: String) -> Double? {
+            let text = app.staticTexts[identifier].firstMatch
+            guard text.exists else { return nil }
+            for value in [text.label, text.value as? String].compactMap({ $0 }) {
+                if let match = expression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+                   let range = Range(match.range, in: value) {
+                    return value[range].split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
+                }
+            }
+            guard let spoken = slider.value as? String else { return nil }
+            let parts = spoken.components(separatedBy: "elapsed")
+            guard parts.count == 2 else { return nil }
+            let value = identifier == "Elapsed Time" ? parts[0] : parts[1]
+            let matches = units.matches(in: value, range: NSRange(value.startIndex..., in: value))
+            if matches.isEmpty { return value.contains("zero seconds") ? 0 : nil }
+            return matches.reduce(0) { total, match in
+                guard let number = Range(match.range(at: 1), in: value),
+                      let unit = Range(match.range(at: 2), in: value),
+                      let count = Double(value[number]) else { return total }
+                let multiplier: Double = value[unit].hasPrefix("hour") ? 3600 : value[unit].hasPrefix("minute") ? 60 : 1
+                return total + count * multiplier
+            }
+        }
+        let elapsed = try XCTUnwrap(seconds("Elapsed Time"))
+        let remaining = try XCTUnwrap(seconds("Remaining Time"))
+        let duration = elapsed + remaining
+        XCTAssertGreaterThan(duration, 600, "ISO duration is missing")
+        func waitForSeek(from previous: Double) throws -> Double {
+            let landed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                ready.exists && (seconds("Elapsed Time").map { abs($0 - previous) >= 5 } ?? false)
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 15), .completed, "ISO seek did not move the playhead")
+            return try XCTUnwrap(seconds("Elapsed Time"))
+        }
+        // A short drag near the current thumb may stay below AVKit's pan threshold.
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+        let middle = try waitForSeek(from: elapsed)
+        XCTAssertGreaterThan(middle, duration / 4)
+        slider.adjust(toNormalizedSliderPosition: CGFloat(600 / duration))
+        var observed = try waitForSeek(from: middle)
+        // The native track rounds long-film gestures; its ten-second buttons finish the seek precisely.
+        for _ in 0..<64 where abs(observed - 600) > 5 {
+            let skip = app.buttons[observed < 600 ? "Skip Forward" : "Skip Backward"].firstMatch
+            XCTAssertTrue(skip.exists)
+            skip.tap()
+            observed = try waitForSeek(from: observed)
+        }
+        XCTAssertLessThanOrEqual(abs(observed - 600), 5, "ISO seek expected 600s, observed \(observed)s")
+        let toggle = app.buttons["Play/Pause"].firstMatch
+        if toggle.label == "Play" { toggle.tap() }
+        let nextSecond = observed + 1
+        if !app.staticTexts["Elapsed Time"].firstMatch.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+        }
+        let advancing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            seconds("Elapsed Time").map { $0 >= nextSecond } ?? false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [advancing], timeout: 15), .completed, "ISO did not play after the seek")
+        if toggle.label == "Pause" { toggle.tap() }
+        attach("iso-seek-ten-minutes")
+        XCTAssertFalse(playbackFailed())
+        closePlayer()
+    }
+
     /// devicectl cannot delete a file, so the backup copy leaves the phone
     /// through the Files app: On My iPhone › oStream, then Recently Deleted.
     func testZRemoveTheBackupFile() {

@@ -361,6 +361,77 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                        "Blu-ray .menu fallback must not pretend to provide DVD navigation")
     }
 
+    func testDVDMenuTitleShowsTimelineAndChapterSeek() throws {
+        guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_ISO_FIXTURES"],
+              let data = encoded.data(using: .utf8),
+              let folders = try JSONSerialization.jsonObject(with: data) as? [String: String],
+              let folder = folders["menu-features"] else {
+            throw XCTSkip("Requires run-e2e.py --iso-fixtures")
+        }
+        app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_PATH"] = folder
+        app.launchArguments = ["-OpenStreamLibraryTitlesFixture", "-OpenStreamTrace", "YES",
+            "-OpenStreamMuteAudio", "YES", "-openstream.settings.metadata.enabled.v1", "NO",
+            "-openstream.playback.engine", "engine"]
+        app.launch()
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'library.title.'")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 60))
+        tile.tap()
+        let play = app.buttons["detail.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30))
+        play.tap()
+        let menu = app.descendants(matching: .any)["player.disc.menu.active"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 30), "Play bypassed the authored DVD menu")
+        func capture(_ stage: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "dvd-menu-timeline-" + stage
+            shot.lifetime = .keepAlways
+            add(shot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "dvd-menu-timeline-" + stage + "-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        capture("menu")
+        app.buttons["player.disc.menu.button.1"].firstMatch.tap()
+        let firstChapter = app.buttons["player.disc.menu.button.1"].firstMatch
+        XCTAssertTrue(app.buttons["player.disc.menu.button.6"].firstMatch.waitForExistence(timeout: 5))
+        firstChapter.tap()
+        let pause = app.buttons["player.play-pause"].firstMatch
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            pause.exists && pause.label == "Pause"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 30), .completed)
+        pause.tap()
+        let slider = app.sliders.firstMatch
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        XCTAssertTrue(slider.isEnabled)
+        XCTAssertNotNil(crawlPlaybackSeconds(), "Elapsed time is missing")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", #"-\d+:\d{2}"#)).firstMatch.exists,
+                      "Remaining time is missing")
+        capture("title")
+        slider.adjust(toNormalizedSliderPosition: 0)
+        let beginning = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.crawlPlaybackSeconds().map { $0 < 1 } ?? false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [beginning], timeout: 5), .completed)
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+        let seek = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.crawlPlaybackSeconds().map { $0 >= 2 && $0 <= 3 } ?? false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [seek], timeout: 5), .completed)
+        app.descendants(matching: .any)["player.options"].firstMatch.tap()
+        let chapters = app.descendants(matching: .any)["player.chapters"].firstMatch
+        XCTAssertTrue(chapters.waitForExistence(timeout: 5))
+        chapters.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Chapter 1")).firstMatch.tap()
+        let chapterSeek = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.crawlPlaybackSeconds().map { $0 < 1 } ?? false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [chapterSeek], timeout: 5), .completed)
+        capture("chapter-seek")
+        XCTAssertFalse(app.alerts["Playback Failed"].exists)
+    }
+
     private func exerciseDVD(_ name: String, skip: Bool) throws {
         if name.hasPrefix("smb-") {
             guard let encoded = ProcessInfo.processInfo.environment["OPENSTREAM_REMOTE_ISO_FIXTURES"],

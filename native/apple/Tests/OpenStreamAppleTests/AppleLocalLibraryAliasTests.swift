@@ -57,6 +57,17 @@ private struct AliasCredentialStub: AppleCredentialStoring {
 }
 
 @MainActor @Suite struct AppleLocalLibraryAliasTests {
+    @Test func defaultDVDPlayOpensTheDiscMenu() async throws {
+        try await LocalAliasFixture.run { f in
+            let file = f.file("Film.2020.iso")
+            let store = f.store([file])
+            let presentation = try await store.presentation(for: file, sourceStore: f.sources,
+                settings: f.settings, engineOverride: .openStream)
+            #expect(presentation.request.hints.disc?.start == .menu)
+            #expect(presentation.request.hints.disc?.engineTitleID == nil)
+        }
+    }
+
     @Test func strongMatchRecordsOneClassPerFile() async throws {
         try await LocalAliasFixture.run { f in
             let file = f.file("Shows/Show/Season 1/Show.S01E01.mkv")
