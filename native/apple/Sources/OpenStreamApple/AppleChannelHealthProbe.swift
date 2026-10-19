@@ -5,12 +5,15 @@ public struct AppleChannelHealthConfiguration: Sendable {
     public let concurrency: Int
     public let requestTimeout: TimeInterval
     public let requestsPerSecondPerHost: Double
+    /// Paces the per-host requests; tests pass a clock they advance by hand.
+    public let clock: any AppleClock
     public init(concurrency: Int = 4, requestTimeout: TimeInterval = 8,
-                requestsPerSecondPerHost: Double = 4) {
+                requestsPerSecondPerHost: Double = 4, clock: any AppleClock = AppleSystemClock()) {
         self.concurrency = max(1, concurrency)
         self.requestTimeout = requestTimeout.isFinite ? max(0.05, requestTimeout) : 8
         self.requestsPerSecondPerHost = requestsPerSecondPerHost.isFinite
             ? max(0.1, requestsPerSecondPerHost) : 4
+        self.clock = clock
     }
 }
 
@@ -21,14 +24,18 @@ public struct AppleChannelHealthConfiguration: Sendable {
 private actor AppleHealthHostLimiter {
     private var next: [String: ContinuousClock.Instant] = [:]
     let interval: Duration
-    init(rate: Double) { interval = .seconds(1 / rate) }
+    private let clock: any AppleClock
+    init(rate: Double, clock: any AppleClock) {
+        interval = .seconds(1 / rate)
+        self.clock = clock
+    }
     func acquire(_ url: URL) async throws {
         let host = url.host?.lowercased() ?? ""
         while true {
             try Task.checkCancellation()
-            let now = ContinuousClock.now
+            let now = clock.now
             if let deadline = next[host], deadline > now {
-                try await Task.sleep(until: deadline, clock: .continuous)
+                try await clock.sleep(until: deadline)
             } else {
                 next[host] = now.advanced(by: interval)
                 return
@@ -134,7 +141,7 @@ public struct AppleChannelHealthProbe: Sendable {
     private let limiter: AppleHealthHostLimiter
     public init(configuration: AppleChannelHealthConfiguration = .init()) {
         self.configuration = configuration
-        limiter = AppleHealthHostLimiter(rate: configuration.requestsPerSecondPerHost)
+        limiter = AppleHealthHostLimiter(rate: configuration.requestsPerSecondPerHost, clock: configuration.clock)
     }
 
     private struct Response: Sendable {

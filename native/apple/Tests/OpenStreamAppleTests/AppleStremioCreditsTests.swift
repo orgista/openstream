@@ -105,7 +105,8 @@ struct AppleStremioCreditsTests {
                 return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
             },
             overallDeadline: .seconds(5),
-            defaultSource: secondary
+            defaultSource: secondary,
+            clock: ManualClock()
         )
 
         let details = try await resolver.resolve(sources: [preferred, secondary], preferredSourceID: preferred.id,

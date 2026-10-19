@@ -29,10 +29,11 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = "com.orgista.openstream"
 GROUP = "group.com.orgista.openstream"
-SIMS = {"iOS": "73E49263-D838-4C4E-9CED-803AA1497945", "tvOS": "F2107E8F-87F4-4685-9C91-84B56D78EC6F"}
+SIMS = {"iOS": os.environ.get("OPENSTREAM_E2E_IOS_SIM", "73E49263-D838-4C4E-9CED-803AA1497945"),
+        "tvOS": "F2107E8F-87F4-4685-9C91-84B56D78EC6F"}
 SCHEMES = {"iOS": "OpenStreamiOSUITests", "tvOS": "OpenStreamTVUITests"}
 TARGETS = {"iOS": "OpenStreamiOSUITests", "tvOS": "OpenStreamTVUITests"}
-DD = Path.home() / "Developer/sim-dd-internal"
+DD = Path(os.environ.get("OPENSTREAM_E2E_DD", Path.home() / "Developer/sim-dd-internal"))
 ACTIVE_TEST_PROCESS = None
 CANCEL_REQUESTED = False
 
@@ -261,6 +262,9 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
             result["captionSelectionTrace"] = [line for line in lines
                                                 if "subtitle select: track=" in line
                                                 or "subtitle mirror:" in line]
+            result["liveTuneTrace"] = [line for line in lines
+                                       if any(mark in line for mark in ("live surf", "live zap", "live first picture",
+                                                                        "live spinner shown", "live watched"))]
             result["fixturePlaybackHealth"] = [line for line in lines
                                                if "first frame, route=" in line or "failure timed out after" in line]
     except Exception as error:

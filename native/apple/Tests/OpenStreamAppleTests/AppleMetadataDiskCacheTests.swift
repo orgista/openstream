@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import OpenStreamApple
 
-@Suite("AppleMetadataDiskCache Tests")
+@Suite("AppleMetadataDiskCache Tests", .timeLimit(.minutes(1)))
 struct AppleMetadataDiskCacheTests {
     @Test("Cache filenames distinguish complete provider endpoints without exposing them")
     func fileNameRules() throws {
@@ -146,11 +146,12 @@ struct AppleMetadataDiskCacheTests {
         func increment() { value += 1 }
     }
 
-    private func waitUntil(_ condition: () async -> Bool, timeout: Duration) async throws {
-        let start = ContinuousClock().now
-        while ContinuousClock().now < start + timeout {
-            if await condition() { return }
-            try await Task.sleep(nanoseconds: 20_000_000)
+    /// Waits for the background refresh of a stale entry. No wall-clock
+    /// deadline: the parallel gate can hold its task up for seconds; the
+    /// suite's time limit fails a refresh that never runs.
+    private func waitUntil(_ condition: () async -> Bool) async throws {
+        while await !condition() {
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -199,7 +200,7 @@ struct AppleMetadataDiskCacheTests {
         #expect(result.count == 1)
         #expect(result.first?.title == "Stale Episode")
         
-        try await waitUntil({ await loadCount.value >= 1 }, timeout: .seconds(3))
+        try await waitUntil({ await loadCount.value >= 1 })
         #expect(await loadCount.value == 1)
     }
 
@@ -248,7 +249,7 @@ struct AppleMetadataDiskCacheTests {
         #expect(result?.logoURL?.absoluteString == "https://fixture.example/old.jpg")
         #expect(result?.trailerYouTubeKeys == [])
         
-        try await waitUntil({ await loadCount.value >= 1 }, timeout: .seconds(3))
+        try await waitUntil({ await loadCount.value >= 1 })
         #expect(await loadCount.value == 1)
     }
 }

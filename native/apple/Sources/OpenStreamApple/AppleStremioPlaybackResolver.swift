@@ -70,6 +70,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
     private let revokeProtectedPlaybackURL: ProtectedPlaybackRevoker
     private let resolutionTimeout: Duration
     private let sourceTimeout: Duration
+    private let clock: any AppleClock
 
     public init(
         client: AppleStremioPlaybackClient = AppleStremioPlaybackClient(),
@@ -80,7 +81,8 @@ public struct AppleMediaPlaybackResolver: Sendable {
             AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: $0)
         },
         resolutionTimeout: Duration = .seconds(45),
-        sourceTimeout: Duration = .seconds(15)
+        sourceTimeout: Duration = .seconds(15),
+        clock: any AppleClock = AppleSystemClock()
     ) {
         self.client = client
         self.inspector = inspector
@@ -96,6 +98,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
         self.revokeProtectedPlaybackURL = revokeProtectedPlaybackURL
         self.resolutionTimeout = max(resolutionTimeout, .milliseconds(1))
         self.sourceTimeout = max(sourceTimeout, .milliseconds(1))
+        self.clock = clock
     }
 
     public init(
@@ -107,7 +110,8 @@ public struct AppleMediaPlaybackResolver: Sendable {
             AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: $0)
         },
         resolutionTimeout: Duration = .seconds(45),
-        sourceTimeout: Duration = .seconds(15)
+        sourceTimeout: Duration = .seconds(15),
+        clock: any AppleClock = AppleSystemClock()
     ) {
         self.client = client
         self.inspector = inspector
@@ -116,6 +120,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
         self.revokeProtectedPlaybackURL = revokeProtectedPlaybackURL
         self.resolutionTimeout = max(resolutionTimeout, .milliseconds(1))
         self.sourceTimeout = max(sourceTimeout, .milliseconds(1))
+        self.clock = clock
     }
 
     public func resolve(
@@ -214,7 +219,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
         preferredSourceID: AppleSource.ID? = nil,
         item: AppleCatalogItem
     ) async throws -> [AppleStremioHTTPPlaybackCandidate] {
-        try await Self.withTimeout(resolutionTimeout) {
+        try await Self.withTimeout(resolutionTimeout, on: clock) {
             try await rankedCandidatesWithinBudget(sources: sources, preferredSourceID: preferredSourceID,
                 item: item)
         }
@@ -229,15 +234,15 @@ public struct AppleMediaPlaybackResolver: Sendable {
         guard !candidates.isEmpty else { throw AppleStremioPlaybackResolutionError.noStreams }
 
         var collected: [AppleStremioHTTPPlaybackCandidate] = []
-        let started = ContinuousClock.now
+        let started = clock.now
         var bestError: AppleStremioPlaybackResolutionError = .noStreams
         var providerFailure: ApplePlaybackFailure?
         var someSourceAnswered = false
         for source in candidates {
             try Task.checkCancellation()
-            if !collected.isEmpty, started.duration(to: .now) + sourceTimeout >= resolutionTimeout { break }
+            if !collected.isEmpty, started.duration(to: clock.now) + sourceTimeout >= resolutionTimeout { break }
             do {
-                let selection = try await Self.withTimeout(sourceTimeout) {
+                let selection = try await Self.withTimeout(sourceTimeout, on: clock) {
                     try await client.streams(source: source, type: item.type, mediaID: item.mediaID)
                 }
                 let http = selection.httpCandidates.filter { !$0.isPendingPreparation }
@@ -308,6 +313,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
 
     private static func withTimeout<Value: Sendable>(
         _ duration: Duration,
+        on clock: any AppleClock,
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
         try Task.checkCancellation()
@@ -315,7 +321,7 @@ public struct AppleMediaPlaybackResolver: Sendable {
             defer { group.cancelAll() }
             group.addTask { try await operation() }
             group.addTask {
-                try await Task.sleep(for: duration)
+                try await clock.sleep(for: duration)
                 throw URLError(.timedOut)
             }
             guard let value = try await group.next() else { throw CancellationError() }

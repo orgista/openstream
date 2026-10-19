@@ -18,7 +18,8 @@ private actor SpotlightFixture: AppleSpotlightStoring {
     func release() { blocked?.resume(); blocked = nil }
 }
 
-@Test func spotlightFiltersPrivateRecordsAndOptOutWinsOverAnInFlightExport() async throws {
+@Test(.timeLimit(.minutes(1)))
+func spotlightFiltersPrivateRecordsAndOptOutWinsOverAnInFlightExport() async throws {
     let fixture = SpotlightFixture()
     let indexer = AppleSpotlightIndexer(store: fixture)
     let source = UUID()
@@ -26,7 +27,7 @@ private actor SpotlightFixture: AppleSpotlightStoring {
     let visible = AppleMediaRecord(canonicalID: "tt1234567", kind: .movie, title: "Public", availability: availability)
     let hidden = AppleMediaRecord(canonicalID: "tt7654321", kind: .movie, title: "Private", availability: availability, isPrivate: true)
     let first = Task { await indexer.synchronize(records: [visible, hidden], enabled: true) }
-    for _ in 0..<200 { if await fixture.entered { break }; try await Task.sleep(for: .milliseconds(5)) }
+    while await !fixture.entered { try await Task.sleep(for: .milliseconds(5)) }
     #expect(await fixture.entered)
     let disabled = Task { await indexer.synchronize(records: [visible], enabled: false) }
     await fixture.release()

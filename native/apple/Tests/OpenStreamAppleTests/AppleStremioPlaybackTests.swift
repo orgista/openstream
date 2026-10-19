@@ -38,75 +38,106 @@ private func stremioSource(
     }
 }
 
+/// Counts provider requests and how each one ended. A request that ends by
+/// cancellation was cut off by a deadline or the caller, never left to run.
 private actor ResolutionLoadProbe {
     var active = 0
     var starts = 0
-    func begin() { active += 1; starts += 1 }
+    var cancellations = 0
+
+    func begin() {
+        active += 1
+        starts += 1
+    }
     func end() { active -= 1 }
+    func cancelled() {
+        active -= 1
+        cancellations += 1
+    }
+    func waitForStarts(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await waitFor("\(count) provider requests, saw \(starts)", sourceLocation: sourceLocation) { starts >= count }
+    }
 }
 
-@Test func rankedStreamsCancelSlowProviderAndTryNextWithinOverallBudget() async throws {
+/// A provider request that only ends when it is cancelled (or after ten real
+/// seconds, which no passing run reaches).
+private func stalledRequest(_ probe: ResolutionLoadProbe) async throws {
+    await probe.begin()
+    do { try await Task.sleep(for: .seconds(10)) }
+    catch { await probe.cancelled(); throw error }
+    await probe.end()
+}
+
+@Test(.timeLimit(.minutes(1))) func rankedStreamsCancelSlowProviderAndTryNextWithinOverallBudget() async throws {
     let probe = ResolutionLoadProbe()
     let client = AppleStremioPlaybackClient { request in
-        if request.url?.host == "slow.example" {
-            await probe.begin()
-            do { try await Task.sleep(for: .seconds(10)) }
-            catch { await probe.end(); throw error }
-            await probe.end()
-        }
+        if request.url?.host == "slow.example" { try await stalledRequest(probe) }
         return (Data(#"{"streams":[{"url":"https://media.example/ready.mp4"}]}"#.utf8),
             HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
     let first = stremioSource(url: "https://slow.example/manifest.json")
-    let resolver = AppleStremioPlaybackResolver(client: client, resolutionTimeout: .seconds(2), sourceTimeout: .milliseconds(100))
-    let result = try await resolver.rankedCandidates(sources: [first, stremioSource(url: "https://ready.example/manifest.json")],
-        preferredSourceID: first.id, item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
+    let clock = ManualClock()
+    let resolver = AppleStremioPlaybackResolver(client: client, resolutionTimeout: .seconds(2),
+        sourceTimeout: .milliseconds(100), clock: clock)
+    let resolution = Task {
+        try await resolver.rankedCandidates(sources: [first, stremioSource(url: "https://ready.example/manifest.json")],
+            preferredSourceID: first.id, item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
+    }
+    // The overall budget and the slow source's own deadline.
+    await clock.waitForSleeps(2)
+    await probe.waitForStarts(1)
+    clock.advance(by: .milliseconds(100))
+    let result = try await resolution.value
     #expect(result.first?.sourceURL.absoluteString == "https://media.example/ready.mp4")
     #expect(await probe.starts == 1)
+    #expect(await probe.cancellations == 1)
     #expect(await probe.active == 0)
 }
 
-@Test func rankedStreamsEnforceOverallDeadlineAndCancelOutstandingRequests() async throws {
+@Test(.timeLimit(.minutes(1))) func rankedStreamsEnforceOverallDeadlineAndCancelOutstandingRequests() async throws {
     let probe = ResolutionLoadProbe()
     let client = AppleStremioPlaybackClient { request in
-        await probe.begin()
-        do { try await Task.sleep(for: .seconds(10)) }
-        catch { await probe.end(); throw error }
-        await probe.end()
+        try await stalledRequest(probe)
         return (Data(#"{"streams":[]}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
-    let resolver = AppleStremioPlaybackResolver(client: client, resolutionTimeout: .milliseconds(250), sourceTimeout: .milliseconds(150))
-    let start = ContinuousClock.now
-    do {
-        _ = try await resolver.rankedCandidates(sources: (0..<8).map { stremioSource(url: "https://slow\($0).example/manifest.json") },
+    let clock = ManualClock()
+    let resolver = AppleStremioPlaybackResolver(client: client, resolutionTimeout: .milliseconds(250),
+        sourceTimeout: .milliseconds(150), clock: clock)
+    let resolution = Task {
+        try await resolver.rankedCandidates(sources: (0..<8).map { stremioSource(url: "https://slow\($0).example/manifest.json") },
             item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
+    }
+    // 150 ms: the first source's deadline passes and the second is asked.
+    await clock.waitForSleeps(2)
+    await probe.waitForStarts(1)
+    clock.advance(by: .milliseconds(150))
+    // 250 ms: the overall deadline passes while the second is outstanding.
+    await clock.waitForSleeps(3)
+    await probe.waitForStarts(2)
+    clock.advance(by: .milliseconds(100))
+    do {
+        _ = try await resolution.value
         Issue.record("Expected overall resolution deadline")
     } catch {
         #expect(ApplePlaybackFailure.classify(error).kind == .timedOut)
     }
-    #expect(start.duration(to: .now) < .seconds(2))
-    #expect(await probe.starts <= 2)
+    #expect(await probe.starts == 2)
+    #expect(await probe.cancellations == 2)
     #expect(await probe.active == 0)
 }
 
-@Test func rankedStreamsPropagateCallerCancellation() async throws {
+@Test(.timeLimit(.minutes(1))) func rankedStreamsPropagateCallerCancellation() async throws {
     let probe = ResolutionLoadProbe()
     let client = AppleStremioPlaybackClient { request in
-        await probe.begin()
-        do { try await Task.sleep(for: .seconds(10)) }
-        catch { await probe.end(); throw error }
-        await probe.end()
+        try await stalledRequest(probe)
         return (Data(#"{"streams":[]}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
-    let resolver = AppleStremioPlaybackResolver(client: client)
+    let resolver = AppleStremioPlaybackResolver(client: client, clock: ManualClock())
     let source = stremioSource()
     let operation = Task {
         try await resolver.rankedCandidates(sources: [source], item: .init(mediaID: "tt123", type: "movie", name: "Fixture"))
     }
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while await probe.starts == 0, ContinuousClock.now < deadline {
-        try await Task.sleep(for: .milliseconds(10))
-    }
+    await probe.waitForStarts(1)
     operation.cancel()
     do {
         _ = try await operation.value
@@ -115,6 +146,7 @@ private actor ResolutionLoadProbe {
         #expect(error is CancellationError)
     }
     #expect(await probe.starts == 1)
+    #expect(await probe.cancellations == 1)
     #expect(await probe.active == 0)
 }
 

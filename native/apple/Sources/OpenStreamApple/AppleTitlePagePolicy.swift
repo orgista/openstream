@@ -139,8 +139,8 @@ public enum AppleTitlePagePolicy {
     }
 
     /// The hero's route: the title page's `hasPlaybackRoute`, fed with what
-    /// the hero's episode lookup found. An empty answer is the title page's
-    /// "Episodes aren't available", so the hero must not promise Play: it
+    /// the hero's episode lookup found. An empty answer is a title page with
+    /// no episodes, so the hero must not promise Play: it
     /// did, for Monster: The Lizzie Borden Story with Torrentio off, and the
     /// press ended in "Playback Unavailable" (iOS 18.6 regression
     /// 2026-10-01). A lookup that never answered (`unknown`) is no evidence,
@@ -439,7 +439,7 @@ public enum AppleTitlePagePolicy {
         return calendar
     }
 
-    // MARK: - Capability chips and what they mean
+    // MARK: - Capability chips
 
     /// "4K · HDR · CC · SDH · AD" from the title's own format badges, best
     /// first, unknown values dropped. The content rating is not a capability;
@@ -447,18 +447,6 @@ public enum AppleTitlePagePolicy {
     public static func capabilityChips(formatBadges: [String]) -> [String] {
         AppleTitleMetadataPresentation.orderedBadges(contentRating: nil, formatBadges: formatBadges, limit: 8)
             .filter { !AppleTitleMetadataPresentation.isContentRating($0) }
-    }
-
-    /// The accessibility chips shown in the hero, each spelled out (A13): the
-    /// compressed badge and its meaning on the same page.
-    public static func accessibilityGlossary(chips: [String]) -> [(badge: String, meaning: String)] {
-        let meanings: [(String, String)] = [
-            ("CC", "Closed captions (CC) are subtitles in the available language that also describe relevant sounds that aren’t dialogue."),
-            ("SDH", "Subtitles for the deaf and hard of hearing (SDH) are subtitles in the original language that also describe relevant sounds that aren’t dialogue."),
-            ("AD", "Audio descriptions (AD) are a narration track that describes what is happening on screen, for people who are blind or have low vision."),
-        ]
-        let present = Set(chips.map { $0.uppercased() })
-        return meanings.filter { present.contains($0.0) }.map { (badge: $0.0, meaning: $0.1) }
     }
 
     /// The 16:9 still YouTube keeps for a video (no letterbox bars).

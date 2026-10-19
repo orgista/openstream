@@ -304,6 +304,9 @@ public final class ApplePlaybackCoordinator {
 
     /// Injected by tests with millisecond delays.
     @ObservationIgnored var liveReconnectPolicy: AppleLiveReconnectPolicy = .standard
+    /// Times the start deadline, the live reconnect delays, the stall timer
+    /// and the progress throttle; tests drive it by hand.
+    @ObservationIgnored var clock: any AppleClock = AppleSystemClock()
     /// The reopen in flight (1-based) while a live channel that was playing
     /// is being reconnected; 0 otherwise. The player reads it to say
     /// "Reconnecting…" instead of "Connecting to …".
@@ -634,7 +637,7 @@ public final class ApplePlaybackCoordinator {
         AppleInteractionTrace.count { $0.recordAttempt(isLive: request.isLive) }
         liveRetryAttempted = false
         liveStartExtended = false
-        discStartBegan = request.hints.disc != nil && !request.isLive ? .now : nil
+        discStartBegan = request.hints.disc != nil && !request.isLive ? clock.now : nil
         discStartMark = .init()
         lastProgressWrite = nil
         remoteProgressStarted = false
@@ -1222,8 +1225,8 @@ public final class ApplePlaybackCoordinator {
         let isLive = lastRequest?.isLive ?? false
         let duration = duration ?? (isLive ? liveTimeoutDuration : timeoutDuration)
         let attempt = generation
-        timeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: duration)
+        timeoutTask = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: duration)
             guard !Task.isCancelled, let self, self.generation == attempt else { return }
             let discExtension = await self.discStartExtension()
             guard !Task.isCancelled, self.generation == attempt else { return }
@@ -1272,7 +1275,7 @@ public final class ApplePlaybackCoordinator {
         let checkpoint = engine.startupCheckpoint
         let bytesRead = await AppleSMBRangeServer.shared.bytesServed(playbackURL: request.url)
         let current = ApplePlaybackStartPolicy.DiscStartProgress(checkpoint: checkpoint, bytesRead: bytesRead)
-        let elapsed = began.duration(to: .now)
+        let elapsed = began.duration(to: clock.now)
         guard let more = ApplePlaybackStartPolicy.discStartExtension(
             elapsed: elapsed, previous: discStartMark, current: current,
             window: discStartWindow, cap: discStartCap) else {
@@ -1350,7 +1353,7 @@ public final class ApplePlaybackCoordinator {
         }
 
         guard route == .surface else { return }
-        let now = ContinuousClock().now
+        let now = clock.now
         guard lastProgressWrite == nil || now - lastProgressWrite! >= progressInterval else { return }
         lastProgressWrite = now
         
@@ -1443,13 +1446,13 @@ public final class ApplePlaybackCoordinator {
         // 15 s; the attempt count carries on until the channel has played
         // steadily (`episodeResetAfter`), so a flapping feed is still bounded.
         liveEpisodeStart = nil
-        if livePlayingSince == nil { livePlayingSince = ContinuousClock.now }
+        if livePlayingSince == nil { livePlayingSince = clock.now }
     }
 
     /// Reopens the live `request` after `failure` when the policy says so.
     /// Returns false when the failure should take its normal course.
     private func reconnectLive(_ request: ApplePlaybackRequest, after failure: ApplePlaybackFailure) async -> Bool {
-        let now = ContinuousClock.now
+        let now = clock.now
         if liveEpisodeAttempts > 0, let since = livePlayingSince,
            liveReconnectPolicy.startsNewEpisode(playingFor: now - since) {
             appleTrace("live reconnect: played \(now - since) since the last drop — new episode")
@@ -1479,7 +1482,7 @@ public final class ApplePlaybackCoordinator {
             setPhase(.waiting(Self.reconnectingText))
             liveReconnectAttempt = attempt
             let attemptGeneration = generation
-            try? await Task.sleep(for: delay)
+            try? await clock.sleep(for: delay)
             guard !Task.isCancelled, generation == attemptGeneration else { return true }
             // `liveReconnectAttempt` survives the loading phase, so the
             // screen keeps saying "Reconnecting…" until a frame or a give-up.
@@ -1497,7 +1500,8 @@ public final class ApplePlaybackCoordinator {
     private func watchLiveStall(kind: String) {
         guard liveHasPlayed else { return }
         if liveStallTask != nil, kind == liveStallKind { return }
-        let now = ContinuousClock.now
+        let clock = self.clock
+        let now = clock.now
         let start = liveStallStart ?? now
         liveStallStart = start
         liveStallKind = kind
@@ -1506,11 +1510,11 @@ public final class ApplePlaybackCoordinator {
         let attempt = generation
         liveStallTask?.cancel()
         liveStallTask = Task { @MainActor [weak self] in
-            if remaining > .zero { try? await Task.sleep(for: remaining) }
+            if remaining > .zero { try? await clock.sleep(for: remaining) }
             guard !Task.isCancelled, let self, self.generation == attempt else { return }
             self.liveStallTask = nil
             guard case .waiting = self.phase else { return }
-            appleTrace("live stalled \(ContinuousClock.now - start) (\(kind)) — treating as a drop")
+            appleTrace("live stalled \(clock.now - start) (\(kind)) — treating as a drop")
             self.liveStallStart = nil
             self.liveStallKind = nil
             self.engine.stop()

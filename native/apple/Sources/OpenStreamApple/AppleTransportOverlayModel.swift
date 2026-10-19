@@ -262,6 +262,7 @@ public final class AppleTransportOverlayModel {
 
     private var observationTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
+    private let hideClock: any AppleClock
     /// Three seconds of stillness hides the chrome. A UI test cannot read a
     /// button's frame and its neighbour's inside that window — the second query
     /// lands after the timer — so the crawler and the live photo tests launch
@@ -284,9 +285,10 @@ public final class AppleTransportOverlayModel {
         #endif
     }()
 
-    public init(coordinator: ApplePlaybackCoordinator, isLive: Bool) {
+    public init(coordinator: ApplePlaybackCoordinator, isLive: Bool, hideClock: any AppleClock = AppleSystemClock()) {
         self.coordinator = coordinator
         self.isLive = isLive
+        self.hideClock = hideClock
         // Seed from the engine's current synchronous state so the first render
         // is correct before any event has been emitted.
         self.position = coordinator.engine.position
@@ -731,8 +733,8 @@ public final class AppleTransportOverlayModel {
             return
         }
         let delay = menuIsOpen ? max(hideDelay, openMenuHideDelay) : hideDelay
-        hideTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: delay)
+        hideTask = Task { @MainActor [weak self, hideClock] in
+            try? await hideClock.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             guard case .playing = self.coordinator.phase else { return }
             self.controlsVisible = false

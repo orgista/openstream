@@ -320,6 +320,7 @@ public struct AppleMediaMetadataClient: Sendable {
     private let metadataCache: AppleMetadataDiskCache?
     /// How long the other add-ons may still add episodes once one has answered.
     let mergeGrace: Duration
+    private let graceClock: any AppleClock
     static let defaultMetadataSource = AppleSource(
         id: UUID(uuidString: "86FE8F74-15D8-4A64-8EE7-B2BE55E22C48") ?? UUID(),
         kind: .stremio,
@@ -357,6 +358,7 @@ public struct AppleMediaMetadataClient: Sendable {
         self.loader = Self.liveMetaLoader
         self.metadataCache = .shared
         self.mergeGrace = .seconds(1)
+        self.graceClock = AppleSystemClock()
     }
 
     /// Injected transports remain independent of process-wide persisted data.
@@ -365,17 +367,20 @@ public struct AppleMediaMetadataClient: Sendable {
         self.loader = loader
         self.metadataCache = nil
         self.mergeGrace = .seconds(1)
+        self.graceClock = AppleSystemClock()
     }
 
     internal init(
         loader: @escaping Loader,
         metadataCache: AppleMetadataDiskCache?,
-        mergeGrace: Duration = .seconds(1)
+        mergeGrace: Duration = .seconds(1),
+        graceClock: any AppleClock = AppleSystemClock()
     ) {
         self.identityLookups = AppleSharedMetadataLookup()
         self.loader = loader
         self.metadataCache = metadataCache
         self.mergeGrace = mergeGrace
+        self.graceClock = graceClock
     }
 
     /// `isListingSource`: the add-on asked is the one whose catalog listed
@@ -592,6 +597,7 @@ public struct AppleMediaMetadataClient: Sendable {
         // one add-on has returned episodes the others get `mergeGrace` to add
         // theirs; the answers are still merged in candidate order.
         let grace = mergeGrace
+        let graceClock = self.graceClock
         let results = await withTaskGroup(
             of: (index: Int, result: Result<[AppleStremioEpisode], any Error>)?.self
         ) { group in
@@ -614,7 +620,7 @@ public struct AppleMediaMetadataClient: Sendable {
                 if !graceStarted, case .success(let values) = next.result, !values.isEmpty {
                     graceStarted = true
                     group.addTask {
-                        try? await Task.sleep(for: grace)
+                        try? await graceClock.sleep(for: grace)
                         return nil
                     }
                 }

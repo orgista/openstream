@@ -3,7 +3,7 @@ import Testing
 @testable import OpenStreamApple
 
 @MainActor
-@Suite(.serialized) struct ApplePlaybackCoordinatorTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct ApplePlaybackCoordinatorTests {
     private func makeRequest(
         isLive: Bool = false,
         sourceKind: ApplePlaybackRequest.SourceKind = .stremio
@@ -69,9 +69,9 @@ import Testing
         // simulator, so the assertions fired mid-transition and saw one
         // request and `.loading`. Wait for the outcome instead of guessing how
         // long it takes.
-        _ = await coordinatorWaitUntil { engine.loadedRequests.isEmpty == false }
+        await coordinatorWaitUntil { engine.loadedRequests.isEmpty == false }
         engine.emit(.failure(.init(kind: .unsupportedMedia, message: "Unsupported fixture")))
-        _ = await coordinatorWaitUntil { engine.loadedRequests.count >= 2 && coordinator.phase == .playing }
+        await coordinatorWaitUntil { engine.loadedRequests.count >= 2 && coordinator.phase == .playing }
         #expect(engine.loadedRequests.map(\.mediaID) == ["test-media-id", "next"])
         #expect(coordinator.phase == .playing)
         coordinator.stop()
@@ -128,9 +128,10 @@ import Testing
         var coordinator: ApplePlaybackCoordinator? = ApplePlaybackCoordinator(engine: engine)
         weak let reference = coordinator
         await coordinator?.begin(makeRequest())
-        try? await Task.sleep(for: .milliseconds(20))
         coordinator = nil
-        await Task.yield()
+        // Its observation task may be mid-event; once that ends nothing holds
+        // it. A retain cycle never lets go, and the time limit fails it.
+        await coordinatorWaitUntil { reference == nil }
         #expect(reference == nil)
         reference?.stop()
     }
@@ -213,13 +214,7 @@ import Testing
         #expect(coordinator.phase == .playing)
         let failure = ApplePlaybackFailure(kind: .player, message: "Player error")
         engine.emit(.failure(failure))
-        // Wait for the observed state, since concurrent builds can delay the
-        // failure-handling task beyond a fixed 20 ms scheduling window.
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while ContinuousClock.now < deadline {
-            if case .failed = coordinator.phase { break }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+        await coordinatorWaitUntil { if case .failed = coordinator.phase { true } else { false } }
         if case .failed(let phaseFailure) = coordinator.phase {
             #expect(phaseFailure.message == "Player error")
         } else {
@@ -234,13 +229,13 @@ import Testing
         let engine = FakePlaybackEngine()
         engine.script([.loading])
         let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .milliseconds(50))
+        let clock = ManualClock()
+        coordinator.clock = clock
         await coordinator.begin(makeRequest())
-        // Poll rather than a single fixed sleep: a fixed short wait flakes when
-        // the machine is loaded (several agents building at once).
-        for _ in 0..<50 {
-            if case .failed = coordinator.phase { break }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await clock.waitForSleep(until: .milliseconds(50))
+        #expect(coordinator.phase == .loading)
+        clock.advance(to: .milliseconds(50))
+        await coordinatorWaitUntil { if case .failed = coordinator.phase { true } else { false } }
         if case .failed(let failure) = coordinator.phase {
             #expect(failure.kind == .timedOut)
             #expect(failure.message == "The player did not become ready in time.")
@@ -286,19 +281,20 @@ import Testing
             retryDelay: .milliseconds(50)
         )
         coordinator.liveReconnectPolicy = AppleLiveReconnectPolicy(maxAttempts: 1, delays: [.milliseconds(50)])
+        let clock = ManualClock()
+        coordinator.clock = clock
         await coordinator.begin(makeRequest(isLive: true))
         #expect(coordinator.phase == .playing)
 
-        try? await Task.sleep(for: .milliseconds(10))
         engine.emit(.phase(.ended))
-        try? await Task.sleep(for: .milliseconds(20))
+        await clock.waitForSleep(until: .milliseconds(50))
         #expect(coordinator.phase == .waiting("Reconnecting…"))
 
-        try? await Task.sleep(for: .milliseconds(120))
-        #expect(coordinator.phase == .playing)
+        clock.advance(to: .milliseconds(50))
+        await coordinatorWaitUntil { coordinator.phase == .playing }
 
         engine.emit(.phase(.ended))
-        try? await Task.sleep(for: .milliseconds(20))
+        await coordinatorWaitUntil { if case .failed = coordinator.phase { true } else { false } }
         if case .failed(let failure) = coordinator.phase {
             #expect(failure.kind == .sourceEnded)
             #expect(failure.message == "The channel stopped sending data.")
@@ -314,58 +310,43 @@ import Testing
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
         engine.scriptedRoute = .surface
-        var writes: [(Double, Double, ContinuousClock.Instant)] = []
+        var writes: [Double] = []
         let coordinator = ApplePlaybackCoordinator(
             engine: engine,
             timeout: .seconds(60),
             progressInterval: .milliseconds(50)
         )
-        coordinator.progressWriter = { pos, dur in
-            writes.append((pos, dur, .now))
+        let clock = ManualClock()
+        coordinator.clock = clock
+        coordinator.progressWriter = { pos, _ in
+            writes.append(pos)
         }
         await coordinator.begin(makeRequest())
         #expect(coordinator.route == .surface)
 
-        // A burst verifies throttling without assuming the scheduler resumes
-        // a 10 ms sleep before a 50 ms interval has elapsed on a busy machine.
+        // A burst within one interval writes its first position only.
         for position in 1...100 { engine.emit(.position(Double(position))) }
         engine.emit(.phase(.paused))
-        let batchDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while coordinator.phase != .paused, ContinuousClock.now < batchDeadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(coordinator.phase == .paused)
-        #expect(writes.count < 100)
-        #expect(writes.first?.0 == 1)
-        for (earlier, later) in zip(writes, writes.dropFirst()) {
-            #expect(earlier.2.duration(to: later.2) >= .milliseconds(49))
-        }
-        try? await Task.sleep(for: .milliseconds(60))
+        await coordinatorWaitUntil { coordinator.phase == .paused }
+        #expect(writes == [1])
+        // Past the interval the next position is written.
+        clock.advance(by: .milliseconds(60))
         engine.emit(.position(200))
         engine.emit(.phase(.playing))
-        let finalDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while coordinator.phase != .playing, ContinuousClock.now < finalDeadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(coordinator.phase == .playing)
-        #expect(writes.count >= 2)
-        #expect(writes.last?.0 == 200)
+        await coordinatorWaitUntil { coordinator.phase == .playing }
+        #expect(writes == [1, 200])
         coordinator.stop()
     }
 }
 
-/// Polls for an outcome rather than sleeping a fixed amount, so a loaded
-/// machine slows the suite down instead of failing it.
-private func coordinatorWaitUntil(
-    timeout: Duration = .seconds(8),
-    _ condition: @MainActor () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
+/// Polls for an outcome rather than sleeping a fixed amount. No wall-clock
+/// deadline: a loaded machine slows the suite down instead of failing it,
+/// and the suite's time limit fails an outcome that never comes.
+@MainActor
+private func coordinatorWaitUntil(_ condition: @MainActor () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return await condition()
 }
 
 @Suite("Live channel failure wording")

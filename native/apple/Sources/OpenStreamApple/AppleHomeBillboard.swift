@@ -102,8 +102,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         )
     }
 
-    /// What the hero's own episode lookup said, the title page's
-    /// "Episodes aren't available" included (`heroHasPlaybackRoute`).
+    /// What the hero's own episode lookup said, an empty answer included
+    /// (`heroHasPlaybackRoute`).
     private var episodeLookup: AppleTitlePagePolicy.HeroEpisodeLookup {
         if let episodeLookupAnswered { return episodeLookupAnswered ? (episodes.isEmpty ? .empty : .found) : .unknown }
         return trailerLookupPatienceElapsed ? .unknown : .pending
@@ -238,6 +238,9 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// that picks each hero's scrim (`AppleHeroScrim`).
     @State private var loadedStill: AppleHeroLoadedStill?
     @State private var artMeasurement: AppleHeroArtMeasurement?
+    /// The page whose still is drawn. It trails `item` until the new still
+    /// has decoded, so the crossfade never starts from a bare surface.
+    @State private var stillPage: AppleHeroStillPage?
 
     /// The iPhone portrait hero's settled art (`AppleHomePhonePortraitStage`).
     @State private var portraitDecision: AppleHeroPortraitDecision?
@@ -422,38 +425,50 @@ struct AppleHomeBillboard<Actions: View>: View {
         #endif
         return AnyView(
             ZStack {
-                // The still sits outside the per-title identity below. It
-                // was inside it, so every page change remounted it empty
-                // and the hero showed a bare surface under the new copy
-                // until the backdrop decoded (sim finding c, 2026-09-22).
-                // It keeps the old still until the new one lands: across a
-                // page change `AppleHeroPageGate` has already warmed it (the
-                // iPhone portrait pages are separate views), and a resize
-                // must never paint the loading surface over the hero.
-                AppleRemoteImage(
-                    url: stillURL,
-                    placeholderSystemImage: "",
-                    onLoad: { [stillURL] image in
-                        stillImage = image
-                        if let stillURL { loadedStill = AppleHeroLoadedStill(url: stillURL, image: image) }
-                        recordStill(.loaded)
-                        appleTrace("hero still loaded \(item.name) \(image.width)px")
-                        AppleLaunchMarks.record(.heroArt)
-                        AppleLaunchReadiness.shared.markFirstScreenReady()
-                    },
-                    onFailure: {
-                        stillImage = nil
-                        recordStill(.failed)
-                        appleTrace("hero still failed \(item.name)")
-                        AppleLaunchReadiness.shared.markFirstScreenReady()
-                    },
-                    loadingFill: AppleDesignTokens.surface,
-                    keepsImageWhileReloading: true,
-                    // The Mac window resizes live; decode the still once.
-                    fixedPixelDimension: mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil,
-                    // Centred like the trailer's cover over it (N44).
-                    fillAlignment: mac?.layout.platform == .mac ? .center : nil
-                )
+                // The still crossfades from the last page's (Apple TV and the
+                // rotating hero; the Mac, iPad and iPhone pages are separate
+                // views). A hidden copy decodes the new still first, so the
+                // fade starts from both images rather than a bare surface
+                // (sim finding c, 2026-09-22), and a resize keeps the old
+                // image until the new decode lands.
+                let shownStill = stillPage ?? currentStill
+                AppleHeroPageFade(page: shownStill.id, layer: .art) {
+                    AppleRemoteImage(
+                        url: shownStill.url,
+                        placeholderSystemImage: "",
+                        onLoad: { image in
+                            stillImage = image
+                            if let url = shownStill.url { loadedStill = AppleHeroLoadedStill(url: url, image: image) }
+                            recordStill(.loaded)
+                            appleTrace("hero still loaded \(item.name) \(image.width)px")
+                            AppleLaunchMarks.record(.heroArt)
+                            AppleLaunchReadiness.shared.markFirstScreenReady()
+                        },
+                        onFailure: {
+                            stillImage = nil
+                            recordStill(.failed)
+                            appleTrace("hero still failed \(item.name)")
+                            AppleLaunchReadiness.shared.markFirstScreenReady()
+                        },
+                        loadingFill: AppleDesignTokens.surface,
+                        keepsImageWhileReloading: true,
+                        fixedPixelDimension: stillPixelDimension,
+                        // Centred like the trailer's cover over it (N44).
+                        fillAlignment: mac?.layout.platform == .mac ? .center : nil
+                    )
+                }
+                if shownStill != currentStill {
+                    AppleRemoteImage(
+                        url: currentStill.url,
+                        placeholderSystemImage: "",
+                        onLoad: { _ in stillPage = currentStill },
+                        onFailure: { stillPage = currentStill },
+                        loadingFill: .clear,
+                        fixedPixelDimension: stillPixelDimension
+                    )
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                }
                 switch AppleTrailerSourcePolicy.heroSource(server: serverTrailer, serverLookedUp: serverTrailerLookedUp) {
                 case .server(let trailer):
                     #if os(tvOS) || os(visionOS)
@@ -482,8 +497,20 @@ struct AppleHomeBillboard<Actions: View>: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 appleTrace("hero stage \(item.name) \(Int(size.width))x\(Int(size.height))")
             }
+            .onAppear { if stillPage == nil { stillPage = currentStill } }
         )
     }
+
+    private var currentStill: AppleHeroStillPage { AppleHeroStillPage(id: item.id, url: stillURL) }
+
+    /// The Mac window resizes live; decode the still once.
+    private var stillPixelDimension: Int? { mac != nil ? AppleMacHeroLayout.stillPixelDimension : nil }
+}
+
+/// A hero page's still: which page, and the art URL it draws.
+struct AppleHeroStillPage: Equatable {
+    let id: String
+    let url: URL?
 }
 
 /// Promotional posters carry their own title treatment and badges in the art.
@@ -496,37 +523,38 @@ struct ApplePortraitPromoCard: View {
     }
 }
 
-/// The rotation dots under the hero's buttons. `AppleFeaturedHero` draws it on
-/// iPhone, iPad, Mac and Vision Pro; tvOS has its own focus-aware indicator.
+/// The rotating hero's dots under its buttons (iPhone on its side, Vision
+/// Pro, iPad at the accessibility sizes), driven by its cycle like every
+/// other hero's: the fill stops while the cycle holds. Reduce Motion holds
+/// the cycle, so the active dot is drawn full.
 struct AppleHomeHeroPageIndicator: View {
-    let count: Int
-    let index: Int
+    let cycle: AppleHeroRotation.Cycle
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var fill: CGFloat = 0
+
+    private static let activeWidth: CGFloat = 28
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(0..<count, id: \.self) { position in
+            ForEach(0..<cycle.count, id: \.self) { position in
                 Capsule()
                     .fill(.primary.opacity(0.2))
-                    .frame(width: position == index ? 28 : 8, height: 4)
+                    .frame(width: position == cycle.index ? Self.activeWidth : 8, height: 4)
                     .overlay(alignment: .leading) {
-                        if position == index {
-                            Capsule().fill(.primary).frame(width: 28 * fill)
+                        if position == cycle.index, reduceMotion {
+                            Capsule().fill(.primary)
+                        } else if position == cycle.index {
+                            TimelineView(.animation(minimumInterval: cycle.fillTickInterval(width: Self.activeWidth, displayScale: displayScale),
+                                                    paused: cycle.isPaused)) { context in
+                                Capsule().fill(.primary).frame(width: Self.activeWidth * cycle.progress(at: context.date))
+                            }
                         }
                     }
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Featured \(index + 1) of \(count)")
-        .task(id: "\(index):\(reduceMotion)") {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            let progress = AppleHeroRotation.progress(at: .now)
-            withTransaction(transaction) { fill = reduceMotion ? 1 : progress }
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: AppleHeroRotation.interval * (1 - progress))) { fill = 1 }
-        }
+        .accessibilityLabel("Featured \(cycle.index + 1) of \(cycle.count)")
+        .accessibilityIdentifier("home.featured.pages")
     }
 }
 

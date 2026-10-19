@@ -110,18 +110,6 @@ private func storedManifestWithoutLogo() -> AppleStremioManifest {
     )
 }
 
-@MainActor
-private func waitUntil(
-    timeout: Duration = .seconds(5),
-    _ condition: @MainActor () -> Bool
-) async {
-    let clock = ContinuousClock()
-    let deadline = clock.now + timeout
-    while !condition(), clock.now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-}
-
 @Suite("Add-on logo refresh")
 struct AppleSourceLogoRefreshTests {
     @MainActor
@@ -291,7 +279,7 @@ struct AppleSourceLogoRefreshTests {
             backfillDelay: .zero
         )
         #expect(store.sources.first(where: { $0.id == saved.id })?.logoURL == nil)
-        await waitUntil { store.sources.first(where: { $0.id == saved.id })?.logoURL != nil }
+        await store.logoBackfill?.value
         #expect(store.sources.first(where: { $0.id == saved.id })?.logoURL?.absoluteString == openSubtitlesHTTPLogo)
         #expect(counter.value == 1)
         #expect(defaults.stringArray(forKey: "openstream.sources.v1.logo-backfill.v2") == [saved.id.uuidString])
@@ -304,7 +292,7 @@ struct AppleSourceLogoRefreshTests {
             backfillDelay: .zero
         )
         #expect(reloaded.sources.first(where: { $0.id == saved.id })?.logoURL?.absoluteString == openSubtitlesHTTPLogo)
-        try? await Task.sleep(for: .milliseconds(100))
+        #expect(reloaded.logoBackfill == nil)
         #expect(counter.value == 1)
     }
 
@@ -325,7 +313,7 @@ struct AppleSourceLogoRefreshTests {
             client: stubManifestClient(returning: manifestJSON(logo: nil), counter: counter),
             backfillDelay: .zero
         )
-        await waitUntil { defaults.stringArray(forKey: "openstream.sources.v1.logo-backfill.v2") != nil }
+        await first.logoBackfill?.value
         #expect(first.sources.first(where: { $0.id == saved.id })?.logoURL == nil)
         #expect(counter.value == 1)
 
@@ -335,7 +323,7 @@ struct AppleSourceLogoRefreshTests {
             client: stubManifestClient(returning: manifestJSON(logo: openSubtitlesHTTPLogo), counter: counter),
             backfillDelay: .zero
         )
-        try? await Task.sleep(for: .milliseconds(100))
+        #expect(second.logoBackfill == nil)
         #expect(second.sources.first(where: { $0.id == saved.id })?.logoURL == nil)
         #expect(counter.value == 1)
     }
@@ -357,8 +345,8 @@ struct AppleSourceLogoRefreshTests {
             client: failingManifestClient(counter: failures),
             backfillDelay: .zero
         )
-        await waitUntil { failures.value >= 1 }
-        try? await Task.sleep(for: .milliseconds(50))
+        await failing.logoBackfill?.value
+        #expect(failures.value >= 1)
         #expect(failing.sources.first(where: { $0.id == saved.id })?.logoURL == nil)
         #expect(defaults.stringArray(forKey: "openstream.sources.v1.logo-backfill.v2") == nil)
 
@@ -368,7 +356,7 @@ struct AppleSourceLogoRefreshTests {
             client: stubManifestClient(returning: manifestJSON(logo: openSubtitlesHTTPLogo)),
             backfillDelay: .zero
         )
-        await waitUntil { store.sources.first(where: { $0.id == saved.id })?.logoURL != nil }
+        await store.logoBackfill?.value
         #expect(store.sources.first(where: { $0.id == saved.id })?.logoURL?.absoluteString == openSubtitlesHTTPLogo)
     }
 

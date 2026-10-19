@@ -4013,7 +4013,7 @@ struct AppleCatalogItemDetailView: View {
             }
 
             #if !os(iOS) && !os(visionOS)
-            if item.type == "series" {
+            if showsEpisodeSection {
                 episodeSection
                     .id("vision-episodes")
                     .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
@@ -4027,7 +4027,7 @@ struct AppleCatalogItemDetailView: View {
 
         #if os(iOS) || os(visionOS)
         // A rail, outside the column for the same reason as More Like This.
-        if item.type == "series" {
+        if showsEpisodeSection {
             padEpisodesSection
                 .id("vision-episodes")
                 .padding(.top, AppleDetailMetrics.sectionHeaderTopSpacing)
@@ -4184,7 +4184,8 @@ struct AppleCatalogItemDetailView: View {
                 controlTopInset: controlTopInset,
                 // Final crop before the art fades, as the hero's (N46b): the
                 // page revealed first and grew 1.35→1.80× in view (N50).
-                settlesPictureBeforeReveal: true
+                settlesPictureBeforeReveal: true,
+                fitsFrame: trailerFitsHeader
             )
                 .id(embedURL.lastPathComponent)
                 .frame(maxWidth: .infinity)
@@ -4812,7 +4813,7 @@ struct AppleCatalogItemDetailView: View {
                 AppleTVFocusableParagraph(text: summary)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             }
-            if item.type == "series" {
+            if showsEpisodeSection {
                 tvOSEpisodeShelf
                     .id("vision-episodes")
             }
@@ -4848,10 +4849,7 @@ struct AppleCatalogItemDetailView: View {
                     .tint(.white)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             case .unavailable:
-                Text("Episodes aren’t available from the connected metadata sources.")
-                    .font(.system(size: AppleTVDetailMetrics.episodeTitleFontSize))
-                    .foregroundStyle(AppleDesignTokens.textSecondary)
-                    .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
+                EmptyView()
             case .episodes:
                 let watched = watchedEpisodeIDs
                 ScrollView(.horizontal) {
@@ -4977,18 +4975,43 @@ struct AppleCatalogItemDetailView: View {
 
     /// The hero still that is on screen, handed to the trailer preview so its
     /// cover paints the same pixels the moment it is inserted.
+    /// Fitted to the trailer's letterbox while a fitted trailer is up, so
+    /// the still, the trailer's cover and the video share one frame and the
+    /// reveal does not reframe the picture.
     private var heroArtwork: some View {
-        AppleRemoteImage(
-            url: heroArtworkURL,
-            placeholderSystemImage: "",
-            onLoad: { image in
-                heroStill.image = image
-                heroStill.art = heroStill.art.settling(with: .loaded)
-                fillTimeline.recordArtworkDecoded()
-            },
-            onFailure: heroArtworkFailed,
-            keepsImageWhileReloading: true
-        )
+        GeometryReader { proxy in
+            let frame = stillFitsHeader ? AppleTrailerPreviewLayout.fitFrame(in: proxy.size) : CGRect(origin: .zero, size: proxy.size)
+            AppleRemoteImage(
+                url: heroArtworkURL,
+                placeholderSystemImage: "",
+                onLoad: { image in
+                    heroStill.image = image
+                    heroStill.art = heroStill.art.settling(with: .loaded)
+                    fillTimeline.recordArtworkDecoded()
+                },
+                onFailure: heroArtworkFailed,
+                keepsImageWhileReloading: true
+            )
+            .frame(width: frame.width, height: frame.height)
+            .clipped()
+            .offset(x: frame.minX, y: frame.minY)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: stillFitsHeader)
+    }
+
+    /// The iPad and landscape title pages fit the trailer, unzoomed
+    /// (`AppleTrailerPreviewLayout.fitsHeader`). Vision Pro keeps its fill.
+    private var trailerFitsHeader: Bool {
+        #if os(iOS)
+        AppleTrailerPreviewLayout.fitsHeader(isPad: horizontalSizeClass == .regular,
+                                             isLandscape: viewportSize.width > viewportSize.height)
+        #else
+        false
+        #endif
+    }
+
+    private var stillFitsHeader: Bool {
+        trailerFitsHeader && !reduceMotion && heroTrailer.hasStarted && trailerEmbedURL != nil
     }
 
     private var slotArtWatcher: some View {
@@ -5395,7 +5418,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func handleTrailerState(_ state: String, muted: Bool, errorCode: Int?) {
-        print("[OpenStream] trailer title=\(item.name) key=\(trailerKey ?? "none") state=\(state) error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
+        appleTrace("title trailer \(state): \(item.name) key=\(trailerKey ?? "none") error=\(errorCode.map(String.init) ?? "none") active=\(heroTrailer.isActive)")
         if state == AppleTrailerArtFirstPolicy.webContentTerminatedState {
             // No next candidate: the web view itself died, not the video.
             heroTrailer.failedKeys.formUnion(trailerCandidates)
@@ -5525,8 +5548,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private func logTrailerFailure(_ reason: String) {
-        appleTrace("title trailer unavailable: \(item.name) reason=\(reason)")
-        print("[OpenStream] trailer unavailable title=\(item.name) key=\(trailerKey ?? "none") reason=\(reason)")
+        appleTrace("title trailer unavailable: \(item.name) key=\(trailerKey ?? "none") reason=\(reason)")
     }
 
     private func showTrailerInteractionGlyph(_ glyph: String) {
@@ -6140,6 +6162,12 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
+    /// A series' episodes, unless the lookup found none: then the section is
+    /// left out rather than saying so.
+    private var showsEpisodeSection: Bool {
+        item.type == "series" && episodeListPresentation != .unavailable
+    }
+
     private var episodeListPresentation: AppleEpisodeListPresentation {
         AppleEpisodeListPresentation.resolve(
             episodeCount: episodeList.episodes.count,
@@ -6158,10 +6186,6 @@ struct AppleCatalogItemDetailView: View {
                     episodePlaceholderRow
                 }
                 .redacted(reason: .placeholder)
-            } else if episodeListPresentation == .unavailable {
-                Text("Episodes aren’t available from the connected metadata sources.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             } else if isWideLandscape {
                 LazyVGrid(
                     columns: [
@@ -7863,6 +7887,9 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
     /// the trailer's crop is final (`AppleTrailerPictureSettle`), and it is
     /// never re-measured once seen. Unset, it reveals and then re-measures.
     var settlesPictureBeforeReveal = false
+    /// Fits the 16:9 picture inside the frame, unzoomed, on black, instead of
+    /// cropping it to fill (`AppleTrailerPreviewLayout.fitsHeader`).
+    var fitsFrame = false
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var loadedURL: URL?
@@ -7964,7 +7991,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
                 guard let self, self.revealGeneration == generation, self.playbackIntent,
                       let webView = self.webView, let container = self.container else { return }
                 var gate = gate
-                switch gate.record(window, size: container.bounds.size, at: Date()) {
+                switch gate.record(window, size: container.pictureSize, at: Date()) {
                 case .wait:
                     DispatchQueue.main.asyncAfter(deadline: .now() + AppleTrailerPictureSettle.pollInterval) { [weak self] in
                         self?.settlePicture(generation: generation, gate: gate, muted: muted)
@@ -8148,11 +8175,14 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var onPause: (() -> Void)?
         var onReplay: (() -> Void)?
         var isLandscape = false { didSet { setNeedsLayout() } }
+        var fitsFrame = false { didSet { if oldValue != fitsFrame { setNeedsLayout() } } }
         var controlTopInset: CGFloat? = nil { didSet { if oldValue != controlTopInset { setNeedsLayout() } } }
         var coverSize: CGSize? = nil { didSet { if oldValue != coverSize { setNeedsLayout() } } }
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
         var settlesPictureBeforeReveal = false
+        /// The frame the picture is drawn in: the hero's, or the fitted letterbox.
+        var pictureSize: CGSize { cover.frame.size }
         #if DEBUG && os(iOS)
         var probe: AppleHeroTrailerProbeIOS?
         #endif
@@ -8279,20 +8309,29 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            let viewport = AppleTrailerPreviewLayout.playerFrame(in: bounds.size, isLandscape: isLandscape)
-            let picture = AppleTrailerPreviewLayout.playerFrame(
-                in: bounds.size, isLandscape: isLandscape, pictureWindow: pictureWindow
-            )
-            // Keep the WebKit viewport stable while applying the cover crop.
-            // A native transform avoids resizing the playing iframe for a crop.
-            if webView.bounds.size != viewport.size {
-                webView.bounds = CGRect(origin: .zero, size: viewport.size)
+            if fitsFrame {
+                webView.transform = .identity
+                webView.frame = AppleTrailerPreviewLayout.fitFrame(in: bounds.size)
+                backgroundColor = .black
+            } else {
+                let viewport = AppleTrailerPreviewLayout.playerFrame(in: bounds.size, isLandscape: isLandscape)
+                let picture = AppleTrailerPreviewLayout.playerFrame(
+                    in: bounds.size, isLandscape: isLandscape, pictureWindow: pictureWindow
+                )
+                // Keep the WebKit viewport stable while applying the cover crop.
+                // A native transform avoids resizing the playing iframe for a crop.
+                if webView.bounds.size != viewport.size {
+                    webView.bounds = CGRect(origin: .zero, size: viewport.size)
+                }
+                webView.center = CGPoint(x: picture.midX, y: picture.midY)
+                if viewport.width > 0, viewport.height > 0 {
+                    webView.transform = CGAffineTransform(scaleX: picture.width / viewport.width, y: picture.height / viewport.height)
+                }
+                backgroundColor = .clear
             }
-            webView.center = CGPoint(x: picture.midX, y: picture.midY)
-            if viewport.width > 0, viewport.height > 0 {
-                webView.transform = CGAffineTransform(scaleX: picture.width / viewport.width, y: picture.height / viewport.height)
-            }
-            if let coverSize, coverSize.width > 0, coverSize.height > 0 {
+            if fitsFrame {
+                cover.frame = webView.frame
+            } else if let coverSize, coverSize.width > 0, coverSize.height > 0 {
                 cover.frame = CGRect(x: bounds.midX - coverSize.width / 2, y: bounds.midY - coverSize.height / 2,
                                      width: coverSize.width, height: coverSize.height)
             } else {
@@ -8476,6 +8515,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         container.updateStill(artworkImage)
         appleTrace("trailer view inserted, still=\(artworkImage.map { "\($0.width)px" } ?? "none")")
         container.isLandscape = isLandscape
+        container.fitsFrame = fitsFrame
         container.controlTopInset = controlTopInset
         container.coverSize = coverSize
         container.settlesPictureBeforeReveal = settlesPictureBeforeReveal
@@ -8511,6 +8551,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.onReplay = onReplay
         view.onPause = { [coordinator = context.coordinator] in coordinator.hidePreview() }
         view.isLandscape = isLandscape
+        view.fitsFrame = fitsFrame
         view.controlTopInset = controlTopInset
         view.coverSize = coverSize
         view.updateArtwork(artworkURL)
@@ -8616,6 +8657,24 @@ enum AppleTrailerPreviewLayout {
         return CGRect(x: visible.maxX - controlInset - side,
                       y: topInset.map { visible.minY + $0 } ?? (visible.maxY - controlInset - side),
                       width: side, height: side)
+    }
+
+    /// Whether a title page's trailer fits its header instead of filling it:
+    /// on the iPad and in landscape, where filling meant a 1.35× zoom upright
+    /// and a 14 % / 9 % top and bottom crop on its side. The Apple TV app and
+    /// Netflix fit or fill the header box without zooming past it (REA
+    /// round 4 §2). The iPhone held upright keeps its full-bleed header.
+    static func fitsHeader(isPad: Bool, isLandscape: Bool) -> Bool {
+        isPad || isLandscape
+    }
+
+    /// The 16:9 player fitted inside `size` and centred: the whole picture,
+    /// letterboxed or pillarboxed.
+    static func fitFrame(in size: CGSize) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let scale = min(size.width / 16, size.height / 9)
+        let width = 16 * scale, height = 9 * scale
+        return CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)
     }
 
     // A 4:3 hero needs only the minimal cover scale for a 16:9 source. The
@@ -9516,7 +9575,6 @@ extension AppleCatalogItemDetailView {
         let credits = titlePageCredits
         let information = titlePageInformation
         let languages = titlePageLanguages
-        let glossary = AppleTitlePagePolicy.accessibilityGlossary(chips: chips)
         return VStack(alignment: .leading, spacing: 0) {
             phoneHero
             phoneHeroFooter(chips: chips)
@@ -9526,7 +9584,7 @@ extension AppleCatalogItemDetailView {
             // from Discover hung iOS 18 for good: the lazy stack's height kept
             // changing while UIKit laid out the push's bottom bars, and each
             // change asked for another layout (2026-10-01, iOS 18.6 sim).
-            if item.type == "series" {
+            if showsEpisodeSection {
                 phoneEpisodesSection
                     .id("vision-episodes")
                     .padding(.top, Self.phoneSectionSpacing - 8)
@@ -9543,7 +9601,7 @@ extension AppleCatalogItemDetailView {
                         .padding(.top, Self.phoneSectionSpacing)
                 }
                 if !suggestedItems.isEmpty {
-                    moreLikeThisSection(title: "Related")
+                    moreLikeThisSection(title: "More Like This")
                         .padding(.top, Self.phoneSectionSpacing - 8)
                 }
                 if !credits.isEmpty {
@@ -9561,16 +9619,6 @@ extension AppleCatalogItemDetailView {
                 if !languages.isEmpty {
                     phoneFactSection("Languages", facts: languages, identifier: "detail.languages")
                         .padding(.top, Self.phoneSectionSpacing)
-                }
-                if !glossary.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        AppleTitlePageSectionTitle("Accessibility")
-                        AppleTitlePageAccessibilityGlossary(entries: glossary)
-                    }
-                    .padding(.horizontal, Self.phoneInset)
-                    .padding(.top, Self.phoneSectionSpacing)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("detail.accessibility")
                 }
             }
         }
@@ -10193,10 +10241,7 @@ extension AppleCatalogItemDetailView {
                 .scrollIndicators(.hidden)
                 .scrollDisabled(true)
             case .unavailable:
-                Text("Episodes aren’t available from the connected metadata sources.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Self.phoneInset)
+                EmptyView()
             case .episodes:
                 phoneEpisodeRail
             }
@@ -10226,10 +10271,7 @@ extension AppleCatalogItemDetailView {
                 .scrollIndicators(.hidden)
                 .scrollDisabled(true)
             case .unavailable:
-                Text("Episodes aren’t available from the connected metadata sources.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, detailHorizontalInset)
+                EmptyView()
             case .episodes:
                 episodeRail(cardWidth: cardWidth, inset: detailHorizontalInset)
             }
@@ -10507,14 +10549,14 @@ extension AppleCatalogItemDetailView {
         let layout = macLayout
         let chips = titlePageCapabilityChips
         let credits = titlePageCredits
-        let reference = macReferenceBlocks(chips: chips)
+        let reference = macReferenceBlocks()
         return VStack(alignment: .leading, spacing: 0) {
             macHero(layout: layout, chips: chips)
             // Lazy: the push builds only the sections on screen (the
             // episodes under a series' hero); the rest are built as they
             // scroll in, as Discover's shelves are (N47).
             LazyVStack(alignment: .leading, spacing: AppleTitlePageMacLayout.sectionSpacing) {
-                if item.type == "series" {
+                if showsEpisodeSection {
                     macEpisodesSection(layout: layout)
                         .id("vision-episodes")
                 }
@@ -10522,7 +10564,7 @@ extension AppleCatalogItemDetailView {
                     macTrailersSection
                 }
                 if !suggestedItems.isEmpty {
-                    AppleMediaShelf(title: "Related", headingIdentifier: "detail.more-like-this") {
+                    AppleMediaShelf(title: "More Like This", headingIdentifier: "detail.more-like-this") {
                         suggestedCards(sizing: .catalog)
                     }
                     .accessibilityElement(children: .contain)
@@ -10893,10 +10935,7 @@ extension AppleCatalogItemDetailView {
                 .padding(.horizontal, layout.horizontalInset)
                 .padding(.vertical, 12)
             case .unavailable:
-                Text("Episodes aren’t available from the connected metadata sources.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, layout.horizontalInset)
+                EmptyView()
             case .episodes:
                 macEpisodeRail(style: style)
             }
@@ -10985,16 +11024,13 @@ extension AppleCatalogItemDetailView {
         .accessibilityIdentifier("detail.about")
     }
 
-    /// Information, Languages and Accessibility, each only when it has
-    /// something real to say.
-    private func macReferenceBlocks(chips: [String]) -> [AppleTitlePageMacReferenceBlock] {
+    /// Information and Languages, each only when it has something real to say.
+    private func macReferenceBlocks() -> [AppleTitlePageMacReferenceBlock] {
         var blocks: [AppleTitlePageMacReferenceBlock] = []
         let information = titlePageInformation
         if !information.isEmpty { blocks.append(.facts(title: "Information", facts: information, identifier: "detail.information")) }
         let languages = titlePageLanguages
         if !languages.isEmpty { blocks.append(.facts(title: "Languages", facts: languages, identifier: "detail.languages")) }
-        let glossary = AppleTitlePagePolicy.accessibilityGlossary(chips: chips)
-        if !glossary.isEmpty { blocks.append(.accessibility(glossary)) }
         return blocks
     }
 

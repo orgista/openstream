@@ -41,15 +41,18 @@ public actor AppleLiveCaptionProbe {
     private let session: URLSession
     private let observationDuration: Duration
     private let pollingInterval: Duration
+    private let clock: any AppleClock
     public static let observationWindow: Duration = .seconds(60)
 
     public init(
         session: URLSession? = nil,
         observationDuration: Duration = observationWindow,
-        pollingInterval: Duration = .seconds(5)
+        pollingInterval: Duration = .seconds(5),
+        clock: any AppleClock = AppleSystemClock()
     ) {
         self.observationDuration = observationDuration
         self.pollingInterval = pollingInterval
+        self.clock = clock
         if let session {
             self.session = session
         } else {
@@ -77,7 +80,7 @@ public actor AppleLiveCaptionProbe {
         var prepared = request
         prepared.hints.declaresEmbeddedCaptions = false
         guard wrapsInCaptionMaster(channelID: request.mediaID) != false else { return prepared }
-        let clock = ContinuousClock()
+        let clock = self.clock
         let started = clock.now
         defer {
             let elapsed = started.duration(to: clock.now)

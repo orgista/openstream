@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @MainActor
@@ -10,7 +11,7 @@ import Testing
 @testable import OpenStreamApple
 
 @MainActor
-@Suite struct AppleTransportOverlayModelTests {
+@Suite(.timeLimit(.minutes(1))) struct AppleTransportOverlayModelTests {
     private func makeRequest(
         isLive: Bool = false,
         dvrWindowSeconds: Double? = nil,
@@ -209,9 +210,7 @@ import Testing
         await Task.yield()
         engine.subtitleTracks = [ApplePlaybackTrack(id: 17, title: "English", language: "en", codec: "cc")]
         engine.emit(.tracks)
-        for _ in 0..<20 where model.visibleSubtitleTracks.isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await waitUntil { !model.visibleSubtitleTracks.isEmpty }
         let track = try #require(model.visibleSubtitleTracks.first)
         #expect(track.id == 17)
         model.selectSubtitle(track.id)
@@ -220,9 +219,7 @@ import Testing
         // A channel switch must not retain the first channel's menu indices.
         engine.subtitleTracks = [ApplePlaybackTrack(id: 23, title: "English", language: "en", codec: "cc")]
         engine.emit(.tracks)
-        for _ in 0..<20 where model.visibleSubtitleTracks.first?.id != 23 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await waitUntil { model.visibleSubtitleTracks.first?.id == 23 }
         let replacement = try #require(model.visibleSubtitleTracks.first)
         #expect(replacement.id == 23)
         model.selectSubtitle(replacement.id)
@@ -240,10 +237,7 @@ import Testing
         await Task.yield()
         engine.activeSubtitleTrackID = nil
         engine.emit(.tracks)
-        for _ in 0..<20 where model.selectedSubtitleID != nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(model.selectedSubtitleID == nil)
+        await waitUntil { model.selectedSubtitleID == nil }
         #expect(!model.isCCActive)
     }
 
@@ -296,7 +290,7 @@ import Testing
         model.route = .avPlayer
         await coordinator.begin(makeRequest())
         engine.emit(.phase(.rebuffering))
-        try? await Task.sleep(for: .milliseconds(150))
+        await waitUntil { if case .waiting = coordinator.phase { true } else { false } }
         #expect(!model.showsOverlay)
         // On `.avPlayer` routes no custom waiting view is ever shown, even while waiting.
         #expect(!model.showsWaitingIndicator)
@@ -308,36 +302,49 @@ import Testing
     @Test func anOpenMenuHoldsTheControlsPastTheAutoHide() async {
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)
-        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        let clock = ManualClock()
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false, hideClock: clock)
         await coordinator.begin(makeRequest())
         engine.emit(.phase(.playing))
-        #expect(await waitUntil { if case .playing = coordinator.phase { true } else { false } })
+        await waitUntil { if case .playing = coordinator.phase { true } else { false } }
         // A menu reports every row; two rows open, both must close.
         model.menuItemAppeared()
         model.menuItemAppeared()
-        try? await Task.sleep(for: .milliseconds(3600))
+        // Only the open menu's one-minute hold is left; the 3 s hide is gone.
+        await waitUntil { clock.pendingDeadlines == [.seconds(60)] }
+        clock.advance(by: .milliseconds(3600))
         #expect(model.controlsVisible)
         #expect(model.menuIsOpen)
         model.menuItemDisappeared()
         #expect(model.menuIsOpen)
         model.menuItemDisappeared()
         #expect(!model.menuIsOpen)
-        #expect(await waitUntil { !model.controlsVisible })
+        await waitUntil { clock.pendingDeadlines == [.milliseconds(6600)] }
+        clock.advance(by: .seconds(3))
+        await waitUntil { !model.controlsVisible }
         coordinator.stop()
     }
 
     @Test func aFocusedSkipIntroHoldsTheControlsPastTheAutoHide() async {
         let engine = FakePlaybackEngine()
         let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: .surface)
-        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        let clock = ManualClock()
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false, hideClock: clock)
         await coordinator.begin(makeRequest())
         engine.emit(.phase(.playing))
-        #expect(await waitUntil { if case .playing = coordinator.phase { true } else { false } })
+        await waitUntil { if case .playing = coordinator.phase { true } else { false } }
+        // As the overlay view does on a phase change. Focusing the prompt
+        // cancels the 3 s hide and none is scheduled while it holds focus.
+        model.playbackPhaseChanged()
+        await waitFor("the 3 s hide") { clock.pendingDeadlines == [.seconds(3)] }
         model.focusedPromptHoldsControls = true
-        try? await Task.sleep(for: .milliseconds(3600))
+        #expect(clock.pendingSleepers == 0)
+        clock.advance(by: .milliseconds(3600))
         #expect(model.controlsVisible)
         model.focusedPromptHoldsControls = false
-        #expect(await waitUntil { !model.controlsVisible })
+        await waitUntil { clock.pendingDeadlines == [.milliseconds(6600)] }
+        clock.advance(by: .seconds(3))
+        await waitUntil { !model.controlsVisible }
         coordinator.stop()
     }
 
@@ -357,14 +364,7 @@ import Testing
         model.route = .surface
         await coordinator.begin(makeRequest())
         engine.emit(.phase(.rebuffering))
-        // Poll for the observed phase: a fixed sleep flakes under machine load.
-        for _ in 0..<50 {
-            if case .waiting = coordinator.phase { break }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        if case .waiting = coordinator.phase {} else {
-            Issue.record("expected .waiting phase, got \(coordinator.phase)")
-        }
+        await waitUntil { if case .waiting = coordinator.phase { true } else { false } }
         #expect(model.showsWaitingIndicator)
         // The waiting text is used only as the spinner's accessibility label.
         #expect(model.waitingText == "Buffering…")
@@ -519,7 +519,7 @@ import Testing
         await coordinator.begin(makeRequest(isLive: true))
         engine.scriptedPresentationTime = 104
         engine.emit(.position(100))
-        for _ in 0..<50 where model.cueTime != 104 { try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil { model.cueTime == 104 }
         #expect(model.position == 100)
         #expect(model.activeSubtitleCues.map(\.id) == [2])
         coordinator.stop()
@@ -535,36 +535,32 @@ import Testing
         engine.position = 5
         let coordinator = makeCoordinator(engine: engine, request: makeRequest())
         let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
-        let counter = ObservationChangeCounter()
+        let changes = Mutex(0)
         await coordinator.begin(makeRequest())
         engine.emit(.position(5))
-        for _ in 0..<50 where model.position != 5 { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(model.position == 5)
+        await waitUntil { model.position == 5 }
 
         // One registration stays armed until the first real change, so an
         // identical tick must leave it armed and the counter at zero.
         withObservationTracking {
             _ = model.position
         } onChange: {
-            Task { @MainActor in counter.count += 1 }
+            changes.withLock { $0 += 1 }
         }
 
         engine.emit(.position(5)) // same value again
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(counter.count == 0)
+        // Events are applied in order: once the duration lands, the identical
+        // tick before it has been applied too.
+        engine.emit(.duration(101))
+        await waitUntil { model.duration == 101 }
+        #expect(changes.withLock { $0 } == 0)
 
         engine.emit(.position(6)) // genuinely new value
-        for _ in 0..<50 where counter.count == 0 { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(counter.count == 1)
-        coordinator.stop()
+        await waitUntil { model.position == 6 }
+        #expect(changes.withLock { $0 } == 1)
 
         coordinator.stop()
     }
-}
-
-@MainActor
-private final class ObservationChangeCounter {
-    var count = 0
 }
 
 @Test func cancelledLoadIsNotReportedAsAPlaybackFailure() async throws {
@@ -574,23 +570,27 @@ private final class ObservationChangeCounter {
     #expect(failure.kind == .cancelled)
 }
 
-@MainActor @Test func transportControlsHideTogetherAfterThreeSecondsAndReturnOnActivity() async throws {
+@MainActor @Test(.timeLimit(.minutes(1)))
+func transportControlsHideTogetherAfterThreeSecondsAndReturnOnActivity() async throws {
     let engine = FakePlaybackEngine()
     engine.script([.playing])
     engine.scriptedRoute = .surface
     let coordinator = ApplePlaybackCoordinator(engine: engine)
     await coordinator.begin(.init(url: URL(fileURLWithPath: "/movie.mkv"), mediaID: "auto-hide", sourceKind: .files))
-    let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+    let clock = ManualClock()
+    let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false, hideClock: clock)
     #expect(model.controlsVisible)
-    // Polled, not slept: a fixed 3200 ms against a 3000 ms hide left 200 ms of
-    // slack and failed on a loaded machine (twice in six gate runs,
-    // 2026-09-15). This still proves the hide happens, without racing it.
-    #expect(await waitUntil { !model.controlsVisible })
+    await clock.waitForSleeps(1)
+    #expect(clock.pendingDeadlines == [.seconds(3)])
+    clock.advance(by: .seconds(3))
+    await waitUntil { !model.controlsVisible }
     model.bumpActivity()
     #expect(model.controlsVisible)
     coordinator.update(.paused)
     model.bumpActivity()
-    try await Task.sleep(for: .milliseconds(3200))
+    // Paused: nothing is left to hide the controls.
+    #expect(clock.pendingSleepers == 0)
+    clock.advance(by: .milliseconds(3200))
     #expect(model.controlsVisible)
     coordinator.stop()
 }
@@ -618,17 +618,12 @@ struct ApplePlaybackSpinnerPolicyTests {
     }
 }
 
-/// Waits for a condition instead of sleeping past a deadline, so a timing test
-/// proves the behaviour without racing the scheduler on a loaded machine.
+/// Waits for engine events to reach the model and coordinator through their
+/// main-actor tasks. No wall-clock deadline: the parallel gate can hold the
+/// main actor for seconds; the time limit fails a change that never lands.
 @MainActor
-private func waitUntil(
-    timeout: Duration = .seconds(8),
-    _ condition: () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(50))
+private func waitUntil(_ condition: () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return condition()
 }

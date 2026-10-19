@@ -21,6 +21,8 @@ struct AppleLiveWatchTracking: ViewModifier {
         let clock = ContinuousClock()
         var previous = clock.now
         var wasPlaying = false
+        var recorded = false
+        var sinceTouch: Double = 0
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             let now = clock.now
@@ -30,10 +32,18 @@ struct AppleLiveWatchTracking: ViewModifier {
                 && coordinator.currentRequest?.isLive == true
             // Count only intervals bounded by playing samples. A suspended
             // process cannot turn several minutes off-screen into a watch.
-            if session.advance(seconds: elapsed, playing: wasPlaying && playing && elapsed < 1) {
+            let counted = wasPlaying && playing && elapsed < 1
+            if recorded {
+                // Keeps the resume window measured from the last minute watched.
+                sinceTouch += counted ? elapsed : 0
+                if sinceTouch >= 60 {
+                    sinceTouch = 0
+                    AppleLiveWatchHistoryStore.shared.touch(channelID)
+                }
+            } else if session.advance(seconds: elapsed, playing: counted) {
                 AppleLiveWatchHistoryStore.shared.record(channelID, watchedSeconds: session.watchedSeconds)
                 AppleInteractionTrace.record(.playback, "live watched \(channelID)")
-                return
+                recorded = true
             }
             previous = now
             wasPlaying = playing

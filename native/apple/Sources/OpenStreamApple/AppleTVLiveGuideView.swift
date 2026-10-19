@@ -1534,6 +1534,7 @@ struct AppleTVLivePlayerScreen: View {
     /// Whether the channel on screen has ever played a frame. Reset per
     /// channel; it decides what Menu means while the picture is still black.
     @State private var hasPlayed = false
+    @State private var zapper = AppleLiveZapCoalescer()
     @State private var playbackMenu = false
     @State private var watchHistory = AppleLiveWatchHistoryStore.shared
     @AppStorage("openstream.live.zappingHintSeen") private var zappingHintSeen = false
@@ -1744,16 +1745,24 @@ struct AppleTVLivePlayerScreen: View {
                 .accessibilityLabel("Reconnecting to \(channel.name)")
                 .accessibilityIdentifier("live.reconnecting")
             } else if coordinator.phase.isBusy {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                    .controlSize(.large)
-                    .accessibilityLabel("Connecting to \(channel.name)")
+                // The previous picture is released on a switch (one-connection
+                // providers), so the new channel's logo holds the screen.
+                if !hasPlayed { AppleLiveConnectingArtwork(logoURL: channel.logoURL) }
+                AppleLiveTuningDelay(id: channel.id) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .controlSize(.large)
+                        .accessibilityLabel("Loading")
+                }
             }
         }
         .overlay {
             if programme == nil {
-                AppleLiveChannelBanner(channel: channel, number: channelNumber, guide: guide)
+                // While presses accumulate, the channel they have reached.
+                let pending = zapper.pendingID.flatMap { id in footerChannels.first { $0.id == id } }
+                AppleLiveChannelBanner(channel: pending ?? channel,
+                                       number: pending.map(\.channelNumber) ?? channelNumber, guide: guide)
                     .padding(metrics.verticalSafeInset)
             }
         }
@@ -1792,6 +1801,7 @@ struct AppleTVLivePlayerScreen: View {
             playbackOptions
         }
         .onChange(of: coordinator.phase) { _, phase in
+            liveSession.notePlaybackPhase(phase)
             if phase == .playing {
                 hasPlayed = true
                 if focus == nil, !footer.isVisible { focus = .surface }
@@ -1838,6 +1848,7 @@ struct AppleTVLivePlayerScreen: View {
                 return
             }
             hasPlayed = false
+            if programme == nil { liveSession.markTuneStarted(channel) }
             if allowsPictureInPicture { AppleTVPictureInPicture.shared.endForNewPlayback(keeping: host) }
             coordinator.stop()
             if onBack != nil && scenePhase == .background { host.teardown(); return }
@@ -1900,7 +1911,10 @@ struct AppleTVLivePlayerScreen: View {
             ))
         }
         #endif
+        .onChange(of: channel.id) { _, id in zapper.playerChanged(to: id) }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { zapper.cancel() } }
         .onDisappear {
+            zapper.cancel()
             // The cover's item binding is cleared by SwiftUI when the cover
             // is dismissed; nothing here must clear it, or a channel switch
             // that rebuilds this screen would close the player.
@@ -2179,15 +2193,15 @@ struct AppleTVLivePlayerScreen: View {
     }
 
     private func zap(_ direction: AppleLiveZappingPolicy.Direction) {
-        guard programme == nil, !playbackMenu,
-              let id = liveSession.zapTarget(currentID: channel.id, programme: programme,
-                orderedIDs: footerChannels.map(\.id), direction: direction),
-              let target = footerChannels.first(where: { $0.id == id }) else { return }
-        switchLiveChannel(target)
+        guard programme == nil, !playbackMenu else { return }
+        zapper.press(direction, currentID: channel.id, orderedIDs: footerChannels.map(\.id)) { id, presses in
+            guard let target = footerChannels.first(where: { $0.id == id }) else { return }
+            switchLiveChannel(target, presses: presses)
+        }
     }
 
-    private func switchLiveChannel(_ target: AppleIPTVChannel) {
-        AppleInteractionTrace.record(.press, "live zap \(channel.name) → \(target.name)")
+    private func switchLiveChannel(_ target: AppleIPTVChannel, presses: Int = 1) {
+        AppleInteractionTrace.record(.press, "live zap \(channel.name) → \(target.name) presses=\(presses)")
         footer.reset()
         focus = .surface
         onSwitch(target)

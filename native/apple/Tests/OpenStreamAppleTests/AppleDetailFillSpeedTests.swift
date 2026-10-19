@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import OpenStreamApple
 
@@ -68,7 +69,7 @@ struct AppleDetailFillTimelineTests {
     }
 }
 
-@Suite("Parallel episode lookup")
+@Suite("Parallel episode lookup", .timeLimit(.minutes(1)))
 struct AppleParallelEpisodeLookupTests {
     private func source(_ host: String, manifestID: String? = nil) -> AppleSource {
         AppleSource(
@@ -88,31 +89,41 @@ struct AppleParallelEpisodeLookupTests {
     }
 
     /// A slow add-on listed first used to hold the list back for its whole
-    /// timeout. Now the fast answer is used once the grace runs out.
+    /// timeout. Now the fast answer is used once the grace runs out, and the
+    /// slow request is cancelled rather than waited for.
     @Test func aSlowAddOnDoesNotHoldBackAFastOne() async throws {
         let slow = source("slow.fixture", manifestID: "com.linvo.cinemeta")
         let fast = source("fast.fixture")
+        let slowCancelled = Mutex(false)
+        let (slowRequests, slowStarted) = AsyncStream.makeStream(of: Void.self)
+        let clock = ManualClock()
         let client = AppleStremioMetadataClient(
             loader: { request in
                 if request.url?.host == "slow.fixture" {
-                    try await Task.sleep(for: .seconds(10))
+                    slowStarted.yield()
+                    do { try await Task.sleep(for: .seconds(10)) }
+                    catch { slowCancelled.withLock { $0 = true }; throw error }
                 }
                 return response(request, #"{"id":"tt1234567:1:1","title":"Pilot","season":1,"episode":1}"#)
             },
             metadataCache: nil,
-            mergeGrace: .milliseconds(100)
+            mergeGrace: .milliseconds(100),
+            graceClock: clock
         )
 
-        let clock = ContinuousClock()
-        let start = clock.now
-        let episodes = try await client.episodes(
-            sources: [slow, fast],
-            preferredSourceID: slow.id,
-            mediaID: "tt1234567"
-        )
+        let lookup = Task {
+            try await client.episodes(sources: [slow, fast], preferredSourceID: slow.id, mediaID: "tt1234567")
+        }
+        // The fast answer starts the grace; the slow one is still out.
+        var slowRequest = slowRequests.makeAsyncIterator()
+        await slowRequest.next()
+        await clock.waitForSleeps(1)
+        #expect(clock.requestedDeadlines == [.milliseconds(100)])
+        clock.advance(by: .milliseconds(100))
+        let episodes = try await lookup.value
 
         #expect(episodes.map(\.id) == ["tt1234567:1:1"])
-        #expect(start.duration(to: clock.now) < .seconds(3))
+        #expect(slowCancelled.withLock { $0 })
     }
 
     /// Both answer within the grace: the preferred add-on still wins a
@@ -133,7 +144,8 @@ struct AppleParallelEpisodeLookupTests {
                     """#)
             },
             metadataCache: nil,
-            mergeGrace: .seconds(5)
+            mergeGrace: .seconds(5),
+            graceClock: ManualClock()
         )
 
         let episodes = try await client.episodes(
@@ -195,7 +207,8 @@ struct AppleParallelMetadataResolutionTests {
             sourceClient: client,
             requestDeadline: .seconds(2),
             overallDeadline: .seconds(3),
-            defaultSource: source("default.fixture", manifestID: "com.linvo.cinemeta")
+            defaultSource: source("default.fixture", manifestID: "com.linvo.cinemeta"),
+            clock: ManualClock()
         )
 
         let details = try await resolver.resolve(

@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import OpenStreamApple
 
-@Suite("AppleMediaServerLibraryStore Tests")
+@Suite("AppleMediaServerLibraryStore Tests", .timeLimit(.minutes(1)))
 @MainActor
 struct AppleMediaServerLibraryStoreTests {
 
@@ -571,12 +571,11 @@ struct AppleMediaServerLibraryStoreTests {
 }
 
 /// Polls a condition the store satisfies from an unstructured task; a fixed
-/// sleep races the scheduler when the whole gate runs in parallel.
+/// sleep races the scheduler when the whole gate runs in parallel. No
+/// wall-clock deadline either: the suite's time limit fails one that never holds.
 @MainActor
-private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async {
-    let clock = ContinuousClock()
-    let deadline = clock.now + timeout
-    while !condition(), clock.now < deadline {
+private func waitUntil(_ condition: () -> Bool) async {
+    while !condition(), !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(10))
     }
 }

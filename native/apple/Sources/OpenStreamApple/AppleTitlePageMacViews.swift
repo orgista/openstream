@@ -34,26 +34,23 @@ struct AppleTitlePageMacRoundLabel: View {
 /// One of the reference blocks at the foot of the Mac title page (A13).
 enum AppleTitlePageMacReferenceBlock: Identifiable {
     case facts(title: String, facts: [AppleTitlePagePolicy.Fact], identifier: String)
-    case accessibility([(badge: String, meaning: String)])
 
     var id: String {
         switch self {
         case .facts(_, _, let identifier): identifier
-        case .accessibility: "detail.accessibility"
         }
     }
 
     var title: String {
         switch self {
         case .facts(let title, _, _): title
-        case .accessibility: "Accessibility"
         }
     }
 }
 
-/// A reference block: its heading, then label-above-value facts or the
-/// accessibility glossary. The page lays several side by side in a wide
-/// window (`AppleTitlePageMacLayout.referenceColumns`).
+/// A reference block: its heading, then label-above-value facts. The page
+/// lays several side by side in a wide window
+/// (`AppleTitlePageMacLayout.referenceColumns`).
 struct AppleTitlePageMacReferenceBlockView: View {
     let block: AppleTitlePageMacReferenceBlock
     /// How many columns a facts block spreads its own facts over.
@@ -65,8 +62,6 @@ struct AppleTitlePageMacReferenceBlockView: View {
             switch block {
             case .facts(_, let facts, _):
                 AppleTitlePageFactList(facts: facts, columns: factColumns)
-            case .accessibility(let entries):
-                AppleTitlePageAccessibilityGlossary(entries: entries)
             }
         }
         .accessibilityElement(children: .contain)

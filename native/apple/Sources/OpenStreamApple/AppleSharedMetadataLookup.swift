@@ -72,7 +72,8 @@ actor AppleSharedMetadataLookup<Value: Sendable> {
 /// The operation and its transport must cooperate with cancellation. Both
 /// outcomes are joined before returning, so no abandoned request survives.
 func appleBoundedMetadataLookup<Value: Sendable>(
-    timeout: Duration, operation: @escaping @Sendable () async throws -> Value
+    timeout: Duration, clock: any AppleClock = AppleSystemClock(),
+    operation: @escaping @Sendable () async throws -> Value
 ) async throws -> Value {
     try Task.checkCancellation()
     return try await withThrowingTaskGroup(of: Value.self) { group in
@@ -83,7 +84,7 @@ func appleBoundedMetadataLookup<Value: Sendable>(
             return value
         }
         group.addTask {
-            try await Task.sleep(for: timeout)
+            try await clock.sleep(for: timeout)
             throw URLError(.timedOut)
         }
         defer { group.cancelAll() }

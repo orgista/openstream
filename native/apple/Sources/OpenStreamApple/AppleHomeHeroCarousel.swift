@@ -106,6 +106,7 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             if let index = rotatingCycle.pages(available: items.count)?.shown {
                 AppleHeroPageGate(pages: art, requested: index, slots: slots) { shown, failed in
                     page(shown, failed, .rotating, items.count, shown, nil)
+                        .environment(\.appleRotatingHeroCycle, rotatingCycle.indicator(showing: shown))
                 } onPresent: { shown in
                     if shown == rotatingCycle.index { rotatingCycle.didPresent(at: .now) }
                 }
@@ -140,4 +141,9 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     }
     #endif
 
+}
+
+extension EnvironmentValues {
+    /// The rotating hero's cycle, for its page dots (`AppleHomeHeroPageIndicator`).
+    @Entry var appleRotatingHeroCycle: AppleHeroRotation.Cycle?
 }

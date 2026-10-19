@@ -272,8 +272,10 @@ private actor CountingSMBClient: AppleNetworkShareClient {
     }
 }
 
+/// The start deadline runs on a `ManualClock`: the disc's progress is set
+/// before each deadline is advanced past, so nothing races a real ticker.
 @MainActor
-@Suite(.serialized) struct AppleDiscStartDeadlineTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct AppleDiscStartDeadlineTests {
     private func discRequest() -> ApplePlaybackRequest {
         var hints = ApplePlaybackRequest.Hints()
         hints.disc = AppleDiscPlaybackChoice(start: .mainTitle, format: .bluRay)
@@ -281,15 +283,17 @@ private actor CountingSMBClient: AppleNetworkShareClient {
             mediaID: "disc", sourceKind: .networkShare, hints: hints)
     }
 
-    private func makeCoordinator(_ engine: FakePlaybackEngine) -> ApplePlaybackCoordinator {
+    private func makeCoordinator(_ engine: FakePlaybackEngine, clock: ManualClock) -> ApplePlaybackCoordinator {
         let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .milliseconds(200))
         coordinator.discCrashGuard = AppleDiscCrashGuard(defaults: freshDefaults(), build: "test")
+        coordinator.clock = clock
         return coordinator
     }
 
-    private func waitForFailure(_ coordinator: ApplePlaybackCoordinator, within limit: Duration) async -> ApplePlaybackFailure? {
-        let deadline = ContinuousClock.now.advanced(by: limit)
-        while ContinuousClock.now < deadline {
+    /// No wall-clock deadline: the failure lands through main-actor tasks the
+    /// parallel gate can hold up; the time limit fails one that never comes.
+    private func failure(of coordinator: ApplePlaybackCoordinator) async -> ApplePlaybackFailure? {
+        while !Task.isCancelled {
             if case .failed(let failure) = coordinator.phase { return failure }
             try? await Task.sleep(for: .milliseconds(10))
         }
@@ -299,21 +303,20 @@ private actor CountingSMBClient: AppleNetworkShareClient {
     @Test func aDiscThatKeepsMovingOutlivesTheDeadline() async {
         let engine = FakePlaybackEngine()
         engine.loadHandler = { _ in try await Task.sleep(for: .seconds(30)) }
-        let coordinator = makeCoordinator(engine)
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         coordinator.discStartWindow = .milliseconds(300)
         coordinator.discStartCap = .seconds(5)
-        let ticker = Task { @MainActor in
-            for step in 1 ... 20 {
-                try? await Task.sleep(for: .milliseconds(50))
-                engine.startupCheckpoint = step
-            }
-        }
         let begin = Task { await coordinator.begin(discRequest()) }
-        try? await Task.sleep(for: .milliseconds(600))
+        // Still reading at the 200 ms deadline: one more window.
+        await clock.waitForSleep(until: .milliseconds(200))
+        engine.startupCheckpoint = 1
+        clock.advance(to: .milliseconds(200))
+        await clock.waitForSleep(until: .milliseconds(500))
         #expect(coordinator.phase == .loading)
-        ticker.cancel()
-        // Nothing moves after the ticker stops, so the next deadline fails it.
-        let failure = await waitForFailure(coordinator, within: .seconds(3))
+        // Nothing moves in that window, so its deadline fails the start.
+        clock.advance(to: .milliseconds(500))
+        let failure = await failure(of: coordinator)
         #expect(failure?.kind == .timedOut)
         coordinator.stop()
         begin.cancel()
@@ -322,10 +325,13 @@ private actor CountingSMBClient: AppleNetworkShareClient {
     @Test func aDiscThatNeverMovesFailsAtTheFirstDeadline() async {
         let engine = FakePlaybackEngine()
         engine.loadHandler = { _ in try await Task.sleep(for: .seconds(30)) }
-        let coordinator = makeCoordinator(engine)
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         coordinator.discStartWindow = .seconds(10)
         let begin = Task { await coordinator.begin(discRequest()) }
-        let failure = await waitForFailure(coordinator, within: .seconds(2))
+        await clock.waitForSleep(until: .milliseconds(200))
+        clock.advance(to: .milliseconds(200))
+        let failure = await failure(of: coordinator)
         #expect(failure?.kind == .timedOut)
         coordinator.stop()
         begin.cancel()
@@ -334,18 +340,19 @@ private actor CountingSMBClient: AppleNetworkShareClient {
     @Test func theCapEndsADiscThatIsStillMoving() async {
         let engine = FakePlaybackEngine()
         engine.loadHandler = { _ in try await Task.sleep(for: .seconds(30)) }
-        let coordinator = makeCoordinator(engine)
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         coordinator.discStartWindow = .milliseconds(300)
         coordinator.discStartCap = .milliseconds(800)
-        let ticker = Task { @MainActor in
-            for step in 1 ... 100 {
-                try? await Task.sleep(for: .milliseconds(50))
-                engine.startupCheckpoint = step
-            }
-        }
         let begin = Task { await coordinator.begin(discRequest()) }
-        let failure = await waitForFailure(coordinator, within: .seconds(3))
-        ticker.cancel()
+        // Moving at every deadline: 200 ms, then a 300 ms window to 500 ms,
+        // then the 300 ms left under the cap; at 800 ms the cap ends it.
+        for (step, deadline) in [Duration.milliseconds(200), .milliseconds(500), .milliseconds(800)].enumerated() {
+            await clock.waitForSleep(until: deadline)
+            engine.startupCheckpoint = step + 1
+            clock.advance(to: deadline)
+        }
+        let failure = await failure(of: coordinator)
         begin.cancel()
         #expect(failure?.kind == .timedOut)
         coordinator.stop()

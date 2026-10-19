@@ -6,7 +6,7 @@ import Testing
 /// "maintenance" answer) is skipped for another service's streams, demoted on
 /// the next play for a few minutes, and never dropped.
 @MainActor
-@Suite(.serialized) struct AppleStreamServiceHealthTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct AppleStreamServiceHealthTests {
     private static let serviceA = "addon a|fixture.example"
     private static let serviceB = "addon b|fixture.example"
     private static let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: false)
@@ -115,7 +115,7 @@ import Testing
         await coordinator.begin(request("a1", service: Self.serviceA), fallbackCandidates: [
             request("a2", service: Self.serviceA), request("b1", service: Self.serviceB),
         ])
-        _ = await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
+        await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
         #expect(engine.loadedRequests.map(\.mediaID) == ["a1", "b1"])
         #expect(coordinator.serviceHealth.isUnhealthy(Self.serviceA))
         coordinator.stop()
@@ -132,7 +132,7 @@ import Testing
         await coordinator.begin(request("a1", service: Self.serviceA), fallbackCandidates: [
             request("a2", service: Self.serviceA), request("b1", service: Self.serviceB),
         ])
-        _ = await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
+        await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
         #expect(engine.loadedRequests.map(\.mediaID) == ["a1", "a2"])
         #expect(coordinator.serviceHealth.isUnhealthy(Self.serviceA) == false)
         coordinator.stop()
@@ -149,7 +149,7 @@ import Testing
         await coordinator.begin(request("a1", service: Self.serviceA), fallbackCandidates: [
             request("a2", service: Self.serviceA), request("a3", service: Self.serviceA),
         ])
-        _ = await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
+        await coordinatorWaitUntilHealthy { coordinator.phase == .playing }
         #expect(engine.loadedRequests.map(\.mediaID) == ["a1", "a2", "a3"])
         #expect(coordinator.phase == .playing)
         coordinator.stop()
@@ -177,14 +177,11 @@ import Testing
     }
 }
 
-private func coordinatorWaitUntilHealthy(
-    timeout: Duration = .seconds(8),
-    _ condition: @MainActor () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
+/// No wall-clock deadline: the parallel gate can hold the coordinator's tasks
+/// up for seconds; the suite's time limit fails an outcome that never comes.
+@MainActor
+private func coordinatorWaitUntilHealthy(_ condition: @MainActor () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return false
 }

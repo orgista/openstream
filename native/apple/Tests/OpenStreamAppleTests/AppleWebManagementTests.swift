@@ -526,10 +526,10 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     #expect((activeSession.url.port ?? 0) > 0)
 }
 
+/// No short client deadline: the server answers from the main actor, which
+/// the parallel gate can hold for seconds. The default timeout is a hang guard.
 private func request(url: URL) -> URLRequest {
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 5
-    return request
+    URLRequest(url: url)
 }
 
 private func formBody(manifest: String, token: String? = nil) -> Data {

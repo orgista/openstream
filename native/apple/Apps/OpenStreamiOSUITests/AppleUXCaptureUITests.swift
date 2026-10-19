@@ -343,6 +343,24 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         shot("jank-09-end")
     }
 
+    /// Spec S3 G12: the title page from the top to its last section, a frame
+    /// per screen, with which section headings and lines are on it. Open a
+    /// title with `OPENSTREAM_UX_CAPTURE_ARGS="-OpenStreamVisionScreen detail-movie"`.
+    func testB9TitlePageSections() {
+        launch([])
+        _ = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen."))
+            .firstMatch.waitForExistence(timeout: 60)
+        Thread.sleep(forTimeInterval: 4)
+        for screen in 0..<8 {
+            shot(String(format: "title-%02d", screen))
+            let texts = ["More Like This", "Related", "Accessibility", "Episodes aren’t available from the connected metadata sources."]
+                .filter { app.staticTexts[$0].exists }
+            print("UXCAPTURE TITLE screen \(screen): \(texts)")
+            app.swipeUp()
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+    }
+
     // MARK: - Helpers
 
     private func launch(_ extra: [String]) {

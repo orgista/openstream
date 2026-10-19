@@ -3,7 +3,7 @@ import Testing
 
 @MainActor
 @Suite struct ApplePlaybackEventStreamTests {
-    @Test func cancelledObserversAreRemovedAndDoNotAccumulateOnChannelSwitches() async {
+    @Test(.timeLimit(.minutes(1))) func cancelledObserversAreRemovedAndDoNotAccumulateOnChannelSwitches() async {
         let events = ApplePlaybackEventStream()
         for _ in 0..<100 {
             let stream = events.stream()
@@ -11,7 +11,7 @@ import Testing
             observer.cancel()
             await observer.value
         }
-        for _ in 0..<100 where events.subscriberCount > 0 { await Task.yield() }
+        while events.subscriberCount > 0, !Task.isCancelled { await Task.yield() }
         #expect(events.subscriberCount == 0)
     }
 

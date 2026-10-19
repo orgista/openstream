@@ -60,20 +60,45 @@ struct AppleTVHeroPagingTests {
         #expect(AppleTVHeroPaging.entry(arriving: .play, returningTo: .details) == .play)
     }
 
-    @Test func theCycleHoldsOnlyWhileTheHeroHasFocus() {
-        #expect(!AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false))
-        #expect(AppleTVHeroPaging.cycleIsPaused(heroHasFocus: true))
+    @Test func theCycleHoldsForInputAndCoversNotForFocus() {
+        #expect(!AppleTVHeroPaging.cycleIsPaused(holdingForInput: false, isCovered: false))
+        #expect(AppleTVHeroPaging.cycleIsPaused(holdingForInput: true, isCovered: false))
+        #expect(AppleTVHeroPaging.cycleIsPaused(holdingForInput: false, isCovered: true))
+        #expect(AppleTVHeroPaging.inputHold == .seconds(5))
     }
 
-    @Test func anUnfocusedHeroKeepsCyclingOnItsNormalTimer() throws {
+    @Test func focusMovedByTheCarouselIsNotRemoteInput() {
+        #expect(!AppleTVHeroPaging.isRemoteInput(focusedNow: .myList, movedByCode: .myList))
+        #expect(!AppleTVHeroPaging.isRemoteInput(focusedNow: .play, movedByCode: .play))
+        #expect(AppleTVHeroPaging.isRemoteInput(focusedNow: .details, movedByCode: .myList))
+        #expect(AppleTVHeroPaging.isRemoteInput(focusedNow: .play, movedByCode: nil))
+        #expect(AppleTVHeroPaging.isRemoteInput(focusedNow: nil, movedByCode: .play))
+    }
+
+    /// Spec S3 G2: DevTV idle on Home with Play focused turns at least four
+    /// pages in 60 s. Focus sits on Play the whole time; nothing holds.
+    @Test func anIdleHeroWithPlayFocusedTurnsAPageEveryDwell() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        #expect(!AppleTVHeroPaging.cycleIsPaused(holdingForInput: false, isCovered: false))
+        var cycle = AppleHeroRotation.Cycle(count: 5, now: start)
+        var turns = 0
+        while let due = cycle.dueDate, due <= start.addingTimeInterval(60) {
+            if cycle.advanceIfDue(at: due) { turns += 1 }
+        }
+        #expect(turns >= 4)
+        #expect(turns == Int(60 / AppleHeroRotation.interval))
+    }
+
+    @Test func inputHoldsThePageAndTheTimerRunsOnFromWhereItStopped() throws {
         let start = Date(timeIntervalSinceReferenceDate: 1_000)
         var cycle = AppleHeroRotation.Cycle(count: 3, now: start)
-        if AppleTVHeroPaging.cycleIsPaused(heroHasFocus: false) { cycle.pause(at: start) }
+        cycle.pause(at: start.addingTimeInterval(2))
+        let inputHold = TimeInterval(AppleTVHeroPaging.inputHold.components.seconds)
+        let released = start.addingTimeInterval(2 + inputHold)
+        #expect(cycle.dueDate == nil)
+        cycle.resume(at: released)
         let due = try #require(cycle.dueDate)
-        #expect(due == start.addingTimeInterval(cycle.interval))
-        let moved = cycle.advanceIfDue(at: due)
-        #expect(moved)
-        #expect(cycle.index == 1)
+        #expect(due == released.addingTimeInterval(cycle.interval - 2))
     }
 
     @Test func turningWhilePausedKeepsTheCycleHeldWithAFreshTimer() throws {

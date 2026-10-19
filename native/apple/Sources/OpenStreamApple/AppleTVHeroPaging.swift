@@ -61,11 +61,26 @@ public enum AppleTVHeroPaging {
         arriving == returningTo ? arriving : .play
     }
 
-    /// Whether the hero's cycle holds still: only while anything in the hero
-    /// has focus (the person is reading it or about to press). The Apple TV
-    /// hero is a still with no trailer (`AppleTitlePagePolicy.offersTrailers`),
-    /// so nothing else holds it.
-    public static func cycleIsPaused(heroHasFocus: Bool) -> Bool {
-        heroHasFocus
+    /// How long the cycle holds after the last remote input in the hero (a
+    /// focus move, a page turn, a press): the Apple TV app's indicator
+    /// hide delay.
+    public static let inputHold: Duration = .seconds(5)
+
+    /// Whether the hero's cycle holds still: for `inputHold` after the last
+    /// remote input, and while a cover or full-screen player is over it.
+    /// Focus alone does not hold it. Home opens with focus on Play, so an idle
+    /// Apple TV never cycled (owner 2026-10-17: "no trailers or sync through
+    /// heros"); the Apple TV app's auto-advance has no focus input either
+    /// (REA round 4 §1).
+    public static func cycleIsPaused(holdingForInput: Bool, isCovered: Bool) -> Bool {
+        holdingForInput || isCovered
+    }
+
+    /// Whether a focus change was the remote's, and so restarts the hold:
+    /// any change except the arrival of the carousel's own last focus write
+    /// (Play on entry, the trailing button after a turn, My List when Details
+    /// goes away).
+    public static func isRemoteInput(focusedNow: Target?, movedByCode: Target?) -> Bool {
+        focusedNow == nil || focusedNow != movedByCode
     }
 }

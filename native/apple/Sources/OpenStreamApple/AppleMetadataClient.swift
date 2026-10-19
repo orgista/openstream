@@ -903,19 +903,22 @@ public struct AppleMetadataResolver: Sendable {
     private let requestDeadline: Duration
     private let overallDeadline: Duration
     private let defaultSource: AppleSource
+    private let clock: any AppleClock
 
     public init(
         sourceClient: AppleStremioMetadataClient = AppleStremioMetadataClient(),
         tmdbClient: AppleTMDBClient = AppleTMDBClient(),
         requestDeadline: Duration = .seconds(1),
         overallDeadline: Duration = .seconds(3),
-        defaultSource: AppleSource? = nil
+        defaultSource: AppleSource? = nil,
+        clock: any AppleClock = AppleSystemClock()
     ) {
         self.sourceClient = sourceClient
         self.tmdbClient = tmdbClient
         self.requestDeadline = max(requestDeadline, .milliseconds(1))
         self.overallDeadline = max(overallDeadline, .milliseconds(1))
         self.defaultSource = defaultSource ?? AppleStremioMetadataClient.defaultMetadataSource
+        self.clock = clock
     }
 
     public func resolve(
@@ -964,7 +967,7 @@ public struct AppleMetadataResolver: Sendable {
             for (index, source) in candidates.enumerated() {
                 group.addTask {
                     do {
-                        return (index, try await appleBoundedMetadataLookup(timeout: timeout) {
+                        return (index, try await appleBoundedMetadataLookup(timeout: timeout, clock: clock) {
                             try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID,
                                                            isListingSource: source.id == preferredSourceID,
                                                            fallbackName: fallbackName)
@@ -979,7 +982,7 @@ public struct AppleMetadataResolver: Sendable {
             if let configuration, let tmdbIMDBID {
                 group.addTask {
                     do {
-                        return (candidates.count, try await appleBoundedMetadataLookup(timeout: timeout) {
+                        return (candidates.count, try await appleBoundedMetadataLookup(timeout: timeout, clock: clock) {
                             try await tmdbClient.details(
                                 imdbID: tmdbIMDBID,
                                 kind: cleanType == "series" ? .series : .movie,

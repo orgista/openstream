@@ -96,8 +96,12 @@ struct AppleMacCaptionsSelectionTests {
                                                        autoplay: false, mediaID: "mac-captions",
                                                        sourceKind: .files))
             item = try #require(engine.avPlayer?.currentItem)
-            // AVKit offers its CC menu once the item is ready, not before.
+            // AVKit offers its CC menu once the item is ready, not before. The
+            // engine's ready-time track reload applies the captions setting
+            // with its own select; a viewer's choice comes after it.
             try await Self.waitUntil { [item] in item.status == .readyToPlay }
+            try await Self.waitUntil { [engine] in engine.readyToPlayTracksLoad != nil }
+            await engine.readyToPlayTracksLoad?.value
             group = try #require(try await item.asset.loadMediaSelectionGroup(for: .legible))
             selection = mirrors ? ApplePlayerSubtitleSelection(engine: engine) : nil
             selection?.bind(to: item)

@@ -29,7 +29,7 @@ import AetherEngine
 /// order is guaranteed, and the same overlay model outlives a load whenever the
 /// viewer switches source or channel without leaving the player.
 @MainActor
-@Suite struct AppleOverlayChapterEventTests {
+@Suite(.timeLimit(.minutes(1))) struct AppleOverlayChapterEventTests {
     private func makeModel(_ engine: ChapterFakeEngine) -> (ApplePlaybackCoordinator, AppleTransportOverlayModel) {
         let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
         return (coordinator, AppleTransportOverlayModel(coordinator: coordinator, isLive: false))
@@ -78,7 +78,7 @@ import AetherEngine
 
         engine.duration = 600
         engine.emit(.duration(600))
-        #expect(await waitUntil { model.duration == 600 })
+        await waitUntil { model.duration == 600 }
         // 280 s is 47% of a ten-minute programme: a mislabelled single-chapter
         // file, not an opening. The share-of-runtime rule can only run now, so
         // `.duration` has to re-derive the marker.
@@ -92,7 +92,7 @@ import AetherEngine
         let (coordinator, model) = makeModel(engine)
         engine.duration = 1370
         engine.emit(.duration(1370))
-        #expect(await waitUntil { model.duration == 1370 })
+        await waitUntil { model.duration == 1370 }
         #expect(model.introChapter?.title == "Opening Credits")
         coordinator.stop()
     }
@@ -107,12 +107,12 @@ import AetherEngine
         engine.emit(.tracks)
         engine.audioTracks = [ApplePlaybackTrack(id: 0, title: "English", language: "eng")]
         engine.emit(.tracks)
-        #expect(await waitUntil { model.audioTracks.count == 1 })
+        await waitUntil { model.audioTracks.count == 1 }
         #expect(model.introChapter == nil)
 
         engine.chapters = [AppleChapter(title: "Opening", start: 0, end: 70)]
         engine.emit(.tracks)
-        #expect(await waitUntil { model.introChapter != nil })
+        await waitUntil { model.introChapter != nil }
         #expect(model.introChapter == AppleChapter(title: "Opening", start: 0, end: 70))
         coordinator.stop()
     }
@@ -125,7 +125,7 @@ import AetherEngine
         engine.chapters = [AppleChapter(title: "Opening", start: 0, end: 70)]
         let (coordinator, model) = makeModel(engine)
         engine.emit(.position(10))
-        #expect(await waitUntil { model.position == 10 })
+        await waitUntil { model.position == 10 }
         #expect(model.showsSkipIntro)
 
         await model.skipIntro()
@@ -137,12 +137,12 @@ import AetherEngine
         // chapter list is unchanged, so nothing about the skip may change.
         engine.subtitleTracks = [ApplePlaybackTrack(id: 9, title: "English", language: "eng")]
         engine.emit(.tracks)
-        #expect(await waitUntil { model.subtitleTracks.count == 1 })
+        await waitUntil { model.subtitleTracks.count == 1 }
         #expect(model.hasSkippedIntro)
 
         // Seeking back into the opening must not put the button up again.
         engine.emit(.position(5))
-        #expect(await waitUntil { model.position == 5 })
+        await waitUntil { model.position == 5 }
         #expect(!model.showsSkipIntro)
         coordinator.stop()
     }
@@ -155,14 +155,14 @@ import AetherEngine
         engine.chapters = [AppleChapter(title: "Opening", start: 0, end: 70)]
         let (coordinator, model) = makeModel(engine)
         engine.emit(.position(10))
-        #expect(await waitUntil { model.position == 10 })
+        await waitUntil { model.position == 10 }
         await model.skipIntro()
         #expect(model.hasSkippedIntro)
 
         // Switching source or channel through the same overlay runs the new
         // load through the engine's `stop()`, which reports `.idle`.
         engine.emit(.phase(.idle))
-        #expect(await waitUntil { !model.hasSkippedIntro })
+        await waitUntil { !model.hasSkippedIntro }
         // The old item's marker goes with it.
         #expect(model.introChapter == nil)
 
@@ -170,7 +170,7 @@ import AetherEngine
         // boundary, rather than chapter equality, must reset the skip.
         engine.chapters = [AppleChapter(title: "Opening", start: 0, end: 70)]
         engine.emit(.tracks)
-        #expect(await waitUntil { model.introChapter?.title == "Opening" })
+        await waitUntil { model.introChapter?.title == "Opening" }
         // Position 10 is inside the new item's opening: the button is offered
         // again, because this is a different stream.
         #expect(model.showsSkipIntro)
@@ -185,13 +185,13 @@ import AetherEngine
         engine.chapters = [AppleChapter(title: "Opening", start: 0, end: 70)]
         let (coordinator, model) = makeModel(engine)
         engine.emit(.position(10))
-        #expect(await waitUntil { model.position == 10 })
+        await waitUntil { model.position == 10 }
         await model.skipIntro()
         #expect(model.hasSkippedIntro)
 
         engine.chapters = [AppleChapter(title: "Theme", start: 0, end: 40)]
         engine.emit(.tracks)
-        #expect(await waitUntil { model.introChapter?.title == "Theme" })
+        await waitUntil { model.introChapter?.title == "Theme" }
         #expect(model.hasSkippedIntro, "A metadata update must retain the skip: \(model.hasSkippedIntro)")
         #expect(!model.showsSkipIntro, "Updated markers must not re-offer a skipped intro")
         coordinator.stop()
@@ -238,15 +238,12 @@ final class ChapterFakeEngine: ApplePlaybackEngine {
     func selectSubtitleTrack(id: Int?) {}
 }
 
-/// Waits for a condition instead of sleeping past a deadline: engine events
-/// reach the model through an `AsyncStream` task, and a fixed sleep races the
-/// scheduler on a loaded machine.
+/// Waits for engine events to reach the model through its main-actor
+/// `AsyncStream` task. No wall-clock deadline: the parallel gate can hold the
+/// main actor for seconds; the suite's time limit fails a change that never lands.
 @MainActor
-private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
+private func waitUntil(_ condition: () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return condition()
 }

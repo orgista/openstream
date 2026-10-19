@@ -22,7 +22,8 @@ import Testing
 }
 
 @MainActor
-@Test func siblingSubtitlesPrecedeAddonsAndCacheTheFolderForThisPlay() async throws {
+@Test(.timeLimit(.minutes(1)))
+func siblingSubtitlesPrecedeAddonsAndCacheTheFolderForThisPlay() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -47,8 +48,7 @@ import Testing
         #expect(track.id >= 1_000_000)
         let menu = AppleStockPlayerSubtitles()
         menu.select(track.id, on: player)
-        let cueDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while player.subtitleCues.isEmpty, ContinuousClock.now < cueDeadline {
+        while player.subtitleCues.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(player.subtitleCues.first?.text == "HOLA DESDE ESPANA")
@@ -73,8 +73,7 @@ import Testing
     var request = ApplePlaybackRequest(url: video, mediaID: "fixture", sourceKind: .files,
         hints: .init(addonMediaID: "fixture", addonMediaType: "movie"))
     await coordinator.begin(request)
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while engine.externalSubtitleTracks.count < 3, ContinuousClock.now < deadline { await Task.yield() }
+    while engine.externalSubtitleTracks.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
     #expect(engine.externalSubtitleTracks.map(\.displayName) == ["English", "French", "English (Fixture)"])
     coordinator.stop()
     request.isLive = true

@@ -17,6 +17,15 @@ final class AppleLiveWatchHistoryStore {
 
     func record(_ channelID: String, watchedSeconds: Double) {
         history.record(channelID, watchedSeconds: watchedSeconds)
+        save()
+    }
+
+    func touch(_ channelID: String) {
+        history.touch(channelID)
+        save()
+    }
+
+    private func save() {
         if let data = try? JSONEncoder().encode(history) { defaults.set(data, forKey: Self.storageKey) }
     }
 }

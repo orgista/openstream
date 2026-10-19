@@ -42,4 +42,23 @@ public enum AppleHeroPageSwap: Sendable {
         let next = (requested + 1) % count
         return next == requested ? [requested] : [requested, next]
     }
+
+    /// How a gated page change is drawn on the Apple TV and the rotating
+    /// hero: the art crossfades over `art` seconds, the copy fades out over
+    /// the first half and the new copy in over the second, and the buttons
+    /// stay where they are, so focus never moves. The Apple TV app slides its
+    /// TV hero over 1.0 s with the metadata fading on its own (REA round 4
+    /// §1); the cut it replaces showed one title's frame, then the next's.
+    public struct Crossfade: Equatable, Sendable {
+        public let art: TimeInterval
+        public var copyOut: TimeInterval { art / 2 }
+        public var copyIn: TimeInterval { art / 2 }
+        /// The new copy starts once the old one has gone.
+        public var copyInDelay: TimeInterval { copyOut }
+    }
+
+    /// The page change's crossfade, or nil for Reduce Motion, which cuts.
+    public static func crossfade(reduceMotion: Bool) -> Crossfade? {
+        reduceMotion ? nil : Crossfade(art: 1.0)
+    }
 }

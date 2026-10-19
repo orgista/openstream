@@ -116,6 +116,9 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// overriding it on the next track load.
     @ObservationIgnored private var subtitleSelectionOverridden = false
     @ObservationIgnored private var readyToPlayTracksLoaded = false
+    /// The track reload once the item is ready, which applies the captions
+    /// setting. Tests await it before acting as the viewer.
+    @ObservationIgnored private(set) var readyToPlayTracksLoad: Task<Void, Never>?
     public private(set) var failure: ApplePlaybackFailure? = nil {
         didSet {
             guard failure != oldValue else { return }
@@ -576,7 +579,7 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
             if !readyToPlayTracksLoaded {
                 readyToPlayTracksLoaded = true
                 if let asset = item.asset as? AVURLAsset {
-                    Task { @MainActor [weak self, item] in
+                    readyToPlayTracksLoad = Task { @MainActor [weak self, item] in
                         guard let self else { return }
                         await self.loadEmbeddedSubtitleTracks(of: asset, item: item)
                     }

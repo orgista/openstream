@@ -18,7 +18,7 @@ extension AppleLiveCaptionWrapTests {
     @Test func firstPlayOfUndeclaredMediaPlaylistCarriesTheCaptionMaster() async throws {
         let origin = AppleLiveTVUpstreamFixture()
         let request = try await fixtureRequest(origin, playlist: undeclaredMedia)
-        let probe = AppleLiveCaptionProbe()
+        let probe = AppleLiveCaptionProbe(clock: ManualClock())
         #expect(probe.wrapsInCaptionMaster(channelID: request.mediaID) == nil)
         let prepared = try await probe.preparedRequest(request)
         #expect(prepared.hints.declaresEmbeddedCaptions)
@@ -38,7 +38,7 @@ extension AppleLiveCaptionWrapTests {
         let origin = AppleLiveTVUpstreamFixture()
         let request = try await fixtureRequest(origin,
             playlist: "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nvariant.m3u8\n")
-        let prepared = try await AppleLiveCaptionProbe().preparedRequest(request)
+        let prepared = try await AppleLiveCaptionProbe(clock: ManualClock()).preparedRequest(request)
         #expect(prepared.hints.declaresEmbeddedCaptions == false)
         #expect(prepared.url == request.url)
         #expect(await origin.hitCount(for: "/variant.m3u8") == 0)
@@ -48,7 +48,7 @@ extension AppleLiveCaptionWrapTests {
         let playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,CLOSED-CAPTIONS=NONE\nvariant.m3u8\n"
         let origin = AppleLiveTVUpstreamFixture()
         let request = try await fixtureRequest(origin, playlist: playlist)
-        let prepared = try await AppleLiveCaptionProbe().preparedRequest(request)
+        let prepared = try await AppleLiveCaptionProbe(clock: ManualClock()).preparedRequest(request)
         #expect(prepared.hints.declaresEmbeddedCaptions == false)
         #expect(prepared.url == request.url)
         #expect(AppleHLSCaptionDeclaration.declaring(playlist) == playlist)
@@ -87,20 +87,19 @@ extension AppleLiveCaptionWrapTests {
         configuration.protocolClasses = [SlowCaptionPlaylistURLProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        let probe = AppleLiveCaptionProbe(session: session)
+        let clock = ManualClock()
+        let probe = AppleLiveCaptionProbe(session: session, clock: clock)
         let url = try #require(URL(string: "https://fixture.example/\(deliverHeadersFirst ? "body" : "headers").m3u8"))
         let request = AppleIPTVChannel(id: UUID().uuidString, sourceID: UUID(), name: "Slow caption fixture",
                                       streamURL: url).playbackRequest()
-        let clock = ContinuousClock()
-        let started = clock.now
-        let prepared = try await probe.preparedRequest(request)
-        let elapsed = started.duration(to: clock.now)
+        let preflight = Task { try await probe.preparedRequest(request) }
+        await clock.waitForSleeps(1)
+        #expect(clock.requestedDeadlines == [AppleLiveCaptionProbe.preflightTimeout])
+        clock.advance(by: AppleLiveCaptionProbe.preflightTimeout)
+        let prepared = try await preflight.value
         #expect(prepared.hints.declaresEmbeddedCaptions == false)
         #expect(prepared.url == request.url)
-        #expect(elapsed < .milliseconds(1_600))
-        #expect(elapsed >= .milliseconds(1_400))
         #expect(probe.wrapsInCaptionMaster(channelID: request.mediaID) == nil)
-        print("Caption preflight slow fixture: \(elapsed)")
     }
 
     @Test func cancellingPreflightDoesNotTurnCancellationIntoPlayback() async throws {
@@ -137,11 +136,7 @@ extension AppleLiveCaptionWrapTests {
         let probe = AppleLiveCaptionProbe()
         let observation = Task { await probe.probe(channelID: request.mediaID, playlistURL: request.url) }
         defer { observation.cancel() }
-        for _ in 0..<200 {
-            if await origin.hitCount(for: "/second.ts") > 0 { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(await origin.hitCount(for: "/second.ts") > 0)
+        await origin.waitForHit("/second.ts")
         #expect(probe.wrapsInCaptionMaster(channelID: request.mediaID) == nil)
         observation.cancel()
         #expect(await observation.value == nil)
@@ -157,8 +152,9 @@ extension AppleLiveCaptionWrapTests {
     }
 }
 
-/// Delays completion for three seconds, optionally sending headers and a body
-/// prefix first to exercise the whole-read deadline, not just connection time.
+/// Never completes on its own. The body variant sends headers and a playlist
+/// prefix, then keeps trickling bytes so no inactivity timeout ends the read,
+/// only the whole-read deadline; the headers variant sends nothing at all.
 private final class SlowCaptionPlaylistURLProtocol: URLProtocol {
     private var timer: Timer?
 
@@ -166,29 +162,20 @@ private final class SlowCaptionPlaylistURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        if request.url?.lastPathComponent == "body.m3u8" {
-            sendHeaders()
-            client?.urlProtocol(self, didLoad: Data("#EXTM3U\n".utf8))
-        }
-        let timer = Timer(timeInterval: 3, target: self, selector: #selector(finish),
-                          userInfo: nil, repeats: false)
-        self.timer = timer
-        RunLoop.current.add(timer, forMode: RunLoop.current.currentMode ?? .default)
-    }
-
-    private func sendHeaders() {
-        guard let url = request.url,
+        guard request.url?.lastPathComponent == "body.m3u8", let url = request.url,
               let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
                                              headerFields: ["Content-Type": "application/vnd.apple.mpegurl"])
         else { return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("#EXTM3U\n".utf8))
+        let timer = Timer(timeInterval: 0.25, target: self, selector: #selector(trickle),
+                          userInfo: nil, repeats: true)
+        self.timer = timer
+        RunLoop.current.add(timer, forMode: RunLoop.current.currentMode ?? .default)
     }
 
-    @objc private func finish() {
-        if request.url?.lastPathComponent != "body.m3u8" { sendHeaders() }
-        client?.urlProtocol(self, didLoad: Data("#EXTM3U\n#EXTINF:6,\nsegment.ts\n".utf8))
-        client?.urlProtocolDidFinishLoading(self)
-        timer = nil
+    @objc private func trickle() {
+        client?.urlProtocol(self, didLoad: Data("\n".utf8))
     }
 
     override func stopLoading() {

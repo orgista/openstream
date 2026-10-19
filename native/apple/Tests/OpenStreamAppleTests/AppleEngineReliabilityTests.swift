@@ -64,15 +64,16 @@ struct AppleEngineReliabilityTests {
 }
 
 @MainActor
-@Suite(.serialized) struct AppleEngineOpenRetryCoordinatorTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct AppleEngineOpenRetryCoordinatorTests {
     private func request(_ id: String) -> ApplePlaybackRequest {
         ApplePlaybackRequest(url: URL(string: "http://127.0.0.1:8765/media/\(id).mkv")!,
                              mediaID: id, sourceKind: .stremio)
     }
 
+    /// No wall-clock deadline: the parallel gate can hold the coordinator's
+    /// tasks up for seconds; the time limit fails an outcome that never comes.
     private func waitUntil(_ condition: @MainActor () -> Bool) async {
-        let deadline = ContinuousClock.now + .seconds(8)
-        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        while !condition(), !Task.isCancelled { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     @Test("A failed open retries the same candidate, then plays it, before any fallback")
