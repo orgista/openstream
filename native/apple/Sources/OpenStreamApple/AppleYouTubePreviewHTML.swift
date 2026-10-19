@@ -448,7 +448,7 @@ enum AppleYouTubePreviewHTML {
     /// YouTube's own chrome that `controls: 0` still draws: the play/pause
     /// glyph in the middle of the picture and the caption window.
     private static let playerChromeHidingCSS =
-        #".ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
+        #".player-controls-middle,.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
 
     /// Injected into every frame of the title page's web view on iPhone and
     /// iPad, it acts only in YouTube's own player page, which the host page

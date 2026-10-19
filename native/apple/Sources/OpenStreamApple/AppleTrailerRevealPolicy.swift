@@ -1,14 +1,10 @@
 import Foundation
 
-/// When the shared trailer page (`AppleYouTubePreviewHTML`) may reveal its
-/// player once YouTube has said PLAYING — one rule for the iPhone, iPad,
-/// Vision Pro and Mac pages; the host's own art-first gate (picture band,
-/// geometry settle) still runs after it.
+/// When the shared trailer page may reveal its player after PLAYING.
+/// The host's art-first gate (picture band, geometry settle) still runs after it.
 ///
-/// Nothing of YouTube's player is hidden or cropped (its terms; owner round 3, 2026-10-10). Where the
-/// mobile embed draws its start-up title strip, link and "More videos" (iPhone, iPad, Vision Pro), the
-/// art stays up until that chrome has faded on its own — 3.9–4.2 s of media time when filmed (N75) — and
-/// the trailer is shown from then on, attribution and all, whenever YouTube draws it again.
+/// iOS hides the centre play glyph and reveals without waiting for start-up
+/// chrome; YouTube's title strip and attribution remain untouched.
 struct AppleTrailerRevealRule: Equatable, Sendable {
     /// Never earlier than this after PLAYING.
     var minimumWait: TimeInterval
@@ -34,11 +30,9 @@ enum AppleTrailerRevealPolicy {
     /// A video that stalls under its chrome is shown anyway after this.
     static let startupChromeCap: TimeInterval = 12
 
-    /// Whether YouTube's start-up title strip and link can reach the screen
-    /// on this platform's trailer page: the mobile embed draws them, the
-    /// Mac's desktop embed does not (N70).
+    /// Whether the page waits for YouTube's start-up chrome to fade.
     static var startupChromeCanShow: Bool {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         false
         #else
         true
