@@ -407,12 +407,12 @@ struct AppleLiveTVView: View {
             playbackCoordinator.engine.applyCaptionPreference(preference)
         }
         .onChange(of: isActive, initial: true) { _, active in
-            resumePending = active
-            if active {
-                resumeLastChannelIfNeeded()
-                startFirstChannelIfNeeded()
-            }
+            guard active else { resumePending = false; return }
+            liveSession.enterLive()
+            resumeLastChannelIfNeeded()
+            startFirstChannelIfNeeded()
         }
+        .onChange(of: playbackCoordinator.phase) { _, phase in liveSession.notePlaybackPhase(phase) }
         .onDisappear { quietRetry?.cancel() }
         .refreshable { await refreshGuide(Set(channelSnapshot.channelIDs), force: true) }
         .task(id: reloadIdentity) { await reload() }
@@ -989,7 +989,8 @@ struct AppleLiveTVView: View {
         }
         let available = recallChannelIDs
         guard let id = liveSession.resumeTarget(enabled: startWithLastChannel, active: isActive,
-            watchedIDs: watchHistory.history.channelIDs, availableIDs: available),
+            watchedIDs: watchHistory.history.channelIDs, availableIDs: available,
+            lastWatchedAt: watchHistory.history.lastWatchedAt),
               let channel = channelIndex[id] else { return }
         resumePending = false
         #if os(tvOS)
@@ -1192,6 +1193,7 @@ struct AppleLiveTVView: View {
     private func startAuthorizedChannel(_ channel: AppleIPTVChannel, shareSelection: Bool, present: Bool,
                                        programme: AppleIPTVProgramme?) {
         liveSession.beginSelection(programme: programme, shareSelection: shareSelection)
+        liveSession.markTuneStarted(channel)
         guard channel.probedMediaKind == nil, AppleLiveStreamRoutePolicy.needsProbe(channel.streamURL) else {
             startChannelNow(channel, shareSelection: shareSelection, present: present)
             return
@@ -1582,21 +1584,6 @@ struct AppleLiveTVView: View {
 
 }
 
-private struct AppleLiveConnectingArtwork: View {
-    let logoURL: URL?
-    var label = "Connecting to live channel"
-    var body: some View {
-        ZStack {
-            Color.black
-            AsyncImage(url: logoURL) { image in
-                image.resizable().scaledToFit()
-            } placeholder: { Color.clear }
-            .frame(width: 132, height: 76)
-        }
-        .accessibilityLabel(label)
-    }
-}
-
 private struct LivePinnedPlayerLayout: ViewModifier {
     let isPlaceholder: Bool
     #if os(iOS)
@@ -1780,12 +1767,14 @@ struct AppleLiveInlinePlayer: View {
                 AppleLiveConnectingArtwork(logoURL: logoURL)
                     .allowsHitTesting(false)
                 #if !os(macOS)
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white)
-                    .allowsHitTesting(false)
-                    .accessibilityLabel("Loading")
-                    .accessibilityIdentifier("live.loading")
+                AppleLiveTuningDelay(id: liveChannel?.id ?? "") {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .accessibilityLabel("Loading")
+                        .accessibilityIdentifier("live.loading")
+                }
+                .allowsHitTesting(false)
                 #endif
                 if coordinator.isReconnectingLive {
                     // A channel that was playing dropped and is being reopened
@@ -2153,6 +2142,8 @@ private struct AppleLiveFullScreenControls: View {
     @State private var lastChannelSwitch: ContinuousClock.Instant?
     @State private var pickerShowTask: Task<Void, Never>?
     @State private var controlsHeight: CGFloat = 0
+    @State private var zapper = AppleLiveZapCoalescer()
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Shows the channel list unless a channel switch lands around the same
     /// touch: the video-area Button fires on the lift of a swipe too
@@ -2193,11 +2184,11 @@ private struct AppleLiveFullScreenControls: View {
     }
 
     private func zap(_ direction: AppleLiveZappingPolicy.Direction) {
-        guard request.isLive, !channelPicker.isPresented, let currentChannelID,
-              let id = AppleLiveZappingPolicy.target(currentID: currentChannelID,
-                orderedIDs: channels.map(\.id), direction: direction),
-              let channel = channels.first(where: { $0.id == id }) else { return }
-        switchChannel(channel)
+        guard request.isLive, !channelPicker.isPresented, let currentChannelID else { return }
+        zapper.press(direction, currentID: currentChannelID, orderedIDs: channels.map(\.id)) { id, _ in
+            guard let channel = channels.first(where: { $0.id == id }) else { return }
+            switchChannel(channel)
+        }
     }
 
     private var watchLiveAction: (() -> Void)? {
@@ -2354,6 +2345,8 @@ private struct AppleLiveFullScreenControls: View {
                     }
                 picker
                     .zIndex(1)
+            } else {
+                AppleLiveZapPendingBanner(zapper: zapper, channels: channels)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -2402,6 +2395,9 @@ private struct AppleLiveFullScreenControls: View {
         .accessibilityAction(named: "Next Channel") { zap(.next) }
         .accessibilityAction(named: "Previous Channel") { zap(.previous) }
         #endif
+        .onChange(of: currentChannelID) { _, id in zapper.playerChanged(to: id) }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { zapper.cancel() } }
+        .onDisappear { zapper.cancel() }
     }
 }
 
@@ -2426,6 +2422,10 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     /// Mute, AirPlay and full screen, top-right, 4 pt apart.
     private var topTrailingStack: UIStackView!
     private var isBusy = false
+    private let zapper = AppleLiveZapCoalescer()
+    #if os(iOS)
+    private var pendingBannerHost: UIHostingController<AppleLiveZapPendingBanner>?
+    #endif
     private weak var presentedFullscreen: AppleLiveFullscreenPlayerViewController?
     /// Set on visionOS: full screen is the window's player stage.
     var onRequestFullWindow: (() -> Void)?
@@ -2513,6 +2513,11 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         #endif
         view.addSubview(playPauseButton)
         view.addSubview(topTrailingStack)
+        #if os(iOS)
+        addPendingBanner()
+        NotificationCenter.default.addObserver(self, selector: #selector(cancelZap),
+                                               name: UIApplication.willResignActiveNotification, object: nil)
+        #endif
 
         NSLayoutConstraint.activate([
             playPauseButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
@@ -2600,13 +2605,35 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     }
 
     #if os(iOS)
+    private func addPendingBanner() {
+        let hosting = UIHostingController(rootView: AppleLiveZapPendingBanner(zapper: zapper, channels: channels))
+        hosting.view.backgroundColor = .clear
+        hosting.view.isUserInteractionEnabled = false
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(hosting)
+        view.insertSubview(hosting.view, belowSubview: playPauseButton)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        hosting.didMove(toParent: self)
+        pendingBannerHost = hosting
+    }
+
+    @objc private func cancelZap() {
+        zapper.cancel()
+    }
+
     @objc private func swipeChannel(_ gesture: UISwipeGestureRecognizer) {
-        guard request.isLive, let currentChannelID,
-              let id = AppleLiveZappingPolicy.target(currentID: currentChannelID, orderedIDs: channels.map(\.id),
-                direction: gesture.direction == .up ? .next : .previous),
-              let channel = channels.first(where: { $0.id == id }) else { return }
-        AppleInteractionTrace.record(.press, "live zap → \(channel.name)")
-        onSwitchChannel?(channel)
+        guard request.isLive, let currentChannelID else { return }
+        zapper.press(gesture.direction == .up ? .next : .previous, currentID: currentChannelID,
+                     orderedIDs: channels.map(\.id)) { [weak self] id, _ in
+            guard let self, let channel = channels.first(where: { $0.id == id }) else { return }
+            AppleInteractionTrace.record(.press, "live zap → \(channel.name)")
+            onSwitchChannel?(channel)
+        }
     }
     #endif
 
@@ -2711,6 +2738,10 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
         self.onLastChannel = onLastChannel
         self.onStartOver = onStartOver
         self.fullScreenRevision = fullScreenRevision
+        zapper.playerChanged(to: currentChannelID)
+        #if os(iOS)
+        pendingBannerHost?.rootView = AppleLiveZapPendingBanner(zapper: zapper, channels: channels)
+        #endif
         if isViewLoaded {
             updateInlineSurface()
             updateChromeButtons()

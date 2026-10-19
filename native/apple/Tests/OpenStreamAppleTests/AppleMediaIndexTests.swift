@@ -518,7 +518,7 @@ import Testing
 /// lookup has to be observed so the Download button appears once the index
 /// loads, even though the keyed table beside the array is not (F-e).
 @MainActor
-@Test func recordLookupByIDObservesTheIndex() async throws {
+@Test(.timeLimit(.minutes(1))) func recordLookupByIDObservesTheIndex() async throws {
     let url = FileManager.default.temporaryDirectory.appending(path: "record-lookup-\(UUID()).json")
     defer { try? FileManager.default.removeItem(at: url) }
     let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
@@ -531,7 +531,7 @@ import Testing
         Task { @MainActor in flag.changed = true }
     }
     try await store.upsert(record)
-    for _ in 0..<50 where !flag.changed { try await Task.sleep(for: .milliseconds(20)) }
+    while !flag.changed { try await Task.sleep(for: .milliseconds(10)) }
     #expect(flag.changed)
     #expect(store.record(id: record.id)?.title == "A Series")
 }
@@ -562,7 +562,7 @@ import Testing
 }
 
 @MainActor
-@Test func recordLookupByDownloadMediaIDObservesTheIndex() async throws {
+@Test(.timeLimit(.minutes(1))) func recordLookupByDownloadMediaIDObservesTheIndex() async throws {
     let url = FileManager.default.temporaryDirectory.appending(path: "record-prefix-observe-\(UUID()).json")
     defer { try? FileManager.default.removeItem(at: url) }
     let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
@@ -575,7 +575,7 @@ import Testing
         Task { @MainActor in flag.changed = true }
     }
     try await store.upsert(record)
-    for _ in 0..<50 where !flag.changed { try await Task.sleep(for: .milliseconds(20)) }
+    while !flag.changed { try await Task.sleep(for: .milliseconds(10)) }
     #expect(flag.changed)
     #expect(store.record(matchingMediaID: record.id + ":tt1000003:1:1")?.title == "Another Series")
 }

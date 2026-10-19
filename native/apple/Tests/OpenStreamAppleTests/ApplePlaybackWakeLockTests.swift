@@ -147,7 +147,7 @@ private func makeLock() -> (ApplePlaybackWakeLock, RecordingWakeAssertion) {
 }
 
 @MainActor
-@Suite("Playback wake lock, driven by the coordinator", .serialized)
+@Suite("Playback wake lock, driven by the coordinator", .serialized, .timeLimit(.minutes(1)))
 struct ApplePlaybackCoordinatorWakeLockTests {
     private func makeRequest(isLive: Bool = true) -> ApplePlaybackRequest {
         ApplePlaybackRequest(
@@ -185,11 +185,11 @@ struct ApplePlaybackCoordinatorWakeLockTests {
         #expect(lock.holderCount == 1)
 
         engine.emit(.phase(.paused))
-        _ = await wakeWaitUntil { coordinator.phase == .paused }
+        await wakeWaitUntil { coordinator.phase == .paused }
         #expect(lock.holderCount == 0)
 
         engine.emit(.phase(.playing))
-        _ = await wakeWaitUntil { coordinator.phase == .playing }
+        await wakeWaitUntil { coordinator.phase == .playing }
         #expect(lock.holderCount == 1)
         coordinator.stop()
     }
@@ -204,7 +204,7 @@ struct ApplePlaybackCoordinatorWakeLockTests {
         #expect(lock.holderCount == 1)
 
         engine.emit(.failure(.init(kind: .player, message: "The decoder stopped.")))
-        _ = await wakeWaitUntil { lock.holderCount == 0 }
+        await wakeWaitUntil { lock.holderCount == 0 }
         #expect(lock.holderCount == 0)
         #expect(assertion.isDisabled == false)
         coordinator.stop()
@@ -270,7 +270,7 @@ struct ApplePlaybackCoordinatorWakeLockTests {
         await coordinator?.begin(makeRequest())
         #expect(lock.holderCount == 1)
         coordinator = nil
-        _ = await wakeWaitUntil { lock.holderCount == 0 }
+        await wakeWaitUntil { lock.holderCount == 0 }
         #expect(lock.holderCount == 0)
         #expect(assertion.isDisabled == false)
     }
@@ -291,15 +291,11 @@ struct ApplePlaybackCoordinatorWakeLockTests {
     }
 }
 
+/// No wall-clock deadline: the parallel gate can hold the coordinator's tasks
+/// up for seconds; the suite's time limit fails an outcome that never comes.
 @MainActor
-private func wakeWaitUntil(
-    timeout: Duration = .seconds(8),
-    _ condition: @MainActor () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
+private func wakeWaitUntil(_ condition: @MainActor () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return condition()
 }

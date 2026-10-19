@@ -116,3 +116,23 @@ import Testing
     #expect(AppleOrientationPolicy.supportedOrientations(isPhone: false, allowsLandscape: false) == .all)
     #expect(AppleOrientationPolicy.supportedOrientations(isPhone: false, allowsLandscape: true) == .all)
 }
+
+/// Spec S3 G15: the iPad and landscape title pages fit the trailer, unzoomed;
+/// the upright iPhone keeps its full-bleed fill.
+@Test func iPadAndLandscapeTitlePageTrailersFitWithoutZoom() {
+    #expect(AppleTrailerPreviewLayout.fitsHeader(isPad: true, isLandscape: false))
+    #expect(AppleTrailerPreviewLayout.fitsHeader(isPad: true, isLandscape: true))
+    #expect(AppleTrailerPreviewLayout.fitsHeader(isPad: false, isLandscape: true))
+    #expect(!AppleTrailerPreviewLayout.fitsHeader(isPad: false, isLandscape: false))
+
+    // iPad upright header (834 × 625): the full 16:9 width, letterboxed.
+    let upright = AppleTrailerPreviewLayout.fitFrame(in: CGSize(width: 834, height: 625))
+    #expect(upright.width == 834)
+    #expect(abs(upright.height - 834 * 9 / 16) < 0.001)
+    #expect(abs(upright.midY - 312.5) < 0.001)
+    // Phone on its side (874 × 402): the full height, pillarboxed.
+    let side = AppleTrailerPreviewLayout.fitFrame(in: CGSize(width: 874, height: 402))
+    #expect(side.height == 402)
+    #expect(side.width <= 874)
+    #expect(abs(side.midX - 437) < 0.001)
+}

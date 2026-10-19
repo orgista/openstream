@@ -1296,7 +1296,9 @@ public final class AppleSourceStore {
     }
 
     private var manifestRefreshKey: String { storageKey + ".manifest-refresh.v1" }
-    @ObservationIgnored private var dailyManifestRefresh: Task<Void, Never>?
+    /// Tests await these instead of polling for their effects.
+    @ObservationIgnored private(set) var dailyManifestRefresh: Task<Void, Never>?
+    @ObservationIgnored private(set) var logoBackfill: Task<Void, Never>?
 
     /// At launch: fetch each add-on's manifest again in the background, at
     /// most once per add-on per day, so add-ons saved before catalog paging
@@ -1934,7 +1936,7 @@ public final class AppleSourceStore {
             .filter { $0.isAddon && !$0.needsSignIn && $0.logoURL == nil && !attempted.contains($0.id.uuidString) }
             .map(\.id)
         guard !pending.isEmpty else { return }
-        Task { [weak self, delay = logoBackfillDelay] in
+        logoBackfill = Task { [weak self, delay = logoBackfillDelay] in
             try? await Task.sleep(for: delay)
             for id in pending {
                 guard let self, !Task.isCancelled else { return }

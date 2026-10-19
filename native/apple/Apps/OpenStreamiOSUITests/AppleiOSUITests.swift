@@ -3136,6 +3136,24 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
     }
 
+    /// Round 4 G4 on the stubbed lineup: five quick swipes up on the picture
+    /// tune once (the run's trace holds one `live zap` line for them).
+    func testLiveSwipesCoalesceIntoOneTune() {
+        app.launchArguments += ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "live")
+        let watching = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true", "Play ")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 90), "no playing row")
+        let firstLabel = watching.label
+        Thread.sleep(forTimeInterval: 8)
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        for _ in 0..<5 { player.swipeUp(velocity: .fast) }
+        let changed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true AND label != %@",
+                                                       "Play ", firstLabel)).firstMatch
+        XCTAssertTrue(changed.waitForExistence(timeout: 15), "the swipes never changed the channel")
+        Thread.sleep(forTimeInterval: 3)
+        attach("g4-after-five-swipes")
+    }
+
     /// Device check (DevPlus): a Live channel in full screen on the AVPlayer
     /// route goes to Picture in Picture when the viewer goes home. The
     /// screenshot after Home shows the window; the app trace says

@@ -1,3 +1,5 @@
+import Foundation
+
 enum AppleLiveZappingPolicy {
     enum Direction: Equatable, Sendable { case next, previous }
     enum Input: Sendable { case up, down, select, longSelect }
@@ -21,8 +23,18 @@ enum AppleLiveZappingPolicy {
         return vertical < 0 ? .next : .previous
     }
 
-    static func resumeTarget(enabled: Bool, liveTabActive: Bool, watchedIDs: [String], availableIDs: Set<String>) -> String? {
-        guard enabled, liveTabActive else { return nil }
+    /// The last channel resumes only inside this window; older than this,
+    /// Live opens on the guide.
+    static let resumeWindow: TimeInterval = 30 * 60
+
+    static func isWithinResumeWindow(_ lastWatchedAt: Date?, now: Date) -> Bool {
+        guard let lastWatchedAt else { return false }
+        return now.timeIntervalSince(lastWatchedAt) <= resumeWindow
+    }
+
+    static func resumeTarget(enabled: Bool, liveTabActive: Bool, watchedIDs: [String], availableIDs: Set<String>,
+                             lastWatchedAt: Date?, now: Date = Date()) -> String? {
+        guard enabled, liveTabActive, isWithinResumeWindow(lastWatchedAt, now: now) else { return nil }
         return watchedIDs.first { availableIDs.contains($0) }
     }
 
@@ -33,6 +45,11 @@ enum AppleLiveZappingPolicy {
         }
         return Array(orderedIDs[max(0, index - radius)..<min(orderedIDs.count, index + radius)])
     }
+
+    /// Up/Down presses are collected and tuned once, this long after the
+    /// last one. One-connection IPTV providers stall when every press opens
+    /// a stream.
+    static let coalesceDelay: Duration = .milliseconds(400)
 
     /// Takes the guide's final projected order, after package/hidden/favorite
     /// filters. Wrap at the ends, and never reopen a lone current channel.

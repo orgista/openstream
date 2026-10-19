@@ -1,9 +1,8 @@
 import Foundation
-import Synchronization
 import Testing
 @testable import OpenStreamApple
 
-@Suite struct AppleLiveZappingTests {
+@Suite(.timeLimit(.minutes(1))) struct AppleLiveZappingTests {
     @MainActor @Test func sharedSessionPreservesCoordinatorAndArchiveAcrossSurfaceChanges() throws {
         let coordinator = ApplePlaybackCoordinator(engine: FakePlaybackEngine())
         let session = AppleLiveSession(coordinator: coordinator)
@@ -19,30 +18,30 @@ import Testing
         session.multiviewChannels = [channel]
         #expect(session.coordinator === coordinator)
         #expect(!session.request(for: channel, programme: session.programme).isLive)
-        #expect(session.zapTarget(currentID: "a", programme: programme, orderedIDs: ["a", "b"], direction: .next) == nil)
         session.beginSelection(programme: nil, shareSelection: true)
         #expect(session.request(for: channel, programme: session.programme).isLive)
-        #expect(session.zapTarget(currentID: "a", programme: nil, orderedIDs: ["a", "b"], direction: .next) == "b")
+        let now = Date()
         session.resumePending = true
-        #expect(session.resumeTarget(enabled: true, active: false, watchedIDs: ["a"], availableIDs: ["a"]) == nil)
+        #expect(session.resumeTarget(enabled: true, active: false, watchedIDs: ["a"], availableIDs: ["a"],
+                                     lastWatchedAt: now, now: now) == nil)
         #expect(session.resumePending)
-        #expect(session.resumeTarget(enabled: true, active: true, watchedIDs: ["a"], availableIDs: ["a"]) == "a")
+        #expect(session.resumeTarget(enabled: true, active: true, watchedIDs: ["a"], availableIDs: ["a"],
+                                     lastWatchedAt: now, now: now) == "a")
         #expect(!session.resumePending)
     }
 
     @MainActor @Test func supersededLiveProbeCannotSelectOrCacheThePreviousChannel() async throws {
-        let pending = Mutex<CheckedContinuation<(Data, URLResponse), any Error>?>(nil)
+        let (loads, pending) = AsyncStream.makeStream(of: CheckedContinuation<(Data, URLResponse), any Error>.self)
         let probe = AppleIPTVStreamProbe { _ in
-            try await withCheckedThrowingContinuation { continuation in pending.withLock { $0 = continuation } }
+            try await withCheckedThrowingContinuation { pending.yield($0) }
         }
         let session = AppleLiveSession(coordinator: ApplePlaybackCoordinator(engine: FakePlaybackEngine()), streamProbe: probe)
         let channel = AppleIPTVChannel(id: "a", sourceID: UUID(), name: "Fixture",
             streamURL: URL(string: "https://fixture.example/live")!)
         session.pendingProbe = .init(channel: channel, shareSelection: false, present: false)
         let old = Task { await session.resolvePendingProbe() }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while pending.withLock({ $0 == nil }), ContinuousClock.now < deadline { await Task.yield() }
-        let continuation = try #require(pending.withLock { $0 })
+        var started = loads.makeAsyncIterator()
+        let continuation = try #require(await started.next())
         let replacement = AppleLiveSession.ProbeRequest(channel: channel, shareSelection: true, present: true)
         session.pendingProbe = replacement
         continuation.resume(returning: (Data("#EXTM3U".utf8), HTTPURLResponse(url: channel.streamURL,
@@ -148,14 +147,146 @@ import Testing
     }
 
     @Test func resumeOnlyRunsWhenLiveOpensAndSkipsUnavailableChannels() {
+        let now = Date()
         #expect(AppleLiveZappingPolicy.resumeTarget(enabled: true, liveTabActive: false,
-            watchedIDs: ["a"], availableIDs: ["a"]) == nil)
+            watchedIDs: ["a"], availableIDs: ["a"], lastWatchedAt: now, now: now) == nil)
         #expect(AppleLiveZappingPolicy.resumeTarget(enabled: false, liveTabActive: true,
-            watchedIDs: ["a"], availableIDs: ["a"]) == nil)
+            watchedIDs: ["a"], availableIDs: ["a"], lastWatchedAt: now, now: now) == nil)
         #expect(AppleLiveZappingPolicy.resumeTarget(enabled: true, liveTabActive: true,
-            watchedIDs: ["removed", "a"], availableIDs: ["a"]) == "a")
+            watchedIDs: ["removed", "a"], availableIDs: ["a"], lastWatchedAt: now, now: now) == "a")
         #expect(AppleLiveZappingPolicy.resumeTarget(enabled: true, liveTabActive: true,
-            watchedIDs: [], availableIDs: ["a"]) == nil)
+            watchedIDs: [], availableIDs: ["a"], lastWatchedAt: now, now: now) == nil)
+    }
+
+    /// G18: resume only inside the window; older, Live opens on the guide.
+    @Test func resumeNeedsAWatchInTheLastThirtyMinutes() {
+        let now = Date()
+        func target(_ lastWatchedAt: Date?) -> String? {
+            AppleLiveZappingPolicy.resumeTarget(enabled: true, liveTabActive: true, watchedIDs: ["a"],
+                                                availableIDs: ["a"], lastWatchedAt: lastWatchedAt, now: now)
+        }
+        #expect(target(now.addingTimeInterval(-29 * 60)) == "a")
+        #expect(target(now.addingTimeInterval(-31 * 60)) == nil)
+        #expect(target(nil) == nil)
+
+        var history = AppleLiveWatchHistory()
+        history.record("a", watchedSeconds: 5, at: now.addingTimeInterval(-40 * 60))
+        history.touch("b", at: now)
+        #expect(history.lastWatchedAt == now.addingTimeInterval(-40 * 60))
+        history.touch("a", at: now)
+        #expect(history.lastWatchedAt == now)
+    }
+
+    /// G18: leaving Live and coming back never re-arms the resume.
+    @MainActor @Test func resumeArmsOnTheFirstLiveEntryOfALaunchOnly() {
+        let first = AppleLiveSession(coordinator: ApplePlaybackCoordinator(engine: FakePlaybackEngine()))
+        first.enterLive()
+        #expect(first.resumePending)
+        first.resumePending = false
+        first.enterLive()
+        #expect(!first.resumePending)
+        let later = AppleLiveSession(coordinator: ApplePlaybackCoordinator(engine: FakePlaybackEngine()))
+        later.enterLive()
+        #expect(!later.resumePending)
+
+        let now = Date()
+        first.resumePending = true
+        #expect(first.resumeTarget(enabled: true, active: true, watchedIDs: ["a"], availableIDs: ["a"],
+                                   lastWatchedAt: now.addingTimeInterval(-3600), now: now) == nil)
+        #expect(!first.resumePending)
+    }
+
+    /// G4: 5 presses in 1 s → exactly 1 stream open, on the channel they reached.
+    @MainActor @Test func zapPressesCoalesceIntoOneTune() async throws {
+        let zapper = AppleLiveZapCoalescer()
+        var commits: [(String, Int)] = []
+        let ids = ["a", "b", "c", "d", "e", "f", "g"]
+        for _ in 0..<5 {
+            zapper.press(.next, currentID: "a", orderedIDs: ids) { commits.append(($0, $1)) }
+        }
+        #expect(commits.isEmpty)
+        #expect(zapper.pendingID == "f")
+        try await waitUntil { !commits.isEmpty }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(commits.count == 1)
+        #expect(commits.first?.0 == "f")
+        #expect(commits.first?.1 == 5)
+        #expect(zapper.pendingID == nil)
+    }
+
+    /// G4: Up on the last channel wraps to the first; back to where the
+    /// presses started opens nothing.
+    @MainActor @Test func zapWrapsAtTheEndsAndReturningHomeOpensNothing() async throws {
+        let zapper = AppleLiveZapCoalescer(delay: .milliseconds(50))
+        var commits: [String] = []
+        zapper.press(.next, currentID: "c", orderedIDs: ["a", "b", "c"]) { id, _ in commits.append(id) }
+        #expect(zapper.pendingID == "a")
+        zapper.press(.previous, currentID: "c", orderedIDs: ["a", "b", "c"]) { id, _ in commits.append(id) }
+        #expect(zapper.pendingID == nil)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(commits.isEmpty)
+    }
+
+    /// A press just after a tune, before the player reports the new channel,
+    /// steps on from the channel that was tuned (DevTV-sim trace 2026-10-18).
+    @MainActor @Test func aPressRightAfterATuneStepsFromTheTunedChannel() async throws {
+        let zapper = AppleLiveZapCoalescer(delay: .milliseconds(50))
+        let ids = ["a", "b", "c", "d"]
+        var commits: [String] = []
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        try await waitUntil { !commits.isEmpty }
+        #expect(commits == ["c"])
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        #expect(zapper.pendingID == "d")
+        zapper.cancel()
+        zapper.press(.next, currentID: "c", orderedIDs: ids) { id, _ in commits.append(id) }
+        #expect(zapper.pendingID == "d")
+        zapper.cancel()
+    }
+
+    /// F12: one `live first picture` line per tune, from the tune to playing,
+    /// keyed by channel id; a tune left before its picture is logged as abandoned.
+    @MainActor @Test func firstPictureIsTracedOncePerTune() {
+        let session = AppleLiveSession(coordinator: ApplePlaybackCoordinator(engine: FakePlaybackEngine()))
+        func channel(_ id: String) -> AppleIPTVChannel {
+            AppleIPTVChannel(id: id, sourceID: UUID(), name: "Same Name",
+                             streamURL: URL(string: "https://fixture.example/live/\(id).m3u8")!)
+        }
+        session.markTuneStarted(channel("first-picture-left"))
+        session.markTuneStarted(channel("first-picture-kept"))
+        session.notePlaybackPhase(.loading)
+        session.notePlaybackPhase(.playing)
+        session.notePlaybackPhase(.playing)
+        let trace = AppleInteractionTrace.snapshot()
+        let kept = trace.filter { $0.contains("live first picture first-picture-kept ") }
+        #expect(kept.count == 1)
+        #expect(kept.first?.hasSuffix(" ms") == true)
+        let left = trace.filter { $0.contains("live first picture first-picture-left abandoned ") }
+        #expect(left.count == 1)
+        #expect(left.first?.hasSuffix(" ms") == true)
+    }
+
+    /// Presses still waiting when the channel changes another way (a row,
+    /// Last Channel) are dropped: their tune would override the choice.
+    @MainActor @Test func aSwitchMadeAnotherWayDropsTheWaitingPresses() async throws {
+        let zapper = AppleLiveZapCoalescer(delay: .milliseconds(50))
+        let ids = ["a", "b", "c", "d"]
+        var commits: [String] = []
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        zapper.playerChanged(to: "a")
+        #expect(zapper.pendingID == "b")
+        zapper.playerChanged(to: "d")
+        #expect(zapper.pendingID == nil)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(commits.isEmpty)
+
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        try await waitUntil { !commits.isEmpty }
+        zapper.press(.next, currentID: "a", orderedIDs: ids) { id, _ in commits.append(id) }
+        zapper.playerChanged(to: "b")
+        #expect(zapper.pendingID == "c")
+        zapper.cancel()
     }
 
     @Test func recallAndResumeCanCrossTheCurrentGuideFilter() {
@@ -166,7 +297,7 @@ import Testing
         #expect(AppleLiveZappingPolicy.target(currentID: "news", orderedIDs: ["news"], direction: .next) == nil)
         #expect(history.previous(currentID: "news", availableIDs: loadedVisible) == "sports")
         #expect(AppleLiveZappingPolicy.resumeTarget(enabled: true, liveTabActive: true,
-            watchedIDs: history.channelIDs, availableIDs: loadedVisible) == "news")
+            watchedIDs: history.channelIDs, availableIDs: loadedVisible, lastWatchedAt: history.lastWatchedAt) == "news")
         #expect(history.previous(currentID: "news", availableIDs: ["news"]) == nil)
     }
 
@@ -202,5 +333,12 @@ import Testing
             isCatchUp: false, phase: .loading))
         #expect(!AppleLiveZappingPolicy.keepsCurrentAttempt(requestedID: "cbs", selectedID: "cbs",
             isCatchUp: true, phase: .playing))
+    }
+
+    /// The coalescer's timer runs on the main actor, which a full parallel
+    /// run keeps busy; wait for the commit rather than a fixed time.
+    @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
     }
 }

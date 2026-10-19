@@ -9,8 +9,10 @@ struct AppleChannelHealthTests {
         .init(id: id, sourceID: sourceID, name: "Fixture", streamURL: url,
               userAgent: "FixtureAgent", referer: "https://fixture.example/", origin: "https://fixture.example")
     }
+    /// Content tests, not timing tests: the request timeout only guards a hang,
+    /// and the parallel gate can hold a loopback answer up for seconds.
     private var config: AppleChannelHealthConfiguration {
-        .init(requestTimeout: 2, requestsPerSecondPerHost: 1000)
+        .init(requestTimeout: 30, requestsPerSecondPerHost: 1000)
     }
     private let playlist = Data("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.2,\nsegment.ts\n#EXT-X-ENDLIST\n".utf8)
 
@@ -63,7 +65,7 @@ struct AppleChannelHealthTests {
     @Test func firstRungTimeout() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/slow", body: playlist, delay: .seconds(5))
+        await server.route("/slow", body: playlist, delay: .seconds(3_600))
         let probe = AppleChannelHealthProbe(configuration: .init(requestTimeout: 0.15))
         let result = try await probe.probe(channel(base.appendingPathComponent("slow")))
         await server.stop()
@@ -143,15 +145,21 @@ struct AppleChannelHealthTests {
     @Test func concurrencyIsBoundedAndProgressIsComplete() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", status: 403, delay: .milliseconds(80))
+        await server.route("/live", status: 403)
+        await server.holdResponses()
         let channels = (0..<12).map { channel(base.appendingPathComponent("live"), id: "channel-\($0)") }
         let progress = HealthProgressRecorder()
-        let results = try await AppleChannelHealthSweep(configuration: .init(concurrency: 3, requestsPerSecondPerHost: 1000))
-            .run(channels, history: nil) { value in await progress.record(value) }
+        let sweep = Task {
+            try await AppleChannelHealthSweep(configuration: .init(concurrency: 3, requestsPerSecondPerHost: 1000))
+                .run(channels, history: nil) { value in await progress.record(value) }
+        }
+        // All three slots fill while nothing has been answered.
+        await server.waitForActive(3)
+        await server.releaseResponses()
+        let results = try await sweep.value
         await server.stop()
         #expect(results.count == 12)
-        #expect(await server.maximumActive <= 3)
-        #expect(await server.maximumActive > 1)
+        #expect(await server.maximumActive == 3)
         #expect(await progress.completed == Array(1...12))
     }
 
@@ -161,16 +169,22 @@ struct AppleChannelHealthTests {
         await server.route("/live", body: playlist)
         await server.route("/segment.ts", body: Self.video)
         await server.route("/other", status: 403)
-        _ = try await AppleChannelHealthSweep(configuration: .init(concurrency: 2, requestsPerSecondPerHost: 5))
-            .run([channel(base.appendingPathComponent("live"), id: "a"),
-                  channel(base.appendingPathComponent("other"), id: "b")], history: nil)
-        await server.stop()
-        let times = await server.arrivals
-        #expect(times.count == 3)
-        if times.count == 3 {
-            // Live, then its segment straight away, then the second channel a fifth of a second after Live.
-            #expect(times[0].duration(to: times[2]) >= .milliseconds(180))
+        let clock = ManualClock()
+        let sweep = Task {
+            try await AppleChannelHealthSweep(configuration: .init(concurrency: 1, requestsPerSecondPerHost: 5, clock: clock))
+                .run([channel(base.appendingPathComponent("live"), id: "a"),
+                      channel(base.appendingPathComponent("other"), id: "b")], history: nil)
         }
+        await clock.waitForSleeps(1)
+        #expect(clock.requestedDeadlines == [.milliseconds(200)])
+        #expect(await server.hits("/live") == 1)
+        #expect(await server.hits("/segment.ts") == 1)
+        #expect(await server.hits("/other") == 0)
+        clock.advance(by: .milliseconds(200))
+        let results = try await sweep.value
+        await server.stop()
+        #expect(results.count == 2)
+        #expect(await server.hits("/other") == 1)
     }
 
     /// Owner recording 2026-10-15: "Checking 12 of 136" for minutes. A slow provider answered one
@@ -178,28 +192,44 @@ struct AppleChannelHealthTests {
     @Test func slowAnswersDoNotRunOneAtATime() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", status: 403, delay: .seconds(1))
+        await server.route("/live", status: 403)
+        await server.holdResponses()
+        let clock = ManualClock()
         let channels = (0..<2).map { channel(base.appendingPathComponent("live"), id: "channel-\($0)") }
-        _ = try await AppleChannelHealthSweep(configuration: .init(concurrency: 2, requestsPerSecondPerHost: 4))
-            .run(channels, history: nil)
+        let sweep = Task {
+            try await AppleChannelHealthSweep(configuration: .init(concurrency: 2, requestsPerSecondPerHost: 4, clock: clock))
+                .run(channels, history: nil)
+        }
+        await server.waitForActive(1)
+        await clock.waitForSleeps(1)
+        #expect(clock.requestedDeadlines == [.milliseconds(250)])
+        clock.advance(by: .milliseconds(250))
+        await server.waitForActive(2)
+        #expect(await server.maximumActive == 2)
+        await server.releaseResponses()
+        let results = try await sweep.value
         await server.stop()
-        let times = await server.arrivals
-        #expect(times.count == 2)
-        // The second channel arrives while the first still waits for its answer.
-        if times.count == 2 { #expect(times[0].duration(to: times[1]) < .seconds(1)) }
+        #expect(results.count == 2)
     }
 
     @Test(arguments: [(nil, 2), (1, 1), (3, 3), (10, 4)] as [(Int?, Int)])
     func probesPerProviderFollowItsConnectionLimit(limit: Int?, cap: Int) async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", status: 403, delay: .milliseconds(150))
+        await server.route("/live", status: 403)
+        await server.holdResponses()
         let source = UUID()
         let channels = (0..<8).map { channel(base.appendingPathComponent("live"), id: "channel-\($0)", sourceID: source) }
-        _ = try await AppleChannelHealthSweep(configuration: .init(concurrency: 6, requestsPerSecondPerHost: 1000),
+        let sweep = Task {
+            try await AppleChannelHealthSweep(configuration: .init(concurrency: 6, requestsPerSecondPerHost: 1000),
                                               connectionLimits: limit.map { [source: $0] } ?? [:])
-            .run(channels, history: nil)
+                .run(channels, history: nil)
+        }
+        await server.waitForActive(cap)
+        await server.releaseResponses()
+        let results = try await sweep.value
         await server.stop()
+        #expect(results.count == 8)
         #expect(await server.maximumActive == cap)
         #expect(AppleChannelHealthSweep.probeCap(connectionLimit: limit) == cap)
     }
@@ -207,20 +237,20 @@ struct AppleChannelHealthTests {
     @Test func cancellationStopsSweepWithoutRecordingOutages() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", body: playlist, delay: .seconds(5))
+        await server.holdResponses()
+        await server.route("/live", body: playlist)
         let directory = FileManager.default.temporaryDirectory.appending(path: "health-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let history = AppleChannelHealthHistory(directory: directory)
         let channels = (0..<30).map { channel(base.appendingPathComponent("live"), id: "channel-\($0)") }
-        let task = Task { try await AppleChannelHealthSweep().run(channels, history: history) }
-        for _ in 0..<100 {
-            if await server.hits("/live") > 0 { break }
-            try await Task.sleep(for: .milliseconds(10))
+        // Nothing is answered and nothing times out within the time limit, so
+        // only the cancellation reaching the requests in flight ends the sweep.
+        let task = Task {
+            try await AppleChannelHealthSweep(configuration: .init(requestTimeout: 3_600)).run(channels, history: history)
         }
-        let start = ContinuousClock.now
+        await server.waitForHit("/live")
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(start.duration(to: .now) < .seconds(1))
         await server.stop()
         #expect(await history.snapshot().isEmpty)
         #expect(await server.hits("/live") <= 4)
@@ -307,24 +337,27 @@ struct AppleChannelHealthTests {
         #expect(output.contains("#EXTINF:-1,Fixture"))
     }
 
+    /// The body stalls after the headers and its first byte, so the request
+    /// only ends when its resource timeout runs out, counted from the request.
+    /// The answer started before that (status 200), so a first byte timed at
+    /// the answer is under the timeout however loaded the machine; one timed
+    /// at the end of the body is not.
     @Test func ttfbDoesNotIncludeBodyDownload() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", body: playlist, bodyDelay: .milliseconds(350))
-        await server.route("/segment.ts", body: Self.video)
-        let start = ContinuousClock.now
-        let result = try await AppleChannelHealthProbe(configuration: config).probe(channel(base.appendingPathComponent("live")))
+        await server.route("/live", body: playlist, bodyDelay: .seconds(3_600))
+        let result = try await AppleChannelHealthProbe(configuration: .init(requestTimeout: 5))
+            .probe(channel(base.appendingPathComponent("live")))
         await server.stop()
-        #expect(result.bucket == .online)
+        #expect(result.httpStatus == 200)
         let ttfb = try #require(result.ttfbMs)
-        #expect(start.duration(to: .now) >= .milliseconds(350))
-        #expect(ttfb < 250)
+        #expect(ttfb < 5_000)
     }
 
     @Test func answeredButStalledBodyIsReachable() async throws {
         let server = HealthHTTPFixture()
         let base = try await server.start()
-        await server.route("/live", body: playlist, bodyDelay: .seconds(5))
+        await server.route("/live", body: playlist, bodyDelay: .seconds(3_600))
         let result = try await AppleChannelHealthProbe(configuration: .init(requestTimeout: 1))
             .probe(channel(base.appendingPathComponent("live")))
         await server.stop()

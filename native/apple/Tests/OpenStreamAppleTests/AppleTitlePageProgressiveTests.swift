@@ -118,7 +118,8 @@ struct AppleTitlePageProgressiveTests {
             try Task.checkCancellation()
             return response(request, #"{"meta":{"id":"fixture:film","type":"movie","name":"Late"}}"#)
         })
-        let resolver = AppleMetadataResolver(sourceClient: client)
+        // Only the cancellation may end the lookup, never its request deadline.
+        let resolver = AppleMetadataResolver(sourceClient: client, clock: ManualClock())
         let task = Task {
             try await resolver.resolve(sources: [source("cancel.fixture.example")], type: "movie", mediaID: "fixture:film",
                 onUpdate: { value in await updates.append(value) })

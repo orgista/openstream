@@ -152,19 +152,12 @@ struct AppleTitlePagePolicyTests {
         #expect(AppleTitlePagePolicy.episodeEyebrow(episode(0, 2), now: now, calendar: calendar) == "SPECIAL 2")
     }
 
-    // MARK: Chips and glossary
+    // MARK: Chips
 
     @Test func chipsAreTheRealCapabilitiesBestFirstWithoutTheRating() {
         let chips = AppleTitlePagePolicy.capabilityChips(formatBadges: ["AD", "TV-MA", "HD", "4K", "SDH", "Nonsense", "CC", "HDR"])
         #expect(chips == ["4K", "HDR", "CC", "SDH", "AD"])
         #expect(AppleTitlePagePolicy.capabilityChips(formatBadges: []).isEmpty)
-    }
-
-    @Test func glossaryExplainsOnlyTheAccessibilityChipsShown() {
-        let entries = AppleTitlePagePolicy.accessibilityGlossary(chips: ["4K", "SDH", "AD"])
-        #expect(entries.map(\.badge) == ["SDH", "AD"])
-        #expect(entries.allSatisfy { !$0.meaning.isEmpty })
-        #expect(AppleTitlePagePolicy.accessibilityGlossary(chips: ["4K", "HDR"]).isEmpty)
     }
 
     // MARK: Reference blocks

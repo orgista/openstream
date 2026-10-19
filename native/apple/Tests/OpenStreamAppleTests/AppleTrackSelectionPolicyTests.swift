@@ -14,7 +14,7 @@ import Testing
 
     /// Apple TV verification 2026-10-01: Spanish chosen, the menu reopened
     /// with English checked while the switch was still rebuilding.
-    @Test func menuKeepsTheNewAudioTrackThroughTheSwitchAndARebuiltOverlay() async throws {
+    @Test(.timeLimit(.minutes(1))) func menuKeepsTheNewAudioTrackThroughTheSwitchAndARebuiltOverlay() async throws {
         let engine = FakePlaybackEngine()
         engine.duration = 100
         engine.audioTracks = [
@@ -43,11 +43,11 @@ import Testing
         // The switch lands: the engine's report is the truth again.
         engine.activeAudioTrackID = 2
         engine.emit(.tracks)
-        for _ in 0..<20 where coordinator.pendingAudioPick != nil { try await Task.sleep(for: .milliseconds(10)) }
+        while coordinator.pendingAudioPick != nil { try await Task.sleep(for: .milliseconds(10)) }
         #expect(coordinator.pendingAudioPick == nil)
         engine.activeAudioTrackID = 1
         engine.emit(.tracks)
-        for _ in 0..<20 where rebuilt.selectedAudioID != 1 { try await Task.sleep(for: .milliseconds(10)) }
+        while rebuilt.selectedAudioID != 1 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(rebuilt.selectedAudioID == 1)
     }
 

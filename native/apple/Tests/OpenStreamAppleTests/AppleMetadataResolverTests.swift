@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct AppleMetadataResolverTests {
     @Test
     func fallbackOrderingMergesRicherFieldsAndPreservesIdentity() async throws {
@@ -14,17 +14,14 @@ struct AppleMetadataResolverTests {
         let oversized = metadataSource(host: "oversized.fixture", name: "Oversized")
         let insecure = metadataSource(host: "insecure.fixture", name: "Insecure")
         let defaultSource = metadataSource(host: "default.fixture", name: "Default")
-        // This test is about *ordering and merging*, not the deadline: it has
-        // to walk all seven fixtures to assert the host order. Seven 5 ms
-        // sleeps fit a 250 ms budget on an idle machine and do not when the
-        // whole suite is running in parallel, which made it fail roughly one
-        // run in four — every assertion at once, because a cut-short walk
-        // merges nothing. The deadline itself is covered by the next test,
-        // which keeps its 250 ms and asserts the elapsed time.
+        // This test is about *ordering and merging*, not the deadline: a
+        // cut-short walk merges nothing, so the deadlines run on a clock that
+        // never moves. The deadline itself is covered by the next test.
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             overallDeadline: .seconds(5),
-            defaultSource: defaultSource
+            defaultSource: defaultSource,
+            clock: ManualClock()
         )
 
         let details = try await resolver.resolve(
@@ -62,28 +59,40 @@ struct AppleMetadataResolverTests {
             url: URL(string: "https://catalog-only.fixture/manifest.json")!,
             resources: ["catalog"]
         )
+        let clock = ManualClock()
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             requestDeadline: .milliseconds(100),
             overallDeadline: .milliseconds(250),
-            defaultSource: metadataSource(host: "default.fixture", name: "Default")
+            defaultSource: metadataSource(host: "default.fixture", name: "Default"),
+            clock: clock
         )
 
-        let start = ContinuousClock().now
-        let details = try await resolver.resolve(
-            sources: [slow, noMetadata],
-            preferredSourceID: slow.id,
-            type: "series",
-            mediaID: "tt7654321:1:2"
-        )
-        let elapsed = start.duration(to: ContinuousClock().now)
+        let (answers, answered) = AsyncStream.makeStream(of: Void.self)
+        let resolution = Task {
+            try await resolver.resolve(
+                sources: [slow, noMetadata],
+                preferredSourceID: slow.id,
+                type: "series",
+                mediaID: "tt7654321:1:2",
+                onUpdate: { _ in answered.yield() }
+            )
+        }
+        // The default source answers; the slow one is still out when its
+        // 100 ms request deadline passes.
+        var answer = answers.makeAsyncIterator()
+        await answer.next()
+        await clock.waitForSleeps(2)
+        while !fixture.hosts.contains("slow.fixture") { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(clock.requestedDeadlines == [.milliseconds(100), .milliseconds(100)])
+        clock.advance(by: .milliseconds(100))
+        let details = try await resolution.value
 
         #expect(details?.mediaID == "tt7654321:1:2")
         #expect(details?.title == "Default Episode")
         #expect(details?.runtimeMinutes == 42)
         #expect(details?.genres == ["Drama"])
         #expect(fixture.wasCancelled(host: "slow.fixture"))
-        #expect(elapsed < .milliseconds(220))
         #expect(fixture.requestsAreRedacted())
     }
 
@@ -107,7 +116,8 @@ struct AppleMetadataResolverTests {
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             overallDeadline: .seconds(2),
-            defaultSource: defaultSource
+            defaultSource: defaultSource,
+            clock: ManualClock()
         )
         
         let details = try await resolver.resolve(
@@ -132,7 +142,8 @@ struct AppleMetadataResolverTests {
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             overallDeadline: .seconds(2),
-            defaultSource: defaultSource
+            defaultSource: defaultSource,
+            clock: ManualClock()
         )
         
         let details = try await resolver.resolve(
@@ -155,7 +166,8 @@ struct AppleMetadataResolverTests {
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             overallDeadline: .seconds(2),
-            defaultSource: defaultSource
+            defaultSource: defaultSource,
+            clock: ManualClock()
         )
         
         let details = try await resolver.resolve(
@@ -179,7 +191,8 @@ struct AppleMetadataResolverTests {
         let resolver = AppleMetadataResolver(
             sourceClient: AppleStremioMetadataClient(loader: fixture.load),
             overallDeadline: .seconds(2),
-            defaultSource: defaultSource
+            defaultSource: defaultSource,
+            clock: ManualClock()
         )
         
         let details = try await resolver.resolve(

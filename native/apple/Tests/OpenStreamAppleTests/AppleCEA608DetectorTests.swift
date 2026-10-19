@@ -162,7 +162,7 @@ struct AppleHLSCaptionDeclarationTests {
 }
 
 /// When a live channel plays through the proxy's caption-declaring master.
-@Suite("Live caption master wrap")
+@Suite("Live caption master wrap", .timeLimit(.minutes(1)))
 struct AppleLiveCaptionWrapTests {
     /// Probe × manifest × shape: only undeclared 608 in a media playlist wraps.
     @Test(arguments: [

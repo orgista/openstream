@@ -150,6 +150,7 @@ struct AppleFeaturedHero<Actions: View>: View {
     @ViewBuilder var actions: Actions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.appleRotatingHeroCycle) private var rotatingCycle
     var body: some View {
         #if os(tvOS)
         AppleTVBillboard(item: item, wordmark: wordmark, rotationCount: rotationCount,
@@ -222,30 +223,32 @@ struct AppleFeaturedHero<Actions: View>: View {
                     }
                     .overlay(alignment: .bottomLeading) {
                         VStack(alignment: .leading, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                titleTreatment
-                                if let metadataLine {
-                                    Text(metadataLine)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.white.opacity(0.75))
-                                        .lineLimit(1)
-                                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                            AppleHeroPageFade(page: item.id, layer: .copy, alignment: .bottomLeading) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    titleTreatment
+                                    if let metadataLine {
+                                        Text(metadataLine)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.white.opacity(0.75))
+                                            .lineLimit(1)
+                                            .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                                    }
+                                    if let summary = item.summary, !summary.isEmpty {
+                                        // White at 90 %, the same as the Apple TV
+                                        // billboard, not `.secondary`: a hierarchical
+                                        // grey over bright art disappears, and "TOXIC"
+                                        // sits on a white backdrop (2026-09-20). The fade
+                                        // covers the bottom of the frame, and over
+                                        // bright art the copy's side too (N20).
+                                        Text(summary)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                            .lineLimit(2)
+                                            .frame(maxWidth: min(700, copyColumnWidth), alignment: .leading)
+                                            .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
+                                    }
                                 }
-                                if let summary = item.summary, !summary.isEmpty {
-                                    // White at 90 %, the same as the Apple TV
-                                    // billboard, not `.secondary`: a hierarchical
-                                    // grey over bright art disappears, and "TOXIC"
-                                    // sits on a white backdrop (2026-09-20). The fade
-                                    // covers the bottom of the frame, and over
-                                    // bright art the copy's side too (N20).
-                                    Text(summary)
-                                        .foregroundStyle(.white.opacity(0.9))
-                                        .lineLimit(2)
-                                        .frame(maxWidth: min(700, copyColumnWidth), alignment: .leading)
-                                        .shadow(color: .black.opacity(0.6), radius: 6, y: 1)
-                                }
+                                .appleHeroCopyShadow(scrim.copyShadow)
                             }
-                            .appleHeroCopyShadow(scrim.copyShadow)
                             actions
                             pageIndicator
                         }
@@ -306,8 +309,8 @@ struct AppleFeaturedHero<Actions: View>: View {
 
     @ViewBuilder
     private var pageIndicator: some View {
-        if rotationCount > 1 {
-            AppleHomeHeroPageIndicator(count: rotationCount, index: rotationIndex)
+        if let rotatingCycle, rotatingCycle.count > 1 {
+            AppleHomeHeroPageIndicator(cycle: rotatingCycle)
                 .padding(.top, 2)
         }
     }

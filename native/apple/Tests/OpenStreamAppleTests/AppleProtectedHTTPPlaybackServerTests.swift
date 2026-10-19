@@ -647,7 +647,6 @@ actor AppleLiveTVUpstreamFixture {
     private var captured: [String: [String: String]] = [:]
     private var hitCounts: [String: Int] = [:]
     private var alternatingRedirects: [String: (targets: [String], nextIndex: Int)] = [:]
-    private var readyPort: UInt16?
 
     deinit { listener?.cancel() }
 
@@ -660,20 +659,8 @@ actor AppleLiveTVUpstreamFixture {
         listener.newConnectionHandler = { [weak self] connection in
             Task { await self?.accept(connection) }
         }
-        listener.stateUpdateHandler = { [weak self] state in
-            if case .ready = state {
-                Task { await self?.markReady() }
-            }
-        }
-        listener.start(queue: DispatchQueue(label: "openstream-tests.live-tv-fixture"))
-        for _ in 0 ..< 200 {
-            if let port = readyPort { return port }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        throw URLError(.cannotConnectToHost)
+        return try await listener.startedPort(queue: DispatchQueue(label: "openstream-tests.live-tv-fixture"))
     }
-
-    private func markReady() { readyPort = listener?.port?.rawValue }
 
     func addRoute(
         _ path: String,
@@ -688,6 +675,11 @@ actor AppleLiveTVUpstreamFixture {
     func headers(receivedFor path: String) -> [String: String]? { captured[path] }
 
     func hitCount(for path: String) -> Int { hitCounts[path] ?? 0 }
+
+    /// Returns once `path` has been requested at least once.
+    func waitForHit(_ path: String, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await waitFor("a request for \(path)", sourceLocation: sourceLocation) { hitCount(for: path) > 0 }
+    }
 
     /// Registers a path that 302-redirects to a different absolute location
     /// on each successive request, cycling through `targets` in order —
@@ -720,7 +712,18 @@ actor AppleLiveTVUpstreamFixture {
         var responseData = Data(text.utf8)
         responseData.append(route.body)
         try? await send(responseData, connection: connection)
+        // Cancelling drops bytes still queued behind the proxy's backpressure;
+        // close once the proxy has read to the end and hung up.
+        await waitForPeerClose(connection)
         connection.cancel()
+    }
+
+    private func waitForPeerClose(_ connection: NWConnection) async {
+        while await withCheckedContinuation({ (continuation: CheckedContinuation<Bool, Never>) in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { _, _, isComplete, error in
+                continuation.resume(returning: !isComplete && error == nil)
+            }
+        }) {}
     }
 
     private func readRequest(_ connection: NWConnection) async throws -> (String, [String: String]) {
@@ -759,7 +762,7 @@ actor AppleLiveTVUpstreamFixture {
 
     private func send(_ data: Data, connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            connection.send(content: data, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed {
+            connection.send(content: data, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed {
                 if let error = $0 { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             })

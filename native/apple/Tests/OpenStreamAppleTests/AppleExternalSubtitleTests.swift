@@ -236,7 +236,8 @@ private func subtitleSource(
 // MARK: - Coordinator hook
 
 @MainActor
-@Test func playbackCoordinatorHandsFetchedSubtitlesToTheEngineWithoutDelayingTheLoad() async {
+@Test(.timeLimit(.minutes(1)))
+func playbackCoordinatorHandsFetchedSubtitlesToTheEngineWithoutDelayingTheLoad() async {
     let engine = FakePlaybackEngine()
     engine.loadHandler = { _ in engine.phase = .playing }
     let coordinator = ApplePlaybackCoordinator(engine: engine)
@@ -258,9 +259,8 @@ private func subtitleSource(
         hints: .init(addonMediaID: "tt765:2:6", addonMediaType: "series")
     )
     await coordinator.begin(request)
-    let deadline = ContinuousClock().now.advanced(by: .seconds(2))
-    while engine.externalSubtitleTracks.isEmpty, ContinuousClock().now < deadline {
-        try? await Task.sleep(for: .milliseconds(20))
+    while engine.externalSubtitleTracks.isEmpty, !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
     #expect(engine.externalSubtitleTracks.map(\.languageCode) == ["eng"])
     #expect(coordinator.phase == .playing)

@@ -18,7 +18,8 @@ struct AppleHomeHeroActions: View {
         #elseif os(tvOS)
         if let tv {
             AppleHomeTVHeroActions(button: button, isInList: isInList, focus: tv.focus,
-                pagingEnabled: tv.pagingEnabled, willOpenPage: tv.willOpenPage,
+                pagingEnabled: tv.pagingEnabled, willOpenPage: tv.willOpenPage, noteInput: tv.noteInput,
+                moveFocus: tv.moveFocus,
                 onPlay: onPlay, onToggleList: onToggleList, onDetails: onDetails)
         } else { fallback }
         #else

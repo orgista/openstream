@@ -205,8 +205,13 @@ struct AppleIPTVCatchUpTests {
     }
 }
 
+/// The coordinator's timers (start deadline, reconnect delays, stall timer)
+/// run on a `ManualClock`, so each one fires when the test advances it.
+/// Engine events still reach the coordinator through a main-actor task, which
+/// the parallel gate can hold up for seconds; `waitUntil` has no deadline and
+/// the time limit is the guard.
 @MainActor
-@Suite("Live reconnect in the coordinator", .serialized)
+@Suite("Live reconnect in the coordinator", .serialized, .timeLimit(.minutes(1)))
 struct AppleLiveReconnectCoordinatorTests {
     private let fast = AppleLiveReconnectPolicy(
         maxAttempts: 3,
@@ -221,27 +226,40 @@ struct AppleLiveReconnectCoordinatorTests {
                              isLive: true, mediaID: "ch5", sourceKind: .liveTV)
     }
 
-    private func waitUntil(_ condition: @MainActor () -> Bool) async -> Bool {
-        let deadline = ContinuousClock().now + .seconds(8)
-        while ContinuousClock().now < deadline {
-            if condition() { return true }
+    private func makeCoordinator(_ engine: FakePlaybackEngine, policy: AppleLiveReconnectPolicy? = nil,
+                                 clock: ManualClock) -> ApplePlaybackCoordinator {
+        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
+        coordinator.liveReconnectPolicy = policy ?? fast
+        coordinator.clock = clock
+        return coordinator
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async {
+        while !condition(), !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        return condition()
+    }
+
+    private func failed(_ coordinator: ApplePlaybackCoordinator) -> Bool {
+        if case .failed = coordinator.phase { return true }
+        return false
     }
 
     @Test func aDropMidPlayReconnectsAndRecovers() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         await coordinator.begin(liveRequest())
         #expect(coordinator.phase == .playing)
 
         engine.emit(.failure(.init(kind: .network, message: "connection reset")))
-        #expect(await waitUntil { coordinator.liveReconnectAttempt == 1 })
+        await clock.waitForSleep(until: .milliseconds(20))
+        #expect(coordinator.liveReconnectAttempt == 1)
         #expect(coordinator.phase.isBusy)
-        #expect(await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing })
+        #expect(engine.loadedRequests.count == 1)
+        clock.advance(to: .milliseconds(20))
+        await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing }
         #expect(coordinator.liveReconnectAttempt == 0)
         #expect(engine.loadedRequests.map(\.url) == [liveRequest().url, liveRequest().url])
         coordinator.stop()
@@ -250,18 +268,19 @@ struct AppleLiveReconnectCoordinatorTests {
     @Test func aChannelThatStaysDeadGivesUpAfterThreeTries() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         await coordinator.begin(liveRequest())
         #expect(coordinator.phase == .playing)
 
         engine.loadHandler = { _ in throw ApplePlaybackFailure(kind: .unavailable, message: "HTTP 404") }
         engine.emit(.failure(.init(kind: .network, message: "connection reset")))
-        let failed = await waitUntil {
-            if case .failed = coordinator.phase { return true }
-            return false
+        // Each reopen fails at once, so the next delay starts where the last ended.
+        for deadline in [Duration.milliseconds(20), .milliseconds(60), .milliseconds(120)] {
+            await clock.waitForSleep(until: deadline)
+            clock.advance(to: deadline)
         }
-        #expect(failed)
+        await waitUntil { failed(coordinator) }
         // The first open plus three reopens, then the failure is shown.
         #expect(engine.loadedRequests.count == 4)
         #expect(coordinator.liveReconnectAttempt == 0)
@@ -271,13 +290,14 @@ struct AppleLiveReconnectCoordinatorTests {
     @Test func aChannelThatNeverPlayedReopensOnlyOnce() async {
         let engine = FakePlaybackEngine()
         engine.failOnLoad = .init(kind: .network, message: "refused")
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
-        await coordinator.begin(liveRequest())
-        _ = await waitUntil {
-            if case .failed = coordinator.phase { return true }
-            return false
-        }
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
+        let opening = Task { await coordinator.begin(liveRequest()) }
+        // The one quick reopen waits the policy's own second, not `fast`'s delays.
+        await clock.waitForSleep(until: .seconds(1))
+        clock.advance(to: .seconds(1))
+        await opening.value
+        await waitUntil { failed(coordinator) }
         #expect(engine.loadedRequests.count == 2)
         coordinator.stop()
     }
@@ -285,35 +305,42 @@ struct AppleLiveReconnectCoordinatorTests {
     @Test func aStallLongerThanTheTimeoutIsTreatedAsADrop() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         await coordinator.begin(liveRequest())
         #expect(coordinator.phase == .playing)
 
         engine.emit(.phase(.stalled(reconnecting: false)))
-        #expect(await waitUntil { coordinator.phase == .waiting("Reconnecting…") })
-        #expect(await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing })
+        await clock.waitForSleep(until: .milliseconds(150))
+        clock.advance(to: .milliseconds(150))
+        await waitUntil { coordinator.phase == .waiting("Reconnecting…") }
+        await clock.waitForSleep(until: .milliseconds(170))
+        clock.advance(to: .milliseconds(170))
+        await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing }
         coordinator.stop()
     }
 
     @Test func dataMovingAgainAfterAStallGivesTheEngineMoreTime() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = AppleLiveReconnectPolicy(
-            delays: [.milliseconds(20)], window: .seconds(5), stallTimeout: .milliseconds(300))
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, policy: AppleLiveReconnectPolicy(
+            delays: [.milliseconds(20)], window: .seconds(5), stallTimeout: .milliseconds(300)), clock: clock)
         await coordinator.begin(liveRequest())
         engine.emit(.phase(.stalled(reconnecting: true)))
-        #expect(await waitUntil { coordinator.isReconnectingLive })
-        try? await Task.sleep(for: .milliseconds(200))
-        // The engine's own reconnect got data: buffering, not stalled.
+        await waitUntil { coordinator.isReconnectingLive }
+        await clock.waitForSleep(until: .milliseconds(300))
+        clock.advance(to: .milliseconds(200))
+        // The engine's own reconnect got data: buffering, not stalled. The
+        // timer starts over from here.
         engine.emit(.phase(.rebuffering))
-        try? await Task.sleep(for: .milliseconds(200))
+        await clock.waitForSleep(until: .milliseconds(500))
+        clock.advance(to: .milliseconds(400))
         // 400 ms after the stall, past one timeout, but the timer restarted.
         #expect(engine.loadedRequests.count == 1)
         engine.emit(.phase(.playing))
-        #expect(await waitUntil { coordinator.phase == .playing })
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntil { coordinator.phase == .playing }
+        #expect(!clock.pendingDeadlines.contains(.milliseconds(500)))
         #expect(engine.loadedRequests.count == 1)
         coordinator.stop()
     }
@@ -321,14 +348,15 @@ struct AppleLiveReconnectCoordinatorTests {
     @Test func aShortRebufferIsLeftAlone() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         await coordinator.begin(liveRequest())
         engine.emit(.phase(.rebuffering))
-        #expect(await waitUntil { coordinator.phase == .waiting("Buffering…") })
+        await waitUntil { coordinator.phase == .waiting("Buffering…") }
+        await clock.waitForSleep(until: .milliseconds(150))
         engine.emit(.phase(.playing))
-        #expect(await waitUntil { coordinator.phase == .playing })
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntil { coordinator.phase == .playing }
+        #expect(!clock.pendingDeadlines.contains(.milliseconds(150)))
         #expect(engine.loadedRequests.count == 1)
         coordinator.stop()
     }
@@ -336,11 +364,13 @@ struct AppleLiveReconnectCoordinatorTests {
     @Test func endOfALiveStreamReconnects() async {
         let engine = FakePlaybackEngine()
         engine.script([.loading, .playing])
-        let coordinator = ApplePlaybackCoordinator(engine: engine, timeout: .seconds(60))
-        coordinator.liveReconnectPolicy = fast
+        let clock = ManualClock()
+        let coordinator = makeCoordinator(engine, clock: clock)
         await coordinator.begin(liveRequest())
         engine.emit(.phase(.ended))
-        #expect(await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing })
+        await clock.waitForSleep(until: .milliseconds(20))
+        clock.advance(to: .milliseconds(20))
+        await waitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing }
         coordinator.stop()
     }
 }

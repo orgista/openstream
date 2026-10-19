@@ -72,25 +72,29 @@ struct AppleTVBillboard<Actions: View>: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: M.copySpacing) {
-                VStack(alignment: .leading, spacing: M.copySpacing) {
-                    titleTreatment
-                    if usesKindMetadata {
-                        AppleTVBillboardKindMetadata(item: item)
-                    } else if let metadataLine {
-                        Text(metadataLine)
-                            .font(.system(size: M.metadataFontSize, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .lineLimit(1)
+                // The copy fades per page; the buttons below stay, so focus
+                // stays on them across the change.
+                AppleHeroPageFade(page: item.id, layer: .copy, alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: M.copySpacing) {
+                        titleTreatment
+                        if usesKindMetadata {
+                            AppleTVBillboardKindMetadata(item: item)
+                        } else if let metadataLine {
+                            Text(metadataLine)
+                                .font(.system(size: M.metadataFontSize, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                        }
+                        if let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+                            Text(summary)
+                                .font(.system(size: M.synopsisFontSize))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .lineLimit(M.synopsisLineLimit)
+                                .truncationMode(.tail)
+                        }
                     }
-                    if let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-                        Text(summary)
-                            .font(.system(size: M.synopsisFontSize))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(M.synopsisLineLimit)
-                            .truncationMode(.tail)
-                    }
+                    .appleHeroCopyShadow(scrim.copyShadow)
                 }
-                .appleHeroCopyShadow(scrim.copyShadow)
                 actions
                     .padding(.top, 8)
                 if let cycle, cycle.count > 1 {

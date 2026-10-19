@@ -152,3 +152,40 @@ private struct AppleHeroPagePreload: View {
         onReady(wordmarkResult == false)
     }
 }
+
+/// One layer of a gated hero page, redrawn per page: when `page` changes the
+/// old layer and the new one cross as `AppleHeroPageSwap.crossfade` says
+/// (the art together, the copy out and then in). Reduce Motion cuts.
+struct AppleHeroPageFade<Content: View>: View {
+    enum Layer { case art, copy }
+
+    let page: String
+    let layer: Layer
+    var alignment: Alignment = .center
+    @ViewBuilder let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let fade = AppleHeroPageSwap.crossfade(reduceMotion: reduceMotion)
+        ZStack(alignment: alignment) {
+            content
+                .id(page)
+                .transition(transition(fade))
+        }
+        .animation(fade.map { .easeInOut(duration: $0.art) }, value: page)
+    }
+
+    private func transition(_ fade: AppleHeroPageSwap.Crossfade?) -> AnyTransition {
+        guard let fade else { return .identity }
+        switch layer {
+        case .art:
+            return .opacity
+        case .copy:
+            return .asymmetric(
+                insertion: .opacity.animation(.easeOut(duration: fade.copyIn).delay(fade.copyInDelay)),
+                removal: .opacity.animation(.easeIn(duration: fade.copyOut))
+            )
+        }
+    }
+}

@@ -1571,6 +1571,77 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         remote.press(.menu)
     }
 
+    /// Spec S3 G2/G3: an idle Home keeps cycling with focus resting on Play
+    /// (at least 4 page changes in 60 s) and focus stays on Play across every
+    /// change. Then 30 s with focus on the trailing round button: a page
+    /// change must leave focus in the hero. Last, three page turns by the
+    /// remote, which every build draws, so the screen recording holds page
+    /// changes from a build without the crossfade too. Read-only: nothing is
+    /// selected. The crossfade is measured from the run's screen recording:
+    /// a 4K screenshot takes most of a second on an Apple TV.
+    func testDiscoverHeroCyclesWhilePlayHasFocus() {
+        launch(screen: "discover")
+        let play = element("home.featured.play")
+        XCTAssertTrue(wait(for: play, 90), "the Discover billboard never appeared")
+        let pages = element("home.featured.pages")
+        XCTAssertTrue(wait(for: pages, 30), "the hero has one page: nothing to cycle")
+        let heroIDs = ["home.featured.play", "home.featured.my-list", "home.featured.details"]
+        if !play.hasFocus {
+            remote.press(.down)
+            Thread.sleep(forTimeInterval: 1.5)
+            if !heroIDs.contains(focusedElement.identifier) {
+                remote.press(.up)
+                Thread.sleep(forTimeInterval: 1.5)
+            }
+        }
+        for _ in 0..<2 where !play.hasFocus {
+            remote.press(.left)
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        XCTAssertTrue(play.hasFocus, "Play never took focus, got '\(focusedElement.identifier)'")
+        attachScreen("g2-hero-play-focused")
+        let onPlay = watchPages(pages, seconds: 60, phase: "PLAY")
+        attachScreen("g2-hero-after-60s")
+
+        remote.press(.right)
+        Thread.sleep(forTimeInterval: 1.0)
+        remote.press(.right)
+        Thread.sleep(forTimeInterval: 1.0)
+        print("G2 HERO trailing focus '\(focusedElement.identifier)'")
+        let onTrailing = watchPages(pages, seconds: 30, phase: "TRAILING")
+
+        for turn in 1...3 {
+            print("G2 HERO TURN \(turn) at \(Date().timeIntervalSince1970) from '\(pages.label)'")
+            remote.press(.right)
+            Thread.sleep(forTimeInterval: 4)
+            print("G2 HERO TURN \(turn) → '\(pages.label)' focus '\(focusedElement.identifier)'")
+        }
+
+        XCTAssertGreaterThanOrEqual(onPlay.changes, 4, "an idle hero with Play focused should keep cycling")
+        XCTAssertTrue(onPlay.focus.allSatisfy { $0 == "home.featured.play" }, "focus left Play across a page change: \(onPlay.focus)")
+        XCTAssertTrue(onTrailing.focus.allSatisfy { heroIDs.contains($0) }, "focus left the hero across a page change: \(onTrailing.focus)")
+    }
+
+    /// Logs each change of the hero's page label for `seconds`, with what has
+    /// focus after it.
+    private func watchPages(_ pages: XCUIElement, seconds: TimeInterval, phase: String) -> (changes: Int, focus: [String]) {
+        var label = pages.label
+        var focus: [String] = []
+        let start = Date()
+        print("G2 HERO \(phase) from \(start.timeIntervalSince1970) on '\(label)' focus '\(focusedElement.identifier)'")
+        while Date().timeIntervalSince(start) < seconds {
+            Thread.sleep(forTimeInterval: 0.5)
+            let current = pages.label
+            guard current != label else { continue }
+            label = current
+            let focused = focusedElement.identifier
+            focus.append(focused)
+            print("G2 HERO \(phase) change \(focus.count) at \(String(format: "%.1f", Date().timeIntervalSince(start))) s → '\(label)' focus '\(focused)'")
+        }
+        print("G2 HERO \(phase) \(focus.count) page changes in \(Int(seconds)) s")
+        return (focus.count, focus)
+    }
+
     /// N12: the Discover hero after the Apple TV app. Read-only: focus moves
     /// over the buttons and pages, nothing is selected. Frames: at rest, after
     /// one cycle, focus on Play/Resume, on My List, and the page `→` turns.
@@ -2176,6 +2247,53 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         shot.lifetime = .keepAlways
         add(shot)
         remote.press(.menu)
+    }
+
+    /// Round 4 G4 + G18 on the stubbed lineup: five quick Up presses tune
+    /// once (the run's trace holds one `live zap` line for them), and going
+    /// back to Live from another tab stays on the guide instead of reopening
+    /// the last channel full screen.
+    func testLiveZapCoalescesAndReturningToLiveStaysOnTheGuide() {
+        func snap(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        launch(screen: "live")
+        XCTAssertTrue(wait(for: element("live.tv.info")), "the guide never appeared")
+        for _ in 0..<6 where !focusedElement.identifier.hasPrefix("guide.play.") { remote.press(.down) }
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."))
+        remote.press(.select)
+        let surface = element("live.player.surface")
+        XCTAssertTrue(surface.waitForExistence(timeout: 20))
+        let firstName = surface.value as? String ?? ""
+        // Past the 5 s that make a watch, so the resume has a channel.
+        Thread.sleep(forTimeInterval: 8)
+        for _ in 0..<5 { remote.press(.up) }
+        expectation(for: NSPredicate(format: "exists == true AND value != %@", firstName), evaluatedWith: surface)
+        waitForExpectations(timeout: 10)
+        Thread.sleep(forTimeInterval: 3)
+        snap("g4-after-five-ups")
+
+        for _ in 0..<3 where surface.exists {
+            remote.press(.menu)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        XCTAssertFalse(surface.exists, "Menu never closed the player")
+        XCTAssertTrue(wait(for: element("live.tv.info")))
+        for _ in 0..<4 where focusedElement.label != "Live" {
+            remote.press(.menu)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        XCTAssertEqual(focusedElement.label, "Live", "Menu never reached the tab bar")
+        remote.press(.left)
+        Thread.sleep(forTimeInterval: 3)
+        remote.press(.right)
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(focusedElement.label, "Live")
+        XCTAssertFalse(surface.waitForExistence(timeout: 8), "returning to Live reopened the last channel")
+        snap("g18-back-on-live")
     }
 
     func testLiveZappingRecallAndMultiviewRemoteMapping() throws {

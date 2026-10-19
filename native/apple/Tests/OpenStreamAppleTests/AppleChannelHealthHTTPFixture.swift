@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import OpenStreamApple
+import Testing
 
 actor HealthProgressRecorder {
     var completed: [Int] = []
@@ -17,15 +18,16 @@ actor HealthHTTPFixture {
         let bodyDelay: Duration
     }
     private var listener: NWListener?
-    private var readyPort: UInt16?
     private var routes: [String: Route] = [:]
     private var counts: [String: Int] = [:]
     private var captured: [String: [String: String]] = [:]
     private var connections: [UUID: NWConnection] = [:]
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    /// Requests received and not yet answered.
     private var active = 0
     private(set) var maximumActive = 0
-    private(set) var arrivals: [ContinuousClock.Instant] = []
+    private var holdsResponses = false
+    private var heldResponses: [CheckedContinuation<Void, Never>] = []
 
     func start() async throws -> URL {
         let parameters = NWParameters.tcp
@@ -36,26 +38,43 @@ actor HealthHTTPFixture {
         listener.newConnectionHandler = { [weak self] connection in
             Task { await self?.accept(connection) }
         }
-        listener.stateUpdateHandler = { [weak self] state in
-            if case .ready = state { Task { await self?.ready() } }
+        do {
+            let port = try await listener.startedPort(queue: DispatchQueue(label: "health-fixture.listener"))
+            return URL(string: "http://127.0.0.1:\(port)")!
+        } catch {
+            await stop()
+            throw error
         }
-        listener.start(queue: DispatchQueue(label: "health-fixture.listener"))
-        for _ in 0..<200 {
-            if let port = readyPort { return URL(string: "http://127.0.0.1:\(port)")! }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        await stop()
-        throw URLError(.cannotConnectToHost)
     }
-    private func ready() { readyPort = listener?.port?.rawValue }
     func route(_ path: String, status: Int = 200, headers: [String: String] = [:], body: Data = Data(), delay: Duration = .zero, bodyDelay: Duration = .zero) {
         routes[path] = Route(status: status, headers: headers, body: body, delay: delay, bodyDelay: bodyDelay)
     }
     func hits(_ path: String) -> Int { counts[path, default: 0] }
+
+    /// Received requests wait, unanswered, until `releaseResponses()`.
+    func holdResponses() { holdsResponses = true }
+
+    func releaseResponses() {
+        holdsResponses = false
+        heldResponses.forEach { $0.resume() }
+        heldResponses = []
+    }
+
+    /// Returns once `count` requests are waiting for an answer.
+    func waitForActive(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await waitFor("\(count) requests in flight", sourceLocation: sourceLocation) { active >= count }
+    }
+
+    /// Returns once `path` has been requested.
+    func waitForHit(_ path: String, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await waitFor("a request for \(path)", sourceLocation: sourceLocation) { counts[path, default: 0] > 0 }
+    }
+
     func header(_ path: String, _ name: String) -> String? { captured[path]?[name] }
     func stop() async {
         listener?.cancel()
         listener = nil
+        releaseResponses()
         for task in tasks.values { task.cancel() }
         for connection in connections.values { connection.cancel() }
         let pending = Array(tasks.values)
@@ -92,12 +111,14 @@ actor HealthHTTPFixture {
             }
             captured[path] = headers
             counts[path, default: 0] += 1
-            arrivals.append(.now)
             active += 1
             maximumActive = max(active, maximumActive)
-            defer { active -= 1 }
             let route = routes[path] ?? Route(status: 404, headers: [:], body: Data(), delay: .zero, bodyDelay: .zero)
-            try await Task.sleep(for: route.delay)
+            if holdsResponses { await withCheckedContinuation { heldResponses.append($0) } }
+            do { try await Task.sleep(for: route.delay) } catch { active -= 1; throw error }
+            // Answered from here on: a client that hears back can start its
+            // next request before this connection's send completes.
+            active -= 1
             var head = "HTTP/1.1 \(route.status) Fixture\r\nContent-Type: application/octet-stream\r\nContent-Length: \(route.body.count)\r\nConnection: close\r\n"
             for (key, value) in route.headers { head += "\(key): \(value)\r\n" }
             // Deliver a first body byte, then stall the remainder. Foundation does not
@@ -115,5 +136,31 @@ actor HealthHTTPFixture {
                     else { continuation.resume() }
                 })
             }
+    }
+}
+
+extension NWListener {
+    /// Starts the listener and returns its port once it is ready.
+    func startedPort(queue: DispatchQueue) async throws -> UInt16 {
+        try await withCheckedThrowingContinuation { continuation in
+            // Cleared on the first ready, failed or cancelled state, so it resumes once.
+            stateUpdateHandler = { [unowned self] state in
+                switch state {
+                case .ready:
+                    stateUpdateHandler = nil
+                    if let port = port?.rawValue { continuation.resume(returning: port) }
+                    else { continuation.resume(throwing: URLError(.cannotConnectToHost)) }
+                case .failed(let error):
+                    stateUpdateHandler = nil
+                    continuation.resume(throwing: error)
+                case .cancelled:
+                    stateUpdateHandler = nil
+                    continuation.resume(throwing: CancellationError())
+                default:
+                    break
+                }
+            }
+            start(queue: queue)
+        }
     }
 }

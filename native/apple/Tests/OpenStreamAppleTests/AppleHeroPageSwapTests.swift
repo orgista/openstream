@@ -34,4 +34,14 @@ struct AppleHeroPageSwapTests {
         #expect(AppleHeroPageSwap.pagesToWarm(requested: 0, count: 0).isEmpty)
         #expect(AppleHeroPageSwap.pagesToWarm(requested: 5, count: 5).isEmpty)
     }
+
+    /// Spec S3 G3: art 1.0 s, copy out then in within it, Reduce Motion cuts.
+    @Test func pagesCrossfadeOverOneSecondAndReduceMotionCuts() throws {
+        let fade = try #require(AppleHeroPageSwap.crossfade(reduceMotion: false))
+        #expect(abs(fade.art - 1.0) <= 0.1)
+        #expect(fade.copyOut > 0 && fade.copyIn > 0)
+        #expect(fade.copyInDelay >= fade.copyOut)
+        #expect(fade.copyInDelay + fade.copyIn <= fade.art)
+        #expect(AppleHeroPageSwap.crossfade(reduceMotion: true) == nil)
+    }
 }

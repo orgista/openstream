@@ -82,7 +82,7 @@ import Testing
 /// Library shelves read nothing but `sorted(...)` in their body. Once the
 /// sort is memoised, the cached answer must still register `groups` and
 /// `metadata`, or a title's metadata landing never redraws the shelf.
-@MainActor @Test func memoisedLibrarySortStillObservesTheLibrary() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func memoisedLibrarySortStillObservesTheLibrary() async throws {
     let file = AppleLibraryItem(sourceID: UUID(), name: "Example.Film.2020.mkv",
         url: URL(fileURLWithPath: "/Example.Film.2020.mkv"), relativePath: "Example.Film.2020.mkv", sizeBytes: 1)
     let group = AppleLibrarySeries.groups([file])[0]
@@ -112,7 +112,7 @@ import Testing
     }
     await store.resolve(group, sourceStore: sourceStore, settings: settings)
     #expect(store.metadata[group.id] == item)
-    for _ in 0..<50 where !flag.changed { try await Task.sleep(for: .milliseconds(20)) }
+    while !flag.changed { try await Task.sleep(for: .milliseconds(10)) }
     #expect(flag.changed)
 }
 

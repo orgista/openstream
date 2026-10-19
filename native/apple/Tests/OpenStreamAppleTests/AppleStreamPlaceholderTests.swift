@@ -6,7 +6,7 @@ import Testing
 /// were counted as watched and auto-advanced through the season. They are
 /// demoted by their words and, at playback, failed over by their length.
 @MainActor
-@Suite(.serialized) struct AppleStreamPlaceholderTests {
+@Suite(.serialized, .timeLimit(.minutes(1))) struct AppleStreamPlaceholderTests {
     private static let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: false)
 
     private func candidate(_ title: String, file: String, description: String? = nil) -> AppleStremioHTTPPlaybackCandidate {
@@ -73,8 +73,7 @@ import Testing
         let coordinator = ApplePlaybackCoordinator(engine: engine)
         coordinator.serviceHealth = AppleStreamServiceHealth()
         await coordinator.begin(request("clip", runtime: 45 * 60), fallbackCandidates: [request("real", runtime: 45 * 60)])
-        let played = await placeholderWaitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing }
-        #expect(played)
+        await placeholderWaitUntil { engine.loadedRequests.count == 2 && coordinator.phase == .playing }
         #expect(engine.loadedRequests.map(\.mediaID) == ["clip", "real"])
         #expect(coordinator.isPlaceholderPlayback == false)
         coordinator.stop()
@@ -89,21 +88,20 @@ import Testing
         let coordinator = ApplePlaybackCoordinator(engine: engine)
         coordinator.serviceHealth = AppleStreamServiceHealth()
         await coordinator.begin(request("clip", runtime: 45 * 60))
-        let failed = await placeholderWaitUntil {
+        await placeholderWaitUntil {
             if case .failed = coordinator.phase { return true }
             return false
         }
-        #expect(failed)
         #expect(coordinator.phase != .ended)
         coordinator.stop()
     }
 }
 
-private func placeholderWaitUntil(timeout: Duration = .seconds(8), _ condition: @MainActor () -> Bool) async -> Bool {
-    let deadline = ContinuousClock().now + timeout
-    while ContinuousClock().now < deadline {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
+/// No wall-clock deadline: the parallel gate can hold the coordinator's tasks
+/// up for seconds; the suite's time limit fails an outcome that never comes.
+@MainActor
+private func placeholderWaitUntil(_ condition: @MainActor () -> Bool) async {
+    while !condition(), !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(10))
     }
-    return false
 }

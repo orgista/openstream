@@ -669,29 +669,6 @@ struct AppleTitlePageFactList: View {
     }
 }
 
-/// Each accessibility chip from the hero, spelled out in plain words (A13).
-struct AppleTitlePageAccessibilityGlossary: View {
-    let entries: [(badge: String, meaning: String)]
-    @Environment(\.appleDiscoverRows) private var rowStyle
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(entries, id: \.badge) { entry in
-                VStack(alignment: .leading, spacing: 6) {
-                    AppleFormatBadge(entry.badge)
-                        .accessibilityHidden(true)
-                    Text(entry.meaning)
-                        .font(rowStyle?.platform == .mac ? .body : .subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 /// The capability chips under the hero ("4K  HDR  CC  SDH  AD"): outlined
 /// badges that wrap onto a second line rather than shrink.
 struct AppleTitlePageChipRow: View {

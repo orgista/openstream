@@ -5,10 +5,12 @@ import Foundation
 /// Vision Pro and Mac pages; the host's own art-first gate (picture band,
 /// geometry settle) still runs after it.
 ///
-/// Nothing of YouTube's player is hidden or cropped (its terms; owner round 3, 2026-10-10). Where the
-/// mobile embed draws its start-up title strip, link and "More videos" (iPhone, iPad, Vision Pro), the
-/// art stays up until that chrome has faded on its own — 3.9–4.2 s of media time when filmed (N75) — and
-/// the trailer is shown from then on, attribution and all, whenever YouTube draws it again.
+/// None of YouTube's chrome is hidden (its terms; owner round 3, 2026-10-10). Where the mobile embed
+/// draws its start-up title strip, link and "More videos" (iPhone, iPad, Vision Pro), the art stays up
+/// until that chrome has faded on its own — 3.9–4.2 s of media time when filmed (N75) — and the trailer
+/// is shown from then on, attribution and all, whenever YouTube draws it again. The picture fills its
+/// frame on the home heroes and the upright iPhone title page; the iPad and landscape title pages fit it,
+/// unzoomed (`AppleTrailerPreviewLayout.fitsHeader`).
 struct AppleTrailerRevealRule: Equatable, Sendable {
     /// Never earlier than this after PLAYING.
     var minimumWait: TimeInterval

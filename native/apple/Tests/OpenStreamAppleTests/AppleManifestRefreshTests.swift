@@ -96,18 +96,10 @@ struct AppleManifestRefreshTests {
         #expect(store.sources.first { $0.id == saved.id }?.catalogs.first?.supportsSkip == false)
 
         store.scheduleDailyManifestRefresh()
-        let deadline = ContinuousClock.now + .seconds(5)
-        while store.sources.first(where: { $0.id == saved.id })?.catalogs.first?.supportsSkip != true,
-              ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await store.dailyManifestRefresh?.value
         let refreshed = try #require(store.sources.first { $0.id == saved.id })
         #expect(refreshed.catalogs.map(\.id) == ["top"])
         #expect(refreshed.catalogs.first?.supportsSkip == true)
-        while (defaults.dictionary(forKey: "openstream.sources.v1.manifest-refresh.v1") as? [String: Double])?[saved.id.uuidString] == nil,
-              ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
         let attempts = defaults.dictionary(forKey: "openstream.sources.v1.manifest-refresh.v1") as? [String: Double]
         #expect(attempts?[saved.id.uuidString] != nil)
         // The persisted copy carries the flag too.

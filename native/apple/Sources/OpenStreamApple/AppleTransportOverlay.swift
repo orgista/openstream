@@ -316,7 +316,13 @@ struct AppleTransportOverlay: View {
             // when the controls fade to avoid moving the button mid-tap.
             .padding(.bottom, bottomBarHeight + AppleDesignTokens.spacingMedium)
 
-            if model.showsWaitingIndicator { waitingIndicator }
+            if model.showsWaitingIndicator {
+                if request.isLive {
+                    AppleLiveTuningDelay(id: request.mediaID) { waitingIndicator }
+                } else {
+                    waitingIndicator
+                }
+            }
             // Cues sit against the **picture**, not the screen; the same
             // layer is mounted over the stock player on `.avPlayer`.
             // With the bar measured on screen, the cue clears its real top

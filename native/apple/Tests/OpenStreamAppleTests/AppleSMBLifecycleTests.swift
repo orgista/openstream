@@ -12,7 +12,8 @@ private actor BlockingSMBClient: AppleNetworkShareClient {
     func read(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws -> Data {
         activeReads += 1
         defer { activeReads -= 1 }
-        if blocksReads { try await Task.sleep(for: .seconds(10)) }
+        // Stalls until `allowReads()`; only cancellation ends it sooner.
+        while blocksReads { try await Task.sleep(for: .milliseconds(10)) }
         return Data(repeating: 1, count: Int(range.count))
     }
     func closeAll() async { closeCount += 1 }
@@ -65,7 +66,11 @@ func smbPlayerBridgeReachesPlaybackSeeksAndReleasesItsListener() async throws {
     #expect(!(await server.diagnostics().listenerActive))
 }
 
-@Test func revokingOneSMBPlaybackCancelsItsReadWithoutClosingOtherSessions() async throws {
+/// The waits have no wall-clock deadline: the server's tasks can be held up
+/// for seconds by the parallel gate. The time limit fails a read that never
+/// starts or is never cancelled.
+@Test(.timeLimit(.minutes(1)))
+func revokingOneSMBPlaybackCancelsItsReadWithoutClosingOtherSessions() async throws {
     let client = BlockingSMBClient()
     let server = AppleSMBRangeServer(client: client)
     let credentials = AppleSMBCredentials(username: "fixture", password: "fixture")
@@ -74,17 +79,10 @@ func smbPlayerBridgeReachesPlaybackSeeksAndReleasesItsListener() async throws {
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
     let request = Task { try await session.data(from: first) }
-    let startDeadline = ContinuousClock.now.advanced(by: .seconds(2))
-    while await client.activeReads == 0, ContinuousClock.now < startDeadline {
-        try await Task.sleep(for: .milliseconds(10))
-    }
+    while await client.activeReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
     #expect(await client.activeReads == 1)
     await server.revoke(playbackURL: first)
-    let cancelDeadline = ContinuousClock.now.advanced(by: .seconds(1))
-    while await client.activeReads != 0, ContinuousClock.now < cancelDeadline {
-        try await Task.sleep(for: .milliseconds(10))
-    }
-    #expect(await client.activeReads == 0)
+    while await client.activeReads != 0 { try await Task.sleep(for: .milliseconds(10)) }
     #expect(await client.closeCount == 0)
     #expect(await server.diagnostics().sessionCount == 1)
     #expect(await server.diagnostics().connectionCount == 0)
@@ -94,7 +92,11 @@ func smbPlayerBridgeReachesPlaybackSeeksAndReleasesItsListener() async throws {
     #expect(await client.closeCount == 1)
 }
 
-@Test func stalledSMBReadTimesOutReleasesConnectionAndAllowsRetry() async throws {
+/// The read stalls until allowed and the client's own timeout is far off, so
+/// only the server's 100 ms read timeout can end the first response. The
+/// time limit fails a server that never gives up.
+@Test(.timeLimit(.minutes(1)))
+func stalledSMBReadTimesOutReleasesConnectionAndAllowsRetry() async throws {
     let client = BlockingSMBClient()
     let server = AppleSMBRangeServer(client: client, readTimeout: .milliseconds(100))
     let playback = try await server.playbackURL(sourceURL: URL(string: "smb://fixture.invalid/Media/stall.mp4")!,
@@ -102,15 +104,14 @@ func smbPlayerBridgeReachesPlaybackSeeksAndReleasesItsListener() async throws {
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: playback)
-    request.timeoutInterval = 2
-    let start = ContinuousClock.now
+    request.timeoutInterval = 3_600
     do {
         _ = try await session.data(for: request)
         Issue.record("Expected incomplete stalled response to fail")
     } catch {}
-    #expect(start.duration(to: .now) < .seconds(2))
-    #expect(await client.activeReads == 0)
-    #expect(await server.diagnostics().connectionCount == 0)
+    // The client can see the dropped response before the server's cleanup lands.
+    while await client.activeReads != 0 { try await Task.sleep(for: .milliseconds(10)) }
+    while await server.diagnostics().connectionCount != 0 { try await Task.sleep(for: .milliseconds(10)) }
     await client.allowReads()
     let (data, response) = try await session.data(for: request)
     #expect(data == Data(repeating: 1, count: 1_024))

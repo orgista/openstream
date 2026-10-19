@@ -27,6 +27,10 @@ final class AppleLiveSession {
     var failedProbe: ProbeRequest?
     var probeFailureMessage: String?
     @ObservationIgnored private let streamProbe: AppleIPTVStreamProbe
+    /// The channel being tuned and when, until its first picture.
+    @ObservationIgnored private var tune: (id: String, startedAt: ContinuousClock.Instant)?
+    /// Live resumes the last channel on its first entry per launch only.
+    private static var launchEntryUsed = false
 
     init(coordinator: ApplePlaybackCoordinator = ApplePlaybackCoordinator(),
          streamProbe: AppleIPTVStreamProbe = AppleIPTVStreamProbe()) {
@@ -48,6 +52,45 @@ final class AppleLiveSession {
         failedProbe = nil
         probeFailureMessage = nil
         self.programme = programme
+    }
+
+    /// F12: zap → first picture, one `live first picture` trace line per tune.
+    /// The guide marks a tune before its preflight and the player again when
+    /// it opens the stream; a recent earlier mark for the same channel stands.
+    /// A tune left for another channel before its picture is logged as abandoned.
+    func markTuneStarted(_ channel: AppleIPTVChannel) {
+        let now = ContinuousClock.now
+        if let tune {
+            if tune.id == channel.id, now - tune.startedAt < .seconds(30) { return }
+            if tune.id != channel.id {
+                appleTrace("live first picture \(tune.id) abandoned \(Self.milliseconds(now - tune.startedAt)) ms")
+            }
+        }
+        tune = (channel.id, now)
+    }
+
+    func notePlaybackPhase(_ phase: ApplePlaybackPhase) {
+        guard let tune else { return }
+        switch phase {
+        case .playing:
+            appleTrace("live first picture \(tune.id) \(Self.milliseconds(ContinuousClock.now - tune.startedAt)) ms")
+            self.tune = nil
+        case .failed:
+            appleTrace("live first picture \(tune.id) failed")
+            self.tune = nil
+        default:
+            break
+        }
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int { Int(duration / .milliseconds(1)) }
+
+    /// Arms the resume on the first Live entry of this launch only; later
+    /// visits to the tab open on the guide (Paramount+).
+    func enterLive() {
+        guard !Self.launchEntryUsed else { return }
+        Self.launchEntryUsed = true
+        resumePending = true
     }
 
     func resolvePendingProbe() async -> ProbeOutcome {
@@ -72,11 +115,16 @@ final class AppleLiveSession {
         }
     }
 
-    func resumeTarget(enabled: Bool, active: Bool, watchedIDs: [String], availableIDs: Set<String>) -> String? {
+    func resumeTarget(enabled: Bool, active: Bool, watchedIDs: [String], availableIDs: Set<String>,
+                      lastWatchedAt: Date?, now: Date = Date()) -> String? {
         guard resumePending else { return nil }
-        guard enabled, !watchedIDs.isEmpty else { resumePending = false; return nil }
+        guard enabled, !watchedIDs.isEmpty,
+              AppleLiveZappingPolicy.isWithinResumeWindow(lastWatchedAt, now: now) else {
+            resumePending = false
+            return nil
+        }
         guard let id = AppleLiveZappingPolicy.resumeTarget(enabled: enabled, liveTabActive: active,
-            watchedIDs: watchedIDs, availableIDs: availableIDs) else { return nil }
+            watchedIDs: watchedIDs, availableIDs: availableIDs, lastWatchedAt: lastWatchedAt, now: now) else { return nil }
         resumePending = false
         return id
     }
@@ -85,11 +133,5 @@ final class AppleLiveSession {
                     availableIDs: Set<String>) -> String? {
         guard programme == nil else { return nil }
         return history.previous(currentID: currentID, availableIDs: availableIDs)
-    }
-
-    func zapTarget(currentID: String, programme: AppleIPTVProgramme?, orderedIDs: [String],
-                   direction: AppleLiveZappingPolicy.Direction) -> String? {
-        guard programme == nil else { return nil }
-        return AppleLiveZappingPolicy.target(currentID: currentID, orderedIDs: orderedIDs, direction: direction)
     }
 }
