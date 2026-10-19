@@ -2,11 +2,7 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-/// N70/N75: the shared trailer page reveals as soon as the video is really
-/// advancing where YouTube's start-up chrome cannot reach the screen (the
-/// Mac's desktop embed draws none), and after that chrome has faded where the
-/// mobile embed draws it (iPhone, iPad, Vision Pro).
-@Suite("Trailer page: reveal once the video advances and YouTube's start-up chrome is gone")
+@Suite("Trailer page: reveal once the video advances, preserving attribution")
 struct AppleTrailerRevealPolicyTests {
     private let fast = AppleTrailerRevealPolicy.rule(isLandscape: true, startupChromeCanShow: false)
 
@@ -32,8 +28,8 @@ struct AppleTrailerRevealPolicyTests {
         #expect(fast.allowsReveal(sincePlaying: 3.2, mediaAdvance: -40))
     }
 
-    @Test("The mobile embed waits for its start-up chrome to fade", arguments: [true, false])
-    func mobileEmbedWaitsForItsChrome(isLandscape: Bool) {
+    @Test("Platforms retaining the chrome wait keep their existing rule", arguments: [true, false])
+    func startupChromeWaitIsUnchanged(isLandscape: Bool) {
         let rule = AppleTrailerRevealPolicy.rule(isLandscape: isLandscape, startupChromeCanShow: true)
         // N75: the title strip, link and "More videos" are up until 3.9–4.2 s of media time.
         #expect(!rule.allowsReveal(sincePlaying: 4.3, mediaAdvance: 4.2))
@@ -50,23 +46,35 @@ struct AppleTrailerRevealPolicyTests {
         #expect(rule.allowsReveal(sincePlaying: 0.9, mediaAdvance: 0))
     }
 
-    @Test("Only the Mac's desktop embed has no start-up chrome")
+    @Test("iOS and Mac reveal without waiting for start-up chrome")
     func platformDefault() {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         #expect(AppleTrailerRevealPolicy.startupChromeCanShow == false)
         #else
         #expect(AppleTrailerRevealPolicy.startupChromeCanShow == true)
         #endif
     }
 
-    @Test("Trailer scripts preserve YouTube attribution")
+    @Test("Owner: \"only the centre play glyph is hidden\"; YouTube attribution stays")
     func frameScriptsPreserveAttribution() {
         for script in [AppleYouTubePreviewHTML.playerChromeScript, AppleYouTubePreviewHTML.macPlayerFrameScript] {
             #expect(script.contains(#"[class^="player-controls"]"#) == false)
             #expect(script.contains("player-controls-top") == false)
             #expect(script.contains(".ytp-chrome-top") == false)
+            #expect(script.contains(".player-controls-middle,"))
             #expect(script.contains(".ytp-bezel"))
         }
+    }
+
+    @Test("The iOS and Mac page defaults reveal at 0.5 s with 0.3 s of media")
+    func pageDefaultsToFastReveal() throws {
+        let embed = try #require(AppleTrailerPreviewPolicy.embedURL(for: "trailer_456"))
+        let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true)
+        #if os(macOS) || os(iOS)
+        #expect(html.contains("var revealRules = {landscape: [500, 0.3, 3200], portrait: [500, 0.3, 900]};"))
+        #else
+        #expect(html.contains("var revealRules = {landscape: [500, 4.5, 12000], portrait: [500, 4.5, 12000]};"))
+        #endif
     }
 
     @Test("The page carries the same numbers as the Swift rule")
