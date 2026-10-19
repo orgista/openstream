@@ -568,10 +568,15 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// horizontal row, or laid out at zero size. Asking only about elements
     /// whose centre is on the screen is what keeps a sweep running to the end.
     private func isSafelyHittable(_ element: XCUIElement) -> Bool {
-        guard element.exists else { return false }
-        let frame = element.frame
+        guard let snapshot = try? element.snapshot() else { return false }
+        let frame = snapshot.frame
         guard frame.width >= 1, frame.height >= 1 else { return false }
         guard crawlScreenRect.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+        // The Discover hero's buttons sit on top of everything and the hero
+        // advances about once a second on iOS 27; asking XCTest for their
+        // hittability mid-transition raises "activation point invalid". Their
+        // on-screen frame is the answer.
+        if snapshot.identifier.hasPrefix("home.featured.") { return true }
         return element.isHittable
     }
 
@@ -4905,8 +4910,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         let query = app.descendants(matching: target.type)
         let matches: XCUIElementQuery
         // Play/Pause and Mute/Unmute can change labels between the scene
-        // snapshot and the touch. The identifier is their stable identity.
-        if target.identifier.hasPrefix("player.") || target.identifier.hasPrefix("live.player.") {
+        // snapshot and the touch, and so do the Discover hero's buttons when
+        // the hero advances. The identifier is their stable identity.
+        if target.identifier.hasPrefix("player.") || target.identifier.hasPrefix("live.player.")
+            || target.identifier.hasPrefix("home.featured.") {
             matches = query.matching(identifier: target.identifier)
         } else if !target.identifier.isEmpty && !target.label.isEmpty {
             matches = query.matching(NSPredicate(format: "identifier == %@ AND label == %@",
