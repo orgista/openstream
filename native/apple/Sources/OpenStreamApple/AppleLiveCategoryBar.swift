@@ -11,14 +11,16 @@ struct AppleLiveCategoryBar: View {
     @Binding var selection: String
     let onSearch: () -> Void
     let onGuide: (() -> Void)?
+    let usesPhoneLayout: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(tabs: [String], selection: Binding<String>, onSearch: @escaping () -> Void,
-         onGuide: (() -> Void)? = nil) {
+         onGuide: (() -> Void)? = nil, usesPhoneLayout: Bool = false) {
         self.tabs = tabs
         _selection = selection
         self.onSearch = onSearch
         self.onGuide = onGuide
+        self.usesPhoneLayout = usesPhoneLayout
     }
 
     var body: some View {
@@ -66,10 +68,14 @@ struct AppleLiveCategoryBar: View {
             .accessibilityLabel("Search Channels")
             .accessibilityIdentifier("live.search")
         }
-        .frame(height: AppleDesignTokens.minimumActionSize)
+        .frame(height: categoryHeight)
         .background(Color.black)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("live.categories")
+    }
+
+    private var categoryHeight: CGFloat {
+        usesPhoneLayout ? AppleLiveStagePolicy.phoneCategoryHeight : AppleDesignTokens.minimumActionSize
     }
 
     private func tabButton(_ tab: String) -> some View {
@@ -82,7 +88,7 @@ struct AppleLiveCategoryBar: View {
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .fixedSize()
-                .frame(minHeight: AppleDesignTokens.minimumActionSize)
+                .frame(minHeight: categoryHeight)
                 .overlay(alignment: .bottom) {
                     Rectangle()
                         .fill(.white)

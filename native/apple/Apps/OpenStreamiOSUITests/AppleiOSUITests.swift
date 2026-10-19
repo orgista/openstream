@@ -629,6 +629,54 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                       "Dismissal must restore the presenting page's accessibility elements")
     }
 
+    func testLiveParamountRowsPlayInlineThenFullScreen() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Phone Live layout")
+        }
+        continueAfterFailure = true
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamHoldPlayerChrome", "YES"]
+        launch(screen: "live")
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 60))
+        let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        XCTAssertTrue(channels.firstMatch.waitForExistence(timeout: 30))
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Playing"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 60), .completed)
+        attach("pplus-live-rest")
+        let stageFrame = player.frame
+        XCTAssertEqual(stageFrame.width / max(1, stageFrame.height), 16.0 / 9.0, accuracy: 0.02)
+        let row = try XCTUnwrap(channels.allElementsBoundByIndex.first {
+            !$0.isSelected && isSafelyHittable($0)
+        }, "The fixture must include a visible channel to switch to")
+        row.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Playing"), object: player)], timeout: 60), .completed)
+        XCTAssertTrue(row.isSelected)
+        XCTAssertTrue(revealInlineLiveControls(timeout: 60))
+        attach("pplus-live-after-tap")
+        XCTAssertEqual(player.frame.width / max(1, player.frame.height), 16.0 / 9.0, accuracy: 0.02,
+                       "A new row plays inline on the stage")
+        row.tap()
+        let close = app.buttons["player.close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 10),
+                      "A second tap on the playing row opens full screen")
+        close.tap()
+        let guide = app.buttons["live.guide"].firstMatch
+        guide.tap()
+        let done = app.buttons["live.guide.done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        attach("pplus-live-guide")
+        done.tap()
+        XCTAssertTrue(guide.waitForExistence(timeout: 10))
+        XCTAssertTrue(revealInlineLiveControls(timeout: 30))
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(isSafelyHittable(fullScreen))
+        fullScreen.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen must still open the player")
+        close.tap()
+        XCTAssertTrue(guide.waitForExistence(timeout: 10))
+    }
+
     func testLiveGuideSheetOpensAndDismisses() {
         app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
         launch(screen: "live")

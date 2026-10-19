@@ -30,6 +30,7 @@ public struct AppleIPTVGuideGridView: View {
     /// lineup or history change. Rows only look their own id up.
     let health: [String: AppleChannelHealthResult]
     let onShowHealth: ((AppleIPTVChannel) -> Void)?
+    let compactPhoneLayout: Bool
     
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     
@@ -45,7 +46,10 @@ public struct AppleIPTVGuideGridView: View {
     /// same clock time when the window's past edge moves.
     @State private var placedWindowStart: Date?
     
-    @ScaledMetric(relativeTo: .body) private var rowHeight = 76.0
+    @ScaledMetric(relativeTo: .body) private var standardRowHeight: CGFloat = 76
+    @ScaledMetric(relativeTo: .body) private var phoneRowHeight = AppleLiveStagePolicy.phoneGuideRowHeight
+
+    private var rowHeight: CGFloat { compactPhoneLayout ? phoneRowHeight : standardRowHeight }
 
     public init(channels: [AppleIPTVChannel], guide: AppleIPTVGuide, guideRevision: Int = 0,
                 entries: [AppleChannelLineupEntry],
@@ -54,7 +58,8 @@ public struct AppleIPTVGuideGridView: View {
                 onVisibleChannels: @escaping (Set<String>) async -> Void,
                 health: [String: AppleChannelHealthResult] = [:],
                 onShowHealth: ((AppleIPTVChannel) -> Void)? = nil,
-                onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in }) {
+                onSelectProgramme: @escaping (AppleIPTVChannel, AppleIPTVProgramme) -> Void = { _, _ in },
+                compactPhoneLayout: Bool = false) {
         self.onSelectProgramme = onSelectProgramme
         self.channels = channels
         self.guide = guide
@@ -67,6 +72,7 @@ public struct AppleIPTVGuideGridView: View {
         self.onVisibleChannels = onVisibleChannels
         self.health = health
         self.onShowHealth = onShowHealth
+        self.compactPhoneLayout = compactPhoneLayout
     }
 
     private let railWidth: CGFloat = 144

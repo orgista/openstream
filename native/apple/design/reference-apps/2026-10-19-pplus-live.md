@@ -1,0 +1,25 @@
+# Paramount+ Live — 2026-10-19
+- Static REA first; APK never installed/executed. Target: `/Volumes/DevExt/dev/rea/targets/apk/paramount/com.cbs.ott.apk`.
+- Version 17.1.1 (520000950), SHA-256 `838282ec27b36fc941e917330adafbc8536b386f105629b8a8695412a3607aa5`.
+- The adjacent `com.cbs.ott.xapk` contains this same TV base plus ABI/density splits; no separate mobile Paramount package was present.
+- Inventory: `ev_c3aa72bb7f9e7136f74b60c352a7498f9ae6a5377528a4e3b328d9795822e258` (1,207 ZIP occurrences).
+- Resource decode: `ev_d2bc0114fbcb97400fbce893266a506ca9e79ee7765762588e498660f09284d0`; two nested-markup strings omitted; identity anchored by the APK digest above.
+- XML `res/layout/fragment_livetv_video.xml`: independent video, selector, details and loading layers; video match_parent, startup spinners centered. This is a TV host, not proof of a phone layout.
+- `res/navigation/livetv_nav_graph.xml` and `livetv_fullscreen_nav_graph.xml`: separate Live and fullscreen destinations; touch/repeated-tap semantics remain unknown from resources.
+- `res/values/dimens.xml`: normal logo 40×40 dp, compact logo 72×36 dp, logo plate 92 dp, listing start 98 dp, row gap 6 dp.
+- REA `defpackage.c05.q`, `ev_4da941ff25d036e141cf7ca49ed65316aa3916f0adc04e94f775f279bdc07bdb`: normal guide row 48 dp; compact is a separate variant.
+- REA `defpackage.ga5.invoke` overload 0, `ev_6ba82b74df6dffd5099305f50338e25f629f1c82a454b59dc5ef97ccc86242e7`: programme cards 313×48 dp, current thumbnail 85 dp, on-now progress 3 dp, focused border 2 dp.
+- Categories have distinct selected accessibility strings. Prior bounded findings (`2026-10-17-gui-rea-round4.md` §3): P+ uses horizontal categories and fixed programme cards, not a time ruler.
+- Actual phone guide density, phone category dp metrics, mobile connecting-frame policy and repeated-tap behavior are unverified; no current mobile frames were supplied.
+- Historical phone reference `design/live-tab-reference-cbs.png`: full-width 16:9 stage, underlined text categories, channel-logo list and selected-row background. It is not a current P+ runtime capture.
+- OpenStream keeps its approved secondary time-grid guide, source failure handling and separate Full Screen control; no TV overlay, gradient, new category or setting is imported.
+- Phone adaptations to verify visually: channel/programme below the 16:9 stage; 72×36 logo slots, 80 pt minimum channel rows and 3 pt now-progress; 52 pt category bar; 64 pt guide rows with the existing 36 pt time header.
+- These phone sizes are OpenStream choices informed by the resources, not measurements of a missing Paramount+ phone build. iPad, tvOS, macOS and visionOS keep their prior layout inputs.
+- Phone row taps stay inline, including the playing row; Full Screen remains the explicit player control. Failed selected channels can still retry inline.
+- iOS 18.6 before: `/tmp/live-pplus-before-k90wv1h1` (2/2 UI tests); after: `/tmp/live-pplus-review-4fqnu92_` (inline/fullscreen regression 1/1); screenshots in `design/2026-10-19-live-pplus/`.
+- Measured from the guide frames: 9 complete rows before, 11 after; measured separators 228→192 px at 3× (76→64 pt); 16:9 stage retained. Temporary 15-channel fixture, no provider credentials; protected app/data/host/Keychain restoration hashes passed.
+- Compile proof: all eight changed Swift files appear in `SwiftCompile normal arm64 Compiling` in the review build log. Serial package gates before/after: 3,596 tests / 446 suites passed; parallel runs failed with 12 / 7 issues respectively.
+- Quiet rest proof: `/tmp/live-pplus-quiet-uxzul_x3` (1/1); iOS 27 after `/tmp/live-pplus-after-glass-bhnjx6k0` (2/2). System glass preserved; app/data/host/Keychain restoration hashes passed on both simulators.
+- Boards: `design/2026-10-19-live-pplus/comparison-{rest,tap,guide,glass}.png`; APK panel is explicitly a static TV resource diagram, not a mobile runtime screenshot. Raw before/after frames are beside the boards.
+- `testCrawlLive` ran once: 21 controls pressed, 2 findings (Full Screen/no response; Play/Pause/unhittable) after a fixture feed ended and the inline failure card covered player controls. Exit 65; restoration hashes passed. See `crawl-failure-covered-controls.png`; failure handling was preserved.
+- Strengthened channel-switch + repeated-tap + explicit Full Screen test: iOS 18.6 `/tmp/live-pplus-switch-wyjyblri` and iOS 27 `/tmp/live-pplus-switch-glass-ras4w7k9`, both 1/1 passed; UI test recompiled, protected restoration verified. Follow-up gate: parallel failed with 3 issues; serial 3,596/446 passed; full crawl was not repeated.

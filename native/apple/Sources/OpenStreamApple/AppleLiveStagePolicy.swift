@@ -5,6 +5,11 @@ import SwiftUI
 enum AppleLiveStagePolicy {
     /// The guide column never gets narrower than this beside the player.
     static let minimumGuideWidth: CGFloat = 340
+    static let phoneLogoSize = CGSize(width: 72, height: 36)
+    static let phoneChannelRowHeight: CGFloat = 80
+    static let phoneProgrammeLineHeight: CGFloat = 3
+    static let phoneCategoryHeight: CGFloat = 52
+    static let phoneGuideRowHeight: CGFloat = 64
 
     /// Side by side only in a regular-width window wider than it is tall and
     /// wide enough for both columns; stacked everywhere else. Decided by the

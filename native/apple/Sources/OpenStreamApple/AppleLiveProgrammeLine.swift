@@ -9,11 +9,11 @@ enum AppleLiveProgrammeProgress {
     }
 }
 
-/// The 2 pt line directly under the Live video: the current programme's
-/// progress, white 70 % on white 15 %. The track is always drawn so the
-/// height never changes when the guide arrives.
+/// Keep the track's height stable while programme metadata arrives.
 struct AppleLiveProgrammeLine: View {
     let programme: AppleIPTVProgramme?
+    var lineHeight: CGFloat = 2
+    var accessibilityID = "live.programmeProgress"
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -29,12 +29,12 @@ struct AppleLiveProgrammeLine: View {
                     }
                 }
             }
-            .frame(height: 2)
+            .frame(height: lineHeight)
             .accessibilityElement()
             .accessibilityLabel(programme?.title ?? "")
             .accessibilityValue(fraction.map { "\(Int(($0 * 100).rounded())) percent" } ?? "")
             .accessibilityHidden(programme == nil)
-            .accessibilityIdentifier("live.programmeProgress")
+            .accessibilityIdentifier(accessibilityID)
         }
     }
 }
