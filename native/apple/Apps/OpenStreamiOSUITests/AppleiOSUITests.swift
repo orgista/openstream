@@ -1950,7 +1950,18 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         assertInterfaceOrientation(landscape: false)
         let channel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play CBS")).firstMatch
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "CBS channel missing from the configured lineup")
-        channel.tap()
+        // A new selection starts inline; a selected row would instead open full screen.
+        // Live follows the Paramount+ design (owner REA 2026-10-17): a row plays inline and Full
+        // Screen is a separate control. Earlier crawls leave another channel selected, so on a
+        // first run this tap starts CBS inline; the solo rerun only passed because "Start with
+        // last channel" (default on) had resumed CBS from the failed run's history (row 74).
+        if !channel.isSelected { channel.tap() }
+        XCTAssertTrue(revealInlineLiveControls(timeout: 60), "CBS never reached the inline player")
+        let fullscreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(fullscreen.waitForExistence(timeout: 10), "Inline Full Screen control missing")
+        XCTAssertTrue(fullscreen.isEnabled && app.frame.contains(fullscreen.frame),
+                      "Full Screen is not an enabled visible control")
+        fullscreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["player.controls.show"].waitForExistence(timeout: 30),
                       "The channel never opened the full-screen player")
         XCTAssertTrue(revealPlayerControls(), "The player chrome never came back")
