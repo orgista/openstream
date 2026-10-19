@@ -28,16 +28,19 @@ struct ApplePhoneTitlePageChrome: ViewModifier {
                     Spacer(minLength: 0)
                 }
                 .overlay {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .padding(.horizontal, barHeight + horizontalInset)
-                        .opacity(heroIsOffscreen ? 1 : 0)
-                        .accessibilityHidden(!heroIsOffscreen)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("detail.compact-title")
-                        .allowsHitTesting(false)
+                    // Only in the tree once the hero has scrolled away: an
+                    // opacity-0 title still answers accessibility queries.
+                    if heroIsOffscreen {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .padding(.horizontal, barHeight + horizontalInset)
+                            .transition(.opacity)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("detail.compact-title")
+                            .allowsHitTesting(false)
+                    }
                 }
                 .frame(height: barHeight)
                 .padding(.horizontal, horizontalInset)

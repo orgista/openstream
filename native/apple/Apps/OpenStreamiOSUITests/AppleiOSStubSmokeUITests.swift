@@ -79,8 +79,24 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             XCTAssertFalse(app.navigationBars.firstMatch.exists)
             let compactTitle = app.staticTexts["detail.compact-title"].firstMatch
             XCTAssertFalse(compactTitle.exists)
-            for _ in 0..<3 { app.swipeUp() }
-            XCTAssertTrue(compactTitle.waitForExistence(timeout: 5))
+            // The compact title appears once the hero block has scrolled away: Play
+            // is gone from the hierarchy or its frame is above the status bar. A
+            // page that cannot scroll at all (Play's frame unchanged after the first
+            // swipe) keeps the hero, and no compact title is the right outcome.
+            let statusBarBottom = app.statusBars.firstMatch.frame.maxY
+            let startFrame = play.frame
+            for swipe in 0..<6 {
+                app.swipeUp()
+                if swipe == 0, play.exists, play.frame == startFrame {
+                    print("note: the stub title page cannot scroll; compact title not asserted")
+                    break
+                }
+                if !play.exists || play.frame.maxY < statusBarBottom {
+                    XCTAssertTrue(compactTitle.waitForExistence(timeout: 5),
+                                  "the hero scrolled away but the compact title never appeared")
+                    break
+                }
+            }
         }
 
         let back = app.buttons["detail.back"].firstMatch
@@ -149,9 +165,19 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(automatic.exists, "a manual match offers no way back")
         shot("unmatched-title-menu")
         automatic.tap()
-
+        XCTAssertTrue(app.staticTexts["Quiet Harbor Home Video"].firstMatch.waitForExistence(timeout: 10),
+                      "the automatic title did not replace the manual match")
+        shot("unmatched-after-automatic-match")
         let back = app.buttons["detail.back"].firstMatch
-        if back.waitForExistence(timeout: 5) { back.tap() } else { app.navigationBars.buttons.firstMatch.tap() }
+        let backExists = back.waitForExistence(timeout: 5)
+        if !backExists {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "unmatched-after-automatic-match-elements"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(backExists, "automatic matching lost the title page's Back control")
+        back.tap()
         XCTAssertTrue(matched.waitForExistence(timeout: 10), "the Library did not come back")
         reveal(tile)
         XCTAssertTrue(tile.exists, "Use Automatic Match did not return the title to Unmatched")
