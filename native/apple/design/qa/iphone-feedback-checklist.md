@@ -115,6 +115,8 @@ Prefixes in the tables: `G/` = `gates/`; `J/` = `jank-0755/`; `R/` = `shots/rota
 | 69 | Live guide scrub bar gets stuck / looks wrong (recording 7:20 "that bar right there gets like stuck") | recording 10-16 | not checked | |
 | 70 | Live categories: pay-per-view / premium not findable; no metadata outside All (recording 0:30-1:23) | recording 10-16 | not checked (owner decision on Live categories open) | |
 | 71 | Library shows only "Movies"; no Shows category with one folder (recording 2:47) | recording 10-16 | not checked | |
+| 72 | Library search for the full title "John Wick: Chapter 4" shows "No Results" on DevPlus while "John Wick" finds it (batch-1018b gate probe, twice; library intact, 1,473 files) | gate 10-18 | not checked: punctuation in search? pre-existing or 1018b? check on the owner sim + DevPlus in the 1018c gate | dev-mini:/Volumes/DevExt/dev/openstream-build/devplus-state/search-john-wick.png |
+| 73 | Disc images: act like a Blu-ray player — Play opens the disc menu (DVD + Blu-ray as far as the engine renders them), and the transport shows running time / duration / seek once a title plays (owner 10-18: "my ISOs are 1-1 disc copies, I want the app to act like a Blu-ray player and show the disc menus") | owner 10-18 19:25 + 22:05 | still broken: the menu path never publishes title duration (first iso-player run), and the owner sees no menus at all on his ISOs — lane iso-player (redirected) | |
 
 ## Summary
 
