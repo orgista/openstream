@@ -45,3 +45,22 @@ Rows 10/11 (Discover bar) stay as they are; row 30's round button style may be r
 Proof as in the spec (three title pages at rest and after scrolling on the iOS 18.6 owner sim, iOS 27 note),
 gates, UI tests updated for the removed search control with the owner's words quoted: "in the content page
 there is a search icon we don't need" (2026-10-19).
+
+## Lead 2026-10-19 13:45 — two stub-smoke failures to fix in this lane (batch-1018f gate + a fresh 2× rerun)
+Both in Apps/OpenStreamiOSUITests/AppleiOSStubSmokeUITests.swift on the iOS 18.6 owner sim (stub launch args),
+deterministic 2/2 (dev-mini:/tmp/openstream-fixtures-hugi_z6j/iOS/{1,2}/tests.log):
+1. `testUnmatchedShelfMatchesAndReverts`: after `detail.automaticMatch` is tapped on the title page, `detail.back`
+   does not exist for 5 s (the app is alive, pid in the log; the nav-bar fallback then fails because there is no
+   bar on iPhone any more). Diagnose with a screenshot + element list right after the tap: is the page re-created
+   without the phone chrome (ApplePhoneTitlePageChrome missing on that state), is the button there but without its
+   identifier, or is a sheet/menu still up? Fix the app if the chrome is missing in that state (the Back control
+   must exist on every phone title-page state); fix the test only if the page is legitimately dismissed.
+2. `testDiscoverRowOpensATitleFromStubsAndComesBack`: line ~83, the compact title never appears after 3 swipes on
+   the short stub page. The lead already changed the assertion to scroll-until-it-appears-or-the-page-stops-moving
+   (uncommitted in this worktree) — keep that unless you find a better deterministic rule; verify it passes.
+Proof: both tests 2/2 on the 18.6 owner sim (protected.py) and 1/1 on iOS 27 (73E49263…); swift test if app code
+changed (compile lane); iOS app + UI-test builds; code-anti-slop; zero-byte. No commit. Report cause, change
+(file:line), log paths.
+
+Cause of the lost `detail.back` (worker): the page's outer `.accessibilityIdentifier("detail.screen...")` on the detail body
+overrode the Back control's identifier after the item swap, so the identifier moved to the ScrollView; the modifier now sits on the ScrollView (AppleDiscoverView.swift:3526-3534).

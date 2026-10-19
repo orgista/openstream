@@ -3482,7 +3482,6 @@ struct AppleCatalogItemDetailView: View {
             #endif
         }
         .environment(\.appleTMDBConfiguration, metadataConfiguration)
-        .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
         .task(id: "\(item.mediaID):\(AppleServerTrailerStore.shared.revision)") {
             // Throws only when the servers changed; the task runs again then.
             do { serverTrailer = try await AppleServerTrailerStore.shared.trailer(for: item) } catch {}
@@ -3527,10 +3526,12 @@ struct AppleCatalogItemDetailView: View {
             } else {
                 #if os(tvOS)
                 tvOSDetailLayout
+                    .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
                 #else
                 ScrollView {
                     AppleTitlePageScrollContent(page: self)
                 }
+                .accessibilityIdentifier("detail.screen.\(item.type).\(item.mediaID)")
                 .scrollPosition($detailScrollPosition)
                 #if os(macOS)
                 // Discover's: the hero runs up under the toolbar with no backing.
