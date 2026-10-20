@@ -24,6 +24,8 @@ public final class AppleChannelHealthStore {
     /// and the export writes.
     public private(set) var lineup: [AppleIPTVChannel] = []
     public private(set) var progress: Progress?
+    public private(set) var isPreparingLineup = false
+    @ObservationIgnored private let lineupGate = AppleReloadGate()
     public var isSweeping: Bool { progress != nil }
 
     @ObservationIgnored private var sweepTask: Task<Void, Never>?
@@ -86,16 +88,37 @@ public final class AppleChannelHealthStore {
         #endif
     }
 
-    /// Settings opened before the Live tab: build the same All lineup from the
-    /// saved channels, without touching the network.
-    public func prepareLineupIfNeeded(settings: AppleSettingsStore, sourceStore: AppleSourceStore) async {
-        guard lineup.isEmpty else { return }
+    /// Settings can open before Live has saved any channels.
+    public func prepareLineupIfNeeded(settings: AppleSettingsStore, sourceStore: AppleSourceStore,
+                                     cache: AppleIPTVChannelCache = .shared,
+                                     client: AppleIPTVClient = AppleIPTVClient()) async {
+        guard !Task.isCancelled, await lineupGate.waitUntilIdle(), lineup.isEmpty, lineupGate.begin() else { return }
+        isPreparingLineup = true
+        defer {
+            isPreparingLineup = false
+            lineupGate.end()
+        }
         var cached: [AppleIPTVChannel] = []
         for source in sourceStore.sources where source.kind == .liveTV && source.isEnabled {
-            if let snapshot = await AppleIPTVChannelCache.shared.snapshot(for: source.id) {
+            guard !Task.isCancelled else { return }
+            if let snapshot = await cache.snapshot(for: source.id), !snapshot.channels.isEmpty {
                 cached.append(contentsOf: snapshot.channels)
+                continue
+            }
+            do {
+                let channels = try await client.channels(source: source, credentials: sourceStore.iptvCredentials(for: source))
+                guard !Task.isCancelled else { return }
+                let sourceChannels = await cache.reconcileAndStore(channels, for: source.id)
+                cached.append(contentsOf: sourceChannels)
+                sourceStore.recordValidationSuccess(id: source.id, summary: "Connected · \(sourceChannels.count) channels",
+                    discoveredItemCount: sourceChannels.count, capabilities: ["Live channels", "Playback"])
+            } catch {
+                guard !(error is CancellationError), !Task.isCancelled else { return }
+                sourceStore.recordValidationFailure(id: source.id,
+                    summary: AppleIPTVFailureCause.message(for: error, providerName: source.name))
             }
         }
+        guard !Task.isCancelled else { return }
         settings.updateAutomaticLiveChannelPackage(channels: cached)
         guard !cached.isEmpty else { return }
         let groups = await AppleChannelProjection.buildGroupsOffMain(
@@ -115,7 +138,7 @@ public final class AppleChannelHealthStore {
                 entries: (try? AppleChannelLineupPresets.completeUS()) ?? [],
                 favoriteIDs: favorites, category: "All")
         }.value
-        guard lineup.isEmpty else { return }
+        guard !Task.isCancelled, lineup.isEmpty else { return }
         setLineup(snapshot.channels)
     }
 
