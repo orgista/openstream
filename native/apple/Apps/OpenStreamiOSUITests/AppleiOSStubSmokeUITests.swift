@@ -62,9 +62,13 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'home.' OR identifier BEGINSWITH 'discover.'")).firstMatch
             .waitForExistence(timeout: 60), "Discover never drew")
-        for _ in 0 ..< 8 where !(poster.exists && poster.isHittable) {
-            app.swipeUp()
-            _ = poster.waitForExistence(timeout: 3)
+        // The row is lazy and a page swipe can carry it past the top: scroll
+        // until it is on screen, and back down a little when it went by.
+        for _ in 0 ..< 10 {
+            guard let frame = (try? poster.snapshot())?.frame else { app.swipeUp(); _ = poster.waitForExistence(timeout: 3); continue }
+            if poster.isHittable { break }
+            if frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+            Thread.sleep(forTimeInterval: 0.6)
         }
         XCTAssertTrue(poster.exists && poster.isHittable, "the stub catalog row never drew")
         poster.tap()
@@ -83,15 +87,18 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             // is gone from the hierarchy or its frame is above the status bar. A
             // page that cannot scroll at all (Play's frame unchanged after the first
             // swipe) keeps the hero, and no compact title is the right outcome.
-            let statusBarBottom = app.statusBars.firstMatch.frame.maxY
-            let startFrame = play.frame
+            // Snapshots, not live reads: iOS 27 has no status-bar element and Play
+            // can leave the hierarchy mid-loop, and a live read of either raises.
+            let statusBarBottom = (try? app.statusBars.firstMatch.snapshot())?.frame.maxY ?? 0
+            let startFrame = (try? play.snapshot())?.frame ?? .zero
             for swipe in 0..<6 {
                 app.swipeUp()
-                if swipe == 0, play.exists, play.frame == startFrame {
+                let playFrame = (try? play.snapshot())?.frame
+                if swipe == 0, let playFrame, playFrame == startFrame {
                     print("note: the stub title page cannot scroll; compact title not asserted")
                     break
                 }
-                if !play.exists || play.frame.maxY < statusBarBottom {
+                if playFrame == nil || playFrame!.maxY < statusBarBottom {
                     XCTAssertTrue(compactTitle.waitForExistence(timeout: 5),
                                   "the hero scrolled away but the compact title never appeared")
                     break
@@ -100,7 +107,14 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         }
 
         let back = app.buttons["detail.back"].firstMatch
-        if back.waitForExistence(timeout: 5) { back.tap() } else { app.navigationBars.buttons.firstMatch.tap() }
+        if back.waitForExistence(timeout: 5) {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // Row 30: a 44 pt control on every iOS, glass included (iOS 27 measured 26.67 pt before).
+                XCTAssertGreaterThanOrEqual(back.frame.width, 44, "Back is narrower than 44 pt")
+                XCTAssertGreaterThanOrEqual(back.frame.height, 44, "Back is shorter than 44 pt")
+            }
+            back.tap()
+        } else { app.navigationBars.buttons.firstMatch.tap() }
         XCTAssertFalse(play.waitForExistence(timeout: 5), "the title page did not close")
         XCTAssertTrue(poster.waitForExistence(timeout: 30), "Discover did not come back")
     }

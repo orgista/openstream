@@ -28,19 +28,21 @@ struct ApplePhoneTitlePageChrome: ViewModifier {
                     Spacer(minLength: 0)
                 }
                 .overlay {
-                    // Only in the tree once the hero has scrolled away: an
-                    // opacity-0 title still answers accessibility queries.
-                    if heroIsOffscreen {
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .padding(.horizontal, barHeight + horizontalInset)
-                            .transition(.opacity)
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("detail.compact-title")
-                            .allowsHitTesting(false)
-                    }
+                    // Opacity, not a conditional: inserting the title re-laid out
+                    // the page and the hero reader flipped `heroIsOffscreen` back,
+                    // which looped layout (batch-1018g gate hang on iOS 18.6). The
+                    // identifier is withheld while hidden so accessibility and the
+                    // UI tests see no compact title at rest.
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, barHeight + horizontalInset)
+                        .opacity(heroIsOffscreen ? 1 : 0)
+                        .accessibilityHidden(!heroIsOffscreen)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier(heroIsOffscreen ? "detail.compact-title" : "")
+                        .allowsHitTesting(false)
                 }
                 .frame(height: barHeight)
                 .padding(.horizontal, horizontalInset)
@@ -60,17 +62,28 @@ struct ApplePhoneTitlePageChrome: ViewModifier {
             backControl
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                // The glass style sizes itself to the glyph (26.67 pt measured on
+                // iOS 27); the 44 pt minimum and the identifier go on the styled
+                // button so XCTest and fingers both find a 44 pt control (row 30).
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Circle())
+                .accessibilityIdentifier("detail.back")
         } else {
             backControl.appleTitleBarButtonBacking()
         }
     }
 
     private var backControl: some View {
-        Button("Back", systemImage: "chevron.left", action: onBack)
-            .labelStyle(.iconOnly)
-            .foregroundStyle(.white)
-            .keyboardShortcut("[", modifiers: .command)
-            .accessibilityIdentifier("detail.back")
+        Button(action: onBack) {
+            Image(systemName: "chevron.left")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("Back")
+        .foregroundStyle(.white)
+        .keyboardShortcut("[", modifiers: .command)
+        .accessibilityIdentifier("detail.back")
     }
 }
 #endif
