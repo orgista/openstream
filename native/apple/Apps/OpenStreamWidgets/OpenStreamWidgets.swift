@@ -24,19 +24,8 @@ struct ContinueWatchingEntry: TimelineEntry {
     /// Distinguishes "you have finished everything" from "nothing was ever
     /// published", which the widget used to report identically.
     let emptyState: AppleWidgetEmptyState
-}
-
-/// How many posters each family shows — and therefore how many the provider
-/// fetches and how wide each one is. The view and the provider must agree, or
-/// the widget fetches art it never draws.
-enum ContinueWatchingLayout {
-    static func visibleCount(for family: WidgetFamily) -> Int {
-        switch family {
-        case .systemSmall: 1
-        case .systemMedium: 3
-        default: 6
-        }
-    }
+    var heroBackdrop: Data? = nil
+    var heroWordmark: Data? = nil
 }
 
 struct ContinueWatchingProvider: TimelineProvider {
@@ -51,7 +40,7 @@ struct ContinueWatchingProvider: TimelineProvider {
         // The gallery preview has to appear instantly, so it draws the titles
         // over the brand mark rather than waiting on any artwork.
         guard !context.isPreview else {
-            completion(entry(artwork: [:]))
+            completion(entry(artwork: [:], family: context.family, isPreview: true))
             return
         }
         let layout = Layout(context)
@@ -87,8 +76,9 @@ struct ContinueWatchingProvider: TimelineProvider {
     }
 
     private func loadedEntry(_ layout: Layout) async -> ContinueWatchingEntry {
-        let entry = entry(artwork: [:])
-        let visible = Array(entry.items.prefix(ContinueWatchingLayout.visibleCount(for: layout.family)))
+        let entry = entry(artwork: [:], family: layout.family)
+        guard layout.family == .systemSmall else { return entry }
+        let visible = Array(entry.items.prefix(1))
         guard !visible.isEmpty else { return entry }
         let pixelSize = AppleWidgetArtworkPolicy.pixelSize(
             widthInPoints: layout.widthInPoints,
@@ -103,32 +93,63 @@ struct ContinueWatchingProvider: TimelineProvider {
         )
     }
 
-    private func entry(artwork: [String: Data]) -> ContinueWatchingEntry {
+    private func entry(artwork: [String: Data], family: WidgetFamily, isPreview: Bool = false) -> ContinueWatchingEntry {
         let snapshot = reader.read()
+        let hero = family != .systemSmall && !isPreview ? snapshot?.widgetHero : nil
+        let root = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: AppleTopShelfSnapshotWriter.appGroup)
+        let matches = hero?.itemID == snapshot?.continueWatching.first?.id
         return ContinueWatchingEntry(
             date: .now,
             items: snapshot?.continueWatching ?? [],
             artwork: artwork,
-            emptyState: .state(hasSnapshot: snapshot != nil)
+            emptyState: .state(hasSnapshot: snapshot != nil),
+            heroBackdrop: matches ? root.flatMap { AppleWidgetHeroArtworkStore.read(hero?.backdropFile, in: $0) } : nil,
+            heroWordmark: matches ? root.flatMap { AppleWidgetHeroArtworkStore.read(hero?.wordmarkFile, in: $0) } : nil
         )
     }
 }
 
 struct ContinueWatchingWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+    @Environment(\.widgetContentMargins) private var margins
     let entry: ContinueWatchingEntry
 
-    private var visibleCount: Int { ContinueWatchingLayout.visibleCount(for: family) }
+    private var isHero: Bool { family != .systemSmall && !entry.items.isEmpty }
+    private var usesArtwork: Bool { renderingMode == .fullColor && showsBackground }
 
     var body: some View {
         Group {
             if entry.items.isEmpty {
-                empty
-            } else {
-                content
+                empty.padding(margins)
+            } else if isHero, let item = entry.items.first {
+                hero(item)
+            } else if let item = entry.items.first {
+                poster(item).padding(margins)
             }
         }
-        .containerBackground(.fill.tertiary, for: .widget)
+        .widgetURL(entry.items.first.map { $0.playURL ?? $0.displayURL })
+        .containerBackground(for: .widget) {
+            if isHero, usesArtwork, let data = entry.heroBackdrop, let image = UIImage(data: data) {
+                ZStack {
+                    GeometryReader { geometry in
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                    }
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0.35),
+                        .init(color: .black.opacity(0.65), location: 1),
+                    ], startPoint: .top, endPoint: .bottom)
+                }
+            } else {
+                Color(uiColor: .tertiarySystemFill)
+            }
+        }
     }
 
     /// Title and nothing else: a widget has no room for explanatory copy, and
@@ -145,16 +166,38 @@ struct ContinueWatchingWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder
-    private var content: some View {
-        if family == .systemSmall, let item = entry.items.first {
-            poster(item)
-        } else {
-            HStack(spacing: 8) {
-                ForEach(entry.items.prefix(visibleCount), id: \.id) { item in
-                    poster(item)
+    private func hero(_ item: AppleTopShelfSnapshot.Item) -> some View {
+        Link(destination: item.playURL ?? item.displayURL) {
+            VStack(alignment: .leading, spacing: 6) {
+                Spacer(minLength: 0)
+                if usesArtwork, entry.heroBackdrop != nil, let data = entry.heroWordmark, let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 220, maxHeight: family == .systemLarge ? 80 : 52, alignment: .bottomLeading)
+                        .accessibilityLabel(item.title)
+                } else {
+                    Text(item.title)
+                        .font(.system(.title2, weight: .black))
+                        .lineLimit(family == .systemMedium ? 1 : 2)
+                        .widgetAccentable()
                 }
+                resumeCue(item)
+                    .font(.caption)
+                    .lineLimit(family == .systemMedium ? 1 : 2)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(margins)
+            .foregroundStyle(usesArtwork && entry.heroBackdrop != nil ? Color.white : Color.primary)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func resumeCue(_ item: AppleTopShelfSnapshot.Item) -> Text {
+        if let minutes = item.remainingMinutes {
+            Text("Resume · \(minutes) min left")
+        } else {
+            Text("Continue Watching")
         }
     }
 
@@ -197,6 +240,7 @@ struct ContinueWatchingWidget: Widget {
         .configurationDisplayName("Continue Watching")
         .description("Pick up where you left off.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .contentMarginsDisabled()
     }
 }
 

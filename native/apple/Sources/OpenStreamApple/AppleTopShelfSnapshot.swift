@@ -68,6 +68,12 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.shelfVideo = AppleTopShelfTrailerPolicy.shelfVideo(shelfVideo)
         }
 
+        public var remainingMinutes: Int? {
+            guard let progress, progress.isFinite, (0...1).contains(progress),
+                  let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else { return nil }
+            return Int(exactly: ceil((durationSeconds - durationSeconds * progress) / 60))
+        }
+
         func withShelfImage(_ name: String?) -> Item {
             .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
                   progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
@@ -82,6 +88,8 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
                   shelfVideo: name)
         }
     }
+
+    public var widgetHero: AppleWidgetHeroArtwork?
 
     public let version: Int
     public let generatedAt: Date
@@ -109,8 +117,10 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         topPicks: [Item] = [],
         favoriteChannels: [Item] = [],
         recentChannels: [Item] = [],
-        heroes: [Item] = []
+        heroes: [Item] = [],
+        widgetHero: AppleWidgetHeroArtwork? = nil
     ) {
+        self.widgetHero = widgetHero
         self.version = version
         self.generatedAt = generatedAt
         self.continueWatching = continueWatching
@@ -124,11 +134,12 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, generatedAt, continueWatching, recentlyAdded, favorites, topPicks, favoriteChannels, recentChannels,
-             heroes
+             heroes, widgetHero
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        widgetHero = try container.decodeIfPresent(AppleWidgetHeroArtwork.self, forKey: .widgetHero)
         version = try container.decode(Int.self, forKey: .version)
         generatedAt = try container.decode(Date.self, forKey: .generatedAt)
         continueWatching = try container.decode([Item].self, forKey: .continueWatching)
@@ -154,7 +165,7 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         AppleTopShelfSnapshot(version: version, generatedAt: generatedAt, continueWatching: continueWatching.map(change),
                               recentlyAdded: recentlyAdded, favorites: favorites, topPicks: topPicks.map(change),
                               favoriteChannels: favoriteChannels, recentChannels: recentChannels,
-                              heroes: heroes.map(change))
+                              heroes: heroes.map(change), widgetHero: widgetHero)
     }
 }
 
@@ -459,6 +470,7 @@ public actor AppleTopShelfSnapshotWriter {
     /// Saves the hero pages' server trailers; only the Apple TV has a Top Shelf.
     private let trailerFiles: AppleTopShelfTrailerFiles?
     private let trailerDownloads: AppleTopShelfTrailerDownloads
+    private let widgetArtwork = AppleWidgetHeroArtworkStore()
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
@@ -530,6 +542,7 @@ public actor AppleTopShelfSnapshotWriter {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         #endif
         guard enabled else {
+            AppleWidgetHeroArtworkStore.removeAll(in: root)
             await trailerDownloads.cancel()
             try? FileManager.default.removeItem(at: AppleTopShelfArtworkStore.directory(in: root))
             try? FileManager.default.removeItem(at: AppleTopShelfTrailerPolicy.directory(in: root))
@@ -575,6 +588,35 @@ public actor AppleTopShelfSnapshotWriter {
             favoriteChannels: favoriteChannels, recentChannels: recentChannels,
             heroes: heroes.map(\.item)
         )
+        #if os(iOS)
+        let previous = (try? Data(contentsOf: url)).flatMap {
+            try? JSONDecoder().decode(AppleTopShelfSnapshot.self, from: $0)
+        }
+        if let hero = previous?.widgetHero, hero.itemID == snapshot.continueWatching.first?.id {
+            snapshot.widgetHero = hero
+        }
+        try Task.checkCancellation()
+        try save(snapshot, to: url)
+        if let first = snapshot.continueWatching.first,
+           let continued = shownContinued.first {
+            let item = listed[continued.record.id] ?? Self.matchedItem(for: continued)
+            let hero = heroes.first { $0.item.id == first.id }
+            let cached: AppleHeroArtworkUpgrade.Artwork?
+            if let item { cached = await AppleHeroArtworkUpgrade.shared.cachedArtwork(for: item) }
+            else { cached = nil }
+            let wordmark = await Self.wordmark(for: item)
+            snapshot.widgetHero = await widgetArtwork.prepare(itemID: first.id,
+                backdrop: hero?.backdropURL ?? cached?.backdropURL ?? first.landscapeArtworkURL,
+                wordmark: hero?.wordmarkURL ?? cached?.logoURL ?? wordmark, in: root)
+            try Task.checkCancellation()
+            // A newer publish or opt-out may have replaced the snapshot during the fetch.
+            guard let current = try? JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(contentsOf: url)),
+                  current.generatedAt == snapshot.generatedAt else { return }
+            if let widgetHero = snapshot.widgetHero { widgetArtwork.removeUnused(in: root, keeping: widgetHero) }
+        } else {
+            AppleWidgetHeroArtworkStore.removeAll(in: root)
+        }
+        #endif
         if let artwork {
             // Each carousel page's art: the hero's as the billboard draws it,
             // else the backdrop and the wordmark its listed item carries.

@@ -177,6 +177,132 @@ struct AppleWidgetArtworkTests {
         #expect(await store.thumbnail(for: url("https://cdn.example.com/a.jpg"), pixelSize: 240) != nil)
     }
 
+    @Test func heroArtworkIsBoundedBeforeTheWidgetReadsIt() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try posterData(width: 2_400, height: 1_350)
+        let fetches = Counter()
+        let store = AppleWidgetHeroArtworkStore(fetch: { _ in
+            await fetches.increment()
+            return source
+        })
+        let backdrop = url("https://fixture.example/backdrop.jpg")
+        let first = await store.prepare(itemID: "hero", backdrop: backdrop, wordmark: nil, in: root)
+        let data = try #require(AppleWidgetHeroArtworkStore.read(first.backdropFile, in: root))
+        let size = try #require(AppleWidgetArtworkThumbnail.pixelSize(ofEncoded: data))
+        #expect(size.width == 1_600)
+        #expect(size.width > size.height)
+        #expect(first.wordmarkFile == nil)
+        let second = await store.prepare(itemID: "hero", backdrop: backdrop, wordmark: nil, in: root)
+        #expect(first == second)
+        #expect(await fetches.value == 1)
+        let snapshot = AppleTopShelfSnapshot(version: 1, generatedAt: .now, continueWatching: [],
+            recentlyAdded: [], favorites: [], widgetHero: first)
+        let decoded = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(decoded.widgetHero == first)
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        legacy.removeValue(forKey: "widgetHero")
+        let older = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(older.widgetHero == nil)
+    }
+
+    @Test func failedHeroFetchesAreRememberedUntilTheNextSession() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fetches = Counter()
+        let store = AppleWidgetHeroArtworkStore(fetch: { _ in
+            await fetches.increment()
+            throw URLError(.timedOut)
+        })
+        let backdrop = url("https://fixture.example/missing.jpg")
+        for id in ["first", "second"] {
+            let hero = await store.prepare(itemID: id, backdrop: backdrop, wordmark: nil, in: root)
+            #expect(hero.backdropFile == nil)
+        }
+        #expect(await fetches.value == 1)
+        let nextSession = AppleWidgetHeroArtworkStore(fetch: { _ in
+            await fetches.increment()
+            throw URLError(.timedOut)
+        })
+        _ = await nextSession.prepare(itemID: "third", backdrop: backdrop, wordmark: nil, in: root)
+        #expect(await fetches.value == 2)
+    }
+
+    @Test(arguments: [(0.25, 6_000.0, 75), (1.0 / 3.0, 3_600.0, 40), (0.99, 3_610.0, 1), (1.0, 600.0, 0)])
+    func resumeCueUsesRemainingWholeMinutes(progress: Double, duration: Double, expected: Int) {
+        let item = AppleTopShelfSnapshot.Item(id: "hero", title: "Hero", kind: "movie", artworkURL: nil,
+            displayURL: url("openstream://media/hero"), playURL: nil, progress: progress, durationSeconds: duration)
+        #expect(item.remainingMinutes == expected)
+    }
+
+    @Test(arguments: [(nil, 600.0), (0.5, nil), (Double.nan, 600.0), (-0.1, 600.0), (1.1, 600.0)] as [(Double?, Double?)])
+    func unknownResumeTimeHasNoMinuteCue(progress: Double?, duration: Double?) {
+        let item = AppleTopShelfSnapshot.Item(id: "hero", title: "Hero", kind: "movie", artworkURL: nil,
+            displayURL: url("openstream://media/hero"), playURL: nil, progress: progress, durationSeconds: duration)
+        #expect(item.remainingMinutes == nil)
+    }
+
+    @Test func opaqueArtworkIsNeverUsedAsAWordmark() throws {
+        let source = try posterData(width: 600, height: 300)
+        #expect(AppleWidgetArtworkThumbnail.thumbnail(from: source, pixelSize: 600, isWordmark: true) == nil)
+    }
+
+    @Test func heroWordmarksKeepTheirTransparentPixels() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let context = try #require(CGContext(data: nil, width: 1_200, height: 300, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 100, y: 100, width: 300, height: 100))
+        let buffer = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(buffer, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try #require(context.makeImage()), nil)
+        #expect(CGImageDestinationFinalize(destination))
+        let source = buffer as Data
+        let store = AppleWidgetHeroArtworkStore(fetch: { _ in source })
+        let hero = await store.prepare(itemID: "hero", backdrop: nil,
+            wordmark: url("https://fixture.example/transparent.png"), in: root)
+        let encoded = try #require(AppleWidgetHeroArtworkStore.read(hero.wordmarkFile, in: root))
+        let size = try #require(AppleWidgetArtworkThumbnail.pixelSize(ofEncoded: encoded))
+        #expect(max(size.width, size.height) <= AppleWidgetHeroArtworkStore.wordmarkPixels)
+        let imageSource = try #require(CGImageSourceCreateWithData(encoded as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(imageSource, 0, nil))
+        #expect([CGImageAlphaInfo.premultipliedLast, .premultipliedFirst, .last, .first].contains(image.alphaInfo))
+    }
+
+    @Test func missingAndUnsafeHeroArtFallsBackWithoutFetching() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fetches = Counter()
+        let store = AppleWidgetHeroArtworkStore(fetch: { _ in
+            await fetches.increment()
+            throw URLError(.timedOut)
+        })
+        let hero = await store.prepare(itemID: "hero", backdrop: url("http://fixture.example/art.jpg"),
+            wordmark: nil, in: root)
+        #expect(hero.backdropFile == nil)
+        #expect(hero.wordmarkFile == nil)
+        #expect(await fetches.value == 0)
+        #expect(AppleWidgetHeroArtworkStore.read("../outside.png", in: root) == nil)
+    }
+
+    @Test func replacingHeroArtEvictsThePreviousTitle() async throws {
+        let root = try temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try posterData(width: 100, height: 60)
+        let store = AppleWidgetHeroArtworkStore(fetch: { _ in source })
+        let previous = await store.prepare(itemID: "old", backdrop: url("https://fixture.example/old.jpg"),
+            wordmark: nil, in: root)
+        let current = await store.prepare(itemID: "new", backdrop: url("https://fixture.example/new.jpg"),
+            wordmark: nil, in: root)
+        store.removeUnused(in: root, keeping: current)
+        #expect(AppleWidgetHeroArtworkStore.read(previous.backdropFile, in: root) == nil)
+        #expect(AppleWidgetHeroArtworkStore.read(current.backdropFile, in: root) != nil)
+        AppleWidgetHeroArtworkStore.removeAll(in: root)
+        #expect(AppleWidgetHeroArtworkStore.read(current.backdropFile, in: root) == nil)
+    }
+
     private func item(id: String, artwork: String?) -> AppleTopShelfSnapshot.Item {
         AppleTopShelfSnapshot.Item(
             id: id,
