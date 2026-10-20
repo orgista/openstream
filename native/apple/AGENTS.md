@@ -212,6 +212,7 @@ check your diff against that skill's review list before you report.
 
 | When the task touches… | Read | Then |
 |---|---|---|
+| any OpenStream hero/title page/top bar/Live TV/image caching/playback work | `openstream-reference-patterns` (`~/.claude/skills/openstream-reference-patterns/SKILL.md`) | read the matching topic and pinned source pointers on Dev-Mini before designing or editing |
 | any SwiftUI view/modifier change | `swiftui-pro` | check the diff against its review list |
 | SwiftUI, App Intents, UIKit modernization, tests — Apple's own guidance (first-party, exported from Xcode 27 on 2026-10-14) | `apple-swiftui-specialist`, `apple-swiftui-whats-new-27`, `apple-app-intents-specialist`, `apple-app-intents-whats-new-27`, `apple-uikit-app-modernization`, `apple-modernize-tests`, `apple-device-interaction`, `apple-audit-xcode-security-settings` | Apple's word wins over third-party skills where they disagree |
 | a long `body`, inline side effects, view models, `@Observable` | `swiftui-view-refactor` | small dedicated subviews, MV over MVVM |
