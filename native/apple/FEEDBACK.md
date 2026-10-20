@@ -4689,3 +4689,17 @@ Both simulators passed all 34 disc/caption cases after correcting the tests for 
 You can select several folders from a network share, name each one before adding them, and add more folders from its group in Sources. Folders on the same server and account share saved credentials. Removing one source keeps the account available to the other folders. The saved source and backup formats are unchanged.
 
 The package checks passed 3,363 tests in 410 suites, and all three app builds passed (Mac without signing). Apple TV passed 20/0. iPhone remains 39/2 instead of the requested 40/1: the existing Live case and player skip-position check still fail after retries. The same player assertion was present before this change. No real SMB server was configured; the four fixture screenshots are under `verification-artifacts/share-multi-folder-2026-10-13/`. Direct tap verification was unavailable because the simulator control agent is absent. Original data was restored and the simulators closed. No commit or upload.
+
+
+## 2026-10-20 — Live category bar
+
+The phone’s Live category labels no longer slide vertically inside their bar. Horizontal category navigation, inline playback and the second tap opening full screen stay as before. Native videos show the original clipping and the fixed bar on iOS 18.6 and 27. Swiftfin, VLC and Telly were checked before editing; Paramount+ became reachable later and confirms that its player and categories stay fixed while channels scroll. (changed in pass 2 the same day: a tap on the playing channel now stays inline, like Paramount+)
+
+The final package run passed 3,607 tests in 446 suites. The owner-data capture and playback checks passed on 18.6, the local-stream checks passed on 27, and the final 18.6 Live crawl passed with the local fixture. An earlier owner-data crawl still reported no visible response from Try Again on an unavailable source; that source behavior was preserved. Original data was restored with matching hashes. All builds and tests ran on Dev-Mini; no commit or upload.
+
+
+## 2026-10-20 — Live Paramount+ pass 2
+
+The phone Live screen now follows the measured Paramount+ layout: taller channel rows with square logo areas, and the fixed categories directly under the video. Programme names and progress stay in each row. Tapping the playing channel keeps it inline; the Full Screen button opens the player.
+
+The DevPlus comparison and all earlier captures are now under `../../../evidence/live-oss-2026-10-20/`. The package gate passed 3,607 tests in 446 suites before and after; iOS builds and all three requested 18.6 UI checks passed. The protected checks restored the original simulator data with matching hashes. No commit or upload.
