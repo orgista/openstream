@@ -4726,3 +4726,10 @@ Three DevPlus samples in each mode show no consistent speed gain: median hero ti
 Discover and Library now leave room for the top bar when there is no hero, keeping the first shelf heading visible. A cached poster no longer uses up the artwork upgrade, and catalog artwork remains available if remembered art fails. The page title reads only the vertical scroll view. The eager scene initializer stays in place to preserve the iOS 27 launch fix.
 
 Serial gate: 3,615 tests in 446 suites. iOS build and runner passed; Discover crawl and smoke passed with one existing optional skip. Chrome and populated pages without heroes passed on iOS 18.6 and 27; hero redraw count was one. Screenshots, swipe videos and verification are in `../../../evidence/hero-unify-2026-10-20/second-pass/`. Owner state was restored and simulators shut down. No commits.
+
+## 2026-10-21 — Discover front load (front-load)
+Discover now shows its saved hero and rows while the full index loads, then refreshes the selection. On DevPlus, the warm hero median fell from 1,291 to 220 ms after the first frame across three launches. Cold starts improved too. The artwork crop, wordmark, buttons, Continue Watching row and system tab bar look the same.
+
+Saved watch status and My List flags are checked before reuse. Opening Continue Watching immediately can finish its own loading work. Serial tests passed (3632/447), and both iOS and tvOS builds passed. Comparison screenshots are in `design/2026-10-21-front-load/`.
+
+The Discover crawl, both standard smoke tests and the jank check passed on iOS 18.6. The hero was laid out once. The simulator's original app, data and Keychain were restored and verified.
