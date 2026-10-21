@@ -213,4 +213,112 @@ struct AppleHeroMixPolicyTests {
         #expect(AppleHeroMixPolicy.releaseDayFormatter === AppleHeroMixPolicy.releaseDayFormatter)
     }
 
+    @MainActor @Test(arguments: [false, true])
+    func revalidationPreservesCachedHeroesAndRows(catalogChanged: Bool) async throws {
+        let catalog = AppleStremioCatalog(type: "movie", id: "top")
+        let source = AppleSource(kind: .stremio, name: "Fixture",
+            url: try #require(URL(string: "https://fixture.example/manifest.json")),
+            resources: ["catalog", "meta"], catalogs: [catalog])
+        let items = (1...12).map { index in
+            AppleCatalogItem(mediaID: String(format: "tt%07d", index), type: "movie", name: "Fixture \(index)",
+                backgroundURL: URL(string: "https://fixture.example/\(index).jpg"),
+                releaseInfo: "2026", genres: ["Action"], year: 2026)
+        }
+        let section = AppleCatalogSection(source: source, catalog: catalog, items: items)
+        var records = items.map { AppleMediaIngestion.catalogRecord(instanceID: source.id, item: $0, verifiedAt: now) }
+        records[0].isFavorite = true
+        let resumeKey = try #require(ApplePlaybackIdentity.storageKey(for: records[0].id))
+        let watchedKey = try #require(ApplePlaybackIdentity.storageKey(for: records[1].id))
+        let progress = ApplePlaybackProgress(position: 120, duration: 1200, updatedAt: now)
+        let otherRecords = [AppleMediaKind.channel, .video].map { kind in
+            AppleMediaRecord(kind: kind, title: "Fixture \(kind.rawValue)", availability: [
+                .init(instanceID: source.id, capability: .direct, itemReference: kind.rawValue)
+            ])
+        }
+        var saved = [resumeKey: progress]
+        for record in otherRecords {
+            let key = try #require(ApplePlaybackIdentity.storageKey(for: record.id))
+            saved[key] = ApplePlaybackProgress(position: 120, duration: 1200, updatedAt: now.addingTimeInterval(60))
+        }
+        func snapshot(_ records: [AppleMediaRecord], section: AppleCatalogSection) -> AppleDiscoverView.RecommendationSnapshot {
+            .init(sections: [section], relations: [], sources: [source], records: records,
+                lookup: AppleCatalogSearchLookup(sections: [section], sources: [source]),
+                progress: saved, activity: saved, availableEpisodes: [:],
+                completed: [watchedKey: now], unwatched: [:], removed: [:],
+                ratings: [ApplePlaybackIdentity.digest(for: items[2].mediaID): .down],
+                serverContinueWatching: [], serverShelves: [], artwork: [:], debugHeroTitle: nil, now: now)
+        }
+        let input = snapshot(records + records + otherRecords, section: section)
+        let original = try await AppleDiscoverView.buildRecommendations(input)
+        #expect(original.heroes.first?.item.mediaID == items[0].mediaID)
+        #expect(!original.heroes.contains { $0.item.mediaID == items[2].mediaID })
+        #expect(original.continueWatching.map(\.item.mediaID) == [items[0].mediaID])
+        #expect(!original.picks.isEmpty)
+        #expect(original.seedHeading != nil)
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleMetadataDiskCache(directory: directory)
+        let state = AppleDiscoverRecommendationCache.WatchState(progress: input.progress, activity: input.activity,
+            completed: input.completed, unwatched: input.unwatched, removed: input.removed,
+            ratings: input.ratings.mapValues(\.rawValue))
+        let key = try #require(await AppleDiscoverRecommendationCache.key(scope: "revalidation", state: state, indexURL: nil))
+        let favoriteIDs: Set<String> = [records[0].id]
+        await AppleDiscoverRecommendationCache.store(original, key: key, favoriteIDs: favoriteIDs, cache: cache)
+        let restored = try #require(await AppleDiscoverRecommendationCache.restore(key, sources: [source], cache: cache))
+        #expect(restored.heroes.first?.record.isFavorite == true)
+        var refreshedItems = items
+        if catalogChanged {
+            refreshedItems[0] = AppleCatalogItem(mediaID: items[0].mediaID, type: "movie", name: "Updated Fixture 1",
+                backgroundURL: URL(string: "https://fixture.example/updated.jpg"),
+                releaseInfo: "2026", genres: ["Action"], year: 2026)
+        }
+        let refreshedSection = AppleCatalogSection(source: source, catalog: catalog, items: refreshedItems)
+        let fresh = try await AppleDiscoverView.buildRecommendations(snapshot(input.records, section: refreshedSection))
+        #expect(restored.heroes.map(\.id) == fresh.heroes.map(\.id))
+        if catalogChanged {
+            #expect(restored.heroes.first?.item == items[0])
+            #expect(fresh.heroes.first?.item == refreshedItems[0])
+            #expect(restored.heroes.first?.item != fresh.heroes.first?.item)
+            #expect(restored.seedHeading != fresh.seedHeading)
+            #expect(fresh.seedHeading?.contains(refreshedItems[0].name) == true)
+            await AppleDiscoverRecommendationCache.store(fresh, key: key, favoriteIDs: favoriteIDs, cache: cache)
+            let revalidated = try #require(await AppleDiscoverRecommendationCache.restore(key, sources: [source], cache: cache))
+            #expect(revalidated.heroes.map(\.item) == fresh.heroes.map(\.item))
+            #expect(revalidated.heroes.first?.record.isFavorite == true)
+            #expect(revalidated.seedHeading == fresh.seedHeading)
+        } else {
+            #expect(restored.heroes.map(\.item) == fresh.heroes.map(\.item))
+            #expect(restored.seedHeading == fresh.seedHeading)
+        }
+        #expect(restored.heroes.map(\.source.id) == fresh.heroes.map(\.source.id))
+        #expect(restored.picks.map(\.id) == fresh.picks.map(\.id))
+        #expect(restored.continueWatching.map(\.id) == fresh.continueWatching.map(\.id))
+        #expect(restored.seedItems.map(\.id) == fresh.seedItems.map(\.id))
+    }
+
+    @MainActor @Test(arguments: [true, false])
+    func indexedVideoKeepsItsCatalogResume(hasCanonicalID: Bool) async throws {
+        let catalog = AppleStremioCatalog(type: "movie", id: "top")
+        let source = AppleSource(kind: .stremio, name: "Fixture",
+            url: try #require(URL(string: "https://fixture.example/manifest.json")),
+            resources: ["catalog", "meta"], catalogs: [catalog])
+        let item = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "Fixture",
+            backgroundURL: URL(string: "https://fixture.example/backdrop.jpg"))
+        let section = AppleCatalogSection(source: source, catalog: catalog, items: [item])
+        let catalogRecord = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+        let record = AppleMediaRecord(canonicalID: hasCanonicalID ? item.mediaID : nil, kind: .video,
+            title: item.name, availability: catalogRecord.availability)
+        let key = try #require(ApplePlaybackIdentity.storageKey(for: record.id))
+        let progress = ApplePlaybackProgress(position: 120, duration: 1200, updatedAt: now)
+        let snapshot = AppleDiscoverView.RecommendationSnapshot(sections: [section], relations: [], sources: [source],
+            records: [record], lookup: AppleCatalogSearchLookup(sections: [section], sources: [source]),
+            progress: [key: progress], activity: [key: progress], availableEpisodes: [:], completed: [:],
+            unwatched: [:], removed: [:], ratings: [:], serverContinueWatching: [], serverShelves: [],
+            artwork: [:], debugHeroTitle: nil, now: now)
+        let result = try await AppleDiscoverView.buildRecommendations(snapshot)
+        #expect(result.continueWatching.map(\.id) == [record.id])
+        #expect(result.continueWatching.first?.continueWatchingUpdatedAt == now)
+        #expect(result.heroes.first?.item.mediaID == item.mediaID)
+    }
+
 }

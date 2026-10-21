@@ -227,15 +227,16 @@ final class AppleLocalLibraryStore {
     func matchingGroups(_ item: AppleCatalogItem) -> [AppleLibrarySeries] {
         let index = matchIndex()
         let byName = index.byName[Self.nameKey(item)] ?? []
-        guard item.mediaID.hasPrefix("tt") else { return byName.map { groups[$0] } }
+        guard item.mediaID.hasPrefix("tt") else { return byName.map { index.groups[$0] } }
         // An IMDb id on both sides decides alone; a group without one still matches by name.
         let positions = Set(index.byIMDb["\(item.type):\(item.mediaID)"] ?? [])
             .union(byName.filter { !index.hasIMDb[$0] })
-        return positions.sorted().map { groups[$0] }
+        return positions.sorted().map { index.groups[$0] }
     }
 
     private struct MatchIndex {
         let revision: Int
+        let groups: [AppleLibrarySeries]
         var byIMDb: [String: [Int]] = [:]
         var byName: [String: [Int]] = [:]
         var hasIMDb: [Bool] = []
@@ -250,8 +251,9 @@ final class AppleLocalLibraryStore {
         _ = groups
         _ = metadata
         if let matchIndexCache, matchIndexCache.revision == contentRevision { return matchIndexCache }
-        var index = MatchIndex(revision: contentRevision)
-        for (position, group) in groups.enumerated() {
+        let snapshot = groups
+        var index = MatchIndex(revision: contentRevision, groups: snapshot)
+        for (position, group) in snapshot.enumerated() {
             let item = catalogItem(for: group)
             let hasIMDb = item.mediaID.hasPrefix("tt")
             index.hasIMDb.append(hasIMDb)

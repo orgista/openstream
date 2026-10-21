@@ -85,8 +85,8 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
     ) {
         let cleanTitle = Self.clean(title, limit: 200)
         let cleanCanonical = canonicalID.map { Self.clean($0, limit: 200).lowercased() }.flatMap { $0.isEmpty ? nil : $0 }
-        let fallback = "\(kind.rawValue)|\(Self.normalizedTitle(cleanTitle))|\(year.map(String.init) ?? "")"
-        id = ApplePlaybackIdentity.digest(for: cleanCanonical.map { "canonical|\($0)" } ?? fallback)
+        id = ApplePlaybackIdentity.digest(for: cleanCanonical.map { "canonical|\($0)" }
+            ?? "\(kind.rawValue)|\(Self.normalizedTitle(cleanTitle))|\(year.map(String.init) ?? "")")
         self.canonicalID = cleanCanonical
         self.kind = kind
         self.title = cleanTitle
@@ -655,6 +655,8 @@ public final class AppleMediaIndexStore {
     /// answer with the earliest match the way `records.first` did.
     @ObservationIgnored private var recordOffsetByID: [String: Int] = [:]
     private let repository: AppleMediaIndexRepository
+    @ObservationIgnored private var playbackProgressWrite: Task<Void, Error>?
+    @ObservationIgnored private var playbackProgressWriteRevision: UInt64 = 0
 
     public init(repository: AppleMediaIndexRepository = AppleMediaIndexRepository()) {
         self.repository = repository
@@ -716,13 +718,41 @@ public final class AppleMediaIndexStore {
     }
 
     public func synchronizePlaybackProgress(store: ApplePlaybackStore = ApplePlaybackStore()) async throws {
+        await load()
+        try await beginSynchronizingPlaybackProgress(store: store).value
+    }
+
+    /// Saved playback is authoritative; Discover can draw its index projection before the file copy finishes.
+    @discardableResult
+    func beginSynchronizingPlaybackProgress(store: ApplePlaybackStore = ApplePlaybackStore()) -> Task<Void, Error> {
         var progressByID: [String: Double] = [:]
         for record in records {
             guard let progress = store.progress(for: record.id), progress.duration > 0 else { continue }
             progressByID[record.id] = min(max(progress.position / progress.duration, 0), 1)
         }
-        try await repository.updateProgress(progressByID)
-        setRecords(await repository.records())
+        applyPlaybackProgress(progressByID)
+        let projectedRevision = revision
+        playbackProgressWriteRevision &+= 1
+        let generation = playbackProgressWriteRevision
+        let previous = playbackProgressWrite
+        let write = Task<Void, Error> { [repository, progressByID] in
+            _ = await previous?.result
+            try await repository.updateProgress(progressByID)
+            guard generation == playbackProgressWriteRevision, revision != projectedRevision else { return }
+            applyPlaybackProgress(progressByID)
+        }
+        playbackProgressWrite = write
+        return write
+    }
+
+    func waitForPlaybackProgressSynchronization() async throws {
+        try await playbackProgressWrite?.value
+    }
+
+    private func applyPlaybackProgress(_ progressByID: [String: Double]) {
+        var projected = records
+        for index in projected.indices { projected[index].progress = progressByID[projected[index].id] }
+        setRecords(projected)
     }
 
     func restoreConfigurationWatchlist(_ watchlist: [AppleMediaRecord]) async throws {

@@ -2,6 +2,24 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
+@Test func canonicalMediaRecordKeysIgnoreFallbackFields() {
+    let first = AppleMediaRecord(canonicalID: "  TT1234567  ", kind: .movie,
+        title: "A Movie", year: 2000, availability: [])
+    let second = AppleMediaRecord(canonicalID: "tt1234567", kind: .series,
+        title: "Another Title", year: 2026, availability: [])
+    #expect(first.id == second.id)
+    #expect(first.id == ApplePlaybackIdentity.digest(for: "canonical|tt1234567"))
+    #expect(first.canonicalID == "tt1234567")
+}
+
+@Test(arguments: [nil, "", " \n "] as [String?])
+func fallbackMediaRecordKeysKeepTheirPersistedNormalization(canonicalID: String?) {
+    let record = AppleMediaRecord(canonicalID: canonicalID, kind: .movie,
+        title: " A / Tést! ", year: 1800, availability: [])
+    #expect(record.id == ApplePlaybackIdentity.digest(for: "movie|a test|1800"))
+    #expect(record.year == nil)
+}
+
 @Test func mediaIndexMergesCanonicalAvailabilityAndRemovesOneInstanceTransactionally() async throws {
     let root = FileManager.default.temporaryDirectory
         .appending(path: "openstream-index-test-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -658,4 +676,128 @@ private final class RecordLookupChangeFlag {
     #expect(await batched.records().count == 4)
     #expect(await batched.lastSuccessfulScan(for: second) != nil)
     #expect(await AppleMediaIndexRepository(fileURL: root.appendingPathComponent("batch.json")).records() == batched.records())
+}
+
+@MainActor @Test(arguments: [true, false])
+func unloadedFavoriteWritesPreserveTheSavedIndex(upsertHero: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appending(path: "index.json")
+    let sourceID = UUID()
+    let saved = (0..<2).map { index in
+        AppleMediaRecord(canonicalID: "tt000000\(index)", kind: .movie, title: "Saved \(index)",
+            availability: [.init(instanceID: sourceID, capability: .resolvable, itemReference: "movie|tt000000\(index)")])
+    }
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.replace(instanceID: sourceID, with: saved)
+    try await repository.setFavorite(true, recordID: saved[0].id)
+    try await repository.setFavorite(true, recordID: saved[1].id)
+    try await repository.updateProgress([saved[1].id: 0.4])
+    let before = try #require(await repository.records().first { $0.id == saved[1].id })
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    #expect(store.records.isEmpty)
+    let hero = AppleMediaRecord(canonicalID: "tt1234567", kind: .movie, title: "Cached Hero",
+        availability: [.init(instanceID: sourceID, capability: .resolvable, itemReference: "movie|tt1234567")])
+    let target = upsertHero ? hero : saved[0]
+    let source = AppleSource(id: sourceID, kind: .mediaServer, name: "Fixture",
+        url: try #require(URL(string: "https://fixture.example")))
+    let value = AppleDiscoverView.IndexedCatalogItem(record: target,
+        item: AppleCatalogItem(mediaID: target.canonicalID ?? target.id, type: "movie", name: target.title), source: source)
+    try await AppleDiscoverView.toggleHeroInList(value, mediaIndex: store)
+
+    let reloaded = await AppleMediaIndexRepository(fileURL: url).records()
+    #expect(Set(reloaded.map(\.id)) == Set(saved.map(\.id) + (upsertHero ? [hero.id] : [])))
+    #expect(reloaded.first { $0.id == saved[1].id } == before)
+    #expect(reloaded.first { $0.id == target.id }?.isFavorite == upsertHero)
+}
+
+@MainActor @Test func concurrentDiscoverAndSheetLoadsKeepFavoritesAndProgress() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "discover-load-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let playback = ApplePlaybackStore(defaults: defaults)
+    let url = root.appending(path: "index.json")
+    let sourceID = UUID()
+    let records = (0..<3).map { index in
+        AppleMediaRecord(canonicalID: "tt000000\(index)", kind: .movie, title: "Movie \(index)",
+            availability: [.init(instanceID: sourceID, capability: .resolvable, itemReference: "movie|tt000000\(index)")])
+    }
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.replace(instanceID: sourceID, with: records)
+    try await repository.setFavorite(true, recordID: records[0].id)
+    playback.save(mediaID: records[1].id, position: 120, duration: 1200)
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    func prepare() async throws {
+        await store.load()
+        try await store.synchronizePlaybackProgress(store: playback)
+    }
+    async let discover: Void = prepare()
+    async let sheet: Void = prepare()
+    _ = try await (discover, sheet)
+    let reloaded = await AppleMediaIndexRepository(fileURL: url).records()
+    #expect(Set(reloaded.map(\.id)) == Set(records.map(\.id)))
+    #expect(reloaded.first { $0.id == records[0].id }?.isFavorite == true)
+    #expect(reloaded.first { $0.id == records[1].id }?.progress == 0.1)
+    #expect(reloaded.first { $0.id == records[2].id }?.progress == nil)
+    #expect(store.records == reloaded)
+}
+
+@MainActor @Test func playbackProgressIsPublishedBeforeTheIndexWrite() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "discover-progress-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let playback = ApplePlaybackStore(defaults: defaults)
+    let url = root.appending(path: "index.json")
+    let sourceID = UUID()
+    let record = AppleMediaRecord(canonicalID: "tt1234567", kind: .movie, title: "Movie",
+        availability: [.init(instanceID: sourceID, capability: .resolvable, itemReference: "movie|tt1234567")])
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.replace(instanceID: sourceID, with: [record])
+    try await repository.updateProgress([record.id: 0.1])
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    await store.load()
+    let before = try Data(contentsOf: url)
+    playback.save(mediaID: record.id, position: 240, duration: 1200)
+    store.beginSynchronizingPlaybackProgress(store: playback)
+    #expect(store.record(id: record.id)?.progress == 0.2)
+    #expect(try Data(contentsOf: url) == before)
+    let projectedRevision = store.revision
+    try await store.waitForPlaybackProgressSynchronization()
+    #expect(store.revision == projectedRevision)
+    try await store.beginSynchronizingPlaybackProgress(store: playback).value
+    #expect(store.revision == projectedRevision)
+    let reloaded = try #require(await AppleMediaIndexRepository(fileURL: url).records().first)
+    #expect(reloaded.progress == 0.2)
+}
+
+@MainActor @Test func aLaterProgressProjectionSurvivesAnEarlierIndexWrite() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "discover-progress-order-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let playback = ApplePlaybackStore(defaults: defaults)
+    let url = root.appending(path: "index.json")
+    let sourceID = UUID()
+    let record = AppleMediaRecord(canonicalID: "tt1234567", kind: .movie, title: "Movie",
+        availability: [.init(instanceID: sourceID, capability: .resolvable, itemReference: "movie|tt1234567")])
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.replace(instanceID: sourceID, with: [record])
+    let store = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: url))
+    await store.load()
+    playback.save(mediaID: record.id, position: 120, duration: 1200)
+    let first = store.beginSynchronizingPlaybackProgress(store: playback)
+    playback.save(mediaID: record.id, position: 240, duration: 1200)
+    store.beginSynchronizingPlaybackProgress(store: playback)
+    #expect(store.record(id: record.id)?.progress == 0.2)
+    try await first.value
+    #expect(store.record(id: record.id)?.progress == 0.2)
+    try await store.waitForPlaybackProgressSynchronization()
+    let reloaded = try #require(await AppleMediaIndexRepository(fileURL: url).records().first)
+    #expect(reloaded.progress == 0.2)
+    #expect(store.record(id: record.id)?.progress == 0.2)
 }

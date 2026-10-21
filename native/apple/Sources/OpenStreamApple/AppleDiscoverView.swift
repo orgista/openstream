@@ -70,6 +70,8 @@ struct AppleDiscoverView: View {
     @State private var continueWatchingRemovalRevision = 0
     @State private var continueWatchingChangeRevision = 0
     @State private var loadedCache = false
+    @State private var continueWatchingCacheReady = false
+    @State private var catalogCacheLoad: Task<Void, Never>?
     /// The source configuration whose catalog refresh last finished; until it
     /// matches the current one an empty page is loading, not empty.
     @State private var settledCatalogIdentity: String?
@@ -149,6 +151,10 @@ struct AppleDiscoverView: View {
         let source: AppleSource
         var continueWatchingUpdatedAt: Date? = nil
         var id: String { record.id }
+    }
+
+    nonisolated static func showsLoadingContent(hasContent: Bool, hasRecommendations: Bool, isLoading: Bool) -> Bool {
+        isLoading && (!hasContent || !hasRecommendations)
     }
 
     struct RecommendationResult: Sendable {
@@ -246,7 +252,8 @@ struct AppleDiscoverView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: sectionSpacing) {
-                        if !hasContent || reviewLoadingState {
+                        if Self.showsLoadingContent(hasContent: hasContent, hasRecommendations: recommendationsRevision != nil,
+                            isLoading: discoverIsLoading) || reviewLoadingState {
                             AppleDiscoverLoadingContent(presentation: heroPresentation, viewport: viewportSize,
                                 phoneLayout: phoneHeroLayout, wideLayout: usesPadHero ? padHeroLayout : macHeroLayout,
                                 rowStyle: discoverRowStyle)
@@ -372,6 +379,14 @@ struct AppleDiscoverView: View {
                 .padding()
             }
             .task(id: recommendationRevision) {
+                // A cached rail can open before Discover finishes its index load.
+                if !loadedCache && !continueWatchingCacheReady {
+                    await loadCachedCatalogSectionsIfNeeded()
+                    await mediaIndex.load()
+                    guard !Task.isCancelled else { return }
+                    mediaIndex.beginSynchronizingPlaybackProgress()
+                    continueWatchingCacheReady = true
+                }
                 await rebuildRecommendations(for: recommendationRevision)
             }
             .navigationTitle("Continue Watching")
@@ -558,26 +573,39 @@ struct AppleDiscoverView: View {
                 for: route, hasDedicatedSearchTab: AppleSearchRoutePolicy.platformHasDedicatedSearchTab)
         }
         .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
-            await mediaIndex.load()
+            let index = mediaIndex
+            let indexStarted = ContinuousClock.now
+            async let indexLoaded: Void = index.load()
+            let cacheStarted = ContinuousClock.now
+            await loadCachedCatalogSectionsIfNeeded()
+            appleTrace("discover catalog cache loaded \(AppleLaunchMarks.milliseconds(cacheStarted.duration(to: .now)))ms sections=\(catalogStore.sections.count)")
+            if recommendationsRevision == nil { await restoreCachedRecommendations() }
+            await indexLoaded
+            guard !Task.isCancelled else { return }
+            appleTrace("discover index ready \(AppleLaunchMarks.milliseconds(indexStarted.duration(to: .now)))ms records=\(mediaIndex.records.count)")
             #if DEBUG
             AppleLaunchClock.mark("index.loaded(\(mediaIndex.records.count))")
             #endif
-            try? await mediaIndex.synchronizePlaybackProgress()
+            let progressStarted = ContinuousClock.now
+            let progressWrite = mediaIndex.beginSynchronizingPlaybackProgress()
+            appleTrace("discover progress projected \(AppleLaunchMarks.milliseconds(progressStarted.duration(to: .now)))ms")
             if !loadedCache {
-                await catalogStore.loadCachedSections(sources: sourceStore.sources)
                 loadedCache = true
                 #if DEBUG
                 AppleLaunchClock.mark("discover.cache(\(catalogStore.sections.count))")
                 #endif
-                // Nothing cached to put in the billboard: the launch cover
-                // has nothing to wait for. (Not the billboard candidates —
-                // building them walks the media index and digests every
-                // catalog item, ~90 ms on the Apple TV sim, and sat between
-                // the cache and the billboard's first draw.)
-                if catalogStore.sections.allSatisfy(\.items.isEmpty) {
-                    AppleLaunchReadiness.shared.markFirstScreenReady()
-                }
             }
+            // Nothing cached to put in the billboard: the launch cover
+            // has nothing to wait for. (Not the billboard candidates —
+            // building them walks the media index and digests every
+            // catalog item, ~90 ms on the Apple TV sim, and sat between
+            // the cache and the billboard's first draw.)
+            if catalogStore.sections.allSatisfy(\.items.isEmpty) {
+                AppleLaunchReadiness.shared.markFirstScreenReady()
+            }
+            try? await progressWrite.value
+            appleTrace("discover progress synchronized \(AppleLaunchMarks.milliseconds(progressStarted.duration(to: .now)))ms")
+            guard !Task.isCancelled else { return }
             await catalogStore.refresh(sources: sourceStore.sources)
             if !Task.isCancelled {
                 settledCatalogIdentity = catalogConfigurationIdentity(sourceStore.sources)
@@ -627,17 +655,68 @@ struct AppleDiscoverView: View {
         .environment(\.appleTabToolbar, tabToolbarContext)
     }
 
+    /// Share the first disk read with an early rail navigation; later appearances keep the live catalog.
+    private func loadCachedCatalogSectionsIfNeeded() async {
+        if let catalogCacheLoad {
+            await catalogCacheLoad.value
+            return
+        }
+        guard !loadedCache, !continueWatchingCacheReady, catalogStore.sections.isEmpty else { return }
+        let catalog = catalogStore
+        let sources = sourceStore.sources
+        let load = Task { await catalog.loadCachedSections(sources: sources) }
+        catalogCacheLoad = load
+        await load.value
+    }
+
     /// All selection inputs have cheap revision tokens. Geometry, scrolling,
     /// carousel ticks and wordmark publication do not invalidate this snapshot.
     private var recommendationRevision: String {
         let sectionsIdentity = catalogLookupIdentity
-        return "\(sectionsIdentity)|lookup:\(catalogLookupRevision)|play:\(ApplePlaybackProgressFeed.shared.revision)"
+        return "\(sectionsIdentity)|loaded:\(loadedCache || continueWatchingCacheReady)|lookup:\(catalogLookupRevision)|play:\(ApplePlaybackProgressFeed.shared.revision)"
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
     }
 
+    private var recommendationCacheScope: String {
+        [searchConfigurationIdentity(sourceStore.sources),
+         sourceStore.sources.map { AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: $0) }.joined(separator: ";"),
+         AppleSourceKind.allCases.map(\.rawValue).joined(separator: ";"),
+         ApplePlaybackStore().namespace, AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration),
+         UserDefaults.standard.string(forKey: "OpenStreamHeroTitle") ?? ""].joined(separator: "|")
+    }
+
+    private var recommendationCacheRevision: String {
+        recommendationCacheScope + "|play:\(ApplePlaybackProgressFeed.shared.revision)|ratings:\(AppleTitleRatingStore.revision)"
+            + "|removed:\(continueWatchingChangeRevision)"
+    }
+
+    private func recommendationWatchState(_ store: ApplePlaybackStore) -> AppleDiscoverRecommendationCache.WatchState {
+        .init(progress: store.configurationProgress(), activity: store.activities(),
+            completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
+            removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings.mapValues(\.rawValue))
+    }
+
+    private func restoreCachedRecommendations() async {
+        let revision = recommendationCacheRevision
+        let scope = recommendationCacheScope
+        let started = ContinuousClock.now
+        let state = recommendationWatchState(ApplePlaybackStore())
+        appleTrace("discover cache watch state \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms")
+        guard let key = await AppleDiscoverRecommendationCache.key(scope: scope, state: state),
+              let cached = await AppleDiscoverRecommendationCache.restore(key, sources: sourceStore.sources) else {
+            appleTrace("discover recommendations cache miss")
+            return
+        }
+        guard !Task.isCancelled, revision == recommendationCacheRevision, recommendationsRevision == nil else { return }
+        recommendations = cached
+        recommendationsRevision = "cache|\(key.fingerprint)"
+        appleTrace("discover recommendations cache hit heroes=\(cached.heroes.count)")
+    }
+
     private func rebuildRecommendations(for revision: String) async {
+        guard loadedCache || continueWatchingCacheReady else { return }
         // The first pass with heroes draws the billboard. The index, lookup, server and art revisions that follow
         // it at launch each asked for another (~0.1 s of CPU apiece on the 18.6 sim, up to four in the first 2 s);
         // they wait out the launch window, and a newer revision cancels the wait, so only the last one runs.
@@ -663,6 +742,7 @@ struct AppleDiscoverView: View {
             removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
             artwork: heroArtwork, debugHeroTitle: wanted, now: .now)
+        let cacheScope = recommendationCacheScope
         do {
             let started = ContinuousClock.now
             var result = try await Self.buildRecommendations(snapshot)
@@ -678,6 +758,19 @@ struct AppleDiscoverView: View {
                 incoming: result.continueWatching, id: { $0.record.id }, timestamp: { $0.continueWatchingUpdatedAt ?? $0.record.lastVerified })
             recommendations = result
             recommendationsRevision = revision
+            let state = AppleDiscoverRecommendationCache.WatchState(progress: snapshot.progress, activity: snapshot.activity,
+                completed: snapshot.completed, unwatched: snapshot.unwatched, removed: snapshot.removed,
+                ratings: snapshot.ratings.mapValues(\.rawValue))
+            do { try await mediaIndex.waitForPlaybackProgressSynchronization() }
+            catch {
+                appleTraceFailure("discover recommendation cache skipped after index write failure")
+                return
+            }
+            if let key = await AppleDiscoverRecommendationCache.key(scope: cacheScope, state: state),
+               !Task.isCancelled, revision == recommendationRevision {
+                await AppleDiscoverRecommendationCache.store(result, key: key,
+                    favoriteIDs: Set(snapshot.records.lazy.filter(\.isFavorite).map(\.id)))
+            }
         } catch is CancellationError {
             // Disappearance or a newer revision owns the next result.
         } catch {
@@ -1284,7 +1377,7 @@ struct AppleDiscoverView: View {
             AppleContinueWatchingTile(
                 item: value.item,
                 info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
-                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false,
+                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? value.record.isFavorite,
                 onOpenTitle: { selectHero(value, autoPlay: false) },
                 onToggleList: { toggleHeroInList(value) },
                 onRemove: { removeFromContinueWatching(value) }
@@ -1464,7 +1557,7 @@ struct AppleDiscoverView: View {
         ) { button, perform in
             AppleHomeHeroActions(mode: phone ? .phone : pad ? .pad : mac ? .mac : tv != nil ? .tv : .rotating,
                 viewportSize: viewportSize, button: button,
-                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? false, tv: tv,
+                isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? value.record.isFavorite, tv: tv,
                 onPlay: perform, onToggleList: { toggleHeroInList(value) },
                 onDetails: { selectHero(value, autoPlay: false) })
         }
@@ -1474,11 +1567,16 @@ struct AppleDiscoverView: View {
     /// My List toggles. A title first seen on the hero has no record yet — the
     /// title page writes one when it opens — so it is written here first.
     private func toggleHeroInList(_ value: IndexedCatalogItem) {
-        let isInList = mediaIndex.record(id: value.record.id)?.isFavorite ?? false
         Task { @MainActor in
-            if mediaIndex.record(id: value.record.id) == nil { try? await mediaIndex.upsert(value.record) }
-            try? await mediaIndex.setFavorite(!isInList, recordID: value.record.id)
+            try? await Self.toggleHeroInList(value, mediaIndex: mediaIndex)
         }
+    }
+
+    static func toggleHeroInList(_ value: IndexedCatalogItem, mediaIndex: AppleMediaIndexStore) async throws {
+        await mediaIndex.load()
+        let isInList = mediaIndex.record(id: value.record.id)?.isFavorite ?? value.record.isFavorite
+        if mediaIndex.record(id: value.record.id) == nil { try await mediaIndex.upsert(value.record) }
+        try await mediaIndex.setFavorite(!isInList, recordID: value.record.id)
     }
 
     /// The Apple TV app row style for Discover's rails: the iPhone held upright

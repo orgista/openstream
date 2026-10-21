@@ -33,6 +33,30 @@ import Testing
     #expect(!store.matchingGroups(queries[0]).isEmpty)
 }
 
+@MainActor @Test(arguments: [true, false])
+func matchingGroupsKeepsItsSnapshotUntilTheNewRevisionIsPublished(hasIMDb: Bool) throws {
+    let file = AppleLibraryItem(sourceID: UUID(), name: "Example.Film.2020.mkv",
+        url: URL(fileURLWithPath: "/Example.Film.2020.mkv"), relativePath: "Example.Film.2020.mkv", sizeBytes: 1)
+    let groups = AppleLibrarySeries.groups([file])
+    let store = AppleLocalLibraryStore(groups: groups)
+    let query = AppleCatalogItem(mediaID: hasIMDb ? "tt1234567" : "fixture", type: "movie", name: "Example Film", releaseInfo: "2020")
+    let original = store.matchingGroups(query)
+    _ = try #require(original.first)
+    let observed = SortObservationChangeFlag()
+    withObservationTracking {
+        _ = store.contentRevision
+    } onChange: {
+        // Observation invokes this synchronously from the MainActor reset below.
+        MainActor.assumeIsolated {
+            #expect(store.matchingGroups(query).map(\.id) == original.map(\.id))
+            observed.changed = true
+        }
+    }
+    store.discardAfterReset()
+    #expect(observed.changed)
+    #expect(store.matchingGroups(query).isEmpty)
+}
+
 @MainActor @Test func localSeasonRowsKeepUncatalogedEpisodesAndDeduplicateCopies() {
     let source = UUID()
     let files = ["Show.S01E01.1080p.mkv", "Show.S01E01.2160p.mkv", "Show.S02E03.1080p.mkv"].map {
