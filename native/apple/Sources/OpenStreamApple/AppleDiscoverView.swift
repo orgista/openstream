@@ -8678,9 +8678,6 @@ enum AppleTrailerPreviewLayout {
     static let minimumControlSide: CGFloat = 44
     static let pausedControlSide: CGFloat = 64
     static let controlInset: CGFloat = 4
-    /// At the top the control joins the round Back/Search/Refresh column,
-    /// which sits 16 pt in from the edge (ApplePhoneHeroChrome).
-    static let topControlInset: CGFloat = 16
 
     /// Where the trailer's one control sits in the `visible` part of its
     /// view: paused, centred; playing, in the bottom-right corner, or
@@ -8691,7 +8688,8 @@ enum AppleTrailerPreviewLayout {
             return CGRect(x: visible.midX - side / 2, y: visible.midY - side / 2, width: side, height: side)
         }
         let side = minimumControlSide
-        return CGRect(x: visible.maxX - (topInset == nil ? controlInset : topControlInset) - side,
+        let edgeInset = topInset == nil ? controlInset : AppleDesignTokens.phoneHeroControlInset
+        return CGRect(x: visible.maxX - edgeInset - side,
                       y: topInset.map { visible.minY + $0 } ?? (visible.maxY - controlInset - side),
                       width: side, height: side)
     }

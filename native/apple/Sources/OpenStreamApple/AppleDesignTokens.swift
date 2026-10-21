@@ -43,6 +43,9 @@ public enum AppleDesignTokens {
     public static let minimumActionSize: CGFloat = 44
     #endif
 
+    /// How far the phone hero's round control row sits in from the screen edge.
+    static let phoneHeroControlInset: CGFloat = 16
+
     /// The owner's "no scroll indicators" rule.
     ///
     /// `.never` on macOS, not `.hidden`. The two are not the same thing:

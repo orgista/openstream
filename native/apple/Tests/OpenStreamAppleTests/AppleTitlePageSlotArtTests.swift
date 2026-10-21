@@ -108,6 +108,8 @@ import Testing
     @Test func aTopSoundControlLinesUpWithTheRoundControlColumn() {
         let visible = CGRect(x: 0, y: 0, width: 430, height: 652)
         let sound = AppleTrailerPreviewLayout.controlFrame(in: visible, paused: false, topInset: 111)
-        #expect(sound == CGRect(x: 370, y: 111, width: 44, height: 44))
+        let side = AppleTrailerPreviewLayout.minimumControlSide
+        #expect(sound == CGRect(x: visible.maxX - AppleDesignTokens.phoneHeroControlInset - side,
+                                y: 111, width: side, height: side))
     }
 }

@@ -73,7 +73,7 @@ private struct ApplePhoneHeroChrome<Controls: View>: ViewModifier {
                             .allowsHitTesting(false)
                     }
                     .frame(height: AppleDesignTokens.minimumActionSize)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, AppleDesignTokens.phoneHeroControlInset)
                     .background {
                         Rectangle()
                             .fill(.bar)
