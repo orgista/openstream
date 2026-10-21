@@ -52,10 +52,12 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 ## 3. Never (these end the task — stop and report instead)
 - Never upload to TestFlight/App Store, run `asc publish`, `asc builds upload`, `xcodebuild
   -exportArchive`, or `git push`. Never add a build to a TestFlight group.
-- Never erase, delete, reset, or create simulators. The persistent sims on Dev-Mini (owner cleanup 2026-10-14, 24
-  default sims deleted) are: iPhone 18 Pro iOS 27 `73E49263…` (E2E-iOS), iPhone 18 Pro Max iOS 27 `2E61439B…`,
-  iPhone 15 Pro Max iOS 18.6 `7530ECB2…` (owner's imported setup), DUO foldable `CA2CCA73…`, iPad Pro 13" `8939801C…`,
-  Apple TV 4K `F2107E8F…` (E2E-tvOS), Apple Watch Series 12 `4ABCBF60…`, Vision Pro `46B2DEDC…`. Boot ONE at a time.
+- Never erase, delete, reset, or create simulators. The persistent sims on Dev-Mini (owner cleanups 2026-10-14 and
+  2026-10-21) are: iPhone 18 Pro Max iOS 27 `2E61439B…` (E2E-iOS), iPhone 15 Pro Max iOS 18.6 `7530ECB2…` (owner's
+  imported setup), **iPhone Duo iOS 27.2 `57B18C7A…`** (the real foldable; Xcode 27.2 only:
+  `DEVELOPER_DIR=/Volumes/DevExt/Applications/Xcode-27.2.app/Contents/Developer`), "DUO" `CA2CCA73…` (NOT a Duo: an
+  iPhone 18 Pro renamed), iPad Pro 13" `8939801C…`, Apple TV 4K `F2107E8F…` (E2E-tvOS), Apple Watch Series 12
+  `4ABCBF60…`, Vision Pro `46B2DEDC…`. Boot ONE at a time.
   Never leave test data on them (a source, a download, a playlist you added — remove it).
 - Never use Computer Use / screen control / osascript UI automation — the owner is using this Mac.
 - Never create LaunchAgents, cron, routines, background workers.
