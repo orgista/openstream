@@ -32,22 +32,29 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
         XCTAssertTrue(focusedElement.waitForExistence(timeout: 60), "Discover never took focus")
-        let poster = element("home.media.movie:tt0000001")
+        // f82ef99 deduplicates the previous three rows: Movie One is already
+        // in Your Library, so the catalog shelf starts with Movie Two.
+        let posterID = "home.media.movie:tt0000002"
+        let poster = element(posterID)
 
         // Walk focus down from the hero until the poster holds it (the shelf
         // is lazy and only enters the hierarchy as focus reaches it), then open.
         let focusedPoster = app.descendants(matching: .any).matching(NSPredicate(
-            format: "hasFocus == true AND identifier == %@", "home.media.movie:tt0000001")).firstMatch
+            format: "hasFocus == true AND identifier == %@", posterID)).firstMatch
         for _ in 0 ..< 10 where !focusedPoster.exists {
             remote.press(.down)
             _ = focusedPoster.waitForExistence(timeout: 2)
         }
         XCTAssertTrue(focusedPoster.exists, "focus never reached the stub poster; sits on '\(focusedElement.identifier)'")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "discover-stub-movies-tv"
+        shot.lifetime = .keepAlways
+        add(shot)
         remote.press(.select)
 
         let play = element("detail.play")
         XCTAssertTrue(play.waitForExistence(timeout: 30), "the title page never opened")
-        XCTAssertTrue(app.staticTexts["Stub Movie One"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Stub Movie Two"].firstMatch.waitForExistence(timeout: 10))
 
         remote.press(.menu)
         XCTAssertTrue(poster.waitForExistence(timeout: 30), "Discover did not come back")
