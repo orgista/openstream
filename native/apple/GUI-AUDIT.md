@@ -2473,3 +2473,17 @@ brought back on screen after the walk had scrolled past their row.
 - [x] Settings: Source Code opens a browser; observing unchanged app snapshots for three seconds misjudged the handoff. Wait for background/background-suspended state, then activate OpenStream and verify foreground restoration. Settings passed 5/5 on each iOS version.
 - [x] Harness supports explicit simulator/DerivedData and independent `--repeat` runs with separate results and restoration after each. Serial Swift gate: 3549 tests / 443 suites. Changed app sources and UI-test files recompiled for arm64. Full iOS/tvOS suites belong to the lead's merge batch under the 2026-10-17 22:05 note.
 - [x] Final targeted gates: Messages, Players, Live and Settings each passed 5/5 on iOS 18.6 (`7530ECB2`) and iOS 27 (`73E49263`), 40 passes total. App/group/host restoration hashes and simulator shutdown verified after every attempt; final matrix exit 0 at 03:17 local. No commits.
+
+
+## 2026-10-20 — Live category bar (live-oss)
+
+- [x] Phone category content stays inside its fixed bar; vertical bounce constrained, horizontal selected-category reveal retained. Owner iOS 18.6 reproduced first; native before/after 10 fps videos and screenshots on 18.6/27: `../../../evidence/live-oss-2026-10-20/`. References: Swiftfin, VLC, Telly, Paramount Android; later DevPlus Paramount+ runtime confirms fixed player/categories. Reference note is 40 lines.
+- [x] Final Dev-Mini serial Swift gate 3607 tests / 446 suites; iOS build recompiled AppleLiveCategoryBar, UI runner recompiled AppleiOSUITests. Owner 18.6 capture/bar/inline-fullscreen tests 3/3; iOS 27 local-stream fixture 3/3; final protected 18.6 fixture testCrawlLive 1/1. App/group/host/Keychain restoration hashes verified; no commit.
+- [!] Earlier intermediate owner-data crawl: eight category-reveal findings resolved by retaining existing auto-reveal; unavailable-source Try Again had no visible response within three seconds. Earlier SMB cancellation gate failed twice, isolated retry passed; final full serial gate passed. Source errors and import-card behavior unchanged.
+
+
+## 2026-10-20 — Live Paramount+ pass 2 (live-oss)
+
+- [x] Phone rows 88 pt with 50×50 logo slots; programme title/progress retained. Removed the phone programme header so the fixed category bar immediately follows the edge-to-edge 16:9 stage. Repeated playing-row taps stay inline; Full Screen remains separate. No existing phone schedule view to adapt.
+- [x] Dev-Mini serial Swift gate before/after 3607/446; iOS simulator/device Debug builds and dedicated UI runner passed, edited Swift files recompiled for arm64. Owner 18.6 bar and updated tap tests 2/2; fixture testCrawlLive 1/1. Both protected runs restored app/group/host/Keychain hashes; simulator shut down, DevPlus app stopped.
+- [x] DevPlus comparison, owner 18.6 screenshots, frames and scroll capture: `../../../evidence/live-oss-2026-10-20/`. Moved all 44 original evidence files with matching hashes. Frames: stage (0,59,430,242), bar (0,301,430,52), row height 88. Anti-slop removed one unused view and one misleading comment block; zero-byte check clean. No commit.

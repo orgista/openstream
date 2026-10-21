@@ -661,11 +661,29 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         attach("pplus-live-after-tap")
         XCTAssertEqual(player.frame.width / max(1, player.frame.height), 16.0 / 9.0, accuracy: 0.02,
                        "A new row plays inline on the stage")
+        XCTAssertEqual(row.frame.height, 88, accuracy: 1)
+        let bar = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 10))
+        XCTAssertEqual(bar.frame.minY, stageFrame.maxY, accuracy: 1,
+                       "Categories sit directly below the stage")
+        XCTAssertEqual(stageFrame.minX, app.frame.minX, accuracy: 1)
+        XCTAssertEqual(stageFrame.width, app.frame.width, accuracy: 1)
+        if app.statusBars.firstMatch.exists {
+            XCTAssertEqual(stageFrame.minY, app.statusBars.firstMatch.frame.maxY, accuracy: 1)
+        }
+        let frames = XCTAttachment(string: "stage: \(stageFrame)\nbar: \(bar.frame)\nrow: \(row.frame)")
+        frames.name = "pplus-live-layout-frames"
+        frames.lifetime = .keepAlways
+        add(frames)
+        // Owner: "REA Paramount+ Live … redo Live" (2026-10-20). DevPlus:
+        // Paramount+ 15.28.0 keeps a repeated playing-channel tap inline.
         row.tap()
         let close = app.buttons["player.close"].firstMatch
-        XCTAssertTrue(close.waitForExistence(timeout: 10),
-                      "A second tap on the playing row opens full screen")
-        close.tap()
+        XCTAssertFalse(close.waitForExistence(timeout: 2), "Tapping the playing channel must stay inline")
+        XCTAssertTrue(row.isSelected)
+        XCTAssertEqual(player.frame.minY, stageFrame.minY, accuracy: 1)
+        XCTAssertEqual(player.frame.height, stageFrame.height, accuracy: 1)
+        attach("pplus-live-playing-row-stays-inline")
         let guide = app.buttons["live.guide"].firstMatch
         guide.tap()
         let done = app.buttons["live.guide.done"].firstMatch
@@ -680,6 +698,43 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen must still open the player")
         close.tap()
         XCTAssertTrue(guide.waitForExistence(timeout: 10))
+    }
+
+    func testLiveCategoryBarStaysFixedWhileScrolling() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Phone Live layout")
+        }
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
+        launch(screen: "live")
+        let bar = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+        let list = app.descendants(matching: .any).matching(identifier: "live.list").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 60))
+        XCTAssertTrue(list.waitForExistence(timeout: 30))
+        let all = app.buttons["live.category.All"].firstMatch
+        XCTAssertTrue(all.waitForExistence(timeout: 30))
+        let barFrame = bar.frame
+        let allFrame = all.frame
+        attach("live-categories-before-scroll")
+        for _ in 0..<3 {
+            list.swipeUp()
+            XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
+            XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
+        }
+        let start = all.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 35)),
+                    withVelocity: .slow, thenHoldForDuration: 1)
+        XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
+        attach("live-categories-after-scroll")
+        let favorites = app.buttons["live.category.Favorites"].firstMatch
+        if favorites.exists, isSafelyHittable(favorites) {
+            let before = favorites.frame
+            favorites.tap()
+            XCTAssertTrue(favorites.isSelected)
+            XCTAssertEqual(favorites.frame.minX, before.minX, accuracy: 1,
+                           "Selecting a visible category must not slide it inside the fixed bar")
+            XCTAssertEqual(favorites.frame.minY, before.minY, accuracy: 1)
+            attach("live-categories-favorites-selected")
+        }
     }
 
     func testLiveGuideSheetOpensAndDismisses() {
@@ -4853,7 +4908,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     private func launchForCrawl(_ screen: CrawlScreen) {
         crawlWindowRect = .null
         app.terminate()
-        app.launchArguments = []
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
         XCUIDevice.shared.orientation = screen.landscape ? .landscapeLeft : .portrait
         app.launchArguments += ["-OpenStreamHoldPlayerChrome", "YES"]
         launch(screen: screen.route)

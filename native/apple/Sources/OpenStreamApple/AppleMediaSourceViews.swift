@@ -1465,8 +1465,7 @@ struct AppleLiveTVView: View {
     }
 
     private var liveStagePlayerColumn: some View {
-        let channel = usesPhoneLiveLayout ? (pendingProbe?.channel ?? selectedChannel) : selectedChannel
-        let programme = channel.flatMap {
+        let programme = selectedChannel.flatMap {
             guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
         }
         return VStack(spacing: 0) {
@@ -1485,12 +1484,9 @@ struct AppleLiveTVView: View {
             .frame(maxWidth: .infinity)
             .clipped()
             .accessibilityIdentifier("live.stage.player")
-            #if os(iOS)
-            if usesPhoneLiveLayout, let channel {
-                AppleLivePhoneProgrammeInfo(channel: channel, programme: programme)
+            if !usesPhoneLiveLayout {
+                AppleLiveProgrammeLine(programme: programme)
             }
-            #endif
-            AppleLiveProgrammeLine(programme: programme)
         }
     }
 
@@ -1556,11 +1552,9 @@ struct AppleLiveTVView: View {
         }
     }
 
-    /// A row plays in the frame above the list, like Paramount+; the row
-    /// already playing goes full screen. The playing mark moves at once,
-    /// before the stream starts.
     private func playFromList(_ channel: AppleIPTVChannel) {
         if channel.id == selectedChannel?.id, catchUp == nil, pendingProbe == nil {
+            guard !usesPhoneLiveLayout else { return }
             AppleInteractionTrace.record(.press, "live row full screen \(channel.name)")
             #if os(visionOS)
             if let fullWindowAction { fullWindowAction() } else { fullScreenRevision &+= 1 }

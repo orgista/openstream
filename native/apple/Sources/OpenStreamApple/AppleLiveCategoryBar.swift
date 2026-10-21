@@ -1,11 +1,6 @@
 #if os(iOS) || os(visionOS)
 import SwiftUI
 
-/// The Live tab's fixed category row (owner item 8): underlined text tabs
-/// that never float or move, the selected one white with a 2 pt white
-/// underline the width of its text, the others secondary; one search glyph
-/// fixed at the trailing end. 17 pt semibold, the same size as the rows'
-/// channel names, so the row does not read as an afterthought.
 struct AppleLiveCategoryBar: View {
     let tabs: [String]
     @Binding var selection: String
@@ -34,8 +29,10 @@ struct AppleLiveCategoryBar: View {
                         }
                     }
                     .padding(.horizontal, 16)
+                    .frame(height: usesPhoneLayout ? categoryHeight : nil)
                 }
                 .scrollIndicators(.never)
+                .scrollBounceBehavior(usesPhoneLayout ? .basedOnSize : .automatic, axes: .vertical)
                 .onChange(of: selection) { _, tab in
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                         proxy.scrollTo(tab, anchor: .center)
