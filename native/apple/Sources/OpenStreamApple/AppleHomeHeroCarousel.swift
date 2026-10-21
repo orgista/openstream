@@ -80,6 +80,7 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             if presentation == .phone || presentation == .pad {
                 AppleHomePhoneHeroCarousel(pageIDs: pageIDs,
                     dotsCentreInset: presentation == .pad ? AppleMacHeroLayout.padDotsCentreInset : AppleHomePhoneHeroLayout.dotsCentreInset,
+                    waitsForCurrentArtwork: presentation == .phone,
                     prefetchTrailer: prefetchTrailer) { index in
                     page(index, false, presentation, 0, 0, nil)
                 } preload: { index in
@@ -99,6 +100,9 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             rotatingHero
             #endif
         }
+        #if os(iOS)
+        .modifier(ApplePhoneLandingHeroReader(isPhone: presentation == .phone))
+        #endif
     }
     #if !os(macOS) && !os(tvOS)
     private var rotatingHero: some View {

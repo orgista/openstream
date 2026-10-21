@@ -284,6 +284,30 @@ struct AppleRecommendationRankerTests {
         #expect(memo.identity(unknown, sourceID: "a") != memo.identity(unknown, sourceID: "b"))
     }
 
+    @Test func recommendationMemoKeepsEnrichedGenresSeparateFromIdentity() {
+        var memo = AppleRecommendationInputs.IdentityMemo()
+        let original = AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Film", genres: [" Drama ", "DRAMA"])
+        let enriched = AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Film", genres: ["Drama", "Comédie"])
+        #expect(memo.genres(original) == ["drama"])
+        #expect(memo.genres(enriched) == ["comedie", "drama"])
+        #expect(memo.genres(original) == ["drama"])
+    }
+
+    @Test func recommendationMemoPreservesProgressAliasesAcrossMetadataChanges() {
+        var memo = AppleRecommendationInputs.IdentityMemo()
+        let source = UUID()
+        for item in [
+            AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Film", releaseInfo: "2020"),
+            AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Film", releaseInfo: "2024"),
+            AppleCatalogItem(mediaID: "tt2250912", type: "movie", name: "Film", releaseInfo: "2017"),
+        ] {
+            let expected = AppleTitleProgressIdentity.candidates(item: item, sourceID: source)
+            #expect(memo.progressCandidates(item, sourceID: source) == expected)
+            #expect(memo.progressCandidates(item.withHeroArtwork(backgroundURL: URL(string: "https://fixture.example/art"),
+                logoURL: nil), sourceID: source) == expected)
+        }
+    }
+
     @Test func ratingRevisionChangesForSetRemovalAndRestore() throws {
         let suite = "recommendation-rating-revision-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

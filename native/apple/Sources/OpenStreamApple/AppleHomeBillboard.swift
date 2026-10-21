@@ -65,6 +65,10 @@ struct AppleHomeBillboard<Actions: View>: View {
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
     @State private var previewTrailerKeys: [String] = []
     @State private var detailTrailerKeys: [String] = []
+    @State private var phoneDetails: AppleTMDBDetails?
+    @State private var phonePreviewLogo: URL?
+    @State private var phoneLogo: URL?
+    @State private var phoneLogoLookupPending = true
     @State private var trailerRequest: UUID?
     /// The title's trailer on the user's server, and whether that lookup
     /// has answered for this page (the Vision Pro waits for it before
@@ -169,6 +173,8 @@ struct AppleHomeBillboard<Actions: View>: View {
         actionMetadataLoaded = false
         previewTrailerKeys = []
         detailTrailerKeys = []
+        phoneDetails = nil
+        phonePreviewLogo = nil
         trailerRequest = nil
         trailerIsOnScreen = false
         let client = AppleStremioMetadataClient()
@@ -177,6 +183,7 @@ struct AppleHomeBillboard<Actions: View>: View {
         let preferred = preferredSourceID
         let item = item
         let configuration = metadataConfiguration
+        let fallbackName = phone != nil ? item.name : nil
         func addLookups(to group: inout TaskGroup<AppleHeroMetadataOutcome>, mediaID: String) {
             if item.type == "series" {
                 group.addTask {
@@ -184,12 +191,11 @@ struct AppleHomeBillboard<Actions: View>: View {
                                                           mediaID: mediaID)) ?? [])
                 }
             }
-            // The details and preview lookups only feed the trailer key, so
-            // the Apple TV, which plays no trailer, skips them.
+            // Apple TV plays no trailer and keeps its separate artwork policy.
             guard AppleTitlePagePolicy.offersTrailers() else { return }
             group.addTask {
                 .details(try? await resolver.resolve(sources: sources, preferredSourceID: preferred,
-                    type: item.type, mediaID: mediaID, configuration: configuration))
+                    type: item.type, mediaID: mediaID, configuration: configuration, fallbackName: fallbackName))
             }
         }
         await withTaskGroup(of: AppleHeroMetadataOutcome.self) { group in
@@ -210,8 +216,12 @@ struct AppleHomeBillboard<Actions: View>: View {
             while let outcome = await group.next() {
                 guard !Task.isCancelled else { group.cancelAll(); return }
                 switch outcome {
-                case .preview(let assets): previewTrailerKeys = assets?.trailerYouTubeKeys ?? []
-                case .details(let details): detailTrailerKeys = details?.trailerYouTubeKeys ?? []
+                case .preview(let assets):
+                    previewTrailerKeys = assets?.trailerYouTubeKeys ?? []
+                    if phone != nil { phonePreviewLogo = assets?.logoURL }
+                case .details(let details):
+                    detailTrailerKeys = details?.trailerYouTubeKeys ?? []
+                    if phone != nil { phoneDetails = details }
                 case .identity(let id): addLookups(to: &group, mediaID: id ?? item.mediaID)
                 case .episodes(let loaded):
                     episodes = loaded
@@ -243,13 +253,13 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var stillPage: AppleHeroStillPage?
 
     /// The iPhone portrait hero's settled art (`AppleHomePhonePortraitStage`).
-    @State private var portraitDecision: AppleHeroPortraitDecision?
+    @State private var portraitArt: AppleHeroPortraitArt?
     /// What that art is drawn from, at the hero's size: the iPhone trailer
     /// renders its cover from it once it has a video to play.
     @State private var portraitCover: AppleHeroPortraitCover?
 
     private var stillURL: URL? {
-        if phone != nil { return portraitDecision?.art.imageURL }
+        if phone != nil { return portraitArt?.imageURL }
         return item.backgroundURL ?? item.posterURL
     }
 
@@ -366,14 +376,28 @@ struct AppleHomeBillboard<Actions: View>: View {
         #endif
     }
 
+    private var phoneLogoCandidates: [URL] {
+        [wordmark, phoneDetails?.logoURL, phonePreviewLogo, item.logoURL].compactMap { $0 }
+    }
+
+    private var phoneLogoTaskID: String {
+        phoneLogoCandidates.map(\.absoluteString).joined(separator: "|")
+    }
+
     @ViewBuilder
     private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
-                               wordmark: wordmark ?? portraitDecision?.logo, wordmarkLookupPending: wordmarkLookupPending,
-                               showsTitle: portraitDecision.map(\.art.showsTitle),
-                               stage: stage, artLuminance: artLuminance,
+                               wordmark: phoneLogo, wordmarkLookupPending: !actionMetadataLoaded || phoneLogoLookupPending,
+                               stage: stage,
                                onOpenDetails: onOpenDetails) { actionButtons }
+                .task(id: phoneLogoTaskID) {
+                    phoneLogoLookupPending = true
+                    let validated = await AppleTransparentPNGLogoValidator.firstValid(in: phoneLogoCandidates)
+                    guard !Task.isCancelled else { return }
+                    if validated != nil || actionMetadataLoaded { phoneLogo = validated }
+                    phoneLogoLookupPending = false
+                }
         } else {
             AppleFeaturedHero(
                 item: item,
@@ -402,10 +426,10 @@ struct AppleHomeBillboard<Actions: View>: View {
             // the same frame and crossfading in from the same pixels.
             return AnyView(
                 ZStack {
-                    AppleHomePhonePortraitStage(item: item, topInset: phone.copyFadeLine, onReady: { decision, image in
-                        portraitDecision = decision
+                    AppleHomePhonePortraitStage(item: item, details: phoneDetails, topInset: phone.copyFadeLine, onReady: { art, image in
+                        portraitArt = art
                         stillImage = image
-                        if let image, let url = decision.art.imageURL {
+                        if let image, let url = art.imageURL {
                             loadedStill = AppleHeroLoadedStill(url: url, image: image)
                             recordStill(.loaded)
                         } else {

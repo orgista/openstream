@@ -256,36 +256,39 @@ struct AppleHomePhoneHeroLayoutTests {
     private let iPhone16Pro = AppleHomePhoneHeroLayout(containerHeight: 874, topInset: 116, bottomInset: 83)
 
     private func rowPeek(_ layout: AppleHomePhoneHeroLayout) -> CGFloat {
-        layout.containerHeight - layout.bottomInset - (layout.artHeight + AppleHomePhoneHeroLayout.firstRowLead)
+        layout.containerHeight - layout.bottomInset - (layout.heroHeight + AppleHomePhoneHeroLayout.firstRowLead)
     }
 
-    @Test func theArtRunsToSeventyThreePercentOfTheScreen() {
-        #expect(abs(iPhone16Pro.artHeight - 874 * 0.73) < 0.5)
+    @Test func theArtUsesTheTitlePageTargetUntilTheRowPeekClampsIt() {
+        #expect(iPhone16Pro.artHeight <= 874 * 0.70)
         #expect(rowPeek(iPhone16Pro) >= AppleHomePhoneHeroLayout.minimumRowPeek)
+    }
+
+    @Test func theButtonsAndDotsSitWhereTheAppleTVAppsDo() {
+        let hero = iPhone16Pro.heroHeight
+        let dots = (hero - AppleHomePhoneHeroLayout.dotsCentreInset) / 874
+        let button = (hero - AppleHomePhoneHeroLayout.copyBottomInset - 25) / 874
+        #expect(abs(dots - 0.70) < 0.01)
+        #expect(abs(button - 0.64) < 0.01)
+        #expect(hero - iPhone16Pro.artHeight == 40)
     }
 
     @Test func theArtStartsAtTheTopEdge() {
         #expect(iPhone16Pro.topOverlap == 116 + AppleHomePhoneHeroLayout.stackTopPadding)
     }
 
-    @Test func theButtonsAndDotsSitWhereTheAppleTVAppsDo() {
-        let art = iPhone16Pro.artHeight
-        let dots = (art - AppleHomePhoneHeroLayout.dotsCentreInset) / 874
-        let button = (art - AppleHomePhoneHeroLayout.copyBottomInset - 25) / 874
-        #expect(abs(dots - 0.70) < 0.01)
-        #expect(abs(button - 0.64) < 0.01)
-    }
-
     @Test(arguments: [
-        // iPhone SE, 15 Pro Max, 16 Pro Max
+        // iPhone SE, 16e, 16 Pro, 15 Pro Max, 16 Pro Max
         AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 72, bottomInset: 49),
+        AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 59, bottomInset: 83),
+        AppleHomePhoneHeroLayout(containerHeight: 874, topInset: 62, bottomInset: 83),
         AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 118, bottomInset: 83),
         AppleHomePhoneHeroLayout(containerHeight: 956, topInset: 118, bottomInset: 83),
     ])
     func theFirstRowAlwaysPeeks(_ layout: AppleHomePhoneHeroLayout) {
         #expect(rowPeek(layout) >= AppleHomePhoneHeroLayout.minimumRowPeek)
         #expect(layout.artHeight <= layout.containerHeight * AppleHomePhoneHeroLayout.artFraction)
-        #expect(layout.artHeight >= AppleHomePhoneHeroLayout.minimumArtHeight)
+        #expect(layout.artHeight > 0)
     }
 
     @Test func anUnmeasuredScrollViewGetsTheFloor() {

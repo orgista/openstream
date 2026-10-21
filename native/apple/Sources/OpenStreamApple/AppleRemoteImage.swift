@@ -566,6 +566,15 @@ enum AppleTransparentPNGLogoValidator {
     /// content page took to show its wordmark (measured 2026-09-15).
     static let validationPixelDimension = 2_560
 
+    static func firstValid(in candidates: [URL]) async -> URL? {
+        var seen = Set<URL>()
+        for url in candidates where seen.insert(url).inserted {
+            guard !Task.isCancelled else { return nil }
+            if await isValid(url: url), !Task.isCancelled { return url }
+        }
+        return nil
+    }
+
     static func isValid(url: URL) async -> Bool {
         guard let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http",

@@ -3192,17 +3192,22 @@ struct AppleLibraryView: View {
         #if !os(tvOS)
         // The same Search and Refresh as Discover, in the empty state too.
         .toolbar {
-            ToolbarItem(placement: libraryToolbarPlacement) {
-                Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(AppleLibrarySort.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                } label: { Label("Sort library", systemImage: "arrow.up.arrow.down") }
-                .accessibilityIdentifier("library.sort")
-            }
-            AppleTabToolbar(tab: .library, isRefreshing: library.isLoading || AppleXtreamLibraryStore.shared.isLoading,
-                            onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom != .phone { libraryToolbar }
+            #else
+            libraryToolbar
+            #endif
         }
+        #if os(iOS)
+        .modifier(ApplePhoneLandingChrome(title: "Library", identifier: "library.compact-title",
+            hasHero: !hasNothingToShow && (!library.featuredCandidates.isEmpty
+                || !AppleHeroRotation.candidates(AppleXtreamLibraryStore.shared.shelves.flatMap(\.preview),
+                    id: \.id, hasBackdrop: AppleHeroRotation.hasBackdrop).isEmpty),
+            isRefreshing: library.isLoading || AppleXtreamLibraryStore.shared.isLoading,
+            onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } }) {
+                sortMenu.modifier(ApplePhoneHeroControlStyle())
+            })
+        #endif
         #if os(macOS)
         .onChange(of: AppleMacCommandCenter.shared.refreshRevision) {
             guard AppleMacCommandCenter.shared.refreshTarget == .library, !library.isLoading else { return }
@@ -3379,6 +3384,24 @@ struct AppleLibraryView: View {
     private var genreShelves: some View {
         ForEach(library.genreShelves(sort), id: \.genre) { shelf($0.genre, $0.groups) }
     }
+
+    #if !os(tvOS)
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort", selection: $sort) {
+                ForEach(AppleLibrarySort.allCases) { Text($0.rawValue).tag($0) }
+            }
+        } label: { Label("Sort library", systemImage: "arrow.up.arrow.down") }
+        .accessibilityIdentifier("library.sort")
+    }
+
+    @ToolbarContentBuilder
+    private var libraryToolbar: some ToolbarContent {
+        ToolbarItem(placement: libraryToolbarPlacement) { sortMenu }
+        AppleTabToolbar(tab: .library, isRefreshing: library.isLoading || AppleXtreamLibraryStore.shared.isLoading,
+                        onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } })
+    }
+    #endif
 
     private var libraryScroll: some View {
         ScrollView {

@@ -18,6 +18,19 @@ public enum AppleTitlePageSlotArt: Equatable, Sendable {
         return nil
     }
 
+    static func choose(item: AppleCatalogItem, details: AppleTMDBDetails? = nil,
+                       fallback: AppleArtworkResolver.Artwork? = nil, failed: Set<URL> = []) -> Self? {
+        choose(backdrops: [details?.textlessBackdropURL, details?.backdropURL, item.backgroundURL, fallback?.backgroundURL],
+               posters: [details?.posterURL, item.posterURL, fallback?.posterURL], failed: failed)
+    }
+
+    static func landingBackdrops(item: AppleCatalogItem, details: AppleTMDBDetails,
+                                remembered: AppleHeroPortraitArt?) -> [URL?] {
+        let rememberedURL: URL?
+        if case .backdrop(let url) = remembered { rememberedURL = url } else { rememberedURL = nil }
+        return [details.textlessBackdropURL, rememberedURL, item.backgroundURL, details.backdropURL]
+    }
+
     /// Prefer a decoded backdrop, then a decoded poster, without starting
     /// any I/O. An uncached better candidate can replace this later.
     public static func chooseCached(backdrops: [URL?], posters: [URL?],
@@ -58,6 +71,10 @@ public enum AppleTitlePageSlotArt: Equatable, Sendable {
     public var isPosterCard: Bool {
         if case .posterCard = self { return true }
         return false
+    }
+
+    static func heroHeight(screenHeight: CGFloat) -> CGFloat {
+        max(AppleHomePhoneHeroLayout.minimumArtHeight, screenHeight * AppleHomePhoneHeroLayout.artFraction)
     }
 
     /// 16:9 of the width: the size of a poster card's frame.

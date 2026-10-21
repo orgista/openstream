@@ -287,6 +287,16 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
     /// `OPENSTREAM_UX_CAPTURE_TAB` (Discover by default), the number of pages
     /// from `OPENSTREAM_UX_CAPTURE_PAGES` (8 by default).
     func testB7HeroPages() {
+        if environment["OPENSTREAM_UX_CAPTURE_STILLS"] == "1" {
+            app.launchArguments = ["-OpenStreamVisionScreen", "playback-settings", "-OpenStreamMuteAudio", "YES"]
+            app.launch()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+            let autoplay = app.switches["Auto Play Trailer"].firstMatch
+            scrollToControl(autoplay, in: app)
+            XCTAssertTrue(autoplay.exists)
+            if autoplay.value as? String == "1" { autoplay.switches.firstMatch.tap() }
+            XCTAssertEqual(autoplay.value as? String, "0")
+        }
         let tab = environment["OPENSTREAM_UX_CAPTURE_TAB"].flatMap { $0.isEmpty ? nil : $0 } ?? "Discover"
         let pages = environment["OPENSTREAM_UX_CAPTURE_PAGES"].flatMap(Int.init) ?? 8
         launch([])
@@ -299,6 +309,20 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         Thread.sleep(forTimeInterval: 8)
         let slug = tab.lowercased()
         shot("\(slug)-hero-01")
+        if environment["OPENSTREAM_UX_CAPTURE_DETAILS"] == "1" {
+            details.tap()
+            XCTAssertTrue(app.buttons["detail.back"].firstMatch.waitForExistence(timeout: 30))
+            if let expectedID = environment["OPENSTREAM_UX_CAPTURE_ITEM_ID"] {
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "detail.screen.\(expectedID)")
+                    .firstMatch.waitForExistence(timeout: 30))
+            }
+            Thread.sleep(forTimeInterval: 3)
+            shot("\(slug)-title-page")
+            app.buttons["detail.back"].firstMatch.tap()
+            XCTAssertTrue(details.waitForExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["detail.back"].firstMatch.exists)
+            return
+        }
         let window = app.windows.firstMatch
         for page in 2...max(pages, 2) {
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.3))
@@ -341,6 +365,62 @@ final class AppleUXCaptureUITests: OpenStreamUITestCase {
         }
         Thread.sleep(forTimeInterval: 15)
         shot("jank-09-end")
+    }
+
+    func testB8LandingChrome() throws {
+        for page in ["discover", "library"] {
+            launch(["-OpenStreamVisionScreen", page, "-OpenStreamDiscoverScrollY", "0"])
+            let hero = app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch
+            XCTAssertTrue(hero.waitForExistence(timeout: 60), "\(page) hero must be present")
+            let compact = app.staticTexts["\(page).compact-title"].firstMatch
+            XCTAssertFalse(compact.exists, "\(page) must have no compact title at rest")
+            XCTAssertTrue(app.buttons["Search"].firstMatch.isHittable)
+            XCTAssertTrue(app.buttons["Refresh"].firstMatch.isHittable)
+            shot("chrome-\(page)-rest")
+            for _ in 0..<4 where !compact.exists { app.swipeUp() }
+            XCTAssertTrue(compact.waitForExistence(timeout: 5), "\(page) title must appear after the hero")
+            XCTAssertTrue(app.buttons["Search"].firstMatch.isHittable)
+            XCTAssertTrue(app.buttons["Refresh"].firstMatch.isHittable)
+            shot("chrome-\(page)-scrolled")
+            let windowHeight = app.windows.firstMatch.frame.height
+            let row = app.scrollViews.allElementsBoundByIndex.first { row in
+                let frame = row.frame
+                return frame.height > 60 && frame.height < windowHeight / 2
+                    && frame.width > app.windows.firstMatch.frame.width / 2
+                    && frame.minY > compact.frame.maxY && frame.maxY < windowHeight - 90
+            }
+            let posterRow = try XCTUnwrap(row, "\(page) needs a visible horizontal shelf")
+            for direction in [true, false, true] {
+                if direction { posterRow.swipeLeft() } else { posterRow.swipeRight() }
+                XCTAssertTrue(compact.exists, "\(page) title must remain while swiping a shelf")
+                shot("chrome-\(page)-row-\(direction ? "left" : "right")")
+            }
+        }
+        launch(["-OpenStreamVisionScreen", "discover", "-OpenStreamReviewDiscoverLoading", "YES"])
+        XCTAssertTrue(app.staticTexts["discover.compact-title"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Search"].firstMatch.isHittable)
+        XCTAssertTrue(app.buttons["Refresh"].firstMatch.isHittable)
+        shot("chrome-discover-without-hero")
+    }
+
+    func testB8LandingWithoutHero() throws {
+        for page in ["discover", "library"] {
+            app.terminate()
+            app.launchArguments = ["-OpenStreamStubNetwork", Self.stubDirectory, "-OpenStreamTrace", "YES",
+                "-OpenStreamMuteAudio", "YES", "-OpenStreamVisionScreen", page]
+            app.launch()
+            let compact = app.staticTexts["\(page).compact-title"].firstMatch
+            XCTAssertTrue(compact.waitForExistence(timeout: 30))
+            let title = page == "discover" ? "Your Library" : "Movies"
+            let heading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
+            XCTAssertTrue(heading.waitForExistence(timeout: 60), "\(page) needs its populated shelf heading")
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "home.featured.details").firstMatch.exists)
+            let headingFrame = try XCTUnwrap((try? heading.snapshot())?.frame)
+            let controlsBottom = app.buttons["\(page).compact-title.search"].firstMatch.frame.maxY
+            XCTAssertGreaterThanOrEqual(headingFrame.minY, controlsBottom,
+                "\(page)'s first shelf heading must clear the compact bar")
+            shot("chrome-\(page)-populated-without-hero")
+        }
     }
 
     /// Spec S3 G12: the title page from the top to its last section, a frame

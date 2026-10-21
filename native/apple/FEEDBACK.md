@@ -4689,3 +4689,28 @@ Both simulators passed all 34 disc/caption cases after correcting the tests for 
 You can select several folders from a network share, name each one before adding them, and add more folders from its group in Sources. Folders on the same server and account share saved credentials. Removing one source keeps the account available to the other folders. The saved source and backup formats are unchanged.
 
 The package checks passed 3,363 tests in 410 suites, and all three app builds passed (Mac without signing). Apple TV passed 20/0. iPhone remains 39/2 instead of the requested 40/1: the existing Live case and player skip-position check still fail after retries. The same player assertion was present before this change. No real SMB server was configured; the four fixture screenshots are under `verification-artifacts/share-multi-folder-2026-10-13/`. Direct tap verification was unavailable because the simulator control agent is absent. Original data was restored and the simulators closed. No commit or upload.
+
+
+## 2026-10-20 — Matching iPhone heroes
+
+Discover and Library now use the same artwork, framing, fade and title treatment as the title page. Search and Refresh sit over the artwork as round buttons. The page name appears only after the hero scrolls away. The three requested title comparisons and both iOS versions are saved under `../../../evidence/hero-unify-2026-10-20/`.
+
+The existing caches are reused before starting more artwork work. On DevPlus, the single cold/warm hero samples changed from 1.68/1.61 seconds to 1.36/1.52 seconds. Rows did not improve consistently. Full painted-screen timing has screenshot overhead and no original phone screenshot baseline, so the evidence records those limits.
+
+All 3,612 package tests passed, along with the iOS builds, chrome checks, scrolling check and final Discover/title navigation tests. One existing optional distribution check stayed skipped. Owner simulator data was restored with matching hashes. No commit or upload.
+
+
+## 2026-10-20 — Hero review fixes
+
+Applied all eight review points: artwork can improve once without falling back, the first row keeps its 90-point peek, cached title logos appear promptly, and loading pages retain their page name. Backdrop cover drawing runs off the main thread. Touch checks now account for the compact bar, and repeated image callbacks are guarded. An iOS 27 startup crash exposed by the loading check is fixed.
+
+All 3,614 package tests passed. The iOS builds, both versions’ chrome checks, redraw check and Discover/title navigation passed; one existing optional measurement stayed skipped. Three same-title screenshot pairs match. Owner simulator data was restored and the simulators shut down.
+
+Three DevPlus samples in each mode show no consistent speed gain: median hero times changed from 1.445 to 1.504 seconds and 1.509 to 1.534 seconds. These are process launches with disk caches retained, not cleared-cache measurements. The evidence and earlier attempts are under `../../../evidence/hero-unify-2026-10-20/`. Existing work is preserved; no commit or upload.
+
+
+## 2026-10-20 — Fable hero second pass
+
+Discover and Library now leave room for the top bar when there is no hero, keeping the first shelf heading visible. A cached poster no longer uses up the artwork upgrade, and catalog artwork remains available if remembered art fails. The page title reads only the vertical scroll view. The eager scene initializer stays in place to preserve the iOS 27 launch fix.
+
+Serial gate: 3,615 tests in 446 suites. iOS build and runner passed; Discover crawl and smoke passed with one existing optional skip. Chrome and populated pages without heroes passed on iOS 18.6 and 27; hero redraw count was one. Screenshots, swipe videos and verification are in `../../../evidence/hero-unify-2026-10-20/second-pass/`. Owner state was restored and simulators shut down. No commits.
