@@ -196,3 +196,79 @@ private final class SortObservationChangeFlag {
     #expect(completed == ["tt-example:1:2"])
     #expect(completed.contains(AppleLocalLibraryStore.fileEpisodeID(filename)) == false)
 }
+
+@MainActor @Test(.timeLimit(.minutes(1)))
+func cancelledLibraryReloadAllowsWaitingReloadWithNewestSources() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let firstFolder = root.appendingPathComponent("first")
+    let newestFolder = root.appendingPathComponent("newest")
+    for folder in [firstFolder, newestFolder] {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("fixture".utf8).write(to: folder.appendingPathComponent(folder.lastPathComponent + ".2020.mkv"))
+    }
+    let suite = "library-reload-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let sourceStore = AppleSourceStore(defaults: defaults, keychain: SortObservationCredentialStub(),
+        documentsDirectory: root.appendingPathComponent("documents"))
+    let settings = AppleSettingsStore(defaults: defaults, keychain: SortObservationCredentialStub())
+    let firstSource = try sourceStore.addLibraryFolder(name: "First", url: firstFolder, bookmarkData: nil)
+    let probe = LibraryReloadMatchProbe()
+    let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("metadata")) { title, _, _, _ in
+        await probe.lookup(title.title)
+    }
+    let library = AppleLocalLibraryStore(resolver: resolver, playbackStore: ApplePlaybackStore(defaults: defaults),
+        versionCacheURL: root.appendingPathComponent("versions.json"))
+    let index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: root.appendingPathComponent("index.json")))
+    let first = Task { await library.reload(sourceStore: sourceStore, mediaIndex: index, settings: settings) }
+    await probe.waitUntilStarted()
+    #expect(library.isLoading)
+    let newestSource = try sourceStore.addLibraryFolder(name: "Newest", url: newestFolder, bookmarkData: nil)
+    let started = AsyncStream<Void>.makeStream()
+    var secondFinished = false
+    let second = Task {
+        started.continuation.yield(())
+        await library.reload(sourceStore: sourceStore, mediaIndex: index, settings: settings)
+        secondFinished = true
+    }
+    var iterator = started.stream.makeAsyncIterator()
+    _ = await iterator.next()
+    #expect(!secondFinished)
+    first.cancel()
+    await first.value
+    await probe.finish()
+    await second.value
+    #expect(!library.isLoading)
+    #expect(Set(library.groups.flatMap(\.items).map(\.sourceID).filter { $0 != AppleLocalLibraryStore.downloadsID }) == [firstSource.id, newestSource.id])
+    #expect(Set(library.sources.map(\.id).filter { $0 != AppleLocalLibraryStore.downloadsID }) == [firstSource.id, newestSource.id])
+    #expect(index.records.contains { $0.title.localizedCaseInsensitiveContains("newest") })
+}
+
+private actor LibraryReloadMatchProbe {
+    private var calls = 0
+    private var started: CheckedContinuation<Void, Never>?
+    private var response: CheckedContinuation<Void, Never>?
+
+    func lookup(_ title: String) async -> AppleCatalogItem? {
+        calls += 1
+        if calls == 1 {
+            await withCheckedContinuation { continuation in
+                response = continuation
+                started?.resume()
+                started = nil
+            }
+        }
+        return AppleCatalogItem(mediaID: "local-" + title, type: "movie", name: title)
+    }
+
+    func waitUntilStarted() async {
+        if calls > 0 { return }
+        await withCheckedContinuation { started = $0 }
+    }
+
+    func finish() {
+        response?.resume()
+        response = nil
+    }
+}

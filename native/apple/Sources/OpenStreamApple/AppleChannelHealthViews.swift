@@ -166,7 +166,9 @@ struct AppleChannelHealthSettingsRows: View {
         }
         .task {
             await store.loadIfNeeded()
+            #if !os(tvOS)
             await store.prepareLineupIfNeeded(settings: settings, sourceStore: sourceStore)
+            #endif
         }
     }
 
@@ -183,21 +185,21 @@ struct AppleChannelHealthSettingsRows: View {
                 .accessibilityIdentifier("settings.health.stop")
         } else {
             Button("Check Channels Now") {
-                #if os(iOS)
-                if store.lineup.isEmpty {
-                    let failure = sourceStore.sources.first {
-                        $0.kind == .liveTV && $0.isEnabled && $0.hasCurrentValidationFailure
-                    }?.validationFailureSummary
-                    nothingToCheck = AppleChannelHealthSummary.nothingToCheck(sourceFailure: failure)
-                } else {
-                    nothingToCheck = nil
-                    store.startSweep()
+                Task {
+                    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sourceStore)
+                    guard !Task.isCancelled else { return }
+                    if store.lineup.isEmpty {
+                        let failure = sourceStore.sources.first {
+                            $0.kind == .liveTV && $0.isEnabled && $0.hasCurrentValidationFailure
+                        }?.validationFailureSummary
+                        nothingToCheck = AppleChannelHealthSummary.nothingToCheck(sourceFailure: failure)
+                    } else {
+                        nothingToCheck = nil
+                        store.startSweep()
+                    }
                 }
-                #else
-                store.startSweep()
-                #endif
             }
-                .disabled(store.hasLivePlayback)
+                .disabled(store.hasLivePlayback || store.isPreparingLineup)
                 .accessibilityIdentifier("settings.health.check")
         }
     }

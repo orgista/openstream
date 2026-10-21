@@ -3443,7 +3443,7 @@ struct AppleLibraryView: View {
         .background(Color.black.ignoresSafeArea())
         #endif
         .refreshable { await reload() }
-        .task { library.refreshProgress(); if library.groups.isEmpty { await reload() } }
+        .task { library.refreshProgress(); if library.groups.isEmpty && !library.isLoading { await reload() } }
         .onAppear { library.refreshProgress(); AppleXtreamLibraryStore.shared.refreshProgress() }
     }
     private func reload() async {

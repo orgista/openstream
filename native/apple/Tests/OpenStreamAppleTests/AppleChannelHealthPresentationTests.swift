@@ -178,3 +178,47 @@ struct AppleChannelHealthPresentationTests {
         #expect(AppleWorkingM3UExportRoute.address(for: session) == "192.0.2.10:8090/working.m3u?pair=ABC123")
     }
 }
+
+@MainActor @Test
+func channelHealthLoadsMissingLineupBeforeLiveAndReusesItsCache() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "health-cold-lineup-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let sources = AppleSourceStore(defaults: defaults, keychain: HealthLineupCredentials(),
+        documentsDirectory: root.appendingPathComponent("documents"))
+    let source = try sources.addIPTV(name: "Fixture TV", type: .m3u,
+        endpoint: "https://fixture.example/channels.m3u", username: "", password: "")
+    let settings = AppleSettingsStore(defaults: defaults, keychain: HealthLineupCredentials())
+    settings.liveChannelScope = .providerLineup
+    settings.liveChannelPackage = .everything
+    let cache = AppleIPTVChannelCache(directory: root.appendingPathComponent("channels"))
+    let client = AppleIPTVClient { request in
+        let url = try #require(request.url)
+        #expect(url.host == "fixture.example")
+        return (Data("#EXTM3U\n#EXTINF:-1,Fixture News\nhttps://fixture.example/live/news.m3u8\n".utf8),
+            try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+    }
+    let store = AppleChannelHealthStore(history: AppleChannelHealthHistory(directory: root.appendingPathComponent("history")))
+    #expect(store.lineup.isEmpty)
+    #expect(await cache.snapshot(for: source.id) == nil)
+    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: client)
+    #expect(store.lineup.map(\.name) == ["Fixture News"])
+    #expect(!store.isPreparingLineup)
+    #expect(!store.isSweeping)
+    #expect(await cache.snapshot(for: source.id)?.channels == store.lineup)
+    let cachedStore = AppleChannelHealthStore(history: AppleChannelHealthHistory(directory: root.appendingPathComponent("history")))
+    let noNetwork = AppleIPTVClient { _ in
+        Issue.record("A saved lineup must be usable before Live without refetching it")
+        throw URLError(.badServerResponse)
+    }
+    await cachedStore.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: noNetwork)
+    #expect(cachedStore.lineup == store.lineup)
+}
+
+private struct HealthLineupCredentials: AppleCredentialStoring {
+    func string(for account: String) throws -> String? { nil }
+    func set(_ value: String, for account: String) throws {}
+    func remove(_ account: String) throws {}
+}

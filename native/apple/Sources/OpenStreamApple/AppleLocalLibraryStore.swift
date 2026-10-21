@@ -21,6 +21,7 @@ final class AppleLocalLibraryStore {
     /// Titles whose cached lookup found no such title (`AppleLibraryUnmatchedPolicy`).
     private(set) var noMatchIDs: Set<String> = []
     private(set) var isLoading = false
+    @ObservationIgnored private let reloadGate = AppleReloadGate()
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
     private var offlineIDs: [String: String] = [:]
@@ -494,9 +495,12 @@ final class AppleLocalLibraryStore {
     }
 
     func reload(sourceStore: AppleSourceStore, mediaIndex: AppleMediaIndexStore, settings: AppleSettingsStore) async {
-        guard !isLoading else { return }
+        guard !Task.isCancelled, await reloadGate.waitUntilIdle(), reloadGate.begin() else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            reloadGate.end()
+        }
         sources = sourceStore.sources.filter { $0.isEnabled && ($0.kind == .library || $0.kind == .nas) }
         var files: [AppleLibraryItem] = []
         var errors: [String] = []
@@ -538,6 +542,7 @@ final class AppleLocalLibraryStore {
                 sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
             }
         }
+        guard !Task.isCancelled else { return }
         appleTrace("library scans done, \(files.count) files")
         let downloads = await AppleOfflineMediaStore().allRecords()
         appleTrace("library downloads read: \(downloads.count)")
@@ -562,6 +567,7 @@ final class AppleLocalLibraryStore {
         }
         let snapshot = files
         let regrouped = await Task.detached { AppleLibrarySeries.groups(snapshot) }.value
+        guard !Task.isCancelled else { return }
         // A rescan that finds the titles already published must not redraw
         // Library and Discover. (Groups from the persisted index carry fewer
         // parse fields, so the first scan after it still publishes.)
@@ -644,6 +650,7 @@ final class AppleLocalLibraryStore {
             guard !Task.isCancelled else { return }
             await resolve(group, sourceStore: sourceStore, settings: settings)
         }
+        guard !Task.isCancelled else { return }
         appleTrace("library eager metadata resolved, no match: \(noMatchIDs.count)")
         let completedSources = pendingIndexWrites.filter { $0.status == .complete }
         for entry in completedSources { lastSuccessfulScanBySource[entry.source.id] = .now }
@@ -1138,6 +1145,10 @@ struct AppleLocalTitleDestination: View {
                 .environment(\.appleLibraryAutomaticMatch, automaticMatchAction)
                 .sheet(isPresented: $showsFixMatch) {
                     AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
+                }
+                .task(id: group.id) {
+                    guard library.metadata[group.id] == nil else { return }
+                    await library.resolve(group, sourceStore: sourceStore, settings: settings)
                 }
                 .task(id: library.metadata[group.id]) { isManualMatch = await library.hasManualMatch(group) }
                 .task(id: automaticMatchRequest) {
