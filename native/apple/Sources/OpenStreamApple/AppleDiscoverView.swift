@@ -419,9 +419,22 @@ struct AppleDiscoverView: View {
         // refreshes on appear, so nothing floats over the billboard (X4).
         #if !os(tvOS)
         .toolbar {
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom != .phone {
+                AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
+                                onSearch: { showsSearch = true }, onRefresh: refresh)
+            }
+            #else
             AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
                             onSearch: { showsSearch = true }, onRefresh: refresh)
+            #endif
         }
+        #endif
+        #if os(iOS)
+        .modifier(ApplePhoneLandingChrome(title: "Discover", identifier: "discover.compact-title",
+            hasHero: !heroes.isEmpty && hasContent && !reviewLoadingState,
+            isRefreshing: isRefreshing || catalogStore.isLoading,
+            onSearch: { showsSearch = true }, onRefresh: refresh, accessory: { EmptyView() }))
         #endif
         #if os(macOS)
         .onChange(of: AppleMacCommandCenter.shared.refreshRevision) {
@@ -653,6 +666,11 @@ struct AppleDiscoverView: View {
         do {
             let started = ContinuousClock.now
             var result = try await Self.buildRecommendations(snapshot)
+            #if DEBUG
+            if let pinned = reviewHero(source: result.heroes.first?.source) {
+                result.heroes = [pinned]
+            }
+            #endif
             guard !Task.isCancelled, revision == recommendationRevision else { return }
             appleTrace("discover recommendations \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms"
                 + " picks=\(result.picks.count) heroes=\(result.heroes.count)")
@@ -937,10 +955,10 @@ struct AppleDiscoverView: View {
         for value in historyValues {
             try Task.checkCancellation()
             let id = identities.identity(value.item, sourceID: value.source.id.uuidString)
-            let genres = AppleRecommendationInputs.genres(value.item)
+            let genres = identities.genres(value.item)
             genresByID[id, default: []] += genres
             let keys = Array(Set([value.record.id, value.item.mediaID]
-                + AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id)))
+                + identities.progressCandidates(value.item, sourceID: value.source.id)))
             let storageKeys = keys.compactMap { ApplePlaybackIdentity.storageKey(for: $0) }
             let saved = storageKeys.compactMap { progress[$0] }
             let dates = storageKeys.compactMap { completed[$0] }
@@ -1423,7 +1441,7 @@ struct AppleDiscoverView: View {
         _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
         phone: Bool = false, mac: Bool = false, pad: Bool = false, tv: AppleHomeTVHeroContext? = nil
     ) -> some View {
-        let item = heroItem(value.item)
+        let item = phone ? value.item : heroItem(value.item)
         return AppleHomeBillboard(
             item: item,
             sources: sourceStore.sources,
@@ -1652,6 +1670,19 @@ struct AppleDiscoverView: View {
     }
 
     #if DEBUG
+    /// Captures can compare a title that is absent from the current catalog, without saving a source or watch event.
+    private func reviewHero(source: AppleSource?) -> IndexedCatalogItem? {
+        guard UserDefaults.standard.bool(forKey: "OpenStreamDebugPinHero"), let source,
+              let encoded = UserDefaults.standard.string(forKey: "OpenStreamDebugHeroItem"),
+              let payload = Data(base64Encoded: encoded),
+              let item = try? JSONDecoder().decode(AppleCatalogItem.self, from: payload),
+              item.mediaID == UserDefaults.standard.string(forKey: "OpenStreamDebugPlayID"),
+              item.type == UserDefaults.standard.string(forKey: "OpenStreamDebugPlayType") else { return nil }
+        appleTrace("hero capture pin \(item.mediaID)")
+        return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+            item: item, source: source)
+    }
+
     private var visionReviewItem: IndexedCatalogItem? {
         // "detail-movie" is "detail" for the first film instead of the first
         // series, so a sweep can photograph both kinds of title page.
@@ -3360,7 +3391,6 @@ struct AppleCatalogItemDetailView: View {
     /// Scrolls the page back to the hero when a trailer is chosen below it.
     @State private var detailScrollPosition = ScrollPosition(edge: .top)
     @State private var detailHeroIsOffscreen = false
-    @ScaledMetric(relativeTo: .largeTitle) private var phoneTitleSize: CGFloat = 44
     // The text title and its metadata line grow with Dynamic Type; fixed
     // point sizes stayed small at the accessibility sizes (iPad v2 re-run).
     @ScaledMetric(relativeTo: .title3) private var scaledLandscapeTitleSize: CGFloat = AppleDetailMetrics.landscapeTitleFontSize
@@ -3796,15 +3826,12 @@ struct AppleCatalogItemDetailView: View {
             // The first wordmark that is a clean transparent PNG. TMDB's pick
             // can fail it (an SVG, an opaque plate) where the add-on's logo the
             // Discover hero draws passes (Project Hail Mary, iPad v2).
-            for logoURL in candidates {
-                guard !Task.isCancelled else { return }
-                if await AppleTransparentPNGLogoValidator.isValid(url: logoURL), !Task.isCancelled {
-                    #if DEBUG
-                    AppleLaunchClock.mark("detail.validated")
-                    #endif
-                    titleWordmark.state = .valid(logoURL)
-                    return
-                }
+            if let logoURL = await AppleTransparentPNGLogoValidator.firstValid(in: candidates), !Task.isCancelled {
+                #if DEBUG
+                AppleLaunchClock.mark("detail.validated")
+                #endif
+                titleWordmark.state = .valid(logoURL)
+                return
             }
             if !Task.isCancelled { titleWordmark.state = .unavailable }
         }
@@ -5100,11 +5127,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var phoneSlotArtCandidate: AppleTitlePageSlotArt? {
-        AppleTitlePageSlotArt.choose(
-            backdrops: [pageMetadata.details?.textlessBackdropURL, pageMetadata.details?.backdropURL,
-                        item.backgroundURL, pageMetadata.fallbackArtwork?.backgroundURL],
-            posters: [pageMetadata.details?.posterURL, item.posterURL, pageMetadata.fallbackArtwork?.posterURL],
-            failed: slotArt.failed)
+        AppleTitlePageSlotArt.choose(item: item, details: pageMetadata.details,
+            fallback: pageMetadata.fallbackArtwork, failed: slotArt.failed)
     }
 
     private func phoneSlotArtFailed(_ art: AppleTitlePageSlotArt) {
@@ -9640,12 +9664,7 @@ extension AppleCatalogItemDetailView {
     /// From the top edge of the screen: 70 % of it, as the Apple TV app's
     /// title page and build 15, never less than the home hero's floor.
     private var phoneHeroArtHeight: CGFloat {
-        max(AppleHomePhoneHeroLayout.minimumArtHeight, viewportSize.height * 0.70)
-    }
-
-    /// A poster card (no backdrop anywhere) keeps the 16:9 slot's size.
-    private var phoneSlotHeight: CGFloat {
-        AppleTitlePageSlotArt.slotHeight(width: viewportSize.width)
+        AppleTitlePageSlotArt.heroHeight(screenHeight: viewportSize.height)
     }
 
     /// The full-bleed header of build 15 (owner 2026-10-17, undoing 13a2677's
@@ -9664,7 +9683,7 @@ extension AppleCatalogItemDetailView {
         // hero still follows the full size.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.horizontal, Self.phoneInset)
-        .padding(.bottom, 14)
+        .padding(.bottom, AppleHomePhoneHeroLayout.titlePageCopyBottomInset)
         // Clear of the status bar and the navigation buttons at the
         // accessibility sizes; the hero grows downwards instead.
         .padding(.top, dynamicTypeSize.isAccessibilitySize ? pageGeometry.safeAreaInsets.top + 56 : 0)
@@ -9721,45 +9740,16 @@ extension AppleCatalogItemDetailView {
 
     /// Known art renders immediately. Keep the previous decoded picture
     /// visible until a replacement has decoded.
-    @ViewBuilder
     private var phoneSlotArtwork: some View {
-        ZStack {
-            Color.black
-            if let art = phoneSlotArt {
-                switch art {
-                case .backdrop(let url):
-                    AppleRemoteImage(url: url, placeholderSystemImage: "", onLoad: { phoneSlotArtLoaded($0, art: art) },
-                                     onFailure: { phoneSlotArtFailed(art) }, loadingFill: .clear, keepsImageWhileReloading: true, fillAlignment: .center)
-                case .posterCard(let url):
-                    AppleRemoteImage(url: url, placeholderSystemImage: "", loadingFill: .clear, keepsImageWhileReloading: true, fillAlignment: .center)
-                        .blur(radius: 30)
-                        .overlay(Color.black.opacity(0.35))
-                    // Sized to a 2:3 poster: a fitted image in
-                    // `AppleRemoteImage` is pinned to its leading edge.
-                    AppleRemoteImage(url: url, contentMode: .fit, placeholderSystemImage: "", onLoad: { phoneSlotArtLoaded($0, art: art) },
-                                     onFailure: { phoneSlotArtFailed(art) }, loadingFill: .clear, keepsImageWhileReloading: true)
-                        .frame(width: max(0, phoneSlotHeight - 24) * 2 / 3, height: max(0, phoneSlotHeight - 24))
-                        .clipShape(.rect(cornerRadius: 8))
-                }
-            }
-            if slotArt.itemID == item.id, let image = heroStill.image, let displayed = slotArt.displayed {
-                AppleTitlePageDecodedSlotImage(image: image, art: displayed, slotHeight: phoneSlotHeight)
-            } else if let cached = cachedPhoneSlotArt {
-                AppleTitlePageDecodedSlotImage(image: cached.image, art: cached.art, slotHeight: phoneSlotHeight)
-                    .onAppear { phoneSlotArtLoaded(cached.image, art: cached.art) }
-                    .task(id: "cached-slot:\(item.id):\(slotArt.itemID ?? "")") {
-                        guard heroStill.image == nil else { return }
-                        phoneSlotArtLoaded(cached.image, art: cached.art)
-                    }
-            }
-        }
-        .id(item.id)
+        ApplePhoneHeroArtwork(art: phoneSlotArt, cachedArt: cachedPhoneSlotArt,
+            isReadyForLoadResult: slotArt.itemID == item.id, onLoad: phoneSlotArtLoaded, onFailure: phoneSlotArtFailed)
+            .id(item.id)
     }
 
     private func phoneSlotArtLoaded(_ image: CGImage, art: AppleTitlePageSlotArt) {
         guard slotArt.itemID == item.id,
               AppleTitlePageSlotArt.acceptsLoadedArt(art, requested: phoneSlotArt, displayed: slotArt.displayed) else { return }
-        if slotArt.chosen == nil { slotArt.chosen = art }
+        if slotArt.chosen == nil { slotArt.chosen = phoneSlotArtCandidate ?? art }
         slotArt.displayed = art
         heroStill.image = image
         heroStill.art = heroStill.art.settling(with: .loaded)
@@ -9768,41 +9758,13 @@ extension AppleCatalogItemDetailView {
 
     /// The wordmark once it has drawn, otherwise the name in black-weight
     /// capitals; the space is held while the wordmark resolves.
-    @ViewBuilder
     private var phoneTitleLockup: some View {
-        let logoHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 120 : AppleDetailMetrics.titleLogoMaxHeight
-        switch titleLogoPresentation {
-        case .text:
-            Text(displayTitle.uppercased())
-                .font(.system(size: min(max(phoneTitleSize, 34), dynamicTypeSize.isAccessibilitySize ? 58 : 48), weight: .black))
-                .tracking(1)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .minimumScaleFactor(0.6)
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.8), radius: 12, y: 2)
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel(displayTitle)
-                .accessibilityAddTraits(.isHeader)
-        case .logo, .hidden:
-            ZStack {
-                if case .valid = titleWordmark.state, let logoURL = titleLogoURL {
-                    AppleTrimmedTitleLogo(url: logoURL, alignment: .center) { loaded in
-                        guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
-                        titleWordmark.loadResult = loaded
-                        if loaded { fillTimeline.mark(.wordmark) }
-                    }
-                    .opacity(titleLogoPresentation == .logo ? 1 : 0)
-                }
+        ApplePhoneHeroTitle(name: displayTitle, presentation: titleLogoPresentation,
+            logoURL: titleLogoURL) { loaded in
+                guard AppleTitleLogoPolicy.keepsLoadResult(loaded, shown: titleLogoPresentation) else { return }
+                titleWordmark.loadResult = loaded
+                if loaded { fillTimeline.mark(.wordmark) }
             }
-            .frame(maxWidth: 280)
-            .frame(height: logoHeight)
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(displayTitle)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityHidden(titleLogoPresentation != .logo)
-        }
     }
 
     /// "Comedy · 2026 · 51 min": the first genre, the year for a film or the
@@ -9825,37 +9787,9 @@ extension AppleCatalogItemDetailView {
         return values
     }
 
-    @ViewBuilder
     private var phoneMetadataLine: some View {
-        let values = titlePageMetadataValues
-        let rating = AppleBillboardCopy.ratingBadge(pageMetadata.details?.contentRating ?? item.contentRating)
-        if !values.isEmpty || rating != nil {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(spacing: 6))
-                : AnyLayout(HStackLayout(spacing: 8))
-            layout {
-                if !values.isEmpty {
-                    Text(values.joined(separator: AppleBillboardCopy.separator))
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
-                }
-                if let rating {
-                    Text(rating)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .strokeBorder(.white.opacity(0.4), lineWidth: 1)
-                        }
-                        .accessibilityLabel("Rated \(rating)")
-                }
-            }
-            .accessibilityElement(children: .combine)
-        }
+        AppleHomePhoneHeroMetadata(item: item, values: titlePageMetadataValues,
+            contentRating: pageMetadata.details?.contentRating ?? item.contentRating)
     }
 
     private var selectedEpisode: AppleStremioEpisode? {

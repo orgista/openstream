@@ -1,15 +1,18 @@
 import SwiftUI
 
-/// "TV Show · Thriller · Drama" and the outlined rating, centred under the
+/// Genre, year and runtime with the outlined rating, centred under the
 /// iPhone hero's title. Stacks at the accessibility text sizes so neither part
 /// is truncated to nothing.
 struct AppleHomePhoneHeroMetadata: View {
     let item: AppleCatalogItem
+    var values: [String]? = nil
+    var contentRating: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let line = AppleBillboardCopy.phoneMetadataLine(type: item.type, genres: item.genres)
-        let rating = AppleBillboardCopy.ratingBadge(item.contentRating)
+        let fields = values ?? Self.values(for: item)
+        let line = fields.isEmpty ? nil : fields.joined(separator: AppleBillboardCopy.separator)
+        let rating = AppleBillboardCopy.ratingBadge(contentRating ?? item.contentRating)
         if line != nil || rating != nil {
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 6))
@@ -37,4 +40,18 @@ struct AppleHomePhoneHeroMetadata: View {
             }
         }
     }
+    private static func values(for item: AppleCatalogItem) -> [String] {
+        var values: [String] = []
+        if let genre = item.genres?.first(where: { !$0.isEmpty }) { values.append(genre) }
+        if item.type == "series", let release = AppleTitleMetadataPresentation.formattedReleaseInfo(item.releaseInfo) {
+            values.append(release)
+        } else if let year = item.year {
+            values.append(String(year))
+        }
+        if let minutes = item.runtimeMinutes, (1 ... 24 * 60).contains(minutes) {
+            values.append(AppleTitleMetadataPresentation.formattedRuntime(minutes))
+        }
+        return values
+    }
+
 }

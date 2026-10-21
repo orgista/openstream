@@ -13,6 +13,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// The bottom of the art to the centre of the page dots. The iPad's
     /// full-bleed hero (N20) sets its own.
     var dotsCentreInset: CGFloat = AppleHomePhoneHeroLayout.dotsCentreInset
+    var waitsForCurrentArtwork = false
     /// Loads the trailer of the page after the one showing.
     var prefetchTrailer: (Int) async -> Void = { _ in }
     @ViewBuilder let page: (Int) -> Page
@@ -24,6 +25,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     @Environment(\.appleHeroesSettled) private var heroesSettled
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isTouching = false
+    @State private var currentArtIsReady = false
     @State private var trailer = AppleHomeHeroTrailerStateKey.Value()
     /// Anyone can see the hero (`appleHeroVisibility`); it holds while not.
     @State private var heroIsVisible = false
@@ -45,7 +47,8 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             .frame(maxWidth: .infinity)
             .clipped()
             .background {
-                if let next = cycle.pages(available: pageIDs.count)?.next {
+                if !waitsForCurrentArtwork || currentArtIsReady,
+                   let next = cycle.pages(available: pageIDs.count)?.next {
                     preload(next)
                         .id(pageIDs[next])
                         .opacity(0)
@@ -54,6 +57,7 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
                 }
             }
             .simultaneousGesture(swipe)
+            .onPreferenceChange(AppleHomePhoneHeroArtReadyKey.self) { currentArtIsReady = $0 }
             .onPreferenceChange(AppleHomeHeroTrailerStateKey.self) { state in
                 let event = state.cycleEvent(after: trailer)
                 trailer = state

@@ -770,7 +770,7 @@ public struct OpenStreamRootView: View {
                 openSettings: { selectedTab = .settings },
                 backupController: backupController
             )
-            .appleAlignedTabTitle(tab.title, overArtwork: true)
+            .appleAlignedTabTitle(tab.title, overArtwork: true, phoneHero: true)
         case .library:
             AppleLibraryView(
                 catalogStore: catalogStore,
@@ -779,7 +779,7 @@ public struct OpenStreamRootView: View {
                 settings: settingsStore,
                 openSettings: { selectedTab = .settings }
             )
-            .appleAlignedTabTitle(tab.title)
+            .appleAlignedTabTitle(tab.title, phoneHero: true)
         case .live:
             AppleLiveTVView(
                 sourceStore: sourceStore,

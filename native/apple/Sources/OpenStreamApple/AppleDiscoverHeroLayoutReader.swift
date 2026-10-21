@@ -43,6 +43,9 @@ struct AppleDiscoverHeroLayoutReader: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            #if os(iOS)
+            .modifier(ApplePhoneLandingScrollReader(layout: phone))
+            #endif
             .onScrollGeometryChange(for: AppleHomePhoneHeroLayout.self) { geometry in
                 // The container is the part between the bars.
                 AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height

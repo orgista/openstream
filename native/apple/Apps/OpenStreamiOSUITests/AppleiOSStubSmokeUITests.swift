@@ -58,7 +58,8 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
 
         // Discover is lazy: the stub shelf sits under the hero, so it is not
         // in the hierarchy until it has scrolled into view.
-        let poster = app.descendants(matching: .any).matching(identifier: "home.media.movie:tt0000001").firstMatch
+        // Movie One belongs to Your Library and is removed from catalog shelves.
+        let poster = app.descendants(matching: .any).matching(identifier: "home.media.movie:tt0000002").firstMatch
         XCTAssertTrue(app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'home.' OR identifier BEGINSWITH 'discover.'")).firstMatch
             .waitForExistence(timeout: 60), "Discover never drew")
@@ -75,7 +76,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
 
         let play = app.buttons["detail.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 30), "the title page never opened")
-        XCTAssertTrue(app.staticTexts["Stub Movie One"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Stub Movie Two"].firstMatch.waitForExistence(timeout: 10))
 
         if UIDevice.current.userInterfaceIdiom == .phone {
             // Owner, 2026-10-19: "in the content page there is a search icon we don't need".

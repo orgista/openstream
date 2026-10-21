@@ -15,6 +15,47 @@ import Testing
         #expect(AppleTitlePageSlotArt.choose(backdrops: [], posters: []) == nil)
     }
 
+    @Test func landingAndTitlePagesUseTheSameArtCandidates() {
+        let item = AppleCatalogItem(mediaID: "tt2250912", type: "movie", name: "Fixture",
+                                    posterURL: poster, backgroundURL: backdrop)
+        #expect(AppleTitlePageSlotArt.choose(item: item) == .backdrop(backdrop))
+        let details = AppleTMDBDetails(posterURL: poster, backdropURL: backdrop, textlessBackdropURL: textless)
+        #expect(AppleTitlePageSlotArt.choose(item: item, details: details) == .backdrop(textless))
+        #expect(AppleTitlePageSlotArt.choose(item: item, details: details, failed: [textless, backdrop]) == .posterCard(poster))
+    }
+
+    @Test func titlePageArtworkOnlyUpgradesToTextlessBackdrops() {
+        let details = AppleTMDBDetails(posterURL: poster, backdropURL: backdrop)
+        let artwork = AppleHeroArtworkUpgrade.Artwork(details: details)
+        #expect(artwork.backdropURL == nil)
+        #expect(artwork.titlePage?.backdropURL == nil)
+        let item = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "Fixture", backgroundURL: backdrop)
+        #expect(AppleTitlePageSlotArt.choose(item: item) == .backdrop(backdrop))
+        #expect(artwork.titlePage?.posterURL == poster)
+        let textlessDetails = AppleTMDBDetails(backdropURL: backdrop, textlessBackdropURL: textless)
+        #expect(AppleHeroArtworkUpgrade.Artwork(details: textlessDetails).titlePage?.backdropURL == textless)
+    }
+
+    @Test func oldArtworkAnswersCanBeDistinguishedFromAnAnsweredEmptyTitlePage() throws {
+        let legacy = try JSONDecoder().decode(AppleHeroArtworkUpgrade.Artwork.self,
+            from: Data("{\"backdropURL\":null,\"logoURL\":null}".utf8))
+        #expect(legacy.titlePage == nil)
+        let empty = AppleHeroArtworkUpgrade.Artwork(details: nil)
+        let restored = try JSONDecoder().decode(AppleHeroArtworkUpgrade.Artwork.self,
+            from: JSONEncoder().encode(empty))
+        #expect(restored.titlePage != nil)
+        #expect(restored.titlePage?.backdropURL == nil)
+    }
+
+    @Test func aRememberedLandingBackdropKeepsTheCatalogFallback() {
+        let item = AppleCatalogItem(mediaID: "fixture", type: "movie", name: "Fixture",
+                                    posterURL: poster, backgroundURL: backdrop)
+        let candidates = AppleTitlePageSlotArt.landingBackdrops(item: item,
+            details: AppleTMDBDetails(), remembered: .backdrop(textless))
+        #expect(AppleTitlePageSlotArt.choose(backdrops: candidates, posters: [poster]) == .backdrop(textless))
+        #expect(AppleTitlePageSlotArt.choose(backdrops: candidates, posters: [poster], failed: [textless]) == .backdrop(backdrop))
+    }
+
     @Test func aFailedBackdropFallsThrough() {
         #expect(AppleTitlePageSlotArt.choose(backdrops: [textless, backdrop], posters: [poster], failed: [textless])
                 == .backdrop(backdrop))

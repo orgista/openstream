@@ -22,6 +22,7 @@ struct AppleAlignedTabTitle: ViewModifier {
     /// unreadable over bright art (owner, checklist rows 10 and 11), so it
     /// shows its stock material over the hero from the start.
     let overArtwork: Bool
+    var phoneHero = false
 
     static func style(for platform: AppleUIPlatform, isLive: Bool = false) -> AppleTabTitleStyle {
         switch platform {
@@ -33,7 +34,9 @@ struct AppleAlignedTabTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        if isLive {
+        if phoneHero && UIDevice.current.userInterfaceIdiom == .phone {
+            content.navigationTitle("").navigationBarTitleDisplayMode(.inline)
+        } else if isLive {
             legacyNavigationBackground(content)
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
@@ -72,7 +75,7 @@ struct AppleAlignedTabTitle: ViewModifier {
 }
 
 extension View {
-    func appleAlignedTabTitle(_ title: String, isLive: Bool = false, overArtwork: Bool = false) -> some View {
-        modifier(AppleAlignedTabTitle(title: title, isLive: isLive, overArtwork: overArtwork))
+    func appleAlignedTabTitle(_ title: String, isLive: Bool = false, overArtwork: Bool = false, phoneHero: Bool = false) -> some View {
+        modifier(AppleAlignedTabTitle(title: title, isLive: isLive, overArtwork: overArtwork, phoneHero: phoneHero))
     }
 }

@@ -227,14 +227,22 @@ import Testing
                                 .posterCard(URL(string: "https://fixture.example/late-card.jpg")!), .none])
     func aLatePosterReplacesRememberedFallbackArt(_ art: AppleHeroPortraitArt) {
         let id = UUID().uuidString
-        let fallback = AppleHeroPortraitDecision(art: art, logo: nil)
-        let poster = AppleHeroPortraitDecision(art: .keyArt(textlessPoster), logo: logo)
+        let fallback = art
+        let poster = AppleHeroPortraitArt.keyArt(textlessPoster)
         AppleHeroPortraitMemory.remember(fallback, for: id)
-        #expect(AppleHeroPortraitMemory.decision(for: id) == fallback)
+        #expect(AppleHeroPortraitMemory.art(for: id) == fallback)
         AppleHeroPortraitMemory.remember(poster, for: id)
-        #expect(AppleHeroPortraitMemory.decision(for: id) == poster)
+        #expect(AppleHeroPortraitMemory.art(for: id) == poster)
         AppleHeroPortraitMemory.remember(fallback, for: id)
-        #expect(AppleHeroPortraitMemory.decision(for: id) == poster)
+        #expect(AppleHeroPortraitMemory.art(for: id) == poster)
+    }
+
+    @MainActor @Test func aTextlessBackdropUpgradeIsRememberedOnTheNextVisit() {
+        let id = UUID().uuidString
+        AppleHeroPortraitMemory.remember(.backdrop(backdrop), for: id)
+        let upgraded = AppleHeroPortraitArt.backdrop(textlessBackdrop)
+        AppleHeroPortraitMemory.remember(upgraded, for: id)
+        #expect(AppleHeroPortraitMemory.art(for: id) == upgraded)
     }
 
     // MARK: Crop
@@ -261,19 +269,19 @@ import Testing
     // MARK: Geometry
 
     /// Owner 2026-10-14: full-bleed again, as 0d100ce had it: from the top
-    /// edge to 73 % of the screen, held so ≥ 90 pt of the first row peeks
+    /// edge to 70 % of the screen, held so ≥ 90 pt of the first row peeks
     /// above the tab bar. The width no longer sets the height.
     @Test(arguments: [
         // iPhone SE (3rd gen): 667 pt, 49 pt tab bar: the peek clamp wins.
-        (AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 116, bottomInset: 49), CGFloat(466)),
-        // iPhone 16e: 844 pt, 83 pt tab bar: the peek clamp wins.
-        (AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83), CGFloat(609)),
-        // iPhone 15 Pro Max: 932 pt: 73 % of the screen.
-        (AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 155, bottomInset: 83), CGFloat(932 * 0.73)),
+        (AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 116, bottomInset: 49), CGFloat(426)),
+        // iPhone 16e: reserve the footer as well as the first-row peek.
+        (AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83), CGFloat(569)),
+        // iPhone 15 Pro Max: 932 pt: 70 % of the screen.
+        (AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 155, bottomInset: 83), CGFloat(932 * 0.70)),
     ])
     func thePhoneArtIsFullBleed(_ layout: AppleHomePhoneHeroLayout, expected: CGFloat) {
         #expect(abs(layout.artHeight - expected) < 0.5)
-        let peek = layout.containerHeight - layout.bottomInset - layout.artHeight - AppleHomePhoneHeroLayout.firstRowLead
+        let peek = layout.containerHeight - layout.bottomInset - layout.heroHeight - AppleHomePhoneHeroLayout.firstRowLead
         #expect(peek >= AppleHomePhoneHeroLayout.minimumRowPeek - 0.001)
         #expect(layout.topOverlap == layout.topInset + AppleHomePhoneHeroLayout.stackTopPadding)
     }
@@ -287,6 +295,25 @@ import Testing
         #expect(abs(rect.height - 562.5) < 0.5)
         #expect(rect.minX == 0)
         #expect(abs(rect.minY - -(562.5 - 466) * 0.5) < 0.5)
+    }
+
+    @MainActor @Test func theTitlePageBackdropCoverFillsTheFrame() async throws {
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(CGContext(data: nil, width: 16, height: 4, bitsPerComponent: 8,
+            bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 16, height: 4))
+        let image = try #require(context.makeImage())
+        let cover = AppleHeroPortraitCover(art: .backdrop(backdrop), image: image,
+            size: CGSize(width: 4, height: 8), focal: CGPoint(x: 0.5, y: 0.5), topInset: 0,
+            scale: 2, titlePageArt: .backdrop(backdrop))
+        let rendered = try #require(await cover.render())
+        #expect(rendered.width == 8 && rendered.height == 16)
+        let bytes = try #require(rendered.dataProvider?.data as Data?)
+        for row in [0, rendered.height - 1] {
+            let offset = row * rendered.bytesPerRow
+            #expect(bytes[offset + 2] > 200 && bytes[offset] < 50)
+        }
     }
 
     @Test func theTrailerCoverIsDrawnTopEdgeUp() throws {

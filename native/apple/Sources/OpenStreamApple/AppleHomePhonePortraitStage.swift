@@ -1,189 +1,118 @@
 import SwiftUI
 
-/// The iPhone portrait hero's art (Discover and Library), from the top edge of
-/// the screen to 73 % of it; the trailer plays over it (`AppleHomeBillboard`).
-///
-/// The initial lookup is bounded; a late textless poster can replace fallback
-/// art while the view is mounted, and is remembered for subsequent visits.
+/// The landing hero draws known title-page art immediately while metadata upgrades it.
 struct AppleHomePhonePortraitStage: View {
     let item: AppleCatalogItem
-    /// The bottom of the large title, from the top of the art: the poster
-    /// card stays below it (`AppleHeroPortraitArt.posterCardRect`).
+    var details: AppleTMDBDetails? = nil
     var topInset: CGFloat = 0
-    /// Called once the art is on screen: the choice, its image (for the
-    /// still's luminance reading) and the wordmark the choice brought.
-    var onReady: (AppleHeroPortraitDecision, CGImage?) -> Void = { _, _ in }
-    /// Set by a hero whose trailer can play: receives what the art is drawn
-    /// from, at the frame's size, so the trailer can draw its cover from the
-    /// same pixels and nothing jumps (`AppleHeroPortraitCover`). Nothing is
-    /// rendered here; the trailer renders it once it has a video to play.
+    var onReady: (AppleHeroPortraitArt, CGImage?) -> Void = { _, _ in }
     var onCover: ((AppleHeroPortraitCover?) -> Void)? = nil
 
     @Environment(\.appleTMDBConfiguration) private var configuration
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
-    @State private var shown: Shown?
+    @State private var upgrade: AppleHeroArtworkUpgrade.Artwork?
+    @State private var failed: Set<URL> = []
+    @State private var shown: AppleTitlePageSlotArt?
+    @State private var hasUpgradedArtwork = false
+    @State private var shownWasLoaded = false
+    @State private var image: CGImage?
     @State private var size: CGSize = .zero
 
-    struct Shown: Equatable {
-        let decision: AppleHeroPortraitDecision
-        let image: CGImage?
-        var focal: CGPoint = AppleHeroPortraitArt.focalPoint
-        static func == (lhs: Shown, rhs: Shown) -> Bool {
-            lhs.decision == rhs.decision && lhs.image === rhs.image && lhs.focal == rhs.focal
-        }
+    private var artDetails: AppleTMDBDetails {
+        AppleTMDBDetails(posterURL: details?.posterURL ?? upgrade?.titlePage?.posterURL,
+            backdropURL: details?.backdropURL,
+            textlessBackdropURL: details?.textlessBackdropURL ?? upgrade?.titlePage?.backdropURL)
     }
 
-    private struct CoverRequest: Equatable {
-        let shown: Shown?
-        let size: CGSize
-        let topInset: CGFloat
+    private var backdrops: [URL?] {
+        AppleTitlePageSlotArt.landingBackdrops(item: item, details: artDetails,
+            remembered: AppleHeroPortraitMemory.art(for: item.mediaID))
+    }
+
+    private var art: AppleTitlePageSlotArt? {
+        // A poster may gain a backdrop before the textless lookup answers.
+        // Keep that first improvement for this page instead of swapping twice.
+        if hasUpgradedArtwork, let shown { return shown }
+        let candidate = AppleTitlePageSlotArt.choose(backdrops: backdrops, posters: [artDetails.posterURL, item.posterURL], failed: failed)
+        if let shown, shown.isPosterCard, candidate?.isPosterCard == true { return shown }
+        return candidate
+    }
+
+    private var cachedArt: (art: AppleTitlePageSlotArt, image: CGImage)? {
+        AppleTitlePageSlotArt.chooseCached(backdrops: backdrops,
+            posters: [artDetails.posterURL, item.posterURL], cachedImage: { AppleRemoteImageCache.shared.cachedPlaceholderImage(url: $0) })
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-            if let shown, let image = shown.image, size.width > 0, size.height > 0 {
-                AppleHeroPortraitArtView(art: shown.decision.art, image: image, size: size, focal: shown.focal,
-                                         topInset: topInset)
-                    .transition(.opacity)
+        ApplePhoneHeroArtwork(art: art, cachedArt: cachedArt,
+            onLoad: { loaded($0, art: $1, isPlaceholder: false) },
+            onPlaceholder: { loaded($0, art: $1, isPlaceholder: true) },
+            onFailure: { failed.insert($0.url) })
+            .preference(key: AppleHomePhoneHeroArtReadyKey.self, value: image != nil || art == nil)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; reportCover() }
+            .task(id: item.mediaID) { await upgradeArtwork() }
+            .onChange(of: art, initial: true) { _, art in
+                guard art == nil, image == nil else { return }
+                onReady(.none, nil)
+                if onCover != nil { AppleLaunchReadiness.shared.markFirstScreenReady() }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
-        .accessibilityHidden(true)
-        .task(id: item.mediaID) { await settle() }
-        .onChange(of: CoverRequest(shown: shown, size: size, topInset: topInset), initial: true) { reportCover() }
     }
 
-    /// Hands the shown art and the frame's size to the trailer, for its cover.
+    private func loaded(_ decoded: CGImage, art: AppleTitlePageSlotArt, isPlaceholder: Bool) {
+        if shownWasLoaded, let shown, shown != art { hasUpgradedArtwork = true }
+        shownWasLoaded = !isPlaceholder
+        if !isPlaceholder {
+            AppleHeroPortraitMemory.remember(art.isPosterCard ? .posterCard(art.url) : .backdrop(art.url), for: item.mediaID)
+        }
+        guard shown != art || image !== decoded else { return }
+        image = decoded
+        shown = art
+        appleTrace("hero portrait image \(art.isPosterCard ? "fallback" : "backdrop") decoded (\(item.name))")
+        reportReady()
+        reportCover()
+        if onCover != nil {
+            AppleLaunchMarks.record(.heroArt)
+            AppleLaunchReadiness.shared.markFirstScreenReady()
+        }
+    }
+
+    private func reportReady() {
+        guard let shown else { return }
+        let art: AppleHeroPortraitArt = shown.isPosterCard ? .posterCard(shown.url) : .backdrop(shown.url)
+        onReady(art, image)
+    }
+
     private func reportCover() {
         guard let onCover else { return }
-        guard let shown, let image = shown.image, size.width > 0, size.height > 0 else {
-            onCover(nil)
-            return
-        }
-        onCover(AppleHeroPortraitCover(art: shown.decision.art, image: image, size: size, focal: shown.focal,
-                                       topInset: topInset, scale: displayScale))
+        guard let shown, let image, size.width > 0, size.height > 0 else { onCover(nil); return }
+        onCover(AppleHeroPortraitCover(art: shown.isPosterCard ? .posterCard(shown.url) : .backdrop(shown.url),
+            image: image, size: size, focal: CGPoint(x: 0.5, y: 0.5), topInset: topInset,
+            scale: displayScale, titlePageArt: shown))
     }
 
-    private func settle() async {
-        appleTrace("hero portrait settle \(item.name)")
-        if let remembered = AppleHeroPortraitMemory.decision(for: item.mediaID) {
-            var image: CGImage?
-            if let url = remembered.art.imageURL {
-                image = try? await AppleRemoteImageCache.shared.image(
-                    url: url, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
-            }
-            let focal = await focalPoint(for: remembered.art, image: image)
-            guard !Task.isCancelled else { return }
-            show(Shown(decision: remembered, image: image, focal: focal), animated: false)
-            if remembered.art.source != .poster { await upgradeToPoster() }
-            return
-        }
-        let started = ContinuousClock.now
-        let tmdb = await tmdbArtwork()
-        guard !Task.isCancelled else { return }
-        appleTrace("hero portrait tmdb \(tmdb == nil ? "none" : "answered") after \(Self.ms(since: started)) (\(item.name))")
-        let candidates = AppleHeroPortraitArt.Candidates(item: item, tmdbPoster: tmdb?.posterURL,
-                                                         tmdbBackdrop: tmdb?.backdropURL, tmdbLogo: tmdb?.logoURL)
-        var failed = Set<URL>()
-        while true {
-            let art = AppleHeroPortraitArt.choose(candidates, failed: failed)
-            let decision = AppleHeroPortraitDecision(art: art, logo: candidates.logo)
-            guard let url = art.imageURL else {
-                AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
-                AppleHeroPortraitArtTally.record(art, item: item.name)
-                show(Shown(decision: decision, image: nil), animated: false)
-                if tmdb == nil { await upgradeToPoster() }
-                return
-            }
-            do {
-                let image = try await AppleRemoteImageCache.shared.image(
-                    url: url, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
-                appleTrace("hero portrait image \(art.source.rawValue) decoded after \(Self.ms(since: started)) (\(item.name))")
-                let focal = await focalPoint(for: art, image: image)
-                guard !Task.isCancelled else { return }
-                AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
-                AppleHeroPortraitArtTally.record(art, item: item.name)
-                show(Shown(decision: decision, image: image, focal: focal), animated: true)
-                if tmdb == nil { await upgradeToPoster() }
-                return
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                appleTrace("hero portrait art failed \(art.source.rawValue), trying the next (\(item.name))")
-                failed.insert(url)
-            }
-        }
-    }
-
-    private func upgradeToPoster() async {
-        guard let configuration, let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item) else { return }
+    private func upgradeArtwork() async {
+        let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item)
+            ?? item.imdbID.flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
+        guard let configuration, let imdbID else { return }
         let artwork = await AppleHeroArtworkUpgrade.shared.artwork(
-            imdbID: imdbID, kind: item.type == "series" ? .series : .movie, configuration: configuration)
-        guard !Task.isCancelled, let poster = artwork.posterURL else { return }
-        do {
-            let image = try await AppleRemoteImageCache.shared.image(
-                url: poster, maximumPixelDimension: AppleHeroPortraitArt.pixelDimension)
-            guard !Task.isCancelled else { return }
-            let decision = AppleHeroPortraitDecision(art: .keyArt(poster), logo: artwork.logoURL ?? item.logoURL)
-            AppleHeroPortraitMemory.remember(decision, for: item.mediaID)
-            appleTrace("hero portrait late poster (\(item.name))")
-            AppleHeroPortraitArtTally.record(decision.art, item: item.name)
-            show(Shown(decision: decision, image: image), animated: true)
-        } catch is CancellationError {
-            return
-        } catch {
-            appleTrace("hero portrait late poster failed (\(item.name))")
-        }
-    }
-
-    private static func ms(since start: ContinuousClock.Instant) -> String {
-        let elapsed = start.duration(to: .now).components
-        return "\(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000)ms"
-    }
-
-    private func tmdbArtwork() async -> AppleHeroArtworkUpgrade.Artwork? {
-        guard let configuration, let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item) else { return nil }
-        return await AppleHeroArtworkUpgrade.shared.artwork(
-            imdbID: imdbID, kind: item.type == "series" ? .series : .movie,
-            configuration: configuration, deadline: AppleHeroPortraitMemory.lookupDeadline)
-    }
-
-    private func focalPoint(for art: AppleHeroPortraitArt, image: CGImage?) async -> CGPoint {
-        guard case .backdrop(let url) = art, let image else { return AppleHeroPortraitArt.focalPoint }
-        return (try? await AppleHeroFocalPoint.shared.point(image: image, url: url)) ?? CGPoint(x: 0.5, y: 0.5)
-    }
-
-    private func show(_ value: Shown, animated: Bool) {
-        let duration = animated && !reduceMotion ? 0.25 : 0
-        withAnimation(duration > 0 ? .easeOut(duration: duration) : nil) { shown = value }
-        onReady(value.decision, value.image)
-        if value.image != nil { AppleLaunchMarks.record(.heroArt) }
-        AppleLaunchReadiness.shared.markFirstScreenReady()
+            imdbID: imdbID, kind: item.type == "series" ? .series : .movie, configuration: configuration,
+            includingTitlePage: true)
+        guard !Task.isCancelled else { return }
+        upgrade = artwork
+        if art == nil { onReady(.none, nil) }
     }
 }
 
-/// The hero's settled choice: its art and the wordmark that came with it.
-struct AppleHeroPortraitDecision: Equatable, Sendable {
-    let art: AppleHeroPortraitArt
-    let logo: URL?
-}
-
-/// Fallback choices stay stable until a textless portrait poster arrives.
+/// Reuses the last artwork decision when a landing page is remounted.
 @MainActor
 enum AppleHeroPortraitMemory {
-    /// The longest the hero waits for TMDB before choosing from what it has.
-    static let lookupDeadline: Duration = .milliseconds(1_500)
-    private static var decisions: [String: AppleHeroPortraitDecision] = [:]
+    private static var choices: [String: AppleHeroPortraitArt] = [:]
 
-    static func decision(for mediaID: String) -> AppleHeroPortraitDecision? { decisions[mediaID] }
-    static func remember(_ decision: AppleHeroPortraitDecision, for mediaID: String) {
-        if decisions[mediaID] == nil || (decision.art.source == .poster && decisions[mediaID]?.art.source != .poster) {
-            decisions[mediaID] = decision
+    static func art(for mediaID: String) -> AppleHeroPortraitArt? { choices[mediaID] }
+    static func remember(_ art: AppleHeroPortraitArt, for mediaID: String) {
+        if choices[mediaID] == nil || (choices[mediaID]?.source != .poster
+            && (art.source == .poster || art.source == .backdrop)) {
+            choices[mediaID] = art
         }
     }
 }
@@ -200,10 +129,11 @@ struct AppleHeroPortraitCover: Equatable {
     let focal: CGPoint
     let topInset: CGFloat
     let scale: CGFloat
+    var titlePageArt: AppleTitlePageSlotArt? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.art == rhs.art && lhs.image === rhs.image && lhs.size == rhs.size && lhs.focal == rhs.focal
-            && lhs.topInset == rhs.topInset && lhs.scale == rhs.scale
+            && lhs.topInset == rhs.topInset && lhs.scale == rhs.scale && lhs.titlePageArt == rhs.titlePageArt
     }
 
     /// Key art and backdrops are a plain crop, drawn off the main actor; the
@@ -211,11 +141,23 @@ struct AppleHeroPortraitCover: Equatable {
     @MainActor
     func render() async -> CGImage? {
         guard size.width > 0, size.height > 0 else { return nil }
+        if let titlePageArt, titlePageArt.isPosterCard {
+            let renderer = ImageRenderer(content:
+                AppleTitlePageDecodedSlotImage(image: image, art: titlePageArt,
+                    slotHeight: AppleTitlePageSlotArt.slotHeight(width: size.width))
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .background(Color.black))
+            renderer.scale = scale
+            renderer.isOpaque = true
+            return renderer.cgImage
+        }
         let imageSize = CGSize(width: image.width, height: image.height)
         let rect: CGRect
         switch art {
         case .keyArt, .backdrop:
-            rect = art.imageRect(imageSize: imageSize, in: size, focal: focal)
+            rect = titlePageArt == nil ? art.imageRect(imageSize: imageSize, in: size, focal: focal)
+                : AppleHeroPortraitArt.fillRect(imageSize: imageSize, in: size, focal: focal)
         case .posterCard:
             let renderer = ImageRenderer(content:
                 AppleHeroPortraitArtView(art: art, image: image, size: size, focal: focal, topInset: topInset)

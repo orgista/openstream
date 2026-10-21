@@ -24,13 +24,19 @@ actor AppleHeroArtworkUpgrade {
         /// TMDB's textless (`null`-language) poster: the iPhone portrait
         /// hero's first choice (`AppleHeroPortraitArt`).
         var posterURL: URL? = nil
+        var titlePage: TitlePageArtwork? = nil
+    }
+
+    struct TitlePageArtwork: Codable, Equatable, Sendable {
+        let backdropURL: URL?
+        let posterURL: URL?
     }
 
     /// This is our own conclusion, not a provider payload, so it is namespaced
     /// away from the add-on responses that share the cache directory. The
     /// version suffix retires every stored answer if the choice rule changes.
     private static let cacheSource = "openstream://hero-artwork"
-    private static let cacheType = "portrait-v1"
+    private static let cacheType = "portrait-v2"
 
     private let client: AppleTMDBClient
     private let cache: AppleMetadataDiskCache
@@ -68,55 +74,17 @@ actor AppleHeroArtworkUpgrade {
         return try? JSONDecoder().decode(Artwork.self, from: stored.payload)
     }
 
-    /// `artwork`, but answering nil once `deadline` has passed: the iPhone
-    /// hero picks its art before it draws and will not wait longer than
-    /// this for TMDB. The lookup carries on, so its answer is cached for
-    /// the next visit.
-    ///
-    /// Nonisolated, with the timer in a detached task: nothing on the way to
-    /// the deadline waits for this actor (a Library launch traced the iPhone
-    /// hero's 1.5 s answer at 8.6 s, 2026-10-14).
-    nonisolated func artwork(
-        imdbID: String,
-        kind: AppleMediaKind,
-        configuration: AppleTMDBConfiguration,
-        deadline: Duration
-    ) async -> Artwork? {
-        let lookup = Task.detached { await self.artwork(imdbID: imdbID, kind: kind, configuration: configuration) }
-        // A race, not a task group: a group would wait for the lookup it
-        // lost to before returning, which is the wait this exists to cap.
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Artwork?, Never>) in
-            let once = ResumeOnce(continuation)
-            Task.detached { once.resume(await lookup.value) }
-            Task.detached(priority: .userInitiated) {
-                try? await Task.sleep(for: deadline)
-                once.resume(nil)
-            }
-        }
-    }
-
-    private final class ResumeOnce: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<Artwork?, Never>?
-        init(_ continuation: CheckedContinuation<Artwork?, Never>) { self.continuation = continuation }
-        func resume(_ value: Artwork?) {
-            lock.lock()
-            let pending = continuation
-            continuation = nil
-            lock.unlock()
-            pending?.resume(returning: value)
-        }
-    }
-
     func artwork(
         imdbID: String,
         kind: AppleMediaKind,
-        configuration: AppleTMDBConfiguration
+        configuration: AppleTMDBConfiguration,
+        includingTitlePage: Bool = false
     ) async -> Artwork {
         let key = Self.cacheKey(kind: kind, imdbID: imdbID)
         if let stored = await cache.entry(source: Self.cacheSource, type: Self.cacheType, mediaID: key),
            stored.freshness == .fresh,
-           let value = try? JSONDecoder().decode(Artwork.self, from: stored.payload) {
+           let value = try? JSONDecoder().decode(Artwork.self, from: stored.payload),
+           !includingTitlePage || value.titlePage != nil {
             return value
         }
         // Registered before the first suspension point, so a second caller
@@ -127,8 +95,7 @@ actor AppleHeroArtworkUpgrade {
             // `textlessBackdropURL`, not `backdropURL`: replacing one
             // title-in-the-picture backdrop with another buys the viewer a
             // reload of the hero and nothing else.
-            let value = Artwork(backdropURL: details?.textlessBackdropURL, logoURL: details?.logoURL,
-                                posterURL: details?.textlessPosterURL)
+            let value = Artwork(details: details)
             // A failed lookup is still worth remembering for a day: the cost
             // of asking again on every visit is paid by the viewer.
             if let payload = try? JSONEncoder().encode(value) {
@@ -140,5 +107,14 @@ actor AppleHeroArtworkUpgrade {
         let value = await task.value
         inFlight[key] = nil
         return value
+    }
+}
+
+extension AppleHeroArtworkUpgrade.Artwork {
+    init(details: AppleTMDBDetails?) {
+        self.init(backdropURL: details?.textlessBackdropURL, logoURL: details?.logoURL,
+            posterURL: details?.textlessPosterURL,
+            titlePage: .init(backdropURL: details?.textlessBackdropURL,
+                posterURL: details?.posterURL))
     }
 }

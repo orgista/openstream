@@ -567,8 +567,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// find no hit point in the element's frame: something scrolled out of a
     /// horizontal row, or laid out at zero size. Asking only about elements
     /// whose centre is on the screen is what keeps a sweep running to the end.
-    private func isSafelyHittable(_ element: XCUIElement) -> Bool {
-        guard let snapshot = try? element.snapshot() else { return false }
+    private func isSafelyHittable(_ element: XCUIElement, snapshot provided: XCUIElementSnapshot? = nil) -> Bool {
+        guard let snapshot = provided ?? (try? element.snapshot()) else { return false }
         let frame = snapshot.frame
         guard frame.width >= 1, frame.height >= 1 else { return false }
         guard crawlScreenRect.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
@@ -576,7 +576,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // advances about once a second on iOS 27; asking XCTest for their
         // hittability mid-transition raises "activation point invalid". Their
         // on-screen frame is the answer.
-        if snapshot.identifier.hasPrefix("home.featured.") { return true }
+        if ["home.featured.play", "home.featured.my-list", "home.featured.details"].contains(snapshot.identifier) {
+            return true
+        }
         return element.isHittable
     }
 
@@ -5126,7 +5128,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         if !isTab, crawlContentOverlapsNavigationBar(frame: frame, elementType: snapshot.elementType, identifier: identifier, label: label) {
             return .offScreen
         }
-        if element.isHittable { return .hittable }
+        if isSafelyHittable(element, snapshot: snapshot) { return .hittable }
         if isTouchableMenuButton(element, identifier: identifier) { return .hittable }
         return .blocked
     }
@@ -5138,6 +5140,25 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         frame: CGRect, elementType: XCUIElement.ElementType, identifier: String, label: String
     ) -> Bool {
         let bar = app.navigationBars.firstMatch
+        if !bar.exists {
+            let titles = app.staticTexts.matching(NSPredicate(format: "identifier IN %@",
+                ["discover.compact-title", "library.compact-title", "detail.compact-title"]))
+            let compactTitles = titles.allElementsBoundByIndex
+            guard !compactTitles.isEmpty else { return false }
+            let toolbarIdentifiers = ["detail.back", "library.sort", "discover.compact-title.search",
+                "discover.compact-title.refresh", "library.compact-title.search", "library.compact-title.refresh"]
+            let toolbarFrames = app.buttons.matching(NSPredicate(format: "identifier IN %@", toolbarIdentifiers))
+                .allElementsBoundByIndex.compactMap { (try? $0.snapshot())?.frame }
+                .filter { $0.width > 0 && $0.height > 0 && $0.intersects(crawlScreenRect) }
+            let toolbarBounds = toolbarFrames.reduce(CGRect.null) { $0.union($1) }
+            guard !toolbarBounds.isNull else { return false }
+            // The material extends above the controls through the status area.
+            let barFrame = CGRect(x: crawlScreenRect.minX, y: crawlScreenRect.minY,
+                width: crawlScreenRect.width, height: toolbarBounds.maxY - crawlScreenRect.minY)
+            let centre = CGPoint(x: frame.midX, y: frame.midY)
+            guard barFrame.contains(centre) else { return false }
+            return !toolbarIdentifiers.contains(identifier)
+        }
         // XCTest taps the centre, so only a centre under the bar is unreachable;
         // a hero button whose edge touches the bar is still pressed.
         // Everything here comes from snapshots, so a hero that advances or a bar
@@ -5253,7 +5274,10 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                isSafelyHittable(app.buttons["Not Now"].firstMatch) { return scene }
             let present = Set(scene.nodes.map(\.identifier))
             for cover in covers where present.contains(cover) {
-                if tapIfPossible(app.buttons[cover].firstMatch) { Thread.sleep(forTimeInterval: 0.6) }
+                if tapIfPossible(app.buttons[cover].firstMatch) {
+                    Thread.sleep(forTimeInterval: 0.6)
+                    scene = crawlScene()
+                }
             }
             if scene.alerts > 0 {
                 let alert = app.alerts.firstMatch

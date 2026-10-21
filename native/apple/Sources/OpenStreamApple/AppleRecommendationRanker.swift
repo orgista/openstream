@@ -237,16 +237,39 @@ enum AppleRecommendationInputs {
             let sourceID: String
         }
         private var identities: [Key: String] = [:]
+        private var genreValues: [[String]: [String]] = [:]
+        private var progressKeys: [Key: [String]] = [:]
         var count: Int { identities.count }
 
         mutating func identity(_ item: AppleCatalogItem, sourceID: String) -> String {
-            let key = Key(mediaID: item.mediaID, type: item.type, name: item.name, year: item.year,
-                          releaseInfo: item.releaseInfo, imdbID: item.imdbID, sourceID: sourceID)
+            let key = key(for: item, sourceID: sourceID)
             if let id = identities[key] { return id }
             let id = AppleRecommendationInputs.identity(item, sourceID: sourceID)
             identities[key] = id
             return id
         }
+
+        mutating func genres(_ item: AppleCatalogItem) -> [String] {
+            let raw = item.genres ?? []
+            if let genres = genreValues[raw] { return genres }
+            let genres = AppleRecommendationInputs.normalizedGenres(raw)
+            genreValues[raw] = genres
+            return genres
+        }
+
+        mutating func progressCandidates(_ item: AppleCatalogItem, sourceID: AppleSource.ID) -> [String] {
+            let key = key(for: item, sourceID: sourceID.uuidString)
+            if let keys = progressKeys[key] { return keys }
+            let keys = AppleTitleProgressIdentity.candidates(item: item, sourceID: sourceID)
+            progressKeys[key] = keys
+            return keys
+        }
+
+        private func key(for item: AppleCatalogItem, sourceID: String) -> Key {
+            Key(mediaID: item.mediaID, type: item.type, name: item.name, year: item.year,
+                releaseInfo: item.releaseInfo, imdbID: item.imdbID, sourceID: sourceID)
+        }
+
     }
 
     static func normalizedGenres(_ values: [String]) -> [String] {

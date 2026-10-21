@@ -43,7 +43,8 @@ struct OpenStreamPlatformApp: App {
     #endif
 
     var body: some Scene {
-        WindowGroup("oStream") {
+        // Keep eager content: makeContent defers App @State reads off-main and crashes on iOS 27.
+        WindowGroup("oStream", content: {
             #if DEBUG && os(tvOS)
             if ProcessInfo.processInfo.arguments.contains("-OpenStreamDebugLiveFixture") {
                 AppleLiveGuideFixtureView()
@@ -67,7 +68,7 @@ struct OpenStreamPlatformApp: App {
             #else
             platformRoot
             #endif
-        }
+        })
         #if os(visionOS)
         .defaultSize(width: 1180, height: 820)
         .windowResizability(.contentMinSize)
