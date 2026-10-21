@@ -29,7 +29,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = "com.orgista.openstream"
 GROUP = "group.com.orgista.openstream"
-SIMS = {"iOS": os.environ.get("OPENSTREAM_E2E_IOS_SIM", "73E49263-D838-4C4E-9CED-803AA1497945"),
+SIMS = {"iOS": os.environ.get("OPENSTREAM_E2E_IOS_SIM", "2E61439B-4B06-48BA-96F1-8CB92A54699D"),
         "tvOS": "F2107E8F-87F4-4685-9C91-84B56D78EC6F"}
 SCHEMES = {"iOS": "OpenStreamiOSUITests", "tvOS": "OpenStreamTVUITests"}
 TARGETS = {"iOS": "OpenStreamiOSUITests", "tvOS": "OpenStreamTVUITests"}
