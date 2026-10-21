@@ -439,8 +439,9 @@ struct AppleHomeBillboard<Actions: View>: View {
                     AppleHomeHeroPreview(item: item, sources: sources, settings: settings,
                                          trailerRequest: trailerRequest, requestedTrailerKey: trailerKey,
                                          art: phoneStillArt, portraitCover: portraitCover, drawsArtworkURL: false,
-                                         // Under the top bar: the bottom of the art is under the copy.
-                                         controlTopInset: phone.copyFadeLine + 8,
+                                         // Below the round Search/Refresh row (ApplePhoneLandingChrome);
+                                         // the bottom of the art is under the copy.
+                                         controlTopInset: phone.copyFadeLine + AppleDesignTokens.minimumActionSize + 8,
                                          onTrailerOnScreen: { trailerIsOnScreen = $0 })
                         .id(item.id)
                 }

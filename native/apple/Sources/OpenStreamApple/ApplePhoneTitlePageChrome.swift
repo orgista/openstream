@@ -139,9 +139,9 @@ struct ApplePhoneHeroControlStyle: ViewModifier {
             content
                 .labelStyle(.iconOnly)
                 .foregroundStyle(.white)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .frame(minWidth: 44, minHeight: 44)
+                .buttonStyle(.plain)
+                .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .glassEffect(.regular.interactive(), in: .circle)
                 .contentShape(Circle())
         } else {
             content.appleTitleBarButtonBacking()

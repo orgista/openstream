@@ -104,4 +104,10 @@ import Testing
         #expect(sound.width == 44 && sound.height == 44)
         #expect(sound.maxX <= visible.maxX && sound.maxY <= visible.maxY && sound.minX > visible.midX)
     }
+
+    @Test func aTopSoundControlLinesUpWithTheRoundControlColumn() {
+        let visible = CGRect(x: 0, y: 0, width: 430, height: 652)
+        let sound = AppleTrailerPreviewLayout.controlFrame(in: visible, paused: false, topInset: 111)
+        #expect(sound == CGRect(x: 370, y: 111, width: 44, height: 44))
+    }
 }
