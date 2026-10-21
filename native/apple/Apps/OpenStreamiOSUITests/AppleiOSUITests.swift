@@ -541,6 +541,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             "testLivePlaylistShowsChannelFailureAndRecovers",
             "testZRemoveUITestPlaylistSource",
             "testDownloadCanBeCancelledFromItsOptionsWhilePreparingAndDownloading",
+            "testDiscoverBackFromTitlePageTenTimes",
+            "testLibrarySortBeforeAndAfterScrolling",
         ]
         if ProcessInfo.processInfo.environment["OPENSTREAM_ALLOW_MUTATING_UI_TESTS"] != "1",
            isolatedTests.contains(where: { name.contains($0) }) {
@@ -3683,6 +3685,58 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
     func testCrawlLibrary() {
         runCrawlGroup("library", [CrawlScreen(route: "library", includesTabs: true)])
+    }
+
+    func testDiscoverBackFromTitlePageTenTimes() {
+        executionTimeAllowance = 180
+        app.launchArguments = ["-OpenStreamHoldPlayerChrome", "YES", "-OpenStreamMuteAudio", "YES"]
+        launch(screen: "discover")
+        let details = app.buttons["home.featured.details"].firstMatch
+        let back = app.buttons["detail.back"].firstMatch
+        for visit in 1...10 {
+            XCTAssertTrue(details.waitForExistence(timeout: 30), "Discover before visit \(visit)")
+            details.tap()
+            XCTAssertTrue(back.waitForExistence(timeout: 15))
+            if visit == 1 {
+                app.buttons["detail.play"].firstMatch.tap()
+                let ready = app.descendants(matching: .any).matching(identifier: "player.playback.ready").firstMatch
+                XCTAssertTrue(ready.waitForExistence(timeout: 30))
+                app.buttons["player.close"].firstMatch.tap()
+            }
+            let myList = app.buttons["detail.my-list"].firstMatch
+            XCTAssertTrue(myList.waitForExistence(timeout: 10))
+            myList.tap()
+            XCTAssertTrue(back.isHittable)
+            back.tap()
+            XCTAssertTrue(details.waitForExistence(timeout: 5), "Return \(visit) to Discover")
+            XCTAssertFalse(back.exists)
+        }
+    }
+
+    func testLibrarySortBeforeAndAfterScrolling() {
+        launch(screen: "library")
+        let sort = app.buttons["library.sort"].firstMatch
+        XCTAssertTrue(sort.waitForExistence(timeout: 30))
+        let ready = expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: sort)
+        let readiness = XCTWaiter().wait(for: [ready], timeout: 15)
+        if readiness != .completed {
+            attachHierarchy("library-sort-unhittable")
+            attach("library-sort-unhittable")
+        }
+        XCTAssertEqual(readiness, .completed)
+        XCTAssertGreaterThanOrEqual(sort.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(sort.frame.height, 44)
+        XCTAssertTrue(sort.isHittable)
+        sort.tap()
+        let byTitle = app.buttons["Title A–Z"].firstMatch
+        XCTAssertTrue(byTitle.waitForExistence(timeout: 5))
+        byTitle.tap()
+        for _ in 0..<4 { app.swipeUp() }
+        XCTAssertTrue(sort.isHittable)
+        sort.tap()
+        let byAdded = app.buttons["Added"].firstMatch
+        XCTAssertTrue(byAdded.waitForExistence(timeout: 5))
+        byAdded.tap()
     }
 
     func testCrawlLive() {

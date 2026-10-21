@@ -9613,19 +9613,13 @@ extension AppleCatalogItemDetailView {
             phoneHero
             phoneHeroFooter(chips: chips)
                 .padding(.horizontal, Self.phoneInset)
-            // Not lazy: the episodes sit right under the hero, on screen when
-            // the page opens. Inside the LazyVStack below, a series pushed
-            // from Discover hung iOS 18 for good: the lazy stack's height kept
-            // changing while UIKit laid out the push's bottom bars, and each
-            // change asked for another layout (2026-10-01, iOS 18.6 sim).
             if showsEpisodeSection {
                 phoneEpisodesSection
                     .id("vision-episodes")
                     .padding(.top, Self.phoneSectionSpacing - 8)
             }
-            // Lazy: the push builds only the sections on screen; the rest
-            // are built as they scroll in, as Discover's shelves are (N47).
-            LazyVStack(alignment: .leading, spacing: 0) {
+            // Stable section heights avoid lazy placement feedback while UIKit restores the bars on Back.
+            VStack(alignment: .leading, spacing: 0) {
                 if !discTitles.isEmpty {
                     AppleDiscTitlesRow(titles: discTitles, horizontalInset: Self.phoneInset) { startDisc(.mainTitle, titleID: $0.id) }
                         .padding(.top, Self.phoneSectionSpacing)

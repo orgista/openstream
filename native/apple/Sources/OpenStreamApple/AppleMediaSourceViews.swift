@@ -3112,6 +3112,50 @@ enum AppleSMBPlaybackRequestFactory {
     }
 }
 
+#if os(iOS)
+/// Keeps the menu action and its accessibility target on the same native button.
+@MainActor
+private struct AppleLibrarySortButton: UIViewRepresentable {
+    @Binding var sort: AppleLibrarySort
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        var configuration: UIButton.Configuration
+        if #available(iOS 26, *) {
+            configuration = .glass()
+            configuration.cornerStyle = .capsule
+        } else {
+            configuration = .plain()
+            let backingDiameter = AppleDesignTokens.spacingExtraLarge
+            let inset = (AppleDesignTokens.minimumActionSize - backingDiameter) / 2
+            configuration.background = .clear()
+            configuration.background.visualEffect = UIBlurEffect(style: .regular)
+            configuration.background.backgroundInsets = NSDirectionalEdgeInsets(
+                top: inset, leading: inset, bottom: inset, trailing: inset)
+            configuration.background.cornerRadius = backingDiameter / 2
+            configuration.cornerStyle = .fixed
+        }
+        configuration.image = UIImage(systemName: "arrow.up.arrow.down",
+            withConfiguration: UIImage.SymbolConfiguration(textStyle: .body).applying(UIImage.SymbolConfiguration(weight: .semibold)))
+        configuration.baseForegroundColor = .white
+        configuration.contentInsets = .zero
+        button.configuration = configuration
+        button.accessibilityLabel = "Sort library"
+        button.accessibilityIdentifier = "library.sort"
+        button.showsMenuAsPrimaryAction = true
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        button.menu = UIMenu(options: .singleSelection, children: AppleLibrarySort.allCases.map { option in
+            UIAction(title: option.rawValue, state: sort == option ? .on : .off) { _ in
+                sort = option
+            }
+        })
+    }
+}
+#endif
+
 @MainActor
 struct AppleLibraryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -3199,7 +3243,8 @@ struct AppleLibraryView: View {
                     id: \.id, hasBackdrop: AppleHeroRotation.hasBackdrop).isEmpty),
             isRefreshing: library.isLoading || AppleXtreamLibraryStore.shared.isLoading,
             onSearch: { showsSearch = true }, onRefresh: { Task { await reload() } }) {
-                sortMenu.modifier(ApplePhoneHeroControlStyle())
+                AppleLibrarySortButton(sort: $sort)
+                    .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
             })
         #endif
         #if os(macOS)
