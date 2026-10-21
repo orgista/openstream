@@ -45,10 +45,10 @@ public enum AppleWidgetArtworkPolicy {
 
 /// Decodes remote artwork straight to the size the widget draws it at.
 public enum AppleWidgetArtworkThumbnail {
-    /// JPEG bytes no larger than `pixelSize` on the longest edge, or nil when
+    /// Encoded bytes no larger than `pixelSize` on the longest edge, or nil when
     /// the data is not an image. ImageIO decodes the thumbnail directly, so a
     /// 1000×1500 poster is never resident at full resolution in the extension.
-    public static func thumbnail(from data: Data, pixelSize: Int) -> Data? {
+    public static func thumbnail(from data: Data, pixelSize: Int, isWordmark: Bool = false) -> Data? {
         guard pixelSize > 0,
               let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -59,7 +59,9 @@ public enum AppleWidgetArtworkThumbnail {
               ] as CFDictionary) else {
             return nil
         }
-        return encode(image)
+        guard !isWordmark || AppleTransparentPNGLogoValidator.hasTransparentEdges(in: image) else { return nil }
+        let output = isWordmark ? (AppleRemoteImageDecoder.trimmedToAlphaBounds(image) ?? image) : image
+        return encode(output, preservingAlpha: isWordmark)
     }
 
     /// The pixel dimensions of encoded image data, without decoding the pixels.
@@ -73,12 +75,11 @@ public enum AppleWidgetArtworkThumbnail {
         return (width, height)
     }
 
-    /// JPEG: posters are photographic, and a PNG of the same tile is an order
-    /// of magnitude more bytes to carry across into the widget process.
-    private static func encode(_ image: CGImage) -> Data? {
+    /// Posters use JPEG; wordmarks keep their alpha channel in PNG.
+    private static func encode(_ image: CGImage, preservingAlpha: Bool) -> Data? {
         let buffer = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
-            buffer, UTType.jpeg.identifier as CFString, 1, nil
+            buffer, (preservingAlpha ? UTType.png : .jpeg).identifier as CFString, 1, nil
         ) else {
             return nil
         }
@@ -230,5 +231,85 @@ public struct AppleWidgetArtworkStore: Sendable {
             throw URLError(.cannotDecodeContentData)
         }
         return data
+    }
+}
+
+public struct AppleWidgetHeroArtwork: Codable, Equatable, Sendable {
+    public let itemID: String
+    public let backdropFile: String?
+    public let wordmarkFile: String?
+}
+
+/// Only the app writes these bounded images; the extension reads them without networking.
+public actor AppleWidgetHeroArtworkStore {
+    public static let backdropPixels = 1_600
+    public static let wordmarkPixels = 600
+    private static let directoryName = "widget-hero"
+    private let fetch: AppleWidgetArtworkStore.Fetch
+    private var failedFiles: Set<URL> = []
+
+    public init(fetch: @escaping AppleWidgetArtworkStore.Fetch = AppleWidgetArtworkStore.download) {
+        self.fetch = fetch
+    }
+
+    public func prepare(itemID: String, backdrop: URL?, wordmark: URL?, in root: URL) async -> AppleWidgetHeroArtwork {
+        let backdropFile = await write(backdrop, pixels: Self.backdropPixels, in: root)
+        let wordmarkFile = await write(wordmark, pixels: Self.wordmarkPixels, isWordmark: true, in: root)
+        return AppleWidgetHeroArtwork(itemID: itemID, backdropFile: backdropFile, wordmarkFile: wordmarkFile)
+    }
+
+    public static func read(_ name: String?, in root: URL) -> Data? {
+        guard let name, name == URL(fileURLWithPath: name).lastPathComponent,
+              ["png", "jpg"].contains(URL(fileURLWithPath: name).pathExtension) else { return nil }
+        return try? Data(contentsOf: directory(in: root).appending(path: name))
+    }
+
+    public static func removeAll(in root: URL) {
+        try? FileManager.default.removeItem(at: directory(in: root))
+    }
+
+    private static func directory(in root: URL) -> URL {
+        root.appending(path: "Library/Caches", directoryHint: .isDirectory)
+            .appending(path: directoryName, directoryHint: .isDirectory)
+    }
+
+    public nonisolated func removeUnused(in root: URL, keeping artwork: AppleWidgetHeroArtwork) {
+        let directory = Self.directory(in: root)
+        let kept = Set([artwork.backdropFile, artwork.wordmarkFile].compactMap { $0 })
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: nil) else { return }
+        for file in files where !kept.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private func write(_ url: URL?, pixels: Int, isWordmark: Bool = false, in root: URL) async -> String? {
+        guard let url = AppleSystemArtworkPolicy.publicURL(url) else { return nil }
+        let name = AppleWidgetArtworkPolicy.fileName(for: url, pixelSize: pixels)
+            .replacingOccurrences(of: ".jpg", with: isWordmark ? ".png" : ".jpg")
+        let directory = Self.directory(in: root)
+        let file = directory.appending(path: name)
+        if FileManager.default.fileExists(atPath: file.path) { return name }
+        guard !failedFiles.contains(file) else { return nil }
+        let data: Data
+        do {
+            data = try await fetch(url)
+        } catch {
+            if !(error is CancellationError), !Task.isCancelled { failedFiles.insert(file) }
+            return nil
+        }
+        guard !Task.isCancelled else { return nil }
+        guard let thumbnail = AppleWidgetArtworkThumbnail.thumbnail(from: data, pixelSize: pixels,
+            isWordmark: isWordmark) else {
+            failedFiles.insert(file)
+            return nil
+        }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try thumbnail.write(to: file, options: .atomic)
+            return name
+        } catch {
+            return nil
+        }
     }
 }

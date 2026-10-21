@@ -54,6 +54,20 @@ actor AppleHeroArtworkUpgrade {
         return root
     }
 
+    private static func cacheKey(kind: AppleMediaKind, imdbID: String) -> String {
+        "\(kind == .series ? "series" : "movie")\u{1f}\(imdbID)"
+    }
+
+    // Stale hero art is preferable to a blank widget while the app refreshes metadata.
+    func cachedArtwork(for item: AppleCatalogItem) async -> Artwork? {
+        guard let imdbID = Self.upgradeableIMDBID(for: item) else { return nil }
+        let key = Self.cacheKey(kind: item.type == "series" ? .series : .movie, imdbID: imdbID)
+        guard let stored = await cache.entry(source: Self.cacheSource, type: Self.cacheType, mediaID: key) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(Artwork.self, from: stored.payload)
+    }
+
     /// `artwork`, but answering nil once `deadline` has passed: the iPhone
     /// hero picks its art before it draws and will not wait longer than
     /// this for TMDB. The lookup carries on, so its answer is cached for
@@ -99,7 +113,7 @@ actor AppleHeroArtworkUpgrade {
         kind: AppleMediaKind,
         configuration: AppleTMDBConfiguration
     ) async -> Artwork {
-        let key = "\(kind == .series ? "series" : "movie")\u{1f}\(imdbID)"
+        let key = Self.cacheKey(kind: kind, imdbID: imdbID)
         if let stored = await cache.entry(source: Self.cacheSource, type: Self.cacheType, mediaID: key),
            stored.freshness == .fresh,
            let value = try? JSONDecoder().decode(Artwork.self, from: stored.payload) {
