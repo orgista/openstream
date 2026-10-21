@@ -601,7 +601,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     func testLegacyDiscoverNavigationAndPlayerAccessibilityIsolation() {
         app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
         launch(screen: "discover")
-        XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 30))
+        // iPhone: no navigation bar over the landing hero at rest (owner 2026-10-20, "Discover and Library are
+        // cut off by the bar at the top … those used to not be there"); the Discover tab is the landmark.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCTAssertTrue(app.tabBars.buttons["Discover"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.tabBars.buttons["Discover"].isSelected)
+        } else {
+            XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 30))
+        }
         Thread.sleep(forTimeInterval: 8)
         attach("legacy-discover-navigation")
         app.terminate()
