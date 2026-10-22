@@ -389,3 +389,37 @@ public final class AppleIPTVGuideStore {
         return guide
     }
 }
+
+extension AppleIPTVGuideStore {
+    /// Points the store at every enabled Live source's guide, as the Live tab
+    /// does before each refresh; the launch prefetch fills the same disk caches.
+    /// A playlist can list one channel id twice; the first entry wins, as it
+    /// does in the lineup, instead of trapping at launch.
+    func configure(liveSources sources: [AppleSource], channels: [AppleIPTVChannel],
+                   sourceStore: AppleSourceStore, settings: AppleSettingsStore) {
+        channelDisplayNames = Dictionary(channels.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        channelProviderIDs = Dictionary(channels.compactMap { channel in
+            channel.guideID.map { (channel.id, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        manualChannelMapping = settings.guideChannelAssignments
+        retainSources(Set(sources.map(\.id)))
+        archiveChannelIDs = Set(channels.lazy.filter(AppleIPTVCatchUp.supportsCatchUp).map(\.id))
+        for source in sources {
+            if source.iptvType == .xtream {
+                guard let credentials = try? sourceStore.iptvCredentials(for: source) else { continue }
+                configure(xtreamBase: source.url, username: credentials.username, password: credentials.password, sourceID: source.id,
+                    timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
+            } else {
+                let sourceChannels = channels.filter { $0.sourceID == source.id }
+                let mapping = sourceChannels.reduce(into: [String: String]()) { result, channel in
+                    if let id = channel.guideID { result[channel.id] = id }
+                }
+                configure(xmltvURL: sourceChannels.first?.guideURL, sourceID: source.id, channelMapping: mapping,
+                    defaultOffsetHours: sourceChannels.first?.guideDefaultOffsetHours ?? 0,
+                    channelShifts: Dictionary(sourceChannels.compactMap { channel in
+                        channel.guideShiftHours.map { (channel.id, $0) }
+                    }, uniquingKeysWith: { first, _ in first }), timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
+            }
+        }
+    }
+}

@@ -119,7 +119,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         menuShot.name = "caption-\(name)-selection"; menuShot.lifetime = .keepAlways; add(menuShot)
         XCTAssertTrue(choice.waitForExistence(timeout: 5), "Requested embedded subtitle track is missing")
         if name == "ff-pgs-dts.m2ts" {
-            XCTAssertTrue(choice.label.contains("Unknown"), "Untagged PGS must be listed as Unknown")
+            XCTAssertTrue(choice.label.hasPrefix("Subtitles"), "Untagged PGS must be listed as Subtitles")
         }
         focusAndSelect(choice)
         func seekTextCue() {

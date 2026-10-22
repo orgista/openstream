@@ -140,6 +140,7 @@ public struct OpenStreamRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @Environment(\.scenePhase) private var restrictionScenePhase
+    @Environment(\.displayScale) private var displayScale
     @State private var sourceStore = AppleSourceStore()
     @State private var settingsStore = AppleSettingsStore()
     @State private var mediaIndex = AppleMediaIndexStore()
@@ -555,6 +556,9 @@ public struct OpenStreamRootView: View {
         .task(id: sourceAvailabilityIdentity) {
             await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore)
         }
+        .task(id: liveSourcesIdentity, priority: AppleLaunchWorkPolicy.backgroundPriority) {
+            await AppleLivePrefetch.run(sourceStore: sourceStore, settings: settingsStore, displayScale: displayScale)
+        }
         .onChange(of: ApplePlaybackProgressFeed.shared.revision) {
             AppleXtreamLibraryStore.shared.refreshProgress()
         }
@@ -680,6 +684,14 @@ public struct OpenStreamRootView: View {
         .modifier(AppleSystemSurfacePublishing(
             mediaIndex: mediaIndex, sourceStore: sourceStore,
             settingsStore: settingsStore))
+    }
+
+    /// Live's playlists and whether Live is on: a source added or edited
+    /// starts the prefetch again.
+    private var liveSourcesIdentity: String {
+        ApplePlaybackIdentity.digest(for: sourceStore.sources.filter { $0.kind == .liveTV }.map {
+            "\($0.id.uuidString)|\($0.isEnabled)|\($0.configurationRevision)"
+        }.sorted().joined(separator: "\u{1f}") + "|\(settingsStore.liveTVEnabled)")
     }
 
     private var sourceAvailabilityIdentity: String {

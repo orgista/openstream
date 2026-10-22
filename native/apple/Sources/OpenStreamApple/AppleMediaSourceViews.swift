@@ -43,6 +43,10 @@ struct AppleLiveTVView: View {
     @State private var isLoading = false
     /// The first lineup load has answered (channels, an error or nothing).
     @State private var hasResolvedFirstLoad = false
+    /// When Live first opened with no rows to show, until they show.
+    @State private var firstOpenedAt: ContinuousClock.Instant?
+    /// The `channelsRevision` the shown snapshot was sorted from.
+    @State private var snapshotChannelsRevision = -1
     @State private var errorMessage: String?
     /// Playlists that failed while others loaded; shown inline with Retry.
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
@@ -144,12 +148,18 @@ struct AppleLiveTVView: View {
         @Bindable var settings = settings
 
         Group {
-            if !hasResolvedFirstLoad, channels.isEmpty {
+            if hasLiveSources, channels.isEmpty, showsChannelsLoading {
+                #if os(iOS) || os(visionOS)
+                // The stage stays black and the list area loads, also while a dead playlist
+                // has already failed and the others are still loading.
+                liveStage
+                #else
+                AppleLiveChannelsLoading()
+                #endif
+            } else if !hasResolvedFirstLoad, channels.isEmpty {
                 // Nothing until the first load answers: "No Live Channels"
                 // used to flash before the lineup drew.
                 Color.clear
-            } else if isLoading, channels.isEmpty, !isIOS || sourceFailures.isEmpty {
-                ProgressView()
             } else if channels.isEmpty, errorMessage != nil, let cause = tabFailureCause, cause.action != .tryAgain {
                 AppleLiveFailureCard(cause: cause, size: .tab) { perform(cause.action) }
             } else if channels.isEmpty, !hasLiveSources, isIOS {
@@ -410,11 +420,19 @@ struct AppleLiveTVView: View {
         }
         .onChange(of: isActive, initial: true) { _, active in
             guard active else { resumePending = false; return }
+            if channelSnapshot.channels.isEmpty, firstOpenedAt == nil { firstOpenedAt = .now }
             liveSession.enterLive()
             resumeLastChannelIfNeeded()
             startFirstChannelIfNeeded()
         }
         .onChange(of: playbackCoordinator.phase) { _, phase in liveSession.notePlaybackPhase(phase) }
+        .onChange(of: snapshotRevision) {
+            snapshotChannelsRevision = channelsRevision
+            // Time to rows, for the trace: what the launch prefetch is for (`AppleLivePrefetch`).
+            guard let opened = firstOpenedAt, !channelSnapshot.channels.isEmpty else { return }
+            firstOpenedAt = nil
+            appleTrace("live rows \(channelSnapshot.channels.count) shown \(AppleLaunchMarks.milliseconds(opened.duration(to: .now)))ms after opening")
+        }
         .onDisappear { quietRetry?.cancel() }
         .refreshable { await refreshGuide(Set(channelSnapshot.channelIDs), force: true) }
         .task(id: reloadIdentity) { await reload() }
@@ -560,6 +578,13 @@ struct AppleLiveTVView: View {
 
     private var hasLiveSources: Bool {
         sourceStore.sources.contains { $0.kind == .liveTV && $0.isEnabled }
+    }
+
+    private var showsChannelsLoading: Bool {
+        AppleLiveChannelsLoadingPolicy.showsLoading(hasRows: !channelSnapshot.channels.isEmpty,
+            hasChannels: !channels.isEmpty, isLoading: isLoading, hasResolvedFirstLoad: hasResolvedFirstLoad,
+            showsFailure: errorMessage != nil || !sourceFailures.isEmpty,
+            snapshotIsCurrent: snapshotChannelsRevision == channelsRevision)
     }
 
     private func perform(_ action: AppleLiveFailureCause.Action) {
@@ -878,30 +903,7 @@ struct AppleLiveTVView: View {
     private func refreshGuide(_ visibleIDs: Set<String>, force: Bool) async {
         guard !visibleIDs.isEmpty else { return }
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
-        guideStore.channelDisplayNames = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0.name) })
-        guideStore.channelProviderIDs = Dictionary(uniqueKeysWithValues: channels.compactMap { channel in
-            channel.guideID.map { (channel.id, $0) }
-        })
-        guideStore.manualChannelMapping = settings.guideChannelAssignments
-        guideStore.retainSources(Set(sources.map(\.id)))
-        guideStore.archiveChannelIDs = Set(channels.lazy.filter(AppleIPTVCatchUp.supportsCatchUp).map(\.id))
-        for source in sources {
-            if source.iptvType == .xtream {
-                guard let credentials = try? sourceStore.iptvCredentials(for: source) else { continue }
-                guideStore.configure(xtreamBase: source.url, username: credentials.username, password: credentials.password, sourceID: source.id,
-                    timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
-            } else {
-                let sourceChannels = channels.filter { $0.sourceID == source.id }
-                let mapping = sourceChannels.reduce(into: [String: String]()) { result, channel in
-                    if let id = channel.guideID { result[channel.id] = id }
-                }
-                guideStore.configure(xmltvURL: sourceChannels.first?.guideURL, sourceID: source.id, channelMapping: mapping,
-                    defaultOffsetHours: sourceChannels.first?.guideDefaultOffsetHours ?? 0,
-                    channelShifts: Dictionary(uniqueKeysWithValues: sourceChannels.compactMap { channel in
-                        channel.guideShiftHours.map { (channel.id, $0) }
-                    }), timeShiftHours: Double(settings.guideTimeOffsets[source.id.uuidString] ?? 0))
-            }
-        }
+        guideStore.configure(liveSources: sources, channels: channels, sourceStore: sourceStore, settings: settings)
         await guideStore.refreshVisible(channelIDs: visibleIDs, force: force)
     }
 
@@ -1504,8 +1506,10 @@ struct AppleLiveTVView: View {
                         .accessibilityValue(playbackCoordinator.phase == .playing ? "Playing"
                             : (playbackCoordinator.phase.isBusy ? "Loading" : ""))
                 } else {
-                    AppleLiveConnectingArtwork(logoURL: lastWatchedChannel?.logoURL ?? channels.first?.logoURL,
-                                               label: channels.isEmpty ? "No channels" : "Connecting to live channel")
+                    // Black until a channel is chosen (owner 2026-10-22): the list says it is loading.
+                    Color.black
+                        .accessibilityLabel(channels.isEmpty ? "No channels" : "Connecting to live channel")
+                        .accessibilityHidden(showsChannelsLoading)
                 }
             }
             .aspectRatio(stageAspectRatio(sideBySide: sideBySide), contentMode: .fit)
@@ -1553,12 +1557,17 @@ struct AppleLiveTVView: View {
 
     private var liveStageGuideColumn: some View {
         VStack(spacing: 0) {
-            AppleLiveCategoryBar(tabs: liveCategoryTabs, selection: Binding(
-                get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
-                set: { selectedCategory = $0 }
-            ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true },
-                usesParamountStyle: usesParamountLiveStyle)
-            liveOnNowList(channels: channelSnapshot.channels)
+            if showsChannelsLoading {
+                AppleLiveChannelsLoading()
+                    .background(usesParamountLiveStyle ? AppleLiveStagePolicy.phonePanel : .black)
+            } else {
+                AppleLiveCategoryBar(tabs: liveCategoryTabs, selection: Binding(
+                    get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
+                    set: { selectedCategory = $0 }
+                ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true },
+                    usesParamountStyle: usesParamountLiveStyle)
+                liveOnNowList(channels: channelSnapshot.channels)
+            }
         }
     }
 
@@ -2549,14 +2558,10 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
 
         var trailing: [UIView] = [muteButton]
         #if os(iOS)
-        let route = AVRoutePickerView()
-        route.tintColor = .white
-        route.activeTintColor = .white
-        route.prioritizesVideoDevices = true
-        route.accessibilityIdentifier = "player.airplay"
+        let route = AppleLiveRouteButton()
         route.translatesAutoresizingMaskIntoConstraints = false
-        route.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        route.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        route.widthAnchor.constraint(equalToConstant: AppleDesignTokens.minimumActionSize).isActive = true
+        route.heightAnchor.constraint(equalToConstant: AppleDesignTokens.minimumActionSize).isActive = true
         Self.applyGlyphShadow(route)
         trailing.append(route)
         #endif
@@ -2615,7 +2620,6 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     }
 
     private static let playSymbol = UIImage.SymbolConfiguration(pointSize: 34)
-    private static let glyphSymbol = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
 
     /// The 40 % shadow every glyph over the video carries; no plate behind it.
     private static func applyGlyphShadow(_ view: UIView) {
@@ -2627,7 +2631,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
 
     private func glyphButton(_ symbol: String, accessibilityLabel: String) -> UIButton {
         let button = menuButton(imageName: symbol, accessibilityLabel: accessibilityLabel, menu: nil)
-        button.setImage(UIImage(systemName: symbol, withConfiguration: Self.glyphSymbol), for: .normal)
+        button.setImage(UIImage(systemName: symbol, withConfiguration: AppleLivePlayerGlyph.symbol), for: .normal)
         Self.applyGlyphShadow(button)
         return button
     }
@@ -2641,7 +2645,7 @@ private final class AppleLivePlayerContainerViewController: AppleLiveChromeViewC
     private func updateMuteButton() {
         let isMuted = playerViewController.player?.isMuted ?? false
         muteButton.setImage(UIImage(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                                    withConfiguration: Self.glyphSymbol), for: .normal)
+                                    withConfiguration: AppleLivePlayerGlyph.symbol), for: .normal)
         muteButton.accessibilityLabel = isMuted ? "Unmute" : "Mute"
     }
 

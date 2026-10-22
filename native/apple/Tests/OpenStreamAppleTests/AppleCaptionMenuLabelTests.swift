@@ -77,13 +77,49 @@ struct AppleCaptionMenuLabelTests {
         #expect(AppleSubtitleTrackFilter.menuChoices(withCC, preferredLanguages: ["en"]).map(\.title) == ["English", "English (CC)"])
     }
 
-    @Test func untaggedTitlesRemainUnknownManualChoices() {
+    @Test func untaggedTitlesAreNumberedSubtitleChoices() {
         let tracks = [ApplePlaybackTrack(id: 0, title: "English", codec: "subrip"),
                       ApplePlaybackTrack(id: 1, title: "German", codec: "subrip"),
                       ApplePlaybackTrack(id: 2, title: "Subtitle 3", codec: "subrip")]
         // A track name is not language metadata (owner 2026-10-14).
         #expect(AppleSubtitleTrackFilter.menuChoices(tracks, preferredLanguages: ["en", "de"]).map(\.title)
-            == ["Unknown 1", "Unknown 2", "Unknown 3"])
+            == ["Subtitles 1", "Subtitles 2", "Subtitles 3"])
+    }
+
+    /// Owner 2026-10-22: a Live channel's captions menu read "(unknown)".
+    @Test func liveCaptionTracksAreNamedByLanguageOrService() {
+        let taggedCaptions = [ApplePlaybackTrack(id: 99_608, title: "CC1", language: "en", codec: "eia_608")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(taggedCaptions, preferredLanguages: ["en"]).map(\.title)
+            == ["English (CC)"])
+
+        let untagged = [ApplePlaybackTrack(id: 99_609, title: "CC3", codec: "eia_608"),
+                        ApplePlaybackTrack(id: 99_608, title: "Closed Captions", codec: "eia_608"),
+                        ApplePlaybackTrack(id: 5, title: "(unknown)", codec: "dvb_subtitle"),
+                        ApplePlaybackTrack(id: 6, title: "Track 6 (webvtt)", language: "und", codec: "webvtt")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(untagged, preferredLanguages: ["en"]).map(\.title)
+            == ["Subtitles 1", "Subtitles 2", "CC1", "CC3"])
+
+        let coded = [ApplePlaybackTrack(id: 1, title: "dvbsub", language: "deu", codec: "dvb_subtitle"),
+                     ApplePlaybackTrack(id: 2, title: "Subtitle 2", language: "fr", codec: "webvtt")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(coded, preferredLanguages: ["de", "fr"]).map(\.title)
+            == ["German", "French"])
+
+        let twoCC1 = [ApplePlaybackTrack(id: 99_608, title: "CC1", codec: "eia_608"),
+                      ApplePlaybackTrack(id: 99_609, title: "CC1", codec: "eia_608")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(twoCC1, preferredLanguages: ["en"]).map(\.title) == ["CC1", "CC1 (2)"])
+
+        // A playlist that tags its rendition "unknown" or "undefined" gave a language row named after the tag.
+        let wordTags = [ApplePlaybackTrack(id: 1, title: "(unknown)", language: "unknown", codec: "webvtt"),
+                        ApplePlaybackTrack(id: 2, title: "Subtitle 2", language: "Undefined", codec: "webvtt")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(wordTags, preferredLanguages: ["en"]).map(\.title)
+            == ["Subtitles 1", "Subtitles 2"])
+        #expect(AppleSubtitleTrackFilter.otherLanguageChoices(wordTags, preferredLanguages: ["en"]).isEmpty)
+
+        let titles = AppleSubtitleCueLayerPolicy.menuEntries(tracks: taggedCaptions + untagged + coded + wordTags,
+            preferredLanguages: ["en"], languagesAreExplicit: false, activeTrackID: nil).map(\.title)
+            + AppleSubtitleCueLayerPolicy.moreMenuEntries(tracks: taggedCaptions + untagged + coded + wordTags,
+                preferredLanguages: ["en"], activeTrackID: nil).map(\.title)
+        #expect(!titles.contains { $0.localizedCaseInsensitiveContains("unknown") }, "\(titles)")
     }
 
     /// The app draws the Mac's captions now; a 12 pt cue under a 700 pt

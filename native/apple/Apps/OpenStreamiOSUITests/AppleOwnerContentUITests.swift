@@ -138,6 +138,39 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         closePlayer()
     }
 
+    /// Owner 2026-10-22: opening Live the first time waited on the channels.
+    /// Discover first, for the launch prefetch's time, then Live. A timing log,
+    /// not a gate: it passes at any speed, and the measurement is the app's
+    /// trace line "live rows N shown Xms after opening".
+    func testDLiveFirstOpenTimeToRows() {
+        launch([])
+        Thread.sleep(forTimeInterval: 12)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        let started = Date()
+        tab("Live")
+        let shown = rows.firstMatch.waitForExistence(timeout: 120)
+        print("OWNER-CONTENT live first rows ms=\(Int(Date().timeIntervalSince(started) * 1000)) shown=\(shown)")
+        attach("d-live-first-rows")
+        check(shown, "d-no-rows", "Live showed no channel rows")
+    }
+
+    /// What Live shows before its rows, opened straight from launch with its
+    /// saved lineup cleared: one loading state in the list area, a black stage.
+    func testELiveLoadingStateShowsOneSpinner() {
+        app.launchArguments = ["-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES", "-OpenStreamVisionScreen", "live"]
+        app.launch()
+        let loading = app.descendants(matching: .any).matching(identifier: "live.channels.loading").firstMatch
+        guard check(loading.waitForExistence(timeout: 15), "e-no-loading", "Live showed no loading state") else { return }
+        attach("e-live-loading")
+        check(app.staticTexts["Loading Channels"].exists || loading.label == "Loading Channels",
+              "e-no-label", "the loading state has no \"Loading Channels\" label")
+        // The loading view is the only spinner: none on the stage, none anywhere else.
+        let others = app.progressIndicators.matching(NSPredicate(format: "identifier != %@", "live.channels.loading"))
+        check(others.count == 0, "e-spinners", "\(others.count) more spinners while loading")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        check(rows.firstMatch.waitForExistence(timeout: 120), "e-no-rows", "Live showed no channel rows")
+    }
+
     /// Discover's rows load from the media servers; a title page shows its trailer.
     func testDDiscoverRowsAndTrailer() {
         launch([])

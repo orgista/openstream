@@ -37,6 +37,22 @@ enum AppleLiveSystemChromePolicy {
     }
 }
 
+#if canImport(UIKit)
+import SwiftUI
+import UIKit
+
+/// One glyph for every Live player control, inline and full screen (owner
+/// 2026-10-22: "icons are not the same size … a bit jank"): the same point
+/// size and weight in a 44 pt target, as the Apple TV app's player draws its
+/// own. The centre play/pause stays larger, as there.
+@MainActor
+enum AppleLivePlayerGlyph {
+    static let pointSize: CGFloat = 20
+    static let font = Font.system(size: pointSize, weight: .semibold)
+    static let symbol = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
+}
+#endif
+
 #if os(iOS)
 import AVKit
 import SwiftUI
@@ -94,14 +110,14 @@ struct AppleLiveSystemChrome: View {
     private var topRow: some View {
         HStack(spacing: 4) {
             Button(action: onClose) {
-                glyph("xmark", size: 17)
+                glyph("xmark")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close player")
             .accessibilityIdentifier("player.close")
             if let onPictureInPicture {
                 Button(action: onPictureInPicture) {
-                    glyph("pip.enter", size: 17)
+                    glyph("pip.enter")
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Picture in Picture")
@@ -160,27 +176,18 @@ struct AppleLiveSystemChrome: View {
     private func chevrons(_ step: @escaping (AppleLiveZappingPolicy.Direction) -> Void) -> some View {
         VStack(spacing: 0) {
             Button { model.bumpActivity(); step(.next) } label: {
-                chevron("chevron.up")
+                glyph("chevron.up")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Next Channel")
             .accessibilityIdentifier("live.player.next")
             Button { model.bumpActivity(); step(.previous) } label: {
-                chevron("chevron.down")
+                glyph("chevron.down")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Previous Channel")
             .accessibilityIdentifier("live.player.previous")
         }
-    }
-
-    private func chevron(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 20, weight: .regular))
-            .foregroundStyle(.white.opacity(0.8))
-            .appleTransportGlyphLegibility()
-            .frame(width: 44, height: 44)
-            .contentShape(.rect)
     }
 
     // MARK: - Bottom
@@ -195,15 +202,16 @@ struct AppleLiveSystemChrome: View {
                 Spacer(minLength: 0)
                 if isMuted, let onToggleMute {
                     Button(action: onToggleMute) {
-                        glyph("speaker.slash.fill", size: 17)
+                        glyph("speaker.slash.fill")
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Unmute")
                     .accessibilityIdentifier("player.mute")
                 }
                 if model.showsAirPlay {
-                    AppleRoutePicker()
-                        .frame(width: 44, height: 44)
+                    AppleRoutePicker(drawsLiveGlyph: true)
+                        .appleTransportGlyphLegibility()
+                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                         .accessibilityIdentifier("player.airplay")
                 }
                 AppleTransportTrackMenu(
@@ -217,8 +225,10 @@ struct AppleLiveSystemChrome: View {
                     subtitleTiming: model.subtitleTiming,
                     onChangeSubtitleTiming: { model.changeSubtitleTiming($0) },
                     onMenuItemAppeared: { model.menuItemAppeared() },
-                    onMenuItemDisappeared: { model.menuItemDisappeared() }
+                    onMenuItemDisappeared: { model.menuItemDisappeared() },
+                    symbolConfiguration: AppleLivePlayerGlyph.symbol
                 )
+                .appleTransportGlyphLegibility()
                 .disabled(!AppleLiveSystemChromePolicy.hasTrackChoices(
                     audioChoiceCount: AppleAudioTrackMenu.entries(model.audioTracks, activeTrackID: model.selectedAudioID).count,
                     subtitleTrackCount: model.subtitleTracks.count))
@@ -227,7 +237,7 @@ struct AppleLiveSystemChrome: View {
                         model.bumpActivity()
                         onShowChannels()
                     } label: {
-                        glyph("list.bullet", size: 20)
+                        glyph("list.bullet")
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Channels")
@@ -237,11 +247,11 @@ struct AppleLiveSystemChrome: View {
         }
     }
 
-    private func glyph(_ symbol: String, size: CGFloat) -> some View {
+    private func glyph(_ symbol: String) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: size, weight: .semibold))
+            .font(AppleLivePlayerGlyph.font)
             .appleTransportGlyphLegibility()
-            .frame(width: 44, height: 44)
+            .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
             .contentShape(.rect)
     }
 
@@ -268,7 +278,8 @@ private struct AppleLiveMoreMenu: View {
 
     var body: some View {
         AppleTransportMenuButton(title: "More", systemImage: "ellipsis", identifier: "player.options",
-            menu: uiMenu, onOpen: model.menuItemAppeared, onClose: model.menuItemDisappeared)
+            menu: uiMenu, onOpen: model.menuItemAppeared, onClose: model.menuItemDisappeared,
+            symbolConfiguration: AppleLivePlayerGlyph.symbol)
             .appleTransportGlyphLegibility()
             .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
     }
@@ -415,9 +426,13 @@ private struct AppleLiveScrubberRow: View {
     }
 }
 
-/// The system AirPlay picker, white on the video.
+/// The system AirPlay picker, white on the video. Live draws it with the
+/// player's own glyph (`AppleLiveRouteButton`).
 struct AppleRoutePicker: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
+    var drawsLiveGlyph = false
+
+    func makeUIView(context: Context) -> UIView {
+        guard !drawsLiveGlyph else { return AppleLiveRouteButton() }
         let view = AVRoutePickerView()
         view.tintColor = .white
         view.activeTintColor = .white
@@ -426,7 +441,52 @@ struct AppleRoutePicker: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
+
+/// AirPlay at the size and weight of the Live player's other glyphs. The
+/// system picker's own icon is drawn a size apart from them and cannot be
+/// restyled, so it is tinted clear and keeps only the tap and the route menu;
+/// the glyph under it is ours. The picker's button is 46 pt tall and sat a
+/// point off its neighbours' line, so this 44 pt view is the accessibility
+/// element and hands VoiceOver's activation to it.
+final class AppleLiveRouteButton: UIView {
+    private let picker = AVRoutePickerView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        accessibilityLabel = "AirPlay"
+        accessibilityTraits = .button
+        accessibilityIdentifier = "player.airplay"
+        picker.accessibilityElementsHidden = true
+        let glyph = UIImageView(image: UIImage(systemName: "airplay.video", withConfiguration: AppleLivePlayerGlyph.symbol))
+        glyph.tintColor = .white
+        glyph.contentMode = .center
+        picker.tintColor = .clear
+        picker.activeTintColor = .clear
+        picker.prioritizesVideoDevices = true
+        picker.backgroundColor = .clear
+        for view in [glyph, picker] as [UIView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor),
+                view.topAnchor.constraint(equalTo: topAnchor),
+                view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func accessibilityActivate() -> Bool {
+        guard let button = picker.subviews.lazy.compactMap({ $0 as? UIButton }).first else { return false }
+        button.sendActions(for: .touchUpInside)
+        return true
+    }
 }
 
 #endif

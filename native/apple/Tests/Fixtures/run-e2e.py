@@ -416,7 +416,7 @@ def main():
             for name, case in cases.items():
                 case["label"] = labels.get(name, "")
                 if name == "ff-pgs-dts.m2ts":
-                    case["label"] = "Unknown 1"
+                    case["label"] = "Subtitles 1"
                 if case["kind"] == "text":
                     path = Path(caption_media[urlsplit(case["url"]).path])
                     subtitle = command(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:" + str(case["track"]),
