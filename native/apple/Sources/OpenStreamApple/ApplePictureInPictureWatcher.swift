@@ -69,5 +69,26 @@ extension ApplePictureInPictureWatcher: AVPlayerViewControllerDelegate {
         Task { @MainActor in self.set(false, event: "failedToStart") }
     }
 }
+
+#if os(iOS)
+extension ApplePictureInPictureWatcher: AVPictureInPictureControllerDelegate {
+    nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in self.willStart() }
+    }
+
+    nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in self.set(true, event: "didStart") }
+    }
+
+    nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor in self.set(false, event: "willStop") }
+    }
+
+    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                               failedToStartPictureInPictureWithError error: any Error) {
+        Task { @MainActor in self.set(false, event: "failedToStart") }
+    }
+}
+#endif
 #endif
 #endif

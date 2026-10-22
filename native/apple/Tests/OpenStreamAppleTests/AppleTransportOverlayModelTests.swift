@@ -36,6 +36,23 @@ import Testing
         return coordinator
     }
 
+    @Test func choosingPlaybackSpeedDoesNotResumePausedVideo() async {
+        let engine = FakePlaybackEngine()
+        let request = makeRequest()
+        let coordinator = makeCoordinator(engine: engine, request: request)
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false)
+        await coordinator.begin(request)
+        engine.emit(.phase(.paused))
+        await waitUntil { coordinator.phase == .paused }
+        engine.pause()
+        model.playbackRate = 1.5
+        #expect(engine.phase == .paused)
+        model.togglePlayPause()
+        #expect(engine.phase == .playing)
+        #expect(model.playbackRate == 1.5)
+        coordinator.stop()
+    }
+
     // MARK: - timeText formatting
 
     @Test func timeTextFormatsMinutesSeconds() {
@@ -293,6 +310,25 @@ import Testing
         await waitUntil { if case .waiting = coordinator.phase { true } else { false } }
         #expect(!model.showsOverlay)
         // On `.avPlayer` routes no custom waiting view is ever shown, even while waiting.
+        #expect(!model.showsWaitingIndicator)
+        coordinator.stop()
+    }
+
+    @Test(arguments: [ApplePlaybackPresentationRoute.avPlayer, .surface, .audioOnly])
+    func customControlsOwnTheWaitingIndicator(route: ApplePlaybackPresentationRoute) {
+        let engine = FakePlaybackEngine()
+        let coordinator = makeCoordinator(engine: engine, request: makeRequest(), route: route)
+        let model = AppleTransportOverlayModel(coordinator: coordinator, isLive: false, usesSystemControls: false)
+        model.route = route
+        #expect(model.showsOverlay)
+        for phase: ApplePlaybackPhase in [.loading, .waiting("Buffering…")] {
+            coordinator.update(phase)
+            #expect(model.showsWaitingIndicator)
+        }
+        coordinator.update(.playing)
+        #expect(!model.showsWaitingIndicator)
+        model.route = .none
+        coordinator.update(.loading)
         #expect(!model.showsWaitingIndicator)
         coordinator.stop()
     }

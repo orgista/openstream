@@ -141,11 +141,15 @@ extension AppleSubtitleCueLayerPolicy {
         select: @escaping @MainActor (Int?) -> Void
     ) -> [UIMenuElement] {
         func action(_ entry: MenuEntry) -> UIAction {
-            UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in select(entry.trackID) }
+            let action = UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in select(entry.trackID) }
+            action.accessibilityIdentifier = "player.subtitle.track.\(entry.id)"
+            return action
         }
         var children: [UIMenuElement] = entries.map(action)
         if !more.isEmpty {
-            children.append(UIMenu(title: moreMenuTitle, options: .singleSelection, children: more.map(action)))
+            let menu = UIMenu(title: moreMenuTitle, options: .singleSelection, children: more.map(action))
+            menu.accessibilityIdentifier = "player.subtitle.more"
+            children.append(menu)
         }
         return children
     }

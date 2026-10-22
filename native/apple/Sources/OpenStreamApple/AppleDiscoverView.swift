@@ -400,6 +400,7 @@ struct AppleDiscoverView: View {
                 detail(selectedHero, initialAutoPlay: selectedHeroAutoPlay)
             }
         }
+        #if !os(tvOS)
         .overlay(alignment: .top) {
             // Not over the centred loading state, which already says it.
             if catalogStore.isLoading, hasContent {
@@ -407,6 +408,7 @@ struct AppleDiscoverView: View {
                     .padding()
             }
         }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: ApplePlaybackProgressFeed.continueWatchingChangeNotification)) { _ in
             continueWatchingChangeRevision &+= 1
         }
@@ -4980,9 +4982,11 @@ struct AppleCatalogItemDetailView: View {
             }
             switch episodeListPresentation {
             case .loading:
-                ProgressView()
-                    .tint(.white)
-                    .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
+                HStack(spacing: AppleTVDetailMetrics.episodeCardGap) {
+                    AppleTitlePageEpisodePlaceholder(width: AppleTVDetailMetrics.episodeCardSize.width)
+                    AppleTitlePageEpisodePlaceholder(width: AppleTVDetailMetrics.episodeCardSize.width)
+                }
+                .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             case .unavailable:
                 EmptyView()
             case .episodes:
