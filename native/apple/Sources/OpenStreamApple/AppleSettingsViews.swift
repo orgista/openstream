@@ -576,155 +576,164 @@ private struct AppleChannelManagerView: View {
     var body: some View {
         @Bindable var settings = settings
 
-        Form {
-            Section("Channel Preferences") {
-                #if os(tvOS)
-                // The stock Picker pushed an empty page here (AppleTVChoicePicker).
-                AppleTVChoicePicker("Package", selection: $settings.liveChannelPackage,
-                                    options: AppleLiveChannelPackage.available.map { .init(value: $0, title: $0.title) })
-                AppleTVChoicePicker("Live view", selection: $settings.liveChannelScope,
-                                    options: AppleLiveChannelScope.allCases.map { .init(value: $0, title: $0.title) })
-                #else
-                Picker("Package", selection: $settings.liveChannelPackage) {
-                    ForEach(AppleLiveChannelPackage.available) { package in
-                        Text(package.title).tag(package)
-                    }
-                }
-
-                Picker("Live view", selection: $settings.liveChannelScope) {
-                    ForEach(AppleLiveChannelScope.allCases) { scope in
-                        Text(scope.title).tag(scope)
-                    }
-                }
-                #endif
-
-                Toggle("Show Pay-Per-View", isOn: $settings.showPayPerViewChannels)
-                Toggle("Show 24/7 channels", isOn: $settings.show24x7Channels)
-            }
-
-            AppleLiveChannelPreferencesSection(channels: channels, settings: settings)
-
-            if settings.liveChannelPackage == .custom {
-                Section("Custom Package") {
-                    Toggle("Include West feeds", isOn: $settings.customChannelPackage.includeWestFeeds)
-                    ForEach(Array(Set(channels.map(\.group))).filter { !$0.isEmpty }.sorted(), id: \.self) { group in
-                        Toggle(group, isOn: Binding(
-                            get: { settings.customChannelPackage.groups[group] ?? true },
-                            set: { settings.customChannelPackage.groups[group] = $0 }
-                        ))
-                    }
-                }
-            }
-            #if os(tvOS)
-            // These two are rows rather than toolbar items: a tvOS toolbar item
-            // always draws a box around its glyph (the T4/R1 defect). They sit
-            // in their own section — putting them at the head of the channel
-            // list moved focus to the tab bar and left the Settings pill drawn
-            // without its icon and overflowing the bar (measured 2026-09-16).
-            Section {
-                Button {
-                    Task { await reload() }
-                } label: {
-                    AppleTVNavigationLabel("Refresh", systemImage: "arrow.clockwise")
-                }
-                .disabled(isLoading)
-            }
-            #endif
-            // Owner, 2026-09-17: a 3,000-row wall of toggles is not a way to
-            // pick channels. The list holds only what is selected; adding goes
-            // through a searchable picker.
-            Section(settings.liveChannelPackage == .custom ? "Custom Channels" : "My Channels") {
-                if isLoading, channels.isEmpty {
-                    ProgressView()
-                } else if channels.isEmpty {
-                    Text(errorMessage ?? emptyLineupMessage)
-                        #if os(tvOS)
-                        // A fixed grey, not the hierarchical `.secondary`: in
-                        // this tvOS form the message row drew as an empty
-                        // capsule (Apple TV verification 2026-10-01).
-                        .foregroundStyle(Color.white.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
-                        #else
-                        .foregroundStyle(.secondary)
-                        #endif
-                        .accessibilityIdentifier("channels.empty")
-                    if errorMessage != nil {
-                        Button {
-                            Task { await reload() }
-                        } label: {
-                            #if os(tvOS)
-                            AppleTVFocusReadableText("Retry")
-                            #else
-                            Text("Retry")
-                            #endif
-                        }
-                        .accessibilityIdentifier("channels.retry")
-                    }
-                } else {
-                    NavigationLink {
-                        channelPicker
-                    } label: {
-                        Label("Add Channels…", systemImage: "plus.circle")
-                    }
-                    .accessibilityIdentifier("channels.add")
-                    if let errorMessage {
-                        Text(errorMessage).font(.caption).foregroundStyle(.secondary)
-                    }
-                    ForEach(selectedChannels) { channel in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(displayName(for: channel)).foregroundStyle(.primary)
-                                if !channel.group.isEmpty {
-                                    Text(channel.group).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer(minLength: 8)
-                            #if os(tvOS)
-                            Button { toggle(channel.id) } label: { AppleTVFocusReadableText("Remove") }
-                            #else
-                            Button { toggle(channel.id) } label: {
-                                Image(systemName: "minus.circle").foregroundStyle(.secondary)
-                                    .frame(minWidth: 44, minHeight: 44)
-                                    .contentShape(.rect)
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Remove \(channel.name)")
-                            #endif
+        AppleLineupImportContainer { lineupSection in
+            Form {
+                Section("Channel Preferences") {
+                    #if os(tvOS)
+                    // The stock Picker pushed an empty page here (AppleTVChoicePicker).
+                    AppleTVChoicePicker("Package", selection: $settings.liveChannelPackage,
+                                        options: AppleLiveChannelPackage.available(entries: completeGuide).map { .init(value: $0, title: $0.title) })
+                    AppleTVChoicePicker("Live view", selection: $settings.liveChannelScope,
+                                        options: AppleLiveChannelScope.allCases.map { .init(value: $0, title: $0.title) })
+                    #else
+                    Picker("Package", selection: $settings.liveChannelPackage) {
+                        ForEach(AppleLiveChannelPackage.available(entries: completeGuide)) { package in
+                            Text(package.title).tag(package)
                         }
                     }
-                    #if !os(tvOS)
-                    .onDelete { offsets in
-                        for channel in offsets.map({ selectedChannels[$0] }) { toggle(channel.id) }
+
+                    Picker("Live view", selection: $settings.liveChannelScope) {
+                        ForEach(AppleLiveChannelScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
                     }
                     #endif
+
+                    Toggle("Show Pay-Per-View", isOn: $settings.showPayPerViewChannels)
+                    Toggle("Show 24/7 channels", isOn: $settings.show24x7Channels)
                 }
-            }
-        }
-        .appleSettingsPane("Channel Manager", embedded: embeddedInSplit)
-        // tvOS toolbar items always draw a box around the glyph, which is the
-        // same defect the owner called on Discover (T4) and Search (R1).
-        // On a television these two actions are rows in the form instead.
-        #if !os(tvOS)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { Task { await reload() } } label: {
-                    // The glyph gives way to the spinner while the lineup is
-                    // being fetched. Dimming alone was the only answer this
-                    // button gave, and against a playlist held on disk the
-                    // fetch is over before the dimming is drawn, so the press
-                    // read as dead (button crawl, 2026-09-19).
-                    if isLoading {
-                        ProgressView()
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+
+                lineupSection
+                AppleLiveChannelPreferencesSection(channels: channels, settings: settings)
+
+                if settings.liveChannelPackage == .custom {
+                    Section("Custom Package") {
+                        Toggle("Include West feeds", isOn: $settings.customChannelPackage.includeWestFeeds)
+                        ForEach(Array(Set(channels.map(\.group))).filter { !$0.isEmpty }.sorted(), id: \.self) { group in
+                            Toggle(group, isOn: Binding(
+                                get: { settings.customChannelPackage.groups[group] ?? true },
+                                set: { settings.customChannelPackage.groups[group] = $0 }
+                            ))
+                        }
                     }
                 }
-                .disabled(isLoading)
+                #if os(tvOS)
+                // These two are rows rather than toolbar items: a tvOS toolbar item
+                // always draws a box around its glyph (the T4/R1 defect). They sit
+                // in their own section — putting them at the head of the channel
+                // list moved focus to the tab bar and left the Settings pill drawn
+                // without its icon and overflowing the bar (measured 2026-09-16).
+                Section {
+                    Button {
+                        Task { await reload() }
+                    } label: {
+                        AppleTVNavigationLabel("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+                }
+                #endif
+                // Owner, 2026-09-17: a 3,000-row wall of toggles is not a way to
+                // pick channels. The list holds only what is selected; adding goes
+                // through a searchable picker.
+                Section(settings.liveChannelPackage == .custom ? "Custom Channels" : "My Channels") {
+                    if isLoading, channels.isEmpty {
+                        ProgressView()
+                    } else if channels.isEmpty {
+                        Text(errorMessage ?? emptyLineupMessage)
+                            #if os(tvOS)
+                            // A fixed grey, not the hierarchical `.secondary`: in
+                            // this tvOS form the message row drew as an empty
+                            // capsule (Apple TV verification 2026-10-01).
+                            .foregroundStyle(Color.white.opacity(0.7))
+                            .fixedSize(horizontal: false, vertical: true)
+                            #else
+                            .foregroundStyle(.secondary)
+                            #endif
+                            .accessibilityIdentifier("channels.empty")
+                        if errorMessage != nil {
+                            Button {
+                                Task { await reload() }
+                            } label: {
+                                #if os(tvOS)
+                                AppleTVFocusReadableText("Retry")
+                                #else
+                                Text("Retry")
+                                #endif
+                            }
+                            .accessibilityIdentifier("channels.retry")
+                        }
+                    } else {
+                        NavigationLink {
+                            channelPicker
+                        } label: {
+                            Label("Add Channels…", systemImage: "plus.circle")
+                        }
+                        .accessibilityIdentifier("channels.add")
+                        if let errorMessage {
+                            Text(errorMessage).font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(selectedChannels) { channel in
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(displayName(for: channel)).foregroundStyle(.primary)
+                                    if !channel.group.isEmpty {
+                                        Text(channel.group).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                                #if os(tvOS)
+                                Button { toggle(channel.id) } label: { AppleTVFocusReadableText("Remove") }
+                                #else
+                                Button { toggle(channel.id) } label: {
+                                    Image(systemName: "minus.circle").foregroundStyle(.secondary)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Remove \(channel.name)")
+                                #endif
+                            }
+                        }
+                        #if !os(tvOS)
+                        .onDelete { offsets in
+                            for channel in offsets.map({ selectedChannels[$0] }) { toggle(channel.id) }
+                        }
+                        #endif
+                    }
+                }
             }
+            .appleSettingsPane("Channel Manager", embedded: embeddedInSplit)
+            // tvOS toolbar items always draw a box around the glyph, which is the
+            // same defect the owner called on Discover (T4) and Search (R1).
+            // On a television these two actions are rows in the form instead.
+            #if !os(tvOS)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { Task { await reload() } } label: {
+                        // The glyph gives way to the spinner while the lineup is
+                        // being fetched. Dimming alone was the only answer this
+                        // button gave, and against a playlist held on disk the
+                        // fetch is over before the dimming is drawn, so the press
+                        // read as dead (button crawl, 2026-09-19).
+                        if isLoading {
+                            ProgressView()
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isLoading)
+                }
+            }
+            #endif
+            .task(id: sourceIdentity) { await reload(); completeGuide = AppleChannelLineupPresets.current; lineupIndex = AppleChannelLineupIndex(completeGuide) }
+            .onReceive(NotificationCenter.default.publisher(for: AppleChannelLineupStore.didChange).receive(on: RunLoop.main)) { _ in
+                completeGuide = AppleChannelLineupPresets.current
+                lineupIndex = AppleChannelLineupIndex(completeGuide)
+                settings.updateAutomaticLiveChannelPackage(channels: channels)
+                channelsRevision &+= 1
+            }
+            .task(id: projectionIdentity) { await rebuildFilteredChannels() }
         }
-        #endif
-        .task(id: sourceIdentity) { await reload(); completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []; lineupIndex = AppleChannelLineupIndex(completeGuide) }
-        .task(id: projectionIdentity) { await rebuildFilteredChannels() }
     }
 
     private var sourceIdentity: String {

@@ -402,9 +402,12 @@ func devSeedTMDBKeyTurnsMetadataOn() {
 
 @MainActor
 @Test func packageDefaultTracksPlaylistWithoutSavingAnExplicitChoice() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let lineup = try fixtureLineupStore(directory: directory)
     let defaults = makeIsolatedDefaults()
-    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
-    let entries = Array(try AppleChannelLineupPresets.completeUS().prefix(20))
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(), lineupStore: lineup)
+    let entries = Array(try fixtureLineup().channels.prefix(20))
     let channels = entries.map {
         AppleIPTVChannel(id: String($0.number), sourceID: UUID(), name: $0.name, group: "All",
                          streamURL: URL(string: "https://fixture.example/channel.ts")!)
@@ -420,16 +423,19 @@ func devSeedTMDBKeyTurnsMetadataOn() {
         store.updateAutomaticLiveChannelPackage(channels: channels)
         store.updateAutomaticLiveChannelPackage(channels: [])
         #expect(store.liveChannelPackage == choice)
-        let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+        let reread = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(), lineupStore: lineup)
         #expect(reread.liveChannelPackage == choice)
     }
 }
 
 @MainActor
 @Test func savedLegacyPackageMigratesAndRemainsExplicit() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let lineup = try fixtureLineupStore(directory: directory)
     let defaults = makeIsolatedDefaults()
     defaults.set("premierGuide", forKey: "openstream.settings.live.package.v1")
-    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore())
+    let store = AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore(), lineupStore: lineup)
     #expect(store.liveChannelPackage == .completeGuide)
     #expect(defaults.string(forKey: "openstream.settings.live.package.v1") == "completeGuide")
     store.updateAutomaticLiveChannelPackage(channels: [])

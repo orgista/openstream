@@ -204,7 +204,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     #expect(!page.contains("You can close"))
 }
 
-@Test func webManagementPageCarriesTheAppMarkAndNoUploadSection() {
+@Test func webManagementPageCarriesTheAppMarkAndPairedLineupImport() {
     let unpaired = AppleWebManagementPage.setup(pairingCode: "ABCD2345", address: "192.168.1.95:8090")
     let paired = AppleWebManagementPage.setup(
         sources: [AppleSource(kind: .liveTV, name: "Fixture TV", url: URL(string: "https://fixture.example/playlist.m3u")!,
@@ -228,6 +228,9 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     #expect(paired.contains("id=\"playlistURL\""))
     #expect(paired.contains("Fixture TV"))
     #expect(paired.contains("value=\"remove\""))
+    #expect(paired.contains("action=\"/lineup\""))
+    #expect(paired.contains("accept=\".oslineup,.json,application/json\""))
+    #expect(unpaired.contains("action=\"/lineup\"") == false)
 }
 
 @Test func webManagementUsesAReadablePort() {
@@ -863,4 +866,58 @@ private func pairBrowser(_ active: AppleWebManagementSession, using browser: URL
     let response = try await response(for: post, using: browser)
     #expect(response.statusCode == 200)
     return try pairingCookie(from: response)
+}
+
+
+@MainActor
+@Test func webLineupUploadRequiresPairingAndTrustedOriginAndPersists() async throws {
+    let suite = "openstream-lineup-web-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: directory)
+    }
+    let lineup = AppleChannelLineupStore(directory: directory)
+    let server = AppleWebManagementServer(configuration: .init(preferredPort: 0, sessionDuration: 600,
+        advertisesBonjour: false, advertisedHost: "127.0.0.1"), lineupStore: lineup)
+    let active = try await server.start(sourceStore: AppleSourceStore(defaults: defaults))
+    defer { server.stop() }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.httpShouldSetCookies = false
+    let browser = URLSession(configuration: configuration)
+    defer { browser.invalidateAndCancel() }
+    var upload = URLRequest(url: active.friendlyURL.appendingPathComponent("lineup"))
+    upload.httpMethod = "POST"
+    upload.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    upload.httpBody = try JSONEncoder().encode(fixtureLineup())
+    #expect(try await response(for: upload, using: browser).statusCode == 401)
+    #expect(lineup.current == nil)
+    let cookie = try await pairBrowser(active, using: browser)
+    upload.setValue(cookie, forHTTPHeaderField: "Cookie")
+    upload.setValue("https://fixture.example", forHTTPHeaderField: "Origin")
+    #expect(try await response(for: upload, using: browser).statusCode == 403)
+    upload.setValue(nil, forHTTPHeaderField: "Origin")
+    upload.setValue("fixture.example", forHTTPHeaderField: "Host")
+    #expect(try await response(for: upload, using: browser).statusCode == 403)
+    upload.setValue(nil, forHTTPHeaderField: "Host")
+    let boundary = "lineup-test-boundary"
+    let encoded = try JSONEncoder().encode(fixtureLineup())
+    upload.httpBody = Data(("--\(boundary)\r\nContent-Disposition: form-data; name=\"lineup\"; filename=\"fixture.oslineup\"\r\nContent-Type: application/json\r\n\r\n"
+        + String(decoding: encoded, as: UTF8.self) + "\r\n--\(boundary)--\r\n").utf8)
+    upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+    #expect(try AppleWebManagementServer.uploadedLineup(body: #require(upload.httpBody), contentType: upload.value(forHTTPHeaderField: "Content-Type")) == encoded)
+    let uploaded = try await response(for: upload, using: browser)
+    #expect(uploaded.statusCode == 200)
+    #expect(lineup.current == (try fixtureLineup()))
+    #expect(AppleChannelLineupStore(directory: directory).current == lineup.current)
+    upload.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    upload.httpBody = Data("{}".utf8)
+    #expect(try await response(for: upload, using: browser).statusCode == 400)
+    #expect(lineup.current == (try fixtureLineup()))
+    upload.httpBody = Data(repeating: 32, count: AppleChannelLineupFile.maximumBytes + 1)
+    #expect(try await response(for: upload, using: browser).statusCode == 400)
+    upload.httpBody = Data(repeating: 32, count: 4 * 1024 * 1024 + 1)
+    upload.setValue("100-continue", forHTTPHeaderField: "Expect")
+    #expect(try await response(for: upload, using: browser).statusCode == 413)
 }

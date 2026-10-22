@@ -44,7 +44,7 @@ struct AppleFrenchPlaylistTests {
     /// two that happen to share a name with a US lineup.
     @Test func allShowsTheWholePlaylistUnderCompleteGuide() throws {
         let channels = try playlist()
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let snapshot = AppleLiveChannelSnapshot.build(
             groups: [.init(name: "All", channels: channels)], package: .completeGuide,
             custom: .init(), entries: entries, favoriteIDs: [], category: "All")

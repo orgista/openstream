@@ -15,6 +15,7 @@ final class AppleConfigurationController {
     private let settings: AppleSettingsStore
     private let mediaIndex: AppleMediaIndexStore
     private let defaults: UserDefaults
+    private let lineupStore: AppleChannelLineupStore
     private let cloud: AppleCloudKeyValueStore
     private let backupKeys: any AppleBackupKeyStoring
     private var pendingWrite: Task<Void, Never>?
@@ -31,11 +32,13 @@ final class AppleConfigurationController {
 
     init(sources: AppleSourceStore, settings: AppleSettingsStore, mediaIndex: AppleMediaIndexStore,
          defaults: UserDefaults = .standard, cloud: AppleCloudKeyValueStore = NSUbiquitousKeyValueStore.default,
-         backupKeys: any AppleBackupKeyStoring = AppleICloudBackupKeychain()) {
+         backupKeys: any AppleBackupKeyStoring = AppleICloudBackupKeychain(),
+         lineupStore: AppleChannelLineupStore = .shared) {
         self.sources = sources
         self.settings = settings
         self.mediaIndex = mediaIndex
         self.defaults = defaults
+        self.lineupStore = lineupStore
         self.cloud = cloud
         self.backupKeys = backupKeys
         // The Apple TV has no switch to read, so the policy answers for it:
@@ -443,7 +446,7 @@ final class AppleConfigurationController {
             ratings: AppleTitleRatingStore(defaults: defaults).allRatings.mapValues(\.rawValue),
             continueWatchingRemovals: playback.configurationContinueWatchingRemovals(),
             playbackTerminals: playback.configurationPlaybackTerminals(),
-            playbackActivity: playback.configurationPlaybackActivity())
+            playbackActivity: playback.configurationPlaybackActivity(), lineup: lineupStore.data)
     }
 
     private func contentFingerprint() throws -> Data {
@@ -473,6 +476,7 @@ final class AppleConfigurationController {
         }
         applying = true
         defer { applying = false }
+        if let lineup = snapshot.lineup { try traced("lineup") { try lineupStore.importData(lineup) } }
         // Sources and settings are the setup; a failure there stops the import
         // before anything else changes. What follows is kept on a best-effort
         // basis: a part this device cannot keep is skipped and traced, so the
@@ -600,6 +604,9 @@ struct AppleConfigurationSync: ViewModifier {
                 #if DEBUG
                 if let controller { await AppleDebugBackupRestore.resumeICloudIfRequested(controller: controller) }
                 #endif
+            }
+            .onReceive(NotificationCenter.default.publisher(for: AppleChannelLineupStore.didChange).receive(on: RunLoop.main)) { _ in
+                controller?.localChanged()
             }
             .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
                 controller?.localChanged()

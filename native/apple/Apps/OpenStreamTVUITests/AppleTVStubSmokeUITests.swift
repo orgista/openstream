@@ -1,4 +1,6 @@
 import Network
+import CryptoKit
+import CoreImage
 import XCTest
 
 /// Launch → Discover row → title page → back on the Apple TV, with every
@@ -424,5 +426,84 @@ private actor PlayerDotsLoopbackFixture {
                 "The test runner could not open its loopback fixture listener."
             }
         }
+    }
+}
+
+
+@MainActor
+final class AppleTVLineupImportUITests: OpenStreamUITestCase {
+    private let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+
+    override func tearDown() { app.terminate() }
+
+    func testSealedSetupReceivesTheLineupAndKeepsItAfterRelaunch() async throws {
+        guard let path = ProcessInfo.processInfo.environment["OPENSTREAM_LINEUP_FILE"], !path.isEmpty else {
+            throw XCTSkip("Requires the lineup setup-transfer run.")
+        }
+        continueAfterFailure = false
+        app.launchArguments = ["-OpenStreamVisionScreen", "channels", "-OpenStreamTrace", "YES",
+            "-OpenStreamMuteAudio", "YES", "-OpenStreamDebugSetupReceive", "YES"]
+        app.launch()
+        let qr = app.descendants(matching: .any)["setup.receive.qr"].firstMatch
+        XCTAssertTrue(qr.waitForExistence(timeout: 30))
+        let image = try XCTUnwrap(qr.screenshot().image.cgImage)
+        let detector = try XCTUnwrap(CIDetector(ofType: CIDetectorTypeQRCode,
+            context: CIContext(options: [.useSoftwareRenderer: true]),
+            options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]))
+        let codeImage = detector.features(in: CIImage(cgImage: image)).compactMap { $0 as? CIQRCodeFeature }.first
+        let encodedLink = try XCTUnwrap(codeImage?.messageString)
+        let components = try XCTUnwrap(URLComponents(string: encodedLink))
+        let fields = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        let sessionID = try XCTUnwrap(fields["s"])
+        let code = try XCTUnwrap(fields["c"])
+        let receiverText = try XCTUnwrap(fields["k"])
+        let receiverBytes = try XCTUnwrap(Data(base64Encoded: receiverText
+            .replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") + "="))
+        let receiver = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: receiverBytes)
+        let sender = Curve25519.KeyAgreement.PrivateKey()
+        func base64URL(_ data: Data) -> String {
+            data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        }
+        let senderText = base64URL(sender.publicKey.rawRepresentation)
+        let label = "openstream-setup-v1"
+        let shared = try sender.sharedSecretFromKeyAgreement(with: receiver)
+        let key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(label.utf8),
+            sharedInfo: Data([label, sessionID, code, senderText, receiverText].joined(separator: "|").utf8), outputByteCount: 32)
+        let lineup = try Data(contentsOf: URL(fileURLWithPath: path))
+        let snapshot: [String: Any] = ["formatVersion": 1, "savedAt": Date.now.timeIntervalSinceReferenceDate,
+            "sources": [String](), "settings": [String: String](), "playbackProgress": [String: String](),
+            "watchlist": [String](), "ratings": [String: Int](),
+            "lineup": lineup.base64EncodedString()]
+        let secrets: [String: Any] = ["sourceCredentials": [String](), "sourceAddresses": [String](),
+            "guideAddresses": [String](), "settingsCredentials": [String: String](), "privateSettings": [String: String]()]
+        let payload: [String: Any] = ["v": 1, "sender": "Lineup Test", "snapshot": snapshot, "secrets": secrets]
+        let box = try AES.GCM.seal(JSONSerialization.data(withJSONObject: payload), using: key,
+            authenticating: Data((label + "|" + sessionID).utf8))
+        let requestBody: [String: Any] = ["v": 1, "senderKey": senderText, "sealed": base64URL(try XCTUnwrap(box.combined))]
+        let address = try XCTUnwrap(fields["h"])
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "http://" + address + "/setup/" + sessionID)))
+        request.httpMethod = "POST"
+        request.setValue(code, forHTTPHeaderField: "X-Setup-Code")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        let client = URLSession(configuration: .ephemeral)
+        defer { client.invalidateAndCancel() }
+        let (_, response) = try await client.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let confirm = app.buttons["setup.receive.import"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 20))
+        if !confirm.hasFocus { XCUIRemote.shared.press(.left) }
+        XCTAssertTrue(confirm.hasFocus)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["setup.receive.done"].waitForExistence(timeout: 30))
+        app.terminate()
+        app.launchArguments = ["-OpenStreamVisionScreen", "channels", "-OpenStreamMuteAudio", "YES"]
+        app.launch()
+        let name = app.staticTexts["lineup.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 30))
+        XCTAssertEqual(name.label, "Complete US")
+        XCTAssertFalse(app.buttons["lineup.import.file"].exists)
+        XCTAssertFalse(app.textFields["lineup.url"].exists)
     }
 }

@@ -132,9 +132,10 @@ struct AppleLiveChannelSnapshot: Sendable {
         let all = groups.flatMap(\.channels)
         let selected: [AppleIPTVChannel]
         switch package {
-        case .custom: selected = custom.selected(from: all)
+        case .custom: selected = custom.selected(from: all, entries: entries)
         case .everything: selected = all.filter { !AppleChannelVisibilityPolicy.isPlaceholder($0) }
-        case .completeGuide: selected = AppleChannelVisibilityPolicy.deduplicatedEastChannels(all)
+        case .completeGuide: selected = entries.isEmpty ? all.filter { !AppleChannelVisibilityPolicy.isPlaceholder($0) }
+            : AppleChannelVisibilityPolicy.deduplicatedEastChannels(all)
         }
 
         // One fuzzy match per channel, reused by the category list, the
@@ -162,7 +163,9 @@ struct AppleLiveChannelSnapshot: Sendable {
         // "News" / "Sports" panel, most foreign lists) showed All and
         // Favorites and nothing else (Apple TV full pass, 2026-10-02).
         for channel in selected where categoryByID[channel.id] == nil {
-            if let category = AppleLiveCategoryPolicy.category(forPlaylistGroup: channel.group) {
+            if entries.isEmpty, !channel.group.isEmpty {
+                categoryByID[channel.id] = channel.group
+            } else if let category = AppleLiveCategoryPolicy.category(forPlaylistGroup: channel.group) {
                 categoryByID[channel.id] = category
             }
         }
@@ -190,10 +193,14 @@ struct AppleLiveChannelSnapshot: Sendable {
         let lineup = curated ?? selected
         let available = Set(categoryByID.values)
         let order = AppleLiveCategoryPolicy.order
-        let categories = ["All", "Favorites"] + order.filter { available.contains($0) }
+        let additional = available.subtracting(order + ["All", "Favorites"])
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let categories = ["All", "Favorites"] + (entries.isEmpty
+            ? available.subtracting(["All", "Favorites"]).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            : order.filter { available.contains($0) } + additional)
         let channels: [AppleIPTVChannel]
         if category == "All" {
-            channels = package == .completeGuide
+            channels = entries.isEmpty || package == .completeGuide
                 ? lineup
                 : Dictionary(grouping: selected) { entryByChannelID[$0.id]?.category ?? "Other" }
                     .sorted { $0.key < $1.key }.flatMap(\.value)

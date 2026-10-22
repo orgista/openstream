@@ -83,9 +83,22 @@ public final class AppleAppRouter {
     /// root asks "Send your setup to …?" (`AppleSetupTransferHost`).
     public private(set) var setupSendLink: AppleSetupTransferLink?
 
+    public var lineupImportMessage: String?
+
     public init() {}
 
     public func open(_ url: URL) {
+        #if !os(tvOS)
+        if url.isFileURL, url.pathExtension.lowercased() == "oslineup" {
+            do {
+                try AppleChannelLineupStore.shared.importFile(url)
+                lineupImportMessage = "Lineup imported."
+            } catch {
+                lineupImportMessage = (error as? AppleChannelLineupError)?.errorDescription ?? "Could not open the lineup file."
+            }
+            return
+        }
+        #endif
         if url.scheme?.lowercased() == "openstream", url.host?.lowercased() == "send-setup" {
             guard let link = AppleSetupTransferLink(url: url) else {
                 appleTraceFailure("setup send link refused")

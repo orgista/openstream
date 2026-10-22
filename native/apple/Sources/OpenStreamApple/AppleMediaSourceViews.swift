@@ -418,6 +418,13 @@ struct AppleLiveTVView: View {
         .onDisappear { quietRetry?.cancel() }
         .refreshable { await refreshGuide(Set(channelSnapshot.channelIDs), force: true) }
         .task(id: reloadIdentity) { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: AppleChannelLineupStore.didChange).receive(on: RunLoop.main)) { _ in
+            completeGuide = AppleChannelLineupPresets.current
+            lineupIndex = AppleChannelLineupIndex(completeGuide)
+            settings.updateAutomaticLiveChannelPackage(channels: channelIndex.channels)
+            selectedCategory = "All"
+            channelsRevision &+= 1
+        }
         .task(id: "\(channelsRevision)|\(settings.guideTimeOffsets.sorted { $0.key < $1.key })|\(settings.guideChannelAssignments.sorted { $0.key < $1.key })") {
             await refreshGuide(Set(channelSnapshot.channelIDs))
         }
@@ -653,7 +660,7 @@ struct AppleLiveTVView: View {
             reloadGate.end()
             if !Task.isCancelled { hasResolvedFirstLoad = true }
         }
-        completeGuide = (try? AppleChannelLineupPresets.completeUS()) ?? []
+        completeGuide = AppleChannelLineupPresets.current
         lineupIndex = AppleChannelLineupIndex(completeGuide)
         let sources = sourceStore.sources.filter { $0.kind == .liveTV && $0.isEnabled }
         await AppleIPTVChannelCache.shared.retain(Set(sources.map(\.id)))

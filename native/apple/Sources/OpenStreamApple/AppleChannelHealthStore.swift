@@ -137,7 +137,7 @@ public final class AppleChannelHealthStore {
         let favorites = settings.favoriteChannelIDs
         let snapshot = await Task.detached(priority: .userInitiated) {
             AppleLiveChannelSnapshot.build(groups: groups, package: package, custom: custom,
-                entries: (try? AppleChannelLineupPresets.completeUS()) ?? [],
+                entries: AppleChannelLineupPresets.current,
                 favoriteIDs: favorites, category: "All")
         }.value
         guard !Task.isCancelled, lineup.isEmpty else { return }

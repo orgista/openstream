@@ -76,6 +76,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     /// on reading, tombstoning their ids; more than none means the copy
     /// should be written again.
     private(set) var retiredSourceCount = 0
+    public var lineup: Data?
     public var settings: [String: Data]
     public var playbackProgress: [String: ApplePlaybackProgress]
     /// Finished titles and when, keyed like `playbackProgress`. Snapshots
@@ -94,7 +95,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, savedAt, sources, settings, playbackProgress, watchedHistory, watchedTombstones, watchlist, ratings
-        case continueWatchingRemovals, sourceTombstones, playbackTerminals, playbackActivity
+        case continueWatchingRemovals, sourceTombstones, playbackTerminals, playbackActivity, lineup
     }
 
     public init(savedAt: Date = .now, sources: [AppleSource] = [], sourceTombstones: [UUID: Date] = [:], settings: [String: Data] = [:],
@@ -104,11 +105,12 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
                 watchlist: [AppleMediaRecord] = [], ratings: [String: Int] = [:],
                 continueWatchingRemovals: [String: Date] = [:],
                 playbackTerminals: [String: ApplePlaybackTerminalEvents] = [:],
-                playbackActivity: [String: ApplePlaybackProgress] = [:]) {
+                playbackActivity: [String: ApplePlaybackProgress] = [:], lineup: Data? = nil) {
         formatVersion = 1
         self.savedAt = savedAt
         self.sourceTombstones = sourceTombstones
         self.sources = sources.filter { sourceTombstones[$0.id] == nil }.map(Self.portableSource)
+        self.lineup = lineup
         self.settings = settings
         self.playbackProgress = playbackProgress
         let history = AppleWatchedHistory(watched: watchedHistory, tombstones: watchedTombstones)
@@ -145,6 +147,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
                 retiredSourceCount += 1
             }
         }
+        lineup = try container.decodeIfPresent(Data.self, forKey: .lineup)
         settings = try container.decode([String: Data].self, forKey: .settings)
         playbackProgress = try container.decode([String: ApplePlaybackProgress].self, forKey: .playbackProgress)
         let history = AppleWatchedHistory(
@@ -170,6 +173,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         try container.encode(savedAt, forKey: .savedAt)
         if !sourceTombstones.isEmpty { try container.encode(sourceTombstones, forKey: .sourceTombstones) }
         try container.encode(sources, forKey: .sources)
+        try container.encodeIfPresent(lineup, forKey: .lineup)
         try container.encode(settings, forKey: .settings)
         try container.encode(playbackProgress, forKey: .playbackProgress)
         if !playbackTerminals.isEmpty { try container.encode(playbackTerminals, forKey: .playbackTerminals) }
@@ -185,6 +189,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
 
     public func validate() throws {
         guard formatVersion == 1 else { throw AppleConfigurationError.unsupportedVersion }
+        if let lineup { _ = try AppleChannelLineupFile.decode(lineup) }
         let sourceIDs = sources.map(\.id)
         guard Set(sourceIDs).count == sourceIDs.count,
               Set(watchlist.map(\.id)).count == watchlist.count else { throw AppleConfigurationError.invalidFile }
@@ -192,6 +197,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
 
     public func merging(_ incoming: Self) -> Self {
         var result = incoming
+        result.lineup = incoming.lineup ?? lineup
         var combined = sources
         for source in incoming.sources {
             if let index = combined.firstIndex(where: { $0.id == source.id }) { combined[index] = source }

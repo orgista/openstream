@@ -250,12 +250,16 @@ public enum AppleLiveChannelPackage: String, Codable, CaseIterable, Identifiable
 
     public var id: String { rawValue }
 
-    /// All builds carry the organisation preset; none supply channels.
-    public static var available: [AppleLiveChannelPackage] { allCases }
+    public static var available: [AppleLiveChannelPackage] { available(entries: AppleChannelLineupPresets.current) }
+
+    public static func available(entries: [AppleChannelLineupEntry]) -> [AppleLiveChannelPackage] {
+        entries.isEmpty ? [.everything, .custom] : allCases
+    }
 
     /// Count distinct guide numbers so duplicate quality feeds cannot qualify a playlist.
-    public static func defaultPackage(for channels: [AppleIPTVChannel]) -> AppleLiveChannelPackage {
-        let index = AppleChannelLineupIndex((try? AppleChannelLineupPresets.completeUS()) ?? [])
+    public static func defaultPackage(for channels: [AppleIPTVChannel],
+                                      entries: [AppleChannelLineupEntry] = AppleChannelLineupPresets.current) -> AppleLiveChannelPackage {
+        let index = AppleChannelLineupIndex(entries)
         let matched = Set(AppleChannelVisibilityPolicy.deduplicatedEastChannels(channels)
             .compactMap { index.match($0.name)?.number })
         return matched.count >= AppleLiveChannelSnapshot.minimumLineupMatches ? .completeGuide : .everything
@@ -536,7 +540,10 @@ public final class AppleSettingsStore {
     private var automaticLiveChannelPackage: AppleLiveChannelPackage = .everything
 
     public var liveChannelPackage: AppleLiveChannelPackage {
-        get { selectedLiveChannelPackage ?? automaticLiveChannelPackage }
+        get {
+            let package = selectedLiveChannelPackage ?? automaticLiveChannelPackage
+            return package == .completeGuide && lineupStore.current == nil ? .everything : package
+        }
         set {
             selectedLiveChannelPackage = newValue
             defaults.set(newValue.rawValue, forKey: DefaultsKey.liveChannelPackage)
@@ -546,7 +553,7 @@ public final class AppleSettingsStore {
     /// Automatic choices stay unsaved, so new or changed playlists are evaluated again.
     public func updateAutomaticLiveChannelPackage(channels: [AppleIPTVChannel]) {
         guard selectedLiveChannelPackage == nil else { return }
-        automaticLiveChannelPackage = AppleLiveChannelPackage.defaultPackage(for: channels)
+        automaticLiveChannelPackage = AppleLiveChannelPackage.defaultPackage(for: channels, entries: lineupStore.current?.channels ?? [])
     }
 
     public var customChannelPackage: AppleCustomChannelPackage {
@@ -607,6 +614,7 @@ public final class AppleSettingsStore {
     public private(set) var persistenceError: String?
 
     private let defaults: UserDefaults
+    private let lineupStore: AppleChannelLineupStore
     private let keychain: any AppleCredentialStoring
     private var unreadableSecretAccounts: Set<String>
 
@@ -616,9 +624,11 @@ public final class AppleSettingsStore {
         systemCaptionsEnabled: @escaping () -> Bool = {
             MACaptionAppearanceGetDisplayType(.user) == .alwaysOn
         },
-        captionNotificationCenter: NotificationCenter = .default
+        captionNotificationCenter: NotificationCenter = .default,
+        lineupStore: AppleChannelLineupStore = .shared
     ) {
         self.defaults = defaults
+        self.lineupStore = lineupStore
         self.keychain = keychain
         self.systemCaptionsEnabled = systemCaptionsEnabled
         self.captionNotificationCenter = captionNotificationCenter

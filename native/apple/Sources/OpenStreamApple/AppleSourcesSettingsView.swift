@@ -106,164 +106,168 @@ struct AppleSourcesSettingsView: View {
     #endif
 
     var body: some View {
-        AppleSettingsCollection {
-            Section("Add") {
-                NavigationLink(value: AppleSourceRoute.addMediaServer) {
-                    AppleTVNavigationLabel("Media Server", systemImage: "server.rack")
+        AppleLineupImportContainer { lineupSection in
+            AppleSettingsCollection {
+                Section("Add") {
+                    NavigationLink(value: AppleSourceRoute.addMediaServer) {
+                        AppleTVNavigationLabel("Media Server", systemImage: "server.rack")
+                    }
+                    .appleTVReadableFocus()
+                    NavigationLink(value: AppleSourceRoute.addNetworkShare) {
+                        AppleTVNavigationLabel("Network Share", systemImage: "externaldrive.badge.plus")
+                    }
+                    .appleTVReadableFocus()
+                    NavigationLink(value: AppleSourceRoute.addLiveTV) {
+                        AppleTVNavigationLabel("Live TV", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    .appleTVReadableFocus()
+                    NavigationLink(value: AppleSourceRoute.addFiles) {
+                        AppleTVNavigationLabel("Files", systemImage: "folder.badge.plus")
+                    }
+                    .appleTVReadableFocus()
+                    NavigationLink(value: AppleSourceRoute.webManagement) {
+                        AppleTVNavigationLabel("Web Management", systemImage: "network")
+                    }
+                    .appleTVReadableFocus()
+                    #if os(tvOS)
+                    // Apple TV only receives, so Transfer opens the receiver.
+                    Button {
+                        AppleSetupTransferCenter.shared.presentReceiver()
+                    } label: {
+                        AppleTVNavigationLabel("Transfer", systemImage: "arrow.left.arrow.right")
+                    }
+                    .foregroundStyle(.primary)
+                    .appleTVReadableFocus()
+                    .accessibilityIdentifier("settings.transfer")
+                    #endif
                 }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.addNetworkShare) {
-                    AppleTVNavigationLabel("Network Share", systemImage: "externaldrive.badge.plus")
-                }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.addLiveTV) {
-                    AppleTVNavigationLabel("Live TV", systemImage: "dot.radiowaves.left.and.right")
-                }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.addFiles) {
-                    AppleTVNavigationLabel("Files", systemImage: "folder.badge.plus")
-                }
-                .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.webManagement) {
-                    AppleTVNavigationLabel("Web Management", systemImage: "network")
-                }
-                .appleTVReadableFocus()
-                #if os(tvOS)
-                // Apple TV only receives, so Transfer opens the receiver.
-                Button {
-                    AppleSetupTransferCenter.shared.presentReceiver()
-                } label: {
-                    AppleTVNavigationLabel("Transfer", systemImage: "arrow.left.arrow.right")
-                }
-                .foregroundStyle(.primary)
-                .appleTVReadableFocus()
-                .accessibilityIdentifier("settings.transfer")
-                #endif
-            }
 
-            // Not "Sources" again: the pane is already titled Sources, so the
-            // screen read "Sources … Sources" (review 2026-09-14).
-            // Uppercased on Apple TV only: this pane is a `List` there while
-            // the other settings panes are `Form`s, and a tvOS Form uppercases
-            // its section headers while a List does not — so this one header
-            // read "Your Sources" beside "CHANNEL PREFERENCES" and
-            // "CONNECTION". Everywhere else the header takes the platform's
-            // own case like its neighbours; forcing it read "YOUR SOURCES"
-            // among the Mac's title-case headers (N54 #13).
-            if sourceStore.sources.isEmpty || !ungroupedSources.isEmpty {
-                Section {
-                    if sourceStore.sources.isEmpty {
-                        Text("No sources")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(ungroupedSources) { source in
-                            NavigationLink(value: AppleSourceRoute.detail(source.id)) {
-                                AppleSourceRow(source: source)
+                lineupSection
+
+                // Not "Sources" again: the pane is already titled Sources, so the
+                // screen read "Sources … Sources" (review 2026-09-14).
+                // Uppercased on Apple TV only: this pane is a `List` there while
+                // the other settings panes are `Form`s, and a tvOS Form uppercases
+                // its section headers while a List does not — so this one header
+                // read "Your Sources" beside "CHANNEL PREFERENCES" and
+                // "CONNECTION". Everywhere else the header takes the platform's
+                // own case like its neighbours; forcing it read "YOUR SOURCES"
+                // among the Mac's title-case headers (N54 #13).
+                if sourceStore.sources.isEmpty || !ungroupedSources.isEmpty {
+                    Section {
+                        if sourceStore.sources.isEmpty {
+                            Text("No sources")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(ungroupedSources) { source in
+                                NavigationLink(value: AppleSourceRoute.detail(source.id)) {
+                                    AppleSourceRow(source: source)
+                                }
+                                .appleTVReadableFocus()
                             }
-                            .appleTVReadableFocus()
                         }
+                    } header: {
+                        // Scoped to the header on purpose: `.textCase` on the Section
+                        // uppercases its *rows* too, which turned every source name
+                        // into capitals.
+                        Text("Your Sources")
+                            #if os(tvOS)
+                            .textCase(.uppercase)
+                            #endif
+                    }
+                }
+                ForEach(networkGroups) { group in
+                    AppleNetworkShareSourcesSection(group: group)
+                }
+                #if os(tvOS)
+                Section {
+                    AppleConfigurationSyncStatusLines(status: syncStatus)
+                        .focusable()
+                    if cloudRestoreHeld, let backupController {
+                        Button("Resume iCloud Sync") {
+                            Task { await backupController.restoreFromCloud() }
+                        }
+                        .accessibilityIdentifier("sources.icloud.resume")
                     }
                 } header: {
-                    // Scoped to the header on purpose: `.textCase` on the Section
-                    // uppercases its *rows* too, which turned every source name
-                    // into capitals.
-                    Text("Your Sources")
-                        #if os(tvOS)
-                        .textCase(.uppercase)
-                        #endif
+                    Text("iCloud Sync").textCase(.uppercase)
+                }
+                #endif
+            }
+            .onChange(of: sourceStore.sources, initial: true) {
+                networkGroups = AppleNetworkSharePolicy.groups(in: sourceStore.sources)
+                let groupedIDs = Set(networkGroups.flatMap { $0.sources.map(\.id) })
+                ungroupedSources = sourceStore.sources.filter { !groupedIDs.contains($0.id) }
+            }
+            .appleSettingsPane("Sources", embedded: embeddedInSplit)
+            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+            .navigationDestination(for: AppleSourceRoute.self) { route in
+                switch route {
+                case .addFiles:
+                    AppleAddFilesView(
+                        showingLibraryImporter: $showingLibraryImporter,
+                        sourceStore: sourceStore,
+                        settings: settings,
+                        webManagement: webManagement
+                    )
+                case .addLiveTV:
+                    AppleAddLiveTVSourceView(sourceStore: sourceStore)
+                case .addMediaServer:
+                    AppleAddMediaServerView(sourceStore: sourceStore)
+                case .addNetworkShare:
+                    AppleNetworkShareConnectView(start: .add(nil), flow: .shared, sourceStore: sourceStore)
+                case .networkShareServer(let server):
+                    AppleNetworkShareConnectView(start: .add(server), flow: .shared, sourceStore: sourceStore)
+                case .addNetworkShareFolder(let id):
+                    AppleNetworkShareConnectView(start: .addFolder(id), flow: .shared, sourceStore: sourceStore)
+                case .editNetworkShare(let id, let part):
+                    AppleNetworkShareConnectView(start: .edit(id, part), flow: .shared, sourceStore: sourceStore)
+                case .webManagement:
+                    AppleWebManagementView(sourceStore: sourceStore, service: webManagement)
+                case .detail(let sourceID):
+                    AppleSourceDetailView(sourceID: sourceID, sourceStore: sourceStore, settings: settings)
                 }
             }
-            ForEach(networkGroups) { group in
-                AppleNetworkShareSourcesSection(group: group)
+            .navigationDestination(for: AppleNetworkShareRoute.self) { route in
+                AppleNetworkShareStepView(route: route, flow: .shared, sourceStore: sourceStore)
             }
-            #if os(tvOS)
-            Section {
-                AppleConfigurationSyncStatusLines(status: syncStatus)
-                    .focusable()
-                if cloudRestoreHeld, let backupController {
-                    Button("Resume iCloud Sync") {
-                        Task { await backupController.restoreFromCloud() }
-                    }
-                    .accessibilityIdentifier("sources.icloud.resume")
+            #if DEBUG
+            // Simulator-only: opens a real saved source's detail page so it can be
+            // screenshotted headlessly. Never runs without the debug default set.
+            .navigationDestination(isPresented: Binding(
+                get: { debugDetailSourceID != nil },
+                set: { if !$0 { debugDetailSourceID = nil } }
+            )) {
+                if let debugDetailSourceID {
+                    AppleSourceDetailView(
+                        sourceID: debugDetailSourceID,
+                        sourceStore: sourceStore,
+                        settings: settings
+                    )
                 }
-            } header: {
-                Text("iCloud Sync").textCase(.uppercase)
+            }
+            .task {
+                guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "source-detail" else { return }
+                debugDetailSourceID = sourceStore.sources.first?.id
             }
             #endif
-        }
-        .onChange(of: sourceStore.sources, initial: true) {
-            networkGroups = AppleNetworkSharePolicy.groups(in: sourceStore.sources)
-            let groupedIDs = Set(networkGroups.flatMap { $0.sources.map(\.id) })
-            ungroupedSources = sourceStore.sources.filter { !groupedIDs.contains($0.id) }
-        }
-        .appleSettingsPane("Sources", embedded: embeddedInSplit)
-        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        .navigationDestination(for: AppleSourceRoute.self) { route in
-            switch route {
-            case .addFiles:
-                AppleAddFilesView(
-                    showingLibraryImporter: $showingLibraryImporter,
-                    sourceStore: sourceStore,
-                    settings: settings,
-                    webManagement: webManagement
-                )
-            case .addLiveTV:
-                AppleAddLiveTVSourceView(sourceStore: sourceStore)
-            case .addMediaServer:
-                AppleAddMediaServerView(sourceStore: sourceStore)
-            case .addNetworkShare:
-                AppleNetworkShareConnectView(start: .add(nil), flow: .shared, sourceStore: sourceStore)
-            case .networkShareServer(let server):
-                AppleNetworkShareConnectView(start: .add(server), flow: .shared, sourceStore: sourceStore)
-            case .addNetworkShareFolder(let id):
-                AppleNetworkShareConnectView(start: .addFolder(id), flow: .shared, sourceStore: sourceStore)
-            case .editNetworkShare(let id, let part):
-                AppleNetworkShareConnectView(start: .edit(id, part), flow: .shared, sourceStore: sourceStore)
-            case .webManagement:
-                AppleWebManagementView(sourceStore: sourceStore, service: webManagement)
-            case .detail(let sourceID):
-                AppleSourceDetailView(sourceID: sourceID, sourceStore: sourceStore, settings: settings)
+            #if !os(tvOS)
+            .fileImporter(
+                isPresented: $showingLibraryImporter,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                importFolder(result)
             }
-        }
-        .navigationDestination(for: AppleNetworkShareRoute.self) { route in
-            AppleNetworkShareStepView(route: route, flow: .shared, sourceStore: sourceStore)
-        }
-        #if DEBUG
-        // Simulator-only: opens a real saved source's detail page so it can be
-        // screenshotted headlessly. Never runs without the debug default set.
-        .navigationDestination(isPresented: Binding(
-            get: { debugDetailSourceID != nil },
-            set: { if !$0 { debugDetailSourceID = nil } }
-        )) {
-            if let debugDetailSourceID {
-                AppleSourceDetailView(
-                    sourceID: debugDetailSourceID,
-                    sourceStore: sourceStore,
-                    settings: settings
-                )
+            #endif
+            .alert("Couldn’t Add Folder", isPresented: Binding(
+                get: { importError != nil },
+                set: { if !$0 { importError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importError ?? "The folder could not be added.")
             }
-        }
-        .task {
-            guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "source-detail" else { return }
-            debugDetailSourceID = sourceStore.sources.first?.id
-        }
-        #endif
-        #if !os(tvOS)
-        .fileImporter(
-            isPresented: $showingLibraryImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            importFolder(result)
-        }
-        #endif
-        .alert("Couldn’t Add Folder", isPresented: Binding(
-            get: { importError != nil },
-            set: { if !$0 { importError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(importError ?? "The folder could not be added.")
         }
     }
 
@@ -1399,6 +1403,7 @@ private struct AppleWebManagementView: View {
                         .font(.system(size: 24, design: .monospaced))
                         .tracking(2)
                         .appleSelectableText()
+                        .accessibilityIdentifier("webmanagement.pairingCode")
                     LabeledContent("Expires", value: activeSession.expiresAt.formatted(date: .omitted, time: .shortened))
                 }
 
@@ -1491,6 +1496,7 @@ private struct AppleWebManagementView: View {
                                     .font(.system(size: 30, design: .monospaced))
                                     .tracking(3)
                                     .appleSelectableText()
+                                    .accessibilityIdentifier("webmanagement.pairingCode")
                             }
                             AppleTVFormField("Expires") {
                                 Text(activeSession.expiresAt.formatted(date: .omitted, time: .shortened))
@@ -1706,6 +1712,7 @@ private struct AppleWebManagementView: View {
             .lineLimit(1)
             .minimumScaleFactor(15 / fontSize)
             .appleSelectableText()
+            .accessibilityIdentifier("webmanagement.address")
     }
 
     private static func bareAddress(_ url: URL) -> String {
@@ -1814,6 +1821,110 @@ private struct AppleNetworkShareSourcesSection: View {
                 #if os(tvOS)
                 .textCase(.uppercase)
                 #endif
+        }
+    }
+}
+
+struct AppleLineupImportContainer<Content: View>: View {
+    private let content: (AppleLineupImportSection) -> Content
+    @State private var lineup = AppleChannelLineupStore.shared.current
+    #if !os(tvOS)
+    @State private var choosingFile = false
+    @State private var lineupURL = ""
+    @State private var isFetching = false
+    @State private var importTask: Task<Void, Never>?
+    @State private var resultMessage: String?
+    #endif
+
+    init(@ViewBuilder content: @escaping (AppleLineupImportSection) -> Content) {
+        self.content = content
+    }
+
+    private var section: AppleLineupImportSection {
+        #if os(tvOS)
+        AppleLineupImportSection(lineup: lineup)
+        #else
+        AppleLineupImportSection(lineup: lineup, choosingFile: $choosingFile, lineupURL: $lineupURL,
+                                 isFetching: isFetching, fetchLineup: fetchLineup)
+        #endif
+    }
+
+    var body: some View {
+        content(section)
+        .onReceive(NotificationCenter.default.publisher(for: AppleChannelLineupStore.didChange).receive(on: RunLoop.main)) { _ in
+            lineup = AppleChannelLineupStore.shared.current
+        }
+        #if !os(tvOS)
+        .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.openStreamLineup, .json]) { result in
+            do {
+                try AppleChannelLineupStore.shared.importFile(result.get())
+                resultMessage = "Lineup imported."
+            } catch {
+                if (error as? CocoaError)?.code == .userCancelled { return }
+                resultMessage = (error as? AppleChannelLineupError)?.errorDescription ?? "Could not open the lineup file."
+            }
+        }
+        .alert("Channel Lineup", isPresented: Binding(
+            get: { resultMessage != nil }, set: { if !$0 { resultMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(resultMessage ?? "") }
+        .onDisappear { importTask?.cancel() }
+        #endif
+    }
+
+    #if !os(tvOS)
+    private func fetchLineup() {
+        guard let url = URL(string: lineupURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            resultMessage = AppleChannelLineupError.couldNotDownload.errorDescription
+            return
+        }
+        isFetching = true
+        importTask = Task {
+            defer { isFetching = false }
+            do {
+                try await AppleChannelLineupStore.shared.importURL(url)
+                resultMessage = "Lineup imported."
+            } catch is CancellationError { return }
+            catch { resultMessage = (error as? AppleChannelLineupError)?.errorDescription ?? "Could not download the lineup." }
+        }
+    }
+    #endif
+}
+
+struct AppleLineupImportSection: View {
+    let lineup: AppleChannelLineupFile?
+    #if !os(tvOS)
+    @Binding var choosingFile: Bool
+    @Binding var lineupURL: String
+    let isFetching: Bool
+    let fetchLineup: () -> Void
+    #endif
+
+    var body: some View {
+        Section("Channel Lineup") {
+            if let lineup {
+                Text(lineup.name).accessibilityIdentifier("lineup.name")
+            } else {
+                Text(AppleChannelLineupStore.emptyMessage)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("lineup.empty")
+            }
+            #if !os(tvOS)
+            Button("Import Lineup…", systemImage: "square.and.arrow.down") { choosingFile = true }
+                .accessibilityIdentifier("lineup.import.file")
+            TextField("Lineup URL", text: $lineupURL)
+                .autocorrectionDisabled()
+                #if os(iOS) || os(visionOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                #endif
+                .accessibilityIdentifier("lineup.url")
+            Button("Import URL", action: fetchLineup)
+                .disabled(isFetching || lineupURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("lineup.import.url")
+            if isFetching { ProgressView().accessibilityLabel("Importing lineup") }
+            #endif
         }
     }
 }

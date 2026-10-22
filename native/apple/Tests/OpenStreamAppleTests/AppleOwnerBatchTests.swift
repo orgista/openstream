@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-@Test func regionalFilteringRequiresAValidZIPAndUsesLocalLineupMatches() {
+@Test func regionalFilteringRequiresAValidZIPAndUsesLocalLineupMatches() throws {
+    let lineup = try fixtureLineup()
     let sourceID = UUID()
     let local = AppleIPTVChannel(
         id: "local",
@@ -21,8 +22,11 @@ import Testing
 
     #expect(!AppleZIPCodePolicy.isValid("6061"))
     #expect(AppleZIPCodePolicy.normalize(" 60614 ") == "60614")
-    #expect(AppleChannelVisibilityPolicy.isRegional(local, zipCode: "60614"))
-    #expect(!AppleChannelVisibilityPolicy.isRegional(merelyRegional, zipCode: "60614"))
+    #expect(AppleChannelVisibilityPolicy.isRegional(local, zipCode: "60614", lineup: lineup))
+    #expect(!AppleChannelVisibilityPolicy.isRegional(merelyRegional, zipCode: "60614", lineup: lineup))
+    #expect(!AppleChannelVisibilityPolicy.isRegional(local, zipCode: "6061", lineup: lineup))
+    #expect(!AppleChannelVisibilityPolicy.isRegional(local, zipCode: "60614", lineup: nil))
+    #expect(AppleChannelVisibilityPolicy.isRegional(merelyRegional, zipCode: "60614", lineup: nil))
 }
 
 @Test func titleRatingsPersistAllThreeStates() {

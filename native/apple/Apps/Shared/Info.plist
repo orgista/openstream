@@ -1,3 +1,4 @@
+#include <TargetConditionals.h>
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -24,6 +25,37 @@
 		<string>_openstream._tcp</string>
 		<string>_smb._tcp</string>
 	</array>
+#if !TARGET_OS_TV
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.orgista.openstream.lineup</string>
+            <key>UTTypeDescription</key>
+            <string>oStream Channel Lineup</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>oslineup</string></array>
+            </dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>oStream Channel Lineup</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array><string>com.orgista.openstream.lineup</string></array>
+        </dict>
+    </array>
+#endif
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
