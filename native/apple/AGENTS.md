@@ -53,11 +53,15 @@ The repo is on an SMB share. Builds see stale files and stale directory listings
 - Never upload to TestFlight/App Store, run `asc publish`, `asc builds upload`, `xcodebuild
   -exportArchive`, or `git push`. Never add a build to a TestFlight group.
 - Never erase, delete, reset, or create simulators. The persistent sims on Dev-Mini (owner cleanups 2026-10-14 and
-  2026-10-21) are: iPhone 18 Pro Max iOS 27 `2E61439B…` (E2E-iOS), iPhone 15 Pro Max iOS 18.6 `7530ECB2…` (owner's
-  imported setup), **iPhone Duo iOS 27.2 `57B18C7A…`** (the real foldable; Xcode 27.2 only:
-  `DEVELOPER_DIR=/Volumes/DevExt/Applications/Xcode-27.2.app/Contents/Developer`), "DUO" `CA2CCA73…` (NOT a Duo: an
-  iPhone 18 Pro renamed), iPad Pro 13" `8939801C…`, Apple TV 4K `F2107E8F…` (E2E-tvOS), Apple Watch Series 12
-  `4ABCBF60…`, Vision Pro `46B2DEDC…`. Boot ONE at a time.
+  2026-10-21) are: iPhone 18 Pro Max iOS 27 `2E61439B…` (E2E-iOS, owner data), iPhone 15 Pro Max iOS 18.6
+  `7530ECB2…` (owner's imported setup), **iPhone Duo iOS 27.2 `57B18C7A…`** (the real foldable, owner data; Xcode
+  27.2 only: `DEVELOPER_DIR=/Volumes/DevExt/Applications/Xcode-27.2.app/Contents/Developer`), "DUO" `CA2CCA73…` (NOT
+  a Duo: an iPhone 18 Pro renamed), iPad Pro 13" `8939801C…` (owner data), Apple TV 4K `F2107E8F…` (E2E-tvOS), Apple
+  Watch Series 12 `4ABCBF60…`, Vision Pro `46B2DEDC…`. Boot ONE at a time.
+  **Owner data (2026-10-21):** `7530ECB2…`, `8939801C…`, `57B18C7A…` and `2E61439B…` hold the owner's setup (sources,
+  Keychain, Live lineup, library/watch state, settings; copied from `7530ECB2…`). Run any test on them ONLY through
+  `/Volumes/DevExt/dev/openstream-build/batch-1018a/protected.py <udid> <command…>` (snapshots app, group, host state
+  and Keychain, restores and hash-checks after). Never sign out, remove sources or reset the app there.
   Never leave test data on them (a source, a download, a playlist you added — remove it).
 - Never use Computer Use / screen control / osascript UI automation — the owner is using this Mac.
 - Never create LaunchAgents, cron, routines, background workers.
