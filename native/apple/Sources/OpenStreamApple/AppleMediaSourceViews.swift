@@ -45,8 +45,9 @@ struct AppleLiveTVView: View {
     @State private var hasResolvedFirstLoad = false
     /// When Live first opened with no rows to show, until they show.
     @State private var firstOpenedAt: ContinuousClock.Instant?
-    /// The `channelsRevision` the shown snapshot was sorted from.
-    @State private var snapshotChannelsRevision = -1
+    /// A lineup with channels in it has been sorted at least once; after that
+    /// an empty list (Favorites, a search) is a result, not a load.
+    @State private var hasSortedChannels = false
     @State private var errorMessage: String?
     /// Playlists that failed while others loaded; shown inline with Retry.
     @State private var sourceFailures: [AppleLiveSourceLoad.Failure] = []
@@ -427,7 +428,7 @@ struct AppleLiveTVView: View {
         }
         .onChange(of: playbackCoordinator.phase) { _, phase in liveSession.notePlaybackPhase(phase) }
         .onChange(of: snapshotRevision) {
-            snapshotChannelsRevision = channelsRevision
+            if !channels.isEmpty { hasSortedChannels = true }
             // Time to rows, for the trace: what the launch prefetch is for (`AppleLivePrefetch`).
             guard let opened = firstOpenedAt, !channelSnapshot.channels.isEmpty else { return }
             firstOpenedAt = nil
@@ -584,7 +585,7 @@ struct AppleLiveTVView: View {
         AppleLiveChannelsLoadingPolicy.showsLoading(hasRows: !channelSnapshot.channels.isEmpty,
             hasChannels: !channels.isEmpty, isLoading: isLoading, hasResolvedFirstLoad: hasResolvedFirstLoad,
             showsFailure: errorMessage != nil || !sourceFailures.isEmpty,
-            snapshotIsCurrent: snapshotChannelsRevision == channelsRevision)
+            hasSortedChannels: hasSortedChannels)
     }
 
     private func perform(_ action: AppleLiveFailureCause.Action) {
@@ -732,8 +733,8 @@ struct AppleLiveTVView: View {
             for request in requests {
                 group.addTask {
                     do {
-                        return (request.source, .success(try await iptvClient.channels(
-                            source: request.source, credentials: request.credentials)))
+                        return (request.source, .success(try await AppleLivePlaylistFetches.shared.channels(
+                            source: request.source, credentials: request.credentials, client: iptvClient)))
                     } catch {
                         return (request.source, .failure(error))
                     }

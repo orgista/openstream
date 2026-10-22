@@ -16,12 +16,13 @@ enum AppleLiveChannelsLoadingPolicy {
     /// Loading only while nothing better can be shown: the first lineup has
     /// not answered, a reload runs with no failure on screen (a retry keeps
     /// the failure in place instead of flickering to the spinner and back),
-    /// or the channels are in but not yet sorted. A sorted lineup that came
-    /// out empty shows the empty state.
+    /// or the first channels are in but not yet sorted. Once a lineup has
+    /// been sorted, an empty list (no favourites, no search match) stays a
+    /// list with its category bar, whatever reloads under it.
     static func showsLoading(hasRows: Bool, hasChannels: Bool, isLoading: Bool, hasResolvedFirstLoad: Bool,
-                             showsFailure: Bool, snapshotIsCurrent: Bool) -> Bool {
+                             showsFailure: Bool, hasSortedChannels: Bool) -> Bool {
         guard !hasRows else { return false }
-        if hasChannels { return !snapshotIsCurrent }
+        if hasChannels { return !hasSortedChannels }
         return !hasResolvedFirstLoad || (isLoading && !showsFailure)
     }
 }

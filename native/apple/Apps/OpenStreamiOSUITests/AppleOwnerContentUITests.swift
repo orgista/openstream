@@ -154,23 +154,6 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         check(shown, "d-no-rows", "Live showed no channel rows")
     }
 
-    /// What Live shows before its rows, opened straight from launch with its
-    /// saved lineup cleared: one loading state in the list area, a black stage.
-    func testELiveLoadingStateShowsOneSpinner() {
-        app.launchArguments = ["-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES", "-OpenStreamVisionScreen", "live"]
-        app.launch()
-        let loading = app.descendants(matching: .any).matching(identifier: "live.channels.loading").firstMatch
-        guard check(loading.waitForExistence(timeout: 15), "e-no-loading", "Live showed no loading state") else { return }
-        attach("e-live-loading")
-        check(app.staticTexts["Loading Channels"].exists || loading.label == "Loading Channels",
-              "e-no-label", "the loading state has no \"Loading Channels\" label")
-        // The loading view is the only spinner: none on the stage, none anywhere else.
-        let others = app.progressIndicators.matching(NSPredicate(format: "identifier != %@", "live.channels.loading"))
-        check(others.count == 0, "e-spinners", "\(others.count) more spinners while loading")
-        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
-        check(rows.firstMatch.waitForExistence(timeout: 120), "e-no-rows", "Live showed no channel rows")
-    }
-
     /// Discover's rows load from the media servers; a title page shows its trailer.
     func testDDiscoverRowsAndTrailer() {
         launch([])

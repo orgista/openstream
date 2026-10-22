@@ -63,6 +63,14 @@ public enum AppleNetworkStub {
 
     public static var isActive: Bool { root != nil }
 
+    /// `-OpenStreamStubPlaylistStall <seconds>`: stubbed playlists answer this
+    /// late, so a UI test sees Live's loading state every time.
+    static func stall(for request: URLRequest) -> Duration? {
+        let seconds = UserDefaults.standard.double(forKey: "OpenStreamStubPlaylistStall")
+        guard seconds > 0, request.url?.pathExtension.lowercased() == "m3u" else { return nil }
+        return .seconds(seconds)
+    }
+
     /// `<root>/dev-sources.json` beside the fixtures: the sources a stubbed
     /// run should have, read in place and never deleted (it is a repo file).
     public static var devSourcesURL: URL? {

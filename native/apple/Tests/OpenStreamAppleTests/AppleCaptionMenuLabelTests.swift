@@ -114,6 +114,9 @@ struct AppleCaptionMenuLabelTests {
         #expect(AppleSubtitleTrackFilter.menuChoices(wordTags, preferredLanguages: ["en"]).map(\.title)
             == ["Subtitles 1", "Subtitles 2"])
         #expect(AppleSubtitleTrackFilter.otherLanguageChoices(wordTags, preferredLanguages: ["en"]).isEmpty)
+        // A three-letter code with no two-letter form is still a language.
+        let hawaiian = [ApplePlaybackTrack(id: 3, title: "haw", language: "haw", codec: "webvtt")]
+        #expect(AppleSubtitleTrackFilter.menuChoices(hawaiian, preferredLanguages: ["haw"]).map(\.title) == ["Hawaiian"])
 
         let titles = AppleSubtitleCueLayerPolicy.menuEntries(tracks: taggedCaptions + untagged + coded + wordTags,
             preferredLanguages: ["en"], languagesAreExplicit: false, activeTrackID: nil).map(\.title)

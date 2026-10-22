@@ -63,7 +63,8 @@ enum AppleLivePrefetch {
                 continue
             }
             do {
-                let received = try await client.channels(source: source, credentials: playlist.credentials)
+                let received = try await AppleLivePlaylistFetches.shared.channels(
+                    source: source, credentials: playlist.credentials, client: client)
                 channels += await AppleIPTVChannelCache.shared.reconcileAndStore(received, for: source.id)
                 fetched += 1
             } catch {
@@ -89,13 +90,28 @@ enum AppleLivePrefetch {
         return result
     }
 
-    /// Logos at the size the Live rows decode them.
+    /// Logos at the size this platform's Live rows decode them, so the warm
+    /// entry is the one they ask for (`AppleRemoteImageCache` keys by size).
     nonisolated static func logoRequests(_ channels: [AppleIPTVChannel],
                                          displayScale: CGFloat) -> [AppleArtworkPrefetchPolicy.Request] {
-        let pixels = AppleArtworkSizePolicy.bucket(size: AppleLiveStagePolicy.phoneLogoSize, scale: displayScale)
+        let pixels = AppleArtworkSizePolicy.bucket(size: rowLogoSize, scale: displayScale)
         return channels.compactMap(\.logoURL).map {
             AppleArtworkPrefetchPolicy.Request(url: $0, maximumPixelDimension: pixels)
         }
+    }
+
+    /// The logo frame of a Live channel row here: the Paramount+ row on
+    /// iPhone and iPad, the guide rail's tile less its 6 pt padding on Apple
+    /// TV (`AppleTVGuideLogoTile`), the plain row elsewhere (`AppleLiveOnNowRow`).
+    nonisolated static var rowLogoSize: CGSize {
+        #if os(tvOS)
+        let tile = AppleTVGuideMetrics.standard.logoSize
+        return CGSize(width: tile.width - 12, height: tile.height - 12)
+        #elseif os(iOS)
+        return AppleLiveStagePolicy.phoneLogoSize
+        #else
+        return CGSize(width: 48, height: 32)
+        #endif
     }
 
     /// Wi-Fi or wired, and not in Low Data Mode.
@@ -104,5 +120,23 @@ enum AppleLivePrefetch {
             return path.status == .satisfied && !path.isExpensive && !path.isConstrained
         }
         return false
+    }
+}
+
+/// One download per playlist at a time: Live opened while the launch
+/// prefetch is still fetching waits for that download instead of starting a
+/// second one, and the other way round.
+actor AppleLivePlaylistFetches {
+    static let shared = AppleLivePlaylistFetches()
+    private var inFlight: [String: Task<[AppleIPTVChannel], any Error>] = [:]
+
+    func channels(source: AppleSource, credentials: AppleIPTVCredentials?,
+                  client: AppleIPTVClient) async throws -> [AppleIPTVChannel] {
+        let key = "\(source.id.uuidString)|\(source.configurationRevision)"
+        if let running = inFlight[key] { return try await running.value }
+        let download = Task { try await client.channels(source: source, credentials: credentials) }
+        inFlight[key] = download
+        defer { inFlight[key] = nil }
+        return try await download.value
     }
 }

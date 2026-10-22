@@ -891,6 +891,26 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         for gap in gaps { XCTAssertEqual(gap, gaps[0], accuracy: 0.5, "\(name) gaps \(gaps)") }
     }
 
+    /// Owner 2026-10-22: rows "loading like that". A fresh container and a
+    /// playlist that answers 6 s late: the list area shows one "Loading
+    /// Channels" spinner, nothing else spins, then the strip and rows replace it.
+    func testLiveShowsOneLoadingStateWhileThePlaylistLoads() {
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamResetOnLaunch", "YES",
+                               "-OpenStreamStubPlaylistStall", "6"]
+        launch(screen: "live")
+        let loading = app.descendants(matching: .any).matching(identifier: "live.channels.loading").firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 15), "No loading state while the playlist stalls")
+        attach("live-loading-state")
+        XCTAssertTrue(app.staticTexts["Loading Channels"].exists || loading.label == "Loading Channels")
+        let others = app.progressIndicators.matching(NSPredicate(format: "identifier != %@", "live.channels.loading"))
+        XCTAssertEqual(others.count, 0, "Only the list's spinner while loading")
+        XCTAssertFalse(app.descendants(matching: .any)["live.categories"].exists, "No strip before there are channels")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
+        XCTAssertFalse(loading.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["live.categories"].exists)
+    }
+
     func testLiveGuideSheetOpensAndDismisses() {
         app.launchArguments = ["-OpenStreamMuteAudio", "YES"]
         launch(screen: "live")

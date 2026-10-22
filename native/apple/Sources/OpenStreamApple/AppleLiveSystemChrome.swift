@@ -450,8 +450,11 @@ struct AppleRoutePicker: UIViewRepresentable {
 /// the glyph under it is ours. The picker's button is 46 pt tall and sat a
 /// point off its neighbours' line, so this 44 pt view is the accessibility
 /// element and hands VoiceOver's activation to it.
+/// While a route is active the glyph takes the brand accent, as AVKit tints
+/// its own (owner rule: nothing blue).
 final class AppleLiveRouteButton: UIView {
     private let picker = AVRoutePickerView()
+    private let glyph = UIImageView(image: UIImage(systemName: "airplay.video", withConfiguration: AppleLivePlayerGlyph.symbol))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -460,8 +463,6 @@ final class AppleLiveRouteButton: UIView {
         accessibilityTraits = .button
         accessibilityIdentifier = "player.airplay"
         picker.accessibilityElementsHidden = true
-        let glyph = UIImageView(image: UIImage(systemName: "airplay.video", withConfiguration: AppleLivePlayerGlyph.symbol))
-        glyph.tintColor = .white
         glyph.contentMode = .center
         picker.tintColor = .clear
         picker.activeTintColor = .clear
@@ -477,13 +478,31 @@ final class AppleLiveRouteButton: UIView {
                 view.bottomAnchor.constraint(equalTo: bottomAnchor),
             ])
         }
+        showRouteState()
+        NotificationCenter.default.addObserver(self, selector: #selector(routeChanged),
+                                               name: AVAudioSession.routeChangeNotification, object: nil)
+    }
+
+    /// Posted on a background thread.
+    @objc nonisolated private func routeChanged() {
+        Task { @MainActor [weak self] in self?.showRouteState() }
+    }
+
+    private func showRouteState() {
+        let isActive = AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+        glyph.tintColor = isActive ? UIColor(AppleDesignTokens.brandAccent) : .white
+        accessibilityValue = isActive ? "Connected" : nil
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// The picker's own control, wherever the system nests it.
     override func accessibilityActivate() -> Bool {
-        guard let button = picker.subviews.lazy.compactMap({ $0 as? UIButton }).first else { return false }
+        func control(in view: UIView) -> UIControl? {
+            view.subviews.lazy.compactMap { ($0 as? UIControl) ?? control(in: $0) }.first
+        }
+        guard let button = control(in: picker) else { return false }
         button.sendActions(for: .touchUpInside)
         return true
     }

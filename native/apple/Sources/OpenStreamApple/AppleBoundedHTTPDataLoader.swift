@@ -118,6 +118,7 @@ final class AppleBoundedHTTPClient: NSObject, URLSessionDataDelegate, @unchecked
         // sees the request (UI tests, offline captures).
         #if DEBUG
         if let root = AppleNetworkStub.root {
+            if let stall = AppleNetworkStub.stall(for: request) { try await Task.sleep(for: stall) }
             let (data, response) = try AppleNetworkStub.response(for: request, root: root)
             guard behavior == .returnPrefix || data.count <= maximumBytes else {
                 throw AppleBoundedHTTPError.responseTooLarge

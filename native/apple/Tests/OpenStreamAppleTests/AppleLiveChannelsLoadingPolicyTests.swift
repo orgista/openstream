@@ -5,9 +5,9 @@ import Testing
 /// on it or flickers to it from a failure (owner 2026-10-22).
 struct AppleLiveChannelsLoadingPolicyTests {
     private func loads(rows: Bool = false, channels: Bool = false, loading: Bool = false, resolved: Bool = true,
-                       failure: Bool = false, current: Bool = true) -> Bool {
+                       failure: Bool = false, sorted: Bool = true) -> Bool {
         AppleLiveChannelsLoadingPolicy.showsLoading(hasRows: rows, hasChannels: channels, isLoading: loading,
-            hasResolvedFirstLoad: resolved, showsFailure: failure, snapshotIsCurrent: current)
+            hasResolvedFirstLoad: resolved, showsFailure: failure, hasSortedChannels: sorted)
     }
 
     @Test func theFirstLoadShowsLoadingEvenAfterADeadPlaylistFailed() {
@@ -16,13 +16,20 @@ struct AppleLiveChannelsLoadingPolicyTests {
     }
 
     @Test func rowsAlwaysWin() {
-        #expect(!loads(rows: true, channels: true, loading: true, resolved: false, current: false))
+        #expect(!loads(rows: true, channels: true, loading: true, resolved: false, sorted: false))
     }
 
-    @Test func channelsWaitOnlyForTheirOwnSort() {
-        #expect(loads(channels: true, current: false))
+    @Test func channelsWaitOnlyForTheFirstSort() {
+        #expect(loads(channels: true, sorted: false))
         // Sorted and empty (all hidden or filtered): the empty state, not a spinner.
-        #expect(!loads(channels: true, current: true))
+        #expect(!loads(channels: true, sorted: true))
+    }
+
+    /// Review 2026-10-22: an empty Favorites list, then a playlist refresh,
+    /// must keep the category bar so the viewer can leave Favorites.
+    @Test func anEmptyCategoryStaysAListThroughARefresh() {
+        #expect(!loads(channels: true, loading: true, sorted: true))
+        #expect(!loads(channels: true, loading: false, sorted: true))
     }
 
     @Test func aRetryKeepsTheFailureOnScreen() {
