@@ -52,10 +52,32 @@ struct AppleTitlePageEntryTests {
     /// own origin and leaves YouTube's player untouched.
     @Test func trailersUseTheOfficialPlayerUntouched() throws {
         let embed = try #require(AppleTrailerPreviewPolicy.embedURL(for: "trailer_456"))
-        #expect(embed.absoluteString.contains("origin=https://orgista.com"))
+        #expect(AppleTrailerPreviewPolicy.embedOrigin.host == AppleTrailerPreviewPolicy.hostBundleIdentifier(Bundle.main.bundleIdentifier))
+        let query = try #require(URLComponents(url: embed, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(query.first { $0.name == "origin" }?.value == AppleTrailerPreviewPolicy.embedOrigin.absoluteString)
         let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true)
-        #expect(html.contains("origin: 'https://orgista.com'"))
+        #expect(html.contains("origin: '\(AppleTrailerPreviewPolicy.embedOrigin.absoluteString)'"))
+        #expect(html.contains("origin=\(AppleTrailerPreviewPolicy.embedOrigin.absoluteString)"))
+        #expect(html.contains("referrerpolicy=\"strict-origin-when-cross-origin\""))
         #expect(!html.contains("pointer-events:none"))
         #expect(!html.contains("ytp-"))
+    }
+
+    @Test func trailerHTMLReplacesAnOutdatedEmbedOrigin() throws {
+        let embed = try #require(URL(string: "https://www.youtube-nocookie.com/embed/trailer_456?origin=https://fixture.example"))
+        let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true)
+        #expect(!html.contains("fixture.example"))
+        #expect(html.contains("origin=\(AppleTrailerPreviewPolicy.embedOrigin.absoluteString)"))
+    }
+
+    @Test(arguments: ["share", "widgets", "topshelf", "messages"])
+    func trailerIdentityUsesTheHostAppForKnownExtensions(suffix: String) {
+        #expect(AppleTrailerPreviewPolicy.hostBundleIdentifier("COM.Fixture.OpenStream.\(suffix)") == "com.fixture.openstream")
+    }
+
+    @Test func trailerIdentityPreservesAppIDsAndHasAStableFallback() {
+        #expect(AppleTrailerPreviewPolicy.hostBundleIdentifier(nil) == "com.orgista.openstream")
+        #expect(AppleTrailerPreviewPolicy.hostBundleIdentifier("COM.Fixture.OpenStream") == "com.fixture.openstream")
+        #expect(AppleTrailerPreviewPolicy.hostBundleIdentifier("com.fixture.openstream.watchkitapp") == "com.fixture.openstream.watchkitapp")
     }
 }

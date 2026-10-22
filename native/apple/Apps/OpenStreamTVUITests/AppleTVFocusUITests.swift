@@ -1512,7 +1512,7 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         attachScreen("server-trailer-devtv-title-page")
         XCTAssertTrue(trailer.hasFocus, "focus never reached Trailer, got '\(focusedElement.identifier)'")
         remote.press(.select)
-        XCTAssertTrue(wait(for: element("trailer.player"), 15), "Trailer opened no player")
+        XCTAssertTrue(wait(for: element("trailer.player.playing"), 15), "Trailer opened no playing video")
         Thread.sleep(forTimeInterval: 8)
         attachScreen("server-trailer-devtv-player")
         // The player's first Menu may only hide its transport.

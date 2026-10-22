@@ -244,7 +244,13 @@ struct AppleServerTrailerPlayerView: View {
         VideoPlayer(player: playback.player)
             .ignoresSafeArea()
             .background(.black)
-            .accessibilityIdentifier("trailer.player")
+            .overlay {
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(playback.phase == .playing ? "trailer.player.playing" : "trailer.player.loading")
+                    .allowsHitTesting(false)
+            }
             .onAppear {
                 #if os(iOS) || os(tvOS) || os(visionOS)
                 ApplePlaybackSessionPolicy.prepareTrailerAudio(pressed: true)

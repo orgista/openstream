@@ -134,6 +134,8 @@ struct AppleDiscoverView: View {
         let artwork: [String: AppleHeroArtworkUpgrade.Artwork]
         let debugHeroTitle: String?
         let now: Date
+        var localItems: [IndexedCatalogItem] = []
+        var trending: [AppleCatalogItem] = []
     }
 
     init(
@@ -160,7 +162,7 @@ struct AppleDiscoverView: View {
         let heroes = recommendations.heroes
         let heroSettlement = AppleHeroTrailerGate.SettlementInput(heroIDs: heroes.map(\.id), catalogReviewDone: true)
         let recommendationRevision = recommendationRevision
-        let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
+        let hasContent = !heroes.isEmpty || AppleCatalogShelfPolicy.hasDiscoverContent(
             hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
                 || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty,
@@ -501,7 +503,7 @@ struct AppleDiscoverView: View {
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             try? await mediaIndex.synchronizePlaybackProgress()
         }
-        .task(id: "\(settings.top10ListsEnabled):\(metadataConfiguration != nil)") {
+        .task(id: "\(settings.top10ListsEnabled):\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))") {
             await loadTop10()
         }
         #if DEBUG
@@ -533,15 +535,16 @@ struct AppleDiscoverView: View {
     private var recommendationRevision: String {
         "\(searchConfigurationIdentity(sourceStore.sources))|loaded:\(loadedCache || continueWatchingCacheReady)|play:\(ApplePlaybackProgressFeed.shared.revision)"
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
+            + "|library:\(library.contentRevision)|chart:\(settings.top10ListsEnabled):\(top10?.fetchedAt.timeIntervalSinceReferenceDate ?? 0)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
     }
 
     private var recommendationCacheScope: String {
-        [searchConfigurationIdentity(sourceStore.sources),
-         AppleSourceKind.allCases.map(\.rawValue).joined(separator: ";"),
-         ApplePlaybackStore().namespace, AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration),
-         UserDefaults.standard.string(forKey: "OpenStreamHeroTitle") ?? ""].joined(separator: "|")
+        AppleDiscoverRecommendationCache.scope(sourceIdentity: searchConfigurationIdentity(sourceStore.sources),
+            namespace: ApplePlaybackStore().namespace, metadataConfiguration: metadataConfiguration,
+            top10ListsEnabled: settings.top10ListsEnabled,
+            heroTitle: UserDefaults.standard.string(forKey: "OpenStreamHeroTitle") ?? "")
     }
 
     private var recommendationCacheRevision: String {
@@ -574,12 +577,11 @@ struct AppleDiscoverView: View {
 
     private func rebuildRecommendations(for revision: String) async {
         guard loadedCache || continueWatchingCacheReady else { return }
-        // The first pass with heroes draws the billboard. The index, lookup, server and art revisions that follow
-        // it at launch each asked for another (~0.1 s of CPU apiece on the 18.6 sim, up to four in the first 2 s);
-        // they wait out the launch window, and a newer revision cancels the wait, so only the last one runs.
+        // Metadata resolves one title at a time. Coalesce revisions after the first billboard is visible,
+        // and retain the launch window so scanning cannot repeatedly rebuild the deck.
         let launchWait = AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())
-        if !recommendations.heroes.isEmpty, launchWait > .zero {
-            do { try await Task.sleep(for: launchWait) } catch { return }
+        if !recommendations.heroes.isEmpty {
+            do { try await Task.sleep(for: max(launchWait, .milliseconds(250))) } catch { return }
         }
         // A rating may change while this screen is covered and unsubscribed.
         ratingStoreRevision = AppleTitleRatingStore.revision
@@ -591,14 +593,24 @@ struct AppleDiscoverView: View {
         #else
         let wanted: String? = nil
         #endif
+        let sources = sourceStore.sources
+        let sourcesByID = Dictionary(sources.filter(\.isEnabled).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let snapshot = RecommendationSnapshot(
-            relations: await AppleTMDBRelationCache.shared.snapshot(configuration: metadataConfiguration), sources: sourceStore.sources,
+            relations: await AppleTMDBRelationCache.shared.snapshot(configuration: metadataConfiguration), sources: sources,
             records: mediaIndex.records, progress: store.configurationProgress(),
             activity: store.activities(),
             completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
             removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
-            artwork: heroArtwork, debugHeroTitle: wanted, now: .now)
+            artwork: heroArtwork, debugHeroTitle: wanted, now: .now,
+            localItems: library.featuredCandidates.prefix(AppleHeroRotation.maximumCandidates).compactMap { group in
+                guard let file = group.items.first,
+                      let source = sourcesByID[file.sourceID] else { return nil }
+                let item = library.catalogItem(for: group)
+                return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item),
+                    item: item, source: source)
+            },
+            trending: settings.top10ListsEnabled && metadataConfiguration != nil ? (top10?.movies ?? []) + (top10?.shows ?? []) : [])
         let cacheScope = recommendationCacheScope
         do {
             let started = ContinuousClock.now
@@ -610,7 +622,8 @@ struct AppleDiscoverView: View {
             #endif
             guard !Task.isCancelled, revision == recommendationRevision else { return }
             appleTrace("discover recommendations \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms"
-                + " picks=\(result.picks.count) heroes=\(result.heroes.count)")
+                + " picks=\(result.picks.count) heroes=\(result.heroes.count)"
+                + " serverShelves=\(snapshot.serverShelves.count) local=\(snapshot.localItems.count) trending=\(snapshot.trending.count)")
             result.continueWatching = AppleContinueWatchingResolver.merge(recommendations.continueWatching,
                 incoming: result.continueWatching, id: { $0.record.id }, timestamp: { $0.continueWatchingUpdatedAt ?? $0.record.lastVerified })
             recommendations = result
@@ -662,6 +675,7 @@ struct AppleDiscoverView: View {
                                     picks: [IndexedCatalogItem], states: [String: AppleHeroMixPolicy.State],
                                     identities: inout AppleRecommendationInputs.IdentityMemo) -> [IndexedCatalogItem] {
         let enabled = Set(snapshot.sources.filter(\.isEnabled).map(\.id))
+        let localIDs = Set(snapshot.localItems.map(\.id))
         let servers = snapshot.serverShelves.map { shelf in
             shelf.items.filter { !$0.name.isEmpty && AppleCatalogDiscoveryPolicy.isTitleType($0.type) }.compactMap { item -> IndexedCatalogItem? in
                 guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
@@ -674,9 +688,28 @@ struct AppleDiscoverView: View {
             // Current server shelves already carry playable routes.
             return AppleMediaServerItemReference.parse(value.item.mediaID) != nil
                 || AppleXtreamReference.parse(value.item.mediaID) != nil
+                || localIDs.contains(value.id)
         }
         var values = continueWatching.filter(accessible) + picks.filter(accessible) + servers.flatMap { $0 }
         values += AppleHeroMixPolicy.fairlyGather(servers)
+        values += snapshot.localItems.filter(accessible)
+        let ownedIDs = Set(values.map { identities.identity($0.item, sourceID: $0.source.id.uuidString) })
+        let titleIdentity: (AppleCatalogItem) -> String? = { item in
+            guard let year = AppleRecommendationInputs.releaseYear(item), !item.name.isEmpty else { return nil }
+            return AppleRecommendationInputs.identity(AppleCatalogItem(mediaID: "", type: item.type, name: item.name, year: year))
+        }
+        let ownedTitles = Set(values.compactMap { titleIdentity($0.item) })
+        values += snapshot.trending.filter { item in
+            guard !enabled.isEmpty, !item.name.isEmpty, AppleCatalogDiscoveryPolicy.isTitleType(item.type) else { return false }
+            let id = identities.identity(item, sourceID: "")
+            guard !ownedIDs.contains(id) else { return false }
+            guard let title = titleIdentity(item) else { return true }
+            return !ownedTitles.contains(title)
+        }.map { item in
+            let match = AppleCatalogSearchMatch.metadataOnly(item)
+            return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: item),
+                item: item, source: match.source)
+        }
         let relevant = Set(picks.map { identities.identity($0.item, sourceID: $0.source.id.uuidString) })
         var resumeIDs = Set<String>()
         var resumeDates: [String: Date] = [:]
@@ -804,7 +837,9 @@ struct AppleDiscoverView: View {
         let progress = snapshot.progress
         let completed = snapshot.completed
         let unwatched = snapshot.unwatched
-        var candidates: [IndexedCatalogItem] = []
+        var candidates = snapshot.localItems.filter { value in
+            snapshot.sources.contains { $0.id == value.source.id && $0.isEnabled }
+        }
         for shelf in snapshot.serverShelves {
             for item in shelf.items where AppleCatalogDiscoveryPolicy.isTitleType(item.type) {
                 guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
@@ -7463,7 +7498,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         coordinator.hidePreview()
         view.webView.evaluateJavaScript("window.setTrailerPlaying(false);", completionHandler: nil)
         view.webView.stopLoading()
-        view.webView.loadHTMLString("", baseURL: nil)
+        view.webView.loadHTMLString("", baseURL: AppleTrailerPreviewPolicy.embedOrigin)
         coordinator.loadedURL = nil
         coordinator.loadedLandscape = nil
         coordinator.onStateChange = nil

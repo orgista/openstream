@@ -312,7 +312,7 @@ struct AppleMacYouTubeHeroPreview: NSViewRepresentable {
         coordinator.conceal()
         view.webView.evaluateJavaScript("window.setTrailerPlaying(false);", completionHandler: nil)
         view.webView.stopLoading()
-        view.webView.loadHTMLString("", baseURL: nil)
+        view.webView.loadHTMLString("", baseURL: AppleTrailerPreviewPolicy.embedOrigin)
         view.webView.configuration.userContentController.removeScriptMessageHandler(forName: "trailerState")
         coordinator.loadedURL = nil
         coordinator.onStateChange = nil

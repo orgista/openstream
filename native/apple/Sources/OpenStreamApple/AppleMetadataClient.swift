@@ -227,9 +227,16 @@ public enum AppleTrailerPreviewPolicy {
         displayScale < 2 ? 2 : 1
     }
 
-    /// The page that hosts YouTube's player: the publisher's own domain, as
-    /// the IFrame API asks (`origin`), never YouTube's frame itself.
-    static let embedOrigin = URL(string: "https://orgista.com")!
+    // YouTube requires https://<bundle-id> as the WebView referrer: https://developers.google.com/youtube/terms/required-minimum-functionality#api-client-identity-and-credentials
+    static let embedOrigin = URL(string: "https://" + hostBundleIdentifier(Bundle.main.bundleIdentifier))!
+
+    static func hostBundleIdentifier(_ bundleIdentifier: String?) -> String {
+        let identifier = (bundleIdentifier ?? "com.orgista.openstream").lowercased()
+        for suffix in [".share", ".widgets", ".topshelf", ".messages"] where identifier.hasSuffix(suffix) {
+            return String(identifier.dropLast(suffix.count))
+        }
+        return identifier
+    }
 
     public static func embedURL(for key: String?, quality: String = "hd2160") -> URL? {
         guard let key = validYouTubeKey(key),

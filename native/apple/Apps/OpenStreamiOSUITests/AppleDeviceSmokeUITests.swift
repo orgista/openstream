@@ -16,6 +16,7 @@ import UIKit
 final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
     private let environment = ProcessInfo.processInfo.environment
+    private let demoServerName = "Device Smoke Server \(UUID().uuidString)"
     private static let titleLinkURL = "https://www.imdb.com/title/tt0111161/"
     private static let playlistName = "Device Smoke Playlist"
 
@@ -42,22 +43,19 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
 
     // MARK: a. Trailer
 
-    /// Adds the demo server and watches the Discover billboard for 10 s, then
-    /// opens a title that has a trailer (an IMDb link, through the app's own shared
-    /// link URL) and waits 10 s on its page. The demo server's open movies
-    /// carry no trailer, so the title page is the one that proves the device
-    /// path. The run script asserts `trailer native reveal: live viewport
-    /// (device, unmeasured)` and `trailer cover fading out` in the trace.
+    /// Run-script asserts `trailer native reveal: live viewport (device, unmeasured)`
+    /// and `trailer cover fading out` in the trace, alongside the playing state below.
     func testATrailerRevealsTheLiveVideoOnDevice() throws {
         try addDemoServer()
-        app.tabBars.buttons["Discover"].firstMatch.tap()
-        Thread.sleep(forTimeInterval: 10)
-        attach("a-trailer-discover-hero")
+        launch(["-OpenStreamVisionScreen", "discover", "-openstream.settings.trailer.autoplay.v1", "YES"])
         app.open(Self.sharedLinkURL(Self.titleLinkURL))
         let page = app.buttons["detail.play"].firstMatch
-        check(page.waitForExistence(timeout: 30), "a-no-title-page", "the linked title page never opened")
-        Thread.sleep(forTimeInterval: 10)
-        attach("a-trailer-title-page-10s")
+        check(page.waitForExistence(timeout: 30), "a-no-title-page", "the title page never opened")
+        let preview = app.buttons["detail.trailer.toggle"].firstMatch
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value == 'Playing'"), object: preview)
+        check(XCTWaiter.wait(for: [playing], timeout: 60) == .completed,
+              "a-trailer-not-playing", "the official trailer player never revealed playing video")
+        attach("a-trailer-title-page-playing")
     }
 
     // MARK: b. Live
@@ -294,6 +292,10 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(any.matching(identifier: "sources.mediaServer.kind").firstMatch.waitForExistence(timeout: 30))
         let jellyfin = any.matching(identifier: "sources.mediaServer.kind.jellyfin").firstMatch
         if jellyfin.exists { jellyfin.tap() }
+        let nameField = app.textFields["Name"].firstMatch
+        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
+        nameField.tap()
+        nameField.typeText(demoServerName)
         let urlField = any.matching(identifier: "sources.mediaServer.url").firstMatch
         XCTAssertTrue(urlField.waitForExistence(timeout: 10), "Server URL field missing")
         urlField.tap(); urlField.typeText(server)
@@ -308,10 +310,10 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         passwordField.tap(); passwordField.typeText(password)
         let save = any.matching(identifier: "sources.mediaServer.save").firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 10), "Save missing")
-        addTeardownBlock { [self] in removeSource(matching: "Media Server ·") }
+        addTeardownBlock { [self] in removeSource(matching: demoServerName) }
         save.tap()
         allowSystemAlert()
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Media Server ·")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", demoServerName)).firstMatch
         let listed = row.waitForExistence(timeout: 45)
         attach("a-media-server-saved")
         XCTAssertTrue(listed, "demo server not listed: \(any.matching(identifier: "sources.mediaServer.status").firstMatch.label)")

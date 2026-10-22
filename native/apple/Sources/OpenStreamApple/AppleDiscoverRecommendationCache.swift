@@ -53,6 +53,13 @@ enum AppleDiscoverRecommendationCache {
         let seedItems: [Item]
     }
 
+    static func scope(sourceIdentity: String, namespace: String, metadataConfiguration: AppleTMDBConfiguration?,
+                      top10ListsEnabled: Bool, heroTitle: String) -> String {
+        [sourceIdentity, AppleSourceKind.allCases.map(\.rawValue).joined(separator: ";"), namespace,
+         AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration), "top10:\(top10ListsEnabled)",
+         heroTitle].joined(separator: "|")
+    }
+
     @concurrent nonisolated static func key(scope: String, state: WatchState,
                                            indexURL: URL? = AppleMediaIndexRepository.defaultFileURL) async -> Key? {
         let attributes = indexURL.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path) }
@@ -71,7 +78,10 @@ enum AppleDiscoverRecommendationCache {
               entry.freshness == .fresh,
               let answer = try? JSONDecoder().decode(Answer.self, from: entry.payload),
               answer.fingerprint == key.fingerprint else { return nil }
-        let enabled = Dictionary(sources.filter(\.isEnabled).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var enabled = Dictionary(sources.filter(\.isEnabled).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        if !enabled.isEmpty, let metadata = answer.heroes.first(where: { $0.sourceID == AppleMediaAvailability.metadataOnlyInstanceID }) {
+            enabled[metadata.sourceID] = AppleCatalogSearchMatch.metadataOnly(metadata.item).source
+        }
         let values = answer.continueWatching + answer.picks + answer.heroes + answer.seedItems
         guard values.allSatisfy({ enabled[$0.sourceID] != nil }) else { return nil }
         return .init(continueWatching: answer.continueWatching.compactMap { $0.resolve(sources: enabled, favoriteIDs: answer.favoriteIDs) },

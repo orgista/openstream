@@ -146,6 +146,24 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         return maximum
     }
 
+    func testServerHostedTrailerReachesPlaying() {
+        app.launchArguments += ["-openstream.settings.trailer.autoplay.v1", "NO"]
+        configureFixtureLaunch(app)
+        app.launch()
+        XCTAssertTrue(focusedElement.waitForExistence(timeout: 60))
+        XCTAssertTrue(focus(Self.serverShelfItem("jf-movie-5"), pressing: .down), "The fixture poster never took focus")
+        remote.press(.select)
+        XCTAssertTrue(element("detail.play").waitForExistence(timeout: 30))
+        let trailer = NSPredicate(format: "identifier == 'detail.icon-row' AND label == 'Play Trailer'")
+        XCTAssertTrue(app.buttons.matching(trailer).firstMatch.waitForExistence(timeout: 30))
+        XCTAssertTrue(focus(trailer, pressing: .right))
+        remote.press(.select)
+        let playing = element("trailer.player.playing")
+        XCTAssertTrue(playing.waitForExistence(timeout: 30), "The server-hosted trailer clock never advanced")
+        XCTAssertEqual(playing.label, "")
+        XCTAssertEqual(playing.frame.size, .zero)
+    }
+
     func testDiscoverRowOpensATitleFromStubsAndComesBack() {
         configureFixtureLaunch(app)
         app.launch()

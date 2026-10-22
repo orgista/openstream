@@ -58,11 +58,12 @@ enum AppleYouTubePreviewHTML {
         // duration: sources without chapter/offset information start at zero.
         let suppliedStart = existingItems.first { $0.name == "start" }?.value.flatMap(Double.init) ?? 0
         let start = suppliedStart.isFinite && suppliedStart >= 0 && suppliedStart <= 86_400 ? Int(suppliedStart) : 0
-        components?.queryItems = existingItems.filter { !["mute", "autoplay", "playsinline", "start"].contains($0.name) }
+        components?.queryItems = existingItems.filter { !["mute", "autoplay", "playsinline", "start", "origin"].contains($0.name) }
             + [URLQueryItem(name: "start", value: String(start)),
                URLQueryItem(name: "mute", value: effectiveMuted ? "1" : "0"),
                URLQueryItem(name: "autoplay", value: startsPlaying ? "1" : "0"),
-               URLQueryItem(name: "playsinline", value: "1")]
+               URLQueryItem(name: "playsinline", value: "1"),
+               URLQueryItem(name: "origin", value: AppleTrailerPreviewPolicy.embedOrigin.absoluteString)]
         let videoKeyJSON = (try? JSONEncoder().encode(embedURL.lastPathComponent))
             .map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
         let safeSource = htmlEscaped((components?.url ?? embedURL).absoluteString)

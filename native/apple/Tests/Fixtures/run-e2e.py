@@ -179,6 +179,14 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
         command(["xcrun", "simctl", "install", sim, str(app_path)])
         stub_path = work / "stubs"
         shutil.copytree(ROOT / "Apps/TestPlans/Stubs", stub_path)
+        fixture_spec = importlib.util.spec_from_file_location("fixture_artwork", ROOT / "Tests/Fixtures/serve.py")
+        fixture_artwork = importlib.util.module_from_spec(fixture_spec)
+        fixture_spec.loader.exec_module(fixture_artwork)
+        for item_id in fixture_artwork.ITEMS:
+            images = stub_path / "127.0.0.1/jf/Items" / item_id / "Images"
+            images.mkdir(parents=True, exist_ok=True)
+            for kind, data in fixture_artwork.IMAGES.items():
+                (images / (kind + ".json")).write_bytes(data)
         stub = str(stub_path)
         command(["xcrun", "simctl", "launch", sim, BUNDLE, "-OpenStreamResetOnLaunch", "YES",
                  "-OpenStreamStubNetwork", stub, "-OpenStreamStubMediaBase", "http://127.0.0.1:8767",
@@ -213,11 +221,21 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
                 try:
                     trace_path = container(sim, "data") / "Library/Caches/openstream-trace.log"
                     prior_trace = None
+                    trailer_trace = []
+                    trailer_events = set()
                     diagnostic = work / "players-launch-health.txt"
-                    while proc.poll() is None:
-                        time.sleep(2)
+                    while True:
+                        finished = proc.poll() is not None
                         test_log = (work / "tests.log").read_text(errors="replace")
                         starts = re.findall(r"Test Case '-\[.*? (test\w+)\]' started", test_log)
+                        if starts and starts[-1] in {"testMediaServerHeroTrailerReachesPlaying", "testServerHostedTrailerReachesPlaying"} and trace_path.exists():
+                            for line in trace_path.read_text(errors="replace").splitlines():
+                                if not any(mark in line for mark in ("discover recommendations", "trailer iframe state=", "trailer web load", "title trailer", "server trailer start", "server trailer failed")):
+                                    continue
+                                event = (starts[-1], line)
+                                if event not in trailer_events:
+                                    trailer_events.add(event)
+                                    trailer_trace.append({"test": starts[-1], "event": line})
                         if starts and starts[-1] == "testCrawlPlayers" and trace_path.exists():
                             raw = trace_path.read_text(errors="replace")
                             if raw != prior_trace:
@@ -228,7 +246,11 @@ def run_platform(platform, work, only, media_environment=None, compile_files=(),
                                 cleaned = re.sub(r"(?i)(password|token|username|authorization)[=: ]+\S+", r"\1=<redacted>", cleaned)
                                 with diagnostic.open("a") as capture:
                                     capture.write(f"\nSnapshot {time.time():.3f}\n{cleaned}\n")
+                        if finished:
+                            break
+                        time.sleep(2)
                     result["exitCode"] = proc.returncode
+                    result["heroTrailerTrace"] = trailer_trace
                     if diagnostic.exists():
                         result["playersLaunchHealth"] = str(diagnostic)
                 finally:

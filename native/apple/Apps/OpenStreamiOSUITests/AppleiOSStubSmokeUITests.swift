@@ -2,7 +2,8 @@ import XCTest
 
 /// Launch → Discover row → title page → back, with every control-plane
 /// request answered from `Apps/TestPlans/Stubs` (`-OpenStreamStubNetwork`):
-/// no network, no owner sources, the same screen every run.
+/// isolated sources and the same screen every run. The trailer check uses
+/// YouTube's live official player.
 @MainActor
 final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
@@ -484,6 +485,43 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
                 XCTAssertTrue(tile.waitForExistence(timeout: 10))
             }
         }
+    }
+
+    /// Requires network access to YouTube's official player.
+    func testMediaServerHeroTrailerReachesPlaying() {
+        app.launchArguments += ["-OpenStreamDebugTrailerKeys", "M7lc1UVf-VE",
+                                "-openstream.settings.trailer.autoplay.v1", "YES"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let details = app.buttons["home.featured.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 60), "A media-server-only setup has no Discover hero")
+        details.tap()
+        XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 30))
+        let preview = app.buttons["detail.trailer.toggle"].firstMatch
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value == 'Playing'"), object: preview)
+        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 60), .completed,
+                       "The official YouTube player never revealed playing video")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "official-trailer-playing"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testServerHostedTrailerReachesPlaying() {
+        app.launchArguments += ["-openstream.settings.trailer.autoplay.v1", "NO"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let details = app.buttons["home.featured.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 60))
+        details.tap()
+        let trailer = app.buttons["detail.serverTrailer"].firstMatch
+        XCTAssertTrue(trailer.waitForExistence(timeout: 30))
+        trailer.tap()
+        let playing = app.descendants(matching: .any).matching(identifier: "trailer.player.playing").firstMatch
+        XCTAssertTrue(playing.waitForExistence(timeout: 30),
+                       "The server-hosted trailer clock never advanced")
+        XCTAssertEqual(playing.label, "")
+        XCTAssertEqual(playing.frame.size, .zero)
     }
 
     func testDiscoverRowOpensATitleFromStubsAndComesBack() {
